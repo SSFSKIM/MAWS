@@ -5,6 +5,7 @@
 import type { JsonObject, SessionBodies, SubagentMeta } from 'desk-hub/protocol';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../stores/transcript';
+import { rowsOf as drawnRows, withAllExpanded } from '../transcript/model/derive';
 import type { Row } from '../transcript/model/rows';
 import { FakePlane, mount, settle } from './test-support/fake-plane';
 import { readRecording, rowsBefore, scriptOf, snapshotAt, STRAY, type LiveItem } from './test-support/session-stream';
@@ -606,8 +607,208 @@ describe('the main transcript through the session plane', () => {
     expect(store.getState().entries[controller.key].rows).toEqual(await freshRows(rows));
   });
 
+  it('a background session’s prompt with a peer’s frame is the peer’s line, in the snapshot and live; without the session’s kind, the person’s bubble (UX wave U3, decision 19)', async () => {
+    // The engine's ordinary prompt row, which another machine's producer sends with the session's kind (`sessionKind`);
+    // a row is any JSON on the plane, so the field reaches the reader as written (invented words).
+    const last = recording.session.at(-1)!;
+    const id = (n: number) => `b9b9b9b9-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const at = (second: number) => `2027-01-01T00:01:${String(second).padStart(2, '0')}.000Z`;
+    const base = (n: number, parent: string, second: number) => ({ uuid: id(n), parentUuid: parent, timestamp: at(second), sessionId: TARGET.session, isSidechain: false });
+    const framed = '[sminos chat demo 7f3a2b1c:12 from river → @you]\nThe migration is merged.';
+    const prompt = (n: number, parent: string, second: number, keys: JsonObject) => ({ ...base(n, parent, second), type: 'user', origin: { kind: 'human' }, promptSource: 'typed', turnOrigin: 'human', message: { role: 'user', content: framed }, ...keys });
+    const reply = (n: number, parent: number, second: number) => ({ ...base(n, id(parent), second), type: 'assistant', message: { id: `msg_bg_${n}`, role: 'assistant', model: 'claude-opus-5-5', type: 'message', content: [{ type: 'text', text: 'Picking it up.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } } });
+    const ended = (n: number, parent: number, second: number) => ({ ...base(n, id(parent), second), type: 'system', subtype: 'turn_duration', durationMs: 900, isMeta: false });
+    const rows: JsonObject[] = [...recording.session, prompt(1, String(last.uuid), 10, { sessionKind: 'bg' }), reply(2, 1, 11), ended(3, 2, 12), prompt(4, id(3), 13, { sessionKind: 'bg' }), reply(5, 4, 14), ended(6, 5, 15), prompt(7, id(6), 16, {}), reply(8, 7, 17), ended(9, 8, 18)];
+    const script = scriptOf(rows, null);
+    const rowAt = (n: number) => script.findIndex((item) => item.kind === 'row' && item.body.row.uuid === id(n));
+    plane.snapshot(script, rowAt(4)); // the first prompt in the snapshot, the second and the plain one live
+    await settle();
+    await step(script.slice(rowAt(4)));
+    const entry = store.getState().entries[controller.key];
+    // a closed turn folds its work, the message line among it, which its divider then names: read it unfolded
+    const unfolded = drawnRows(withAllExpanded(entry.state));
+    const lines = unfolded.flatMap((row) => (row.kind === 'agent_message' ? [row.text] : []));
+    expect(lines.filter((text) => text === 'Message from @river: The migration is merged.')).toHaveLength(2);
+    expect(unfolded.filter((row) => row.kind === 'user' && row.text === framed)).toHaveLength(1); // the one without the kind
+    expect(entry.rows).toEqual(await freshRows(rows));
+  });
+
   it('closes its subscription when closed', () => {
     controller.close();
     expect(plane.current.closed).toBe(true);
+  });
+});
+
+// X-168 on another machine (the architect's ruling of 2026-11-13, Decision Log 13): the session's process is known gone
+// when its presence says no live record, as the machine publishes it (`remote-source.ts` hands each presence, the
+// snapshot's and each `presence` message's, to `sessionPresence`; a machine gone offline publishes none). The exit is
+// supplied to the rows and the tree, kept through every rebuild and every status overlay, and cleared by a live record.
+// Hand-written, invented rows: a turn that launched a background agent and ended, the agent still running.
+describe('the exit a gone session leaves on another machine (X-168)', () => {
+  const SESSION = 'sess-gone';
+  const AGENT = 'a0de000000000001';
+  const at = (s: number) => `2026-10-29T08:00:0${s}.000Z`;
+  const row = (fields: JsonObject): JsonObject => ({ sessionId: SESSION, cwd: '/work/demo', entrypoint: 'cli', isSidechain: false, userType: 'external', version: '2.1.322', ...fields });
+  const ROWS: JsonObject[] = [
+    row({ type: 'user', uuid: 'g-u1', parentUuid: null, timestamp: at(0), message: { role: 'user', content: 'Start a helper.' } }),
+    row({ type: 'assistant', uuid: 'g-a1', parentUuid: 'g-u1', timestamp: at(1), message: { id: 'g-m1', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g1', name: 'Agent', input: { description: 'Survey the notes', prompt: 'Read the sample notes', subagent_type: 'Explore', run_in_background: true } }] } }),
+    row({ type: 'user', uuid: 'g-r1', parentUuid: 'g-a1', timestamp: at(2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g1', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
+    row({ type: 'assistant', uuid: 'g-t1', parentUuid: 'g-r1', timestamp: at(3), message: { id: 'g-m2', role: 'assistant', model: 'example-model', content: [{ type: 'text', text: 'Started it.' }] } }),
+    row({ type: 'system', subtype: 'turn_duration', uuid: 'g-d1', parentUuid: 'g-t1', durationMs: 40, timestamp: at(4) }),
+  ];
+  const RUNNING = { agentId: AGENT, meta: { agentType: 'Explore', description: 'Survey the notes', toolUseId: 'toolu-g1' }, status: 'running', evidence: 'bridge' } as unknown as SubagentMeta;
+  const LIVE = { record: { status: 'idle' }, bridge: true };
+  const GONE = { record: null, bridge: false };
+  const EXIT = `session:${SESSION}:exited`;
+
+  let plane: FakePlane;
+  let store: ReturnType<typeof createTranscriptStore>;
+  let controller: PlaneTranscript;
+  let unmount: () => void;
+  beforeEach(() => {
+    plane = new FakePlane(PROJECT);
+    store = createTranscriptStore();
+    controller = new PlaneTranscript({ plane, sessionKey: `mini/${SESSION}`, target: { machine: 'mini', session: SESSION, agentId: null }, store });
+    controller.open();
+    unmount = mount(controller, store);
+  });
+  afterEach(() => {
+    unmount();
+    controller.close();
+  });
+
+  /** A snapshot of the rows, its presence handed on as `remote-source.ts` hands it. */
+  async function snapshot(presence: typeof LIVE | typeof GONE): Promise<void> {
+    plane.send('snapshot', { rows: [...ROWS].reverse(), more: false, subagents: [RUNNING], presence, streaming: [] } as unknown as SessionBodies['snapshot']);
+    controller.sessionPresence(presence);
+    await settle();
+  }
+  async function presence(body: typeof LIVE | typeof GONE): Promise<void> {
+    controller.sessionPresence(body);
+    await settle();
+  }
+  const entry = () => store.getState().entries[controller.key];
+  const agentStatus = () => controller.state.getState().tasks.tasks.get(AGENT as never)?.status;
+  const agentsRowInView = () => entry().rows.some((r) => r.kind === 'subagent');
+  const exitApplied = () => entry().state.seen.has(EXIT as never) || [...entry().state.seen].some((id) => String(id).startsWith(`${EXIT}@`));
+
+  it('a feed whose metadata says running, then no live record while the machine is up: the agent exited, through a rebuild', async () => {
+    await snapshot(LIVE);
+    expect(agentStatus()).toBe('running');
+    expect(agentsRowInView()).toBe(true);
+    await presence(GONE);
+    expect(agentStatus()).toBe('exited');
+    expect(agentsRowInView()).toBe(false); // the agents row reads stopped and folds with its turn
+    expect(exitApplied()).toBe(true);
+    const ended = entry().rows;
+    // the machine's statuses again, still saying running: the exit outranks them
+    plane.send('subagents', { subagents: [RUNNING] } as unknown as SessionBodies['subagents']);
+    await settle();
+    expect(agentStatus()).toBe('exited');
+    // a rebuild (a reconnect's fresh snapshot of the ended session, merged into what is held)
+    plane.current.listener.interrupted();
+    await snapshot(GONE);
+    expect(agentStatus()).toBe('exited');
+    expect(agentsRowInView()).toBe(false);
+    expect(exitApplied()).toBe(true);
+    expect(entry().rows).toEqual(ended);
+  });
+
+  it('presence lost with the machine (an interruption, an end machine-offline) supplies nothing', async () => {
+    await snapshot(LIVE);
+    plane.current.listener.interrupted();
+    await settle();
+    plane.current.listener.end({ reason: 'machine-offline' });
+    await settle();
+    expect(agentStatus()).toBe('running');
+    expect(agentsRowInView()).toBe(true);
+    expect(exitApplied()).toBe(false);
+  });
+
+  it('a fresh live snapshot clears the exit', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    expect(agentStatus()).toBe('exited');
+    plane.current.listener.interrupted();
+    await snapshot(LIVE); // the session resumed: its bridge answers again
+    expect(agentStatus()).toBe('running');
+    expect(agentsRowInView()).toBe(true);
+    expect(exitApplied()).toBe(false);
+  });
+
+  it('presence gone and back within one subscription leaves no exit behind and no doubled row', async () => {
+    await snapshot(LIVE);
+    const drawn = entry().rows;
+    await presence(GONE);
+    await presence(LIVE);
+    expect(agentStatus()).toBe('running');
+    expect(exitApplied()).toBe(false);
+    expect(entry().rows).toEqual(drawn);
+    // and gone again: one exit, under the next id
+    await presence(GONE);
+    expect(agentStatus()).toBe('exited');
+    expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([`${EXIT}@2`]);
+  });
+
+  // Round 4 (the re-review): presence travels outside the ordered rows, so the session's last rows can come after it.
+  const lateRows = () => [
+    row({ type: 'user', uuid: 'g-u2', parentUuid: 'g-d1', timestamp: at(5), message: { role: 'user', content: 'One more helper.' } }),
+    row({ type: 'assistant', uuid: 'g-a2', parentUuid: 'g-u2', timestamp: at(6), message: { id: 'g-m3', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-g2', name: 'Agent', input: { description: 'Check the links', prompt: 'Check the sample links', subagent_type: 'Explore', run_in_background: true } }] } }),
+    row({ type: 'user', uuid: 'g-r2', parentUuid: 'g-a2', timestamp: at(7), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-g2', content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
+  ];
+  // the machine names the late agent, still running by its last word, and its rows come after
+  const LATE = { agentId: 'a0de000000000002', meta: { agentType: 'Explore', description: 'Check the links', toolUseId: 'toolu-g2' }, status: 'running', evidence: 'bridge' } as unknown as SubagentMeta;
+  function expectEndedAfterLateRows(): void {
+    expect(entry().rows.filter((r) => r.kind === 'subagent').map((r) => (r as Extract<Row, { kind: 'subagent' }>).status)).not.toContain('started');
+    expect(entry().rows.filter((r) => r.kind === 'user').length).toBe(2); // the late prompt drawn, once
+    const nodes = [...controller.state.getState().tasks.tasks.values()];
+    expect(nodes.find((node) => node.taskId === AGENT)?.status).toBe('exited');
+    expect(nodes.find((node) => node.taskId === LATE.agentId)?.status).toBe('exited');
+    expect(nodes.filter((node) => node.status === 'running').map((node) => node.taskId)).toEqual([]);
+    expect([...entry().state.seen].filter((id) => String(id).startsWith(EXIT))).toEqual([EXIT]); // one exit, after the rows
+  }
+
+  it('rows that arrive after the presence said gone end too: the agents row they bring is not left working', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
+    for (const body of lateRows()) {
+      plane.send('row', { row: body } as unknown as SessionBodies['row']);
+      await settle();
+    }
+    await settle();
+    expectEndedAfterLateRows();
+  });
+
+  // Round 5 (the re-review): a burst of late rows stages one rebuild, not one per row.
+  it('a burst of late rows delivered at once stages one rebuild of the rows', async () => {
+    await snapshot(LIVE);
+    await presence(GONE);
+    plane.send('subagents', { subagents: [RUNNING, LATE] } as unknown as SessionBodies['subagents']);
+    await settle();
+    let sources = 0;
+    const off = controller.state.subscribe((now, before) => {
+      if (now.source !== before.source) sources += 1;
+    });
+    for (const body of lateRows()) plane.send('row', { row: body } as unknown as SessionBodies['row']); // one delivery, no settling between
+    expect(controller.state.getState().tasks.tasks.get('a0de000000000002' as never)?.status).toBe('exited'); // the tree at once, the exit over it
+    await settle();
+    await settle();
+    off();
+    expect(sources).toBe(1);
+    expectEndedAfterLateRows();
+  });
+
+
+  it('a snapshot of a session already gone ends its agents at once; a subagent’s own transcript takes no presence', async () => {
+    await snapshot(GONE);
+    expect(agentStatus()).toBe('exited');
+    expect(agentsRowInView()).toBe(false);
+    const child = new PlaneTranscript({ plane, sessionKey: `mini/${SESSION}`, target: { machine: 'mini', session: SESSION, agentId: AGENT }, store: createTranscriptStore() });
+    child.open();
+    plane.of(AGENT).send('snapshot', { rows: [], more: false, subagents: [RUNNING], presence: GONE, streaming: [] } as unknown as SessionBodies['snapshot']);
+    child.sessionPresence(GONE);
+    expect(child.state.getState().tasks.tasks.get(AGENT as never)?.status).toBe('running');
+    child.close();
   });
 });

@@ -1,17 +1,19 @@
 // The ask mod's answer to an async question (`ask-answer.ts`), through MAWS's own store, reducer and report, on rows in
 // the shapes 2.1.302 keeps them (local transcripts, read for their shapes): the prompt the plugin submits while the
-// session is idle, and the context on a tool's result or on the human's next prompt. Each draws as the line
-// `answered: …` where the answer reached the model, never as the harness's text, and the idle prompt's turn as one the
-// session continued, with no bubble of the owner's.
+// session is idle, and the context on a tool's result or on the human's next prompt. Each draws as the answer's notice
+// `answered: …` where the answer reached the model (UX wave U3, UC-2, class `answer`: MAWS's backfill draws it from the
+// arrivals reader), never as the harness's text, and the idle prompt's turn as one the session continued, with no
+// bubble of the owner's.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { reportRows } from '../../owner/report/project';
 import { createTranscriptStore } from '../../stores/transcript';
+import { rowsOf, withAllExpanded } from '../../transcript/model/derive';
 import type { Row } from '../../transcript/model/rows';
 import { answeredWords, askAnswers, CLARIFYING, isAnswerPrompt } from '../conversation/ask-answer';
 import { deliveredLines } from '../conversation/delivery-frame';
 import { Chain, SESSION } from '../test-support/chain-rows';
-import { ANSWERED } from './ask-answer';
+import { NOTICE } from '../../transcript/model/copy';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
 
 const QUESTIONS = [
@@ -26,10 +28,11 @@ async function drawn(rows: JsonObject[]) {
   const store = createTranscriptStore();
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([])), { agentId: null as never });
   const entry = store.getState().entries.fresh;
-  return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}) };
+  // the notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): read it unfolded
+  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}) };
 }
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
-const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'error' ? [r.text] : []));
+const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' && r.class === 'answer' ? [r.text] : []));
 const dividers = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'divider' ? [r.origin] : []));
 const HARNESS = /AskUserQuestion|plugin sent a message|surfaces a prompt/;
 
@@ -77,15 +80,19 @@ describe("the ask mod's answer", () => {
     c.answerPrompt(delivered('toolu_01RZQ8nn9jVyPaqznEmsoXMr', CHOSEN));
     c.answer('<message>The palette is blue and summer-bright.</message>');
     c.end();
-    const { rows, report } = await drawn(c.rows);
+    const { rows, expanded, report } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     // The turn the answer opened reads as one the session continued ("Continued for …").
     expect(dividers(rows)).toEqual(['engine']);
-    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(rows.find((r) => r.kind === 'error')?.turnId);
-    expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
-    // The report folds the answered turn's work and keeps the line, the persistent row it is.
-    expect(lines(report)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    // the line heads the turn it opened, which its divider names (UX wave U3, the U3a document's head rule)
+    expect(rows.find((r) => r.kind === 'divider')).toMatchObject({ turnId: expanded.find((r) => r.kind === 'notice')?.turnId, opener: { class: 'answer', line: NOTICE.answered('Color → Blue · Season → Summer') } });
+    expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
+    // The report folds the answered turn's work and keeps the line, with the question's row: until U1b fills that row
+    // with the answer, an answer's notice stays through a fold (the architect's ruling of 2026-11-13), so the report
+    // never shows a question without its answer.
+    expect(lines(report)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
+    expect(report.filter((r) => r.kind === 'question')).toHaveLength(1);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
   });
 
@@ -94,11 +101,11 @@ describe("the ask mod's answer", () => {
     c.answerPrompt(`${delivered('toolu_a', CHOSEN)}\n\n${delivered('toolu_b', TYPED)}`);
     c.answer('Noted both.');
     c.end();
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual([]);
-    expect(lines(rows)).toEqual([
-      `${ANSWERED}: Which color do you prefer? → Blue · Which season do you prefer? → Summer`,
-      `${ANSWERED}: Which color do you prefer? → teal, if we have it`,
+    expect(lines(expanded)).toEqual([
+      NOTICE.answered('Which color do you prefer? → Blue · Which season do you prefer? → Summer'),
+      NOTICE.answered('Which color do you prefer? → teal, if we have it'),
     ]);
   });
 
@@ -115,12 +122,12 @@ describe("the ask mod's answer", () => {
     c.answerContext(delivered('toolu_busy', TYPED), 'prompt.submit');
     c.answer('Serif.');
     c.end();
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.', 'And the font?']);
     const turns = rows.flatMap((r) => (r.kind === 'user' ? [r.turnId] : []));
-    expect(rows.flatMap((r) => (r.kind === 'error' ? [[r.text, r.turnId]] : []))).toEqual([
-      [`${ANSWERED}: Color → Blue · Season → Summer`, turns[0]],
-      [`${ANSWERED}: Color → teal, if we have it`, turns[1]],
+    expect(expanded.flatMap((r) => (r.kind === 'notice' ? [[r.text, r.turnId]] : []))).toEqual([
+      [NOTICE.answered('Color → Blue · Season → Summer'), turns[0]],
+      [NOTICE.answered('Color → teal, if we have it'), turns[1]],
     ]);
   });
 });
@@ -141,11 +148,11 @@ describe("the ask mod's answer under either plugin's name", () => {
     c.end();
     expect(isAnswerPrompt(idle)).toBe(true);
     expect(askAnswers(idle)).toEqual([{ call: 'toolu_01RZQ8nn9jVyPaqznEmsoXMr', text: CHOSEN }]);
-    const { rows } = await drawn(c.rows);
+    const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(dividers(rows)).toEqual(['engine']);
-    expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
+    expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
   });
 
   it.each([
@@ -160,8 +167,8 @@ describe("the ask mod's answer under either plugin's name", () => {
     c.answerPrompt(delivered('toolu_roll', CHOSEN));
     c.answer('Blue.');
     c.end();
-    const { rows } = await drawn(c.rows);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    const { rows, expanded } = await drawn(c.rows);
+    expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(bubbles(rows)).toEqual(['Pick my colors.']);
   });
 

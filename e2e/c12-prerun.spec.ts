@@ -433,8 +433,14 @@ class EventLog {
   }
 }
 
-async function showTool(page: Page, name: 'Subagents' | 'Background work' | 'Review' | 'Files' | 'Terminal' | 'Session info'): Promise<void> {
+async function showTool(page: Page, name: 'Subagents' | 'Background tasks' | 'Review' | 'Files' | 'Terminal' | 'Session info'): Promise<void> {
   await openSurface(page, name);
+}
+
+// The UX wave's U8b: an ended task is under the Background tasks panel's Done, folded at first; this unfolds it.
+async function unfoldBackgroundDone(page: Page): Promise<void> {
+  const toggle = surface(page, 'background').locator('section[data-section="done"] h3 > button');
+  if ((await toggle.getAttribute('aria-expanded', { timeout: 20_000 })) !== 'true') await toggle.click();
 }
 
 function readJournal(path: string): { direction: string; frame: Record<string, unknown> }[] {
@@ -830,25 +836,31 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       out.viewer = { path: 'one.txt in the worktree', screenshots: await shoot(page, '10.4-viewer') };
     });
 
-    await step('a workflow shows its phases and agents in Background work', async () => {
+    await step('a workflow shows its phases and agents in Background tasks', async () => {
       const from = log.seq;
       value(await invoke(page, 'session.send', { appSessionId: id as AppSessionId, content: `Call the Workflow tool once with this exact script as the script parameter, then reply STARTED:\n\n${WORKFLOW_SCRIPT}` } as never));
       const started = await log.until('the workflow’s start', (ev) => ev.find((e) => e.seq !== null && e.seq > from && e.kind === 'task.started' && e.taskType === 'local_workflow'), 240_000);
       const taskId = started.taskId as string;
       await log.until('the workflow’s end', (ev) => ev.find((e) => e.kind === 'task.notification' && e.taskId === taskId), 300_000);
       await log.idle(240_000);
-      await showTool(page, 'Background work');
+      await showTool(page, 'Background tasks');
+      await unfoldBackgroundDone(page); // the ended run (the UX wave's U8b)
       const card = panel(page).locator(`[data-workflow="${taskId}"]`);
       await expect(card).toBeVisible({ timeout: 20_000 });
+      // E7: the card is compact; its phases and agent table are its run's widget, opened from the card's title
+      const title = await card.locator('h4').innerText();
+      await card.locator('h4 button').click();
+      const run = panel(page).locator(`[data-view="run"][data-run="${taskId}"]`);
+      await expect(run).toBeVisible({ timeout: 15_000 });
       out.workflow = {
-        taskId, title: await card.locator('h4').innerText(), phases: await card.locator('[data-phase]').allInnerTexts(),
-        agents: await card.locator('tbody tr').allInnerTexts(), screenshots: await shoot(page, '10.4-workflow'),
+        taskId, title, phases: await run.locator('[role="option"]').allInnerTexts(),
+        agents: await run.locator('tbody tr').allInnerTexts(), screenshots: await shoot(page, '10.4-workflow'),
       };
       expect((out.workflow as { phases: string[] }).phases.join(' ')).toContain('Echo');
       expect((out.workflow as { agents: string[] }).agents.length).toBeGreaterThanOrEqual(2);
     });
     // C8's sitting item "a monitor started from a live session", run here so the owner's script carries a tested prompt
-    await step('a monitor started from the live session shows in Background work and stops', async () => {
+    await step('a monitor started from the live session shows in Background tasks and stops', async () => {
       // the viewer piece before this one leaves its file tab active in the main area, where no composer is, so the
       // session's own tab is opened again first, whichever pieces ran before
       await openRow(page, id!);
@@ -869,7 +881,9 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
         return;
       }
       const taskId = outcome.monitor.taskId as string;
-      await showTool(page, 'Background work');
+      await showTool(page, 'Background tasks');
+      const back = surface(page, 'background').getByRole('button', { name: '‹ Background tasks', exact: true }); // the workflow piece left its widget open
+      if (await back.isVisible()) await back.click();
       const row = panel(page).locator(`[data-monitor="${taskId}"]`);
       await expect(row).toBeVisible({ timeout: 20_000 });
       const line = await row.locator('[data-part="line"]').innerText();
@@ -878,6 +892,8 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       // the end is a notification or a terminal status, never any other update (support/c12-task-end.ts)
       const ended = await log.until('the monitor’s end', (ev) => ev.find((e) => taskEnded(e as TaskEventLike, taskId, outcome.monitor!.seq!)), 60_000);
       await log.idle(180_000);
+      await unfoldBackgroundDone(page); // the stopped monitor is under Done (the UX wave's U8b)
+      await expect(row).toBeVisible({ timeout: 15_000 });
       await expect(row.getByRole('button'), 'the stopped row: no Stop (or stopping…) button, which shows only while it runs').toHaveCount(0, { timeout: 15_000 });
       out.monitor = { prompt: MONITOR_PROMPT, available: true, taskId, taskType: outcome.monitor.taskType, line, endedBy: ended.kind, lineAfterStop: await row.locator('[data-part="line"]').innerText(), screenshots: shots };
     });
@@ -1580,7 +1596,8 @@ test('C8 item 9: Attach adds the Terminal tab and activates its session (a claud
       const items = await page.getByRole('menuitem').allTextContents();
       await page.getByRole('menuitem', { name: 'Attach in a terminal tab' }).click();
       await expect(mainTabById(page, `session:${await addressed(page, bg!.appId)}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
-      await expect(surface(page, 'terminal').getByRole('tab', { selected: true }).first()).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+      // the UX wave's U8b: a tool's tab is in its group's strip, beside the body of the tab in view, not inside it
+      await expect(page.locator('[data-region="panel"] section[data-side-group]:has([data-surface="terminal"]) [data-side-strip] [role="tab"][aria-selected="true"]')).toHaveCount(1, { timeout: 15_000 });
       await expect.poll(async () => value(await invoke(page, 'pty.list', undefined)).ptys.some((p) => p.appSessionId === bg!.appId && p.alive), { timeout: 15_000 }).toBe(true);
       out.attach = { rowMenu: items, sessionTabActivated: true, terminalTabActive: true, screenshots: await shoot(page, 'c8-attach') };
       out.consoleErrors = maws.consoleErrors();

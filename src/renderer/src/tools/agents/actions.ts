@@ -12,6 +12,7 @@ import { useSessions } from '../../stores/sessions'; // E7
 import type { PeerAddress, PeerReplies } from '../../transcript'; // E7
 import { peerRelayKey, useRelays } from './relay-store'; // E7
 import type { BackgroundParams } from './background/BackgroundTool'; // E7
+import { isRemoteLaneA } from '../../lane-a/remote-session'; // UX wave U3
 
 export { AGENT_TOOL_IDS } from './tool-ids';
 
@@ -79,4 +80,15 @@ export const peerReplies: PeerReplies = {
 };
 // E7 end
 
-export const agentTranscriptActions: Pick<TranscriptActions, 'openSubagent' | 'openFullLog' | /* E7 */ 'replyToPeer' | 'peerReplies'> = { openSubagent, openFullLog, replyToPeer, peerReplies };
+// UX wave U3 (the U3a document, decision 22, Interfaces I): "Open output" on a background task's notice opens the Log on
+// the file the engine named, for the row's session, as the background work list's Output button does: for a session MAWS
+// runs, on this Mac or another machine (the Log reads the file on the session's machine). A terminal session's (one a
+// terminal or a background job holds, or another machine's lane A row) gets none, as that list gives its jobs no Output.
+export const outputAction: NonNullable<TranscriptActions['outputAction']> = (appSessionId) => {
+  if (appSessionId === null) return null;
+  const holder = useSessions.getState().records.get(appSessionId)?.holder.kind;
+  if (holder === 'terminal' || holder === 'background_job' || (holder === undefined && isRemoteLaneA(appSessionId))) return null;
+  return (output) => void openLog(appSessionId, output.path, output.title);
+};
+
+export const agentTranscriptActions: Pick<TranscriptActions, 'openSubagent' | 'openFullLog' | /* E7 */ 'replyToPeer' | 'peerReplies' | /* U3 */ 'outputAction'> = { openSubagent, openFullLog, replyToPeer, peerReplies, outputAction };

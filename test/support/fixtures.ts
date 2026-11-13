@@ -27,6 +27,17 @@ export function loadP5Journal(name: string): JournalRow[] {
   return readJsonl(join(FIXTURE_DIR, 'p5', `${name}.jsonl`)).map(parseJournalRow);
 }
 
+// The UX wave's probes under fixtures/uxwave (spikes/protocol-probe/findings-uxwave-*.txt): a journal X8-validated like
+// the passes', and the engine's transcript file the same run wrote beside it (`<name>.transcript.jsonl`; a terminal
+// run has the transcript alone, its `.terminal.json` pane capture is for reference and not read).
+export function loadUxwaveJournal(name: string): JournalRow[] {
+  return readJsonl(join(FIXTURE_DIR, 'uxwave', `${name}.jsonl`)).map(parseJournalRow);
+}
+
+export function loadUxwaveTranscript(name: string): TranscriptRecord[] {
+  return readJsonl(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`)).map(parseTranscriptRecord);
+}
+
 function readJsonl(file: string): unknown[] {
   return readFileSync(file, 'utf8')
     .split('\n')

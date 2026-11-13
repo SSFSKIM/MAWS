@@ -14,7 +14,7 @@
 // has that shape.
 // In each, the attaching app's hello crosses the minor (host.log names the app's wire, the app's main the supervisor's),
 // the app is served as another build (`matches: 'build'`, the update banner, exit-when-idle armed), the kept session's
-// tail reaches its main (the background failure journaled while no app ran raises the Needs-you item only main's live
+// tail reaches its main (the auto-mode denial journaled while no app ran raises the Needs-you item only main's live
 // derivation raises; the request raised while away is pending, its answer is played on and its rows arrive live), a
 // launch on the kept supervisor plays a turn, and once every session there is idle the kept supervisor exits by itself
 // and the app moves to a supervisor of its own build, which serves a launch too.
@@ -121,7 +121,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
@@ -145,12 +145,12 @@ import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { addressed } from './support/address'; // U13a
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, surfaceRow } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs
 import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTaskFailureRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, tailFixture, TASK_FAILED, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -320,7 +320,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
 
-  // the keeper: a paced replay kept across a quit, its background failure and its request still ahead
+  // the keeper: a paced replay kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
   const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
@@ -340,7 +340,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (keeperDaemon !== null) expect(isAlive(keeperDaemon), 'the keeper’s mawsd serves its kept session').toBe(true);
   const atQuit = s.journal(id);
   const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
-  expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
+  expect(atQuit.filter((r) => isTailItemRow(r) || isRequestRow(r)), 'the denial and the request come after the app has exited').toEqual([]);
   await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while no app runs' }).toBe(true);
 
   // the other build's app attaches, and is served as another build until the kept sessions are idle
@@ -402,23 +402,23 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const atAttach = await eventsOf(second.page, id);
   const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
-  const failure = atAttach.find((e) => e.kind === 'task.notification');
-  expect(failure && seqOf(failure), 'the failure was journaled after the keeper had exited').toBeGreaterThan(seqAtQuit);
+  const denial = atAttach.find((e) => e.kind === 'tool.result' && e.denial === 'automode-unavailable');
+  expect(denial && seqOf(denial), 'the denial was journaled after the keeper had exited').toBeGreaterThan(seqAtQuit);
   // P5 O3-D M6 (the architect's ruling; O3 Decision Log 5(1)): on a pre-A attacher after this build's mawsd held the
-  // stream, the failure's item is the one gap of the downgrade. mawsd, the engine host's permanent client while no app
+  // stream, the denial's item is the one gap of the downgrade. mawsd, the engine host's permanent client while no app
   // ran, took the tail (the host's connect burst sends only what no client has received, src/engine-host/session-stream.ts
   // `republish`) and its spine derived the item into the index at 14, which a pre-A app cannot read (its 13): so neither
   // the item nor the events reach the old app. Every other check of the scene runs. Without the daemon no client takes
   // the tail while away, and the burst brings it to the old app, which derives the item live.
   const derivedUnreadable = shapes.keeper === 'daemon' && !takesSpineLock(attacher);
   if (derivedUnreadable) {
-    test.info().annotations.push({ type: 'skipped check', description: `the failure's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
-    said.push(`  tail: the failure's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
+    test.info().annotations.push({ type: 'skipped check', description: `the denial's Needs-you item, derived from the tail: ${attacher.label} (wire ${wireOf(attacher)}) is from before O3-A; this build's mawsd took the tail while away and derived the item into the index at 14, which it cannot read (O3 DL 5(1))` });
+    said.push(`  tail: the denial's Needs-you item not checked: ${attacher.label} is from before O3-A and cannot read the index at 14 where mawsd derived it (O3 DL 5(1))`);
   } else {
-    await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+    await expect.poll(async () => (await attentionOf(second.page, id, 'auto_mode_unavailable')).map((i) => i.summary), { message: 'the denial’s Needs-you item, derived from the tail' }).toEqual([TAIL_ITEM]);
   }
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away' }).toBe(1);
-  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the failure's item and the request's"} reached main`);
+  said.push(`  tail: ${atAttach.filter((e) => seqOf(e) > seqAtQuit).length} events journaled after the keeper's quit; ${derivedUnreadable ? "the request's item" : "the denial's item and the request's"} reached main`);
 
   // P5 O5 M2: an artifact page of the kept engine host, loaded by this build's app on the daemon shape
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
@@ -514,7 +514,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches; both list ${HOLDER_CAPABILITY}: the handover`];
   const stub = s.useStub({ rowMs: Number(ROW_MS) });
 
-  // the keeper: a paced stub launch kept across a quit, its background failure and its request still ahead
+  // the keeper: a paced stub launch kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
   const own = await s.ready(first.page, onShape(shapes.keeper));
   expect(own, `${keeper.label} on its own supervisor`).toMatchObject({ matches: 'same', supervisor: { buildId: own.appBuildId } });
@@ -563,7 +563,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   const atAttach = await eventsOf(second.page, id);
   const seqOf = (e: SessionEvent) => Number(suffix(e.id).split(':')[0]);
   expect(atAttach.filter((e) => seqOf(e) > seqAtQuit).length, 'events from rows journaled after the keeper had exited').toBeGreaterThan(0);
-  await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.summary), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`Background task failed: ${TASK_FAILED}`]);
+  await expect.poll(async () => (await attentionOf(second.page, id, 'auto_mode_unavailable')).map((i) => i.summary), { message: 'the denial’s Needs-you item, derived from the tail' }).toEqual([TAIL_ITEM]);
   await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the request raised while away, once' }).toBe(1);
   if (attacherDaemon !== null) said.push(await artifactPage(s, second, attacher.label, servesArtifacts(attacher)));
   said.push('  gap: not probed: the older supervisor never served this app (its session was handed over at the attach)');
@@ -603,7 +603,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
 // (it knows no such command and would answer `unknown_command`, which `mawsd` logs as `failed`). To a host that lists
 // it, neither: one permanent connection. Either way the turn plays on while no app runs, and its end reaches the
 // reattached app's status and the spine's digest (O2's burst on a recycled link, or the front's follow from the app's
-// cursor), and the session's background failure is still one Needs-you item.
+// cursor), and the session's auto-mode denial is still one Needs-you item.
 // Fix round 1 (the architect's ruling): M3's unit tests prove the outstanding-at-quit items (a bridge request, a hold, a
 // remote subscription) against a fake older host; this scene ties that fake to the real one, each end in its own words.
 // `mawsd`'s log: the kept host's welcome it chose its path from (no host.attachment listed), its recycles at the
@@ -655,7 +655,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
   // seq <= atReattach, the turn's end among them) are the session's events, and the turn's end, its `turn.ended` at the
   // end row's seq, reaches main's view (the engine status, through the front's follow from the app's cursor) and the
   // spine's (the digest's lastTurnEndedAt is that event's own time, folded from the recycled link's burst on an older
-  // host: the spine heard no event while no app ran there); the refold adds no second item for the failure folded before
+  // host: the spine heard no event while no app ran there); the refold adds no second item for the denial folded before
   // the quit
   const ended = endRow()!;
   expect(ended.seq, 'the turn’s end was journaled before the reattach').toBeLessThanOrEqual(atReattach);
@@ -671,7 +671,7 @@ async function quitAndReattach(s: Scratch, run: Run, attach: () => Promise<Run>,
     }, { message: 'the spine’s digest has the turn’s end recovered at the reattach' })
     .toEqual({ lastTurnEndedAt: endEvent!.at, working: false });
   const away = s.journal(o.id).filter((r) => r.seq > awayFrom && r.seq <= atReattach).length;
-  expect((await attentionOf(next.page, o.id, 'error')).map((i) => i.summary), 'the background failure is still one Needs-you item').toEqual([`Background task failed: ${TASK_FAILED}`]);
+  expect((await attentionOf(next.page, o.id, 'auto_mode_unavailable')).map((i) => i.summary), 'the auto-mode denial is still one Needs-you item').toEqual([TAIL_ITEM]);
   expect(await pendingPermissions(next.page, o.id), 'the request answered before the quit stays answered').toEqual([]);
   o.said.push(
     `  reattach (acceptance 9, ${o.capable ? 'a host that serves host.attachment: one permanent connection' : 'an older host: O2’s link per attachment'}): connections from mawsd pid ${o.daemon} ${before} → ${departed} at the departure → ${connectsFrom(s.log(), o.daemon)} at the reattach; ${away} rows journaled while no app ran, the turn’s end (seq ${ended.seq}) among them; ${awayEvents.length} events of theirs, the end’s recovered by the digest`,
@@ -1670,6 +1670,33 @@ const notice = (page: Page) => page.locator('[data-toast-viewport]').getByText(O
 const consoleSaid = async (page: Page) => (await page.consoleMessages({ filter: 'all' })).map((message) => `${message.type()}: ${message.text()}`);
 const INVALID_LAYOUT = /\[layout\] \S+ is not a valid value/; // stores/layout.ts in both builds, a warning
 const SETTINGS_REFUSED = /\[settings\] (?:invalid|cannot read) /; // src/shared/settings/file-store.ts in both builds
+// A tool brought into view from the icon row as a person brings it, in either build: its icon, or its item in "More
+// surfaces" where the row folds it, unless its body is already drawn. Both builds mark that body `[data-surface]` named by
+// the tool's title (build F's stacked section, this build's group body); this build's ./support/shell.ts helpers speak
+// its own side column alone, so a step on the peer's page goes through these.
+const toolBody = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface][aria-label=${JSON.stringify(name)}]`);
+async function chooseTool(page: Page, name: string): Promise<void> {
+  const icon = surfaceRow(page).getByRole('button', { name, exact: true });
+  if (await icon.count()) await icon.click();
+  else {
+    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await page.getByRole('menuitem', { name, exact: true }).click();
+  }
+}
+async function showTool(page: Page, name: string): Promise<void> {
+  if (!await toolBody(page, name).count()) await chooseTool(page, name);
+  await expect(toolBody(page, name)).toBeVisible();
+}
+// Build F's side column (f1852de3a: panel/PanelHost.tsx, PanelHeader.tsx): at most two stacked surfaces, each a section
+// named by its tool, its header's "Close surface" taking it out of the stack (its tab stays in the session's list)
+const peerSurface = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface-stack] > section[data-surface][aria-label=${JSON.stringify(name)}]`);
+const peerStack = (page: Page) => page.locator('[data-region="panel"]:not([inert]) [data-surface-stack] > section[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') ?? ''));
+async function closeOnPeer(page: Page, name: string): Promise<void> {
+  const shown = peerSurface(page, name);
+  if (!await shown.count()) return;
+  await shown.getByRole('button', { name: 'Close surface', exact: true }).click();
+  await expect(shown).toHaveCount(0);
+}
 // A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
 // tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
 // Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx)
@@ -1692,7 +1719,7 @@ async function closeMenus(page: Page): Promise<void> {
 // A tool pinned to, or unpinned from, the icon row through its menu; opened first for the pin (a tool past the first
 // four is listed only when pinned or open)
 async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
-  if (pin) await openSurface(page, name);
+  if (pin) await showTool(page, name);
   await openToolMenu(page, name);
   await page.getByRole('menuitem', { name: pin ? 'Pin to toolbar' : 'Unpin from toolbar', exact: true }).click();
   await closeMenus(page);
@@ -1735,7 +1762,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     await expect.poll(async () => (front = (await activeMainTab(old.page).getAttribute('data-tab-id')) ?? ''), { timeout: 20_000, message: `${peer.label} shows the session’s tab` }).toMatch(/^session:/);
     await pinTab(old.page, front);
     await pinToToolbar(old.page, PINNED_TOOL, true);
-    await closeSurface(old.page, PINNED_TOOL);
+    await closeOnPeer(old.page, PINNED_TOOL); // the peer's own "Close surface": its stack drops the tool, its tab stays
     let theirs: StoredSets | null = null;
     await expect
       .poll(async () => {
@@ -1825,7 +1852,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await expect.poll(() => run.page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab').evaluateAll((t) => t.map((e) => e.getAttribute('data-tab-id'))), { message: 'the split' }).toEqual([session]);
     await openSurface(run.page, 'Files');
     await pinToToolbar(run.page, PINNED_TOOL, true);
-    await closeSurface(run.page, PINNED_TOOL);
+    await openSurface(run.page, 'Files'); // UX wave U8b: Files back in view, the pinned tool a tab beside it (opening it took Files' place)
     await mainTabById(run.page, 'artifacts').click();
     await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', 'artifacts');
     const resizer = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
@@ -2072,6 +2099,388 @@ test('(sidebar, both ways) this build hides a session and quits; the peer, which
     expect(again.maws.consoleErrors()).toEqual([]);
     await s.quit(again);
     said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
+});
+
+// ---- UX wave U8b: the side column's tabs and groups, build F reads (UC-14) --------------------------------------------
+// U8b (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md: Interfaces §A and §G, M9's decision 3) stores the
+// side column as tabs in one or two groups. The keys build F knows keep their shapes: `panel.<session>` and `panel.pinned`
+// are the strip, `panelTools.surfaces.stacks` the tabs in view (none while the column is hidden), `regions.panel.width`
+// the last width dragged (380 at a reset); three keys are new, which F never reads and its main keeps in the file
+// (`panelTools.groups`, `panelTools.widths`, `cards.open`). Two scenes prove it both ways, each by what the reading build
+// draws or by what it writes after an act; a key the peer never writes is read only after a write of the peer's own is
+// seen, to show that the peer kept it. Each runs only with a peer older than this landing (its
+// src/shared/ipc/schema/layout.ts names no `panelTools.groups`), whose side column is F's: two stacked surfaces, "Close
+// surface", 380 the automatic width, driven here by locators of its own UI (above: chooseTool, showTool, peerSurface,
+// peerStack, closeOnPeer). The run of record is the one whose peer is F (`--peer-exact f1852de3a`).
+//   (side column, from the peer)  the peer stacks Files and Session info, then Review in the lower place, keeps a
+//                                 terminal for every session, shows it with no session shown and drags the column;
+//                                 this build shows that pin selected with no session shown, then the session's two
+//                                 groups, Files above and Review below, the pinned terminal in the strip and no Session
+//                                 info tab (the first read's prune), at the peer's width as its wide width, and writes
+//                                 the three keys; Session info opened again stays a tab across one more launch.
+//   (side column, to the peer)    this build opens Review, keeps two terminals for every session and selects the
+//                                 second with no session shown, opens an artifact beside the session, drags the
+//                                 narrow width to exactly 380, moves Review below, drags the bar, resets the wide width,
+//                                 hides the column and folds Environment; its relaunch shows the hidden column, then both
+//                                 groups on one click, and hides it again; the peer draws its cards, then on a click its
+//                                 surface at its automatic width, its sidebar and tab in front as left, the artifact's
+//                                 record, says nothing of an invalid value, and writes its two surfaces; with no session
+//                                 shown it draws both pins as its terminal's tabs, the second selected; the three keys
+//                                 are as they were; this build shows those two as two groups, the wide width automatic
+//                                 and the narrow one 380.
+// UC-14's coverage for U8b (the rows of the U13a table above that this landing changes or adds):
+//   | stored                                      | F reads this build's value, and writes on      | this build reads F's value                      |
+//   |---------------------------------------------|------------------------------------------------|-------------------------------------------------|
+//   | `panel.<session>`: the strip                | (to the peer): Review and the artifact drawn   | (from the peer): the tabs in view kept, Session |
+//   |                                             | from it on a click                             | info dropped; the return of (to the peer)       |
+//   | `panel.pinned`                              | (to the peer): two pinned terminals drawn as   | (from the peer): the pinned terminal            |
+//   |                                             | its terminal's tabs with no session shown      |                                                 |
+//   | `panelTools.activeNoSession`                | (to the peer): the second pin, not the first,  | (from the peer): the pin selected, no session   |
+//   |                                             | the tab it selects with no session shown       |                                                 |
+//   | `panelTools.surfaces`: `stacks`             | (to the peer): the hidden column's empty entry | (from the peer): two ids as two groups, one as  |
+//   |                                             | drawn as F's cards; F's own two-surface write  | one; the return of (to the peer)                |
+//   | `panelTools.params`                         | (to the peer): the artifact tab on its record  | the return of (to the peer): the record below   |
+//   | `regions.panel.width`                       | (to the peer): 380 drawn as F's automatic one  | (from the peer): F's width as the wide one      |
+//   | `panelTools.groups`, `panelTools.widths`,   | (to the peer): kept by F through its own write | (from the peer): written at the first read;     |
+//   | `cards.open`                                |                                                | the return: the groups and both widths as left  |
+const storesGroups = (build: Build) => {
+  const schema = join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts');
+  return existsSync(schema) && readFileSync(schema, 'utf8').includes('panelTools.groups');
+};
+const storesGroupsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names panelTools.groups in its src/shared/ipc/schema/layout.ts: it has this landing's side column, which these scenes do not drive as the peer's; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const F_AUTOMATIC_WIDTH = 380; // build F's automatic width (its app/shell-geometry.ts), which a reset here writes to `regions`
+const NO_SESSION_SCOPE = '@none'; // the `stacks` key of the column while no session is shown, in both builds (schema/layout.ts)
+const NARROW_AUTOMATIC_WIDTH = 360; // this build's automatic width of a column with no reading tool in view (app/shell-geometry.ts)
+type PanelRef = { id: string; toolId: string; pinned: boolean };
+// The side column's keys as main last wrote layout.json (whole, through a rename: a read never sees half a file), for one
+// session: its scope in `stacks` is its address, as its `panel.<session>` key is
+function sideOf(s: Scratch, address: string) {
+  const path = join(s.userData, 'layout.json');
+  const file = (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}) as Record<string, unknown>;
+  const pinned = Array.isArray(file['panel.pinned']) ? (file['panel.pinned'] as PanelRef[]) : [];
+  const own = (file[`panel.${address}`] as { tabs?: PanelRef[]; activeTabId?: string | null } | undefined)?.tabs ?? [];
+  const toolOf = (id: string) => [...pinned, ...own].find((tab) => tab.id === id)?.toolId ?? `(no tab ${id})`;
+  const stacks = (file['panelTools.surfaces'] as StoredSurfaces | undefined)?.stacks ?? {};
+  const noSession = (file['panelTools.activeNoSession'] as { activeTabId?: string | null } | undefined)?.activeTabId ?? null;
+  const lower = (file['panelTools.groups'] as { lower?: Record<string, { tabs: string[]; share: number }> } | undefined)?.lower?.[address];
+  return {
+    pinned: pinned.map((tab) => tab.toolId),
+    pinnedIds: pinned.map((tab) => tab.id),
+    noSession,
+    stackNoSession: stacks[NO_SESSION_SCOPE] ?? null,
+    own: own.map((tab) => tab.toolId),
+    tabOf: (toolId: string) => own.find((tab) => tab.toolId === toolId)?.id,
+    // the tools in view by the stored stack, and with no session shown by F's own rule (its active pin while no stack)
+    inView: (stacks[address] ?? []).map(toolOf),
+    inViewNoSession: (stacks[NO_SESSION_SCOPE] ?? (noSession === null ? [] : [noSession])).map(toolOf),
+    lower: lower === undefined ? null : { tabs: lower.tabs.map(toolOf), share: lower.share },
+    params: (file['panelTools.params'] as { params?: Record<string, unknown> } | undefined)?.params ?? {},
+    width: (file.regions as { panel?: { width?: number } } | undefined)?.panel?.width,
+    added: { 'panelTools.groups': file['panelTools.groups'], 'panelTools.widths': file['panelTools.widths'], 'cards.open': file['cards.open'] },
+  };
+}
+const panelResizer = (page: Page) => page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+const widthOf = async (page: Page) => Number(await panelResizer(page).getAttribute('aria-valuenow'));
+// A group's tabs by their tools' titles, in strip order (a tab's name is its title, then ` · ` and its suffix if any)
+const titlesIn = async (page: Page, group: 'upper' | 'lower') => (await sideTabNames(page, group)).map((name) => name.split(' · ')[0].trim());
+const sortedTitlesIn = async (page: Page, group: 'upper' | 'lower') => (await titlesIn(page, group)).sort();
+// A pointer drag of a resizer by whole pixels from where it is grabbed (each build's app/Resizer.tsx follows the pointer)
+async function dragBy(page: Page, handle: Locator, dx: number, dy = 0): Promise<void> {
+  const box = (await handle.boundingBox())!;
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 4 });
+  await page.mouse.up();
+}
+async function showSession(page: Page, id: AppSessionId, session: string): Promise<void> {
+  await (await sidebarRow(page, { appSessionId: id })).click();
+  await expect(activeMainTab(page), 'the session’s tab in front').toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+}
+
+test('(side column, from the peer) two surfaces the peer stacked open as two groups, its pinned terminal in the strip and selected with no session shown, a tool it had hidden no tab, its width the wide one; the three keys written, and a tool opened again kept as a tab', async () => {
+  const { here, peer } = builds();
+  test.skip(storesGroups(peer), storesGroupsWhy(peer));
+  await withScratch('xb-side-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) stacks surfaces; ${here.label} (wire ${wireOf(here)}) reads them as tabs in groups`];
+    // the peer: the seeded session from its sidebar row; Files, Session info below it, then Review in Session info's
+    // place; a terminal, which takes the lower place in its turn, kept for every session; Review shown below again
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const address = await addressed(old.page, id);
+    const session = `session:${address}`;
+    await showSession(old.page, id, session);
+    await showTool(old.page, 'Files');
+    await showTool(old.page, PINNED_TOOL);
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} stacks ${PINNED_TOOL} below Files` }).toEqual(['Files', PINNED_TOOL]);
+    await showTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: 'Review takes the lower place' }).toEqual(['Files', 'Review']);
+    await showTool(old.page, 'Terminal');
+    await expect.poll(() => peerStack(old.page), { message: 'the terminal takes the lower place' }).toEqual(['Files', 'Terminal']);
+    await openToolMenu(old.page, 'Terminal');
+    await old.page.getByRole('menuitem', { name: 'Keep open for every session', exact: true }).click();
+    await closeMenus(old.page);
+    await showTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: 'Review below Files again' }).toEqual(['Files', 'Review']);
+    // no session shown (its tab closed): the pin brought into view, and the column dragged 64 px wider
+    await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(old.page, session), 'the session’s tab closed').toHaveCount(0);
+    await showTool(old.page, 'Terminal');
+    await expect.poll(() => peerStack(old.page), { message: 'the pin alone with no session shown' }).toEqual(['Terminal']);
+    const start = await widthOf(old.page);
+    await dragBy(old.page, panelResizer(old.page), -64);
+    const dragged = start + 64;
+    await expect(panelResizer(old.page), `${peer.label}’s column dragged`).toHaveAttribute('aria-valuenow', String(dragged));
+    expect(dragged, 'a width the peer does not take for its automatic one').not.toBe(F_AUTOMATIC_WIDTH);
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        return [side.pinned, [...side.own].sort(), side.inView, side.inViewNoSession, side.width, side.added['panelTools.groups'] ?? null];
+      }, { timeout: 20_000, message: `${peer.label} wrote the pin, the session's tabs, both stacks and the width` })
+      .toEqual([['terminal'], ['files', 'review', 'session-info'], ['files', 'review'], ['terminal'], dragged, null]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // this build's own mawsd from here
+    said.push(`  ${peer.label}: Files and Review stacked (${PINNED_TOOL} hidden, its tab kept), the terminal pinned and shown with no session, the column at ${dragged}`);
+
+    // this build: no session shown, the pin selected and alone at the narrow automatic width; the first read wrote the
+    // three keys, the peer's one width the wide one
+    const run = await s.launch();
+    await s.ready(run.page);
+    await expect(sideGroup(run.page, 'upper'), 'the pin in view with no session shown').toHaveAttribute('aria-label', 'Terminal', { timeout: 20_000 });
+    await expect(sideGroup(run.page, 'lower')).toHaveCount(0);
+    await expect(sideTab(sideGroup(run.page, 'upper'), /^Terminal/), 'the pin selected').toHaveAttribute('aria-selected', 'true');
+    // a terminal is wide (UX wave U8b, Addendum 6): the pin in view draws the peer's dragged width, read as the wide one
+    await expect(panelResizer(run.page), 'the pin, a terminal, at the wide width the peer dragged').toHaveAttribute('aria-valuenow', String(dragged));
+    await expect
+      .poll(() => {
+        const { added } = sideOf(s, address);
+        return [(added['panelTools.groups'] as { version?: number } | undefined)?.version, added['panelTools.widths'], added['cards.open']];
+      }, { timeout: 20_000, message: 'the first read wrote the three keys' })
+      .toEqual([1, { version: 1, wide: dragged, narrow: null }, { version: 1, open: ['environment'] }]);
+    // the session: Files above and Review below in view, the pinned terminal in the strip, no Session info tab, at the
+    // peer's width
+    await showSession(run.page, id, session);
+    await expect(sideGroup(run.page, 'upper'), 'Files above').toHaveAttribute('aria-label', 'Files', { timeout: 20_000 });
+    await expect(sideGroup(run.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect.poll(() => titlesIn(run.page, 'upper'), { message: 'the pin first, then Files' }).toEqual(['Terminal', 'Files']);
+    await expect.poll(() => titlesIn(run.page, 'lower')).toEqual(['Review']);
+    await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `no ${PINNED_TOOL} tab in either strip`).toHaveCount(0);
+    await expect(panelResizer(run.page), 'the wide width at the peer’s').toHaveAttribute('aria-valuenow', String(dragged));
+    // Session info opened again on purpose, then its group's other tab brought back into view: a tab not in view
+    await openSurface(run.page, PINNED_TOOL);
+    const holder = (await titlesIn(run.page, 'upper')).includes(PINNED_TOOL) ? 'upper' : 'lower';
+    const other = holder === 'upper' ? 'Files' : 'Review';
+    // a width dragged under the peer is not the narrow one (Addendum 8): with narrow tools alone in view, Session info in
+    // one group and Background tasks brought into the other, the column is at the narrow automatic width; Background
+    // tasks then closed, which gives its group's tab back to view
+    const otherGroup = holder === 'upper' ? 'lower' : 'upper';
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await run.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(run.page, otherGroup), 'Background tasks in the other group').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(sideGroup(run.page, holder), `${PINNED_TOOL} in view`).toHaveAttribute('aria-label', PINNED_TOOL);
+    await expect(panelResizer(run.page), 'a width dragged under the peer is not the narrow one').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect(sideTab(sideColumn(run.page), 'Background tasks'), 'Background tasks closed').toHaveCount(0);
+    await sideTab(sideGroup(run.page, holder), other).click();
+    await expect(sideGroup(run.page, holder)).toHaveAttribute('aria-label', other);
+    await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `${PINNED_TOOL} a tab`).toHaveCount(1);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    said.push(`  ${here.label}: the pin with no session, a terminal, drawn at the wide ${dragged}; Files above, Review below, the terminal in the strip, no ${PINNED_TOOL}; wide ${dragged}; ${PINNED_TOOL} opened again, and with Background tasks beside it the column drawn at the narrow ${NARROW_AUTOMATIC_WIDTH}, then Background tasks closed`);
+
+    // one more launch: no first read again, so the tab not in view stands
+    const again = await s.launch();
+    await s.ready(again.page);
+    await showSession(again.page, id, session);
+    await expect(sideTab(sideColumn(again.page), PINNED_TOOL), `${PINNED_TOOL} still a tab`).toHaveCount(1, { timeout: 20_000 });
+    await expect(again.page.locator(`[data-surface="${PINNED_TOOL_ID}"]`), 'and not in view').toHaveCount(0);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: ${PINNED_TOOL} still a tab`);
+    record(said);
+  });
+});
+
+test('(side column, to the peer) two groups, a hidden column, a folded card and the two widths this build stored are drawn by the peer as its cards and then its surfaces, kept through its own write, and read back here as two groups with the widths as left', async () => {
+  const { here, peer } = builds();
+  test.skip(storesGroups(peer), storesGroupsWhy(peer));
+  await withScratch('xb-side-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) stores two groups and two widths; ${peer.label} (wire ${wireOf(peer)}) reads them, acts and writes on`];
+    // this build: the session in front, the sidebar 40 px wider; Review, a terminal and an artifact beside it (the
+    // artifact's tab holds its params), each in view in its turn
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const session = `session:${address}`;
+    await showSession(run.page, id, session);
+    const sidebar = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
+    await sidebar.focus();
+    for (let i = 0; i < 5; i++) await run.page.keyboard.press('ArrowRight');
+    await expect(sidebar).toHaveAttribute('aria-valuenow', '280');
+    await openSurface(run.page, 'Review');
+    await openSurface(run.page, 'Terminal');
+    // two terminals kept for every session (`panel.pinned`): the one in view by its icon's menu, a second added by "+"
+    // and pinned by its tab's glyph; with no session shown (the session's tab closed) the second is selected
+    // (`panelTools.activeNoSession`), not the first, and the session is shown again
+    await pinSurfaceForSessions(run.page, 'Terminal');
+    await sideGroup(run.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await run.page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+    await sideGroup(run.page, 'upper').locator('[data-side-strip] [data-tab-id]:has([role="tab"][aria-selected="true"])').getByRole('button', { name: 'Pin Terminal', exact: true }).click();
+    await expect.poll(() => sideOf(s, address).pinned, { timeout: 20_000, message: `${here.label} wrote two pinned terminals` }).toEqual(['terminal', 'terminal']);
+    const [firstPin, secondPin] = sideOf(s, address).pinnedIds;
+    await mainTabById(run.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(run.page, session), 'the session’s tab closed: no session shown').toHaveCount(0);
+    if (!await sideGroup(run.page, 'upper').count()) await chooseTool(run.page, 'Terminal');
+    await sideColumn(run.page).locator(`[data-side-strip] [data-tab-id="${secondPin}"] [role="tab"]`).click();
+    await expect(sideColumn(run.page).locator(`[data-side-strip] [data-tab-id="${secondPin}"] [role="tab"]`), 'the second pin in view').toHaveAttribute('aria-selected', 'true');
+    // both readings of the no-session column name the second pin: the selection, and the tab in view (`stacks`), which
+    // the peer draws by its own rule (it falls back to the selection only for a scope with no `stacks` entry)
+    await expect
+      .poll(() => [sideOf(s, address).noSession, sideOf(s, address).stackNoSession], { timeout: 20_000, message: `${here.label} wrote the second pin as the selection and the tab in view with no session shown` })
+      .toEqual([secondPin, [secondPin]]);
+    await showSession(run.page, id, session);
+    const artifactId = await createHtmlArtifact(run.page, LAYOUT_PAGE, 'XB_SIDE_PAGE');
+    await openArtifactInPanel(run.page, artifactId);
+    await mainTabById(run.page, session).click();
+    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', session);
+    await expect(sideGroup(run.page, 'upper'), 'the artifact in view').toHaveAttribute('aria-label', 'Artifacts');
+    await expect.poll(() => sortedTitlesIn(run.page, 'upper'), { message: 'one strip: the two pins and the session’s two tabs' }).toEqual(['Artifacts', 'Review', 'Terminal', 'Terminal']);
+    // the narrow width (no reading tool in view) dragged to exactly 380, which the peer takes for its automatic width
+    await expect(panelResizer(run.page), 'the narrow width automatic').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    await dragBy(run.page, panelResizer(run.page), NARROW_AUTOMATIC_WIDTH - F_AUTOMATIC_WIDTH);
+    await expect(panelResizer(run.page), 'the narrow width at 380').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    // Review below (the column wide from here), the bar dragged, the wide width dragged and then reset to automatic
+    await moveSideTab(run.page, 'Review', 'below');
+    await expect(sideGroup(run.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect(sideGroup(run.page, 'upper'), 'the artifact above').toHaveAttribute('aria-label', 'Artifacts');
+    await expect(panelResizer(run.page), 'the wide width in use').not.toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    const wide = await widthOf(run.page);
+    const bar = sideColumn(run.page).getByRole('separator', { name: 'Resize groups', exact: true });
+    const half = await bar.getAttribute('aria-valuenow');
+    await dragBy(run.page, bar, 0, -48);
+    await expect(bar, 'the bar dragged').not.toHaveAttribute('aria-valuenow', half ?? '');
+    const share = await bar.getAttribute('aria-valuenow');
+    await dragBy(run.page, panelResizer(run.page), 64);
+    await expect(panelResizer(run.page), 'the wide width dragged').toHaveAttribute('aria-valuenow', String(wide - 64));
+    await panelResizer(run.page).focus();
+    await run.page.keyboard.press('Enter');
+    await expect(panelResizer(run.page), 'the wide width automatic again').toHaveAttribute('aria-valuenow', String(wide));
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        const artifactTab = side.tabOf('artifacts');
+        return [side.added['panelTools.widths'], side.width, side.inView, side.lower?.tabs, side.lower !== null && side.lower.share !== 0.5, artifactTab !== undefined && artifactTab in side.params];
+      }, { timeout: 20_000, message: `${here.label} wrote the widths, the two tabs in view, the lower group and the artifact's params` })
+      .toEqual([{ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH }, F_AUTOMATIC_WIDTH, ['artifacts', 'review'], ['review'], true, true]);
+    // the column hidden (the cards show), Environment folded
+    await sideColumn(run.page).getByRole('button', { name: 'Hide side column', exact: true }).click();
+    await expect(sessionCards(run.page), 'the cards in the hidden column’s place').toBeVisible();
+    await expect(sideGroup(run.page, 'upper')).toHaveCount(0);
+    const environment = sessionCard(run.page, 'Environment').getByRole('button', { name: /^Environment/ });
+    await expect(environment, 'Environment open by default').toHaveAttribute('aria-expanded', 'true');
+    await environment.click();
+    await expect(environment).toHaveAttribute('aria-expanded', 'false');
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        return [side.inView, side.lower?.tabs, side.added['cards.open']];
+      }, { timeout: 20_000, message: `${here.label} wrote the hidden column and the fold` })
+      .toEqual([[], ['review'], { version: 1, open: [] }]);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    said.push(`  ${here.label}: the artifact and the terminal above, Review below, the bar at ${share} %, narrow 380, wide automatic (${wide}), the column hidden, Environment folded`);
+
+    // this build again: the hidden column (the cards, Environment folded); one click on Review shows both groups with
+    // their tabs as left and the bar where it was; hidden again
+    const relaunch = await s.launch();
+    await s.ready(relaunch.page);
+    await showSession(relaunch.page, id, session);
+    await expect(sessionCards(relaunch.page), 'the column still hidden').toBeVisible({ timeout: 20_000 });
+    await expect(sideGroup(relaunch.page, 'upper')).toHaveCount(0);
+    await expect(sessionCard(relaunch.page, 'Environment').getByRole('button', { name: /^Environment/ }), 'Environment still folded').toHaveAttribute('aria-expanded', 'false');
+    await chooseTool(relaunch.page, 'Review');
+    await expect(sideGroup(relaunch.page, 'upper'), 'the artifact above').toHaveAttribute('aria-label', 'Artifacts', { timeout: 20_000 });
+    await expect(sideGroup(relaunch.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect.poll(() => sortedTitlesIn(relaunch.page, 'upper')).toEqual(['Artifacts', 'Terminal', 'Terminal']);
+    await expect.poll(() => titlesIn(relaunch.page, 'lower')).toEqual(['Review']);
+    await expect(sideColumn(relaunch.page).getByRole('separator', { name: 'Resize groups', exact: true }), 'the bar where it was').toHaveAttribute('aria-valuenow', share ?? '');
+    await sideColumn(relaunch.page).getByRole('button', { name: 'Hide side column', exact: true }).click();
+    await expect(sessionCards(relaunch.page)).toBeVisible();
+    await expect.poll(() => sideOf(s, address).inView, { message: 'hidden again' }).toEqual([]);
+    expect(relaunch.maws.consoleErrors()).toEqual([]);
+    await s.quit(relaunch);
+    await endProfileProcesses(s.userData);
+    const left = sideOf(s, address).added;
+    said.push(`  ${here.label} again: the hidden column, then both groups on one click, hidden again`);
+
+    // the peer: its cards (the column was hidden), its sidebar and tab in front as left, no word of an invalid value;
+    // then a click on Review draws it at the peer's automatic width (`regions` holds 380), and "Open saved artifact"
+    // draws the artifact's tab on its record below it: two surfaces, which the peer writes
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await expect(activeMainTab(old.page), `${peer.label} shows the session’s tab in front`).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    await expect(old.page.getByRole('complementary', { name: 'Session cards', exact: true }), `${peer.label} draws its cards`).toBeVisible({ timeout: 20_000 });
+    expect(await peerStack(old.page), 'and no surface').toEqual([]);
+    await expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' }), 'the sidebar at the width written').toHaveAttribute('aria-valuenow', '280');
+    await chooseTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} draws Review on a click` }).toEqual(['Review']);
+    await expect(panelResizer(old.page), `${peer.label} reads 380 as its automatic width`).toHaveAttribute('aria-valuenow', String(wide));
+    await surfaceRow(old.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await old.page.getByRole('menuitem', { name: 'Open saved artifact', exact: true }).click();
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} draws the artifact’s tab below Review` }).toEqual(['Review', 'Artifacts']);
+    await expect(peerSurface(old.page, 'Artifacts').locator(`[data-artifact-record="${artifactId}"]`), 'the artifact’s tab on its record').toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => sideOf(s, address).inView, { timeout: 20_000, message: `${peer.label} writes its two surfaces` }).toEqual(['review', 'artifacts']);
+    // with no session shown (its tab closed), the peer draws this build's pins as its terminal's tabs, the second one
+    // selected, as this build left its no-session column
+    await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(old.page, session), `${peer.label} shows no session`).toHaveCount(0);
+    await expect.poll(() => peerStack(old.page), { timeout: 20_000, message: `${peer.label} draws the pinned terminal with no session shown` }).toEqual(['Terminal']);
+    const peerTerminal = peerSurface(old.page, 'Terminal');
+    await expect(peerTerminal.locator(`[data-tab-id="${firstPin}"] [role="tab"]`), 'the first pin, a tab of its terminal').toHaveAttribute('aria-selected', 'false');
+    await expect(peerTerminal.locator(`[data-tab-id="${secondPin}"] [role="tab"]`), 'the second pin, selected').toHaveAttribute('aria-selected', 'true');
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(sideOf(s, address).added, `the three keys as ${here.label} left them, through ${peer.label}’s write`).toEqual(left);
+    said.push(`  ${peer.label}: its cards, then Review at ${wide} and the artifact on its record; wrote its two surfaces; with no session shown, the two pins with the second selected; the three keys kept`);
+
+    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 as stored and as
+    // drawn (the terminal brought into view above, beside the artifact below, keeps the column wide: Addendum 6; a
+    // narrow tool brought into view above draws it at 380: Addendum 8)
+    const back = await s.launch();
+    await s.ready(back.page);
+    await showSession(back.page, id, session);
+    await expect(sideGroup(back.page, 'upper'), 'Review above').toHaveAttribute('aria-label', 'Review', { timeout: 20_000 });
+    await expect(sideGroup(back.page, 'lower'), 'the artifact below').toHaveAttribute('aria-label', 'Artifacts');
+    await expect(sideGroup(back.page, 'lower').locator(`[data-artifact-record="${artifactId}"]`), 'on its record').toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
+    await expect.poll(() => titlesIn(back.page, 'lower')).toEqual(['Artifacts']);
+    await expect(panelResizer(back.page), 'the wide width automatic').toHaveAttribute('aria-valuenow', String(wide));
+    await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
+    await expect(sideGroup(back.page, 'upper'), 'the terminal above').toHaveAttribute('aria-label', 'Terminal');
+    await expect(panelResizer(back.page), 'a terminal in view keeps the column wide (UX wave U8b, Addendum 6)').toHaveAttribute('aria-valuenow', String(wide));
+    expect(sideOf(s, address).added['panelTools.widths'], 'the narrow width still 380').toEqual({ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH });
+    // drawn, not only stored (Addendum 8): a narrow tool in view above, beside the artifact below, and the column is 380
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await back.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(back.page, 'upper'), 'Background tasks above').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(panelResizer(back.page), 'the column drawn at the stored narrow width').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    // the view put back: Background tasks closed, the terminal in view above and the column wide again
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
+    await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
+    await expect(sideGroup(back.page, 'upper'), 'the terminal above again').toHaveAttribute('aria-label', 'Terminal');
+    await expect(panelResizer(back.page), 'wide again').toHaveAttribute('aria-valuenow', String(wide));
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too; Background tasks above drawn at the stored narrow 380, then closed`);
     record(said);
   });
 });

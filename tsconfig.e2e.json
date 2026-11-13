@@ -183,6 +183,7 @@
     "test/support/store-fixture.ts",
     "test/support/stub-engine-bin.ts", // P5 O16 M2b: the hosted supervisor scenes' engine (e2e/support/stub-engine.ts)
     "test/support/synth-transcript.ts",
+    "test/support/terminal-lines.ts", // UX wave U8b (Addendum 5): the terminal spec reads soft-wrapped rows joined
     "test/support/to-human-plugin.ts", // P4-R7z: the to-human spec installs the plugin's style and the plugin in its scratch home
     "test/support/widget-backend.ts",
     // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module

@@ -198,13 +198,11 @@ describe('attention service merges broker items with the derived kinds', () => {
     // a user abort is not a failure, and the wire marks every abort is_error: true (3.8's aborted_streaming; pass3/plan-outcomes seq 510 aborted_tools)
     const fine = event('turn.ended', { isError: true, terminalReason: 'aborted_streaming', result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
     const aborted = event('turn.ended', { isError: true, terminalReason: 'aborted_tools', result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] });
-    const task = event('task.notification', { taskId: 'task-1', toolUseId: null, status: 'failed', summary: 'npm test exited 1', outputFile: null, reason: null });
     const unavailable = event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' });
-    batch(failed, hard, fine, aborted, task, unavailable);
+    batch(failed, hard, fine, aborted, unavailable);
     expect(last().map((i) => [i.kind, i.summary, i.request])).toEqual([
       ['error', 'The turn ended with an error (overloaded)', { requestId: null, toolUseId: null, taskId: null, agentId: null }],
       ['error', 'The turn ended with an error (the conversation is too long for the model)', { requestId: null, toolUseId: null, taskId: null, agentId: null }],
-      ['error', 'Background task failed: npm test exited 1', { requestId: null, toolUseId: null, taskId: 'task-1', agentId: null }],
       ['auto_mode_unavailable', 'Auto mode unavailable: switch out of auto mode to continue', { requestId: null, toolUseId: 'toolu_7', taskId: null, agentId: null }],
     ]);
     const held = { messageUuid: 'm-1', from: 'peer', fromName: 'Reviewer', lane: 'team', heldAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' };
@@ -212,11 +210,34 @@ describe('attention service merges broker items with the derived kinds', () => {
     expect(last().at(-1)).toMatchObject({ kind: 'held_peer_message', summary: 'Held message from Reviewer', createdAt: AT, expiresAt: '2026-09-28T10:05:00.000Z' });
 
     batch(event('turn.started', { userMessageUuid: 'u-2', origin: 'engine' })); // an engine-initiated turn retires nothing
-    expect(last()).toHaveLength(5);
+    expect(last()).toHaveLength(4);
     batch(event('turn.started', { userMessageUuid: 'u-3', origin: 'human' }));
     expect(last().map((i) => i.kind)).toEqual(['held_peer_message']);
     fire('session.status', { appSessionId: APP, status: { engineSessionId: SID, heldPeerMessages: [] } as unknown as EngineSessionStatus });
     expect(last()).toEqual([]);
+  });
+
+  // UX wave U3, O-34 (the U3a document, Acceptance 5): a failed task raises nothing, whether it ran in the background or in
+  // the foreground; its line in the transcript says it (O-28), and a foreground command's own tool row already does.
+  it('a failed task notification derives no item, of a background task or a foreground one; a failed turn, an API error and auto mode unavailable derive theirs as before', () => {
+    const { service, batch } = setup();
+    batch(
+      event('task.started', { taskId: 'task-bg', toolUseId: 'toolu_bg', taskType: 'local_bash', description: 'npm test', isBackground: true, workflowName: null }),
+      event('task.notification', { taskId: 'task-bg', toolUseId: 'toolu_bg', status: 'failed', summary: 'Background command "npm test" failed with exit code 1', outputFile: '/tmp/uxw/task-bg.output', reason: null }),
+      event('task.started', { taskId: 'task-fg', toolUseId: 'toolu_fg', taskType: 'local_bash', description: 'make build', isBackground: false, workflowName: null }),
+      event('task.notification', { taskId: 'task-fg', toolUseId: 'toolu_fg', status: 'failed', summary: 'make build', outputFile: null, reason: null }),
+    );
+    expect(service.list()).toEqual([]);
+    batch(
+      event('turn.ended', { isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }),
+      event('turn.ended', { isError: true, terminalReason: 'api_error', result: 'success', resultText: 'API Error: 529 Overloaded', isEchoReceipt: false, origin: 'human', errors: [] }),
+      event('tool.result', { toolUseId: 'toolu_7', denial: 'automode-unavailable' }),
+    );
+    expect(service.list().map((i) => [i.kind, i.summary])).toEqual([
+      ['error', 'The turn ended with an error'],
+      ['error', 'API Error: 529 Overloaded'],
+      ['auto_mode_unavailable', 'Auto mode unavailable: switch out of auto mode to continue'],
+    ]);
   });
 
   // E11 F2b (plan 2.4)
@@ -233,12 +254,6 @@ describe('attention service merges broker items with the derived kinds', () => {
         failedTurn({ terminalReason: 'api_error', errors: ['overloaded'] }),
       );
       expect(last().map((i) => i.summary)).toEqual(['The turn ended with an error', 'Stopped at the turn limit', 'Stopped at the budget', 'Stopped at the budget', 'The turn ended with an error (overloaded)']);
-    });
-
-    it('a failed background task’s summary is its preview (plan 2.6): no owner marks', () => {
-      const { batch, last } = setup();
-      batch(event('task.notification', { taskId: 'task-9', toolUseId: null, status: 'failed', summary: '<to-human>\n<essential>npm test exited 1</essential>\n</to-human>', outputFile: null, reason: null }));
-      expect(last().map((i) => i.summary)).toEqual(['Background task failed: npm test exited 1']);
     });
 
     it('a human prompt read from the transcript on disk (origin null, backfill.ts) retires it; engine, peer and task-notification turns do not', () => {
@@ -378,9 +393,9 @@ describe('attention service merges broker items with the derived kinds', () => {
       event('turn.ended', { isError: true, terminalReason: 'api_error', result: 'success', resultText: text, isEchoReceipt: false, origin: 'human', errors: [] }),
     ];
 
-    it('an old error the session was seen after raises nothing (a failed background task neither)', () => {
+    it('an old error the session was seen after raises nothing', () => {
       const { service, batch } = setup({ seenAt: () => SEEN_AT });
-      batch(...diskTurn(), event('task.notification', { taskId: 'task-1', toolUseId: null, status: 'failed', summary: 'npm test exited 1', outputFile: null, reason: null, at: FAILED_AT, seq: null }));
+      batch(...diskTurn());
       expect(service.list()).toEqual([]);
     });
 
@@ -516,6 +531,32 @@ describe('attention service merges broker items with the derived kinds', () => {
 
   // C12: a release under the memory budget is not an attention event (D-18, §5.7): nothing is raised, whatever the
   // session held before (a released session held no request, so it lost none)
+  // UX wave U8b M6 (X-168): a session read from disk now ends with the follower's exit (reason unknown, `seq` null)
+  // whether or not its last turn ended, so the case below runs for sessions that ended long ago. It raises nothing: the
+  // same history with and without the supplied exit gives the same list, and nothing new is emitted for the exit.
+  it('the exit a follower supplies to a session read from disk raises nothing', () => {
+    const disk = (kind: string, payload: Record<string, unknown>, at: string) => ({ ...event(kind, payload), seq: null, at }) as SessionEvent;
+    const history = [
+      disk('turn.started', { userMessageUuid: 'u-1', origin: null }, '2026-09-01T09:00:00.000Z'),
+      disk('turn.ended', { isError: false, terminalReason: null, result: 'success', resultText: null, isEchoReceipt: false, origin: null, errors: [] }, '2026-09-01T09:00:05.000Z'),
+      disk('turn.started', { userMessageUuid: 'u-2', origin: null }, '2026-09-01T09:00:10.000Z'),
+      disk('turn.ended', { isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: null, errors: ['overloaded'] }, '2026-09-01T09:00:15.000Z'),
+      disk('task.notification', { taskId: 'task-old', toolUseId: null, status: 'completed', summary: 'done', outputFile: null, reason: null }, '2026-09-01T09:01:00.000Z'),
+    ];
+    const exit = disk('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, '2026-09-01T09:01:00.000Z');
+    const without = setup();
+    without.batch(...history);
+    const withExit = setup();
+    withExit.batch(...history);
+    const emitted = withExit.changed.length;
+    withExit.batch(exit);
+    expect(withExit.last().map((i) => i.kind)).toEqual(['error']); // the history's own failed turn, as before: not the exit's
+    expect(withExit.last()).toEqual(without.last());
+    expect(withExit.changed.length).toBe(emitted); // the list did not change, so nothing was emitted or persisted
+    withExit.batch(...history, exit); // a second read of the same history
+    expect(withExit.last()).toEqual(without.last());
+  });
+
   it('a budget exit raises nothing and keeps what the session already had', () => {
     const { batch, last, changed } = setup();
     batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));

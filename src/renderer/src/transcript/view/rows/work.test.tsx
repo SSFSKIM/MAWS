@@ -215,7 +215,7 @@ describe('agent message and bash rows', () => {
   it('an agent message reads its sentence', async () => {
     const store = await expanded(journalToEvents(loadSyntheticJournal('agents-and-messages')));
     const { container } = renderRow(rowOf(store.rows(), 'agent_message'));
-    expect(container.textContent).toContain('Sent message to');
+    expect(container.textContent).toContain('Sent to Survey src for TODOs'); // UX wave U3 (O-12): the message line's words
     expect(container.textContent).toContain('Skip node_modules entirely.');
   });
 

@@ -114,7 +114,7 @@ describe('keymap: the table', () => {
 
   it('titles the surface rows by the surface’s name alone (l7-shell-07)', () => {
     const surfaces = ACTION_IDS.filter((id) => id.startsWith('surface.')).map((id) => ACTIONS[id].title);
-    expect(surfaces).toEqual(['Terminal', 'Review', 'Files', 'Browser', 'Source control', 'Subagents', 'Background work', 'Session info', 'Questions']);
+    expect(surfaces).toEqual(['Terminal', 'Review', 'Files', 'Browser', 'Source control', 'Subagents', 'Background tasks', 'Session info', 'Questions']);
   });
 
   // C7 start: the composer's actions (C7 execution document, Keymap additions; W10: no ⌥Enter)

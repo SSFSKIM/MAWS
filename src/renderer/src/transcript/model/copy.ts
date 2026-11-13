@@ -251,11 +251,31 @@ export function subagentSentence(names: string[], status: SubagentStatus): strin
 
 export const subagentDetail = (name: string, lastTool: string | null, elapsedMs: number) => [name, lastTool, duration(elapsedMs)].filter((part) => part !== null).join(' · ');
 
+// UX wave U3 (O-12; the U3a document, Interfaces D): every message between agents and sessions is one line, its words
+// the CLI's: `Message from <who>: <preview>`, `Report from <agent>: <first line>`, `Sent to <who>: <preview>`. The lead
+// mark is the view's and never in the text; a peer is `@<name>`, a subagent its title.
+export const MESSAGE_LINE = { from: 'Message from', report: 'Report from', to: 'Sent to', mark: '›' } as const;
+const messageLine = (lead: string, who: string, preview: string) => `${lead} ${who}: ${preview}`;
+
 export const agentMessageCopy = (direction: 'to_child' | 'from_child' | 'between', name: string | null, text: string) => {
-  if (direction === 'to_child') return `Sent message to ${name ?? 'agent'}: ${text}`;
-  if (direction === 'from_child') return `Message from ${name ?? 'agent'}: ${text}`;
-  return `Message from parent: ${text}`;
+  if (direction === 'to_child') return messageLine(MESSAGE_LINE.to, name ?? 'agent', text);
+  if (direction === 'from_child') return messageLine(MESSAGE_LINE.from, name ?? 'agent', text);
+  return messageLine(MESSAGE_LINE.from, 'parent', text);
 };
+
+// UX wave U3 (UC-2, "The rows"; the U3a document, Interfaces D): the notice line, led by a dot in its outcome's colour
+// (the view's), and the consent line on the person's own "Approve and retry".
+export const NOTICE = {
+  mark: '●',
+  schedule: (firstLine: string | null) => (firstLine === null ? 'Running scheduled task' : `Running scheduled task · ${firstLine}`),
+  answered: (words: string) => `answered: ${words}`,
+  dismissed: 'dismissed', // the bridge's dismissal of a question (decision 18)
+  wake: 'sminos bridge woke the session to read a message it had not read',
+  openOutput: 'Open output',
+} as const;
+// A notice's line as copied: its text and, where the engine gave one, its duration in the turn line's words.
+export const noticeLine = (row: { text: string; durationMs: number | null }) => (row.durationMs === null ? row.text : `${row.text} · ${duration(row.durationMs)}`);
+export const CONSENT = { approved: 'You approved' } as const; // then the subject as inline code
 
 export const PLAN_OUTCOME_BADGE = { implement: 'Implemented', clear_and_implement: 'Cleared context and implemented', keep_planning: 'Kept planning' } as const;
 export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedback: string | null) =>
@@ -484,15 +504,11 @@ export const questionRefused = (text: string) => `The engine refused this questi
 // `message` from a listing row; the line under it walks the steer that asks the session to send it.
 type PeerMode = 'reply' | 'message';
 export const peerMessageCopy = {
-  inbound: (sender: string, preview: string) => `Message from ${sender}: ${preview}`,
-  outbound: (recipient: string, preview: string) => `Sent to ${recipient}: ${preview}`,
-  report: (title: string | null) => `Report from ${title ?? 'agent'}`, // a subagent's hand-back; the report folds under it
-  sender: (name: string) => `@ ${name}`, // the row's lead, the address as its tooltip
-  recipient: (name: string) => `To @ ${name}`,
+  inbound: (sender: string, preview: string) => messageLine(MESSAGE_LINE.from, peerMessageCopy.who(sender), preview),
+  outbound: (recipient: string, preview: string) => messageLine(MESSAGE_LINE.to, peerMessageCopy.who(recipient), preview),
+  report: (title: string | null, firstLine: string) => messageLine(MESSAGE_LINE.report, title ?? 'agent', firstLine), // a subagent's hand-back; the report opens under it
+  who: (name: string) => `@${name}`, // a peer on the line, the address as its tooltip
   result: { pending: 'Sending', sent: 'Sent', failed: 'Not sent', unanswered: 'Never answered' /* E11 */ } as const, // an outbound send's state
-  showMessage: 'Show the whole message',
-  showReport: 'Show the report',
-  hide: 'Hide',
   reply: 'Reply',
   send: 'Send',
   label: (mode: PeerMode, session: string) => (mode === 'reply' ? `Reply via ${session}` : `Message via ${session}`),

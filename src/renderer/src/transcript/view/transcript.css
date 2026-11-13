@@ -535,13 +535,35 @@ button.transcript-chip[data-chip="anchor"]:hover { background: var(--bg-hover); 
 /* E3 end */
 /* E7 start: a message between sessions (its party, preview, send state, Reply), a subagent's report, the inline composer
    under them, and a ListAgents listing as compact lists. Muted lifecycle lines like the agent messages they sit among. */
+/* UX wave U3 start (O-12, O-28; UC-2 "The rows"): one line for what entered the session or what an agent sent, its lead
+   mark, its words in one line cut with an ellipsis at the column's edge; the line is the control that opens what it
+   leaves out. A notice's dot takes its outcome's colour; the person's consent is one line too. */
+.transcript-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; padding: 4px 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; }
+.transcript-line-words { display: flex; flex: 0 1 auto; align-items: baseline; gap: 8px; min-width: 0; color: inherit; text-align: left; }
+button.transcript-line-words { border-radius: var(--radius-sm); outline-color: var(--accent); }
+button.transcript-line-words:hover { color: var(--fg); }
+button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: solid; outline-offset: 2px; }
+.transcript-line-mark { flex: none; }
+.transcript-line-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transcript-notice { padding-bottom: 4px; }
+.transcript-notice[data-outcome="completed"] .transcript-line-mark { color: var(--success); }
+.transcript-notice[data-outcome="failed"] .transcript-line-mark { color: var(--danger); }
+.transcript-notice[data-outcome="stopped"] .transcript-line-mark { color: var(--warning); }
+.transcript-notice-duration { color: var(--fg-faint); }
+.transcript-notice-detail > .transcript-quiet-button { margin: 0 0 6px 24px; }
+.transcript-consent { display: flex; min-width: 0; padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; }
+.transcript-consent-subject { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-code); }
+/* UX wave U3 end */
 .transcript-peer { padding-bottom: 4px; }
-.transcript-peer > .transcript-lifecycle { flex-wrap: wrap; padding-bottom: 4px; }
+.transcript-peer > .transcript-lifecycle { flex-wrap: wrap; padding-bottom: 4px; } /* the desk's agent runs (desk-web StreamView) */
 .transcript-peer-text { min-width: 0; }
 .transcript-peer-who { color: var(--fg); font-weight: 500; }
-.transcript-peer-state { color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.transcript-peer-state { flex: none; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-peer-state[data-result="failed"] { color: var(--danger); }
 .transcript-peer-toggle { margin-top: 0; font-size: var(--text-ui-sm); }
+/* Reply at the line's end on hover or focus, and while its composer is open (U3, O-12) */
+.transcript-peer-reply { flex: none; margin-top: 0; font-size: var(--text-ui-sm); opacity: 0; }
+.transcript-peer:hover .transcript-peer-reply, .transcript-peer:focus-within .transcript-peer-reply, .transcript-peer[data-replying] .transcript-peer-reply { opacity: 1; }
 .transcript-peer-error { margin: 0 0 4px 24px; color: var(--danger); font-size: var(--text-ui-sm); overflow-wrap: anywhere; white-space: pre-wrap; }
 .transcript-peer-body { margin: 0 0 6px 24px; padding: 6px 10px; border-left: 2px solid var(--border); color: var(--fg); font-size: var(--text-ui); line-height: 1.5; overflow-wrap: anywhere; white-space: pre-wrap; }
 .transcript-peer-composer { display: flex; flex-direction: column; gap: 6px; max-width: min(560px, 100%); margin: 2px 0 10px 24px; padding: 10px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-raised); }

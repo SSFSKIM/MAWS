@@ -65,12 +65,21 @@ function regionStops(): FocusStop[] {
   }
   add(main?.querySelector<HTMLElement>('[data-region="cards"]') ?? null);
   if (panel && available(panel)) {
-    const surfaces = panel.querySelectorAll<HTMLElement>('[data-surface]');
-    if (surfaces.length > 0) {
-      for (const surface of surfaces) {
-        const content = surface.querySelector<HTMLElement>('[role="tabpanel"]');
+    // UX wave U8b (M2, decision 7): each group of the side column is two stops, its strip (its selected tab) and then
+    // its tool's content, as a main pane's strip and body are. The strip's stop is its whole row, so focus on "+" or the
+    // region's controls past the tabs is in it (fix round 1).
+    const groups = panel.querySelectorAll<HTMLElement>('section[data-side-group]');
+    if (groups.length > 0) {
+      for (const group of groups) {
+        const strip = group.querySelector<HTMLElement>('[role="tablist"]');
+        const row = strip?.closest<HTMLElement>('[data-side-strip]') ?? strip;
+        const tabs = strip && stop(strip);
+        const selected = strip?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]');
+        if (row && tabs) result.push({ root: row, target: selected && available(selected) ? selected : tabs.target });
+        const surface = group.querySelector<HTMLElement>('[data-surface]');
+        const content = surface?.querySelector<HTMLElement>('[role="tabpanel"]');
         const next = content && stop(content);
-        if (next) result.push({ root: surface, target: next.target });
+        if (surface && next) result.push({ root: surface, target: next.target });
       }
     } else {
       const next = stop(panel.querySelector<HTMLElement>('[data-panel-content]') ?? panel);

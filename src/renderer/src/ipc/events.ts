@@ -27,6 +27,7 @@ import { currentTabRetention } from '../keymap/actions-runtime';
 import { useAttention } from '../stores/attention';
 import { createFreshness, type Freshness } from '../stores/freshness';
 import { useLayout } from '../stores/layout';
+import { usePanelHost } from '../panel/host'; // UX wave U8b
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { startLiveWords } from '../lane-b/live-word'; // the UX wave, U9 (S-05)
@@ -442,7 +443,10 @@ export function connectShell(
     const intents = retention ? await retention.ready : true;
     if (!connected) return;
     if (applied && intents) loadLocal();
-    const { merged } = await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, rekeyOf, titleOf });
+    // UX wave U8b (its M1, decision 1): the first read of a profile asks which tools take several tabs. Every built-in
+    // tool registers in App's effects, which run in the same commit as this connection's, before any read answers.
+    const multiInstance = (toolId: string) => usePanelHost.getState().tools.get(toolId)?.multiInstance;
+    const { merged } = await stores.layout.getState().hydrate(client, knownTab, { settle: flushNow, rekeyOf, titleOf, multiInstance });
     // U13a (its plan's §G): a stored value whose sets were merged into the one strip; said at each such read
     if (merged && connected) toast({ level: 'info', text: ONE_STRIP_NOTICE, actions: [], dismissible: true });
   });

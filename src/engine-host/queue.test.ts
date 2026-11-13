@@ -238,13 +238,15 @@ describe('queue release never follows an engine-initiated turn', () => {
     expect(t.rows).toEqual([RECOVERED]); // P2-C: the recovery's own row only
   });
 
-  it('an engine turn that leaves the session idle releases the head exactly as a human turn does (concern 1, as ruled)', async () => {
+  // UX wave U3 (the U3a document, M4 decision 3): `turn.ended` carries the arrival's word for an engine-opened turn
+  // (`engine`, `peer`) as well as the engine's own (`task-notification`); each takes the engine turn's release
+  it.each(['engine', 'peer', 'task-notification'])('an engine turn (%s) that leaves the session idle releases the head exactly as a human turn does (concern 1, as ruled)', async (origin) => {
     const t = await harness();
     t.h.turn = true;
     await t.queue.send('typed during the engine turn');
     await t.queue.send('and another');
     t.h.turn = false;
-    await t.queue.onTurnEnded(turnEnded({ origin: 'task-notification' }));
+    await t.queue.onTurnEnded(turnEnded({ origin }));
     expect(t.writes.map((w) => w.message.content)).toEqual(['typed during the engine turn']);
     expect(t.writes[0]).not.toHaveProperty('priority');
     expect(queueRows(t.rows)).toEqual(['release:turn_ended']);

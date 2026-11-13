@@ -89,11 +89,9 @@ import { ReadError, type SessionPlane, type SessionTarget, type Subscription, ty
 import { taskGraphOf, withEvents, withMetas, withStatuses } from './agents/task-feed';
 import { OutputRequests } from './jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from './stream/layer';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame } from './conversation/delivery-frame';
+import { deliveredLines, deliveryFrame } from './conversation/delivery-frame';
 import { withAppendedTurn } from './source/appended-turn';
-import { withAnswerLines } from './source/ask-answer';
 import { isMirrorLine, steerAsDrawn } from './source/bridge-rows';
-import { withWakeLine } from './source/bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './source/interrupt';
 import { drawingOf, drawingsDiffer, isResponse, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './source/off-chain';
 
@@ -231,30 +229,22 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
 }
 
 /**
- * One row's X1 events under a backfill context; a row that is not a transcript record yields none. A turn that a
- * message from the session's own subagent opens (its hand-back, an `<agent-message>` of the peer origin, which MAWS's
- * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
- * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
- * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
- * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
- * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
- * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), one appended while no turn ran taken by the turn
- * that starts next (`appended-turn.ts`), the bridge's mirror of either not at all, and the bridge's wake as its own line
- * in a turn the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the
- * wake's line is no wake, and its drawn copy has lost the frame that says so. The ask mod's answer to an async question
- * is drawn as a line naming the answers where it reached the model, its idle prompt's turn one the session continued
- * (`ask-answer.ts`).
+ * One row's X1 events under a backfill context; a row that is not a transcript record yields none. What entered the
+ * session from elsewhere (a peer's delivery, the owner's own send or steer, a subagent's hand-back, a task's end, a
+ * scheduled fire, the bridge's wake, an answer to an async question) is read by the arrivals reader that MAWS's backfill
+ * asks (`@shared/engine/arrival`, UX wave U3, UC-2), so the row passes through as it is held and draws as the same row
+ * does from a transcript file on this Mac. What stays here is placement: an interrupt marker ends the turn it
+ * interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`); a steer an older bridge
+ * appended with no steer line, which no class claims, is drawn as the owner's prompt queued into the running turn
+ * (`bridge-rows.ts`), one appended while no turn ran taken by the turn that starts next (`appended-turn.ts`); and the
+ * bridge's mirror of a row it appended is not drawn.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   if (isMirrorLine(row)) return [];
-  const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
+  const mapped = steerAsDrawn(normalizeInterruptRow(row));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  let events = withAnswerLines(row, withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx), ctx);
-  if (events.some((event) => event.kind === 'subagent.message')) {
-    events = events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
-  }
-  return withAppendedTurn(row, events, ctx);
+  return withAppendedTurn(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
 }
 
 /** A held row's events as the drawing has it (`off-chain.ts`): none for a row it leaves out, an undone input's for one it draws so. */
@@ -314,8 +304,15 @@ class RowsSource implements TranscriptSource {
     await this.owner.whenSnapshotted();
     const ctx = this.owner.newContext();
     const events = this.owner.heldRows().flatMap((row) => this.owner.mapRow(row, ctx));
+    const exit = this.owner.suppliedExit();
+    if (exit !== null) events.push(exit); // X-168: after the rows it ends
     this.ctx = ctx;
     return events;
+  }
+
+  /** X-168: the exit supplied once the snapshot is in; before it, the snapshot holds it. */
+  exited(exit: SessionEvent): void {
+    if (this.ctx !== null) this.listener?.([exit]);
   }
 
   /**
@@ -357,6 +354,15 @@ export class PlaneTranscript {
   private subagents: SubagentLookup = subagentLookupOf([]);
   /** The tree's own backfill context, continued by each row after the held ones; null until a snapshot. */
   private treeContext: BackfillContext | null = null;
+  /**
+   * X-168: the exit the session's gone process left, which its rows never hold, while its presence says no process
+   * (`sessionPresence`); laid after the rows of every source and over the tree after every status overlay. `exits`
+   * counts those supplied, for each one's own id.
+   */
+  private exit: SessionEvent | null = null;
+  private exits = 0;
+  /** A rebuild asked for by `rebuildSoon` and not yet made. */
+  private rebuildAsked = false;
   /**
    * Agent tool calls a held row's mapping looked up before their subagent's metadata was in: metadata naming one
    * rebuilds the transcript, so the rows mapped without it are attributed as a fresh load attributes them.
@@ -442,6 +448,38 @@ export class PlaneTranscript {
     this.offStore?.();
     this.offStore = null;
     this.outputs.clear();
+  }
+
+  /**
+   * The session's presence as its machine publishes it, a snapshot's and each `presence` message's (`remote-source.ts`
+   * hands them on; a machine gone offline publishes none, so its sessions keep what they drew). No live record: the
+   * session's process is gone, and its exit is supplied to the rows and the tree (X-168; the architect's ruling of
+   * 2026-11-13), so the agents it left running end. A live record clears it. The main thread's only, once served.
+   */
+  sessionPresence(presence: { record?: unknown } | undefined): void {
+    if (this.target.agentId !== null || !this.held || presence?.record === undefined) return;
+    const gone = presence.record === null;
+    if (gone === (this.exit !== null)) return;
+    if (gone) {
+      this.exits += 1;
+      const id = `session:${this.target.session}:exited${this.exits === 1 ? '' : `@${this.exits}`}`;
+      const at = this.rows.findLast((row) => typeof row.timestamp === 'string')?.timestamp;
+      this.exit = {
+        id: id as EventId, sessionId: this.target.session as SessionId, at: typeof at === 'string' ? at : new Date().toISOString(), seq: null, agentId: null, parentToolUseId: null,
+        kind: 'process.exited', code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null,
+      };
+      this.source.exited(this.exit);
+      this.setTree(this.heldTasks);
+    } else {
+      this.exit = null;
+      this.rebuild(); // the rows and the tree as the held rows alone give them
+    }
+    this.publish();
+  }
+
+  /** X-168: the exit supplied now, or null. */
+  suppliedExit(): SessionEvent | null {
+    return this.exit;
   }
 
   /** After an `end`: subscribe again; the fresh snapshot is merged into what is drawn, which stays drawn meanwhile. */
@@ -676,7 +714,11 @@ export class PlaneTranscript {
       }
     }
     if (!fresh) return;
-    this.source.live(row);
+    // X-168: a row after the supplied exit (presence travels outside the ordered rows, so the last ones can follow it): the
+    // rows are rebuilt with the kept exit after them, staged, so what it brings ends too and nothing is drawn twice; one
+    // rebuild for a delivery's rows, while the tree takes each row as it comes, the exit laid over it
+    if (this.exit !== null) this.rebuildSoon();
+    else this.source.live(row);
     if (this.treeContext !== null) this.setTree(withEvents(this.heldTasks, this.drawnEventsOf(row, this.treeContext)));
     this.publish();
   }
@@ -802,8 +844,20 @@ export class PlaneTranscript {
     return [...this.rows.slice(0, at), ...fresh, ...this.rows.slice(at).filter((row) => !inSnapshot.has(row.uuid))];
   }
 
+  /** One rebuild after the rows of the delivery in hand (X-168's late rows); any rebuild before it serves. */
+  private rebuildSoon(): void {
+    if (this.rebuildAsked) return;
+    this.rebuildAsked = true;
+    queueMicrotask(() => {
+      if (!this.rebuildAsked) return;
+      this.rebuild();
+      this.publish();
+    });
+  }
+
   /** The held rows under a new source: MAWS's store rebuilds the key from all of them, staged; the tree with them. */
   private rebuild(): void {
+    this.rebuildAsked = false;
     this.source = new RowsSource(this);
     this.state.setState({ source: this.source, held: this.rows });
     this.retree();
@@ -816,10 +870,11 @@ export class PlaneTranscript {
     this.setTree(taskGraphOf(this.metas, this.rows.flatMap((row) => this.drawnEventsOf(row, ctx))));
   }
 
-  /** The tree as the held rows and metas build it, published with each agent's DX4 status laid over it. */
+  /** The tree as the held rows and metas build it, published with each agent's DX4 status and then the supplied exit laid over it. */
   private setTree(held: TaskGraph): void {
     this.heldTasks = held;
-    this.state.setState({ tasks: withStatuses(held, this.metas) });
+    const reported = withStatuses(held, this.metas);
+    this.state.setState({ tasks: this.exit === null ? reported : withEvents(reported, [this.exit]) }); // X-168: the exit outranks a status
   }
 
   /** The transcript's latest response came from `model`: the session info names it, and the pickers offer it. */

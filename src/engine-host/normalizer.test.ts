@@ -201,7 +201,9 @@ describe('normaliser: ids, turns and the human prompt bubble', () => {
       inRow({ type: 'user', uuid: 'm-2', session_id: 'sess-1', message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } }),
     ]);
     expect(kinds(events)).toEqual(['user.message', 'user.message', 'user.message']);
-    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: 'Set model to `haiku`', isReplay: true, bash: null });
+    // UX wave U3 (UC-2, class `command`; the U3a document, Interfaces C and Acceptance 6): the output keeps the engine's
+    // own tag, which says stdout or stderr
+    expect(events[0]).toMatchObject({ messageUuid: 'l-1', origin: 'local-command', content: '<local-command-stdout>Set model to `haiku`</local-command-stdout>', isReplay: true, bash: null });
     expect(events[1]).toMatchObject({ messageUuid: 'm-1', origin: 'interrupt-marker', content: [{ type: 'text', text: '[Request interrupted by user]' }], bash: null });
     expect(events[2]).toMatchObject({ messageUuid: 'm-2', origin: 'interrupt-marker' });
     expect(n.state.currentTurn).toBeNull();
@@ -653,7 +655,7 @@ describe('normaliser: meta rows, system subtypes and the unknown', () => {
     expect(events[16]).toMatchObject({ taskId: 'wf-1', workflowName: 'probe', progress: [{ type: 'workflow_phase', index: 1 }] });
     expect(events[17]).toMatchObject({ patch: { status: 'completed', endTime: 5 } });
     expect(events[18]).toMatchObject({ status: 'completed', summary: 'ONE', outputFile: '/o', reason: null });
-    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2' });
+    expect(events[19]).toMatchObject({ status: 'stopped', outputFile: null, toolUseId: 'toolu_2', arrivals: true }); // UX wave U3: its end is an arrival's
     expect(events[20]).toMatchObject({ tasks: [{ taskId: 'ag-1', taskType: 'local_agent', description: 'Read', ambient: false }] });
     expect(events[21]).toMatchObject({ frameType: 'system', subtype: 'turn_starting' });
     expect(events[23]).toMatchObject({ toolUseId: 'toolu_1', elapsedSeconds: 2.5, taskId: null, heartbeat: false });
@@ -1101,5 +1103,39 @@ describe('a gap reseeded from the transcript', () => {
     feed(other, [metaRow({ event: 'transcript_reseed', rows })], 1);
     const otherStart = stream({ type: 'message_start', message: { id: 'msg_10', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } });
     expect(only(feed(other, [otherStart, block, delta], 2), 'assistant.block.delta')).toHaveLength(1);
+  });
+});
+
+// The UX wave's U8b, M5 decision 1: who started a task. The engine names a subagent's shell's and monitor's starter on
+// `task_started` (`owned_by_subagent`, `parent_task_id`) and on each `background_tasks_changed` entry (`parent_task_id`),
+// and neither key for the main loop's (pass3/uxwave/uxwave-subagent-tasks-nodelay: the agent at seq 41, its shell at 75
+// and 76, the main loop's shell at 176 and 177; findings-uxwave-U8-subagent-tasks.txt (b)).
+describe('normaliser: a task’s starter', () => {
+  const AGENT = 'ab2a8ea9925ee4d69';
+  const events = () => {
+    const n = make();
+    return loadJournal('pass3', 'uxwave/uxwave-subagent-tasks-nodelay').flatMap((row) => n.push(row));
+  };
+  const at = (list: SessionEvent[], seq: number) => list.filter((e) => e.seq === seq);
+
+  it('carries a subagent’s shell’s starter on task.started, and none for the main loop’s shell or an agent', () => {
+    const list = events();
+    for (const e of list) SessionEventSchema.parse(e);
+    expect(at(list, 76)).toMatchObject([{ kind: 'task.started', taskId: 'brqab7ydc', parentTaskId: AGENT }]);
+    expect(at(list, 177)).toMatchObject([{ kind: 'task.started', taskId: 'bfg1i3ud3' }]);
+    expect(at(list, 177)[0]).not.toHaveProperty('parentTaskId');
+    expect(at(list, 41)[0]).toMatchObject({ kind: 'subagent.started', taskId: AGENT });
+    expect(at(list, 41)[0]).not.toHaveProperty('parentTaskId');
+  });
+
+  it('carries each listed task’s starter on tasks.snapshot, and none where the entry names none', () => {
+    const list = events();
+    expect(at(list, 75)).toEqual([expect.objectContaining({
+      kind: 'tasks.snapshot',
+      tasks: [
+        { taskId: AGENT, taskType: 'local_agent', description: 'Run background sleep command', ambient: false },
+        { taskId: 'brqab7ydc', taskType: 'local_bash', description: 'Sleep 30 seconds then print marker', ambient: false, parentTaskId: AGENT },
+      ],
+    })]);
   });
 });
