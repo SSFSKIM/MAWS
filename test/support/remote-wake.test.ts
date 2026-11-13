@@ -7,7 +7,7 @@ import type { PipeRequest } from './loopback-pipe';
 import type { LogLine } from './main-log';
 import { CHECKPOINT_ROWS as STREAM_CHECKPOINT_ROWS } from '../../src/engine-host/session-stream';
 import { PAGE_EVENTS } from '../../src/shared/host/stream-catchup';
-import { boundMissMessage, CHANNEL_CLOSED_WITHIN_MS, historyReadsBeside, CHECKPOINT_ROWS, INJECT_AFTER_STALL_MS, PAST_RESUME_MARGIN_MS, PING_MS, RESUME_MS, RESUME_PAGE_EVENTS, lastPageIn, linkPending, markersNotOnce, placeOfEvent, readWake, ruleBContext, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, wakeMisses, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadRead, type WakeInput, type WakeRecord } from './remote-wake';
+import { besideOutcome, boundMissMessage, CHANNEL_CLOSED_WITHIN_MS, historySeen, historyReadsBeside, CHECKPOINT_ROWS, INJECT_AFTER_STALL_MS, PAST_RESUME_MARGIN_MS, PING_MS, RESUME_MS, RESUME_PAGE_EVENTS, lastPageIn, linkPending, markersNotOnce, placeOfEvent, readWake, ruleBContext, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, wakeMisses, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadRead, type WakeInput, type WakeRecord } from './remote-wake';
 
 const REF = 'Bref0123456789abcdef';
 const APPS = ['app-1', 'app-2'];
@@ -300,10 +300,36 @@ describe('the reads beside a resume', () => {
   const whole = (s: number, app: string, ms: number) => line(s, `warn: [engine-host] session.events ${app} after start: from the journal, 420 rows read in ${ms} ms`);
   const asked = (s: number, app: string) => line(s, `[lane-b] lane B: timing history B/${app}: asked`);
   const read = (s: number, app: string, ms: number) => line(s, `[lane-b] lane B: timing history B/${app}: budgeted launch, 1 pages, 5469 bytes, ${ms} ms`);
-  const beside = (a: readonly LogLine[], b: readonly LogLine[] = []) => {
+  // each pane's first read, at the launch: the start and end lines the check stands on
+  const opened = [asked(3, 'app-1'), read(3.1, 'app-1', 100), asked(3, 'app-2'), read(3.2, 'app-2', 200)];
+  const inputOf = (a: readonly LogLine[], b: readonly LogLine[] = [], first: readonly LogLine[] = opened) => {
     const input = passing('direct');
-    return historyReadsBeside({ carrier: 'direct', ref: REF, live: 'app-1', main: [...input.main, ...a], endpoint: input.endpoint, host: [...input.host, ...b], restoredAt: input.restoredAt });
+    return { carrier: 'direct' as const, ref: REF, live: 'app-1', sessions: APPS, main: [...input.main, ...first, ...a], endpoint: input.endpoint, host: [...input.host, ...b], launchedAt: input.launchedAt, stalledAt: input.stalledAt, restoredAt: input.restoredAt };
   };
+  const beside = (a: readonly LogLine[], b: readonly LogLine[] = []) => historyReadsBeside(inputOf(a, b));
+
+  // M5's re-review, finding 1: with no start line to read the check would pass whatever was read, so it stands only on
+  // each pane's first read shown before the stall, its start paired with its end
+  it('fail without each session’s first read before the stall, its start and its end, whatever came after', () => {
+    expect(historyReadsBeside(inputOf([], [], [])).failures).toEqual([
+      "direct: main.log has no history read of session app-1 between the launch and the stall (an asked line and its end): the check would see no read",
+      "direct: main.log has no history read of session app-2 between the launch and the stall (an asked line and its end): the check would see no read",
+    ]);
+    expect(historyReadsBeside(inputOf([], [], [asked(3, 'app-1'), read(3.1, 'app-1', 100), asked(3, 'app-2')])).failures, 'a start with no end').toEqual(["direct: main.log has no history read of session app-2 between the launch and the stall (an asked line and its end): the check would see no read"]);
+    expect(historyReadsBeside(inputOf([], [], [read(3.1, 'app-1', 100), read(3.2, 'app-2', 200)])).failures, 'ends with no start (an older build)').toHaveLength(2);
+    expect(historySeen(opened, APPS, at(0), at(10))).toEqual([]);
+    expect(historySeen([], APPS, at(0), at(10))).toEqual(['app-1', 'app-2']);
+  });
+
+  // M5's re-review, finding 2: the case's bounded wait returns the last answered read when it gives up; that read may be
+  // an early empty one while every later read failed, and the observation never completed
+  it('stand only on a reading that completed: an early empty read, then failures until the wait gave up, fails', () => {
+    expect(besideOutcome({ done: true, last: { failures: [], inFlight: [] }, error: null }, 30_000)).toEqual([]);
+    expect(besideOutcome({ done: true, last: { failures: ['direct: a failure'], inFlight: [] }, error: null }, 30_000)).toEqual(['direct: a failure']);
+    expect(besideOutcome({ done: false, last: { failures: [], inFlight: [] }, error: 'ENOENT: no such file, main.log' }, 30_000)).toEqual(["the reading did not complete within 30000 ms: ENOENT: no such file, main.log"]);
+    expect(besideOutcome({ done: false, last: { failures: [], inFlight: ['app-2 (asked at +300 ms)'] }, error: null }, 30_000)).toEqual(['the reading did not complete within 30000 ms: still in flight: app-2 (asked at +300 ms)']);
+    expect(besideOutcome({ done: false, last: null, error: null }, 30_000)).toEqual(['the reading did not complete within 30000 ms: no answer']);
+  });
 
   it('are none in a run whose resume reads only from its cursor, and a read asked after the live session’s subbed passes', () => {
     expect(beside([])).toEqual({ failures: [], inFlight: [] });
@@ -332,7 +358,7 @@ describe('the reads beside a resume', () => {
   it('name a live session not answered after the restore, on either side', () => {
     const input = passing('direct');
     const after = (l: LogLine) => l.at >= input.restoredAt && l.text.includes('session B:app-1: subbed');
-    const reading = (main: readonly LogLine[], endpoint: readonly LogLine[]) => historyReadsBeside({ carrier: 'direct', ref: REF, live: 'app-1', main, endpoint, host: input.host, restoredAt: input.restoredAt }).failures;
+    const reading = (main: readonly LogLine[], endpoint: readonly LogLine[]) => historyReadsBeside({ ...inputOf([]), main: [...main, ...opened], endpoint }).failures;
     expect(reading(input.main.filter((l) => !after(l)), input.endpoint)).toEqual(["direct: main.log has no subscription … session B:app-1: subbed line after the restore"]);
     expect(reading(input.main, input.endpoint.filter((l) => !after(l)))).toEqual(["direct: B's mawsd.log has no sub … session B:app-1: subbed line after the restore"]);
   });
