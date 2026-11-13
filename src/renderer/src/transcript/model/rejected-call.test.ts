@@ -175,7 +175,7 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
     const cut = [...transcript.slice(0, 3), prompt('f-9', 'f-3', 20, 'Leave it for now.')];
     const ctx = createBackfillContext({ sessionId: 'sess-denials' as SessionId, agent: null });
     const drawing = drawn(cut.flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx)));
-    expect(reading(callOf(drawing, REJECTED))).toMatchObject({ status: 'stopped', disposition: 'stopped', label: 'Stopped: `git push --force`' });
+    expect(reading(callOf(drawing, REJECTED))).toMatchObject({ status: 'stopped', disposition: 'stopped', label: 'Stopped: `git push…`' }); // M3: the short command
     expect(linesOf(drawing)[0]).toMatchObject({ state: 'stopped', denied: 0 });
   });
 });
