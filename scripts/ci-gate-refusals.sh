@@ -1,7 +1,8 @@
 # shellcheck shell=bash
 # scripts/ci-gate.sh's summary of a run the mini refused jobs of (docs/doperpowers/plans/2026-10-14-gate-offload.md
 # Decision Log 58(c), 59(1), 66), sourced by it and by scripts/ci-gate-refusals.test.mjs. It reads ci-gate.sh's sha,
-# runner, class1a, lane, live, gates, default_beside and label, and relaunch_peer (the run's peer, a sha or `none`).
+# runner, class1a, lane, live, gates, default_beside and label, and relaunch_peer (the run's peer, a sha or `none`) with
+# relaunch_peer_flag (--peer-exact for a peer taken exactly; unset means --peer).
 # shellcheck disable=SC2154 # those variables are ci-gate.sh's
 
 # When ci-kit refused jobs on the mini (its `ci-kit: … rerun` line in a job's log: the job-started check's, before any of
@@ -27,8 +28,8 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   # A live run's groups are refused without --live (Decision Log 75), so its relaunch stays live.
   [[ -n $live ]] && relaunch+=" --live"
   # The peer the run checked against, resolved (its full sha) or `none`: the relaunch checks the same pair, never the
-  # merge base of the moment.
-  [[ -n ${relaunch_peer:-} ]] && relaunch+=" --peer $relaunch_peer"
+  # merge base of the moment. A peer taken exactly is named with --peer-exact: --peer would map it to another commit.
+  [[ -n ${relaunch_peer:-} ]] && relaunch+=" ${relaunch_peer_flag:---peer} $relaunch_peer"
   beside=$({
     printf '%s\n' "$1" | awk -F'\t' '{ sub(/ \((EC2|mini) overflow\)$/, "", $2) } $1 != "skipped" && $2 ~ /^e2e:[A-Za-z0-9._:-]+$/ { print substr($2, 5) }'
     printf '%s\n' "$default_beside" | tr ', ' '\n'

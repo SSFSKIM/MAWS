@@ -3,7 +3,8 @@
 #
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
 #                      [--class1a linux|macos|pool] [--lane vm|vm-trial|hosted|no-hosted] [--default-beside <groups>] [--evidence]
-#                      [--hosted-route direct|mirror] [--live] [--affected] [--peer <ref>|none] [--label <name>] [--keep]
+#                      [--hosted-route direct|mirror] [--live] [--affected] [--peer <ref>|none | --peer-exact <ref>]
+#                      [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -84,6 +85,14 @@
 #                      requires two wires with different minors within one major; equal minors, different majors and
 #                      --peer none are refused before pushing. Choose --peer at a master commit a minor apart, or leave
 #                      the group out of --gates. This does not change the default set selected by --gates all
+#   --peer-exact       the peer as one commit and no other: it is not mapped to a first-parent master state. For a
+#                      build that is a master ancestor off master's first-parent chain (it came in as a merge's second
+#                      parent, as a build the machines run can), which --peer would replace with the merge that contains
+#                      it, a different tree. The commit must hold a manifest and be an ancestor of origin/master (exit 2
+#                      otherwise, naming --peer-exact); it is refused beside --peer (exit 2); the transcript says the
+#                      peer was taken exactly, with its full sha and wire. --peer's other rules hold: the trailers, the
+#                      two minors a named PEER_E2E group needs, a shallow checkout refused. A refused run's relaunch
+#                      line and an alert refusal's override carry --peer-exact with that sha
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
 #   --label            the ref's name before the short sha, sanitized as before. Without it: auto-<branch-or-gate>-
@@ -95,7 +104,7 @@
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
-# The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer).
+# The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer, --peer-exact).
 # Direct e2e runs without --lane hosted or no-hosted add `Mac-Backlog:` when the caller can read the account queues and
 # self-hosted runners and mini lane publication (cached for 60 s).
 # The plan may overflow eligible groups to EC2 or the mini; an absent or older-than-five-minute sample preserves normal placement.
@@ -167,6 +176,7 @@ evidence=''
 live=''
 affected=''
 peer=''
+peer_exact=''
 label=''
 keep=false
 while (($# > 0)); do
@@ -181,6 +191,7 @@ while (($# > 0)); do
     --live) live=yes; shift ;;
     --affected) affected=yes; shift ;;
     --peer) peer=${2:?--peer needs a ref or none}; shift 2 ;;
+    --peer-exact) peer_exact=${2:?--peer-exact needs a commit}; shift 2 ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -238,7 +249,7 @@ ref=ci/$label-$short
 # The peer of the PEER_E2E groups and both trees' wires, as trailers (ci-gate-peer.mjs), read before the alert check, whose
 # plan they can add a Mac job to; what it decided is said once the transcript starts.
 peer_notes=$(mktemp)
-peer_trailers=$(node "$(dirname "$0")/ci-gate-peer.mjs" --git-dir "$git_dir" --sha "$sha" --peer "$peer" --gates "$gates" 2>"$peer_notes")
+peer_trailers=$(node "$(dirname "$0")/ci-gate-peer.mjs" --git-dir "$git_dir" --sha "$sha" --peer "$peer" --peer-exact "$peer_exact" --gates "$gates" 2>"$peer_notes")
 peer_status=$?
 peer_said=$(<"$peer_notes")
 rm -f "$peer_notes"
@@ -249,6 +260,14 @@ fi
 # A relaunch (ci-gate-refusals.sh) checks the same pair: the peer as resolved, or none.
 relaunch_peer=$(printf '%s\n' "$peer_trailers" | sed -n 's/^Peer: //p')
 relaunch_peer=${relaunch_peer:-none}
+# An exact peer stays exact in a relaunch, named by its sha: --peer with that sha would map it to another commit, and
+# --peer none beside the call's own --peer-exact would be refused. So also when the run has no peer trailer (the exact
+# peer is the tested commit itself): the relaunch then resolves to no peer again, as this call did.
+relaunch_peer_flag=--peer
+if [[ -n $peer_exact ]]; then
+  relaunch_peer_flag=--peer-exact
+  relaunch_peer=$(git -C "$git_dir" rev-parse --verify --quiet "$peer_exact^{commit}") || exit 2
+fi
 
 # --affected: the change's paths, from the merge base with origin/master to the tested commit, each as a line of
 # `git diff --name-status -M` (status, tab, path, and a rename's new path after another tab). A failed fetch goes ahead:
@@ -340,7 +359,7 @@ else
     0) ;;
     2)
       printf '%s\n' "$alert_check" >&2
-      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]} --peer $relaunch_peer" >&2
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]} $relaunch_peer_flag $relaunch_peer" >&2
       exit 2 ;;
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac
