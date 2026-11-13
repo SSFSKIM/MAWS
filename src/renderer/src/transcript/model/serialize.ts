@@ -8,11 +8,19 @@ import { previewHidesBody } from './rows'; // E7
 import { artifactHeading } from './copy'; // E2
 import { BROWSER_ACTION, browserActionError, browserActionHeading, took } from './copy'; // E4c
 import { browserActivityLine } from './copy'; // E13
+import { CONSENT, noticeLine } from './copy'; // UX wave U3
 import type { Cell, Row } from './rows';
 import { copiedUserText } from './user-text';
 import { SIDE_COPY, sideRowStatus } from '../../side/copy'; // E3
 
 const indent = (text: string, by: string) => text.split('\n').map((line) => `${by}${line}`).join('\n');
+// Inline code that holds any text: a fence one backtick longer than the text's longest run, padded where the text meets it
+// with a backtick.
+function inlineCode(text: string): string {
+  const fence = '`'.repeat(Math.max(0, ...[...text.matchAll(/`+/g)].map((run) => run[0].length)) + 1);
+  const pad = text.startsWith('`') || text.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${text}${pad}${fence}`;
+}
 
 function cellLines(cell: Cell, by: string): string[] {
   const lines = [`${by}- ${cell.label}`];
@@ -28,7 +36,7 @@ function cellLines(cell: Cell, by: string): string[] {
 function partOf(row: Row): string | null {
   switch (row.kind) {
     case 'time': return `### ${row.label}`;
-    case 'user': return `**You**\n\n${copiedUserText(row)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
+    case 'user': return row.consent ? `*${CONSENT.approved} ${inlineCode(row.consent.subject)}*` /* UX wave U3: the person's act, one line */ : `**You**\n\n${copiedUserText(row)}${row.dropped ? `\n\n*${NOT_SENT}*` : ''}`;
     case 'assistant_text': return row.markdown;
     case 'divider': return `*${dividerCopy({ ...row, durationMs: row.summary.durationMs ?? Date.parse(row.endedAt ?? row.startedAt) - Date.parse(row.startedAt) })}*`;
     case 'group': return [`- ${row.summary}`, ...row.cells.flatMap((cell) => cellLines(cell, '  '))].join('\n');
@@ -44,6 +52,7 @@ function partOf(row: Row): string | null {
     case 'boundary': return `---\n*${row.text}*`;
     case 'gap': return `---\n*${row.text}*`; // P5 O7 M2
     case 'bash': return `\`\`\`\n${[bashHeader(row.command), row.stdout, row.stderr, bashFooter(row.exitCode)].filter((part) => part.length > 0).join('\n')}\n\`\`\``;
+    case 'notice': return row.detail === null ? `*${noticeLine(row)}*` : `*${noticeLine(row)}*\n${indent(row.detail, '> ')}`; // UX wave U3: its line, then what opens under it
     case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
     // E1 start
     case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');

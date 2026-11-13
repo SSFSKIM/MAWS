@@ -30,6 +30,9 @@ import { previewHidesBody } from './rows'; // E7
 import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
+import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { NOTICE } from './copy'; // UX wave U3
+import { answeredWords } from './answered'; // UX wave U3
 import { INTERRUPT_CUT, parseInterruptCut } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { parseListing } from './agent-listing'; // E7
 import { peerMessageCopy } from './copy'; // E7
@@ -128,12 +131,14 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
 // E2: what the agent asked, delivered and registered stays in view, as an answered question does), and a message tool's
 // message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
-// presenter draws and so keeps with the lane off). The divider folds everything else, so a turn of a local command
+// presenter draws and so keeps with the lane off), and a task's end that reports an outcome and a scheduled fire (UX wave
+// U3: one short fact each, which a failed task would otherwise show nowhere; every message between agents and sessions
+// folds, O-12). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
-  || isPersistentMessage(row) // E7
+  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome and a scheduled fire stay
   || row.kind === 'owner_record' // P2-C (2026-10-09): placed by the report projection, never a work row
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
@@ -288,6 +293,9 @@ type Item =
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
   | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
 
+// UX wave U3: the questions of an ask call, by its tool-use id, for the words of an answer's line
+type CallQuestions = (call: string) => ReadonlyArray<{ question: string; header?: string }> | null;
+
 interface SubagentGroup { id: RowId; at: string; apiMessageId: string | null; refs: SubagentRef[]; statuses: Map<TaskId, SubagentStatus>; lastTool: Map<TaskId, string | null>; phase: string | null; ended: boolean /* P5 O9: made before the session's process exited (TurnState.agentsEndedAt) */ }
 interface Pending { kind: 'question' | 'plan'; use: Event<'tool.use'>; answers: Record<string, string> | null; outcome: RowOf<'plan'>['outcome']; feedback: string | null; requestId: RequestId | null; error: string | null /* E1: the engine's refusal */ }
 
@@ -416,7 +424,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
   // (`priority: 'next'`) is the turn's only other prompt message: a steer bubble, which is never dropped.
   let openerDropped = false;
+  const companions = new Set<MessageUuid>(); // UX wave U3: the messages a peer.message of this turn draws (their user.message draws no bubble)
   for (const event of turn.events) {
+    if (event.kind === 'peer.message' && event.messageUuid !== null) companions.add(event.messageUuid);
     if (event.kind === 'boundary.retraction') for (const uuid of event.retractedMessageUuids) retracted.add(uuid);
     if (event.kind === 'assistant.block.complete') for (const uuid of event.supersedes) superseded.add(uuid);
     if (event.kind === 'command.lifecycle') openerDropped = true;
@@ -438,8 +448,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
       ...anchorOf(text), // E3
+      ...consentOf(event), // UX wave U3 (decision 10)
     };
   };
+  // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, so the
+  // resolution pass can tell which stand at the turn's head
+  const arrivals = new Map<Item, Arrival['class']>();
+  const arrive = (item: Item, of: Arrival['class']) => {
+    arrivals.set(item, of);
+    items.push(item);
+  };
+  const questionsOf: CallQuestions = (call) => callQuestions(turn, state, call as ToolUseId);
 
   const blockRow = (block: LiveBlock, at: string): Item | null => {
     const live = !block.completed;
@@ -480,7 +499,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     position = at;
     switch (event.kind) {
       case 'user.message': {
-        if (event.origin === INTERRUPT_CUT) { // P5 O9: the reply an interrupt cut off, as the sminos bridge records it
+        if (event.isSynthetic && event.arrival !== undefined) { // UX wave U3: what the engine told the agent, one notice per arrival
+          event.arrival.forEach((entry, n) => {
+            const known = carriedOf([entry])[0];
+            if (known === undefined || known.class === 'consent') return; // a class this build does not know; consent is the person's prompt
+            arrive({ kind: 'later', row: () => noticeOf(event, known, n, turn.id, questionsOf) }, known.class);
+          });
+        } else if (event.origin === INTERRUPT_CUT) { // P5 O9: the reply an interrupt cut off, as the sminos bridge records it
           const row = cutRowOf(event, turn.id);
           if (row) items.push({ kind: 'row', row });
         } else if (event.bash?.part === 'input') {
@@ -496,9 +521,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (originOf(event.origin) === 'engine') {
           // The engine's own trigger (C4's disk `<task-notification>` record, origin 'task-notification'): an engine turn
           // has no user row; its divider reads Continued and the subagent row says what finished.
-        } else if (originOf(event.origin) === 'peer' && keepsPeerOwners(event, peerOwners)) {
+        } else if (originOf(event.origin) === 'peer' && hasCompanion(event, companions, peerOwners)) {
           // E7: a message from another session or an in-process agent: its companion event (peer.message,
-          // subagent.message) draws it; a peer text the parser refuses keeps its bubble below, so nothing is lost
+          // subagent.message) draws it; a peer text no reader claims keeps its bubble below, so nothing is lost
         } else if (answersHeldAsk(event)) {
           // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn.id && user === null && !dropped(event.messageUuid)) {
@@ -670,11 +695,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       case 'subagent.message': {
         if (event.direction === 'from_child') { // E7: the agent by its title, a hand-back as its report
-          items.push({ kind: 'later', row: () => agentMessageRow(event, turn.id, agentOf) });
+          arrive({ kind: 'later', row: () => agentMessageRow(event, turn.id, agentOf) }, 'subagent');
           break;
         }
         const name = event.direction === 'to_child' ? event.toAgentId : event.fromAgentId;
-        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, event.text) } });
+        const preview = previewOf(event.text); // UX wave U3 (O-12): one line, the whole message opened under it
+        items.push({ kind: 'row', row: { id: rowId.agentMessage(event.id), turnId: turn.id, at: event.at, kind: 'agent_message', direction: event.direction, from: null, to: null, text: agentMessageCopy(event.direction, name, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) } });
         break;
       }
       case 'permission.requested':
@@ -771,7 +797,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       // E3 end
       // E7 start: a message from another session, at its arrival position (its user.message draws no bubble)
       case 'peer.message':
-        items.push({ kind: 'row', row: inboundRow(event, turn.id, event.messageUuid === null ? null : (peerOwners.get(event.messageUuid) ?? null)) });
+        arrive({ kind: 'row', row: inboundRow(event, turn.id, event.messageUuid === null ? null : (peerOwners.get(event.messageUuid) ?? null)) }, 'peer');
         break;
       // E7 end
       // E2 start: the host's account of an artifact call, routed here by its tool use (reduce.ts)
@@ -798,7 +824,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // rows, subagent rows. The retry row updates in place: the last api.retry event's text at the first one's position.
   const retryRow = retry;
   const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
+  // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class. A hook that ran
+  // is not the model's work; anything else ends the head.
+  const heads = new Map<(typeof resolved)[number], Arrival['class']>();
+  let atHead = true;
   for (const item of items) {
+    const from = resolved.length;
+    const arrivalClass = arrivals.get(item);
+    if (arrivalClass === undefined && item.kind !== 'hook') atHead = false;
     switch (item.kind) {
       case 'tool': {
         const rec = tools.get(item.toolUseId)!;
@@ -858,20 +891,31 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       default:
         resolved.push(item);
     }
+    if (arrivalClass !== undefined && atHead) for (const entry of resolved.slice(from)) heads.set(entry, arrivalClass);
   }
+  // A task's end with an outcome and a scheduled fire that came before the turn's work stand above its divider, where a
+  // prompt stands (above the prompt, in a turn the person's prompt opened); every other arrival there is the first row
+  // under it. A turn the person did not start names on its divider what opened it (`opener`).
+  const standsAbove = (entry: (typeof resolved)[number]): entry is { kind: 'row'; row: RowOf<'notice'> } =>
+    heads.has(entry) && entry.kind === 'row' && entry.row.kind === 'notice' && (entry.row.class === 'schedule' || (entry.row.class === 'task' && entry.row.outcome !== null));
+  const above = resolved.filter(standsAbove).map((entry) => entry.row);
+  const stream = above.length === 0 ? resolved : resolved.filter((entry) => !standsAbove(entry));
+  const head = resolved.find((entry) => heads.has(entry));
+  const opener: RowOf<'divider'>['opener'] = turn.origin !== 'human' && head?.kind === 'row' && (head.row.kind === 'agent_message' || head.row.kind === 'notice') ? { class: heads.get(head)!, line: head.row.text } : undefined;
   // Text blocks after the last piece of work are the answer, outside the work area; earlier ones are commentary. A hook,
   // a notice and what a plugin said (R1) are not the model's work: under MessageDisplay and Stop hooks every final text
   // is followed by hook events (pass3/steer-next seq 230-237), and counting them would class the answer as commentary (W1).
   // P4-R7: a message tool's call is a call too, so a text before it is the turn's commentary, as before any call
-  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
+  // UX wave U3: a notice that arrived among the work counts as an inbound message does
+  const WORK_ROWS = new Set<Row['kind']>(['subagent', 'agent_message', 'notice', 'question', 'plan', 'request_slot', 'error', 'ask', 'delivery' /* E1: calls, as a question is */, 'agent_list' /* E7 */, 'artifact' /* E2 */, 'browser_action' /* E4c */, 'to_human' /* P4-R7 */]);
   const isWork = (item: (typeof resolved)[number]) => item.kind === 'cell' || (item.kind === 'row' && WORK_ROWS.has(item.row.kind) && !(item.row.kind === 'error' && (item.row.severity === 'notice' || item.row.scope === 'plugin')));
-  const lastWork = resolved.map(isWork).lastIndexOf(true);
+  const lastWork = stream.map(isWork).lastIndexOf(true);
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
   // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
   // command's output) go through the group machine as rows, so a steer splits the work around it; everything else is
   // the work area.
   const ordered: WorkItem[] = [];
-  resolved.forEach((item, i) => {
+  stream.forEach((item, i) => {
     if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });
     else if (item.kind === 'text' && i > lastWork) ordered.push({ kind: 'row', row: { ...item.row, phase: 'answer' } });
     else if (item.kind === 'text') ordered.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
@@ -895,7 +939,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const lastReply = turn.events.findLast((event) => event.kind === 'assistant.block.complete');
   const endedOnApiError = lastReply?.kind === 'assistant.block.complete' && lastReply.isApiErrorMessage === true;
   const dividerState: RowOf<'divider'>['state'] = turn.state === 'open' ? 'working' : turn.closedBy !== null ? turn.closedBy : isAborted(turn.ended?.terminalReason ?? null) ? 'stopped' : turn.ended?.isError && !endedOnApiError ? 'failed' : turn.ended ? 'completed' : 'stopped';
-  const rows: Row[] = [];
+  const rows: Row[] = [...above];
   if (user) rows.push(user);
   // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
   // what tells the reader whose turn it was ("Continued for …"; pass2/workflow's engine turn is a single answer); a
@@ -907,6 +951,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
+      ...(opener !== undefined && { opener }), // UX wave U3
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
@@ -1279,25 +1324,37 @@ function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
 
 const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
 
-// The body's first line cut to 120 columns, as the TUI previews a message.
+// A text's first line cut to 120 columns, as the TUI previews a message (the line's ellipsis at the column's edge is the
+// view's). UX wave U3 (O-12): a message's preview leaves out a leading `@address` token, which names whom it was sent to;
+// the opened message keeps it.
 const PREVIEW_COLUMNS = 120;
-function previewOf(body: string): string {
-  const line = body.trimStart().split('\n')[0]!.trimEnd();
+function firstLineOf(text: string): string {
+  const line = text.trimStart().split('\n')[0]!.trimEnd();
   return line.length > PREVIEW_COLUMNS ? `${line.slice(0, PREVIEW_COLUMNS - 1)}…` : line;
 }
-
-// An inbound row and a hand-back row stand where a persistent bubble stood, and the sender, the preview and Reply must
-// outlive the turn's fold; outbound and in-process rows stay work.
-function isPersistentMessage(row: Row): boolean {
-  return row.kind === 'agent_message' && ((row.peer?.sender ?? null) !== null || row.report !== undefined);
+const LEADING_ADDRESS = /^@\S+\s+/;
+function previewOf(body: string): string {
+  const rest = body.trimStart().replace(LEADING_ADDRESS, '');
+  return firstLineOf(rest.trim() === '' ? body : rest);
 }
 
-// Whether a peer user.message is an envelope its companion event draws (E7); P5 O15 M2b: when it is one whose sminos
-// frame names the sender's owners, they are kept by its messageUuid for the companion's row (§J).
-function keepsPeerOwners(event: Event<'user.message'>, peerOwners: Map<MessageUuid, string[]>): boolean {
-  const envelope = parsePeerMessage(messageText(event.content));
-  if (envelope === null) return false;
-  const owners = envelope.kind !== 'agent' && envelope.frame !== null ? sminosFrameOwners(envelope.frame)?.owners : undefined;
+// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
+// scheduled fire stay in view when their turn folds; a notice with no outcome, an answer's and the wake's fold with it.
+function isPersistentNotice(row: Row): boolean {
+  return row.kind === 'notice' && (row.class === 'schedule' || (row.class === 'task' && row.outcome !== null));
+}
+
+// Whether a peer user.message is drawn by its companion event (E7): an envelope (peer.message, subagent.message), or, UX
+// wave U3, a message whose peer.message this turn holds (a delivery the sminos bridge made, a background session's
+// prompt: their text is the carrier's, with no envelope). P5 O15 M2b: the owners sminos's frame line names for the
+// sender, wherever it stands (the envelope's body, or the text's own first line), are kept by its messageUuid for the
+// companion's row (§J).
+function hasCompanion(event: Event<'user.message'>, companions: ReadonlySet<MessageUuid>, peerOwners: Map<MessageUuid, string[]>): boolean {
+  const text = messageText(event.content);
+  const envelope = parsePeerMessage(text);
+  if (envelope === null && (event.messageUuid === null || !companions.has(event.messageUuid))) return false;
+  const frame = envelope === null ? text.trimStart().split('\n', 1)[0]! : envelope.kind !== 'agent' ? envelope.frame : null;
+  const owners = frame !== null ? sminosFrameOwners(frame)?.owners : undefined;
   if (owners !== undefined && event.messageUuid !== null) peerOwners.set(event.messageUuid, owners);
   return true;
 }
@@ -1322,11 +1379,12 @@ function sendMessageRow(use: Event<'tool.use'>, result: Event<'tool.result'> | u
   const to = str(input.to);
   const message = str(input.message, str(input.content));
   const base = { id: rowId.agentMessage(use.id), turnId, at: use.at, kind: 'agent_message' as const, from: null };
-  if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, message) };
+  const preview = previewOf(message); // UX wave U3 (O-12): every send is one line, the whole message opened under it
+  const body = previewHidesBody(message, preview) ? { body: message } : {};
+  if (to === 'parent' || to === 'main') return { ...base, direction: 'from_child', to: null, text: agentMessageCopy('from_child', to, preview), ...body };
   const agent = to === '' ? null : agentOf(to);
-  if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', agent?.name ?? (to || null), message) };
+  if (agent !== null || to === '') return { ...base, direction: 'to_child', to: agent, text: agentMessageCopy('to_child', agent?.name ?? (to || null), preview), ...body };
   const outcome = result === undefined ? null : sendMessageOutcome(result);
-  const preview = previewOf(message);
   const name = peerNamed(known, to);
   return {
     ...base, direction: 'between', to: null, text: peerMessageCopy.outbound(peerLabel(to, name), preview), // the label the view shows
@@ -1346,9 +1404,48 @@ function agentMessageRow(event: Event<'subagent.message'>, turnId: TurnId, agent
   const title = agent?.name ?? event.fromAgentId;
   const report = handbackReport(event.text);
   const base = { id: rowId.agentMessage(event.id), turnId, at: event.at, kind: 'agent_message' as const, direction: 'from_child' as const, from: agent, to: null };
-  if (report !== null) return { ...base, text: peerMessageCopy.report(title), report };
+  if (report !== null) return { ...base, text: peerMessageCopy.report(title, previewOf(report)), report }; // UX wave U3: the report's first line on the line
   const preview = previewOf(event.text);
   return { ...base, text: agentMessageCopy('from_child', title, preview), ...(previewHidesBody(event.text, preview) && { body: event.text }) };
+}
+
+// UX wave U3 (UC-2, "The rows"; the U3a document, Interfaces D): one arrival a synthetic message carries, as its notice. A
+// task's line is the engine's sentence; a scheduled fire's names the prompt's first line where the carrier holds it; an
+// answer's is worded from its summary and the questions of the call that asked (decision 9); the wake's is today's.
+function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival, { class: 'consent' }>, index: number, turnId: TurnId, questionsOf: CallQuestions): RowOf<'notice'> {
+  const id = rowId.notice(arrival.class === 'task' ? arrival.runId : null, event.messageUuid ?? event.id, index);
+  const base = { id, turnId, at: event.at, kind: 'notice' as const, class: arrival.class, outcome: null, durationMs: null, detail: null, taskId: null, toolUseId: null, outputFile: null };
+  switch (arrival.class) {
+    case 'task':
+      return {
+        ...base, outcome: arrival.outcome, text: arrival.summary, durationMs: arrival.durationMs, detail: arrival.detail,
+        taskId: arrival.taskId as TaskId | null, toolUseId: arrival.toolUseId as ToolUseId | null, outputFile: arrival.outputFile,
+      };
+    case 'schedule': {
+      const first = arrival.prompt === null ? null : firstLineOf(arrival.prompt);
+      return { ...base, text: NOTICE.schedule(first), detail: arrival.prompt !== null && first !== null && previewHidesBody(arrival.prompt, first) ? arrival.prompt : null };
+    }
+    case 'answer':
+      return { ...base, text: NOTICE.answered(arrival.dismissed ? NOTICE.dismissed : answeredWords(arrival.summary, questionsOf(arrival.call))) };
+    case 'wake':
+      return { ...base, text: NOTICE.wake };
+  }
+}
+
+// The questions an ask call put, read from the call itself: in this turn, else in the turn the state files it under.
+function callQuestions(turn: TurnState, state: TranscriptState | null, call: ToolUseId): { question: string; header: string }[] | null {
+  const owner = turn.events.some((event) => event.kind === 'tool.use' && event.toolUseId === call) ? turn : state?.turns.get(state.index.toolUses.get(call) ?? ('' as TurnId));
+  const use = owner?.events.find((event): event is Event<'tool.use'> => event.kind === 'tool.use' && event.toolUseId === call);
+  if (use === undefined) return null;
+  const questions = record(use.input).questions;
+  return Array.isArray(questions) ? questions.map(record).filter((q) => typeof q.question === 'string').map((q) => ({ question: str(q.question), header: str(q.header) })) : [];
+}
+
+// UX wave U3 (decision 10): the consent an "Approve and retry" prompt carries, for its user row.
+function consentOf(event: Event<'user.message'>): Pick<RowOf<'user'>, 'consent'> {
+  if (event.isSynthetic) return {};
+  const consent = carriedOf(event.arrival).find((entry) => entry.class === 'consent');
+  return consent === undefined ? {} : { consent: { kind: consent.kind, subject: consent.subject } };
 }
 
 function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, context: TurnContext): RowOf<'agent_list'> {

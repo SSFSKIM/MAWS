@@ -14,7 +14,7 @@
 // author, as a line above the bubble and in the region's name; the reader's own reads "Your message".
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
-import { NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
+import { CONSENT, NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
 import type { Attachment, Row } from '../../model/rows';
 import { copiedUserText, placeholdersOf } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
@@ -46,6 +46,23 @@ function segmentsOf(row: UserRowData): Segment[] {
 }
 
 export function UserRow({ row }: { row: UserRowData }) {
+  return row.consent ? <ConsentLine consent={row.consent} /> : <UserBubble row={row} />;
+}
+
+// UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): MAWS's "Approve and retry" for a call auto mode
+// blocked is the person's act, not their prose: one line, "You approved `<subject>`", never a bubble, with no Copy and
+// no Edit. The subject is cut at the column's edge; its tooltip holds it whole.
+function ConsentLine({ consent }: { consent: NonNullable<UserRowData['consent']> }) {
+  return (
+    <div className="transcript-consent" data-consent={consent.kind}>
+      <span className="transcript-line-text" title={consent.subject}>
+        {CONSENT.approved} <code className="transcript-consent-subject">{consent.subject}</code>
+      </span>
+    </div>
+  );
+}
+
+function UserBubble({ row }: { row: UserRowData }) {
   const actions = useActions();
   const { storeKey, variant, promptAuthor } = useTranscriptContext();
   const author = promptAuthor?.(row) ?? null; // board 525

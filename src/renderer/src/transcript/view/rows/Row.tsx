@@ -11,6 +11,7 @@ import type { Row } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { inWorkArea } from '../motion';
 import { AgentMessageRow } from './AgentMessage';
+import { NoticeRow } from './Notice'; // UX wave U3
 import { AskCapsule } from './AskCapsule'; // E1
 import { DeliveryRowView } from './Delivery'; // E1
 import { SideThreadRow } from './SideThread'; // E3
@@ -47,6 +48,7 @@ function body(row: Row) {
     case 'subagent': return <SubagentRow row={row} />;
     case 'agent_message': return <AgentMessageRow row={row} />;
     case 'bash': return <BashRow row={row} />;
+    case 'notice': return <NoticeRow row={row} />; // UX wave U3: a task's end, a scheduled fire, an answer, the bridge's wake
     case 'local_command': return <SurfaceCommandRow row={row} />;
     case 'plan': return <PlanRow row={row} />;
     case 'question': return <SurfaceQuestionRow row={row} />;
