@@ -615,6 +615,10 @@ Found while checking the section against the code at `85e934368` and the probes'
   Rationale: accepted by the architect on 2026-11-13 as the controller proposed.
   Date/Author: 2026-11-13, the U3a controller.
 
+- Decision: a terminal's scheduled fire is not held (revises M3's "the caller places it on the turn the `user` row after it opens"). The fire row places its notice at its own row and opens the engine's turn there; the meta `user` row after it, tied by `scheduledFireId` or else by place, is the arrival's second carrier, makes no second notice and continues that turn. Where a synthesized exit closed the fire's turn before the meta row arrived, the meta row does what a person's prompt row does today when it follows a synthesized exit. What the owner sees is the same (a `schedule` notice sits above its turn's divider, decision 5).
+  Rationale: the M3 re-review showed a held fire is lost at every input boundary but the first (a later append, a reload, a finite replay, the reseed loop), and that each needs its own flush; holding nothing needs none. Rejected: a flush at every boundary, one more lifecycle per caller.
+  Date/Author: 2026-11-13, the U3a controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
