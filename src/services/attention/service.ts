@@ -284,7 +284,9 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           break;
         }
         case 'tool.result':
-          if (event.denial === 'automode-unavailable') {
+          // UX wave U2 (the architect's ruling R3): only a result that came over the wire as its own frame raises; a file's
+          // history (`seq: null`) and a rebuild from the transcript (`reseeded`) now carry a refusal's kind and raise nothing
+          if (event.denial === 'automode-unavailable' && event.seq !== null && event.reseeded !== true) {
             derive(id, state, event.toolUseId, { ...base, kind: 'auto_mode_unavailable', summary: 'Auto mode unavailable: switch out of auto mode to continue', request: { ...noRequest, toolUseId: event.toolUseId as ToolUseId } });
           }
           break;
