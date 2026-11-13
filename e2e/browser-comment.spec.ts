@@ -446,8 +446,10 @@ test('1b. the strip opening under the page scrolls it by the least that keeps a 
     await expect(t.panel.locator('[data-card-dock] [data-card-caret]')).toHaveAttribute('data-card-caret', String(position!.x));
 
     // UX wave U5a (A5, X-216; §G): past the pick's two seconds the page keeps the element in view because it was told the
-    // card is open (main's `card` message), so a shorter window still brings the target back; once the card closed, a
-    // shorter window scrolls nothing, though the close gave the page back less height than the window took
+    // card is open (main's `card` message), so a shorter window still brings the target back. Once the card closed, a
+    // shorter window that clips the target scrolls nothing. The earlier page script forgot its subject only when the
+    // page grew back to its height at the pick; the close here gives back the strip but not the 60 px the window took, so
+    // that script still held the target and would have scrolled it back into view
     await t.page.waitForTimeout(2_100); // PICK_GRACE_MS (2 s) has passed: only the card's message holds the element now
     const pane = paneIn(t.panel);
     await resizeWindow(s, pane, 0, -60);
@@ -458,9 +460,17 @@ test('1b. the strip opening under the page scrolls it by the least that keeps a 
       }, { message: 'the open card still keeps the target in view after the window got shorter' })
       .toBe(true);
     await dismiss(s, t, card);
+    await expect.poll(async () => near(await page.evaluate(() => window.innerHeight), full - 60, 1), { message: 'the strip gave the page its bottom back, less the 60 px' }).toBe(true);
+    // the target 12 px above the page's bottom, so the next 60 px clip 48 px of it: what the earlier script brought back
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 1400 + 32 - window.innerHeight + 12, behavior: 'instant' }));
+    const closed = await rectOf(target);
+    expect(near(closed.y + closed.height, (await page.evaluate(() => window.innerHeight)) - 12, 1), `the target 12 px above the page's bottom: ${JSON.stringify({ closed, full })}`).toBe(true);
     const closedAt = await scrollOf(page);
     await resizeWindow(s, pane, 0, -60);
+    await expect.poll(async () => near(await page.evaluate(() => window.innerHeight), full - 120, 1), { message: 'the page 60 px shorter again' }).toBe(true);
     await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))); // the resize dispatched
+    const clipped = await rectOf(target);
+    expect(clipped.y + clipped.height, 'the shorter page clips the target').toBeGreaterThan(await page.evaluate(() => window.innerHeight));
     expect(await scrollOf(page), 'A5: after the card closed, a shorter window does not scroll the page').toEqual(closedAt);
     await resizeWindow(s, pane, 0, 120); // the window's height back for the cases below
     await expect.poll(() => page.evaluate(() => window.innerHeight), { message: 'the page’s full height back' }).toBe(full);
