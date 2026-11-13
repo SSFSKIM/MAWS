@@ -1558,6 +1558,27 @@ describe('listed rows from another machine', () => {
       expect(needsYou()[0].getAttribute('data-menu')).toBe('none'); // a Needs you row keeps no menu for a listed session
     });
 
+    // UX wave U7, #559: an owner item's row lands on its mark, and still opens a listed session through its lane's opener
+    it('an anchored item of its Needs you row opens it through its lane’s opener, ⌘-click and a middle click with the new-tab request', () => {
+      const calls: [AppSessionId, { newTab: boolean } | undefined][] = [];
+      offs.push(registerRemoteOpener('B', (listed, how) => calls.push([listed.appId, how])));
+      fill([listedOn('b1', { title: 'Studio build', state: 'idle' })]);
+      const anchored = item(studio('b1'), 'async_input', '2026-10-28T08:00:00Z', {
+        id: addressOf(OTHER_MACHINE, 'att-b1-owner') as never,
+        request: { requestId: null, toolUseId: null, taskId: null, agentId: null },
+        summary: 'Which name should it take?',
+        anchor: { messageUuid: 'msg-b1-1' as never, blockIndex: 0, span: 0 },
+      });
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [anchored], greyed: false });
+      render(<Sidebar />);
+      const tabsBefore = useLayout.getState().main;
+      fireEvent.click(needsYou()[0]);
+      fireEvent.click(needsYou()[0], { metaKey: true });
+      fireEvent(needsYou()[0], new MouseEvent('auxclick', { bubbles: true, button: 1 }));
+      expect(calls).toEqual([[studio('b1'), undefined], [studio('b1'), { newTab: true }], [studio('b1'), { newTab: true }]]);
+      expect(useLayout.getState().main).toBe(tabsBefore);
+    });
+
     it('a greyed machine’s item is drawn after the live rows, readable and marked, and leaves every count until its snapshot', () => {
       fill([listedOn('b1', { title: 'Studio build' })]);
       useAttention.setState({ loaded: true, bySession: new Map([[here.appId, [pageItem('here', 'question', '2026-10-28T09:00:00Z')]]]), version: useAttention.getState().version + 1 });
