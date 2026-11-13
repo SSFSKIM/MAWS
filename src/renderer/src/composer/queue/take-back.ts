@@ -78,7 +78,7 @@ const waitingForBox = new Map<AppSessionId, { stage: Draft; deps: TakeBackDeps }
 /** The composer's box for the session, while it mounts it. */
 export function attachTakeBackBox(appSessionId: AppSessionId, box: TakeBackBox): () => void {
   boxes.set(appSessionId, box);
-  if (inHand.has(appSessionId)) box.hold(true);
+  box.hold(inHand.has(appSessionId)); // a composer that moves to another session leaves the last one's hold behind
   return () => {
     if (boxes.get(appSessionId) === box) boxes.delete(appSessionId);
   };

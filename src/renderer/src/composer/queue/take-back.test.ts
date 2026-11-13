@@ -193,12 +193,30 @@ describe('a take-back in order', () => {
     expect(w.log).toEqual(['claim', 'cancel', 'settle']);
     expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
     expect(stageMark({ doc: b.state.loaded[0], attachments: [], updatedAt: '' })).toBeNull(); // loaded without the mark
-    expect(b.state.held).toEqual([true, false]); // read-only while in hand
+    expect(b.state.held).toEqual([false, true, false]); // attached free, read-only while in hand
     const kept = w.store.get(APP)!;
     expect(stageMark(kept)).toBeNull();
     expect(textOf(kept.doc as ComposerDoc)).toBe(TEXT);
     expect(w.steers.size).toBe(0); // in the queue not at all
     expect(w.controls.sendNow).not.toHaveBeenCalled();
+  });
+
+  it('a box attached while a take-back of its session is in hand is held, and one attached for another session is not', async () => {
+    const w = world();
+    w.steers.add(U1);
+    attachTakeBackBox(APP, box().api);
+    w.holdNextSets();
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.waitFor(() => expect(w.heldCount()).toBe(1));
+    const remounted = box();
+    attachTakeBackBox(APP, remounted.api);
+    const other = box();
+    attachTakeBackBox('app-other' as AppSessionId, other.api);
+    expect(remounted.state.held).toEqual([true]);
+    expect(other.state.held).toEqual([false]);
+    await w.letGo();
+    await run;
+    expect(remounted.state.held).toEqual([true, false]);
   });
 
   it('a held message is removed in the second place', async () => {
