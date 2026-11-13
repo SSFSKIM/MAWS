@@ -19,7 +19,8 @@ import { surfaceSession } from '../panel/surface-model';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { useMachines } from '../stores/machines';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { localProjectOfSet, selectOrgIndex, sessionSetKey, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { localProjectOfSet, rowOfListed, selectOrgIndex, sessionSetKey, type RowKey } from '../stores/org-projects'; // P5 O6 M5
+import { machineKey } from '@shared/machine/org-key';
 import { newChatElsewhere, registrySpawnTarget } from '../sidebar/registry-new-chat'; // U13a: New chat's place elsewhere
 import { ipc } from '../ipc/client';
 import { create } from 'zustand';
@@ -195,13 +196,19 @@ export function closeEmptyChat(appSessionId: AppSessionId): void {
   const layout = useLayout.getState();
   const open = findTab(layout.main, tabId(tab));
   if (port === null || open === null || !port.isEmpty(appSessionId) || frontOf(layout) === tabId(tab)) return;
-  layout.dropSession(appSessionId); // as an unstarted chat's close, it leaves no reopen entry
+  // only the tab leaves now, with no reopen entry (as an unstarted chat's close); what else the session holds (its side
+  // tools and their state) goes once main has agreed, so a refusal puts back exactly what was there
+  layout.closeTab(open.id, { remember: false });
   const putBack = () => {
     useLayout.getState().openTab(tab, { activate: false });
     if (open.pinned) useLayout.getState().togglePinned(open.id); // a new ref is unpinned
   };
   port.discard(appSessionId).then(
-    (discarded) => (discarded ? useSessions.getState().dropUnstarted(appSessionId) : putBack()),
+    (discarded) => {
+      if (!discarded) return putBack();
+      useLayout.getState().dropSession(appSessionId);
+      useSessions.getState().dropUnstarted(appSessionId);
+    },
     (error: unknown) => {
       console.error('[actions] discarding an empty chat failed; its tab is back', error);
       putBack();
@@ -374,6 +381,10 @@ type RowState = Pick<SessionsState, 'projects' | 'registry' | 'records' | 'liste
 function rowOf(appSessionId: AppSessionId, state: RowState, loaded: ReadonlySet<MachineRef>, revision: number): RowKey | null | undefined {
   void revision;
   if (!loaded.has(machineOf(appSessionId))) return undefined;
+  // a listed session with no record read, of either lane, sits where its listing's row is (the branch review: lane A's
+  // opener reads no record; `sessionSetKey` knows a listing only for lane B)
+  const listing = state.records.has(appSessionId) ? undefined : state.listed.get(appSessionId);
+  if (listing !== undefined) return rowOfListed(selectOrgIndex(state, ipc.localMachine), listing) ?? listing.orgKey ?? machineKey(listing.machine);
   return sessionSetKey(state, ipc.localMachine, appSessionId, () => {
     const retention = currentTabRetention();
     const unstarted = retention ? retention.retains(appSessionId) : state.unstarted.has(appSessionId);
@@ -383,6 +394,13 @@ function rowOf(appSessionId: AppSessionId, state: RowState, loaded: ReadonlySet<
 
 /** The row a session sits under (rule 5): its project's, a machine's own, or the project chosen in an unstarted chat.
     null: an unstarted chat with no project. undefined: its machine has not answered in this run, or it is not known. */
+// What `sessionRow` reads, for a reader outside React that must hear its answer change (the branch review: a drag's
+// targets): the sessions, the machines' loads and the unstarted titles.
+export function subscribeSessionRows(listener: () => void): () => void {
+  const offs = [useSessions.subscribe(listener), useMachines.subscribe(listener), useTitleRevision.subscribe(listener)];
+  return () => offs.forEach((off) => off());
+}
+
 export const sessionRow = (appSessionId: AppSessionId): RowKey | null | undefined =>
   rowOf(appSessionId, useSessions.getState(), useMachines.getState().loaded, useTitleRevision.getState().n);
 

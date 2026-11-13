@@ -11,7 +11,7 @@ import { appendHistory } from '../composer/editor/submit'; // P2-F (L118)
 import { sendToSession } from '../session/controls/controls-for'; // P2-A; P5 O9 M4: through the session's controls port
 import { pickDirectModel } from '../gateway/direct-model'; // debt wave 4: the direct route's model refusal
 import { ipc } from '../ipc/client';
-import { clearComposer } from '../stores/composer'; // P2-A
+import { clearComposer, useComposerStore } from '../stores/composer'; // P2-A; U13a: what waits for a composer
 import type { ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -78,11 +78,22 @@ async function start(appSessionId: AppSessionId, message: FirstMessage | null, o
 
 // ---- the hook's commands -----------------------------------------------------------------------------------------
 
+// U13a (the branch review): the intent writes this page has sent and main has not answered, per session, counted as the
+// write leaves; until its answer reaches the setup store a chat may hold a draft its intent does not show yet.
+const writing = new Map<AppSessionId, number>();
+
 export async function patchIntent(appSessionId: AppSessionId, patch: SetupIntentPatch): Promise<HookResult> {
-  const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
-  if (!result.ok) return { ok: false, error: result.error.message };
-  useSetup.getState().setIntent(result.value);
-  return { ok: true };
+  writing.set(appSessionId, (writing.get(appSessionId) ?? 0) + 1);
+  try {
+    const result = await ipc.invoke('session.intent.patch', { appSessionId, patch });
+    if (!result.ok) return { ok: false, error: result.error.message };
+    useSetup.getState().setIntent(result.value);
+    return { ok: true };
+  } finally {
+    const left = (writing.get(appSessionId) ?? 1) - 1;
+    if (left > 0) writing.set(appSessionId, left);
+    else writing.delete(appSessionId);
+  }
 }
 
 // Send on an unstarted session: `starting`, `needs_trust` and `relay_unreachable` are `{ ok: true }` (the message is
@@ -341,13 +352,17 @@ export function isEmptyIntent(intent: SetupIntent): boolean {
   );
 }
 
-// An unstarted chat whose intent is empty, with no start under way, no card or failure to show, and an empty editor
-// where one is mounted (it is read before its draft reaches the intent).
+// The one definition of an empty chat (the branch review), which New chat's reuse, its close of the other empty chats
+// and the relaunch sweep all read: an unstarted chat whose intent is empty, with no start under way, no card or failure
+// to show, and nothing on its way to it: no write of its intent unanswered, no prompt or attachment waiting for its
+// composer to mount, and an empty editor where one is mounted (read before its draft reaches the intent).
 export function isEmptyChat(appSessionId: AppSessionId): boolean {
   const setup = useSetup.getState();
   const intent = setup.intents.get(appSessionId);
   if (intent === undefined || useSessions.getState().records.has(appSessionId) || !isEmptyIntent(intent)) return false;
   if (isStarting(setup, appSessionId) || setup.cards.has(appSessionId) || failureOf(setup, appSessionId) !== null) return false;
+  const composer = useComposerStore.getState();
+  if (writing.has(appSessionId) || composer.prefills.has(appSessionId) || (composer.attachmentQueue.get(appSessionId)?.length ?? 0) > 0) return false;
   const liveDoc = liveDraftDoc(appSessionId);
   return liveDoc === undefined || isEmptyDoc(liveDoc);
 }

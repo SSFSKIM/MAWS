@@ -27,7 +27,7 @@ import { registerMessageReturn } from './message-return';
 import { NewSessionEmptyState } from './NewSessionEmptyState';
 import { resubmitProvider } from './record-ops';
 import { connectSetupDock } from './SetupCard';
-import { beforeCloseUnstarted, discardEmptyChat, isEmptyChat, isEmptyIntent, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict; U13a: the empty chats
+import { beforeCloseUnstarted, discardEmptyChat, isEmptyChat, unstartedReplaceVerdict } from './setup-actions'; // E11 F2b: unstartedReplaceVerdict; U13a: the empty chats
 import { connectSetup, useSetup } from './store';
 import { intentProjectName } from './useSetupIntent';
 import { machineOf } from '@shared/machine/address';
@@ -93,13 +93,14 @@ export async function createUnstartedSession(projectId: ProjectId | null, client
 // in it does not come back after a relaunch. Its intent is discarded once the snapshot holds the intents, before the
 // retention lets the layout hydrate, so hydration finds no intent and drops its tab without a word; one main refuses
 // stays, and its tab comes back as before. A relaunch's cleanup: the candidates are what an earlier run left (no chat
-// of this run exists before the sweep has run: `sweepRun`), and none whose tab is open is discarded.
+// of this run exists before the sweep has run: `sweepRun`), and none whose tab is open is discarded. Empty is New
+// chat's own definition (`isEmptyChat`): at a relaunch nothing of a chat waits outside its intent, so it reads the intent
+// alone, and anything that did wait (a prompt queued for it meanwhile) keeps it.
 
 async function discardEmptyIntents(client: MawsBridge, candidates: readonly AppSessionId[]): Promise<void> {
   await Promise.all(
     candidates.map(async (appSessionId) => {
-      const intent = useSetup.getState().intents.get(appSessionId);
-      if (intent === undefined || !isEmptyIntent(intent) || isOpen(useLayout.getState().main, tabId({ kind: 'session', appSessionId }))) return;
+      if (!isEmptyChat(appSessionId) || isOpen(useLayout.getState().main, tabId({ kind: 'session', appSessionId }))) return;
       const result = await client.invoke('session.intent.discard', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error }));
       if (result.ok) useSetup.getState().applyIntentChanged({ appSessionId, intent: null });
       else console.warn('[sessions] an empty New chat could not be discarded; its tab comes back', result.error);

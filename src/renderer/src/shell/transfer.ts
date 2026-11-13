@@ -28,7 +28,7 @@ import { askEditorHostClose, type CloseAsk, type EditorHostScope } from '../pane
 import { instanceOf, panelHost, usePanelHost } from '../panel/host';
 import { surfaceSession } from '../panel/surface-model';
 import { ipc } from '../ipc/client';
-import { sessionRow } from '../keymap/actions-runtime';
+import { sessionRow, subscribeSessionRows } from '../keymap/actions-runtime';
 import { selectOrgIndex, setKeyOfProject, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { useLayout, type LayoutState } from '../stores/layout';
@@ -145,15 +145,18 @@ export function transferRefusal(request: TransferRequest): string | null {
 }
 
 // The refusal for a render, re-read whenever the layout or the panel host changes (a record shown or left changes the
-// tool's persisted params, so the layout store hears it too).
+// tool's persisted params, so the layout store hears it too), and whenever a session's row may (UX wave U13a: a
+// project's eligibility reads `sessionRow`, which waits for the session's machine to answer).
 const subscribeTransfer = (listener: () => void) => {
   const offLayout = useLayout.subscribe(listener);
   const offHost = usePanelHost.subscribe(listener);
   const offLibrary = library.subscribe(listener);
+  const offRows = subscribeSessionRows(listener);
   return () => {
     offLayout();
     offHost();
     offLibrary();
+    offRows();
   };
 };
 export const useTransferRefusal = (request: TransferRequest | null): string | null =>
