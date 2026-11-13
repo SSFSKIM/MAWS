@@ -234,7 +234,7 @@ describe('a background open', () => {
     const withSettings = focusPane(openTab(openTab(split(), { kind: 'settings', section: 'engine' }, { pane: 1 }), S('d')), 0);
     const updated = openTab(withSettings, { kind: 'settings', section: 'keyboard' }, bg);
     unchangedFront(updated, ['session:c', 'session:d']);
-    expect(cur(updated).panes[1].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
+    expect(cur(updated).panes[1]!.tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
   });
 
   it('that creates pane 1 does not focus it', () => {
