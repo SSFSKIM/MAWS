@@ -506,6 +506,7 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
    - the Connectors card of the card column still shows the engine's raw status and says "MCP servers" (U8's file);
    - a re-enrollment's `machine-names` line names a remedy that does not apply there;
    - a `storage` refusal after the machine answered still opens with "Not signed";
+   - `shape`'s second detail in `src/main/org/enroll.ts` ("a re-enrollment names the machine it replaces, <name>") is hidden by §B with the first; no sheet sends that case today;
    - a file-scope server and a dynamic one of the same name and address are two connectors to the one-at-a-time rule though the engine keeps one credential;
    - the Channel's composer returns only at the channel's own next retry, up to about 36 s after the network is back;
    - a Customize page read before the engine host restarted has revisions the new host does not answer, so its Sign in is refused until the page is refreshed;
@@ -1113,6 +1114,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: M1's plugin question gives the scratch plugin with `--plugin-dir`, not a marketplace install; the two questions run after the seven with names of their own (`fx-own`, `plugin:fx-plugin:fx-oauth`); each reconnects at once after an accepted callback, as MAWS's operation does; the spike case alone can run another engine through `MAWS_SIGNIN_SPIKE_ENGINE_BIN`, and `scripts/engine-checksums.txt` gains the 2.1.322 darwin-arm64 line so `provision-engine.sh 2.1.322` can fetch it; the case's timeouts rise to 900 s and 840 s.
   Rationale: in 2.1.322 both plugin routes name the server `plugin:<plugin>:<server>` with scope `dynamic` and key its credential the same way, and `--plugin-dir` has fewer steps that can fail before the question; P1 must read 2.1.322 without moving the group's 2.1.309 pin for its other cases. Rejected: changing the group's engine pin; a marketplace install.
   Date/Author: 2026-11-12, M1's executor; folded by the controller.
+
+- Decision: M2's sheets hide main's detail by a list of the reasons whose detail repeats the line, so a reason main gives no detail today (grant `signed-out`, `damaged`, `cancelled`) shows one if main ever adds it; one small `ReadState` component draws "reading, or the read's line with Retry" for the nobody state, the picker branch and the re-grant sheet; A8's machine-row lines are proved through the drawn rows in `MachinesGroup.test.tsx`.
+  Rationale: §B's details table says "a reason main gains later shows its detail until the table says otherwise", and a list of hidden reasons keeps that true for a reason that gains a detail. Rejected: a list of shown reasons.
+  Date/Author: 2026-11-12, M2's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
