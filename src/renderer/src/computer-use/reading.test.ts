@@ -90,7 +90,7 @@ describe('the computer-use calls of a session', () => {
     marked.turn('u1');
     marked.toolUse('j1', JS, { code: '1' });
     marked.result('j1', REJECTED, { isError: true }); // a transcript file's row carries no denial
-    expect(calls(stateOf(marked))).toEqual([['j1', 'js', 'done']]); // until the marker's row arrives
+    expect(calls(stateOf(marked))).toEqual([['j1', 'js', 'failed']]); // until the marker's row arrives
     marker(marked);
     expect(calls(stateOf(marked))).toEqual([['j1', 'js', 'withdrawn']]);
 
