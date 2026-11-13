@@ -6,6 +6,11 @@
 // what main holds, "As of" the last time it caught up, and the composer is withdrawn; an ended hub sign-in offers "Sign
 // in to the hub again", the Org page's own action (`org.signIn`, Q7). "N events didn't verify" counts what main held
 // back. The tab holds the channel while mounted (use-channel.ts).
+// UX wave U11a M4 (S-09; Interfaces §F, "The footer"): the reason after "As of" is the first that holds of signed out, the
+// hub sign-in ended (the channel's own refusal or the org's hub status), the hub no longer admitting the member (the
+// same), "Offline · retrying" (the channel's own reach or the hub status), and "Connecting…". The refusal reads before
+// reach: a channel the hub ended retries nothing, whatever the org's hub status says. A channel open with nothing held
+// and never caught up says this Mac has no copy of it.
 // M7b: every machine's to-human entries (ToHumanEntry.tsx) are placed by time among the log's (project.ts), each session
 // named from the sessions store; a machine whose MAWS shares none says so, greyed, above the stream.
 //
@@ -24,7 +29,7 @@ import { CHANNEL } from './copy';
 import { Composer } from './Composer';
 import { EntryRow } from './Entries';
 import { channelEntries, placeByTime, toHumanEntries, type StreamEntry } from './project';
-import { tailOf } from './state';
+import { tailOf, type OpenHeld } from './state';
 import { ToHumanEntry } from './ToHumanEntry';
 import { useChannel } from './use-channel';
 import { Waiting } from './Waiting';
@@ -96,7 +101,7 @@ export function ChannelView({ project }: { project: string }) {
               {CHANNEL.toHuman.unavailable(machine.name)}
             </p>
           ))}
-          {held.phase === 'open' && entries.length === 0 && <p className="m-0 text-fg-muted">{CHANNEL.empty}</p>}
+          {held.phase === 'open' && entries.length === 0 && <p className="m-0 text-fg-muted">{held.asOf === null ? CHANNEL.noCopy : CHANNEL.empty}</p>}
           {entries.map((entry) => (entry.kind === 'to-human' ? <ToHumanEntry key={entry.key} entry={entry} /> : <EntryRow key={entry.key} entry={entry} me={me} />))}
           <div className="mt-auto">
             <Waiting project={project} />
@@ -104,17 +109,29 @@ export function ChannelView({ project }: { project: string }) {
         </div>
       </div>
       <div className="scroll-gutter-under shrink-0 pt-2 pb-4">
-        <div className="thread-column">{live ? <Composer send={channel.send} /> : <Offline asOf={held.phase === 'open' ? held.asOf : null} access={access} signedIn={me !== null} />}</div>
+        <div className="thread-column">
+          {live ? <Composer send={channel.send} /> : <Offline reason={offlineReason(me !== null, access, held.phase === 'open' ? held : null)} asOf={held.phase === 'open' ? held.asOf : null} />}
+        </div>
       </div>
     </div>
   );
 }
 
+type OfflineReason = keyof typeof CHANNEL.offline;
+
+/** §F's footer: the first that holds, from the sign-in, the org's hub status and the channel's own refusal and reach. */
+function offlineReason(signedIn: boolean, access: HubAccess | null, channel: Pick<OpenHeld, 'reach' | 'refused'> | null): OfflineReason {
+  if (!signedIn || access === null) return 'signedOut';
+  if (channel?.refused === 'credentials' || access === 'expired') return 'expired';
+  if (channel?.refused === 'removed' || access === 'denied') return 'denied';
+  if (channel?.reach === 'unreachable' || access === 'unreachable') return 'unreachable';
+  return 'connecting';
+}
+
 /** In the composer's place while the channel isn't live: what main holds is as of its last catch-up, and why. */
-function Offline({ asOf, access, signedIn }: { asOf: string | null; access: HubAccess | null; signedIn: boolean }) {
+function Offline({ reason, asOf }: { reason: OfflineReason; asOf: string | null }) {
   const [signing, setSigning] = useState(false);
   const [refused, setRefused] = useState<string | null>(null);
-  const reason = !signedIn || access === null ? CHANNEL.offline.signedOut : access === 'expired' || access === 'denied' || access === 'unreachable' ? CHANNEL.offline[access] : CHANNEL.offline.connecting;
   const at = asOf === null ? NaN : Date.parse(asOf);
   const signIn = async () => {
     setSigning(true);
@@ -129,8 +146,8 @@ function Offline({ asOf, access, signedIn }: { asOf: string | null; access: HubA
       <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-ui-sm text-fg-muted">
         {Number.isFinite(at) && <span data-channel-as-of={asOf}>{CHANNEL.asOf(formatDayTime(at))}</span>}
         {Number.isFinite(at) && <span aria-hidden>·</span>}
-        <span>{reason}</span>
-        {access === 'expired' && (
+        <span>{CHANNEL.offline[reason]}</span>
+        {reason === 'expired' && (
           <button type="button" className={ACTION} disabled={signing} onClick={() => void signIn()}>
             {CHANNEL.signInAgain}
           </button>

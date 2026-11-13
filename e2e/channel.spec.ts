@@ -13,6 +13,9 @@
 // UX wave U11a M3 (#505): under classic scrollbars the footer and a stream row share both edges; in a 420 px column nothing
 // overflows and every row's names give way in one order (the title, the labels, the chip, then the alias, never under
 // twelve characters); and a live channel's composer lines up the same under classic and overlay scrollbars.
+// UX wave U11a M4 (S-09; Interfaces §F, "The footer"): while the org's hub status reads connected, a channel whose own
+// reach is unreachable says "Offline · retrying" after its "As of"; one the hub refused says the refusal with its button
+// and never "retrying"; one never read on this Mac says this Mac has no copy, its footer with no "As of".
 //
 // The channel is seeded where no real log can hold it at once: under MAWS_E2E=1 a harness build's main answers
 // `org.status` and the project's `org.channel.open` from a file the `org.*` schemas admit (src/main/org/channel-fixture.ts),
@@ -393,6 +396,58 @@ test('channel: a seeded project channel offline, its exchange of 40 opened, its 
     rmSync(userData, { recursive: true, force: true });
   }
 });
+
+// UX wave U11a M4 (S-09; Interfaces §F): the footer reads the channel's own reach and refusal, not only the org's hub
+// status, which reads connected in each of these; each footer photographed.
+type FooterScene = { name: string; words: string; over: Partial<Extract<ChannelAnswer, { ok: true }>>; held: boolean };
+const FOOTERS: FooterScene[] = [
+  { name: 'unreachable', words: CHANNEL.offline.unreachable, over: { reach: 'unreachable' }, held: true },
+  { name: 'refused', words: CHANNEL.offline.expired, over: { reach: 'unreachable', refused: 'credentials' }, held: true },
+  { name: 'never-read', words: CHANNEL.offline.unreachable, over: { reach: 'unreachable', events: [], sessions: [], pending: [], unverified: 0, asOf: null, hosts: [], machines: [] }, held: false },
+];
+for (const scene of FOOTERS) {
+  test(`channel: the footer of a channel not live while the hub status reads connected (${scene.name}) says ${scene.words}`, async () => {
+    test.setTimeout(90_000);
+    const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-channel-')));
+    try {
+      const local = readOrMintMachineRef(userData);
+      const { status, answer, asOf } = seededChannel(Date.now(), local);
+      const fixture = join(userData, 'channel.json');
+      writeFileSync(fixture, JSON.stringify({ status: { ...status, hubAccess: 'connected' }, project: PROJECT, answer: { ...answer, live: false, ...scene.over } }));
+      const stub = join(userData, 'channel-scenario.json');
+      writeFileSync(stub, JSON.stringify(scenario()));
+      const maws = await launchMaws({ userData, env: { [FIXTURE_ENV]: fixture, MAWS_SESSION_SOURCE: `stub:${stub}` }, appKitDefaults: { AppleShowScrollBars: 'Always' } });
+      try {
+        const { page } = maws;
+        const row = page.locator(`[data-menu="project:${await addressed(page, PROJECT_ID)}"]`).first();
+        await expect(row).toBeVisible({ timeout: 15_000 });
+        await row.click({ button: 'right' });
+        await page.getByRole('menuitem', { name: CHANNEL.menuItem, exact: true }).click();
+        const channel = page.locator(`[data-channel="${PROJECT}"]`);
+        const footer = channel.locator('[data-channel-offline]');
+        await expect(footer).toContainText(scene.words);
+        await expect(channel.locator('[data-channel-composer]')).toHaveCount(0);
+        if (scene.name === 'refused') {
+          await expect(footer).not.toContainText(CHANNEL.offline.unreachable); // a channel the hub refused retries nothing
+          await expect(footer.getByRole('button', { name: CHANNEL.signInAgain })).toBeVisible();
+        } else await expect(footer.getByRole('button', { name: CHANNEL.signInAgain })).toHaveCount(0);
+        if (scene.held) {
+          await expect(footer.locator(`[data-channel-as-of="${asOf}"]`)).toBeVisible();
+        } else {
+          await expect(footer.locator('[data-channel-as-of]')).toHaveCount(0);
+          await expect(footer).toHaveText(CHANNEL.offline.unreachable);
+          await expect(channel.getByRole('log')).toContainText(CHANNEL.noCopy);
+          await expect(channel.getByRole('log')).not.toContainText(CHANNEL.empty);
+        }
+        await test.info().attach(`channel-footer-${scene.name}`, { body: await footer.screenshot(), contentType: 'image/png' });
+      } finally {
+        await maws.cleanup();
+      }
+    } finally {
+      rmSync(userData, { recursive: true, force: true });
+    }
+  });
+}
 
 // #505 (UX wave U11a M3): a live channel's footer, its composer, lines up with the stream under classic scrollbars and
 // under overlay ones (where nothing moves); each footer photographed for the frame's shadow, which the clipping footer

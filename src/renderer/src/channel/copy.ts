@@ -28,6 +28,7 @@ export const CHANNEL = {
   },
   unverified: (count: number) => (count === 1 ? '1 event didn’t verify' : `${count} events didn’t verify`),
   empty: 'Nothing in this channel yet.',
+  noCopy: 'This Mac has no copy of this channel yet.', // U11a M4: open, nothing held, never caught up
   opening: 'Reading the channel…',
   failed: 'Couldn’t open the channel.',
   retry: 'Retry',
@@ -41,11 +42,12 @@ export const CHANNEL = {
   notSent: 'Not sent',
   refused: (reason: string) => (reason === 'not-reachable' ? 'Not reachable' : `Not sent · ${reason}`),
   asOf: (time: string) => `As of ${time}`,
+  // U11a M4 (Interfaces §F, "The footer"): `expired` and `denied` also say the channel's own refusal, `unreachable` its reach
   offline: {
-    connecting: 'Connecting to the hub…',
+    connecting: 'Connecting…',
     expired: 'The hub sign-in has ended.',
     denied: 'The hub no longer admits you.',
-    unreachable: 'Hub unreachable',
+    unreachable: 'Offline · retrying',
     signedOut: 'Signed out',
   } as const,
   signInAgain: 'Sign in to the hub again',
