@@ -76,7 +76,9 @@ function kindOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionKind | 
     }
     case 'Edit': case 'MultiEdit': return 'edit';
     case 'NotebookEdit': return 'notebook';
-    // the engine names KillShell `TaskStop` and BashOutput `TaskOutput` (2.1.322's aliases): the shell's kill and output
+    // `TaskStop` stops a background task, a shell or an agent; 2.1.322 makes `KillShell` and `KillBash` its aliases
+    // (`cli.pretty.js:103217, 751918`). The bundle shows no alias for `TaskOutput`; it lists it beside `BashOutput` and
+    // `AgentOutput` (`:417594`). Both are commands, not todos, by the architect's ruling of 2026-11-13
     case 'Bash': case 'PowerShell': case 'BashOutput': case 'KillShell': case 'Monitor': case 'TaskOutput': case 'TaskStop': return 'command';
     case 'Grep': return 'grep';
     case 'Glob': case 'LS': return 'glob';
