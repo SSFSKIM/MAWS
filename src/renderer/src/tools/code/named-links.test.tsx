@@ -211,7 +211,7 @@ describe('the chip’s and the anchor’s readers', () => {
       commentsMessage([{ anchor: anchors[0]!, text: lookalike, screenshot: false }, { anchor: anchors[2]!, text: `x\n${lookalike}`, screenshot: false }], 'thread'),
     ];
     for (const text of texts) expect(anchorPaths(text)).toEqual(chipPaths(text));
-    expect(anchorPaths(texts.at(-1)!)).toEqual([P, '/work/out/a.ts']);
+    expect(anchorPaths(texts[anchors.length + 1]!), 'several comments, to a thread').toEqual([P, '/work/out/a.ts']);
     expect(anchorPaths('no tag here')).toEqual([]);
   });
 });

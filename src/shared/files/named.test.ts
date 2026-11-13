@@ -473,17 +473,18 @@ describe('isMcpTool and anchorPaths', () => {
     expect(anchorPaths(lookalikes[2]!)).toEqual([P, OTHER]);
   });
 
-  // the reader bounds how many paths a message names: the count its framing line names, two to twenty, exactly
-  it('anchorPaths names at most MESSAGE_COMMENTS_MAX paths, and none from a framing the reader refuses', () => {
+  // the reader bounds how many paths a message names: the count its framing line names, two to twenty, exactly; a
+  // framing it refuses is read by the one-comment rule, as the window reads it: the last tag's path alone
+  it('anchorPaths names at most MESSAGE_COMMENTS_MAX paths, and one from a framing the reader refuses', () => {
     const fileAt = (n: number) => ({ anchor: { kind: 'file-line' as const, label: `f${n}.md`, locator: `/work/f${n}.md:1`, path: `/work/f${n}.md`, line: 1 }, text: `Comment ${n}`, screenshot: false });
     const full = commentsMessage(Array.from({ length: MESSAGE_COMMENTS_MAX }, (_, n) => fileAt(n)), 'main');
     expect(anchorPaths(full)).toHaveLength(MESSAGE_COMMENTS_MAX);
     const last = fileAt(MESSAGE_COMMENTS_MAX);
     const more = `${full.replace(/^\d+ comments/, `${MESSAGE_COMMENTS_MAX + 1} comments`)}\n\n${anchorLead(last.anchor, false)}\n${last.text}\n\n${anchorTag(last.anchor)}`;
-    expect(anchorPaths(more), 'a framing past the maximum').toEqual([]);
+    expect(anchorPaths(more), 'a framing past the maximum').toEqual([last.anchor.path]);
     const three = commentsMessage([fileAt(0), fileAt(1), fileAt(2)], 'main');
     expect(anchorPaths(three)).toHaveLength(3);
-    expect(anchorPaths(three.replace(/^3 comments/, '2 comments')), 'more blocks than the framing names').toEqual([]);
+    expect(anchorPaths(three.replace(/^3 comments/, '2 comments')), 'more blocks than the framing names').toEqual(['/work/f2.md']);
   });
 
   // the scanner's steps: one for each comment the reader read, so a message's comments are paced as its blocks are
