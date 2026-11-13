@@ -118,6 +118,39 @@ describe('where an arrival’s row sits (decision 5)', () => {
   });
 });
 
+// M2 re-review: what the engine says of a task between the turn's start and the arrival draws nothing, so it ends
+// nothing (head.ts against derive.ts)
+describe('metadata before an arrival', () => {
+  const updated = (b: Builder) => b.emit('task.updated', { taskId: taskId('bt1'), patch: { status: 'completed', endTime: 1 } });
+  it('leaves the arrival at the head: above the divider, which it names', () => {
+    const b = builder();
+    engineTurn(b);
+    updated(b);
+    carry(b, 'h1', [task({ runId: 'run-h' })], '');
+    const list = rowsOf(reduce(b.events));
+    expect(kinds(list)).toEqual(['notice', 'divider']);
+    expect(divider(list).opener).toEqual({ class: 'task', line: OK });
+  });
+
+  it('leaves a provisional line at the head, so the process’s exit takes it out', () => {
+    const b = builder();
+    engineTurn(b);
+    updated(b);
+    carry(b, 'h1', [task({ runId: 'run-h' })], '');
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null });
+    expect(of(rowsOf(reduce(b.events)), 'notice')).toEqual([]);
+  });
+
+  it('leaves an engine turn that held only it empty, so an end that ran nothing removes it', () => {
+    const b = builder();
+    engineTurn(b);
+    updated(b);
+    endEngine(b, 0);
+    expect(reduce(b.events).order).toEqual([]);
+    expect(kinds(rowsOf(reduce(b.events)))).toEqual([]);
+  });
+});
+
 describe('what stays through a fold (Interfaces D)', () => {
   it('a task’s end with an outcome and a scheduled fire stay; a notice with no outcome, an answer, the wake and every message fold', () => {
     const b = builder();
