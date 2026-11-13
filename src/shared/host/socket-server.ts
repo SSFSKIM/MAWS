@@ -38,6 +38,11 @@
 // P5 O3-D M5 (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L): `admitHello` is told the hello's
 // `appPid` too, and may refuse on its own account (`own`: `mawsd`'s refusal of an app that runs a spine of its own)
 // rather than reflect the upstream's line; the one exit that connection may send says which (`onExit`'s `from.own`).
+//
+// P5 Decision Log 273 (the idle collection's quiet entry, idle-collect.ts): `onActivity` is told each line and document
+// frame a welcomed client sends, never what is written to it (an answer ends its request's lifetime, an event was
+// counted where it came in). A request's lifetime is its runtime's to tell, which sees its handler settle whether or
+// not the client is still connected.
 import { timingSafeEqual } from 'node:crypto';
 import type { Server, Socket } from 'node:net';
 import { HostClientGoneSchema, HostReadySchema, HostRequestSchema } from '../ipc/host-protocol';
@@ -101,6 +106,7 @@ export interface SocketServerOptions {
   onClient?(connected: boolean, peer?: WirePeer, appPid?: number): void; // a client was welcomed (P5 O3-D M3: with what its hello said of it; M4: and its appPid), or a client left (not called for a replaced one)
   admitHello?(peer: WirePeer, appPid: number): Promise<Admission>; // P5 O2 M5: a relay's reflected handshake (above); P5 O3-D M5: with the hello's appPid
   log(line: string): void;
+  onActivity?(): void; // P5 Decision Log 273 (above)
   helloTimeoutMs?: number;
   lineCap?: number;
   docHighWater?: number; // P3-A M5: the document channels' reset mark (DOC_HIGH_WATER unless a test lowers it)
@@ -330,6 +336,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       const client: Client = { socket, port, runtime, documents, peer };
       clients.add(client);
       port.onDoc((channel, frame) => {
+        options.onActivity?.();
         if (clients.has(client)) documents.deliver(channel, frame); // P3-A M5: a replaced client's frames are dropped
       });
       port.onEnd(() => {
@@ -358,6 +365,7 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
       on: (_event: 'message', listener: (event: { data: unknown }) => void) =>
         port.on('message', (event) => {
           if (!clients.has(client)) return;
+          options.onActivity?.();
           const exit = readTolerant(ClientExitSchema, event.data);
           if (exit.ok) {
             logDropped('socket exit', exit.dropped);

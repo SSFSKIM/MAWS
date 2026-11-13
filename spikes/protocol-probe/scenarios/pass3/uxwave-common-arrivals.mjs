@@ -127,7 +127,7 @@ export async function mawsLaunch(name,{cwd=process.env.PROBE_WORK,model='haiku',
   p.note({event:'maws_post_initialize',surfaceAttached:caps.includes('ui_surface_v1'),capabilities:caps});
   try{await body(p,{sessionId:id,cwd,transcript:transcriptOf(cwd,id)});}catch(e){failure=e;throw e;}
   finally{p.note({event:'spend',total_cost_usd:cost(p)});try{await p.request('end_session',{reason:'stop'},10000);}catch{}}
- },{cwd,bin:BIN,model,mode,settingSources:'user,project,local',strictMcp:false,dir:'fixtures/uxwave/',env:mawsEnv(env,lane),flags:args});
+ },{cwd,bin:BIN,model,noModel:model===null /* null: no --model */,mode,settingSources:'user,project,local',strictMcp:false,dir:'fixtures/uxwave/',env:mawsEnv(env,lane),flags:args});
  await p.closed;
  if(failure)throw failure;
  return {p,sessionId:id,cwd,transcript:transcriptOf(cwd,id)};

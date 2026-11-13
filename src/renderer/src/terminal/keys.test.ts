@@ -11,6 +11,10 @@ describe('terminal key filter', () => {
     ['⌘⇧J', { key: 'J', code: 'KeyJ', metaKey: true, shiftKey: true }],
     ['⌘⇧C (not the copy chord)', { key: 'C', code: 'KeyC', metaKey: true, shiftKey: true }],
     ['⌘ alone', { key: 'Meta', code: 'MetaLeft', metaKey: true }],
+    // U6a (A7): the side surfaces' chords reach the menu from a terminal
+    ['⌘J (Terminal)', { key: 'j', code: 'KeyJ', metaKey: true }],
+    ['⇧⌘D (Review)', { key: 'd', code: 'KeyD', metaKey: true, shiftKey: true }],
+    ['⇧⌘F (Files)', { key: 'f', code: 'KeyF', metaKey: true, shiftKey: true }],
   ])('gives %s to the app', (_name, init) => {
     expect(terminalKeyFilter(key(init))).toBe('app');
   });
@@ -29,6 +33,12 @@ describe('terminal key filter', () => {
     expect(terminalKeyFilter(key({ key: 'F9', code: 'F9' }), { 'tab.stripNext': null })).toBe('pty');
     expect(terminalKeyFilter(key({ key: 'Tab', code: 'Tab', shiftKey: true }))).toBe('pty');
     expect(terminalKeyFilter(key({ key: 'c', code: 'KeyC', metaKey: true }), { 'sidebar.focus': 'Cmd+C' })).toBe('pty');
+  });
+
+  // the panel's finding of 2026-11-12 ("tab-chord expansion past F24"): F21 is one chord, never F22 … F29
+  it('reads a stored Select tab of F21 as that one key, without throwing', () => {
+    expect(terminalKeyFilter(key({ key: 'F21', code: 'F21' }), { 'tab.select': 'F21' })).toBe('app');
+    expect(terminalKeyFilter(key({ key: 'F22', code: 'F22' }), { 'tab.select': 'F21' })).toBe('pty');
   });
 
   it('keeps the tab cycle: ⌃Tab is tab.next and ⌃⇧Tab is tab.previous', () => {

@@ -1,17 +1,18 @@
 // `mawsd`'s clocks (P5 O2 M5, "The clocks"), on vitest's fake timers: the engine host's park clock, a private
-// daemon's own idle exit, and its quiet (P5 Decision Log 124's idle collection).
+// daemon's own idle exit, its quiet (P5 Decision Log 124's idle collection) and its settled (Decision Log 273's quiet
+// entry).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GROWTH_BYTES, idleCollector } from '@shared/host/idle-collect';
 import { DaemonClocks, DEFAULT_IDLE_EXIT_MS } from './clocks';
 
 const MIN = 60_000;
 const action = () => vi.fn<(why?: 'idle' | 'discovery') => boolean>(() => true);
-let actions: { armEnginePark: ReturnType<typeof action>; disarmEnginePark: ReturnType<typeof action>; exitDaemon: ReturnType<typeof action>; quiet: ReturnType<typeof vi.fn<(quiet: boolean) => void>> };
+let actions: { armEnginePark: ReturnType<typeof action>; disarmEnginePark: ReturnType<typeof action>; exitDaemon: ReturnType<typeof action>; quiet: ReturnType<typeof vi.fn<(quiet: boolean) => void>>; activity: ReturnType<typeof action> };
 const made: DaemonClocks[] = [];
 
 beforeEach(() => {
   vi.useFakeTimers({ now: new Date('2026-10-27T10:00:00.000Z') });
-  actions = { armEnginePark: action(), disarmEnginePark: action(), exitDaemon: action(), quiet: vi.fn<(quiet: boolean) => void>() };
+  actions = { armEnginePark: action(), disarmEnginePark: action(), exitDaemon: action(), quiet: vi.fn<(quiet: boolean) => void>(), activity: action() };
 });
 afterEach(() => {
   for (const clocks of made.splice(0)) clocks.stop();
@@ -426,5 +427,56 @@ describe('the daemon’s quiet', () => {
     deferred.splice(0).forEach((run) => run());
     expect(c.quiet()).toBe(false);
     expect(collect).not.toHaveBeenCalled();
+  });
+});
+
+// P5 Decision Log 273: the quiet entry's predicate. A client or a session's interest holds the quiet and leaves the daemon
+// settled; a hold, an app between a socket and the count or a client's engine request in flight does not, and a hold or
+// a request beginning or ending is activity.
+describe('the daemon’s settled', () => {
+  it('stands with clients connected and interest held, and not before it serves or once stopped', () => {
+    const c = clocks();
+    expect(c.settled()).toBe(false);
+    c.served();
+    c.clients(3);
+    c.interest(false);
+    expect(c.quiet()).toBe(false);
+    expect(c.settled()).toBe(true);
+    c.stop();
+    expect(c.settled()).toBe(false);
+  });
+
+  it.each([
+    ['a hold out', (c: DaemonClocks) => c.holds(1)],
+    ['an app between a relay’s socket and the count', (c: DaemonClocks) => c.relaysBetween(true)],
+    ['a client’s engine request in flight', (c: DaemonClocks) => c.engineRequests(1)],
+  ])('%s unsettles it', (_, pend) => {
+    const c = clocks();
+    c.served();
+    pend(c);
+    expect(c.settled()).toBe(false);
+  });
+
+  it('stands under standing holds and needs (an open remote channel, a document channel), not under an operation among them', () => {
+    const c = clocks();
+    c.served();
+    c.holds(2, 0); // two channels open
+    c.engineRequests(1, 0); // a document channel's need
+    expect(c.settled()).toBe(true);
+    c.holds(3, 1); // an op beside them
+    expect(c.settled()).toBe(false);
+    c.holds(2, 0);
+    c.engineRequests(2, 1); // a request beside the need
+    expect(c.settled()).toBe(false);
+  });
+
+  it('tells activity as a hold or an engine request begins and ends', () => {
+    const c = clocks();
+    c.served();
+    c.holds(1);
+    c.holds(0);
+    c.engineRequests(1);
+    c.engineRequests(0);
+    expect(actions.activity).toHaveBeenCalledTimes(4);
   });
 });

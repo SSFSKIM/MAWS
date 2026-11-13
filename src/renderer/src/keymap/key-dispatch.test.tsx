@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ActionId, KeymapOverrides } from '@shared/keymap/actions';
+import { EXTENDED_TABLE, sample } from '@shared/keymap/sample-rows'; // U6a
 import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { connectKeys, keymapBinds, releaseHold } from './dispatcher';
+import { connectKeys, dispatchKey, keymapBinds, releaseHold } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
 import { currentSet } from '../stores/layout-model';
 
@@ -249,6 +250,45 @@ describe('keymapBinds', () => {
     expect(keymapBinds(press({ key: 'F7', shiftKey: true }), { 'palette.open': 'F7' })).toBe(false);
     expect(keymapBinds(press({ key: '7', code: 'Digit7', metaKey: true }), {})).toBe(true); // Select Tab 7
     expect(keymapBinds(press({ key: 'n', code: 'KeyN', metaKey: true }), { 'session.new': null })).toBe(false); // unbound
+  });
+});
+
+// U6a (UC-6 "fixed"; the U6a execution document, decision 7): a key its own editing surface handles is listed and never
+// dispatched, so the dispatcher runs no binding of it and keymapBinds does not count it; a row sharing ⌘Enter with
+// composer.send, as U4's composer.queue will, is dispatched as any composer row.
+describe('rows the dispatcher does not count', () => {
+  function Composer({ fixed, shared }: { fixed: () => void; shared: () => void }) {
+    const ref = useRef<HTMLDivElement>(null);
+    useKeyChord(sample('sample.fixed'), fixed, { within: ref });
+    useKeyChord(sample('sample.shared'), shared, { within: ref });
+    return (
+      <div ref={ref} data-key-sink="composer">
+        <textarea aria-label="draft" />
+      </div>
+    );
+  }
+
+  it('never runs a fixed row, and runs a composer row that shares a chord by default', () => {
+    cleanup();
+    disconnect();
+    const handled: boolean[] = [];
+    const listen = (event: KeyboardEvent) => void handled.push(dispatchKey(event, {}, EXTENDED_TABLE));
+    window.addEventListener('keydown', listen, { capture: true });
+    const fixed = vi.fn();
+    const shared = vi.fn();
+    render(<Composer fixed={fixed} shared={shared} />);
+    const draft = screen.getByLabelText('draft');
+    act(() => draft.focus());
+    const kept = fireEvent.keyDown(draft, { key: 'Enter', shiftKey: true });
+    fireEvent.keyDown(draft, { key: 'Enter', metaKey: true });
+    window.removeEventListener('keydown', listen, { capture: true });
+    expect(fixed).not.toHaveBeenCalled();
+    expect(kept).toBe(true); // the editor's own key keeps its default
+    expect(shared).toHaveBeenCalledOnce();
+    expect(handled).toEqual([false, true]);
+    const press = (init: KeyboardEventInit) => new KeyboardEvent('keydown', init);
+    expect(keymapBinds(press({ key: 'Enter', shiftKey: true }), {}, EXTENDED_TABLE)).toBe(false);
+    expect(keymapBinds(press({ key: 'Enter', metaKey: true }), {}, EXTENDED_TABLE)).toBe(true);
   });
 });
 

@@ -53,6 +53,7 @@ export interface ConnectorsSurfaceDeps {
   statusCache?: ConnectorStatusCache; // P3-HD: tests
   direct?: DirectCalls; // P3-HD M2: tests
   deliveryConfig?: { userData: string; captureEnv: () => Promise<Record<string, string>> }; // WR 76/78: host-owned, never renderer input
+  work?(): () => void; // P5 Decision Log 273: the operations' runs past their answers, as the host's work
 }
 
 function refused(reason: ArtifactRefusal['reason'], message: string, data: Record<string, unknown> = {}, code: 'invalid_input' | 'internal' = 'invalid_input'): HostCommandError {
@@ -73,11 +74,12 @@ export function registerConnectors(on: HostOn, emit: HostEmit, connectorsPresenc
       completed: (operationId) => void emit('connectors.operation', { operationId }),
       datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), // E3
       statusCache, // P3-HD
+      work: deps.work, // P5 Decision Log 273
     });
   // P3-HD M2: route D's host half over the same store and observations; its connections live for its owner's attachment
   const direct =
     deps.direct ??
-    new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, ...(deps.deliveryConfig && { deliverySources: new ConfiguredDeliverySources(deps.deliveryConfig) }), pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }) });
+    new DirectCalls({ datasets: connectorDatasetSink({ store: () => store, requests: deps.datasetRefresh ?? null }), cache: statusCache, ...(deps.deliveryConfig && { deliverySources: new ConfiguredDeliverySources(deps.deliveryConfig) }), pool: new DirectConnectionPool(), store: () => store, completed: (operationId) => void emit('connectors.directOperation', { operationId }), work: deps.work /* P5 Decision Log 273 */ });
   const storeOf = (): ArtifactStore => {
     if (!store) throw refused('unavailable', 'the artifact store could not be opened this run', {}, 'internal');
     return store;
