@@ -127,6 +127,8 @@ export const COMMAND_BUDGETS_MS: Readonly<Partial<Record<CommandName, number>>> 
   // P5 O7 M4: a spawn answers at its setup's `launching`: the configure gate, a new worktree's git, and the trust
   // bootstrap's launch (watched for WATCHDOG_MS) before the record
   'session.spawn': CONFIGURE_WAIT_MS + GIT_TIMEOUT_MS + WATCHDOG_MS + MARGIN_MS,
+  // the UX wave (U9, M2): a fork from another machine answers at its setup's `launching` as a spawn does, with no git call
+  'session.fork': CONFIGURE_WAIT_MS + WATCHDOG_MS + MARGIN_MS,
   'settings.engineApplied': CONFIGURE_WAIT_MS + MARGIN_MS, // the engine host's verdict on the settings
   'laneA.interrupt': BRIDGE_MS + MARGIN_MS,
   'laneA.command': BRIDGE_MS + MARGIN_MS,

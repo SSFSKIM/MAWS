@@ -94,7 +94,7 @@ import { EndpointOrg, type OrgChange } from './org-sync';
 import { PlaneA } from './plane-a';
 import { PlaneB } from './plane-b';
 import { PlaneFeeds, type OwnersRead } from './plane-feeds';
-import { EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
+import { aboveCeiling, EndpointPolicy, MachineSetup, settingsDefaultMode } from './policy';
 import { completeProvisioning, provisionInto, type DelegatedInput } from './provision';
 import { retireInto, type Retired } from './retire';
 import { owns } from './grades';
@@ -215,8 +215,17 @@ export class Endpoint implements EndpointModule {
   get registryRead(): RegistryRead {
     return this.registry;
   }
+  /**
+   * The UX wave (U9, M2): whether the machine's ceiling, as its policy stands now, refuses a session started from another
+   * machine in `mode`: what the services hold a fork from another machine to where they allocate it (mawsd hands it them).
+   */
+  aboveCeiling(mode: string): boolean {
+    return aboveCeiling(mode, this.policy.current(), this.#settingsMode);
+  }
   /** P5 O8 M6b: the local door, this machine's own app's record acts and policy read, served by `mawsd` (local-door.ts). */
   readonly local: LocalDoor;
+  /** The machine's `defaultMode`, which a `settings` ceiling reads (the user's settings, or a suite's). */
+  readonly #settingsMode: () => string;
   /** What `start` subscribed to on mawsd's seam, let go at `stop`. */
   readonly #unseam: Array<() => void> = [];
   readonly #options: EndpointOptions;
@@ -405,6 +414,7 @@ export class Endpoint implements EndpointModule {
     this.checkouts = authorization.checkouts ?? (options.projects === undefined ? this.rl10.members : anyCheckout(this.rl10.members, options.projects));
     const setupHome = authorization.setup;
     const setup = new MachineSetup(setupHome === undefined ? undefined : () => setupHome); // P5 O7 M9: the authorizer's and the folder list's
+    this.#settingsMode = authorization.settingsMode ?? (() => settingsDefaultMode(homedir()));
     this.authorizer = new Authorizer({
       ref: () => this.#services?.machine.ref ?? null,
       org: () => {
@@ -413,7 +423,7 @@ export class Endpoint implements EndpointModule {
       },
       rights: (member) => this.#rights(member),
       policy: () => this.policy.current(),
-      settingsMode: authorization.settingsMode ?? (() => settingsDefaultMode(homedir())),
+      settingsMode: this.#settingsMode,
       records: authorization.records ?? this.rl10.members,
       checkouts: this.checkouts,
       checkoutBounds: this.checkoutBounds,

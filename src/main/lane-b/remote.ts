@@ -67,7 +67,10 @@
 //   unarchive (`session.update {patch: {archived: false}}`), rename and a dismissal are `machine` acts, taking back a
 //   waiting message and a pane's answer engine-host acts (the answer never resumes a session), and the archived sessions'
 //   read a call by name; each goes only to an endpoint that lists `rl2.session-acts` (REMOTE_NEEDS), and a refusal of an
-//   act with words says UC-7.5's sentence (./remote-outcomes.ts' `refusalResult`).
+//   act with words says UC-7.5's sentence (./remote-outcomes.ts' `refusalResult`). M2: a fork in place is a `machine` act
+//   with step-up (signed before its first copy goes; unasked on a machine the member owns, ../device/step-up.ts), not
+//   through the spawn table, so two forks from one tab are two forks; its answer comes once the fork is `launching` on
+//   the machine, waited for within the fork's command budget past the pending bound.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -87,6 +90,7 @@ import { OPERATION_COMMANDS, type OperationCommand } from '@shared/engine/operat
 import { listenLoopback, type LocalListener } from '../forwards';
 import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
+import { budgetedMs } from '../machines/budgets'; // U9 (M2): a fork's answer within its command's budget
 import { peerLists } from '../machines/remote/capabilities';
 import { needsProjectActs } from '../machines/project-acts-peer';
 import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
@@ -250,8 +254,9 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.projects.addFolder', // P5 O7 M9: the remote setup's registration (`machine-admin`, the machine's owners')
   'session.projects.link', 'session.projects.relocate', 'session.projects.update', 'session.projects.remove', // the project registry (M9, §I's acts): the machine's owners' (`machine-admin`)
   'session.drafts.set', // P5 O8 M6a: the caller's own draft, kept per member on the machine (`converse`)
-  // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`
-  'session.archive', 'session.update', 'session.rename', 'attention.acknowledge',
+  // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`; M2: a fork
+  // in place, the machine's owners', stepped up and answered within its command's budget, never through the spawn table
+  'session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.fork',
 ]);
 /**
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists
@@ -274,7 +279,12 @@ const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.l
 const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
 /** Acts the endpoint always asks a step-up of, signed before the first copy goes (no round trip to be asked). */
-const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate']);
+const STEPPED_UP: ReadonlySet<CommandName> = new Set<CommandName>(['session.projects.addFolder', 'session.projects.link', 'session.projects.relocate', 'session.fork']);
+/**
+ * The UX wave (U9, M2): `machine` acts whose work on the machine outlasts the pending bound, answered up to their
+ * command's budget past it (`answerMs`): a fork answers once its setup reached `launching`, as a spawn's bound has it.
+ */
+const BUDGETED_ACTS: ReadonlySet<CommandName> = new Set<CommandName>(['session.fork']);
 // P5 O7 M5c ("O4's surfaces: the grade"): the six lease reads, sent as calls by name (./remote-connectors.ts)
 export { MACHINE_CALLS } from './remote-connectors';
 /** Reads the pane makes that no row offers, answered here from one that is. */
@@ -783,6 +793,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (connectors.handles(name)) return connectors.dispatch(link, name, fields, ctx.client); // P5 O7 M5c
     if (MACHINE_CALLS.has(name)) return callOverLink(link, name, fields); // P5 O7 M9: the remote setup's two reads
     if (TARGETED_CALLS.has(name)) return targeted(link, name, fields, ctx); // P5 O7 M8
+    if (BUDGETED_ACTS.has(name)) return machineAct(link, name, fields, deadline, { answerMs: budgetedMs(link.budgets, name) ?? 0 });
     if (MACHINE_ACTS.has(name)) return machineAct(link, name, fields, deadline);
     const lane = lanesOf(link).get(String(fields.appSessionId));
     if (lane === undefined || !lane.open) return failure('internal', `${name}: ${NOT_OPEN}`, { refusal: 'not-open' });

@@ -18,7 +18,8 @@
 //      its recorded one is `unavailable` only after the caller's rank on the recorded one (P5 O7 M4, fix wave 1); then,
 //      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout, and for the `task-list` rule
 //      (P5 O7 M8), the input's list the session's own (`no-target`; `unavailable` when the session moved to another
-//      engine session since it was placed);
+//      engine session since it was placed); and (the UX wave, U9 M2) for a fork, whose floor is a right on the machine,
+//      `view` on its source as well (`grade`);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
@@ -206,6 +207,8 @@ const refuse = (reason: RefusalReason): Decision => ({ ok: false, reason });
 type Standing = { decision: Decision; presence?: () => Promise<Decision> };
 const decided = (decision: Decision): Standing => ({ decision });
 /** The part of a record a decision rests on. */
+/** UX wave U9 (M2): the rows that fork their target session, which the caller must also view (step 4). */
+const FORKS: ReadonlySet<string> = new Set(['session.fork']);
 const standingOf = (record: SessionRecord | null) => (record === null ? null : JSON.stringify([record.owners, record.access ?? 'listed', record.shares ?? []]));
 /**
  * P5 O12 M11: the record a decision reads of `target`: the source's, else, for a lane B session spawned by `launchedBy`'s
@@ -467,6 +470,8 @@ export class Authorizer {
     const record = target === undefined ? null : reads.record(target, resolved.kind === 'session' ? resolved.launchedBy : undefined);
     const atFloor = await this.#stands(floor, target, record, who, reads, artifact);
     if (atFloor !== null) return no(atFloor);
+    // UX wave U9 (M2): a fork's floor is a right on the machine, which ranks nothing of its source: `view` on that too
+    if (FORKS.has(name) && !rankAtLeast(sessionRank(record, who.member, await reads.owners()), 'view')) return no('grade');
     // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
     if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.

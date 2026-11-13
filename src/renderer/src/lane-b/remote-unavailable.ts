@@ -24,10 +24,10 @@ import { isOverRl2, useIsOverRl2 } from './remote-session';
 
 /**
  * UX wave U9, M1's bridge (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Decision Log: "M1's bridge in
- * the window's helper, a seam M4 removes"). M1 offers these six acts at the other machine's endpoint and takes them out of
- * `REMOTE_UNAVAILABLE`, before any control of the window guards them; until M4 mounts those guards, a session reached over
- * RL2 keeps them greyed here with the words the declared set gave them. M4 deletes this list, its answer read from the
- * offers instead.
+ * the window's helper, a seam M4 removes"). M1 offers six of these acts at the other machine's endpoint and M2 the fork,
+ * each taken out of `REMOTE_UNAVAILABLE` before any control of the window guards it; until M4 mounts those guards, a
+ * session reached over RL2 keeps them greyed here with the words the declared set gave them. M4 deletes this list, its
+ * answer read from the offers instead.
  */
 export const ACTS_UNTIL_M4: Readonly<Partial<Record<CommandName, string>>> = {
   'session.archive': 'Not on another machine yet: archiving a session',
@@ -36,6 +36,7 @@ export const ACTS_UNTIL_M4: Readonly<Partial<Record<CommandName, string>>> = {
   'attention.acknowledge': 'Not on another machine yet: dismissing an error from here',
   'session.steer.cancel': 'Not on another machine yet: taking back a message the agent hasn’t started',
   'maws.pane.answer': 'Not on another machine yet: mod surfaces',
+  'session.fork': 'Not on another machine yet: forking a session', // M2's offer, under the same bridge
 };
 
 interface Facts {

@@ -13,6 +13,7 @@
 // placed) closes every control; otherwise only what a session on another machine can't take yet is closed. A link that is
 // down or reconnecting closes nothing: an act waits under the link's hold (A4), and a session with a record and no status
 // (released, or opening) is resumed by the act that needs it.
+import { isRefusalReason } from '../../../apps/org-protocol/src/index.ts';
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
 import { ACT_WORDS, failureWords, refusalWords } from '@shared/ipc/remote-unavailable';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
@@ -70,6 +71,14 @@ export function outcomeAsResult(name: CommandName, machine: string, outcome: Act
       const error = record(outcome.error);
       const code = typeof error?.code === 'string' ? error.code : 'failed';
       const said = typeof error?.message === 'string' ? error.message : `${name}: failed on machine ${machine}`;
+      // U9 (M2): a failure of an act with words that names one of RL4's refusals (a fork above the machine's ceiling,
+      // refused where the services allocate it) keeps it, and reads as that refusal does, the mode it names included
+      const issues = record(error?.issues) ?? {};
+      const refusal = issues.refusal;
+      if (ACT_WORDS[name] !== undefined && isRefusalReason(refusal)) {
+        const mode = typeof issues.mode === 'string' ? { mode: issues.mode } : undefined;
+        return failure(isIpcCode(code) ? code : 'internal', refusalWords(name, machine, refusal, mode), { refusal });
+      }
       // U9: the machine ran it and it failed: "Not <done>: <the machine's own sentence>"
       const message = ACT_WORDS[name] === undefined ? said : failureWords(name, said);
       return isIpcCode(code) ? failure(code, message) : failure('internal', message, { refusal: code });

@@ -9,8 +9,8 @@
 // What is here, and why (the offer audit's rule, m8-2a: a session's own read is offered when it is harmless to other
 // clients; anything per member, anything that acts on the asking client, anything with effects on other clients, and
 // anything of another lane's surface is declared):
-// - the session's lifecycle and its record, which the machine's own app runs (launch, stop, start, fork, archive, take
-//   over, delete, rename, the setup intent, replays): a remote session starts from "+ Session" and resumes by a send;
+// - the session's lifecycle and its record, which the machine's own app runs (launch, stop, start, take over, delete, the
+//   setup intent, replays): a remote session starts from "+ Session" and resumes by a send;
 // - the composer's machine-side extras with no remote route yet (`!` commands, `#` memory, flag settings, the working
 //   directory, the prompt history's append, a steer's cancel, the skills' reload);
 // - what is kept per window (visibility, the mods' surfaces and their panes, a pane's answer);
@@ -33,7 +33,6 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.launch': notYet('start it again by sending a message, or start a new session with + Session'),
   'session.stop': notYet('stopping the session’s process'),
   'session.start': notYet('start a session there with + Session'),
-  'session.fork': notYet('forking a session'),
   'session.takeOver': notYet('taking over a session another process holds'),
   'session.delete': notYet('deleting a session'),
   'session.deletions.keep': notYet('deleting a session'),
@@ -98,6 +97,7 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'attention.acknowledge': SESSION_ACTS_CAPABILITY,
   'session.steer.cancel': SESSION_ACTS_CAPABILITY,
   'maws.pane.answer': SESSION_ACTS_CAPABILITY,
+  'session.fork': SESSION_ACTS_CAPABILITY, // in place, the machine's owners' (M2)
 };
 
 /**
