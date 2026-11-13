@@ -227,9 +227,9 @@ function overflowing(root: Element): string[] {
 function namesOutOfOrder(root: Element): string[] {
   const RANK: Record<string, number> = { title: 0, label: 1, chip: 2, alias: 3 };
   const faults: string[] = [];
-  const rows = new Set([...root.querySelectorAll('[data-name-part]')].map((part) => part.closest('header, button, li > div')).filter((row): row is Element => row !== null));
+  const rows = new Set(Array.from(root.querySelectorAll('[data-name-part]')).map((part) => part.closest('header, button, li > div')).filter((row): row is Element => row !== null));
   for (const row of rows) {
-    const parts = [...row.querySelectorAll<HTMLElement>('[data-name-part]')].filter((part) => part.closest('header, button, li > div') === row);
+    const parts = Array.from(row.querySelectorAll<HTMLElement>('[data-name-part]')).filter((part) => part.closest('header, button, li > div') === row);
     const text = (el: HTMLElement) => (el.querySelector<HTMLElement>('[data-machine-chip]') ?? el);
     const width = (el: HTMLElement) => el.getBoundingClientRect().width;
     const whole = (el: HTMLElement) => text(el).scrollWidth <= text(el).clientWidth + 1 && width(el) > 0;
