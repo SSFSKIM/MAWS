@@ -11,7 +11,10 @@
 //            Keychain item that directory names claimed before and released after every engine the probe started has
 //            exited. The test records the answers; the verdict is read from them (it passes whatever they are, once the
 //            Keychain is left as found). Its verdict is in (spikes/p4-aggregator/findings-m4.txt, gate run 40175924834),
-//            so it runs again only on request: MAWS_SIGNIN_SPIKE=1 beside the group's flag.
+//            so it runs again only on request: MAWS_SIGNIN_SPIKE=1 beside the group's flag. The UX wave's U11a (Proof P1)
+//            added the questions `dynamic` and `plugin`, each summed up on its own `spike <question>` line, and asks them
+//            of engine 2.1.322, which MAWS_SIGNIN_SPIKE_ENGINE_BIN names for this case alone; without it the case runs
+//            the group's engine.
 //   add:     Connectors › Discover lists Linear (Partner, its rank, its URL); + opens the connector sheet with the name,
 //            user scope and the exact command; the real CLI adds it (the scratch configuration has it, type http); My
 //            items lists it with "Sign in needed"; the url_regex server asks an instance URL and refuses one off its
@@ -100,8 +103,9 @@ test('oauth fixture, engine mode: a localhost-redirect token exchange from a pla
 test('spike: the engine\'s own MCP sign-in over the control protocol, against the engine-mode fixture', async ({}, testInfo) => {
   test.skip(process.platform !== 'darwin', 'the sign-in spike runs on the Mac lane alone (Decision Log 6)');
   test.skip(process.env.MAWS_SIGNIN_SPIKE !== '1', 'the sign-in spike reruns only on request (MAWS_SIGNIN_SPIKE=1)');
-  test.setTimeout(600_000);
-  const { bin } = realEngine();
+  test.setTimeout(900_000);
+  // the group's other cases keep its pinned engine; the spike may be asked of another release
+  const bin = process.env.MAWS_SIGNIN_SPIKE_ENGINE_BIN || realEngine().bin;
   const configDir = join(root, 'claude-config'); // the string the engine is given, so the item's name derives from it as written
   const project = join(root, 'project');
   mkdirSync(configDir, { recursive: true });
@@ -118,7 +122,7 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
     fixture = await startOAuthFixture({ root, id: 'spike', mode: 'engine' });
     const inputFile = join(root, 'spike-input.json');
     writeFileSync(inputFile, JSON.stringify({ bin, configDir, project, resourceUrl: fixture.resourceUrl, outDir }));
-    const child = spawn(process.execPath, [resolve(__dirname, '../spikes/p4-aggregator/m4-signin-spike.mjs'), inputFile], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 540_000 });
+    const child = spawn(process.execPath, [resolve(__dirname, '../spikes/p4-aggregator/m4-signin-spike.mjs'), inputFile], { stdio: ['ignore', 'ignore', 'pipe'], timeout: 840_000 });
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => (stderr = (stderr + chunk.toString()).slice(-4000)));
     const stopAll = () => {
@@ -143,6 +147,12 @@ test('spike: the engine\'s own MCP sign-in over the control protocol, against th
       : {};
     const verdictInput = { custody: released, fixture: fixtureSide, result };
     console.log(`spike result ${JSON.stringify(verdictInput)}`);
+    const questions = (result?.questions ?? {}) as Record<string, Record<string, unknown> | undefined>;
+    const failures = (result?.failures ?? []) as { question: string }[];
+    for (const question of ['dynamic', 'plugin']) {
+      const answers = Object.fromEntries(Object.entries(questions[question] ?? {}).filter(([key]) => key !== 'steps'));
+      console.log(`spike ${question} ${JSON.stringify({ engineVersion: result?.engineVersion ?? null, ...answers, failures: failures.filter((failure) => failure.question === question) })}`);
+    }
     await testInfo.attach('spike-result.json', { body: JSON.stringify(verdictInput, null, 2), contentType: 'application/json' });
     if (existsSync(join(outDir, 'frames.jsonl'))) await testInfo.attach('spike-frames.jsonl', { path: join(outDir, 'frames.jsonl'), contentType: 'application/x-ndjson' });
     await testInfo.attach('spike-debug-lines.json', { body: JSON.stringify(debugLines, null, 2), contentType: 'application/json' });
