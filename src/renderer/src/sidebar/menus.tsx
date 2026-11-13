@@ -8,7 +8,8 @@
 // with no record here included. P5 O8 M5b: Add owner… after Share, for the
 // session's owners (sessions/share/target.ts' `useCanAddOwner`). UX wave U7 (O-38, #559): a listed row's menu opens with
 // Open and Open in new tab, through its lane's opener. UX wave U7 (O-16): Hide, or Unhide for a hidden session, in every
-// session's menu, where `withHide` places it among a record's actions, and after a listing's opens. The project registry (docs/doperpowers/plans/
+// tree row's session menu, where `withHide` places it among a record's actions, and after a listing's opens; a Needs you
+// row's menu has none (the architect's ruling of 2026-11-13: that row stays where it is whatever is hidden). The project registry (docs/doperpowers/plans/
 // 2026-11-10-project-registry.md, Interfaces §J): a registry project's row offers Add location… (Add project with the
 // project filled) and, unless a `.smns` names it, Rename…; Channel for a hub project only; and a row of a project you see
 // only through its sessions (`registry:<id>`) offers Channel alone.
@@ -48,7 +49,7 @@ import { useTree } from './tree'; // UX wave U7, O-16
 // P5 O8 M5: a project's or machine's `people` says whether its row offers the People toggle.
 export type MenuTarget =
   | { kind: 'machine'; machine: MachineRef; people: boolean }
-  | { kind: 'session'; appSessionId: AppSessionId }
+  | { kind: 'session'; appSessionId: AppSessionId; tree: boolean } // UX wave U7, O-16: a row of the tree, which alone offers Hide
   | { kind: 'project'; projectId: ProjectId; people: boolean }
   | { kind: 'registry'; id: string; people: boolean }; // the project registry: a row with no location to act on
 
@@ -59,7 +60,7 @@ export function menuTargetOf(element: Element | null): MenuTarget | null {
   const value = row?.getAttribute('data-menu') ?? null;
   const people = row?.hasAttribute('data-people') ?? false;
   if (value?.startsWith('machine:')) return { kind: 'machine', machine: value.slice('machine:'.length) as MachineRef, people };
-  if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId };
+  if (value?.startsWith('session:')) return { kind: 'session', appSessionId: value.slice('session:'.length) as AppSessionId, tree: row?.closest('[role="tree"]') != null };
   if (value?.startsWith('project:')) return { kind: 'project', projectId: value.slice('project:'.length) as ProjectId, people };
   if (value?.startsWith('registry:')) return { kind: 'registry', id: value.slice('registry:'.length), people };
   return null;
@@ -89,7 +90,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
             {target.people && <PeopleItem rowKey={machineKey(target.machine)} />}
           </>
         )}
-        {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} />}
+        {target?.kind === 'session' && <SessionItems appSessionId={target.appSessionId} hidable={target.tree} />}
         {target?.kind === 'project' && <ProjectItems projectId={target.projectId} people={target.people} />}
         {target?.kind === 'registry' && <RegistryItems id={target.id} people={target.people} />}
       </ContextMenu.Content>
@@ -99,7 +100,7 @@ export function SidebarMenuContent({ target }: { target: MenuTarget | null }) {
 
 // P5 O8 M6b: the listing-capable session menu. A record's actions, then Share for a session you own (sessions/share/
 // target.ts); another machine's listed session with no record here offers its two opens (UX wave U7), then Share.
-function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSessionId; dropdown?: boolean }) {
+function SessionItems({ appSessionId, dropdown = false, hidable }: { appSessionId: AppSessionId; dropdown?: boolean; hidable: boolean }) {
   const record = useSessions((s) => s.records.get(appSessionId));
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
   const kept = useSessions((s) => s.engine.get(appSessionId)?.kept); // P5 O2 M2: undefined while no status reports it
@@ -113,12 +114,14 @@ function SessionItems({ appSessionId, dropdown = false }: { appSessionId: AppSes
       {ownable && <AddOwnerItem appSessionId={appSessionId} dropdown={dropdown} />}
     </>
   );
-  if (!record && listed !== undefined) return <><ListedOpenItems listed={listed} dropdown={dropdown} /><HideItem appSessionId={appSessionId} dropdown={dropdown} />{reach}</>;
+  if (!record && listed !== undefined) return <><ListedOpenItems listed={listed} dropdown={dropdown} />{hidable && <HideItem appSessionId={appSessionId} dropdown={dropdown} />}{reach}</>;
   if (!record) return shareable ? reach : null;
   const foreign = record.holder.kind === 'terminal' || record.holder.kind === 'background_job'; // D-12: the opens only
+  const actions = sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading });
+  const items: (SessionActionId | 'hide')[] = hidable ? withHide(actions) : actions;
   return (
     <>
-      {withHide(sessionActionsFor(record, { bridged, remote: isRemoteLaneB(appSessionId) /* P5 O7 M2 */, remoteReading })).map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : <SessionItem key={id} id={id} record={record} dropdown={dropdown} />))}
+      {items.map((id) => (id === 'hide' ? <HideItem key={id} appSessionId={appSessionId} dropdown={dropdown} /> : <SessionItem key={id} id={id} record={record} dropdown={dropdown} />))}
       {kept !== undefined && !foreign && <KeepItem appSessionId={appSessionId} kept={kept} dropdown={dropdown} />}
       {reach}
     </>
@@ -159,13 +162,12 @@ const keepMovedFocus = (event: Event) => {
   focusMoved = false;
 };
 
-// UX wave U7, O-16: a session's Hide or Unhide, through the sidebar where it places the keyboard after (`fromRow`: the act
-// is a tree row's own control); true when it does.
-function useHideAct(appSessionId: AppSessionId): { hidden: boolean; act(fromRow: boolean): boolean } {
+// UX wave U7, O-16: a tree row's Hide or Unhide, through the sidebar, which places the keyboard after; true when it does.
+function useHideAct(appSessionId: AppSessionId): { hidden: boolean; act(): boolean } {
   const hidden = useHidden((s) => s.hidden.has(appSessionId));
   const tree = useTree();
-  const act = (fromRow: boolean) => {
-    if (tree.onHideAct) return tree.onHideAct(appSessionId, !hidden, fromRow);
+  const act = () => {
+    if (tree.onHideAct) return tree.onHideAct(appSessionId, !hidden);
     if (hidden) useHidden.getState().unhide(appSessionId);
     else useHidden.getState().hide(appSessionId);
     return false;
@@ -181,7 +183,7 @@ function HideItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; drop
       dropdown={dropdown}
       enabled
       onSelect={() => {
-        focusMoved = act(dropdown); // the three dots are a tree row's own
+        focusMoved = act();
       }}
     >
       {hidden ? HIDDEN.unhide : HIDDEN.hide}
@@ -200,7 +202,7 @@ export function RowHideButton({ appSessionId }: { appSessionId: AppSessionId }) 
     <button type="button" tabIndex={-1} aria-label={label} title={label}
       onClick={(event) => {
         event.stopPropagation();
-        act(true);
+        act();
       }}
       className="hidden size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent group-hover/session:inline-flex group-focus-within/session:inline-flex hover:bg-bg-active hover:text-fg focus-visible:outline-2">
       {hidden ? <EyeIcon /> : <EyeOffIcon />}
@@ -397,7 +399,7 @@ export function SessionOverflow({ appSessionId, title }: { appSessionId: AppSess
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content align="end" sideOffset={4} onClick={(e) => e.stopPropagation()} onCloseAutoFocus={keepMovedFocus}
       className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-      <SessionItems appSessionId={appSessionId} dropdown />
+      <SessionItems appSessionId={appSessionId} dropdown hidable /* the three dots are a tree row's own */ />
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>;
 }

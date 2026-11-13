@@ -71,8 +71,8 @@ export interface TreeContextValue {
   selected: AppSessionId | null;
   onFocusItem(id: string): void;
   onPick?(id: AppSessionId): void; // P5 O8 M2: a listed row selected with no opener for its lane
-  // UX wave U7, O-16: a Hide or an Unhide (from a row's own control: `fromRow`); true when the sidebar then places the keyboard
-  onHideAct?(id: AppSessionId, hide: boolean, fromRow: boolean): boolean;
+  // UX wave U7, O-16: a tree row's Hide or Unhide; true when the sidebar then places the keyboard
+  onHideAct?(id: AppSessionId, hide: boolean): boolean;
 }
 export const TreeContext = createContext<TreeContextValue>({ tabStop: null, selected: null, onFocusItem: () => {} });
 export const useTree = () => useContext(TreeContext);

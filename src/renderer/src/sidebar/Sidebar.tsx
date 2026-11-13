@@ -137,7 +137,6 @@ function SidebarBody() {
   const [focused, setFocused] = useState<string | null>(null);
   const pendingFocus = useRef<string | null>(null); // a tree item to focus once a render shows it
   const placeAfterHide = useRef<{ key: ProjectKey; at: number } | null>(null); // UX wave U7, O-16: where a hidden row stood
-  const contextInTree = useRef(false); // UX wave U7, O-16: the open context menu is a tree row's, not a Needs you row's
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [pointerWithin, setPointerWithin] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
@@ -185,8 +184,10 @@ function SidebarBody() {
   // A deliberate sort change is immediate, and so is a Hide or an Unhide (UX wave U7, O-16); no timer can reshuffle a
   // row between two actions.
   const holding = pointerWithin || focusWithin || menuTarget !== null;
+  // An act settles even when it changed no rank (a Hide with no lead): it is consumed then, never left to release a later
+  // live update while the person is still inside.
   const [settledOrder, setSettledOrder] = useState({ entries: rankedEntries, sort: sidebar.sort, acts: hideActs });
-  if ((!holding || settledOrder.sort !== sidebar.sort || settledOrder.acts !== hideActs) && settledOrder.entries !== rankedEntries) {
+  if (settledOrder.acts !== hideActs || ((!holding || settledOrder.sort !== sidebar.sort) && settledOrder.entries !== rankedEntries)) {
     setSettledOrder({ entries: rankedEntries, sort: sidebar.sort, acts: hideActs });
   }
   const everyEntry = useMemo(() => {
@@ -245,21 +246,22 @@ function SidebarBody() {
   // The tree items on screen, in order: what the arrow keys walk.
   const nodes = useMemo(() => {
     const out: TreeNode[] = [];
-    // E3: a nested row's parent is its lineage parent's row, so ArrowLeft lands there
-    const rowNodes = (rows: SidebarTreeRow[], parent: string) => rows.map((row): TreeNode => isListedRow(row)
+    // E3: a nested row's parent is its lineage parent's row, so ArrowLeft lands there; under the Hidden row every row's is
+    // the Hidden row (UX wave U7, O-16), a lineage child's included
+    const rowNodes = (rows: SidebarTreeRow[], parent: string, byLineage: boolean) => rows.map((row): TreeNode => isListedRow(row)
       ? { id: sessionNodeId(row.listed.appId), kind: 'listed', appSessionId: row.listed.appId, parent }
-      : { id: sessionNodeId(row.record.appId), kind: 'session', appSessionId: row.record.appId, parent: row.nestedUnder === null ? parent : sessionNodeId(row.nestedUnder) });
+      : { id: sessionNodeId(row.record.appId), kind: 'session', appSessionId: row.record.appId, parent: !byLineage || row.nestedUnder === null ? parent : sessionNodeId(row.nestedUnder) });
     shown.forEach(({ entry, open, sessions, more: folded, hidden }, i) => {
       if (i === moreAt) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
       const id = projectNodeId(entry.key);
       out.push({ id, kind: 'project', key: entry.key, expanded: open });
       if (!open) return;
-      out.push(...rowNodes(sessions, id));
+      out.push(...rowNodes(sessions, id, true));
       if (folded > 0) out.push({ id: moreNodeId(entry.key), kind: 'more', key: entry.key, parent: id });
       if (hidden.count === 0) return;
       const hiddenId = hiddenNodeId(entry.key); // UX wave U7, O-16: its rows step out to it
       out.push({ id: hiddenId, kind: 'hidden', key: entry.key, expanded: hidden.open, parent: id });
-      out.push(...rowNodes(hidden.rows, hiddenId));
+      out.push(...rowNodes(hidden.rows, hiddenId, false));
     });
     if (moreAt === shown.length) out.push({ id: MORE_PROJECTS, kind: 'more', key: null, parent: null });
     return out;
@@ -380,15 +382,13 @@ function SidebarBody() {
     if (!next.delete(key)) next.add(key);
     setOpenHidden(next);
   };
-  // A Hide or an Unhide from a row's menu, and where the keyboard goes after it (M3, decision 6), when the menu was a tree
-  // row's (its three dots, or its context menu; a Needs you row keeps the keyboard): after Unhide to the unhidden row, at
-  // its list's head, once the render that moves it is on screen; after Hide to the row that takes its place (the effect
-  // above), else the Hidden row.
-  const hideAct = (id: AppSessionId, hide: boolean, fromRow: boolean): boolean => {
+  // A Hide or an Unhide from a tree row (its menu or its button; a Needs you row offers neither), and where the keyboard
+  // goes after it (M3, decision 6): after Unhide to the unhidden row, at its list's head, once the render that moves it is
+  // on screen; after Hide to the row that takes its place (the effect above), else the Hidden row.
+  const hideAct = (id: AppSessionId, hide: boolean): boolean => {
     const store = useHidden.getState();
-    const inTree = fromRow || contextInTree.current;
     if (!hide) {
-      const moves = inTree && shown.some((p) => p.open && p.hidden.rows.some((row) => rowId(row) === id));
+      const moves = shown.some((p) => p.open && p.hidden.rows.some((row) => rowId(row) === id));
       store.unhide(id);
       if (moves) {
         setFocused(sessionNodeId(id));
@@ -396,7 +396,7 @@ function SidebarBody() {
       }
       return moves;
     }
-    const group = inTree ? shown.find((p) => p.open && p.sessions.some((row) => rowId(row) === id)) : undefined;
+    const group = shown.find((p) => p.open && p.sessions.some((row) => rowId(row) === id));
     store.hide(id);
     if (group !== undefined) placeAfterHide.current = { key: group.entry.key, at: group.sessions.findIndex((row) => rowId(row) === id) };
     return group !== undefined;
@@ -439,7 +439,6 @@ function SidebarBody() {
               data-testid="sidebar-tree"
               onContextMenu={(event) => {
                 const target = menuTargetOf(event.target as Element);
-                contextInTree.current = (event.target as Element).closest('[role="tree"]') !== null;
                 if (target) setMenuTarget(target);
                 else event.preventDefault(); // no row, no menu
               }}
