@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
-import { heard, resetSignIns } from './connectors/sign-in';
+import { heard, resetSignIns, startSignInDynamic } from './connectors/sign-in';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
@@ -441,6 +441,73 @@ describe('Connectors', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
     expect(await within(rows()[1]!).findByText('Sign in needed')).toBeTruthy();
     expect(within(rows()[1]!).queryByText('Signed in · connected here')).toBeNull();
+  });
+
+  // UX wave U11a M8 (§A, "Who offers Sign in"): a row of MAWS's own list signs in through a ready session on this Mac whose
+  // status lists the name, sending the revision of the configuration the row was drawn with; with no revision (an engine
+  // host of an earlier build) it offers nothing, and with no such session it says to open one.
+  describe('a row of MAWS’s own list', () => {
+    const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
+    const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
+    const ownRow = async () => (await screen.findByText('fx-own')).closest('li')!;
+    beforeEach(() => {
+      backend.script('customization.inventory', () => ({ skills: [], servers: [OWN], warnings: [], serversRead: true }));
+      backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-own' }));
+    });
+
+    it('offers Sign in while a ready session holds the server, and sends the revision the row was drawn with to that session', async () => {
+      const bare = holding('bare', '/one', []); // the page's attached session, which does not list it
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[bare.appSessionId, bare], [holder.appSessionId, holder]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'holder', entry: { revision: 'rev-1' } }]));
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'waiting_callback', reason: null, message: null, where: null }));
+      expect(within(row).getByText('Finish signing in in your browser…')).toBeTruthy();
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'done', reason: null, message: null, where: 'here' }));
+      expect(within(row).getByText('Signed in · connected here')).toBeTruthy();
+    });
+
+    it('offers no Sign in while the row has no revision', async () => {
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });
+      ownPosture(null);
+      mountWith(fresh());
+      const row = await ownRow();
+      expect(await within(row).findByText('Sign in needed')).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Sign in to fx-own' })).toBeNull();
+      expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
+    it('with no ready session on this Mac holding it, says to open one and sends nothing', async () => {
+      const other = holding('other', '/one', ['notion']);
+      const remote = { ...holding('on-mini', '/one', ['fx-own']), appSessionId: addressOf(OTHER_MACHINE, 'on-mini' as AppSessionId) };
+      useSessions.setState({ engine: new Map([[other.appSessionId, other], [remote.appSessionId, remote]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      expect(await within(row).findByText('Open a session, then sign in')).toBeTruthy();
+      expect(within(row).queryByRole('button', { name: 'Sign in to fx-own' })).toBeNull();
+      expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer')).toEqual([]);
+    });
+
+    it('shows a sign-in the dialog runs while it runs, and not its finished result', async () => {
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });
+      ownPosture('rev-1');
+      mountWith(fresh());
+      const row = await ownRow();
+      await within(row).findByRole('button', { name: 'Sign in to fx-own' });
+      await act(() => startSignInDynamic({ name: 'fx-own' }, null, holder.appSessionId)); // the dialog's press: no revision, no fingerprint
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'waiting_callback', reason: null, message: null, where: null }));
+      expect(within(row).getByText('Finish signing in in your browser…')).toBeTruthy();
+      act(() => heard({ opId: 'op-own', name: 'fx-own', state: 'done', reason: null, message: null, where: 'here' }));
+      expect(within(row).queryByText('Signed in · connected here')).toBeNull();
+      expect(within(row).getByText('Sign in needed')).toBeTruthy();
+    });
   });
 
   it('an authless server reads No sign-in needed and offers no sign-in', async () => {

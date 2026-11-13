@@ -7,7 +7,7 @@ import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
-import { INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
+import { configurationRevision, INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
 
 // P5 O3-A: a machine-settings.json holding these app MCP servers
 const appServers = (mcpServers: { name: string; type: 'http'; url: string }[]) => ({ ...machineSettingsDefaults(), engine: { ...machineSettingsDefaults().engine, mcpServers } });
@@ -288,13 +288,45 @@ describe('cold customization inventory', () => {
     await json(global, { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
     const appFile = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     expect(await readServerEndpoints(null, { userData, captureEnv: environment })).toEqual({ servers: [
-      { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/' },
-      { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET' },
-      { name: 'process', scope: 'user', path: global, transport: 'stdio', url: null },
+      { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { name: 'process', scope: 'user', path: global, transport: 'stdio', url: null, revision: null },
     ] });
     expect(JSON.stringify(await read())).not.toMatch(/SECRET|linear\.app/);
     expect(isBridgedCommandName('customization.serverEndpoints')).toBe(false);
     expect(commands['customization.serverEndpoints'].owner).toBe('engine-host');
+  });
+
+  // UX wave U11a M8 (§A, "The configuration's revision"): each endpoint's configuration stands as an opaque revision, an
+  // HMAC of its name, transport and address under a key the host makes at its start and never writes or sends, so a
+  // press from Customize can name the configuration its row showed without the window holding an address.
+  it('stamps each endpoint with its configuration’s revision: the same within one run for the same name, transport and address, another for any change, none without an address', async () => {
+    const global = join(configHome, '.claude.json');
+    const revisions = async () => Object.fromEntries((await readServerEndpoints(null, { userData, captureEnv: environment })).servers.map((server) => [`${server.scope}:${server.name}`, server.revision]));
+    await json(global, { mcpServers: { linear: { type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }, same: { type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }, process: { command: 'run' } } });
+    await json(join(userData, 'machine-settings.json'), appServers([{ name: 'linear', type: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' }]));
+    const first = await revisions();
+    expect(await revisions()).toEqual(first); // within one run of the host
+    expect(first['user:linear']).toMatch(/^[0-9a-f]{32}$/);
+    expect(first['app:linear']).toBe(first['user:linear']); // the configuration is its name, transport and address, not its file
+    expect(first['user:same']).not.toBe(first['user:linear']); // another name
+    expect(first['user:process']).toBeNull();
+    await json(global, { mcpServers: { linear: { type: 'http', url: 'https://linear.example.test/mcp?token=OTHER_SECRET' } } });
+    expect((await revisions())['user:linear']).not.toBe(first['user:linear']); // another address
+    await json(global, { mcpServers: { linear: { type: 'sse', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' } } });
+    expect((await revisions())['user:linear']).not.toBe(first['user:linear']); // another transport
+    expect(JSON.stringify(first)).not.toMatch(/SECRET|linear\.example/);
+  });
+
+  it('makes a revision that says nothing of the address: keyed, so a known address cannot be confirmed from it', () => {
+    const configuration = { name: 'linear', transport: 'http', url: 'https://linear.example.test/mcp?token=QUERY_SECRET' } as const;
+    const revisionOf = configurationRevision(Buffer.alloc(32, 7));
+    const revision = revisionOf(configuration)!;
+    expect(revision).toMatch(/^[0-9a-f]{32}$/);
+    expect(revisionOf(configuration)).toBe(revision);
+    expect(configurationRevision(Buffer.alloc(32, 8))(configuration)).not.toBe(revision); // another run, another key
+    expect(revisionOf({ ...configuration, url: null })).toBeNull();
+    expect(revision).not.toContain('linear');
   });
 
   it('registers a read-only host command with null-cwd support and strict metadata-only IPC output', async () => {

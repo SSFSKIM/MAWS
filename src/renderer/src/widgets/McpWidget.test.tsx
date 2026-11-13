@@ -175,12 +175,11 @@ describe('mcp sign in', () => {
     await waitFor(async () => expect((await row(DOCS)).querySelector('[data-sign-in-state]')?.textContent).toBe('Signed in · connected here'));
   });
 
-  it('offers no Sign in on a connected server, nor on one of a scope the engine signs in nowhere', async () => {
+  it('offers no Sign in on a connected server', async () => {
     backend.script('session.mcpStatus', () => withServer('plugin:ptc:ptc', { status: 'needs-auth' }));
     mountFor(ID);
     await row(DOCS);
     expect(screen.queryByRole('button', { name: `Sign in to ${DOCS}` })).toBeNull(); // connected
-    expect(screen.queryByRole('button', { name: 'Sign in to plugin:ptc:ptc' })).toBeNull(); // `dynamic`: --mcp-config's
   });
 
   // P5 O7 M8 ("An older peer"): a machine heard refusing a command `not-offered` greys its control for that machine's
@@ -444,5 +443,68 @@ describe('toggleView: the switch from the read, never from the outcome', () => {
   });
   it('trusts the read after a refusal thrown before the write', () => {
     expect(toggleView(true, failed('MCP server x is blocked by enterprise managed policy'), { status: 'disabled', error: null })).toEqual({ position: 'off', line: 'MCP server x is blocked by enterprise managed policy · engine_error' });
+  });
+});
+
+// UX wave U11a M8 (§A, "Who offers Sign in"): a dynamic row that needs a sign-in, a plugin's (`plugin:<plugin>:<server>`)
+// or one of MAWS's own list, both `dynamic` in mcp_status (P1), offers Sign in through `connectors.signInDynamicServer`
+// by its name; `claudeai` and the managed scopes are signed in nowhere a session reaches. For a session on another
+// machine the control is drawn disabled with U9's sentence until U11f; a file-scope row beside it keeps its Sign in.
+describe('the Connectors dialog’s Sign in for a dynamic connector', () => {
+  const PLUGIN = 'plugin:fx-plugin:fx-oauth';
+  const REMOTE = addressOf(OTHER_MACHINE, BARE);
+  const NOT_YET = 'Not on another machine yet: signing in to a connector from a plugin or from MAWS’s own list';
+  const dynamicServer = (name: string) => server(name, 'needs-auth', { scope: 'dynamic', source: 'dynamic' });
+  const sent = () => backend.calls.filter((c) => c.command === 'connectors.signInDynamicServer').map((c) => c.input);
+  beforeEach(() => {
+    resetSignIns();
+    backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-d' }));
+    backend.script('connectors.signInServer', () => ({ opId: 'op-f' }));
+  });
+  const signInOf = async (name: string) => within(await row(name)).findByRole('button', { name: `Sign in to ${name}` });
+
+  it('offers Sign in on a plugin’s row and on one of MAWS’s own list, and signs each in by its name; the line under it follows the sign-in', async () => {
+    backend.script('session.mcpStatus', () => ({ mcpServers: [dynamicServer(PLUGIN), dynamicServer('fx-own')] }));
+    mount();
+    fireEvent.click(await signInOf(PLUGIN));
+    await waitFor(() => expect(sent()).toEqual([{ name: PLUGIN, appSessionId: BARE }]));
+    act(() => heard({ opId: 'op-d', name: PLUGIN, state: 'waiting_callback', reason: null, message: null, where: null }, Date.now(), null));
+    await waitFor(async () => expect((await row(PLUGIN)).querySelector('[data-sign-in-state]')?.textContent).toBe('Finish signing in in your browser…'));
+    expect((await row('fx-own')).querySelector('[data-sign-in-state]')).toBeNull(); // another connector's sign-in
+    fireEvent.click(await signInOf('fx-own'));
+    await waitFor(() => expect(sent()).toEqual([{ name: PLUGIN, appSessionId: BARE }, { name: 'fx-own', appSessionId: BARE }]));
+    expect(backend.calls.filter((c) => c.command === 'connectors.signInServer')).toEqual([]);
+  });
+
+  it('offers none for the claudeai and managed scopes, nor for a dynamic name past the 128 characters the command takes', async () => {
+    const long = `plugin:fx-plugin:${'x'.repeat(112)}`; // 129 characters
+    backend.script('session.mcpStatus', () => ({ mcpServers: [server('fx-claude', 'needs-auth', { scope: 'claudeai' }), server('fx-managed', 'needs-auth', { scope: 'managed' }), server('fx-enterprise', 'needs-auth', { scope: 'enterprise' }), dynamicServer(long), dynamicServer('fx-own')] }));
+    mount();
+    await signInOf('fx-own');
+    for (const name of ['fx-claude', 'fx-managed', 'fx-enterprise', long]) expect(within(await row(name)).queryByRole('button', { name: `Sign in to ${name}` }), name).toBeNull();
+  });
+
+  it('is disabled with its sentence for a session on another machine, a file-scope row beside it keeping its Sign in', async () => {
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ engine: new Map([[REMOTE, { ...backend.status(BARE), appSessionId: REMOTE }]]), listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, BARE), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    backend.script('session.mcpStatus', () => ({ mcpServers: [dynamicServer(PLUGIN), server('tickets', 'needs-auth')] }));
+    try {
+      render(
+        <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+          <McpWidget appSessionId={REMOTE} args="" close={() => {}} />
+        </QueryClientProvider>,
+      );
+      const dynamic = await signInOf(PLUGIN);
+      expect(dynamic).toHaveProperty('disabled', true);
+      expect(dynamic.title).toBe(NOT_YET);
+      fireEvent.click(dynamic);
+      const file = await signInOf('tickets');
+      expect(file).toHaveProperty('disabled', false);
+      fireEvent.click(file);
+      await waitFor(() => expect(backend.calls.filter((c) => c.command === 'connectors.signInServer')).toHaveLength(1));
+      expect(sent()).toEqual([]);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
   });
 });
