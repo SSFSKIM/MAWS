@@ -606,17 +606,20 @@ describe('the queue (S14, S15)', () => {
 
   // Decision Log 24: the rule's meter pauses each time its scan has done 64 KiB of work, and each pause is a turn of the
   // loop at once, not one step among NAMED_CLAIM_STEPS. A row of one long text and one link that does not name the path:
-  // its two passes over three million characters pause at least once per 64 KiB of the text.
+  // its two passes over three million characters pause at least once per 64 KiB of the text. The turns are counted from
+  // the moment the transcript is open, so none is the loop turning while the file is read from the disk.
   it('gives the event loop back at every pause of the scan of one long text', async () => {
     const text = `${'x'.repeat(3_000_000)} [r](${P}.bak)`;
     await writeTranscript([assistant({ type: 'text', text })]);
     const loop = ticker();
+    let opened = 0;
+    holds.opened = async () => void (opened = loop.ticks());
     try {
       expect(await paths({ open: instant(), bounds: { chunk: 8 * 1024 * 1024 } }).names(S, P)).toBe(false);
     } finally {
       loop.stop();
     }
-    expect(loop.ticks()).toBeGreaterThanOrEqual(text.length / (64 * 1024));
+    expect(loop.ticks() - opened).toBeGreaterThanOrEqual(text.length / (64 * 1024));
   });
 
   // fix round 1, item 3: a request's patience and its signal run from the moment it is made, the locator's wait

@@ -179,7 +179,7 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
   // An independent count, outside the meter: every `charCodeAt` call and every character an `indexOf` passes, and the
   // longest unread input any regular expression is run on (`exec` is what `test`, `replace` and `matchAll` call once it
   // is patched). A count past its bound stops the scan at once, so a quadratic scan fails here instead of running on.
-  const VISITS_PER_CHAR = 4 * WORK_PER_CHAR;
+  const VISITS_PER_CHAR = 256; // independent of the meter's own multiple
   const REGEX_INPUT_MAX = 64 * 1024; // a link's tail is at most 16 KiB, and percent-encoding at most triples an ASCII one
   function probed(text: string): { visits: number; regexInput: number } {
     const bound = VISITS_PER_CHAR * text.length + 1_000_000;
