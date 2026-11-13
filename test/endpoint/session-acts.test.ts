@@ -11,7 +11,7 @@
 //
 // The org (sub-harness.ts): A owns the machine `mini`; B and C are members.
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
-import type { Action } from 'org-protocol';
+import { MESSAGE_MAX_BYTES, type Action } from 'org-protocol';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { registerIndexHandlers } from '../../src/services/index/register';
@@ -255,16 +255,17 @@ describe('dismiss, take back and a pane’s answer (`converse`)', () => {
 describe('the archived sessions’ read (`session.list {includeArchived: true}`, cut at `manage`)', () => {
   const idsOf = (m: Msg) => ((m.output as { sessions: SessionRecord[] }).sessions ?? []).map((record) => record.appId).sort();
 
-  it('answers each caller the records they hold `manage` on, archived ones included, and nothing else', async () => {
+  it('answers each caller the archived records they hold `manage` on, and nothing else', async () => {
     const { f, h } = await machine();
     const machines = session(f, h, { archived: true, shares: [{ member: org.B, grade: 'converse' }] }).appId;
     const listed = session(f, h, { archived: true, shares: [{ member: org.B, grade: 'list' }] }).appId;
-    const live = session(f, h).appId;
+    session(f, h); // unarchived: no caller's to unarchive, so none is answered it
     const bobs = session(f, h, { owners: [org.B], archived: true }).appId;
+    session(f, h, { owners: [org.B] }); // B's own, unarchived
     const [a, b, c] = [await openRemote(f, org.a1, org.A), await openRemote(f, org.b1, org.B), await openRemote(f, org.c1, org.C)];
     const asOwner = await call(a, 'session.list', { includeArchived: true });
     expect(codeOf(asOwner)).toBe('ok');
-    expect(idsOf(asOwner)).toEqual([machines, listed, live].sort());
+    expect(idsOf(asOwner)).toEqual([machines, listed].sort());
     // a session the member may converse in or only list is not theirs to unarchive: their own alone is answered
     const asMember = await call(b, 'session.list', { includeArchived: true });
     expect(codeOf(asMember)).toBe('ok');
@@ -280,6 +281,20 @@ describe('the archived sessions’ read (`session.list {includeArchived: true}`,
     const b = await openRemote(f, org.b1, org.B);
     const [record] = (((await call(b, 'session.list', { includeArchived: true })).output as { sessions: SessionRecord[] }).sessions);
     expect(record.pinned).toBe(false);
+  });
+
+  // The panel's fix: the read exists for Unarchive alone, so an unarchived record never leaves the machine through it, and
+  // a machine whose unarchived records alone would pass the channel's ceiling still answers its archived ones
+  it('leaves every unarchived record out, however many and large, so the archived ones still fit', async () => {
+    const { f, h } = await machine();
+    const LARGE = 'Loft notes '.repeat(10_000); // ~110 kB a record
+    for (let i = 0; i < 40; i += 1) session(f, h, { title: `${LARGE}${i}` });
+    expect(40 * LARGE.length).toBeGreaterThan(MESSAGE_MAX_BYTES - 1024); // uncut, the answer could not be sent
+    const archived = session(f, h, { archived: true }).appId;
+    const a = await openRemote(f, org.a1, org.A);
+    const answer = await call(a, 'session.list', { includeArchived: true });
+    expect(codeOf(answer)).toBe('ok');
+    expect(idsOf(answer)).toEqual([archived]);
   });
 
   it('takes no other input (`malformed`)', async () => {
