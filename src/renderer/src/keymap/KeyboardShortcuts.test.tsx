@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ACTION_IDS, ACTIONS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
 import { matchesChord, parseChord } from '@shared/keymap/chord';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
@@ -8,6 +8,13 @@ import { registerShellActions } from '../app/shell-actions';
 import { useSettings } from '../stores/settings';
 import { runAction } from './actions-runtime';
 import { KeyboardShortcuts } from './KeyboardShortcuts';
+
+// U6a (decision 12): the sheet lists the table extended with sample rows shaped as the siblings' will be
+vi.mock('../settings-tab/keymap', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../settings-tab/keymap')>();
+  const { EXTENDED_TABLE } = await import('@shared/keymap/sample-rows');
+  return { ...actual, keymapGroups: (overrides: KeymapOverrides) => actual.keymapGroups(overrides, EXTENDED_TABLE) };
+});
 
 let off: () => void;
 beforeEach(() => { off = registerShellActions(); });
@@ -77,4 +84,14 @@ it.each(['cards', 'terminal', 'review', 'files', 'browser'])('finds the current 
   const dialog = openSheet();
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: query } });
   expect(within(dialog).getAllByRole('row').length).toBeGreaterThan(0);
+});
+
+// U6a (A9): the sheet groups its rows as the menus do, submenus included, and lists an editor's own keys under their scope
+it('draws a submenu’s group under its path, and lists a fixed key with its chord', () => {
+  const dialog = openSheet();
+  expect(within(within(dialog).getByRole('table', { name: 'View › Tabs' })).getByRole('row', { name: /Select tab 1–9/ }).textContent).toContain('⌘1…9');
+  expect(within(within(dialog).getByRole('table', { name: 'View › More surfaces' })).getByRole('row', { name: /Source control/ })).toBeTruthy();
+  expect(within(within(dialog).getByRole('table', { name: 'Edit › Sample' })).getByRole('row', { name: /Sample menu row/ })).toBeTruthy();
+  expect(within(within(dialog).getByRole('table', { name: 'In the composer' })).getByRole('row', { name: /Sample fixed key/ }).textContent).toContain('⇧↩');
+  expect(within(within(dialog).getByRole('table', { name: 'View' })).getByRole('row', { name: /Terminal/ }).textContent).toContain('⌘J');
 });

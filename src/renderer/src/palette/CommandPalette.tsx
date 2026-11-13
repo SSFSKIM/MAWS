@@ -14,7 +14,7 @@ import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord } from '@shared/ipc/schema';
-import { ACTION_IDS, ACTIONS, effectiveChord, type ActionId } from '@shared/keymap/actions';
+import { ACTIONS, effectiveChord, idsOf, type ActionId, type ActionTable } from '@shared/keymap/actions';
 import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
@@ -55,13 +55,15 @@ export interface PaletteEntries {
 export function paletteEntries(
   query: string,
   input: { records: ReadonlyMap<AppSessionId, SessionRecord>; projects: ReadonlyMap<ProjectId, ProjectRecord> },
+  table: ActionTable = ACTIONS,
 ): PaletteEntries {
   const q = query.trim().toLowerCase();
   const matches = sessionMatcher(query, input.projects);
   return {
     sessions: [...input.records.values()].filter((r) => !r.archived && matches(r)),
     projects: [...input.projects.values()].filter((p) => !p.hidden && (q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q))), // W11: a hidden project is not revealed
-    actions: ACTION_IDS.filter((id) => q === '' || ACTIONS[id].title.toLowerCase().includes(q)),
+    // U6a: a fixed row (a key its own editor handles) is not an act the palette can run
+    actions: idsOf(table).filter((id) => !table[id].fixed && (q === '' || table[id].title.toLowerCase().includes(q))),
   };
 }
 
