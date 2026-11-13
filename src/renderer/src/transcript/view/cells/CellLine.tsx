@@ -5,7 +5,9 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
-import { baseName, descriptionLabel } from '../../model/copy';
+import { baseName, descriptionLabel, SHELL_CELL } from '../../model/copy';
+import { shellToolOf } from '../../model/cells';
+import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
@@ -35,13 +37,24 @@ function FileLabel({ label, path, target }: { label: string; path: string; targe
 // The model's label as it is: a refusal's diagnostic, and the one form of a stopped call (UX wave U2, decision 23, R2)
 const asLabelled = (cell: Cell) => cell.classification.denial !== null || cell.status === 'stopped';
 
+// UX wave U2 (O-49; the U2a document, decision 5, Interfaces §D): what a shell call's row reads, the one function its
+// row and its run's line call. In order: the model's label for a refused call that stands alone and for a stopped call;
+// the description, always, when the call gave one (the agent's own summary, inflected); else the verb and the short
+// form of the command, in code marks; else the verb and `a command`. A shell tool with no command line of its own reads
+// the verb and its name.
+export function shellLabel(cell: Cell): string {
+  if (cell.detail.kind !== 'shell' || asLabelled(cell)) return cell.label;
+  const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
+  if (description) return descriptionLabel(description, cell.status);
+  const status = cell.status === 'running' ? 'running' : cell.status === 'error' ? 'error' : 'done';
+  const shell = shellToolOf(cell.toolName);
+  if (shell === null) return SHELL_CELL.tool(status, cell.toolName);
+  const short = shortCommand(cell.detail.command, shell);
+  return short === null ? SHELL_CELL.aCommand[status] : SHELL_CELL.command(status, short);
+}
+
 function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
-  // Bash's description is the agent-authored summary, not a command to reformat. Keep diagnostic denial labels.
-  if (cell.detail.kind === 'shell' && !asLabelled(cell)) {
-    const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
-    const verb = { running: 'Running', done: 'Ran', error: 'Failed', stopped: 'Stopped', denied: 'Denied' }[cell.status];
-    return <>{description ? descriptionLabel(description, cell.status) : `${verb} ${cell.toolName}`}</>;
-  }
+  if (cell.detail.kind === 'shell') return <CodeText text={shellLabel(cell)} />;
   if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingCellLabel cell={cell} turnId={turnId} />; // W8
   const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   const label = counts ? cell.label.slice(0, counts.index) : cell.label;
@@ -69,6 +82,7 @@ export function CellLine({ cell, turnId, focusable = false, renderDetail, onTogg
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
           <Label cell={cell} turnId={turnId} />
+          {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
         </span>
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
         <Chevron />

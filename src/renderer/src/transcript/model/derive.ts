@@ -16,6 +16,7 @@ import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
 import { cellOf, editCounts, engineRefusalOf, filePathOf, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
+import { artifactTitlesOf } from './cells'; // UX wave U2
 import { hookNotice, type HookRecord } from './hooks';
 import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
@@ -417,6 +418,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const looked = state.agents?.get(key);
     return looked?.kind === 'agent' ? looked : null;
   };
+  // UX wave U2 (l6-artifacts-12): an artifact by the title the transcript's results gave it, this turn's then the earlier
+  // turns' (latest first), read once a call asks
+  let earlierTitles: ReadonlyMap<string, string>[] | null = null;
+  const titleOf = (ref: string): string | null =>
+    titlesOfTurn(turn).get(ref) ?? (earlierTitles ??= state === null ? [] : earlierTurns(state, turn).map(titlesOfTurn)).find((titles) => titles.has(ref))?.get(ref) ?? null;
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
@@ -857,7 +863,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     switch (item.kind) {
       case 'tool': {
         const rec = tools.get(item.toolUseId)!;
-        resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
+        resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false, undefined, titleOf) });
         break;
       }
       case 'hook': {
@@ -897,7 +903,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'message': { // P4-R7
         const rec = messageCalls.get(item.toolUseId)!;
         const row = toHumanRow(rec, turn.id, context);
-        resolved.push(row !== null ? { kind: 'row', row } : { kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
+        resolved.push(row !== null ? { kind: 'row', row } : { kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false, undefined, titleOf) });
         break;
       }
       case 'subagents': {
@@ -1377,6 +1383,17 @@ function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
 }
 
 const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
+
+// UX wave U2 (l6-artifacts-12): the titles one turn's results gave its artifacts, kept per turn object as its agents are
+// (`knownOfTurn`), and made again when the turn has changed
+const titlesByTurn = new WeakMap<TurnState, { version: number; events: number; titles: ReadonlyMap<string, string> }>();
+function titlesOfTurn(turn: TurnState): ReadonlyMap<string, string> {
+  const kept = titlesByTurn.get(turn);
+  if (kept && kept.version === turn.version && kept.events === turn.events.length) return kept.titles;
+  const titles = artifactTitlesOf(turn.events);
+  titlesByTurn.set(turn, { version: turn.version, events: turn.events.length, titles });
+  return titles;
+}
 
 
 // UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome, a

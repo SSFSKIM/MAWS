@@ -293,6 +293,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell-line > .transcript-chevron { margin-left: auto; opacity: 0; }
 .transcript-cell-line:hover > .transcript-chevron, .transcript-cell-line:focus-visible > .transcript-chevron, .transcript-cell-line[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
 .transcript-cell-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* UX wave U2 (decision 13): a failed call's reason, muted after its label and cut by the label's own ellipsis. */
+.transcript-cell-reason { margin-left: 3px; color: var(--fg-faint); }
 .transcript-file-verb { color: var(--fg-muted); }
 .transcript-file-target { color: var(--fg); }
 /* The status mark is drawn here, so the line's text is its label alone. */

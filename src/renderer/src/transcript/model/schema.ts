@@ -50,7 +50,7 @@ const cellShape = {
   id: z.string(), toolUseId: nullable(z.string()), toolName: z.string(), category, classification: ToolClassificationSchema,
   status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
-  background: z.boolean(), doneLabel: z.string().optional(), // UX wave U2
+  background: z.boolean(), doneLabel: z.string().optional(), error: z.string().optional(), // UX wave U2
 };
 export const CellSchema = z.strictObject(cellShape);
 

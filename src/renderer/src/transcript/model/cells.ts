@@ -4,12 +4,14 @@
 import type { SafeguardVerdict } from '@shared/graph/enums';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { TaskId, ToolUseId } from '@shared/graph/ids';
-import { ShowPaneResultSchema } from '@shared/maws/tools'; // E1
+import { MAWS_SERVER_NAME, ShowPaneResultSchema } from '@shared/maws/tools'; // E1
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools'; // E2
 import * as z from 'zod'; // P3-A
-import { classifyTool, continuedAfter, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, stoppedMember, tableRowOf, type ClassifyContext } from './classify';
-import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, stoppedLabel, thinkingLabel } from './copy';
+import { classifyTool, continuedAfter, HISTORICAL_ARTIFACT_UPDATE_TOOL_USE, isAbortedReason, MAWS_TOOL_USE, MCP_TOOL, stoppedMember, tableRowOf, type ClassifyContext } from './classify';
+import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, SHELL_CELL, stoppedLabel, thinkingLabel } from './copy';
 import { ARTIFACT_CELL } from './copy'; // E2
+import { ARTIFACT_TITLE, type ArtifactCallWords } from './copy'; // UX wave U2
+import { shortCommand } from './short-command'; // UX wave U2
 import { cellId } from './keys';
 import type { TurnState } from './reduce';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
@@ -242,33 +244,127 @@ function statusOf(rec: ToolRecord, turn: TurnContext, disposition: 'denied' | 'a
 const elapsedMs = (rec: ToolRecord, turn: TurnContext) =>
   rec.result ? Date.parse(rec.result.at) - Date.parse(rec.use.at) : Math.max(rec.elapsedSeconds * 1000, Date.parse(turn.lastAt) - Date.parse(rec.use.at));
 
-// UX wave U2 (decision 23, R2; Interfaces §D): what a stopped call's row names, family by family: a shell call its
-// description as written (no marks) or else its command, a file change its path, an MCP call its shown name, every other
-// tool its name. The refusal that stands alone keeps today's subject.
-function stoppedSubject(rec: ToolRecord, detail: CellDetail): { subject: string; code: boolean } {
+// UX wave U2 (decision 23, R2; Interfaces §D): what a stopped call's row reads, family by family: `Stopped: ` and a shell
+// call's description as written (no marks), or else the short form of its command (`Stopped a command` where the rule
+// refuses it; a shell tool with no command line of its own, its command field), a file change's path, an artifact's
+// title in its marks, an MCP call's shown name, every other tool's name. The refusal that stands alone keeps today's
+// subject.
+function stoppedRowLabel(rec: ToolRecord, detail: CellDetail, titles: ArtifactTitles): string {
   if (detail.kind === 'shell') {
     const description = detail.description?.trim().split(/\r?\n/, 1)[0];
-    return description ? { subject: description, code: false } : { subject: detail.command, code: true };
+    if (description) return stoppedLabel(description, false);
+    const shell = shellToolOf(rec.use.toolName);
+    if (shell === null) return stoppedLabel(detail.command, true);
+    const short = shortCommand(detail.command, shell);
+    return short === null ? SHELL_CELL.aCommand.stopped : stoppedLabel(short, true);
   }
-  if (detail.kind === 'edit') return { subject: detail.filePath, code: true };
+  if (detail.kind === 'edit') return stoppedLabel(detail.filePath, true);
+  const artifact = artifactSubjectOf(rec, titles);
+  if (artifact !== null) return stoppedLabel(artifact, false);
   const mcp = MCP_TOOL.exec(rec.use.toolName);
-  return { subject: mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName, code: true };
+  return stoppedLabel(mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName, true);
 }
 
-function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], category: ToolCategory, classification: Cell['classification'], turn: TurnContext): string {
+// UX wave U2 (O-49): the shell tools whose command line Desktop's rule shortens (its `fu`, for Bash and PowerShell)
+export const shellToolOf = (toolName: string): 'Bash' | 'PowerShell' | null => (toolName === 'Bash' || toolName === 'PowerShell' ? toolName : null);
+
+// UX wave U2 start (l6-artifacts-12; the U2a document, Interfaces §D, Reported 4): an artifact is named by the title a
+// result in the loaded transcript gave it (a creation, a read, a publication, a list, a search or a screenshot: this
+// turn's results, then the earlier turns'), else by the id or handle the call gave. No library is read: an edit's result
+// carries no title, the result shapes are frozen (UC-15), and the library differs by machine while the transcript's own
+// results are the same on every route.
+export type ArtifactTitles = (ref: string) => string | null;
+const noTitles: ArtifactTitles = () => null;
+
+const ARTIFACT_PREFIX = `mcp__${MAWS_SERVER_NAME}__`;
+const TITLE_GIVING = new Set<string>([
+  MAWS_TOOL_USE.artifact_create, MAWS_TOOL_USE.artifact_publish, HISTORICAL_ARTIFACT_UPDATE_TOOL_USE, MAWS_TOOL_USE.artifact_read,
+  MAWS_TOOL_USE.artifact_list, MAWS_TOOL_USE.artifact_search, MAWS_TOOL_USE.artifact_screenshot,
+]);
+
+// What a run of events' results named: each id and handle a result gave a title to, the latest result's title kept.
+// Read leniently (any result of a tool that names artifacts, by the keys its JSON carries), so a result written by an
+// older build still names what it named.
+export function artifactTitlesOf(events: readonly SessionEvent[]): Map<string, string> {
+  const titles = new Map<string, string>();
+  const tools = new Map<ToolUseId, string>();
+  const named = (value: unknown) => {
+    const item = record(value);
+    if (typeof item.title !== 'string' || item.title === '') return;
+    for (const key of [item.artifactId, item.id, item.handle]) if (typeof key === 'string' && key !== '') titles.set(key, item.title);
+  };
+  for (const event of events) {
+    if (event.kind === 'tool.use') tools.set(event.toolUseId, event.toolName);
+    else if (event.kind === 'tool.result' && !event.isError && TITLE_GIVING.has(tools.get(event.toolUseId) ?? '')) {
+      const json = record(firstJsonBlock(event.content));
+      named(json);
+      for (const list of [json.artifacts, json.hits]) if (Array.isArray(list)) list.forEach(named);
+    }
+  }
+  return titles;
+}
+
+export const artifactTitleOf = (ref: string, titles: ArtifactTitles): string => titles(ref) ?? ref;
+
+// The plain artifact calls a cell's label names, by their tool name under the `maws` server
+type ArtifactCall = keyof typeof ARTIFACT_CELL.calls | 'artifact_list' | 'artifact_screenshot';
+function artifactCallOf(toolName: string): ArtifactCall | null {
+  if (!toolName.startsWith(ARTIFACT_PREFIX)) return null;
+  const name = toolName.slice(ARTIFACT_PREFIX.length);
+  return Object.hasOwn(ARTIFACT_CELL.calls, name) || name === 'artifact_list' || name === 'artifact_screenshot' ? (name as ArtifactCall) : null;
+}
+
+// The artifact a call names, as its row writes it (its title in its marks); null for a call that names none (a list, a
+// search, a kind's description) or a call whose input names nothing
+function artifactSubjectOf(rec: ToolRecord, titles: ArtifactTitles): string | null {
+  const call = artifactCallOf(rec.use.toolName);
+  if (call === null || call === 'artifact_list' || call === 'artifact_search' || call === 'artifact_describe_type') return null;
+  const ref = record(rec.use.input)[call === 'artifact_screenshot' ? 'id' : 'artifact'];
+  return typeof ref === 'string' && ref !== '' ? ARTIFACT_TITLE(artifactTitleOf(ref, titles)) : null;
+}
+
+// An artifact call's row: what it did, while it runs, or that it could not; null where its input does not say what it
+// named (the call then reads as any MCP call)
+function artifactLabel(rec: ToolRecord, status: 'running' | 'done' | 'error', titles: ArtifactTitles): string | null {
+  const call = artifactCallOf(rec.use.toolName);
+  if (call === null) return null;
+  const input = record(rec.use.input);
+  if (call === 'artifact_list') return status === 'running' ? ARTIFACT_CELL.listing : status === 'error' ? ARTIFACT_CELL.listFailed : artifactListLabel(rec);
+  if (call === 'artifact_screenshot') {
+    const subject = artifactSubjectOf(rec, titles);
+    if (subject === null) return null;
+    return status === 'running' ? ARTIFACT_CELL.screenshotting(str(input.id)) : status === 'error' ? ARTIFACT_CELL.screenshotFailed(subject) : screenshotLabel(rec);
+  }
+  const subject = call === 'artifact_search' ? '' : call === 'artifact_describe_type' ? (typeof input.kind === 'string' && input.kind !== '' ? input.kind : null) : artifactSubjectOf(rec, titles);
+  if (subject === null) return null;
+  const words: ArtifactCallWords = ARTIFACT_CELL.calls[call];
+  return status === 'running' ? words.running(subject) : status === 'error' ? words.failed(subject) : words.done(subject, input);
+}
+
+// A failed call's reason (decision 13): the first line of its error with the engine's refusal tags stripped, and for an
+// artifact call the host's own `<tool>: ` before it. The pane-opening call keeps its reason in its words (M3 does not
+// touch it).
+function errorOf(rec: ToolRecord): string | undefined {
+  if (rec.result === null || rec.use.toolName === MAWS_TOOL_USE.show_pane) return undefined;
+  const call = artifactCallOf(rec.use.toolName);
+  const text = toolErrorText(resultText(rec.result.content));
+  const line = text.split(/\r?\n/).map((part) => part.trim()).find((part) => part !== '');
+  return line === undefined ? undefined : call === null ? line : line.replace(new RegExp(`^${call}: `), '') || undefined;
+}
+// UX wave U2 end
+
+function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], category: ToolCategory, classification: Cell['classification'], turn: TurnContext, titles: ArtifactTitles): string {
   const input = record(rec.use.input);
   // UX wave U2 (decision 23, R2): a stopped call that does not stand alone as a refusal reads one form on every family
-  if (status === 'stopped' && (classification.denial === null || stoppedMember(classification.denial))) {
-    const { subject, code } = stoppedSubject(rec, detail);
-    return stoppedLabel(subject, code);
-  }
+  if (status === 'stopped' && (classification.denial === null || stoppedMember(classification.denial))) return stoppedRowLabel(rec, detail, titles);
   if (classification.denial) {
     const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
   }
   if (rec.use.toolName === MAWS_TOOL_USE.show_pane) return paneLabel(rec); // E1
-  if (rec.use.toolName === MAWS_TOOL_USE.artifact_list) return artifactListLabel(rec); // E2
-  if (rec.use.toolName === MAWS_TOOL_USE.artifact_screenshot) return screenshotLabel(rec); // E2
+  // E2, UX wave U2 (l6-artifacts-12): an artifact call names what it did to which artifact
+  const artifact = status === 'running' || status === 'done' || status === 'error' ? artifactLabel(rec, status, titles) : null;
+  if (artifact !== null) return artifact;
   if ((rec.use.toolName === 'Agent' || rec.use.toolName === 'Task') && typeof input.description === 'string') return descriptionLabel(input.description, status);
   switch (detail.kind) {
     case 'shell':
@@ -306,30 +402,24 @@ function paneLabel(rec: ToolRecord): string {
   return PANE_CELL.opened(opened.kind === 'panel-tool' ? opened.title : baseName(opened.path));
 }
 
-// E2 start: an `artifact_list` call reads how many artifacts it listed, an `artifact_screenshot` call what it captured
-// (the result's title, version and size), or the host's refusal without the tool's own prefix.
+// E2 start: an `artifact_list` call done reads how many artifacts it listed, an `artifact_screenshot` call done what it
+// captured (the result's title, version and size). UX wave U2: their running and failed forms are `artifactLabel`'s.
 // P3-A: E2's listing and the library's alike, counted
 const LISTED = z.object({ status: z.literal('listed'), artifacts: z.array(z.unknown()) });
 function artifactListLabel(rec: ToolRecord): string {
-  const { result } = rec;
-  if (!result) return ARTIFACT_CELL.listing;
-  if (result.isError) return ARTIFACT_CELL.listFailed(toolErrorText(resultText(result.content)).replace(/^artifact_list: /, ''));
-  const parsed = LISTED.safeParse(firstJsonBlock(result.content));
+  const parsed = LISTED.safeParse(rec.result && !rec.result.isError ? firstJsonBlock(rec.result.content) : null);
   return ARTIFACT_CELL.listed(parsed.success ? parsed.data.artifacts.length : null);
 }
 
 function screenshotLabel(rec: ToolRecord): string {
-  const { result } = rec;
-  const id = str(record(rec.use.input).id);
-  if (!result) return ARTIFACT_CELL.screenshotting(id);
-  if (result.isError) return ARTIFACT_CELL.screenshotFailed(toolErrorText(resultText(result.content)).replace(/^artifact_screenshot: /, ''));
-  const parsed = ArtifactScreenshotResultSchema.safeParse(firstJsonBlock(result.content));
-  return ARTIFACT_CELL.screenshot(parsed.success ? parsed.data : null, id);
+  const parsed = ArtifactScreenshotResultSchema.safeParse(rec.result && !rec.result.isError ? firstJsonBlock(rec.result.content) : null);
+  return ARTIFACT_CELL.screenshot(parsed.success ? parsed.data : null, str(record(rec.use.input).id));
 }
 // E2 end
 
-// Draw-time rewrites may override status, before deriving both detail and label. Model callers omit it.
-export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, displayStatus?: Cell['status']): Cell {
+// Draw-time rewrites may override status, before deriving both detail and label. Model callers omit it. `titles` names
+// an artifact a call names (UX wave U2); a caller with no transcript to read gives none, and the call names its handle.
+export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, displayStatus?: Cell['status'], titles: ArtifactTitles = noTitles): Cell {
   const { use, result } = rec;
   const denial = result?.denial ? { kind: result.denial, reason: resultText(result.content).trim() || null } : null;
   const context: ClassifyContext = {
@@ -343,12 +433,14 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   const detail = detailOf(rec, status);
   const category = tableRowOf(use.toolName).category;
   const paths = detail.kind === 'read' ? detail.files.map((file) => file.path) : detail.kind === 'edit' ? [detail.filePath] : [];
-  const label = labelOf(rec, detail, status, category, labelClassification, turn);
-  // UX wave U2 (Interfaces §B): a stopped call's caption words are what its row reads done
-  const doneLabel = status === 'stopped' ? labelOf(rec, detailOf(rec, 'done'), 'done', category, { ...classification, denial: null }, turn) : label;
+  const label = labelOf(rec, detail, status, category, labelClassification, turn, titles);
+  // UX wave U2 (Interfaces §B; decision 14): a stopped call's caption words, and a failed artifact call's, are what its
+  // row reads done
+  const doneLabel = status === 'stopped' || (status === 'error' && artifactCallOf(use.toolName) !== null) ? labelOf(rec, detailOf(rec, 'done'), 'done', category, { ...classification, denial: null }, turn, titles) : label;
+  const error = status === 'error' ? errorOf(rec) : undefined; // UX wave U2 (decision 13)
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label, ...(doneLabel !== label && { doneLabel }), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label, ...(doneLabel !== label && { doneLabel }), ...(error !== undefined && { error }), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
     background: result !== null && recordedStatus === 'running', // UX wave U2 (decision 20)
   };
 }

@@ -280,8 +280,11 @@ export interface Cell {
   // background; a mod's draw-time status does not change it
   background: boolean;
   // UX wave U2 (Interfaces §B): what the call's row reads in its done form, where its own label reads another (a stopped
-  // call's `Stopped: …`): the words a caption gives a call of no kind
+  // call's `Stopped: …`, a failed artifact call's `Could not …`): the words a caption gives a call of no kind
   doneLabel?: string;
+  // UX wave U2 (decision 13): why a failed call failed, the first line of its error, which its row draws after the label;
+  // only on a cell whose status is `error` (a refused call says why in its label, a stopped one did not fail)
+  error?: string;
 }
 
 export type CellDetail =

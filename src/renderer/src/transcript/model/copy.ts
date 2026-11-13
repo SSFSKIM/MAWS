@@ -165,6 +165,17 @@ export function cellLabel(input: CellLabelInput): string {
 // turn: `Stopped: ` and the call's subject, in code marks but for a shell call's description, with no duration.
 export const stoppedLabel = (subject: string, code: boolean) => (code ? `Stopped: \`${subject}\`` : `Stopped: ${subject}`);
 
+// UX wave U2 (O-49; the U2a document, Interfaces §D): a shell call with no description reads the verb and the short form
+// of its command in code marks (`shortCommand`), and where Desktop's rule refuses the command, the verb and `a command`:
+// Desktop's shell row's three forms (`web/app/v1/c52b02f3f-C1Vcib4H.js:9084-9124` and `:10941-10954` of app 5.1231.2)
+// and MAWS's stopped one. A shell tool that runs no command line of its own (its output, kill and monitor calls) reads
+// the verb and the tool's name, as before.
+export const SHELL_CELL = {
+  command: (status: 'running' | 'done' | 'error', short: string) => `${status === 'running' ? 'Running' : status === 'error' ? 'Failed' : 'Ran'} \`${short}\``,
+  aCommand: { running: 'Running a command', done: 'Ran a command', error: 'Failed to run a command', stopped: 'Stopped a command' },
+  tool: (status: 'running' | 'done' | 'error', toolName: string) => `${status === 'running' ? 'Running' : status === 'error' ? 'Failed' : 'Ran'} ${toolName}`,
+} as const;
+
 export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: number | null, durationMs: number) => {
   const t = duration(durationMs);
   if (status === 'stopped') return `Stopped after ${t}`;
@@ -523,14 +534,44 @@ export function artifactHeading(row: { action: 'create' | 'update'; artifactId: 
   return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
 }
 
+// UX wave U2 (l6-artifacts-12; the U2a document, Interfaces §D, Reported 4, 5 and 11): an artifact call names what it
+// did to which artifact, the artifact by the title a result in the loaded transcript gave it, else by the id or handle
+// the call gave, between these marks. A failed call reads `Could not …`; why it failed is the row's reason, after it.
+export const ARTIFACT_TITLE = (title: string) => `‹${title}›`;
+
+export interface ArtifactCallWords { done: (subject: string, input: Record<string, unknown>) => string; running: (subject: string) => string; failed: (subject: string) => string }
+const artifactWords = (done: string, running: string, failed: string): ArtifactCallWords => ({
+  done: (subject) => `${done} ${subject}`, running: (subject) => `${running} ${subject}`, failed: (subject) => `Could not ${failed} ${subject}`,
+});
+
+// The other plain calls, by tool; the subject is the artifact's title in its marks, the kind a description names, or
+// none
+const ARTIFACT_CALL_WORDS = {
+  artifact_read: artifactWords('Read', 'Reading', 'read'),
+  artifact_edit: artifactWords('Edited', 'Editing', 'edit'),
+  artifact_comments: artifactWords('Listed comments on', 'Listing comments on', 'list comments on'),
+  artifact_reply: artifactWords('Replied on', 'Replying on', 'reply on'),
+  artifact_resolve: {
+    done: (subject, input) => `${input.reopen === true ? 'Reopened' : 'Resolved'} a comment on ${subject}`,
+    running: (subject) => `Resolving a comment on ${subject}`, failed: (subject) => `Could not resolve a comment on ${subject}`,
+  },
+  artifact_export: artifactWords('Exported', 'Exporting', 'export'),
+  artifact_upload_asset: artifactWords('Uploaded an asset to', 'Uploading an asset to', 'upload an asset to'),
+  artifact_list_assets: artifactWords('Listed assets of', 'Listing assets of', 'list assets of'),
+  artifact_dataset: artifactWords('Bound a dataset to', 'Binding a dataset to', 'bind a dataset to'),
+  artifact_describe_type: { done: (kind) => `Described the ${kind} kind`, running: (kind) => `Describing the ${kind} kind`, failed: (kind) => `Could not describe the ${kind} kind` },
+  artifact_search: { done: () => 'Searched artifacts', running: () => 'Searching artifacts', failed: () => 'Could not search artifacts' },
+} satisfies Record<string, ArtifactCallWords>;
+
 export const ARTIFACT_CELL = {
   listing: 'Listing artifacts',
   listed: (n: number | null) => (n === null ? 'Listed artifacts' : n === 0 ? 'Listed no artifacts' : `Listed ${plural(n, 'artifact')}`),
-  listFailed: (error: string) => `Could not list artifacts: ${error}`,
+  listFailed: 'Could not list artifacts', // UX wave U2: the reason is the row's
   screenshotting: (id: string) => `Taking a screenshot of ${id}`,
   screenshot: (shot: { title: string; version?: number; revision?: number; width: number; height: number } | null, id: string) =>
     shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title}${shot.version === undefined ? ` · revision ${shot.revision ?? 0}` : ` v${shot.version}`} (${shot.width} × ${shot.height})`,
-  screenshotFailed: (error: string) => `Could not screenshot: ${error}`,
+  screenshotFailed: (title: string) => `Could not screenshot ${title}`, // UX wave U2: the artifact's title in its marks; the reason is the row's
+  calls: ARTIFACT_CALL_WORDS, // UX wave U2
 } as const;
 // E2 end
 
