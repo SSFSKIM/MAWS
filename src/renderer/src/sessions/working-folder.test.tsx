@@ -22,9 +22,10 @@ describe('useWorkingFolder', () => {
   });
 
   it("answers the record's working folder", () => {
-    hold(record(id, { directory: '/repo', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'worktree-w1' } }));
+    hold(record(id, { directory: '/repo/.claude/worktrees/w1/pkg', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'worktree-w1' } }));
     const { result } = renderHook(() => useWorkingFolder(id));
-    expect(result.current).toEqual({ path: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', launch: '/repo/.claude/worktrees/w1', moved: false });
+    // U8c-2 (decision 9): the agent's folder is the record's directory, inside the worktree
+    expect(result.current).toEqual({ path: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1/pkg', launch: '/repo/.claude/worktrees/w1', moved: false });
   });
 
   it('keeps the same object while the folder is the same, and gives a new one when it changes', () => {
