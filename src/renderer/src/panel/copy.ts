@@ -24,7 +24,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 // The summary card (Interfaces *Copy*).
 export const SUMMARY_COPY = {
   title: 'Session overview',
-  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background work', sources: 'Sources', plugins: 'Plugins' /* R1 */, artifacts: 'Artifacts' /* E2's Deliverables; P3-L M6b */ },
+  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background tasks' /* UX wave U8b (M8): the card takes the tool's name */, sources: 'Sources', plugins: 'Plugins' /* R1 */, artifacts: 'Artifacts' /* E2's Deliverables; P3-L M6b */ },
   // Environment
   branch: (branch: string) => `⎇ ${branch}`,
   detached: (head: string) => `detached at ${head.slice(0, 7)}`,
@@ -64,21 +64,11 @@ export const SUMMARY_COPY = {
   refreshPrState: 'Refresh PR state',
   checkedAt: (time: string) => `Checked ${time}`,
   // E6 end
-  // Subagents and Background work
-  open: 'Open',
-  agents: (working: number, done: number) => `${working} working · ${done} done`,
-  noAgents: 'No subagents yet',
-  background: (counts: { shells: number; workflows: number; monitors: number; other: number }) =>
-    [
-      counts.shells && plural(counts.shells, 'shell'),
-      counts.workflows && plural(counts.workflows, 'workflow'),
-      counts.monitors && plural(counts.monitors, 'monitor'),
-      counts.other && `${counts.other} other`,
-    ]
-      .filter(Boolean)
-      .join(' · ') || 'Nothing running',
-  runsOnDisk: (n: number) => `${plural(n, 'workflow run')} on disk`,
-  shellsUnavailable: 'Shells and monitors are known only while the session runs here',
+  // UX wave U8b (M8; its execution document, Interfaces §F): the two cards for running work, their heading's count, the
+  // overflow that opens the panel and the tail that opens its Done
+  running: (n: number) => `${n} running`,
+  more: (n: number) => `${n} more`,
+  finished: (n: number) => `${n} finished`,
   // Sources
   noSources: 'No sources yet',
   openSession: 'Open the session to list its sources',
