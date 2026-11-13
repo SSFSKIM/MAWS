@@ -39,7 +39,7 @@ describe('a permission’s notification actions', () => {
   const edit = permission('Edit', { file_path: '/w/a.ts', old_string: 'a', new_string: 'b' });
   // the engine host's answers: the request as it now stands, and the answer's outcome
   const host = (event: SessionEvent | null, outcome = 'delivered') =>
-    vi.fn(async (_owner: string, name: string, _input?: unknown) =>
+    vi.fn<(owner: string, name: string, input?: unknown) => Promise<unknown>>(async (_owner, name) =>
       name === 'session.pendingRequest' ? { ok: true, value: { event } } : name === 'session.answer' ? { ok: true, value: { outcome } } : { ok: false, error: { code: 'internal', message: `unexpected ${name}` } });
   const setup = (event: SessionEvent | null, items: AttentionItem[] = [request], outcome?: string) => {
     const dispatch = host(event, outcome);

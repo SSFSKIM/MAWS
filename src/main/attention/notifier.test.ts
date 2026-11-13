@@ -400,7 +400,7 @@ describe('a permission’s notification buttons', () => {
   const EDIT = ev('Edit', { file_path: '/w/a.ts', old_string: 'a', new_string: 'b' });
   // the engine host: the request as it now stands, and every answer delivered
   const host = (event: unknown) =>
-    vi.fn(async (_owner: string, name: string, _input?: unknown) => (name === 'session.pendingRequest' ? { ok: true, value: { event } } : { ok: true, value: { outcome: 'delivered' } }));
+    vi.fn<(owner: string, name: string, input?: unknown) => Promise<unknown>>(async (_owner, name) => (name === 'session.pendingRequest' ? { ok: true, value: { event } } : { ok: true, value: { outcome: 'delivered' } }));
   const answers = (dispatch: ReturnType<typeof host>) => dispatch.mock.calls.filter(([, name]) => name === 'session.answer').map(([, , input]) => (input as { answer: unknown }).answer);
   const raise = async (event: unknown, kind: 'permission' | 'question' = 'permission') => {
     const dispatch = host(event);
