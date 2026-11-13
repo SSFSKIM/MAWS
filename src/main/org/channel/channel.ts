@@ -106,7 +106,7 @@ interface Channel {
   /** The whole answer for a tab that opens it; the first is what the next change is told against. */
   opened(): ChannelAnswer;
   send(text: string): Promise<ChannelSendResult>;
-  /** The session changed, or (`reopened`) a tab opened it again: what was parked may open again. */
+  /** The session changed, or (`reopened`) a tab opened it: what the hub ended may open again (§F says when). */
   reconcile(reopened?: boolean): void;
   release(): void;
   retain(): void;
@@ -488,11 +488,15 @@ export function createChannels(deps: ChannelsDeps): Channels {
       words.recall(inLog); // the signer's words the project's last channel let go, but none its log holds
       const current = deps.session.current();
       // §F: a new sign-in or hub, a sign-out, or a released channel opened again starts reach again
-      const started = current !== seen || (reopened && refs === 0);
+      const released = reopened && refs === 0;
+      const started = current !== seen || released;
       seen = current;
-      // a refused socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
-      // tab's next open or with another hub; either way the channel starts again
-      if (ended !== null && (reopened || ended !== 'unknown-project' || (current?.hub ?? null) !== socketHub)) {
+      const anotherHub = (current?.hub ?? null) !== socketHub;
+      // a refusal (`credentials`, `removed`) stands, as the Registry feed's does, until the session's next change or a
+      // released channel opened again: another tab's open of a channel still held keeps it. A project the hub refused
+      // opens again at any tab's open or with another hub. Either way the channel starts again.
+      const clears = ended === 'unknown-project' ? reopened || anotherHub : !reopened || released || anotherHub;
+      if (ended !== null && clears) {
         ended = null;
         standing = 'connecting';
       }
