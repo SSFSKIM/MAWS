@@ -927,6 +927,14 @@ Found while writing this document, against master `48619c824`, and reported to t
    - Addendum 3, `e2e/terminal.spec.ts:709` and `:811`. **This landing's, by the master baseline, with the cause not yet proven.** The group is green on master `7b9ef8291`. The harness's `maximize` at load is undone by `surfaceRegions` while no tab is in view (on master too), so the terminal stands at the column's width. On the VM that is 45 columns, now the narrow automatic 360 px rather than master's 420. In the paste scene, the Mac's snapshot shows the terminal's input textarea focused and holding the pasted text, which never reached the shell. On the VM the theme scene's cell at column 20, two rows under `RB`, is the terminal's own screen (`elementFromPoint`), and the screen there holds only the prompt. The VM's capture draws even the red cell near white, and its clipboard fails earlier, at the paste target, so neither failing line reproduces there. Neither scene was changed.
    Date/Author: 2026-11-13, the fix wave's executor.
 
+21. **2026-11-13 (UTC; the architect, Addendum 4 of the rulings on the branch review): two scene changes accepted as premises this landing moved; the group bar left open.**
+   - **C, lane A** (`e2e/lane-a.spec.ts:570`). The scene now waits until the cards above have settled before it takes the "has not moved" box: the Environment card's pull-request row loads late. The rule under test is unchanged: a card leaving does not move a card above it.
+   - **C, remote** (`e2e/remote.spec.ts:2804`). While the link is down, the pane shows "B is offline" in the transcript's place, which is P5's rule. So the step proves "the agent still works" on the Subagents card, and asserts the transcript's row again once B is back.
+   - Both changes are accepted if the Mac passes them. The architect runs both groups on the Mac lane with B.
+   - **D, the group bar** (Addendum 1, `cross-build.spec.ts:2254`). It stays open until the diagnostic run on `ux-wave/U8b-diag` shows which events reach the bar during the drag. The unit test `324462045` stays.
+   - **A** (the header's fold threshold derived from the default width) is built in `d675d5004`. Its record is with Decision Log 20.
+   Date/Author: 2026-11-13, the architect's rulings; written by the controller.
+
 ## Outcomes & Retrospective
 
 (2026-11-13, the controller, at the hand-back to the architect. The run of the e2e groups on the Mac, the cross-build gate, class 1a and the branch review are not yet run and are not in this account.)
