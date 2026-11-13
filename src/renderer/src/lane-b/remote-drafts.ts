@@ -171,7 +171,9 @@ async function saveOnce(client: MawsBridge, appSessionId: AppSessionId, draft: D
 
 async function pump(client: MawsBridge, appSessionId: AppSessionId, queue: Saves): Promise<void> {
   queue.out = true;
-  await onceOut.get(appSessionId); // UX wave U4a: a take-back's save already out goes first
+  // UX wave U4a: a take-back's save already out goes first (with none, the save goes in this tick, as before)
+  const before = onceOut.get(appSessionId);
+  if (before !== undefined) await before.catch(() => undefined);
   if (queue.resend !== null) clearTimeout(queue.resend);
   queue.resend = null;
   let taken = false;
@@ -228,7 +230,7 @@ export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppS
   if (draft !== null && fitDraft(draft).withheld.length > 0) return { withheld: true };
   const before = onceOut.get(appSessionId);
   const sent = (async () => {
-    await before;
+    await before?.catch(() => undefined); // its failure is its caller's
     await ordinarySavesOut(appSessionId);
     const result = await client.invoke('session.drafts.set', { appSessionId, draft, replaces });
     heardReaderRows(appSessionId, result);
