@@ -195,6 +195,7 @@ describe('the ceiling, judged where the fork is allocated', () => {
       outcome: { state: 'failed', error: { code: 'internal', message: expect.any(String), issues: { refusal: 'ceiling', mode: 'bypassPermissions' } } },
     });
     expect(claimed(f)).toHaveLength(1);
+    expect(h.events.filter((e) => e.name === 'session.intent.changed')).toEqual([]); // never allocated, not allocated and dropped
     expect(intentFiles(h)).toEqual([]);
     expect(await h.service.listIntents()).toEqual([]);
     expect(h.host.launches).toEqual([]);
