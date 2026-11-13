@@ -629,7 +629,7 @@ describe('an expanded project', () => {
     render(<Sidebar />);
     const foreign = row('Somersault terminal run');
     // the three dots (UX wave U7: on every session row) and the local read state, no holder actions
-    expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Actions for Somersault terminal run', 'Mark unread']);
+    expect(within(foreign).getAllByRole('button').map((button) => button.getAttribute('aria-label'))).toEqual(['Hide', 'Actions for Somersault terminal run', 'Mark unread']); // UX wave U7, O-16: the row's own Hide
     fireEvent.contextMenu(foreign);
     const menu = await screen.findByRole('menu');
     expect(within(menu).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16: Hide after the opens
@@ -845,6 +845,7 @@ describe('hiding a session', () => {
     expect(hiddenRow(row('MAWS')).textContent).toBe('Hidden · 2');
     expect(hiddenRow(row('MAWS')).getAttribute('aria-label')).toBe('Hidden, 2 sessions');
     expect(sessionRows(row('MAWS'))).not.toContain(maws[0].title.text);
+    expect(within(within(row('MAWS')).getByRole('treeitem', { name: 'Show more' })).queryByRole('button')).toBeNull();
   });
 
   it('the arrow keys reach the Hidden row; Enter opens it, ArrowDown steps in, ArrowLeft lands on it, then closes it, then steps to the project', async () => {
@@ -955,6 +956,45 @@ describe('hiding a session', () => {
     expect(sessionRows(row('MAWS'))).toEqual(['Fix sidebar drag', 'Sidebar interaction pass']);
     expect(row('Fix sidebar drag').dataset.indented).toBeUndefined();
     expect(within(row('MAWS')).queryByRole('treeitem', { name: /^Hidden, / })).toBeNull();
+  });
+
+  // M3, decision 9 (the owner's answer of 2026-11-12, "Button on the row"): the row's own Hide, beside the three dots
+  it('the row’s own button hides with one click, opening nothing, and unhides in the Hidden list; no other row has it', async () => {
+    await storedHidden();
+    expand('proj-maws');
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    const maws = row('MAWS');
+    const title = 'Charter + research';
+    expect(within(row(title)).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Hide', `Actions for ${title}`, 'Mark unread']); // left of the three dots
+    expect(within(row(title)).getByRole('button', { name: 'Hide' }).getAttribute('title')).toBe('Hide');
+    await user.click(within(row(title)).getByRole('button', { name: 'Hide' }));
+    expect(sessionRows(maws)).toEqual(['Workstation north star', 'Fix sidebar drag', 'Sidebar interaction pass']);
+    expect(activeTab(useLayout.getState().main)).toBeNull();
+    const hidden = hiddenRow(maws);
+    expect(hidden.textContent).toBe('Hidden · 1');
+    await waitFor(() => expect(document.activeElement).toBe(hidden)); // the last row hidden: nothing took its place
+    expect(within(maws.querySelector<HTMLElement>('[data-project-line]')!).queryByRole('button', { name: 'Hide' })).toBeNull();
+    expect(within(hidden).queryByRole('button')).toBeNull();
+    for (const waiting of within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button')) expect(within(waiting).queryByRole('button', { name: /^(Hide|Unhide)$/ })).toBeNull();
+    await user.click(hidden);
+    const unhide = within(row(title)).getByRole('button', { name: 'Unhide' });
+    expect(unhide.getAttribute('title')).toBe('Unhide');
+    await user.click(unhide);
+    expect(sessionRows(maws)).toEqual(['Workstation north star', title, 'Fix sidebar drag', 'Sidebar interaction pass']);
+    await waitFor(() => expect(document.activeElement).toBe(row(title)));
+  });
+
+  it('a listed row carries the same button', async () => {
+    const studio = (id: string) => addressOf(OTHER_MACHINE, id) as AppSessionId;
+    await storedHidden();
+    useSessions.setState({ listed: new Map([[studio('b1'), { ...remoteRow(OTHER_MACHINE, 'b1', { title: 'Studio build', orgKey: null }), appId: studio('b1') }]]) });
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [machineKey(OTHER_MACHINE)] as ProjectKey[] }));
+    const user = userEvent.setup();
+    render(<Sidebar />);
+    await user.click(within(row('Studio build')).getByRole('button', { name: 'Hide' }));
+    expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+    expect(useHidden.getState().hidden.has(studio('b1'))).toBe(true);
   });
 
   it('a project whose sessions are all hidden keeps its row, open on its Hidden row alone', async () => {

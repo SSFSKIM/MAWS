@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
 import { greyWords, useMachineMark } from '../app/machine-mark';
-import { SessionOverflow } from './menus';
+import { RowHideButton, SessionOverflow } from './menus';
 import { useNow } from '../app/use-now';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor } from '../attention/glyph';
@@ -102,6 +102,7 @@ export function SessionRow({ record, level, nested, indented = false }: { record
           </span>
         )}
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
+        <RowHideButton appSessionId={id} /* UX wave U7, O-16: shown with the three dots, it takes its 27 px from the title alone */ />
         {/* Approved mockup: overflow replaces age in one fixed slot, never the title or unread target. */}
         <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
           <span data-session-age className="text-ui-sm text-fg-muted tabular-nums group-hover/session:invisible group-focus-within/session:invisible">{sessionAge(record, digest, now, seenAt, listing)}</span>

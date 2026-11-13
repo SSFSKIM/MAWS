@@ -88,14 +88,23 @@ test('UX1: titles keep their width on hover and conversation search stays reacha
     const fixedChromeBudget = 2 * 7 + 4 * 5 + 12 + 26 + 16;
     const titleBudget = rowBox!.width - worktreeBox!.width - fixedChromeBudget;
     expect(rest!.width, 'the title uses the remaining width after its required marks and action slots').toBeGreaterThanOrEqual(titleBudget);
+    const unread = row.getByRole('button', { name: 'Mark read', exact: true });
+    const age = row.locator('[data-session-age]').locator('..'); // the age's slot, which the three dots share
+    const [unreadRest, ageRest] = [await unread.boundingBox(), await age.boundingBox()];
     await row.hover();
     const actions = row.getByRole('button', { name: `Actions for ${TITLE}`, exact: true });
     await expect(actions).toBeVisible();
+    const hide = row.getByRole('button', { name: 'Hide', exact: true }); // UX wave U7, O-16: the row's own Hide, left of the three dots
+    await expect(hide).toBeVisible();
     const hovered = await title.boundingBox();
-    expect(hovered!.width, 'age and overflow share one slot; hover must not squeeze the title').toBe(rest!.width);
+    // Age and overflow share one slot; the Hide button takes its 22 px and one 5 px gap from the title, and nothing else moves.
+    expect(hovered!.width, 'hover takes the Hide button’s 27 px from the title and no more').toBeCloseTo(rest!.width - 27, 1);
     const actionBox = await actions.boundingBox();
-    const unread = row.getByRole('button', { name: 'Mark read', exact: true });
+    const hideBox = await hide.boundingBox();
     const unreadBox = await unread.boundingBox();
+    expect(unreadBox, 'the unread target stands where it stood').toEqual(unreadRest);
+    expect(await age.boundingBox(), 'the age slot stands where it stood').toEqual(ageRest);
+    expect(hideBox!.x + hideBox!.width, 'Hide and overflow remain separate hit targets').toBeLessThanOrEqual(actionBox!.x);
     expect(actionBox!.x + actionBox!.width, 'unread and overflow remain separate hit targets').toBeLessThanOrEqual(unreadBox!.x);
     await attachSidebarStates(maws, info, 'rows');
     await unread.click();

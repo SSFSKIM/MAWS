@@ -159,21 +159,67 @@ const keepMovedFocus = (event: Event) => {
   focusMoved = false;
 };
 
-// UX wave U7, O-16: Hide, or Unhide for a hidden session; an act on this window's view alone, so it never waits for a handler.
-function HideItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown: boolean }) {
+// UX wave U7, O-16: a session's Hide or Unhide, through the sidebar where it places the keyboard after (`fromRow`: the act
+// is a tree row's own control); true when it does.
+function useHideAct(appSessionId: AppSessionId): { hidden: boolean; act(fromRow: boolean): boolean } {
   const hidden = useHidden((s) => s.hidden.has(appSessionId));
   const tree = useTree();
-  const act = () => {
-    if (tree.onHideAct) focusMoved = tree.onHideAct(appSessionId, !hidden, dropdown); // the three dots are a tree row's own
-    else if (hidden) useHidden.getState().unhide(appSessionId);
+  const act = (fromRow: boolean) => {
+    if (tree.onHideAct) return tree.onHideAct(appSessionId, !hidden, fromRow);
+    if (hidden) useHidden.getState().unhide(appSessionId);
     else useHidden.getState().hide(appSessionId);
+    return false;
   };
+  return { hidden, act };
+}
+
+// Hide, or Unhide for a hidden session; an act on this window's view alone, so it never waits for a handler.
+function HideItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown: boolean }) {
+  const { hidden, act } = useHideAct(appSessionId);
   return (
-    <Item dropdown={dropdown} enabled onSelect={act}>
+    <Item
+      dropdown={dropdown}
+      enabled
+      onSelect={() => {
+        focusMoved = act(dropdown); // the three dots are a tree row's own
+      }}
+    >
       {hidden ? HIDDEN.unhide : HIDDEN.hide}
     </Item>
   );
 }
+
+// UX wave U7, O-16 (M3, decision 9; the owner's answer, "Button on the row"): a tree row's own Hide, or Unhide in the
+// Hidden list, left of the three dots while the pointer is over the row or focus is inside it; one click does what the
+// menu item does, without opening the session. Out of the tab order, as the row's other controls are: the row is the
+// tree's stop, and its menu carries the same act for the keyboard.
+export function RowHideButton({ appSessionId }: { appSessionId: AppSessionId }) {
+  const { hidden, act } = useHideAct(appSessionId);
+  const label = hidden ? HIDDEN.unhide : HIDDEN.hide;
+  return (
+    <button type="button" tabIndex={-1} aria-label={label} title={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        act(true);
+      }}
+      className="hidden size-[22px] shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent group-hover/session:inline-flex group-focus-within/session:inline-flex hover:bg-bg-active hover:text-fg focus-visible:outline-2">
+      {hidden ? <EyeIcon /> : <EyeOffIcon />}
+    </button>
+  );
+}
+
+// An eye, and the eye struck through (lucide's `eye` and `eye-off` redrawn on the 16px grid), in the current colour.
+const EyeIcon = () => (
+  <svg viewBox="0 0 16 16" aria-hidden className="size-[13px] shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5]">
+    <path d="M1.5 8s2.4-4.5 6.5-4.5S14.5 8 14.5 8 12.1 12.5 8 12.5 1.5 8 1.5 8z" />
+    <circle cx="8" cy="8" r="2" />
+  </svg>
+);
+const EyeOffIcon = () => (
+  <svg viewBox="0 0 16 16" aria-hidden className="size-[13px] shrink-0 fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round] [stroke-width:1.5]">
+    <path d="M6.6 3.7A6.6 6.6 0 0 1 8 3.5c4.1 0 6.5 4.5 6.5 4.5a11 11 0 0 1-1.6 2.1M4.3 4.9A11 11 0 0 0 1.5 8S3.9 12.5 8 12.5c1.3 0 2.4-.4 3.3-1M6.6 6.6a2 2 0 0 0 2.8 2.8M2 2l12 12" />
+  </svg>
+);
 
 // P5 O8 M6b: the session's Share sheet
 export function ShareItem({ appSessionId, dropdown }: { appSessionId: AppSessionId; dropdown?: boolean }) {

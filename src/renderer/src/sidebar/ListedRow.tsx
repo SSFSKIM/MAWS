@@ -18,7 +18,7 @@ import { selectPendingOf, useAttention } from '../stores/attention'; // P5 O7 M6
 import type { ListedSession } from '../stores/sessions';
 import { formatAge, listedTitle } from './derive';
 import { ListedHoverCard } from './HoverCard';
-import { SessionOverflow } from './menus';
+import { RowHideButton, SessionOverflow } from './menus';
 import { rowInset } from './SessionRow';
 import { RowTitle, useOwnersLabel } from './RowTitle'; // P5 O8 M5
 import { ReachMark } from './ReachMark'; // P5 O8 M6b
@@ -71,6 +71,7 @@ export function ListedRow({ listed, level, indented = false }: { listed: ListedS
         <MachineChip address={id} className="max-w-[35%]" />
         <ReachMark address={id} />
         <GlyphMark glyph={glyph} className="w-[12px] shrink-0" />
+        <RowHideButton appSessionId={id} /* UX wave U7, O-16: shown with the three dots, it takes its 27 px from the title alone */ />
         <span className="relative flex h-[22px] w-[26px] shrink-0 items-center justify-end [&:has([data-state=open])>[data-session-age]]:invisible">
           <span data-session-age className="text-ui-sm text-fg-muted tabular-nums group-hover/session:invisible group-focus-within/session:invisible">{Number.isFinite(issued) ? formatAge(now - issued) : null}</span>
           <span className="absolute inset-0 flex items-center justify-end"><SessionOverflow appSessionId={id} title={title} /></span>
