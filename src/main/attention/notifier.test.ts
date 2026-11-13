@@ -42,6 +42,8 @@ const brought = () => os.focus.mock.calls.filter(([, mode]) => mode === 'bring')
 import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
 import type { MachineRef } from '@shared/machine/ref';
 import type { RemoteAttentionChange } from '../lane-b/remote-attention';
+import { notificationActions, type NotificationActions } from './actions';
+import type { HostDispatch } from '../ipc/router';
 import { startNotifier } from './notifier';
 
 const CHARTER = 'app-charter' as AppSessionId;
@@ -50,7 +52,8 @@ const T = '2026-09-28T10:00:00Z';
 const SETTINGS: Settings = SETTINGS_DEFAULTS_V21;
 
 // P5 O3-C (reader R1): the notifier reads the spine through its view alone
-function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: FakeSpineView) => void; actions?: import('./actions').NotificationActions; remote?: FakeRemote } = {}) {
+// `dispatch`: the engine host's answers, read by main's own notification actions over this view (UX wave U1a §H)
+function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: FakeSpineView) => void; actions?: NotificationActions; dispatch?: HostDispatch; remote?: FakeRemote } = {}) {
   const view = fakeSpineView({
     projects: [project('maws', 0, { name: 'MAWS' })],
     records: [record(CHARTER, { projectId: 'maws' as never, title: { text: 'Charter + research', source: 'user' } }), record(LOOSE, { title: { text: 'Terminal workflow notes', source: 'user' } })],
@@ -62,7 +65,8 @@ function harness(opts: { focused?: boolean; settings?: Settings; before?: (v: Fa
   const navigate = vi.fn();
   const failure = vi.fn();
   const remote = opts.remote === undefined ? {} : { remote: opts.remote.view, emitFrom, remoteTitle: (machine: MachineRef, app: string) => opts.remote!.titles.get(`${machine}/${app}`) ?? null, now: () => state.clock };
-  const stop = startNotifier(view, { port, actions: opts.actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit, ...remote });
+  const actions = opts.actions ?? (opts.dispatch === undefined ? undefined : notificationActions({ dispatch: opts.dispatch, view }));
+  const stop = startNotifier(view, { port, actions, failure, isFocused: () => state.focused, isViewing: (id) => state.focused && state.viewing === id, navigate, settings: () => state.settings, emit, ...remote });
   const set = (appSessionId: AppSessionId, items: AttentionItem[], silent: AttentionItem['id'][] = []) => view.setAttention(appSessionId, items, silent);
   return { view, state, emit, emitFrom, navigate, failure, stop, set };
 }
@@ -321,7 +325,7 @@ describe('dock badge', () => {
     expect(posted()[0].options.body).toBe('All tests pass.');
   });
   it('hands a failed reply to the ready-page relay rather than emitting it to a just-created window', async () => {
-    const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), canAllow: vi.fn(), allow: vi.fn() };
+    const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), offer: vi.fn(), allow: vi.fn(), deny: vi.fn() };
     const h = harness({ actions });
     h.view.putDigest(digest(CHARTER, { phase: 'working', turnStartedAt: T }));
     h.view.putDigest(digest(CHARTER, { lastTurnEndedAt: '2026-09-28T10:01:00Z' }));
@@ -333,7 +337,7 @@ describe('dock badge', () => {
   });
 
   it('hands a failed Allow once action to the same ready-page relay', async () => {
-    const actions = { reply: vi.fn(), canAllow: vi.fn().mockResolvedValue(true), allow: vi.fn().mockRejectedValue(new Error('Request expired')) };
+    const actions = { reply: vi.fn(), offer: vi.fn().mockResolvedValue({ allowOnce: true, deny: true, body: null }), allow: vi.fn().mockRejectedValue(new Error('Request expired')), deny: vi.fn() };
     const h = harness({ actions });
     const request = item(CHARTER, 'permission', T);
     h.set(CHARTER, [request]);
@@ -352,6 +356,118 @@ describe('dock badge', () => {
     expect(posted()[0].close).toHaveBeenCalledOnce();
   });
  });
+
+// UC-1 (A17): the dock badge and the notifications read the one predicate: an answered request is not counted, its banner
+// closes at the answer, and its Allow once takes no action.
+describe('an answered request', () => {
+  it('is not counted in the badge, here or from another machine, and its banner closes at the answer', () => {
+    const r = fakeRemote();
+    const h = harness({ remote: r });
+    const request = item(CHARTER, 'permission', T);
+    h.set(CHARTER, [request]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    h.set(CHARTER, [{ ...request, state: 'delivered' }]);
+    expect(posted()[0].close).toHaveBeenCalledOnce();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+    const remote = item('app-mini', 'permission', T);
+    r.session('app-mini', [remote]);
+    expect(os.badge).toHaveBeenLastCalledWith(null, 1);
+    r.session('app-mini', [{ ...remote, state: 'delivered' }]);
+    expect(posted()[1].close).toHaveBeenCalledOnce();
+    expect(os.badge).toHaveBeenLastCalledWith(null, 0);
+  });
+
+  it('takes no action at its banner’s Allow once or Deny', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ ok: true, value: { event: { kind: 'permission.requested', toolName: 'Read', input: { file_path: '/made/up.md' } } } });
+    const view = fakeSpineView();
+    const request = item(CHARTER, 'permission', T);
+    view.setAttention(CHARTER, [{ ...request, state: 'delivered' }]);
+    const actions = notificationActions({ dispatch, view });
+    expect(await actions.offer(request)).toEqual({ allowOnce: false, deny: false, body: null });
+    await expect(actions.allow(request)).rejects.toThrow();
+    await expect(actions.deny(request)).rejects.toThrow();
+    expect(dispatch.mock.calls.some(([, name]) => name === 'session.answer')).toBe(false);
+  });
+});
+
+// UX wave U1a §H (M6, A14): a permission's notification carries what the one rule admits for the request it reads, in the
+// order Allow once, Deny; a short command is its body; each button's index reaches its own act, read again at the press.
+describe('a permission’s notification buttons', () => {
+  const ev = (toolName: string, input: Record<string, unknown>) => ({ kind: 'permission.requested', requestId: 'req-x', toolName, input });
+  const READ = ev('Read', { file_path: '/w/notes.txt' });
+  const SHORT = ev('Bash', { command: 'make build' });
+  const LONG = ev('Bash', { command: `echo ${'x'.repeat(200)}` });
+  const EDIT = ev('Edit', { file_path: '/w/a.ts', old_string: 'a', new_string: 'b' });
+  // the engine host: the request as it now stands, and every answer delivered
+  const host = (event: unknown) =>
+    vi.fn<(owner: string, name: string, input?: unknown) => Promise<unknown>>(async (_owner, name) => (name === 'session.pendingRequest' ? { ok: true, value: { event } } : { ok: true, value: { outcome: 'delivered' } }));
+  const answers = (dispatch: ReturnType<typeof host>) => dispatch.mock.calls.filter(([, name]) => name === 'session.answer').map(([, , input]) => (input as { answer: unknown }).answer);
+  const raise = async (event: unknown, kind: 'permission' | 'question' = 'permission') => {
+    const dispatch = host(event);
+    const h = harness({ dispatch: dispatch as unknown as HostDispatch });
+    const request = item(CHARTER, kind, T);
+    h.set(CHARTER, [request]);
+    await vi.waitFor(() => expect(posted()).toHaveLength(1));
+    return { h, dispatch, request, banner: posted()[0]! };
+  };
+  const ALLOW = { kind: 'permission', decision: 'allow', scope: 'once' };
+  const DENY = { kind: 'permission', decision: 'deny' };
+
+  it.each([
+    ['a read', READ, ['Allow once', 'Deny'], 'permission for app-charter'],
+    ['a short command', SHORT, ['Allow once', 'Deny'], 'make build'],
+    ['a long command', LONG, ['Deny'], 'permission for app-charter'],
+    ['an edit', EDIT, ['Deny'], 'permission for app-charter'],
+  ])('sends %s its buttons and its body', async (_, event, actions, body) => {
+    const { banner } = await raise(event);
+    expect(banner.options.actions).toEqual(actions);
+    expect(banner.options.body).toBe(body);
+  });
+
+  it('sends a question no button, reading no request', async () => {
+    const { banner, dispatch } = await raise(READ, 'question');
+    expect(banner.options.actions).toBeUndefined();
+    expect(dispatch).not.toHaveBeenCalled();
+  });
+
+  it('with Allow once and Deny, index 0 allows once and index 1 denies, each once', async () => {
+    const first = await raise(READ);
+    first.banner.fire('action', 0);
+    await vi.waitFor(() => expect(answers(first.dispatch)).toEqual([ALLOW]));
+    first.h.stop();
+    os.instances = [];
+    const second = await raise(SHORT);
+    second.banner.fire('action', 1);
+    await vi.waitFor(() => expect(answers(second.dispatch)).toEqual([DENY]));
+  });
+
+  it('with Deny alone, index 0 denies and no other index acts', async () => {
+    const { banner, dispatch } = await raise(EDIT);
+    banner.fire('action', 1);
+    banner.fire('action', 0);
+    await vi.waitFor(() => expect(answers(dispatch)).toEqual([DENY]));
+  });
+
+  it('a press after the request was answered elsewhere answers nothing, opens the session and says so', async () => {
+    const { h, dispatch, request, banner } = await raise(READ);
+    h.set(CHARTER, []); // answered in the pane: the banner closes, and a press may still arrive
+    expect(banner.close).toHaveBeenCalledOnce();
+    banner.fire('action', 1);
+    await vi.waitFor(() => expect(h.failure).toHaveBeenCalledOnce());
+    expect(answers(dispatch)).toEqual([]);
+    expect(brought()).toEqual([[null, 'bring']]);
+    expect(h.navigate).toHaveBeenCalledWith({ appSessionId: CHARTER, attentionId: request.id, source: 'notification' });
+  });
+
+  it('posts the notification with no button when the request cannot be read', async () => {
+    const dispatch = vi.fn(async () => ({ ok: false, error: { code: 'internal', message: 'no host' } }));
+    const h = harness({ dispatch: dispatch as unknown as HostDispatch });
+    h.set(CHARTER, [item(CHARTER, 'permission', T)]);
+    await vi.waitFor(() => expect(posted()).toHaveLength(1));
+    expect(posted()[0]!.options.actions).toBeUndefined();
+    expect(posted()[0]!.options.body).toBe('permission for app-charter');
+  });
+});
 
 // P5 O9 M6 (the owner's Q5): a terminal session's prompt shows in the terminal the owner may be looking at, so its items
 // join Needs you and the dock badge, with a toast while MAWS is focused, but raise no system notification and no bounce.
@@ -463,7 +579,7 @@ describe('another machine’s items', () => {
 
   it('tells one in-app from the machine while MAWS is focused, and offers no reply or Allow once (no action crosses here)', () => {
     const r = fakeRemote();
-    const actions = { canAllow: vi.fn(async () => true), allow: vi.fn(), reply: vi.fn() } as unknown as import('./actions').NotificationActions;
+    const actions = { offer: vi.fn(async () => ({ allowOnce: true, deny: true, body: null })), allow: vi.fn(), deny: vi.fn(), reply: vi.fn() } as unknown as NotificationActions;
     const h = harness({ remote: r, focused: true, actions });
     r.session(REMOTE_APP, [remoteItem('permission')]);
     expect(posted()).toHaveLength(0);
@@ -471,7 +587,7 @@ describe('another machine’s items', () => {
     h.state.focused = false;
     r.session(REMOTE_APP, [remoteItem('permission'), remoteItem('question')]);
     expect(posted().map((n) => n.options)).toEqual([{ title: 'mini', body: `question for ${REMOTE_APP}`, silent: true }]);
-    expect(actions.canAllow).not.toHaveBeenCalled();
+    expect(actions.offer).not.toHaveBeenCalled();
   });
 
   // Fix wave 1: startup silence is this Mac's own clock, never the machine's `createdAt`

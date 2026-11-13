@@ -5,11 +5,13 @@
 // looking at: the first visible block, the selection and the focus. happy-dom lays nothing out, so the page and its
 // blocks are given rects here: a block's height stands for the surface's width (the panel's narrower, its blocks taller).
 import { act, cleanup, render, screen, within } from '@testing-library/react';
-import type { Editor } from '@tiptap/core';
+import type { Editor, JSONContent } from '@tiptap/core';
+import { GapCursor } from '@tiptap/pm/gapcursor';
 import { TextSelection } from '@tiptap/pm/state';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
-import { createDocument } from '@artifacts/document/tabs';
+import { schemaFor } from '@artifacts/document/schema';
+import { createDocument, tabBody } from '@artifacts/document/tabs';
 import { addThread } from '@artifacts/document/threads';
 import type { ArtifactHost } from '@artifacts/host';
 import { yUndoPluginKey } from '@artifacts/yjs/prosemirror';
@@ -372,6 +374,71 @@ describe('a document moved between the panel and a main tab comes back where the
     await ready();
     await settle();
     expect(pageEl().scrollTop, 'a fresh page').toBe(0);
+  });
+
+  // U10a (docs/doperpowers/plans/2026-11-12-ux-wave-U10a-unmade-writes.md, decision 12a): the gap caret after a block
+  // that holds no text comes back as a gap caret; carried as text it would land before the block, and in a document
+  // that is one chart alone it would come back as the chart selected, which the next key replaces.
+  describe('the gap caret', () => {
+    const chart = (id: string): JSONContent => ({ type: 'chart', attrs: { id, source: 'sales', spec: null } });
+    // the store holding `blocks` in its one tab, `tab1`, before any body mounts
+    function holding(...blocks: JSONContent[]): void {
+      memory.destroy();
+      memory = new MemoryDocumentHost();
+      memory.write((doc) => createDocument(doc, { title: 'Launch plan', id: 'tab1', body: schemaFor().nodeFromJSON({ type: 'doc', content: blocks }) }));
+    }
+    const gapAtEnd = (editor: Editor) => act(() => {
+      editor.view.focus();
+      editor.view.dispatch(editor.state.tr.setSelection(new GapCursor(editor.state.doc.resolve(editor.state.doc.content.size))));
+    });
+    // a key typed at a selection that is no text selection, which ProseMirror takes from the keypress itself (happy-dom's
+    // KeyboardEvent carries no charCode)
+    function press(editor: Editor, key: string): void {
+      const event = new KeyboardEvent('keypress', { key, bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'charCode', { value: key.charCodeAt(0) });
+      act(() => void editor.view.dom.dispatchEvent(event));
+    }
+    const shown = (editor: Editor) => {
+      const out: string[] = [];
+      editor.state.doc.forEach((block) => out.push(`${block.type.name}:${block.textContent}`));
+      return out;
+    };
+
+    it('after a document’s only chart comes back as the gap caret, where a key typed makes a paragraph and keeps the chart', async () => {
+      holding(chart('c1'));
+      const source = mountIn(panel);
+      const editor = await ready();
+      gapAtEnd(editor);
+      expect(editor.state.selection).toBeInstanceOf(GapCursor);
+      move(panel, main, source);
+      const moved = await ready();
+      await settle();
+      const { selection } = moved.state;
+      expect([selection instanceof GapCursor, selection.head]).toEqual([true, moved.state.doc.content.size]);
+      press(moved, 'x');
+      expect(shown(moved)).toEqual(['chart:', 'paragraph:x']);
+    });
+
+    it('that is no place any more when it comes back falls back as before: the caret in the nearest text', async () => {
+      holding({ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'Quarterly sales.' }] }, chart('c1'));
+      const source = mountIn(panel);
+      const editor = await ready();
+      gapAtEnd(editor);
+      act(() => {
+        stageArtifactEditorState(panel);
+        source.view.unmount();
+      });
+      // another replica takes the chart away while the document moves: the carried place now follows a paragraph
+      memory.write((doc) => tabBody(doc, 'tab1')!.delete(1, 1));
+      await settle();
+      act(() => void adoptStagedArtifactEditorState(A, main));
+      mountIn(main);
+      const moved = await ready();
+      await settle();
+      expect(shown(moved)).toEqual(['paragraph:Quarterly sales.']);
+      const { selection } = moved.state;
+      expect([selection instanceof TextSelection, selection.empty, selection.$head.parentOffset]).toEqual([true, true, 'Quarterly sales.'.length]);
+    });
   });
 });
 

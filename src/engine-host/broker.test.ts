@@ -289,6 +289,42 @@ describe('plan outcomes map to the wire', () => {
   });
 });
 
+// UX wave U1a §F: an approved plan may name the mode the session is in afterwards, as the terminal's own approval does
+// (findings-uxwave-u1-plan-next-mode.txt: the engine applied a `setMode` update beside the allow before the tool's result).
+// Only the modes that check ran are written; the update is no grant, so the grant snapshot is not told.
+describe('a plan approved in a named mode', () => {
+  const plan = (id: string): ControlRequestFrame => ({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'ExitPlanMode', input: { plan: '# Plan\n1. do it', planFilePath: '/p.md' }, tool_use_id: `toolu_${id}` } });
+
+  it('writes each mode of PLAN_NEXT_MODES as a setMode update for the session beside the allow, and grants nothing', async () => {
+    const { broker, responses, grants } = setup();
+    for (const id of ['p1', 'p2']) broker.accept(plan(id));
+    expect(await broker.answer(rid('p1'), { kind: 'plan', outcome: 'implement', feedback: null, mode: 'acceptEdits' })).toBe('delivered');
+    expect(await broker.answer(rid('p2'), { kind: 'plan', outcome: 'implement', feedback: null, mode: 'default' })).toBe('delivered');
+    expect(responses.map((r) => r.response)).toEqual([
+      { behavior: 'allow', updatedInput: { plan: '# Plan\n1. do it', planFilePath: '/p.md' }, updatedPermissions: [{ type: 'setMode', mode: 'acceptEdits', destination: 'session' }] },
+      { behavior: 'allow', updatedInput: { plan: '# Plan\n1. do it', planFilePath: '/p.md' }, updatedPermissions: [{ type: 'setMode', mode: 'default', destination: 'session' }] },
+    ]);
+    expect(grants).toEqual([]);
+  });
+
+  it.each(['auto', 'bypassPermissions', 'dontAsk', 'plan'] as const)('refuses %s, a mode the check did not run, writing nothing and leaving the item pending', async (mode) => {
+    const { broker, responses } = setup();
+    broker.accept(plan('p1'));
+    expect(await broker.answer(rid('p1'), { kind: 'plan', outcome: 'implement', feedback: null, mode }).catch((e: unknown) => (e as Error).name)).toBe('BrokerAnswerMismatch');
+    expect(broker.item(rid('p1'))?.attention.state).toBe('pending');
+    expect(responses).toEqual([]);
+    expect(await broker.answer(rid('p1'), { kind: 'plan', outcome: 'implement', feedback: null })).toBe('delivered'); // still answerable
+  });
+
+  it('writes today’s response, whole, for an implement that names no mode', async () => {
+    const { broker, responses, grants } = setup();
+    broker.accept(plan('p1'));
+    await broker.answer(rid('p1'), { kind: 'plan', outcome: 'implement', feedback: null });
+    expect(responses).toEqual([{ requestId: 'p1', response: { behavior: 'allow', updatedInput: { plan: '# Plan\n1. do it', planFilePath: '/p.md' } } }]);
+    expect(grants).toEqual([]);
+  });
+});
+
 describe('permission answers on the wire', () => {
   it('allow once, session (suggestion rewritten to session, else built from the request), local_settings, deny and deny_and_stop', async () => {
     const { broker, responses, grants } = setup();

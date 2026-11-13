@@ -7,10 +7,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDesignSystemAdapter, readOrigin, writeSystem } from '@artifacts/design-system/model'; // P4 W1 (L277)
 import type { KindAdapter } from '@artifacts/host';
 import { defaultSystem } from '@artifacts/types/design_system/defaults'; // P4 W1 (L277)
-import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, insertedBy, newDoc, stateV2, stateVector, type Doc } from '@artifacts/yjs';
+import { documentChanges, openDiff } from '@artifacts/document/history';
+import { TAB, block, body, markFormat, textOf } from '@artifacts/document/history.fixture';
+import { schemaFor } from '@artifacts/document/schema';
+import { createDocument } from '@artifacts/document/tabs';
+import { encodeFrame } from '@artifacts/provider/frames';
+import { applyV1, applyV2, canonicalV2, contentIdsOf, decodeMap, diffV1, idAt, insertedBy, mergeUpdates, newDoc, onUpdate, stateV2, stateVector, transact, type Doc } from '@artifacts/yjs';
+import { deletionsOf, liveMarkers } from '@artifacts/yjs/format-cleanup.fixture';
+import { ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ArtifactStoreError } from './errors';
+import type { HostPort } from './ports';
 import { restoreArtifact } from './restore';
 import { DocumentService } from './service';
 import { SqliteDocumentStorage } from './storage';
@@ -1160,6 +1168,60 @@ describe('ArtifactStore: maintenance and thinning (Decision Log 5, 8)', () => {
     ]);
     reopen();
     for (const id of [v3, v4]) expect(canonicalV2(store.versionState(doc.id, id))).toEqual(canonicalV2(states.get(id)!));
+  });
+
+  // l6-artifacts-07 (a): documents now keep formatting markers that change no character's format (two writers at once:
+  // one bolds a word while the other, not having seen the bold, deletes it). A keyframe promoted from a merge over such a
+  // state is the same state: the same structs and deletions, the same rendering, and the same diff to the next version.
+  it('promotes a keyframe over a state that keeps redundant markers to the same state (l6-artifacts-07 (a))', async () => {
+    const paragraph = schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'one word two' }] }] });
+    const doc = await store.create({ kind: 'document', title: 'Memo', initial: (d) => void createDocument(d, { title: 'Main', id: TAB, body: paragraph }) }, human);
+    const v1 = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
+    // the deleter's replica: synced now, and never given what the host sends it after
+    let send: ((data: unknown) => void) | null = null;
+    const port: HostPort = { send: () => {}, close: () => {}, onMessage: (listener) => void (send = listener), onClose: () => {} };
+    service.attach(doc.id, port, agent);
+    const deleter = newDoc();
+    applyV1(deleter, diffV1(service.live(doc.id)));
+    await write(doc.id, human, (d) => block(d, 'p1').format(4, 4, markFormat({ type: 'bold' })));
+    const updates: Uint8Array[] = [];
+    const off = onUpdate(deleter, (update) => updates.push(update));
+    transact(deleter, () => block(deleter, 'p1').delete(4, 4));
+    off();
+    send!(encodeFrame({ type: 'update', update: mergeUpdates(updates) }));
+    await service.whenCommitted();
+    expect(committed('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq', doc.id).slice(-2)).toEqual([{ actor: 'human' }, { actor: 'session:app-1' }]); // both landed
+    expect(textOf(block(service.live(doc.id), 'p1'))).toBe('one  two');
+    expect(liveMarkers(block(service.live(doc.id), 'p1'))).toBe(2);
+    const v2 = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
+    await write(doc.id, human, (d) => block(d, 'p1').insert(0, 'Then '));
+    const v3 = (await store.createVersion(doc.id, { kind: 'named', actor: human }))!;
+    const loaded = (state: Uint8Array) => {
+      const d = newDoc();
+      applyV2(d, state);
+      return d;
+    };
+    const read = (state: Uint8Array) => {
+      const d = loaded(state);
+      return { sv: stateVector(d), deletions: deletionsOf(d), markers: liveMarkers(block(d, 'p1')), rendered: ynodeToPmnode(body(d), schemaFor()).toJSON() };
+    };
+    const changes = (state: Uint8Array) => {
+      const diff = openDiff({ prevState: state, nextState: store.versionState(doc.id, v3), attributions: service.provenance(doc.id) });
+      try {
+        return documentChanges(diff);
+      } finally {
+        diff.destroy();
+      }
+    };
+    const before = store.versionState(doc.id, v2);
+    const expected = { ...read(before), changes: changes(before) };
+    expect(expected.markers).toBe(2);
+    expect(expected.changes.map((tab) => tab.body)).toEqual([1]);
+    await service.inBatch(() => store.versions.drop(doc.id, [v1]));
+    expect(committed('SELECT enc FROM artifact_versions WHERE id = ?', v2)).toEqual([{ enc: 'full' }]);
+    const promoted = store.versionState(doc.id, v2);
+    expect({ ...read(promoted), changes: changes(promoted) }).toEqual(expected);
+    expect(canonicalV2(promoted)).toEqual(canonicalV2(before));
   });
 
   it('prunes versions older than a date on the owner’s word, except pinned states, and a byte kind’s live content', async () => {

@@ -10,11 +10,12 @@
 import { create } from 'zustand';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
-import { isOpen, needsYou, type NeedsYouRow } from '../attention/derive';
+import { waitingAgents, waitingByCall, waits } from '@shared/attention/kinds';
+import { needsYou, type NeedsYouRow } from '../attention/derive';
 import type { QuestionDraft } from '../request-card/question-steps';
 import type { ListedSession } from './sessions';
 
@@ -29,9 +30,9 @@ export interface AttentionState {
   // for an item with no broker request, and for one whose read failed twice (then also in `unreadable`), so the docked
   // swap shows it as a notice instead of waiting for a read that will not come.
   requests: Map<AttentionId, SessionEvent | null>;
-  unreadable: Map<AttentionId, string>; // why an item's request could not be read; forgotten once the item is not pending
+  unreadable: Map<AttentionId, string>; // why an item's request could not be read; forgotten once the item no longer waits
   // W4: a question card's answers in progress, beside its request, so a remount or a move between placements resumes
-  // them (`request-card/question-steps.ts`); dropped once the item is no longer open.
+  // them (`request-card/question-steps.ts`); dropped once the item no longer waits (UC-1: at the answer).
   drafts: Map<AttentionId, QuestionDraft>;
   // P5 O7 M6: the sessions of every machine whose attention main holds greyed.
   greyed: ReadonlySet<AppSessionId>;
@@ -42,6 +43,10 @@ export interface AttentionState {
   // The snapshot nobody answered: the machine's buffer replays over what is held, and nothing is removed.
   cancelSnapshot(machine: MachineRef): void;
   applyChanged(change: EventPayload<'attention.changed'>, machine: MachineRef): void;
+  // UX wave U1a (Reported 9): a session's list that the machine's feed and lists never carry (lane A's mirror of a remote
+  // terminal session, `lane-a/remote-connect.ts`), written at once, never buffered, and left standing, its drafts with it,
+  // by the machine's snapshots until the mirror empties it.
+  applyMirrored(change: EventPayload<'attention.changed'>, machine: MachineRef): void;
   // P5 O7 M6: another machine's feed snapshot (`remote.attention`), its partition replaced whole and greyed or not.
   applyRemote(snapshot: EventPayload<'remote.attention'>): void;
   applyNotified(notified: EventPayload<'attention.notified'>): void;
@@ -52,10 +57,10 @@ export interface AttentionState {
 
 export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
 
-// The unreadable items no longer pending (answered or retired) are forgotten, with the null their read left cached.
+// The unreadable items that no longer wait (answered or retired) are forgotten, with the null their read left cached.
 function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
   if (state.unreadable.size === 0) return {};
-  const pending = new Set([...bySession.values()].flatMap((items) => items.filter((item) => item.state === 'pending').map((item) => item.id)));
+  const pending = new Set([...bySession.values()].flatMap((items) => items.filter(waits).map((item) => item.id)));
   const settled = [...state.unreadable.keys()].filter((id) => !pending.has(id));
   if (settled.length === 0) return {};
   const requests = new Map(state.requests);
@@ -67,10 +72,10 @@ function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, b
   return { requests, unreadable };
 }
 
-// The drafts of items no longer open (answered, retired, gone) are dropped.
+// The drafts of items that no longer wait (answered, retired, gone) are dropped.
 function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
   if (drafts.size === 0) return {};
-  const open = new Set([...bySession.values()].flatMap((items) => items.filter(isOpen).map((item) => item.id)));
+  const open = new Set([...bySession.values()].flatMap((items) => items.filter(waits).map((item) => item.id)));
   const kept = new Map([...drafts].filter(([id]) => open.has(id)));
   return kept.size === drafts.size ? {} : { drafts: kept };
 }
@@ -79,6 +84,7 @@ function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: 
 // its changes buffered while its snapshot is outstanding.
 interface Partition {
   sessions: Set<AppSessionId>;
+  mirrored: Set<AppSessionId>; // U1a: those of its sessions whose list the mirror writes (`applyMirrored`), which no snapshot replaces
   buffer: Map<AppSessionId, AttentionItem[]> | null;
   greyed: boolean; // P5 O7 M6: as main last said it in `remote.attention`
   // P5 O7 M6 (M6c fix wave 1): main's feed speaks for this machine (a first `remote.attention` came), for the page's life:
@@ -92,7 +98,7 @@ export function createAttentionStore() {
   const partitions = new Map<MachineRef, Partition>();
   const partition = (machine: MachineRef): Partition => {
     let p = partitions.get(machine);
-    if (!p) partitions.set(machine, (p = { sessions: new Set(), buffer: null, greyed: false, fed: false }));
+    if (!p) partitions.set(machine, (p = { sessions: new Set(), mirrored: new Set(), buffer: null, greyed: false, fed: false }));
     return p;
   };
   // Every outstanding snapshot's buffer, as the state shows them.
@@ -108,11 +114,12 @@ export function createAttentionStore() {
       if (p.greyed) for (const id of p.sessions) greyed.add(id);
       return greyed;
     };
-    // The partition's sessions replaced by `items`, grouped per session, into `bySession`.
+    // The partition's sessions replaced by `items`, grouped per session, into `bySession`; a mirrored session's list stands.
     const replace = (p: Partition, bySession: Map<AppSessionId, AttentionItem[]>, items: AttentionItem[]) => {
-      for (const id of p.sessions) bySession.delete(id);
-      p.sessions = new Set();
+      for (const id of p.sessions) if (!p.mirrored.has(id)) bySession.delete(id);
+      p.sessions = new Set(p.mirrored);
       for (const item of items) {
+        if (p.mirrored.has(item.appSessionId)) continue; // the feed carries no terminal session's item; the mirror's list is the session's
         bySession.set(item.appSessionId, [...(bySession.get(item.appSessionId) ?? []), item]);
         p.sessions.add(item.appSessionId);
       }
@@ -156,6 +163,15 @@ export function createAttentionStore() {
           set({ pendingReplacements: buffered() });
           return;
         }
+        p.sessions.add(appSessionId);
+        const bySession = new Map(get().bySession).set(appSessionId, items);
+        const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+      },
+      applyMirrored({ appSessionId, items }, machine) {
+        const p = partition(machine);
+        if (items.length === 0) p.mirrored.delete(appSessionId);
+        else p.mirrored.add(appSessionId);
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
@@ -225,14 +241,38 @@ export const useAttention = createAttentionStore();
 
 const EMPTY: AttentionItem[] = [];
 
-// Items still waiting on a human (pending or delivered), memoised per session list.
+// UC-1 (U1a's Interfaces §A): what waits in a session's list, by the one predicate, each reading memoised per list so a
+// component gets the same object until the list changes. `selectPendingOf` keeps its name: the items for which `waits`
+// holds (an answered request is not among them).
 const openCache = new WeakMap<AttentionItem[], AttentionItem[]>();
 export function selectPendingOf(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): AttentionItem[] {
   const items = state.bySession.get(appSessionId);
   if (!items) return EMPTY;
   let open = openCache.get(items);
-  if (!open) openCache.set(items, (open = items.filter(isOpen)));
+  if (!open) openCache.set(items, (open = items.filter(waits)));
   return open;
+}
+
+const NO_CALLS: ReadonlyMap<ToolUseId, AttentionItem> = new Map();
+const callsCache = new WeakMap<AttentionItem[], ReadonlyMap<ToolUseId, AttentionItem>>();
+/** The session's waiting requests by the tool call each names (`waitingByCall`). */
+export function selectWaitingByCall(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): ReadonlyMap<ToolUseId, AttentionItem> {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return NO_CALLS;
+  let calls = callsCache.get(items);
+  if (!calls) callsCache.set(items, (calls = waitingByCall(items)));
+  return calls;
+}
+
+const NO_AGENTS: ReadonlySet<string> = new Set();
+const agentsCache = new WeakMap<AttentionItem[], ReadonlySet<string>>();
+/** The session's agents with a request of their own waiting (`waitingAgents`). */
+export function selectWaitingAgents(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): ReadonlySet<string> {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return NO_AGENTS;
+  let agents = agentsCache.get(items);
+  if (!agents) agentsCache.set(items, (agents = waitingAgents(items)));
+  return agents;
 }
 
 // The Needs-you rows, recomputed only when either input's version moves, so a component gets the same array until

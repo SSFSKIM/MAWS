@@ -7,10 +7,12 @@ import * as awarenessProtocol from '@y/protocols/awareness';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import { decodeFrame, encodeFrame, type Frame } from '@artifacts/provider/frames';
-import { adoptClientId, applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, hasPending, idAt, insertedBy, mergeMaps, newDoc, stateVector, SuggestionError, type Doc, type Node } from '@artifacts/yjs';
+import { adoptClientId, applyV1, applyV2, carriedBy, checkUpdate, contentIdsOf, decodeMap, deletedBy, diffV1, hasPending, idAt, insertedBy, mergeMaps, newDoc, stateVector, SuggestionError, transact, type Doc, type Node } from '@artifacts/yjs';
+import { deletionsOf, liveMarkers } from '@artifacts/yjs/format-cleanup.fixture';
 import type { Actor } from '@shared/artifacts/actor';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostPort } from './ports';
+import { provided, type ProvidedReplica } from './provided-replica.fixture';
 import { DocumentService, IDLE_UNLOAD_MS, type Committed, type ServiceOptions } from './service';
 import { SqliteDocumentStorage, StoreTooNewError } from './storage';
 
@@ -576,6 +578,127 @@ describe('DocumentService: host-originated writes', () => {
       { clientId: expect.any(Number), actor: 'human' },
       { clientId: bound, actor: 'session:app-1' }, // one host clientID per actor, as across a reload
     ]);
+  });
+});
+
+// l6-artifacts-07 (a), sequence S1: two writers at once over formatted text. One bolds a word while the other, not having
+// seen the bold, deletes it, which leaves the bold's two markers around nothing in every doc. On master this went wrong
+// in both orders: the bold first, the live doc's own clean-up refused the deleter's frame and the doc was evicted; the
+// deletion first, the bolder's replica tidied after the relay and wrote a third row, credited to the bolder.
+describe('DocumentService: two writers at once over formatted text (l6-artifacts-07 (a), S1)', () => {
+  const replicas: ProvidedReplica[] = [];
+  afterEach(() => {
+    for (const replica of replicas.splice(0)) replica.provider.destroy();
+  });
+  const open = (actor: Actor) => {
+    const replica = provided(service, 'a1', actor);
+    replicas.push(replica);
+    return replica;
+  };
+  // Delivers and flushes until nothing moves.
+  const settle = () => {
+    for (let moved = 1; moved > 0; ) {
+      moved = replicas.reduce((n, replica) => n + replica.deliver(), 0) + turns.length;
+      tick();
+    }
+  };
+  const actors = () => committed('SELECT actor FROM artifact_updates ORDER BY seq').map((row) => (row as { actor: string }).actor);
+  const text = (doc: Doc) => doc.get('t');
+  // Two replicas synced to 'one word two', the human's (the bolder) and the agent's (the deleter).
+  function opened() {
+    make();
+    const bolder = open(human);
+    const deleter = open(agent);
+    settle();
+    transact(bolder.doc, () => text(bolder.doc).insert(0, 'one word two'), 'typed');
+    settle();
+    return { bolder, deleter, before: actors().length };
+  }
+  const bold = (replica: ProvidedReplica) => transact(replica.doc, () => text(replica.doc).format(4, 4, { bold: true }), 'typed');
+  const deleteWord = (replica: ProvidedReplica) => transact(replica.doc, () => text(replica.doc).delete(4, 4), 'typed');
+  // After both relays: the live doc and both replicas hold the same structs and deletions, render the same text and
+  // formats, keep the two markers, and have nothing unsent.
+  function expectConverged(...ends: ProvidedReplica[]) {
+    const live = service.loaded('a1')!;
+    for (const end of ends) {
+      expect(stateVector(end.doc)).toEqual(stateVector(live));
+      expect(deletionsOf(end.doc)).toEqual(deletionsOf(live));
+      expect(text(end.doc).toDelta()).toEqual(text(live).toDelta());
+      expect(end.provider.state.unsaved).toBe(0);
+    }
+    expect([live, ...ends.map((end) => end.doc)].map((doc) => liveMarkers(text(doc)))).toEqual([2, 2, 2]);
+    expect(text(live).toString()).toBe('one  two');
+  }
+
+  it('the bold first: the deletion made without it lands too, one row each, and nobody writes a third', () => {
+    const { bolder, deleter, before } = opened();
+    deleter.hold = true;
+    bold(bolder);
+    deleteWord(deleter);
+    settle(); // the bold lands and reaches the deleter, whose deletion waits
+    expect(actors().slice(before)).toEqual(['human']);
+    deleter.hold = false;
+    deleter.deliver();
+    tick(); // the deletion lands
+    expect(actors().slice(before)).toEqual(['human', 'session:app-1']);
+    expect(logs.join('\n')).not.toMatch(/evicted/);
+    expect([bolder.closed, deleter.closed]).toEqual([false, false]);
+    settle(); // the relays
+    expectConverged(bolder, deleter);
+    expect(actors().slice(before)).toEqual(['human', 'session:app-1']);
+  });
+
+  it('the deletion first: the bold made without it lands too, one row each, and nobody writes a third', () => {
+    const { bolder, deleter, before } = opened();
+    bolder.hold = true;
+    bold(bolder);
+    deleteWord(deleter);
+    settle(); // the deletion lands and reaches the bolder, whose bold waits
+    expect(actors().slice(before)).toEqual(['session:app-1']);
+    bolder.hold = false;
+    bolder.deliver();
+    tick(); // the bold lands
+    expect(actors().slice(before)).toEqual(['session:app-1', 'human']);
+    expect(logs.join('\n')).not.toMatch(/evicted/);
+    expect([bolder.closed, deleter.closed]).toEqual([false, false]);
+    settle();
+    expectConverged(bolder, deleter);
+    expect(actors().slice(before)).toEqual(['session:app-1', 'human']);
+  });
+
+  it('a reload holds the same live markers, and a replica that syncs from it sends nothing', () => {
+    const { bolder, deleter } = opened();
+    deleter.hold = true;
+    bold(bolder);
+    deleteWord(deleter);
+    settle();
+    deleter.hold = false;
+    settle();
+    const rows = rowCount();
+    const delta = text(service.loaded('a1')!).toDelta();
+    reopen();
+    const reloaded = service.live('a1');
+    expect(liveMarkers(text(reloaded))).toBe(2);
+    expect(text(reloaded).toDelta()).toEqual(delta);
+    replicas.splice(0).forEach((replica) => replica.provider.destroy()); // their host is gone
+    const reader = open(human);
+    settle();
+    expect(reader.sent).toEqual(['step2']); // its answer to the host's step 1, and nothing after it
+    expect(text(reader.doc).toDelta()).toEqual(delta);
+    expect(liveMarkers(text(reader.doc))).toBe(2);
+    expect(rowCount()).toBe(rows);
+  });
+
+  // S3 b: `integrated`'s throw stays, as the tripwire for a re-pin that brings a clean-up back.
+  it('still refuses a transaction on the live doc that names no writer', () => {
+    make();
+    const a = raw('a1', human);
+    a.edit((doc) => doc.get('t').insert(0, 'abc'));
+    tick();
+    const live = service.loaded('a1')!;
+    expect(() => transact(live, () => live.get('t').insert(0, 'x'), null)).toThrow('the live doc of a1 was edited outside a replica');
+    tick();
+    expect(rowCount()).toBe(1);
   });
 });
 

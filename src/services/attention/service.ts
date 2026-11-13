@@ -23,6 +23,7 @@
 // the owner channel's, never restored (the bridge re-raises what is still pending), and untouched by the engine host,
 // which holds none of them.
 import type { AttentionItem } from '@shared/graph/attention';
+import { waits } from '@shared/attention/kinds';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -240,7 +241,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
     if (existing) {
       // the same occurrence, still open, reads as derived now (the ruling, 2026-10-30: one an earlier build stored in the
       // generic words takes the API error's when the transcript replays it); its state and moments stay
-      if ((existing.state === 'pending' || existing.state === 'delivered') && existing.summary !== fields.summary) state.derived.set(itemId, { ...existing, summary: fields.summary });
+      if (waits(existing) && existing.summary !== fields.summary) state.derived.set(itemId, { ...existing, summary: fields.summary });
       return;
     }
     if (seenThere(id, fields)) return;
@@ -321,7 +322,7 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
   const unsubscribe = [
     deps.onEvent('session.brokerItems', ({ appSessionId, items }) => {
       const state = stateOf(appSessionId);
-      state.broker = items.filter((item) => item.state === 'pending' || item.state === 'delivered');
+      state.broker = items.filter(waits); // UC-1: an answered request waits nowhere, so it is published nowhere
       changed(appSessionId, state);
     }),
     deps.onEvent('session.eventBatch', ({ appSessionId, events }) => onEvents(appSessionId, events)),

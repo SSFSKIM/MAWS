@@ -36,7 +36,6 @@ import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useLayout } from '../../stores/layout';
 import { useSettings } from '../../stores/settings';
-import { currentSet } from '../../stores/layout-model';
 import { TranscriptSlot } from '../../transcript';
 import { RewindWidget } from '../../widgets/RewindWidget';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
@@ -58,11 +57,9 @@ function addressedPane(pane: HarnessPane): HarnessPane {
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
 const oldest = (items: AttentionItem[]) => items.reduce<AttentionItem | null>((a, b) => (a === null || at(b) < at(a) ? b : a), null);
 
-// The request a pane shows: the session's oldest pending item, else its oldest open one (an answered item stays,
-// collapsed, until C3 retires it).
+// The request a pane shows: the session's oldest waiting item (UC-1: an answered one waits nowhere, so none is shown).
 function useShown(appSessionId: AppSessionId): AttentionItem | null {
-  const open = useAttention((s) => selectPendingOf(s, appSessionId));
-  return oldest(open.filter((item) => item.state === 'pending')) ?? oldest(open);
+  return oldest(useAttention((s) => selectPendingOf(s, appSessionId)));
 }
 
 function RequestPane({ appSessionId, placement, index }: { appSessionId: AppSessionId; placement: HarnessPlacement; index: 0 | 1 }) {
@@ -131,10 +128,7 @@ function mirrorLayout(panes: [HarnessPane, HarnessPane]) {
     pane !== null && 'composer' in pane
       ? { tabs: [{ id: `session:${pane.composer}`, kind: 'session' as const, appSessionId: pane.composer as AppSessionId, pinned: false }], activeTabId: `session:${pane.composer}` }
       : { tabs: [{ id: 'diagnostics' as const, kind: 'diagnostics' as const, pinned: false }], activeTabId: 'diagnostics' }; // W5: a tab of no session (the Overview is no tab)
-  useLayout.setState((s) => {
-    const shown = currentSet(s.main);
-    return { main: { ...s.main, sets: { ...s.main.sets, [s.main.current]: { ...shown, panes: [tabsOf(panes[0]), tabsOf(panes[1])] } } } };
-  });
+  useLayout.setState((s) => ({ main: { ...s.main, panes: [tabsOf(panes[0]), tabsOf(panes[1])] } }));
 }
 
 export function ComposerHarness() {
