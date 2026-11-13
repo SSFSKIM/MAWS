@@ -407,7 +407,7 @@ test('settings: the regrouped page; each note one line where the body has its 76
     await expect(nav.locator('[data-settings-group]')).toHaveText(['App', 'Sessions & engine']);
     await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toHaveAttribute('aria-current', 'true');
     await expect(view.locator('section[aria-labelledby^="settings-"] > h3')).toHaveText(SECTION_ORDER.map((name) => new RegExp(`^${name}`)));
-    await expect(view.getByRole('region', { name: 'Engine' }).locator('[data-settings-row]')).toHaveCount(3);
+    await expect(view.getByRole('region', { name: 'Engine', exact: true }).locator('[data-settings-row]')).toHaveCount(3);
 
     // 1. the body at 760 px: every note one line
     expect((await column.boundingBox())!.width, 'the body has its full 760 px').toBe(760);
@@ -418,11 +418,11 @@ test('settings: the regrouped page; each note one line where the body has its 76
     expect(notes.length, 'the page draws its notes').toBeGreaterThan(20);
     for (const note of notes) expect(note.height, `${note.row}: ${note.text}`).toBeLessThanOrEqual((note.button ? NOTE_LINE_WITH_BUTTON : NOTE_LINE) + 0.5);
     // More opens the rest in place, under the line, and Less closes it
-    const update = column.getByRole('group', { name: 'Update' });
-    await update.getByRole('button', { name: 'More' }).click();
-    await expect(update.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true');
+    const update = column.getByRole('group', { name: 'Update', exact: true });
+    await update.getByRole('button', { name: 'More', exact: true }).click();
+    await expect(update.getByRole('button', { name: 'Less', exact: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(update.locator('[data-settings-note]')).toContainText('New sessions start on the new version; running sessions keep theirs.');
-    await update.getByRole('button', { name: 'Less' }).click();
+    await update.getByRole('button', { name: 'Less', exact: true }).click();
     await expect(update).not.toContainText('New sessions start on the new version');
     // a short window: the index's list scrolls by itself, its footer in place at the bottom
     await resize(1440, 600);
@@ -506,7 +506,7 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     const option = (name: string, under: string) => options.filter({ has: page.getByText(name, { exact: true }) }).filter({ has: page.getByText(under, { exact: true }) });
 
     // ⌘F from a row of the page focuses the field
-    await view.getByRole('group', { name: 'Theme' }).getByText('Theme', { exact: true }).click();
+    await view.getByRole('group', { name: 'Theme', exact: true }).getByText('Theme', { exact: true }).click();
     await page.keyboard.press('Meta+F');
     await expect(field).toBeFocused();
 
@@ -524,11 +524,11 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     // a row far down a short section: Voice's last, Recognition, lands with Voice's heading at the body's top
     await field.fill('recognition');
     await option('Recognition', 'Voice').click();
-    const recognition = view.getByRole('region', { name: 'Voice' }).getByRole('group', { name: 'Recognition' });
+    const recognition = view.getByRole('region', { name: 'Voice', exact: true }).getByRole('group', { name: 'Recognition', exact: true });
     await expect(recognition).toBeFocused();
     await expect(recognition).toHaveAttribute('data-settings-mark', 'on');
     const bodyBox = (await body.boundingBox())!;
-    const heading = (await view.getByRole('heading', { name: 'Voice' }).boundingBox())!;
+    const heading = (await view.getByRole('heading', { name: 'Voice', exact: true }).boundingBox())!;
     const landed = (await recognition.boundingBox())!;
     expect(heading.y, 'the heading at the body’s top').toBeGreaterThanOrEqual(bodyBox.y - 1);
     expect(heading.y, 'the heading at the body’s top').toBeLessThanOrEqual(bodyBox.y + 24);
@@ -540,8 +540,8 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     // a word behind the More a row shows now opens that More
     await field.fill('PATH');
     await option('Binary', 'Engine').click();
-    const binary = view.getByRole('region', { name: 'Engine' }).getByRole('group', { name: 'Binary' });
-    await expect(binary.getByRole('button', { name: 'Less' })).toHaveAttribute('aria-expanded', 'true');
+    const binary = view.getByRole('region', { name: 'Engine', exact: true }).getByRole('group', { name: 'Binary', exact: true });
+    await expect(binary.getByRole('button', { name: 'Less', exact: true })).toHaveAttribute('aria-expanded', 'true');
     await expect(binary).toBeFocused();
 
     // a short window: the results scroll as the index's list does; the field and the footer stay
@@ -579,7 +579,7 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     expect((await paneList.boundingBox())!.y, 'under the field').toBeGreaterThanOrEqual(fieldBox.y + fieldBox.height - 1);
     await page.screenshot({ path: test.info().outputPath('settings-search-330.png') });
     await paneNav.getByRole('option').filter({ has: page.getByText('MCP servers', { exact: true }) }).click();
-    const servers = pane.getByRole('region', { name: 'Sessions' }).getByRole('group', { name: 'MCP servers' });
+    const servers = pane.getByRole('region', { name: 'Sessions', exact: true }).getByRole('group', { name: 'MCP servers', exact: true });
     await expect(servers).toBeFocused();
     await expect(servers).toBeInViewport();
     expect(maws.consoleErrors()).toEqual([]);
