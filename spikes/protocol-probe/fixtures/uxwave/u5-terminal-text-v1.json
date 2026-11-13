@@ -1,0 +1,352 @@
+{
+ "provenance": {
+  "probe": "U5 P7 (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Probes)",
+  "engineVersion": "2.1.322 (Claude Code)",
+  "launch": "interactive engine in tmux, --model haiku, managed settings kept (vm-run.sh --managed), CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1",
+  "plugins": [
+   {
+    "name": "to-human",
+    "version": "0.7.3"
+   },
+   {
+    "name": "sminos",
+    "version": "1.46.3"
+   },
+   {
+    "name": "doperpowers",
+    "version": "7.220.0"
+   }
+  ],
+  "writer": "maws/probe-vm",
+  "post": "POST /command?wait=10000 {op:\"deliver\",key:{writer,seq},text,launch} (src/services/lane-a/deliveries.ts, driver.ts)"
+ },
+ "steps": [
+  {
+   "step": "p7-idle",
+   "sent": {
+    "utf16": 515,
+    "bytes": 518,
+    "sha256": "53603208de1da5ebe0474fd578940a19cc29eb66b8151e9f1909730d3e30613d",
+    "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-idle) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-idle) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "75b634a489bb40c482553ab91e23b859",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "91c737e6-bcff-4fa9-9973-fb3226f1fd7e"
+    }
+   ],
+   "kept": {
+    "line": 40,
+    "type": "user",
+    "isMeta": null,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos",
+     "asUser": true
+    },
+    "promptId": "present",
+    "shape": "string",
+    "utf16": 515,
+    "sha256": "53603208de1da5ebe0474fd578940a19cc29eb66b8151e9f1909730d3e30613d",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "592d2fd7c32567f44e01edd0f8cb84bb67478ce058d0b6db02ac4aa51ac59134"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "592d2fd7c32567f44e01edd0f8cb84bb67478ce058d0b6db02ac4aa51ac59134"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": []
+  },
+  {
+   "step": "p7-busy",
+   "sent": {
+    "utf16": 515,
+    "bytes": 518,
+    "sha256": "0f38dc23060786ca3b597f81a3c4a8bf1925bae72da82ac0710b33490bd8e46c",
+    "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-busy) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-busy) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "7535a8eba3ff4267bfe6eb56588192c3",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "21c5842c-9526-4a17-8bd0-86402029188d"
+    }
+   ],
+   "kept": {
+    "line": 56,
+    "type": "user",
+    "isMeta": true,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos"
+    },
+    "promptId": "present",
+    "shape": "text",
+    "utf16": 515,
+    "sha256": "0f38dc23060786ca3b597f81a3c4a8bf1925bae72da82ac0710b33490bd8e46c",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "ee416877ffd890443e44223a7691861ae4062a824209532c344c5cbba8c0da54"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "ee416877ffd890443e44223a7691861ae4062a824209532c344c5cbba8c0da54"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [
+    {
+     "line": 57,
+     "type": "system",
+     "isMeta": false,
+     "origin": null,
+     "attachment": null,
+     "shape": "undefined",
+     "sha256": null,
+     "equal": false,
+     "holdsText": false
+    }
+   ],
+   "quote": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```"
+  },
+  {
+   "step": "p7-esc",
+   "sent": {
+    "utf16": 513,
+    "bytes": 516,
+    "sha256": "d213be4461f1ddc641a8f67fce61ac2aa0a10cfd1945a613df6fd8fbcd8a32e0",
+    "text": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-esc) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https://example.com/app\"/>\n\nComment on \"one.txt\" (file one.txt, line 1):\n(p7-esc) This line reads well 🎉.\nNo change is needed.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "5d48fe1712c646b28f74cbc0512f9aeb",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "4f1ee2fb-cb34-450e-a372-1e49f086c004"
+    }
+   ],
+   "kept": {
+    "line": 92,
+    "type": "user",
+    "isMeta": null,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos",
+     "asUser": true
+    },
+    "promptId": "present",
+    "shape": "string",
+    "utf16": 513,
+    "sha256": "d213be4461f1ddc641a8f67fce61ac2aa0a10cfd1945a613df6fd8fbcd8a32e0",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "d211174de2c35b1a59b0b0e7fb4d1a7added3f80ffa6acd6ed344bd03f7fb9d3"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "d211174de2c35b1a59b0b0e7fb4d1a7added3f80ffa6acd6ed344bd03f7fb9d3"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [],
+   "quote": "```\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>\n```"
+  },
+  {
+   "step": "p7-long",
+   "sent": {
+    "utf16": 69968,
+    "bytes": 72420,
+    "sha256": "969d7beec5ab4ece283887aa21c801386f77a42c903b3e5e15ad2604a01e29bc",
+    "head": "Comment on \"Menu > Settings\" (element nav > a.settings on https://example.com/app):\n(p7-long) The café label wraps oddly at this width.\n\nNo change is needed: reply with only the word NOTED.\n\n<maws_anchor kind=\"browser-element\" label=\"Menu &gt; Settings\" locator=\"nav &gt; a.settings\" pageUrl=\"https:/",
+    "tail": "ox jumps over the lazy dog, café 🎉.\nLine 0816 of the long comment: the quick brown fox jumps over the lazy dog, café 🎉.\nLine 0817 of the long comment: the quick brown fox jumps over the lazy dog, café 🎉.\n\n<maws_anchor kind=\"file-line\" label=\"one.txt\" locator=\"one.txt#L1\" path=\"one.txt\" line=\"1\"/>"
+   },
+   "posted": {
+    "status": 200,
+    "body": {
+     "id": "9aed40d5c1914332aeeb703d10645358",
+     "ok": true,
+     "result": {
+      "submitted": true
+     }
+    }
+   },
+   "fates": [
+    {
+     "outcome": "submitted"
+    },
+    {
+     "outcome": "entered",
+     "uuid": "847b2d57-b7aa-4677-a9d3-c53be56b5412"
+    }
+   ],
+   "kept": {
+    "line": 107,
+    "type": "user",
+    "isMeta": null,
+    "origin": {
+     "kind": "plugin",
+     "name": "sminos",
+     "asUser": true
+    },
+    "promptId": "present",
+    "shape": "string",
+    "utf16": 69968,
+    "sha256": "969d7beec5ab4ece283887aa21c801386f77a42c903b3e5e15ad2604a01e29bc",
+    "equal": true,
+    "firstDiff": -1
+   },
+   "reader": {
+    "sent": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "72a80f5ef7a8b9260869c86f7a2ee43de755b7a9447d86112091608f5aa02afc"
+    },
+    "kept": {
+     "anchor": {
+      "kind": "file-line",
+      "locator": "one.txt#L1",
+      "label": "one.txt",
+      "path": "one.txt",
+      "line": 1
+     },
+     "destination": null,
+     "textSha256": "72a80f5ef7a8b9260869c86f7a2ee43de755b7a9447d86112091608f5aa02afc"
+    },
+    "same": true
+   },
+   "otherRowsWithMarker": [
+    {
+     "line": 108,
+     "type": "last-prompt",
+     "isMeta": null,
+     "origin": null,
+     "attachment": null,
+     "shape": "undefined",
+     "sha256": null,
+     "equal": false,
+     "holdsText": false
+    }
+   ]
+  }
+ ],
+ "status": {
+  "status": 200,
+  "keys": [
+   "session",
+   "pid",
+   "protocol",
+   "socket",
+   "started",
+   "ready",
+   "subscribers",
+   "mod",
+   "launch",
+   "capabilities",
+   "permissionMode",
+   "permissionModeAt",
+   "permissionModeFrom"
+  ],
+  "launchNamed": true
+ },
+ "session": "present",
+ "run": "u5-terminal-text-v1"
+}
