@@ -12,8 +12,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
-import { InvalidSideInput } from '../side/invalid';
-import { ScreenshotRefused } from '../side/screenshot';
+import { InvalidSideInput } from '@shared/anchor/invalid';
+import { ScreenshotRefused } from '@shared/anchor/screenshot';
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');

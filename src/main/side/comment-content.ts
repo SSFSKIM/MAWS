@@ -7,8 +7,8 @@
 import { HostCommandError } from '@shared/host/runtime';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
-import { commentsContent } from '../../services/side/content';
-import { InvalidSideInput } from '../../services/side/invalid';
+import { commentsContent } from '@shared/anchor/content';
+import { InvalidSideInput } from '@shared/anchor/invalid';
 import type { MainHandler } from '../ipc/router';
 
 export async function commentContent({ comments }: CommandInput<'side.comment.content'>, userData: string): Promise<CommandOutput<'side.comment.content'>> {

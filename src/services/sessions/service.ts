@@ -39,9 +39,10 @@ import type { ContentBlock } from '@shared/graph/events';
 import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SideThreadFrom } from '@shared/ipc/schema/side';
-import { commentsContent, screenshotRoots, withoutScreenshot } from '../side/content';
-import { screenshotPreview } from '../side/screenshot'; // E11 F2b (Q4)
-import { InvalidSideInput } from '../side/invalid';
+import { commentsContent, withoutScreenshot } from '@shared/anchor/content'; // UX wave U5a: one or several comments
+import { screenshotRoots } from '../side/content';
+import { screenshotPreview } from '@shared/anchor/screenshot'; // E11 F2b (Q4); UX wave U5a: the reader moved to shared
+import { InvalidSideInput } from '@shared/anchor/invalid';
 import { sendToMain, type SendToMainInput, type SendToMainOutput } from '../side/send-to-main';
 // E3 end
 import { trustKeyOf, trustStateOf, type TrustDeps } from './trust';

@@ -10,7 +10,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import { commentsMessage } from '@shared/anchor/message';
 import { HostCommandError } from '@shared/host/runtime';
 import { tempDir } from '../../../test/support/index-fixture';
-import { commentContent as todaysContent } from '../../services/side/content';
+import { commentContent as todaysContent } from '../../services/side/content'; // the one-comment content `side.sendToMain` sends
 import type { MainHandler } from '../ipc/router';
 import { commentContent, registerCommentContent } from './comment-content';
 
