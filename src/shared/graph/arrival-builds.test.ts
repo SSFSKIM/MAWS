@@ -5,6 +5,7 @@
 import * as z from 'zod';
 import { describe, expect, it } from 'vitest';
 import { readTolerant } from '../ipc/tolerant';
+import { REGISTRY } from '../ipc/registry';
 import { codecOf } from '../ipc/validate';
 import { carriedOf } from '../engine/arrival';
 import { ContentBlockSchema, EventBaseSchema, SessionEventSchema } from './events';
@@ -80,7 +81,7 @@ describe('task.notification’s arrivals mark, between builds', () => {
   });
   const buildFEvents = SessionEventSchema.options.map((option) => (option.shape.kind.value === 'task.notification' ? BUILD_F_TASK_NOTIFICATION : option));
   const BUILD_F_EVENT = z.discriminatedUnion('kind', buildFEvents as unknown as [typeof BUILD_F_TASK_NOTIFICATION]);
-  const buildFLink = codecOf({ commands: {}, events: { 'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(BUILD_F_EVENT).max(500) }) } });
+  const buildFLink = codecOf({ ...REGISTRY, commands: {}, events: { 'session.eventBatch': z.strictObject({ appSessionId: AppSessionIdSchema, events: z.array(BUILD_F_EVENT).max(500) }) } });
   const notification = (fields: Record<string, unknown> = {}) => ({ ...base, kind: 'task.notification', taskId: 'b-1', toolUseId: 'toolu_a', status: 'failed', summary: 'Background command "build" failed with exit code 1', outputFile: '/tmp/demo/b-1.output', reason: null, ...fields });
 
   it('a window of build F receives the marked event across the link without the mark, and it parses under F’s schema', () => {
