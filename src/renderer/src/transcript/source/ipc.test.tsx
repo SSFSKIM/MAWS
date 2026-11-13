@@ -2680,6 +2680,28 @@ describe('a first read the engine host’s absence failed (O-11b)', () => {
     expect(reads(fake)).toHaveLength(3);
   });
 
+  it('takes a ready that overtook the retry’s own failure at once, and only once', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    host('ready', 5);
+    await settle();
+    expect(reads(fake), 'read 2 at ready 5').toHaveLength(2);
+    host('crashed', 6);
+    host('ready', 7); // the next host is ready while read 2 is out
+    reads(fake)[1]!.answer(away as never);
+    await settle();
+    expect(reads(fake), 'read 3 at ready 7, with no ready 9').toHaveLength(3);
+    reads(fake)[2]!.answer(away as never);
+    await act(() => vi.advanceTimersByTimeAsync(HOST_RETURN_WAIT_MS));
+    expect(phase()).toBe('failed');
+    expect(reads(fake), 'ready 7 is not used twice').toHaveLength(3);
+    host('ready', 9);
+    await settle();
+    expect(reads(fake)).toHaveLength(4);
+  });
+
   it('fails at once for any other failure, and for a session on another machine (its link’s return heals it)', async () => {
     vi.useFakeTimers();
     host('ready', 3);

@@ -51,6 +51,8 @@ import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { resetStops } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop
+import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
@@ -2204,6 +2206,33 @@ describe('a Stop that fails says so (S-01)', () => {
     expect(notices(), 'a Stop that worked says nothing').toEqual([]);
   });
 
+  it('for a terminal session on this Mac, a refused Stop shows the same notice: “Not stopped: ” and the bridge’s words', async () => {
+    live(A, { record: { holder: { kind: 'terminal', pid: 42 } } });
+    act(() => applyLaneAState(A, laneAState(A, { turn: { running: true, unknown: false } })));
+    try {
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(primary().textContent).toBe('Stop'));
+      await act(async () => primary().click());
+      await act(() => stops.reply('laneA.interrupt', { state: 'refused', code: 'busy', message: 'the terminal is busy' }));
+      await waitFor(() => expect(notices()).toEqual(['Not stopped: the terminal is busy']));
+    } finally {
+      resetLaneAStore();
+    }
+  });
+
+  it('sends no second interrupt from Esc or ⌘. while a Stop has been out past 300 ms', async () => {
+    busy(A);
+    focusOn(A);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    await act(async () => primary().click());
+    await waitFor(() => expect(primary().textContent).toBe('Stopping…'), { timeout: 2_000 });
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Escape' });
+    await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
+    expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'the one Stop out').toHaveLength(1);
+  });
+
   describe('on another machine', () => {
     const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     beforeEach(() => {
@@ -2230,6 +2259,17 @@ describe('a Stop that fails says so (S-01)', () => {
       await act(async () => primary().click());
       await act(() => stops.fail('session.interrupt', 'mini took the request but hasn’t confirmed it', 'timeout'));
       await waitFor(() => expect(notices()).toEqual(['mini took the request but hasn’t confirmed it']));
+    });
+
+    it('sends no interrupt from Esc or ⌘. in the machine’s offline phase, as the button sends none', async () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: '2026-11-13T09:00:00.000Z', generation: 0 }]);
+      focusOn(R);
+      mount([{ index: 0, id: R }], <ComposerAppKeys />);
+      await waitFor(() => expect(primary().title).toContain('Stop is unavailable while mini is offline.'));
+      act(() => editorOf().focus());
+      await key(editorOf(), { key: 'Escape' });
+      await key(editorOf(), { key: '.', code: 'Period', metaKey: true });
+      expect(stops.calls.filter((c) => c === 'invoke session.interrupt'), 'nothing sent to an offline machine').toEqual([]);
     });
   });
 });

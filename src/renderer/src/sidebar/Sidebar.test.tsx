@@ -10,6 +10,8 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending'; // the UX wave, U9
 import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
 import { registerSessionCreator } from '../keymap/actions-runtime';
@@ -1853,5 +1855,38 @@ describe('New chat in a project with no folder here', () => {
     await userEvent.click(plus);
     await vi.waitFor(() => expect(spawnTargetOf(tab, null)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: ID }));
     expect(asked).toEqual([null]);
+  });
+});
+
+// The UX wave, U9 (O-39, A2): a registry row's machines line says "offline" by the link's phase, as its rows grey: not
+// while the machine connects, nor while it reconnects within the minute an act is held; past the minute, and for a first
+// attempt that failed, it does.
+describe('a registry row’s machines line by the link’s phase', () => {
+  const ID = '7e9f2d83-5c4b-4a7f-9e0d-1b2c3d4e5f60';
+  const NOW = Date.parse('2026-11-13T09:00:00.000Z');
+  const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T08:00:00.000Z', generation: 0 } as const;
+  const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: new Date(NOW).toISOString(), generation: 1, carrier: 'direct', ...over });
+  const machinesLine = () => within(row('scrape')).getByText((_, el) => el?.hasAttribute('data-row-machines') ?? false).textContent;
+  beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['setTimeout', 'clearTimeout', 'Date'] }));
+  afterEach(() => {
+    vi.useRealTimers();
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+  });
+
+  it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', () => {
+    fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
+    const location = { machine: OTHER_MACHINE, pid: 'p-studio', path: '/srv/p-studio', key: `folder:${OTHER_MACHINE}:p-studio` as OrgKey, name: 'p-studio', source: 'folder' as const, acts: true };
+    act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }));
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'connecting', generation: 0 })]));
+    render(<Sidebar />);
+    expect(machinesLine(), 'connecting').toBe('studio');
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down' })]));
+    expect(machinesLine(), 'reconnecting').toBe('studio');
+    act(() => vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS));
+    expect(machinesLine(), 'past the minute, at the clock’s own turn').toBe('studio offline');
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', generation: 0 })]));
+    expect(machinesLine(), 'a first attempt that failed').toBe('studio offline');
+    act(() => useMachines.getState().applyRoster([here, studio({})]));
+    expect(machinesLine(), 'up').toBe('studio');
   });
 });
