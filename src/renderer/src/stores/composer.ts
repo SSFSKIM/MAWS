@@ -63,6 +63,9 @@ export interface FocusTarget {
     fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean;
     suggest(text: string): boolean;
   };
+  // UX wave U4a M5 (decision 21): whether the box and its toolbar are shown, false while a card holds the composer's
+  // place; the app's menu chords ask for nothing then
+  draftShown?(): boolean;
   // E9: a dictation's words at the editor's caret (composer/dictation/); null while a card covers the box, the editor is
   // read-only or a submission is in flight. `onEnded` fires once when the composer ends the sink itself.
   dictation?: { begin(onEnded: () => void): DictationSink | null };
@@ -104,6 +107,7 @@ export interface ComposerState {
   resubmit: ReadonlyMap<AppSessionId, Resubmit>; // M4b: absent is IDLE_RESUBMIT
   models: ReadonlyMap<AppSessionId, readonly ListedModel[]>; // the engine's latest `session.listModels` answer per session
   chipWidgets: ReadonlyMap<AppSessionId, ChipWidgetRequest>; // W3: the model chip's open menu (`/model`, `/effort`, `/fast`, or the chip itself)
+  modeMenus: ReadonlySet<AppSessionId>; // UX wave U4a M5: the mode chip's open menu (the chip itself, or ⇧⌘M)
   attachmentQueue: ReadonlyMap<AppSessionId, readonly QueuedAttachment[]>; // P3-G: what waits for a composer to take it
   // UX wave U4a M3 (decision 15): the stack's window-life state per session: whether a folded stack is open, the one
   // notice line, and the next-step messages a Send now was answered for (each reads "Sending…" until the engine starts it)
@@ -133,6 +137,7 @@ export interface ChipWidgetRequest {
   name: string;
   args: string;
   nonce: number;
+  focus?: 'slider'; // UX wave U4a M5 (decision 21): ⇧⌘E's effort view puts the keyboard on the slider
 }
 
 export type ListedModel = ListModelsResponse['models'][number];
@@ -148,6 +153,7 @@ const initial = (): ComposerState => ({
   resubmit: new Map(),
   models: new Map(),
   chipWidgets: new Map(),
+  modeMenus: new Set(),
   attachmentQueue: new Map(),
   stackOpen: new Set(),
   stackNotices: new Map(),
@@ -388,9 +394,10 @@ export function rememberListedModels(appSessionId: AppSessionId, models: readonl
 // ---- W3: the model chip's menu, opened from the editor ----------------------------------------------------------------
 
 let chipNonce = 0;
-export function requestChipWidget(appSessionId: AppSessionId, name: string, args: string): void {
+export function requestChipWidget(appSessionId: AppSessionId, name: string, args: string, focus?: ChipWidgetRequest['focus']): void {
   chipNonce += 1;
-  useComposerStore.setState((s) => ({ chipWidgets: new Map(s.chipWidgets).set(appSessionId, { name, args, nonce: chipNonce }) }));
+  const request: ChipWidgetRequest = { name, args, nonce: chipNonce, ...(focus && { focus }) };
+  useComposerStore.setState((s) => ({ chipWidgets: new Map(s.chipWidgets).set(appSessionId, request) }));
 }
 
 export function closeChipWidget(appSessionId: AppSessionId): void {
@@ -399,6 +406,22 @@ export function closeChipWidget(appSessionId: AppSessionId): void {
     const chipWidgets = new Map(s.chipWidgets);
     chipWidgets.delete(appSessionId);
     return { chipWidgets };
+  });
+}
+
+// ---- UX wave U4a M5: the mode chip's menu, opened by the chip or by ⇧⌘M (decision 21) ------------------------------------
+
+export function requestModeMenu(appSessionId: AppSessionId): void {
+  if (useComposerStore.getState().modeMenus.has(appSessionId)) return;
+  useComposerStore.setState((s) => ({ modeMenus: new Set(s.modeMenus).add(appSessionId) }));
+}
+
+export function closeModeMenu(appSessionId: AppSessionId): void {
+  if (!useComposerStore.getState().modeMenus.has(appSessionId)) return;
+  useComposerStore.setState((s) => {
+    const modeMenus = new Set(s.modeMenus);
+    modeMenus.delete(appSessionId);
+    return { modeMenus };
   });
 }
 

@@ -275,6 +275,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
         insertText: (text, options) => handle.current?.insertText(text, options),
         attachFiles: async (files, options) => (await handle.current?.attachFiles(files, options)) ?? false, // P3-G: Mark-up's Add to chat; registering drains the store's attachment queue
         openWidget: (name, args) => handle.current?.openWidget(name, args) ?? false, // C11: openComposerWidget
+        draftShown: () => !promptState.current.docked, // UX wave U4a M5: the menu chords ask for nothing under a card
         // R2: the engine's prompt requests on a plugin's behalf (engine-surface/asks.ts)
         prompt: {
           read: () => handle.current?.promptBox() ?? { text: '', cursor: 0 },

@@ -163,7 +163,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
 function Value({ appSessionId, row }: { appSessionId: AppSessionId; row: InfoRow }) {
   return (
     <>
-      <span>{row.value}</span>
+      <span title={row.title}>{row.value}</span>
       {row.note && <span className="text-fg-muted"> · {row.note}</span>}
       {row.action === 'permissions' && (
         <button

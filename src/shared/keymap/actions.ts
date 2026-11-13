@@ -119,6 +119,11 @@ export const ACTIONS = {
   // W1's hold until the turn ends) is gone with the hold; a saved override of it is dropped on read (RETIRED_ACTION_IDS).
   'composer.stop':        { title: 'Stop, holding waiting messages', chord: 'Cmd+.',     sink: 'renderer', menu: null, scope: 'app' }, // W1: nothing runs after it
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
+  // UX wave U4a M5 (Interfaces H; decision 21): the composer chips' menus of the focused pane's session, registered once
+  // beside Stop and Focus (ComposerAppKeys); ⇧⌘E's effort view puts the keyboard on the slider
+  'composer.modelMenu':   { title: 'Model menu',                  chord: 'Cmd+Shift+I',  sink: 'renderer', menu: null, scope: 'app' },
+  'composer.effortMenu':  { title: 'Effort',                      chord: 'Cmd+Shift+E',  sink: 'renderer', menu: null, scope: 'app' },
+  'composer.modeMenu':    { title: 'Permission mode menu',        chord: 'Cmd+Shift+M',  sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
   // C11 start: the Settings tab and the ClaudeUsage hand-off (C11 execution document, Keymap and action entries).
   // settings.open's arg, when given, is the index of a Settings section; the relay card runs the hand-off. W6: the

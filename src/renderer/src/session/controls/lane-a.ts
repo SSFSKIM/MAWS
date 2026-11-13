@@ -36,7 +36,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
 import { AGENT_SCOPE_CAPABILITY, type ControlResult, type LaneAAct, type LaneARaised, type LaneAState } from '@shared/ipc/schema/lane-a';
-import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import { modelName, NO_MODEL } from '@shared/sessions/model-label';
 import { workingFolder } from '@shared/sessions/working-folder';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
@@ -315,6 +315,7 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     const override = state.override;
     const rows = models();
     const modelClosed = capability('model');
+    const named = modelName(override?.model ?? state.model, rows, { effort: override?.effort ?? state.effort });
     const refusedWith = (reason: string) => async (): Promise<HookResult> => ({ ok: false, error: reason });
     return {
       location: { path: record ? workingFolder(record).path : '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
@@ -322,8 +323,10 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       model: {
         value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },
         // what the session runs on (its latest request's, so a `/model` or `/effort` typed in the terminal too), an
-        // override MAWS set naming itself before the next request carries it
-        label: chipLabel(aliasOf(override?.model ?? state.model, rows), (override?.effort ?? state.effort) as BridgeEffort | null),
+        // override MAWS set naming itself before the next request carries it; UX wave U4a (decision 19): named as every
+        // chip is, which over the bridge's catalog (no display names) is the alias, and never Fast (no engine status)
+        label: named?.text ?? NO_MODEL,
+        name: named,
         options: rows,
         disabled: modelClosed.available ? null : modelClosed.reason,
         // Only what changed goes: the bridge's `model` op replaces both, and main keeps the other as it reads it fresh.

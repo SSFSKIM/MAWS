@@ -4,7 +4,7 @@
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import { modelName } from '@shared/sessions/model-label';
 import { useMachineMark } from '../../app/machine-mark';
 import { catalogueRoute } from '../../gateway/observed-route'; // P5 O7 M9
 import { checkoutKey, machineFor } from '../../ipc/machine';
@@ -49,16 +49,17 @@ export function Environment({ appSessionId, record, directory }: { appSessionId:
   );
 }
 
-// W9 (H4): the model as the composer's chip names it, `<alias> <effort>` over the route's catalogue (the same
-// `engine.models` read the chip makes), with the exact id the engine reported in the tooltip; Session info has the rest.
+// W9 (H4): the model as the composer's chip names it over the route's catalogue (the same `engine.models` read the chip
+// makes), with the exact id the engine reported in the tooltip; Session info has the rest. UX wave U4a (decision 19): in
+// `modelName`'s words, "Opus 5.5 High"; the record holds no fast-mode state, so never Fast.
 function ModelLine({ record, directory }: { record: SessionRecord; directory: string }) {
   const route = catalogueRoute(null, record); // P5 O7 M9: the catalogue of what the session was observed reaching
   const catalogue = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route, cwd: directory }, { staleTime: 60_000 }, { machine: machineFor(record.appId) });
   const id = record.model.resolved ?? record.model.requested;
-  const alias = aliasOf(id, catalogue.data?.models ?? []);
+  const named = modelName(id, catalogue.data?.models ?? [], { effort: EffortSchema.safeParse(record.effort).data ?? null });
   return (
     <span className="block truncate text-fg-muted" title={id ?? undefined}>
-      {alias === null ? SUMMARY_COPY.modelUnknown : chipLabel(alias, EffortSchema.safeParse(record.effort).data ?? null)}
+      {named?.text ?? SUMMARY_COPY.modelUnknown}
     </span>
   );
 }

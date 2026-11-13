@@ -19,7 +19,7 @@ import { present as presentContext } from '../../widgets/ContextWidget';
 import { present as presentMcp } from '../../widgets/McpWidget';
 import { CONTEXT, MODEL } from '../../widgets/copy';
 import type { ModelRow } from '../../widgets/model';
-import { DEFAULT_ROW, modelAsk, type HeldAsk } from '@shared/sessions/model-label';
+import { DEFAULT_ROW, modelAsk, modelName, type HeldAsk } from '@shared/sessions/model-label';
 import { num } from '../../widgets/parts';
 import { INFO, LANE } from './copy';
 import { contestLine, holderLine } from '../../attention/derive'; // W7
@@ -36,8 +36,9 @@ import type { Fact, ObservedFactsAnswer } from '@shared/engine/observed-facts';
 import { FRESHNESS } from '../../sessions/observed';
 // P2-A end
 
-// W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own)
-export type InfoRow = { label: string; value: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
+// W2: `route` is the Direct⇄gateway switch, offering `targets` (the routing facts' own). UX wave U4a: `title`, the value's
+// tooltip (the Main row's raw model id).
+export type InfoRow = { label: string; value: string; title?: string; note?: string; action?: 'permissions' | 'route'; targets?: SwitchTarget[] };
 export type InfoSection = { title: string; rows: InfoRow[] };
 
 export interface SessionInfoInput {
@@ -155,9 +156,12 @@ function modelSection(input: SessionInfoInput): InfoSection {
   const catalogue = models ?? [];
   const ask = status === null ? null : modelAsk(held ?? undefined, status.model, catalogue);
   const pending = ask !== null && ask.pending;
-  const name = ask !== null && ask.pending ? (ask.asked ?? catalogue.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? DEFAULT_ROW) : (model.resolved ?? model.requested);
+  const id = ask !== null && ask.pending ? (ask.asked ?? catalogue.find((r) => r.value === DEFAULT_ROW)?.resolvedModel ?? DEFAULT_ROW) : (model.resolved ?? model.requested);
+  // UX wave U4a (decision 19): the chip's name for it ("Opus 5.5 High", Fast while the status says fast mode is on), the
+  // raw id as its title; an id the name cannot be read from (`default` with no catalogue) as it is
+  const named = modelName(id, catalogue, { effort, fast: status?.fastMode.state === 'on' });
   const rows: InfoRow[] = [
-    { label: INFO.main, value: name === null ? NONE : effort ? `${name} · ${effort}` : name, note: pending ? MODEL.pending : undefined },
+    { label: INFO.main, value: named?.text ?? id ?? NONE, ...(id !== null && { title: id }), note: pending ? MODEL.pending : undefined },
     status?.subagentModel ? { label: INFO.subagents, value: status.subagentModel, note: INFO.subagentChosen } : { label: INFO.subagents, value: status ? INFO.subagentsInherit : NONE },
   ];
   const overrides = Object.entries(status?.modelOverrides ?? {});

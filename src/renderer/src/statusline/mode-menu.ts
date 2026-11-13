@@ -18,15 +18,18 @@ export interface ModeOption {
   mode: PermissionMode;
   description: string;
   confirm: boolean; // asks before switching
+  separatorBefore?: boolean; // set apart from the rows above it, in the warning tone (UX wave U4a, decision 25)
 }
 
-// W3 (charter §5.1 as amended 2026-10-01): auto and bypass first, the modes people run; ⇧Tab keeps the terminal's cycle.
+// UX wave U4 (l3-input-10; charter §5.1 as amended by the wave's U4 record, after Claude Desktop's list): Auto, MAWS's
+// default (D-18), then Manual, Accept edits and Plan, and Bypass permissions set apart after a separator, in the warning
+// tone with its line. ⇧Tab keeps the terminal's cycle (`CYCLE`, below), which this order does not touch.
 export const MODE_OPTIONS: readonly ModeOption[] = [
   { mode: 'auto', description: 'A classifier approves what is safe and asks for the rest', confirm: false },
-  { mode: 'bypassPermissions', description: 'Every tool runs without asking', confirm: true },
   { mode: 'default', description: 'Asks before each tool that needs approval', confirm: false },
   { mode: 'acceptEdits', description: 'File edits are approved; other tools ask', confirm: false },
   { mode: 'plan', description: 'Reads and plans; changes nothing', confirm: false },
+  { mode: 'bypassPermissions', description: 'Every tool runs without asking', confirm: true, separatorBefore: true },
 ];
 
 export const BYPASS_CONFIRM = 'Bypass permissions runs every tool without asking, file edits and shell commands included.';

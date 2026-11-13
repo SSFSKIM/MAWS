@@ -286,6 +286,7 @@ export const MODEL = {
   effort: 'Effort',
   unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
+  fastState: { on: 'On', off: 'Off' } as const, // UX wave U4a (decision 20): the fast-mode row's line with nothing else to say
   fastForOpus: 'Fast mode is for Opus',
   cooldown: 'on · cooling down',
   fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',
