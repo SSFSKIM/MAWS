@@ -295,12 +295,19 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
     const text = `${recorded('u3-terminal-cron-r1').split('\n').slice(0, 50).join('\n')}\n`;
     expect(rowsIn(text).at(-1)).toMatchObject({ type: 'system', subtype: 'scheduled_task_fire' });
     const { file, remote } = await bothRoutes(text);
+    // UX wave U2 (O-15; the U2a document's C5): the fired turn's line follows its state on each route. The routes differ
+    // here, a difference that predates this landing and is pinned as it is: at the cut's end the file route has closed
+    // the turn, which did nothing and so has no line, and the remote route still runs it, so it reads `Working for …`
+    const fired = (state: TranscriptState) => {
+      const notice = drawn(state).find((row) => row.kind === 'notice' && row.class === 'schedule')!;
+      const turn = state.turns.get(notice.turnId!)!;
+      return { state: turn.state, accepted: turn.accepted, line: drawn(state).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider' && row.turnId === notice.turnId)?.state ?? null };
+    };
+    expect(fired(file), 'file').toEqual({ state: 'closed', accepted: true, line: null });
+    expect(fired(remote), 'remote').toEqual({ state: 'open', accepted: true, line: 'working' });
     for (const [route, state] of [['file', file], ['remote', remote]] as const) {
       const rows = arrivalRows(drawn(state));
       expect(rows.filter((row) => row.startsWith('● schedule')), route).toEqual(['● schedule: Running scheduled task · UXW tick: reply with only the word TOCK.']);
-      // UX wave U2 (O-15; the U2a document's C5): the fired turn has a line while it runs; once closed with nothing done, none
-      const line = drawn(state).find((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider' && row.opener?.class === 'schedule');
-      expect(line === undefined || line.state === 'working', route).toBe(true);
     }
   });
 
