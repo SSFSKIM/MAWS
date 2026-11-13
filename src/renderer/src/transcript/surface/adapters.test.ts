@@ -9,7 +9,7 @@ import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { arrivalInput, assistantInput, commandInput, groupInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
 
 afterEach(cleanup);
 
@@ -417,5 +417,61 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     const reports = tasks.rows.filter((r): r is Extract<Row, { kind: 'agent_message' }> => r.kind === 'agent_message' && r.report !== undefined);
     expect(reports.map((row) => ask(tasks.state, row)?.props.text)).toEqual(['PONG', 'PONG3']); // the hand-backs at seq 337 and 666
     for (const row of reports) expect(ask(tasks.state, row)?.props.from).toEqual({ name: 'general-purpose' }); // the agent's type, which the engine names it by (its origin's `name`)
+  });
+});
+
+// UX wave U3, first landing (the U3a document, Interfaces F, as the controller ruled on M5): the target of the tab's
+// last jump asks no mod's site and is drawn by MAWS, whatever asks it; its neighbour asks as before.
+describe('a jump’s revealed target asks no site', () => {
+  const QUESTIONS = [{ question: 'Which fruit?', header: 'Fruit', options: [{ label: 'Apple', description: null, preview: null }, { label: 'Mango', description: null, preview: null }], multiSelect: false }];
+
+  it('the user row, the answer, the call and the command output it names ask nothing, and the rows beside them ask', () => {
+    const b = builder();
+    b.turn('u1', '/model haiku');
+    b.emit('user.message', { messageUuid: uuid('out1'), content: 'Set model to haiku', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.end(['u1']);
+    b.turn('u2');
+    b.text('a', 0, 'First part');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    b.result('t2', 'b', { structured: BASH_RESULT('b') });
+    b.text('c', 0, 'Second part');
+    b.end(['u2']);
+    b.turn('u3', '/model opus');
+    b.emit('user.message', { messageUuid: uuid('out3'), content: 'Set model to opus', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
+    b.end(['u3']);
+    const state = withAllExpanded(applyEvents(createState(null, null), b.events));
+    const rows = rowsOf(state);
+    const turnOf = (row: Row) => state.turns.get(row.turnId!);
+    const of = <K extends Row['kind']>(kind: K) => rows.filter((r): r is Extract<Row, { kind: K }> => r.kind === kind);
+
+    const [user, beside] = of('user');
+    expect(userInput(user!, turnOf(user!), user!.id)).toBeNull();
+    expect(userInput(beside!, turnOf(beside!), user!.id)).not.toBeNull();
+
+    const [first, second] = of('assistant_text');
+    expect(assistantInput(first!, turnOf(first!), first!.id)).toBeNull();
+    expect(assistantInput(second!, turnOf(second!), first!.id)).not.toBeNull();
+
+    const group = find(rows, 'group');
+    const [t1, t2] = group.cells;
+    expect(toolInputs(t2!, turnOf(group), t2!.id)).toEqual([]); // a cell jump's target
+    expect(toolInputs(t1!, turnOf(group), t2!.id).map((input) => input.instanceId)).toEqual(['t1']);
+
+    const [command, next] = of('local_command');
+    expect(commandInput(command!, state, command!.id)).toBeNull();
+    expect(commandInput(next!, state, command!.id)).not.toBeNull();
+  });
+
+  it('the question it names asks nothing, and the question beside it asks', () => {
+    const b = builder();
+    b.turn('u');
+    b.toolUse('q1', 'AskUserQuestion', { questions: QUESTIONS });
+    b.toolUse('q2', 'AskUserQuestion', { questions: QUESTIONS }, 'msg-q2');
+    const { turn } = setup(b);
+    const question = (id: string): Extract<Row, { kind: 'question' }> => ({ id: `question:${id}` as never, turnId: turn.id, at: turn.startedAt, kind: 'question', toolUseId: tool(id), questions: QUESTIONS, answers: null, error: null });
+    expect(questionInput(question('q1'), turn, question('q1').id)).toBeNull();
+    expect(questionInput(question('q2'), turn, question('q1').id)?.instanceId).toBe('q2');
   });
 });
