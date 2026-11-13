@@ -524,6 +524,7 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
    - a sheet opened from a menu item returns focus to the dialog under it, or to `body`, not to the menu's trigger ("More actions"), the better target (`app/dialog-focus.ts`);
    - `customize/inventory.ts`'s `plugins.changed` subscription is registered during render and lives as long as the window (the event source holds it); right for the window's one query client, not for a client that is replaced or disposed;
    - a comment in `src/shared/engine/app-mcp-servers.ts` still names "Settings › Engine › MCP servers";
+   - a `plugins.changed` that lands while the reader of a read in flight unmounts is not owed a read afterwards; two readers of one key mounted together may cost one extra read per change;
    - `EnrollSheet.test.tsx`'s re-enroll case (master's) prints an uncaptured "[org] command failed … no answer for org.enroll.approve" from an unanswered fake call;
    - where the main root of a session's repository cannot be read (git answers nothing, or another machine does not offer the reading), the Connectors dialog's head names the session's folder, a narrower place than the engine's switch reaches (P2).
 
@@ -1220,6 +1221,16 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision: in the record, the child's sentence "UX wave U11 (#505): …" is written "board 505", and M5's tab opener is `openProjectChannel`.
   Rationale: the token guard reads `#` and three hex digits as a colour (the architect's rule); the RL2 boundary guard (`src/main/machines/remote/boundary.test.ts`) scans main and the renderer for `openChannel(`, the remote module's call, and its allow-list is for real machine paths, so the name moved, not the guard (the architect's ruling).
   Date/Author: 2026-11-13, M11's executor and the wave's architect; folded by the controller.
+
+- Decision (the branch panel, wf_feaae2f7-bcf over `c0e7b2ae8..0833f126d`, finding 1, the architect's ruling): an unstarted tab's `/skills` lists a skill whose plugin is off for the chat, with "Use in chat" disabled and its reason ("Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions"); off is read from `engine.launchProfile.plugins.off`, the one source the launch uses (`2eccce051`). The other offers of an invocation: a started chat's `/skills` reads the session's own dialog, which lists no plugin that is off; Customize › Skills offers no "Use in chat"; the slash palette and the `@` menu read the session's catalogue; the agents widget inserts agents. None of them needs a change.
+  Rationale: the inserted command named a skill the engine that then starts cannot load (`profileSettings` writes `enabledPlugins[id] = false`). Rejected: a second rule for "on".
+  Date/Author: 2026-11-13, the wave's architect (the ruling); the fix wave's executor; folded by the controller.
+- Decision (the panel, finding 2, the architect's ruling): the search's selection is held by result id, so a query change that leaves the results the same (a trailing space) keeps it, and one effect reveals the selected result whenever the selection or the results change. A unit case holds the sequence, and M10's narrow scene gains the step.
+  Rationale: a reset to the first result with no reveal left Enter choosing a result out of view.
+  Date/Author: 2026-11-13, the wave's architect (the ruling); the fix wave's executor; folded by the controller.
+- Decision (the panel, finding 3, the architect's ruling): a change that arrives during a read is owed a read after it, through one shared hook, `useReadAfterPluginsChange`, which both `usePluginsRead` and `useCustomizationInventory` use; the inventory's client-wide listener only marks answers stale (`refetchType: 'none'`), so one change costs one read. `usePluginsRead` now finds its read in flight by the query's own hash (before, another machine's read of the same folder also counted).
+  Rationale: with TanStack Query 5.104.0 an invalidation of a query in its first flight is cleared by that flight's success, so a `plugins.changed` during the first read was lost for the 30 s stale time. A change that lands while its reader unmounts mid-read is still lost (residue).
+  Date/Author: 2026-11-13, the wave's architect (the ruling); the fix wave's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
