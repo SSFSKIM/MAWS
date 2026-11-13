@@ -352,6 +352,8 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     const cases: [string, ArrivalEntry[]][] = [
       ['', [taskEntry()]], // told while idle: the host made the event, and there is no text to give the site
       ['<task-notification>\n<task-id>bt1</task-id>\n<status>completed</status>\n</task-notification>', [taskEntry({ summary: '<task-id>bt1</task-id>' })]],
+      ['<task-notification>\n<tool-use-id>tu-r1</tool-use-id>\n<task-type>tool_call</task-type>\n<summary>A result arrived late</summary>\n</task-notification>', [taskEntry({ summary: 'A result arrived late' })]], // drawn as the call's late result
+      ['<task-notification>\n<task-type>artifact-room-view</task-type>\n<summary>A room was viewed</summary>\n</task-notification>', [taskEntry({ summary: 'A room was viewed' })]], // drawn as nothing
       ['UXW tick: reply with only the word TOCK.', [{ class: 'schedule', prompt: 'UXW tick: reply with only the word TOCK.' }]], // a meta row: the engine draws the fire's system row instead
       ['The human responded to your async AskUserQuestion (call tu-q1): Mango', [{ class: 'answer', tool: 'sminos', call: 'tu-q1', summary: 'Mango', answers: null, dismissed: false }]], // drawn as no message at all
       ['[sminos bridge]\nRead the message you have not read.', [{ class: 'wake' }]], // the bridge's prompt as the user: a plain prompt under the plugin's origin, which the event does not keep

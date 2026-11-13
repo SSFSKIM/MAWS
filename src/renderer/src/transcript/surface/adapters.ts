@@ -277,6 +277,8 @@ function engineUserProps(text: string, isExpanded: boolean, line: RowOf<'agent_m
     return { text: envelope.handback ? (handbackReport(inner) ?? inner) : inner, origin: { kind: 'peer' }, isExpanded, from: { name: speakerName(line?.from?.subagentType ?? envelope.fromAgentId, 'agent') } };
   }
   if (envelope === null && text.includes('<task-notification')) {
+    // Two forms the engine draws otherwise (near line 926168): an artifact room's view (nothing) and a call's late result.
+    if (text.startsWith('<task-notification>\n<task-type>artifact-room-view</task-type>\n') || LATE_RESULT.test(text)) return null;
     // The carrier's first <summary> and the task's fields beside it: the engine draws a carrier of several blocks once.
     const summary = tagText(text, 'summary');
     if (summary === null) return null; // the engine draws nothing for it
@@ -291,7 +293,7 @@ function engineUserProps(text: string, isExpanded: boolean, line: RowOf<'agent_m
 // The engine's headers before an envelope (2.1.322's `Tme`), cut as its renderers cut them.
 const ENVELOPE_HEADERS = ['Another Claude session sent a message while you were working:\n', 'Another Claude session sent a message:\n', 'A peer session sent a message while you were working:\n'];
 // What lies inside an envelope, as the engine's renderers give it to the site: its header and its trailer cut, then its
-// tags (`G` near line 291578 for a peer's, `pT` near line 929220 for an agent's). Null for a text that does not open
+// tags (`G` near line 291571 for a peer's, `pT` near line 929220 for an agent's). Null for a text that does not open
 // with the envelope after a header (the `<system-reminder>` form the model read is not the one the engine draws).
 function envelopeText(text: string, tag: string): string | null {
   const header = ENVELOPE_HEADERS.find((h) => text.startsWith(h));
@@ -303,6 +305,7 @@ function envelopeText(text: string, tag: string): string | null {
   return body.replace(new RegExp(`^<${tag}[^>]*>\\n`), '').replace(new RegExp(`\\n</${tag}>$`), '');
 }
 
+const LATE_RESULT = /^<task-notification>\n<tool-use-id>[^\n]*<\/tool-use-id>\n<task-type>tool_call<\/task-type>\n/; // `fMt`, near line 433387
 const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>' };
 // The text of a carrier's first element of the name, as the engine's task renderer reads it; null when it has none.
 const tagText = (text: string, name: string): string | null => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text)?.[1] ?? null;
