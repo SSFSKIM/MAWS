@@ -42,7 +42,10 @@ describe('a Stop with four commands in flight (queue-and-interrupt), on the wire
       for (const id of arrived) expect(reading(callOf(rows, id)), `${id} at prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped', label: expect.stringMatching(/^Stopped: `/) });
       for (const line of linesOf(rows)) expect(line.denied, `the denied count at prefix ${n}`).toBe(0);
     }
-    expect(linesOf(drawn(events)).at(-1)).toMatchObject({ state: 'stopped', denied: 0 });
+    // the turn the Stop cut (the queued prompt after it opens a turn of its own)
+    const rows = drawn(events);
+    const cut = rows.find((row) => callsOf([row]).some((cell) => cell.toolUseId === rejected[0]!.toolUseId))!.turnId;
+    expect(linesOf(rows).find((line) => line.turnId === cut)).toMatchObject({ state: 'stopped', denied: 0 });
   });
 });
 
@@ -53,7 +56,10 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
 
   it('on the wire, by prefixes: stopped from its result until the next message’s first block, denied from then on', () => {
     const result = events.findIndex((e) => e.kind === 'tool.result' && e.toolUseId === REJECTED);
-    const next = events.findIndex((e, i) => i > result && (e.kind === 'assistant.block.delta' || e.kind === 'assistant.block.complete' || e.kind === 'tool.use') && e.apiMessageId === 'msg_denials_024');
+    // the next message's first block the reducer keeps: a text or thinking block's first delta, a completion or a call (a
+    // call's input deltas are not kept, so its block arrives at its completion)
+    const keeps = (e: SessionEvent) => e.kind === 'assistant.block.complete' || e.kind === 'tool.use' || (e.kind === 'assistant.block.delta' && (e.blockType === 'text' || e.blockType === 'thinking'));
+    const next = events.findIndex((e, i) => i > result && keeps(e) && 'apiMessageId' in e && e.apiMessageId === 'msg_denials_024');
     expect(result).toBeGreaterThan(0);
     expect(next).toBeGreaterThan(result);
     for (let n = result + 1; n <= next; n += 1) expect(reading(callOf(drawn(events.slice(0, n)), REJECTED)), `prefix ${n}`).toMatchObject({ status: 'stopped', disposition: 'stopped' });
