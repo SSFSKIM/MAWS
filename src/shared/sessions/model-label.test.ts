@@ -40,7 +40,7 @@ describe('the alias a model id reads', () => {
 // end, then "Fast" while fast mode is on and the effort in words; one function for the chip, the Environment card and
 // Session info.
 describe('the model is named as Claude Desktop names it', () => {
-  const text = (id: string | null, state?: Parameters<typeof modelName>[2], rows = CATALOGUE) => modelName(id, rows, state)?.text ?? null;
+  const text = (id: string | null, state?: Parameters<typeof modelName>[2], rows: Parameters<typeof modelName>[1] = CATALOGUE) => modelName(id, rows, state)?.text ?? null;
 
   it('reads the display name without its qualifier, then Fast, then the effort in words', () => {
     expect(text('opus', { effort: 'high' })).toBe('Opus 5.5 High');
