@@ -44,6 +44,7 @@ Status words: *specified* (ready to build), *building*, *landed* (on master, or 
 - [x] (2026-11-10) First round of both reviews folded: the desk track's seven findings on M1 to M7 and Interfaces §A to §E (Decision Log 5) and the independent reviewer's seven on the whole execution section (Decision Log 6).
 - [x] (2026-11-10) The desk track's verdict on the revision of its sections at 26d3d5b56: yes, with three notes folded (its message 735). The document lands on master, and the desk track may start M1.
 - [x] (2026-11-10) The independent reviewer's second reading: two details in the app's sections adopted (Decision Log 7). The reviews end here: the round was narrower than the first and left only these.
+- [x] (2026-11-13) Constraint 1 is released: P5's closing verification has recorded the build it verified. F is master f1852de3a, fixed at the first machine's swap on 2026-11-11 21:39Z and running on the three machines and production's hub (P5 Decision Log 270; O15's Decision Log 44 (e)). O15's closing run ran on it (P5 Decision Log 271), and its 67 results are in P5's Outcomes (P5 Decision Log 274). M8 to M12 reached master after F was recorded, on 2026-11-12, as PR #571 at 1ed236bcb (P5 Decision Log 272). M13's preconditions stand as written.
 
 Each sminos milestone records its sminos version here when it merges (Interfaces §L).
 
