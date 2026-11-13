@@ -26,7 +26,7 @@ The to-human view (the report bar, "Working record", "To you", the advertisement
 - [x] The re-check pass (2026-11-13): every statement of "To check again once U3a and U1a are on master", by this document's author, on a tree that holds master `310417fc6` (U1a) and U3a's branch at `2b4869864` (U3a is not on master yet). Fourteen statements hold, five are restated (C5, C7, C9, C12, C13), and M4 gains one rule (the run's ask and a jump's target). No executor starts before U3a is on master.
 - [x] M1 — What a file must say as the wire does: a thought's recorded duration (X1) and a refused call's kind. (2026-11-13, reviewed clean: `7773a2e23..d029fceb0`, the stopped ask and the review's fixes `a0c3cf447..ce823c433`.)
 - [x] M2 — What joins a run, its caption, and the turn's line. (2026-11-13, reviewed clean: `b2d5b372c..c53ef340c`, the rulings' and review's fixes `645beb489..f20efe7a4`.)
-- [ ] M3 — What a row reads: a shell call with no description, an artifact call, a failed call.
+- [x] M3 — What a row reads: a shell call with no description, an artifact call, a failed call. (2026-11-13, reviewed clean: `a9df42ade..acd7855ae`, the review's fixes `373fdd01a..aaa551c94`; `titlesOfTurn` is cached per turn state, `derive.ts:1385-1391`.)
 - [ ] M4 — The run's row: one line, folded; thoughts in order; the running, the waiting and the thinking line.
 - [ ] M5 — The e2e edits and scenes, the routes' proof whole, the record, and the acceptance run.
 
