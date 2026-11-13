@@ -352,6 +352,24 @@ describe('the sequences (S4 to S13)', () => {
     expect(stats.opens).toBe(1);
   });
 
+  // the branch review's finding 5: `/clear` keeps the app session id and binds it to a new transcript; a request made
+  // after that never joins a search of the transcript the session had before
+  it('a request made after the session is bound to another transcript does not join a search of the old one', async () => {
+    const old = await writeTranscript([...filler(4), linkTo(P)]);
+    const rebound = await fixture.addTranscript('/work/repo', 'engine-session-2', filler(4).map(lineOf));
+    const named = paths({ transcript: async () => file });
+    const held = holdAt('opened');
+    const before = named.names(S, P);
+    await held.reached;
+    file = rebound; // the session's transcript is now another file, which does not link the path
+    const after = named.names(S, P);
+    held.release();
+    expect(await before).toBe(true); // asked while the session was bound to the old transcript
+    expect(await after).toBe(false); // answered as a fresh request is
+    expect(await paths({ transcript: async () => rebound }).names(S, P)).toBe(false);
+    expect(old).not.toBe(rebound);
+  });
+
   it('S8: a search that fails in the middle names nothing and remembers nothing; the next ask searches again', async () => {
     await writeTranscript([linkTo(P), ...filler(100)]);
     const named = paths({ bounds: { chunk: 2048 } });
