@@ -52,13 +52,11 @@ export const readInstalledNow = (client: QueryClient, cwd: string, machine?: Mac
 export function useReadAfterPluginsChange({ queryKey, on, shown = true, isFetching, refetch }: { queryKey: QueryKey; on: boolean; shown?: boolean; isFetching: boolean; refetch(): Promise<unknown> }): void {
   const client = useQueryClient();
   const owed = useRef(false);
-  const key = hashKey(queryKey);
-  const latest = useRef(queryKey);
-  latest.current = queryKey;
+  const key = hashKey(queryKey); // the query's own hash: its read in flight, not another key's
   useEffect(() => {
     if (!on) return;
     return ipc.on('plugins.changed', () => {
-      if (!shown || client.isFetching({ queryKey: latest.current }) > 0) owed.current = true;
+      if (!shown || client.isFetching({ predicate: (query) => query.queryHash === key }) > 0) owed.current = true;
       else void refetch();
     });
   }, [on, shown, client, key, refetch]);
