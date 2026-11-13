@@ -19,7 +19,7 @@ Build F (commit `f1852de3a`) is the build on the owner's machines, and the owner
 ## Progress
 
 - [x] (2026-11-13 03:30Z) Document written against master `5c9cfa0c5` (`d6f8c10de` at the end of the writing: probe fixtures and one scanner entry since, nothing this document rests on). The section checked against that code; what is consumed from landings in flight read at `origin/ux-wave/U13a` `772fd07ca`, `U8b` `6dc2f24de`, `U11a` `0adbfd07c`, `U6a` `936d6c003`, and U9's and U1a's documents.
-- [ ] Adversarial review of this document, and the architect's rulings on the points of "Reported to the architect".
+- [x] (2026-11-13) Adversarial review of this document (one P1, six P2, three short points) and the architect's rulings on it and on the thirteen points reported at authoring: folded in, one revision (Decision Log). The cut stands as written. Read again for the revision: master `d7ca414ae`, and `origin/ux-wave/U9` `c13d710b0`, which now holds code.
 - [ ] M1 — Three small fixes: six words, "reconnecting", the chip's box.
 - [ ] M2 — A listed session opens like a local one.
 - [ ] M3 — Hide a session, and get it back.
@@ -41,7 +41,7 @@ The section does not cut the child. Sorted by what each item needs, not by the s
 | S-11 | nothing: one function in the services' index | U7a |
 | #407 | nothing: the first read's retry exists (`ipc/until-answered.ts`) | U7a |
 | O-03 | nothing: two class changes on the chip as it stands. U13a's fourth milestone rewrites the same component's click, so whoever lands second merges one element | U7a |
-| O-38, #559 | nothing: both lanes' openers take the new-tab request today. The listed row's menu is in U7's own files; U9 inserts in it afterwards (Reported, 1) | U7a |
+| O-38, #559 | nothing: both lanes' openers take the new-tab request today. The listed row's menu is in U7's own files; U9 builds in the same files at the same time, to one agreed order of the menu, and whichever lands second merges (Reported, 1) | U7a |
 | O-16 | nothing: a store and a layout key of its own beside `sidebar.people`, and U7's own sidebar files. It does not touch the layout store | U7a |
 | O-40 | U13a: the strip (`Strip`), `commitShown`, `stripOf` and `storedMain`, hydration as U13a leaves it | U7b |
 | O-47 | O-40: "Usage settings" must open Settings at a section build F's stored tab cannot name (root UC-14), and the account actions need their new home in the landing that takes them out of the popover | U7b |
@@ -50,7 +50,7 @@ The section does not cut the child. Sorted by what each item needs, not by the s
 
 **Why not three.** O-47 could be built on master against today's Settings tab, with a link that moves the tab's view without storing a section. It would then be converted when the dialog lands, its e2e scenes written twice, and the interim would hold a seam built to be removed. O-03 as a pull request of its own (the section allows it) would cost a gate and a review for two classes; it rides with U7a and is first in M1, so it can be cherry-picked out if the architect wants it earlier.
 
-**What a reviewer holds.** U7a: about 2,100 changed lines over about 35 files, four milestones. U7b: about 4,600 over about 95, four milestones, of which about 1,500 are e2e scenes re-expressed and about 600 are unit tests moved with the usage panel.
+**What a reviewer holds.** U7a: about 2,100 changed lines over about 35 files, four milestones. U7b: about 5,000 over about 105, four milestones, of which about 1,500 are e2e scenes re-expressed and about 600 are unit tests moved with the usage panel.
 
 **U7b's edge, exactly.** U7b consumes from U7a, by name: the key `sidebar.hidden` and `SidebarHiddenSchema` (it adds `destination` beside them in the same file and the same key list); the cross-build scene *(sidebar, both ways)*, which it extends; `e2e/support/shell.ts` and `e2e/support/sidebar.ts` as U7a leaves them; `sidebar/Sidebar.tsx`'s `Footer`, `DestinationRow` and `ArtifactsRow` as they stand (U7a does not edit them). Nothing else: U7b reads no store, type or component that U7a adds.
 
@@ -73,8 +73,10 @@ One list. Each is true of the branch named and must be read again on master befo
 | R11 | `useScrim()` and the element `Backdrop` are in `sessions/scrim.tsx` (the file is `.tsx`; U11a's document says `.ts`), and `Sheet`, `WidgetDialogHost`, `KeyboardShortcuts` and `AddProject` draw their overlay through `Backdrop` | `origin/ux-wave/U11a:src/renderer/src/sessions/scrim.tsx` |
 | R12 | `SETTINGS_SECTIONS`, `SettingsSection`, `SECTION_TABLE` and `SETTINGS_ROWS` are exported from `settings-tab/SettingsView.tsx` and `settings-tab/rows.ts`; the search field carries `data-escape-clears`. Not built yet (U11a's M9 and M10, which wait for the owner's look) | U11a's document, Interfaces §G |
 | R13 | `BUILD_F_ACTION_IDS` is in `src/shared/keymap/build-f.ts`, and `settings.open`, `accounts.open`, `artifacts.open`, `tab.close`, `tab.overview`, `pane.focusOther`, `panel.float` and `main.expandArtifactPane` are among them, all `menu` rows of scope `app` | `origin/ux-wave/U6a:src/shared/keymap/` |
-| R14 | `remoteSessionActions(facts)` and `REMOTE_ACTION_COMMAND` are in `app/session-actions.ts`, and `SessionItems` draws a listing with no record through `SessionItem`. Not built yet *(U7a at merge, if U9 lands first: Reported, 1)* | U9's document, Interfaces §6 |
+| R14 | `remoteSessionActions(facts)` and `REMOTE_ACTION_COMMAND` are in `app/session-actions.ts`, and `SessionItems` draws a listing with no record through `SessionItem`. U9's executor is building; its fourth milestone holds these *(U7a at merge: Concrete Steps 1 has the check that tells which way M2 is built)* | U9's document, Interfaces §6 and its Decision Log, "the order of a session row's menu, shared with U7a" |
 | R15 | `waits(item)` in `src/shared/attention/kinds.ts` replaces `isOpen`, and `selectPendingOf` keeps its name. Not built yet; U7 calls neither | U1a's document, Interfaces §A |
+| R16 | The panel host queues an `addTool` made before the layout is read (`pending`, with each entry's queued `opens`) and applies it in `passBarrier`; `applyAdd` and `activateIn` call the store's `openSession` for a target that is not shown | `panel/host.ts` on master; the same on `origin/ux-wave/U8b` |
+| R17 | Every side-column tool gets `ctx.visible` from one line of `panel/ToolBody.tsx` (`visible: !collapsed`), and every main-tab artifact editor from one line of `library/ArtifactTab.tsx` (`!panelInMain(regions)`) | both files on master; U8b's M2 and M3 rework the side column around the first |
 
 ## Constraints that bind every milestone
 
@@ -99,7 +101,8 @@ Checked at `5c9cfa0c5`; F's side read with `git show f1852de3a:<path>`. Listed h
 - **The chip.** A `<button>` sizes to its content whatever its display, so the button (`max-w-48`) is wider than its wrapper (`max-w-24`, no clipping) for a long name.
 - **A listed row.** `ListedRow.tsx` calls its lane's opener with no request, has no `onAuxClick`, and names a menu only when the session can be shared. `SessionItems` in `sidebar/menus.tsx` answers nothing for an address with no record unless it can be shared. Both openers honour `{ newTab: true }` (`lane-a/remote-connect.ts`, `lane-b/remote-connect.ts`); lane B's also retries a session whose stream ended. `openListed` (`sessions/remote-openers.ts`) passes no request, and `NeedsYou.tsx` skips it for ⌘-click. `openListed` has four other callers (the Overview, its cards, the palette, attention navigation), none of which asks for a new tab.
 - **The three dots** are drawn only when `sessionActionsFor(record)` includes Rename (`hasActions` in `SessionRow.tsx`).
-- **A turn's start is known for a session MAWS runs and for no other.** The digest's `turnStartedAt` is set by the services' fold for a session MAWS runs (`src/services/sessions/digest.ts`). For every other record the index seeds the digest with `turnStartedAt: null` and `lastTurnEndedAt` set to the transcript's newest record (`digest` in `src/services/index/source.ts`); a terminal session MAWS drives through its bridge adds the phase (`bridgedDigest`: `working`, `waiting`, `idle`) and still no turn start. A record of another machine has no digest; its listing's `state` and `issued` say what is known (`listedStateOf`, `sessions/listed-state.ts`). The section's "a record's turn start" therefore exists on one route of three (Reported, 3).
+- **A turn's start is known for a session MAWS runs and for no other.** The digest's `turnStartedAt` is set by the services' fold for a session MAWS runs (`src/services/sessions/digest.ts`). For every other record the index seeds the digest with `turnStartedAt: null` and `lastTurnEndedAt` set to the transcript's newest record (`digest` in `src/services/index/source.ts`); a terminal session MAWS drives through its bridge adds the phase (`bridgedDigest`: `working`, `waiting`, `idle`) and still no turn start. A record of another machine has no digest; its listing's `state` and `issued` say what is known (`listedStateOf`, `sessions/listed-state.ts`). The section's "a record's turn start" therefore exists on one route of three (Reported, 3). A listing's `issued` says no more: the endpoint signs a new listing whenever any of its fields changes, the title and the owners among them (`#evaluate` and `#sign` in `src/endpoint/listings.ts`), so a newer `busy` listing is not a new turn.
+- **A machine being named by the rows is not evidence about its sessions.** `applyRows` (`stores/sessions.ts`) fills `listedMachines` from any rows answer, whether or not the hub's snapshot is `complete` or the machine is among `pending`; `takeRows` (`ipc/events.ts`) waits for both before it marks the machine loaded, and `ipc/events.test.ts` holds that sequence ("keeps the named machine's restored tabs while the rows are incomplete or it is pending…"), with empty rows for a named machine at its start.
 - **The sidebar holds its order while the pointer or the keyboard is inside it** (`holding`, `holdOrder` in `Sidebar.tsx`): a row that newly leads is drawn at its old rank until the pointer leaves, unless the sort was changed on purpose. `SessionRow` reads "nested under its lineage parent" from `aria-level >= 3`.
 - **`stores/people.ts`**, the pattern the section names, treats a failed read as an empty set and writes at the next toggle, which would replace a stored set with the toggled row alone.
 - **Exact menu lists in e2e.** `e2e/shell.spec.ts` (the long shell scene, "Item 1") and `e2e/sessions.spec.ts` ("foreign-live: …", twice) assert a row's menu as an exact list. `e2e/shell.spec.ts` asserts `layout.list`'s keys as an exact list in two places; neither scene hides a session or opens a page.
@@ -112,30 +115,35 @@ Checked at `5c9cfa0c5`; F's side read with `git show f1852de3a:<path>`. Listed h
 - **The key dispatcher refuses pane and composer chords under an open dialog** (`OPEN_OVERLAY` in `keymap/dispatcher.ts`: any `[role="dialog"][data-state="open"]`), and never refuses a chord of scope `app`. Menu rows reach the renderer as `layout.action` whatever is focused.
 - **The four kinds' callers.** Settings: `settings.open` (`gateway/actions.ts`, whose `SETTINGS_SECTIONS` maps the action's numeric argument to five sections; one caller passes one, `transcript/view/rows/Error.tsx`), and two direct `openTab` calls in `tools/browser/chrome/` (`Chrome.tsx`, `ProfilePopover.tsx`). Customize and Projects: `customize/open.ts` (`openCustomize`, `openDiscover`, `openProjects`) and `selectSection` in `customize/CustomizeView.tsx`. The library: `openArtifacts` (`main/artifacts.ts`), called by the sidebar's row, the `artifacts.open` action, `tools/artifacts/List.tsx` and `panel/summary/Artifacts.tsx`. Each of the three openers calls `revealMain()` first.
 - **Types derived from the tab kinds.** `SettingsSection` (`settings-tab/SettingsView.tsx`, `gateway/actions.ts`), the `settingsTab` slot's prop (`app/slots.ts`) and `CustomizeSection` (`customize/open.ts`) are each `Extract<TabRef, …>`. `UNPINNABLE_KINDS` holds exactly the four.
-- **Who brings a tab to the front without the person.** An agent's `show_pane` (`tools/maws/panes/connect.ts`: `openFile`, `openSession` for a terminal, `panelHost.addTool(…, { activate: true })`, which opens the session when it is not shown) and a mod's pane (`engine-surface/panes.ts`: `panelHost.selectTab`). Both end in the store's `openTab` or `openSession` (Reported, 5).
+- **Who brings a tab or a side surface forward without the person.** Four listeners: an agent's `show_pane` (`connectPaneShows` in `tools/maws/panes/connect.ts`: `openFile`, `openSession` for a terminal, and `panelHost.addTool(…, { activate: true })`, two of those calls after an await); the Browser following an agent that acts in it (`browser.agent.acting` in `tools/browser/agent/connect.ts`); MAWS's ask sheet (`tools/maws/ask/connect.ts`); a mod's pane (`engine-surface/panes.ts`). The first three reach `addTool` with `activate: true`, which opens the target's session when it is not the one shown, and which before the layout is read is queued and applied later (R16). The fourth selects a tab only for a session it finds shown (Reported, 5; §F, "Not the person's act").
+- **Who asks whether something is on screen.** Eight readers, each with its own rule, none of which knows a page: §N lists them.
+- **Two pages carry their own name.** `customize/CustomizeView.tsx` draws `<h1>Customize</h1>` in its header row, and `projects/ProjectsView.tsx` draws `<h1>Projects</h1>`; the library has no heading of its name. Three cases of `customize/CustomizeView.test.tsx` find the header through that heading, and `e2e/ux2-shell.spec.ts` asserts that the heading, the section tabs and the Project select stand in one row.
+- **Build F can write the very shape U13a calls canonical.** F keeps a tab of no session in the set it shows (`openTab` in `stores/layout-model.ts` at `f1852de3a`), and its first-launch value is one set under `none`. So a strip of Diagnostics alone, to which F adds a Settings tab, is stored by F with `current` `none` and the one key `none`.
 - **The usage popover reopens itself** after an account action's confirmation (`ask` in `usage/controls.ts`), and `UsagePanel`'s root sets its own width from the popover's variables. `usage/UsagePill.test.tsx` holds twenty-three tests, twenty-one of them of the panel and its actions.
 - **F's main keeps every top-level key.** `LayoutFileStore` reads the whole file into a map and writes the whole map (`src/main/layout/store.ts`; `git diff f1852de3a 5c9cfa0c5 -- src/main/layout/` is empty). F's renderer cannot ask for a key outside its `LayoutKeySchema`, and uses `layout.list` only to find `panel.<id>` keys and to skip reads of keys that are absent.
 - **Tests that pin today's tabs**, beyond the section's list: `gateway/actions.test.ts`, `shell/transfer.test.ts`, `shell/floating.test.ts`, `main/editor-host.test.tsx`, `main/TabStrip.overflow.test.tsx`, `keymap/shell-navigation.test.tsx`, `app/Shell.test.tsx`, `app/Shell.chrome.test.tsx`, `app/shell-geometry.test.ts`, `tools/browser/chrome/ActionBar.test.tsx`, `ProfilePopover.test.tsx`, `panel/summary/Summary.test.tsx`, `transcript/view/rows/rows.test.tsx`, `settings-tab/SettingsView.test.tsx`, `customize/CustomizeView.test.tsx`, `src/shared/ipc/schema/layout.test.ts`, `src/shared/ipc/schema.test.ts`, `src/shared/browser/tab.test.ts`, `src/main/browser/extensions/register.test.ts`. The e2e scenes are in M8.
 
-## Reported to the architect
+## Reported to the architect, and ruled
 
-Each point has a recommended default, written into the place named, so that a different ruling changes that place and nothing else.
+Thirteen points were reported at authoring, each with a default written into one named place. The architect ruled on all of them on 2026-11-13, with the review's findings; the document is written to the rulings, and a later ruling still changes only the place named.
 
-| # | what | evidence | default, and the one place |
+| # | what | the ruling | the one place |
 |---|---|---|---|
-| 1 | **U7a before U9 in the sidebar's files.** Root UC-8 has U9 land first with the listed row's menu, and U9's document has U7 extend `remoteSessionActions`' `record: false` case. U9 is a document only and waits for a P5 branch. The files are U7's. | U9's document, Interfaces §6 and §12; `origin/ux-wave/U9` holds no code | U7a gives the listed row its menu (Open, Open in new tab, Hide, then Share); U9, landing second, draws its own acts between "Open in new tab" and Hide and no longer adds the opens. **Place:** M2, decision 1. If U9 must land first, that decision and A2's and A3's menu halves for a listed row move to U7b; nothing else moves. |
-| 2 | **S-11 does not reach a row that is only listed, nor the desk.** The section says a session on another machine "changes when that machine runs the wave's build". That holds for its record (a session open here). A listing's title comes from the `member` frame, which the index does not write. | "What the code holds today", the listing's title | No second cut in the window (the section's own reason: it cannot tell a prompt from a chosen title). A1 is read as: the record's title on all three routes. What a listing says for an untitled session is the sender's; if it is the whole prompt, the cut belongs there, outside this repository. **Place:** Interfaces §K, S-11's row. |
-| 3 | **A terminal session has no turn start.** O-16's "has started no turn since that time (a record's turn start; …)" has no datum for a session MAWS does not run. | `digest` in `src/services/index/source.ts`: `turnStartedAt: null` | The rule of Interfaces §E, "When a hidden session returns": for those records, a turn the window sees begin (the phase entering a turn), or a transcript record later than the hide at the store's first look of a run. **Place:** that table. |
-| 4 | **Insertions root UC-8 does not list.** The section names one in U11's files and "the store's one commit function". | Interfaces §J | The list of §J. **Place:** §J; each row can be struck alone. |
-| 5 | **An agent's pane would close the page.** Root UC-12 closes both for "any act of the person's"; U13a's table lands every activating `openTab` and `openSession` through `commitShown`, whoever calls. An agent's `show_pane` and a mod's pane call them. | "What the code holds today", who brings a tab to the front | `quietly(run)`: what runs inside is not the person's act, brings its tab to the front as today, and closes neither the page nor the dialog. After it, Back shows the tab the agent brought forward. **Place:** Interfaces §F, `quietly`; M6, decision 5. |
-| 6 | **A side-surface key on a page.** ⌘J, ⇧⌘D, ⇧⌘F, ⇧⌘B and the View menu's surface rows keep running while a page is open, on a side column that is not drawn. The section says nothing. | `registerShellActions`; R13 | They leave the page first: the person asked for something that is only visible behind it. Under the Settings dialog they act behind it, as the section says. **Place:** M6, decision 6. The other answer (they do nothing while a page is open) changes that decision alone. |
-| 7 | **A page stored before a stay on F.** F leaves `destination` alone, so a page that was open when the wave's build quit would open again after any number of days on F. | Interfaces §G | The stored page is restored only when `main.tabs` is still in this build's stored form (`canonical`); a retired tab in front, which only another build can have written, wins over it. **Place:** Interfaces §F, "At hydration". |
-| 8 | **A7's "as they were" needs the main area to keep its box.** Hiding it as the app hides regions today (0 px) reflows a transcript. And the section does not say whether the session behind a page counts as on screen. | "What the code holds today", hidden regions | The main area and the side column keep their size, drawn invisible and `inert`. Behind a page no session is on screen (unread marks do not clear, notifications are not held back); behind the dialog every session stays on screen, as the section says. **Place:** M5, decisions 2 and 3. |
-| 9 | **The page's name is drawn twice until U11c.** `CustomizeView` has its own heading "Customize", which U11c removes; the title bar now shows the same word. | U11's file, the Customize landing | Left as it is: the page's content is U11's. **Place:** none; residue for U11c. |
-| 10 | **View › Usage under the Settings dialog** would open a popover the modal dialog covers. | Radix's modal dialog blocks pointer events outside it | While the dialog is open the action shows Settings › Usage instead. **Place:** M7, decision 5. |
-| 11 | **Claude Desktop's dialog has a second size.** The section's "at most 1024 px wide and 800 px tall" is the default branch; on a large window another branch allows up to 1280 by 960 (`readable/app-5.1231.2/web/app/v1/shared-61-2ybPsRVk.js:6183-6185`). | the lines named | Nothing changes: MAWS takes its own box (law 7). Recorded so that the comparison is exact. |
-| 12 | **A typed `@word` at a prompt's start is taken off as a mention.** MAWS's bare form cannot be told from it. | `mentionText`; Interfaces §A | Accepted: such a prompt is named by the six words after it. **Place:** Interfaces §A. |
-| 13 | **Scenes whose premise goes.** Eight e2e scenes test Settings, Customize or the library as a tab among tabs. | M8's table | Each is re-expressed there, and none is deleted without a successor. **Place:** M8's table. |
+| 1 | **U7a and U9 in the sidebar's files.** Root UC-8 had U9 land first with the listed row's menu. | Neither order is imposed. Both landings build to §C's order of a row's menu, and whichever lands second merges. A2's and A3's halves for a listed row stay in U7a either way. | M2, decision 1, written both ways; Concrete Steps 1 has the check that tells which |
+| 2 | **S-11 does not reach a row that is only listed, nor the desk.** A listing's title comes from the `member` frame, which the index does not write. | Accepted: no second cut in the window. Once U9 is on a machine, the listing of a session MAWS runs there carries its record's title (U9's listing rule), so the six words reach that listed row through the record; a terminal session's listing keeps the title its member frame states. | Interfaces §K, S-11's row |
+| 3 | **A terminal session has no turn start.** O-16's "a record's turn start" has no datum for a session MAWS does not run. | Replaced, with the review's finding on a listing's `issued`, by one rule: a turn of the session began after the hide, and where no datum says when a turn began, the window must have seen it not working since the hide before it counts it as working again. The child's sentence is amended by the architect. | Interfaces §E, "When a hidden session returns" |
+| 4 | **Insertions root UC-8 does not list.** | Accepted, with the additions of points 5 and 8; the architect adds them to UC-8. | Interfaces §J; each row can be struck alone |
+| 5 | **An agent's pane would close the page.** UC-12 closes both for "any act of the person's"; U13a's table lands every activating open through `commitShown`, whoever calls. | Accepted as repaired by the review: `quietly(run)` holds only for what runs synchronously inside it; wherever an open is deferred between the request and the commit, who asked travels as data with the request and is applied at the commit. | Interfaces §F, "Not the person's act"; M6, decision 5 |
+| 6 | **A side-surface key on a page.** | The default stands: it leaves the page first. It is also one of the four questions for the owner. | M6, decision 6 |
+| 7 | **A page stored before a stay on F.** | Accepted as corrected: a retired Settings tab in front suppresses the stored page; the stored form's shape is a test of shape and not of who wrote it, and a legal one-set layout left by F with no retired tab in front may restore the page, which the person leaves with Back. No witness and no marker is added. | Interfaces §F, "At hydration"; §G |
+| 8 | **A7's "as they were" needs the main area to keep its box,** and the section does not say whether the session behind a page is on screen. | Accepted: the box is kept; behind a page no session is on screen, behind the dialog every session is. The list of readers is finished here, so that M5's executor discovers none. | M5, decisions 2 to 4; Interfaces §N |
+| 9 | **The page's name is drawn twice.** `CustomizeView` has its own heading "Customize". | Changed: U7b removes Customize's own heading, in the insertion it already makes in that file. | M6, decision 9 |
+| 10 | **View › Usage under the Settings dialog** would open a popover the modal dialog covers. | Accepted: while the dialog is open the action shows Settings › Usage. | M7, decision 5 |
+| 11 | **Claude Desktop's dialog has a second size** (up to 1280 by 960 on a large window, `readable/app-5.1231.2/web/app/v1/shared-61-2ybPsRVk.js:6183-6185`). | Accepted; nothing changes: MAWS takes its own box (law 7). | §M |
+| 12 | **A typed `@word` at a prompt's start is taken off as a mention.** | Accepted. | Interfaces §A |
+| 13 | **Scenes whose premise goes.** | Accepted, with `e2e/browser-chrome.spec.ts` added. | M8's table |
+
+One thing was met while ruling 9 was written in and is reported with this revision: `projects/ProjectsView.tsx` draws its own `<h1>Projects</h1>`, which repeats the title bar's name in the same way. M6's decision 9 removes it by the ruling's own reason; that second removal can be struck alone.
 
 ## Plan of Work
 
@@ -143,7 +151,7 @@ Eight milestones in two landings, one executor each, a review at each boundary. 
 
 Terms used below. **The strip:** the one set of open main tabs (U13a). **The tab in front:** the active tab of the focused pane. **A listed row:** a sidebar row of a session on another machine of which this Mac holds only the listing (`ListedSession`) and no record. **A page:** an open destination. **The dialog:** the Settings dialog. **The layout store:** `stores/layout.ts`. **The hidden store:** `stores/hidden.ts` (M3). **A layer:** a sheet, dialog, menu or popover opened over something. **The controller:** the plan-executor that runs the milestones, reviews each at its boundary and is this document's one writer while they run. **The VM:** the wave's build machine, reached through `vmcheck.sh`. **Class 1a:** typecheck, lint, the unit suite and the probes on GitHub Actions. **The peer:** the other build in the two-build e2e group; here it is F.
 
-Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 950; M4 about 450. M5 about 1,100; M6 about 1,300, of which about 500 are tests deleted or changed with the tab kinds; M7 about 1,000, of which about 600 are the panel's tests moved; M8 about 1,500, nearly all e2e.
+Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 1,000; M4 about 450. M5 about 1,300; M6 about 1,500, of which about 500 are tests deleted or changed with the tab kinds; M7 about 1,000, of which about 600 are the panel's tests moved; M8 about 1,500, nearly all e2e.
 
 **Landing U7a: M1 to M4, on `ux-wave/U7`, from today's master.**
 
@@ -170,17 +178,20 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
 
 **What exists at its end.** A listed row has a menu and three dots. Its menu offers Open and Open in new tab, then Share and Add owner where it has them; ⌘-click and middle-click open it in a tab of its own; a plain click and Enter are as before. A Needs you row's ⌘-click on a listed session goes through the lane's opener.
 
-**What it touches.** `src/renderer/src/sessions/remote-openers.ts`, `sidebar/ListedRow.tsx`, `sidebar/menus.tsx`, `sidebar/NeedsYou.tsx`, `sidebar/SessionRow.tsx` (the three dots), and `sidebar/Sidebar.test.tsx`, `sidebar/HoverCard.test.tsx` where a listed row's menu is pinned.
+**What it touches.** `src/renderer/src/sessions/remote-openers.ts`, `sidebar/ListedRow.tsx`, `sidebar/menus.tsx`, `sidebar/NeedsYou.tsx`, `sidebar/SessionRow.tsx` (the three dots), and `sidebar/Sidebar.test.tsx`, `sidebar/HoverCard.test.tsx` where a listed row's menu is pinned. Where U9's menu is on master (decision 1, the second way), also the `record: false` case of `remoteSessionActions` in `app/session-actions.ts`, which is U9's file and the extension U9's document names.
 
 **Interfaces.** Exposes §C. Consumes nothing.
 
 **Decisions.**
-1. *The listed row's menu is drawn by `SessionItems`' branch for an address with a listing and no record* (Reported, 1). Its order is fixed in §C so that U9 has one place to insert. The two opens are not `SESSION_ACTIONS` entries: those run the layout store's `openSession`, which skips the lane's opener and its retry.
+1. *The listed row's menu, in whichever of two ways master calls for* (Reported, 1). Its order is §C's in both, and A3 is proved the same way in both. Concrete Steps 1 has the check that tells which.
+   - *Master holds no `remoteSessionActions`* (U9 is not on master yet): M2 gives `SessionItems` its branch for an address with a listing and no record, drawing Open and Open in new tab, then Share and Add owner where the row has them, and `ListedRow` names its menu always. U9, landing second, draws its acts for a listing between "Open in new tab" and Hide.
+   - *Master holds it* (U9 landed first): the branch and `data-menu` exist. M2 extends the `record: false` case as U9's document says, putting `open` and `openInNewTab` at its head, and gives the two a listing's meaning where `SessionItems` draws them for an address with no record.
+   - *In both:* for a listing with no record the two opens call `openListed`, with and without the new-tab request, and never the session actions' handlers: those run the layout store's `openSession`, which skips the lane's opener and its retry.
 2. *Every way of opening a listed session passes its lane's opener.* `openListed` takes the request; Needs you passes it for ⌘-click and middle-click. Where a lane has no opener the two items are drawn disabled with "Not available here", and a click selects the row and shows its card, as today.
 3. *The three dots show on every session row,* local and listed (the age gives them its slot on hover, as today for a row that can be renamed). M3 needs this, and M2 already has an item for every row.
 4. *A Needs you row keeps no menu for a listed session.* The section gives Hide and the opens to the tree's rows.
 
-**What it does not touch.** Open in split for a listed row. The openers themselves. `app/session-actions.ts` (U9's remote branch). The title bar's session menu.
+**What it does not touch.** Open in split for a listed row. The openers themselves. U9's acts for a session on another machine, and `app/session-actions.ts` beyond the one case named above. The title bar's session menu.
 
 **What it proves.** A3. Its tests pin, in `Sidebar.test.tsx`'s block "listed rows from another machine": the context menu of a listed row lists Open, Open in new tab; each calls the opener, the second with `{ newTab: true }`; ⌘-click and a middle click call it with `{ newTab: true }`; with no opener registered both items are disabled and titled "Not available here", and a click still selects the row. The existing case "…opening nothing and offering no menu" changes to that. A Needs you row's ⌘-click on a listed session calls the opener with `{ newTab: true }` and no longer calls the store's `openSession` (fails before, passes after).
 
@@ -196,14 +207,15 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
 1. *A store of its own, after `stores/people.ts`, with one difference:* a read that failed is not an empty set. Until a read has answered nothing is written, the acts of the run are kept and drawn, and the read is asked again at the next act (§E). Otherwise one refused read followed by one Hide would replace the stored set with one entry.
 2. *Hidden is applied after ranking and before the caps,* in one pure function (`splitHidden`, §D), so a hidden session counts in its project's marks and rollups, is found by the sidebar's search (a search draws every match in place and no Hidden row), and is absent from the five and the eight. A project whose sessions are all hidden still has its row.
 3. *The Hidden row is a tree node of its own kind* (§D). It is open for the run only and closes when its project closes. Its rows are ordinary rows one level deeper; `SessionRow` takes "nested under its lineage parent" as a prop instead of reading it from the level.
-4. *Hide and Unhide are items of the row's menu, not session actions:* they are drawn by `SessionItems` after the record's actions and before Share, and by the listed branch after the opens. They do not appear in the title bar's session menu.
+4. *Hide and Unhide are items of the row's menu, not session actions:* they are drawn by `SessionItems` after the record's actions and before Share, and by the listed branch after the opens. They do not appear in the title bar's session menu. This holds in both ways of M2's decision 1: where U9's `remoteSessionActions` draws a listing's menu, Hide is still its own item, after that list's items.
 5. *An act of Hide or Unhide settles the sidebar's held order at once,* as a change of the sort does: without it an unhidden row would stand at its old rank until the pointer left the sidebar.
 6. *Where the keyboard goes.* After Hide: to the row that took the hidden row's place, else to the Hidden row. After Unhide: to the unhidden row, at the list's head. The tab stop is never left on a row that is gone.
-7. *When a hidden session returns, and when an entry is dropped,* is the table of §E. It is a pure function over what the sessions store holds now and held at the previous look, so that each of its lines is a unit test.
+7. *When a hidden session returns is one pure function of an entry and a look* (`afterLook`, §E; the architect's ruling on Reported, 3). The store only gathers the look and applies the answer, so every case is a row of a table test, and a store test proves the wiring once per route.
+8. *An entry of another machine's session is never dropped because the session is absent* (the review's first finding). The rows naming a machine say nothing certain about its sessions, at a start least of all. The key is bounded by count instead (§E, "The bound").
 
 **What it does not touch.** `stores/layout.ts`. Needs you and every attention reader. The Resume picker, the palette, the Overview. Archive. A project's "Remove from sidebar". Any call to another machine: Hide sends nothing.
 
-**What it proves.** A2. Its tests pin, in `stores/hidden.test.ts`: a hide is written once, 250 ms later, as `{ version: 1, hidden: { <address>: <time> } }`; with the first read held open, a hide is drawn at once, and when the read answers with another entry both are kept and written; with the read refused, a hide is drawn and nothing is written, and the next act reads again; each line of §E's two tables. In `derive.test.ts`: `splitHidden` keeps rank order among the shown and orders the hidden by newest activity; six sessions with one hidden show five and no "Show more". In `Sidebar.test.tsx`: Hide from the three dots and from the context menu, for a local record, a record at another machine's address and a listed row; "Hidden · 2" after "Show more"; the arrow keys reach it, Enter opens it, ArrowLeft from a hidden row lands on it; Unhide puts the row first while the pointer is still inside the sidebar; a hidden session with a pending request is under Needs you; a hidden pinned session is under Hidden and pinned first again after Unhide; a search lists a hidden session in place. In `src/main/layout/store.test.ts`: a file that holds `sidebar.hidden` keeps it, value equal, through a `set` of another key (the property F's main has, held on the same code).
+**What it proves.** A2. Its tests pin, in `stores/hidden.test.ts`: a hide is written once, 250 ms later, in §E's stored shape, armed when the session was not working and unarmed when it was; with the first read held open, a hide is drawn at once, and when the read answers with another entry both are kept and written; with the read refused, a hide is drawn and nothing is written, and the next act reads again. The table test of `afterLook`, one row each: hidden at rest, then a turn; hidden in the middle of a turn, the turn goes on, it ends, the next begins; a listing re-issued for a rename while `busy`, for an entry hidden mid-turn and for one hidden at rest; the first look of a run for an armed and for an unarmed entry, each finding the session working and at rest; a `foreign` record hidden with its newest transcript record ten minutes old, and one hidden thirty seconds after a record; a session MAWS runs whose turn start is later than the hide, and one whose turn start is earlier. The wiring, once per route: a record MAWS runs, a bridged terminal record, a `foreign` record, a listing, and an address with neither digest nor listing, which is left as it is. Arming is stored: an entry hidden mid-turn and then seen at rest is written with its `armedAt`. The drop rule: this Mac's entry goes when this Mac is loaded and holds no record at the address, and not before; `ipc/events.test.ts`'s sequence for another machine (rows incomplete and empty, then the machine pending, then complete without the session) leaves every entry of that machine. The bound: 501 entries are written as 500, the oldest of another machine's gone, and this Mac's oldest only when no other is left. In `derive.test.ts`: `splitHidden` keeps rank order among the shown and orders the hidden by newest activity; six sessions with one hidden show five and no "Show more". In `Sidebar.test.tsx`: Hide from the three dots and from the context menu, for a local record, a record at another machine's address and a listed row; "Hidden · 2" after "Show more"; the arrow keys reach it, Enter opens it, ArrowLeft from a hidden row lands on it; Unhide puts the row first while the pointer is still inside the sidebar; a hidden session with a pending request is under Needs you; a hidden pinned session is under Hidden and pinned first again after Unhide; a search lists a hidden session in place. In `src/main/layout/store.test.ts`: a file that holds `sidebar.hidden` keeps it, value equal, through a `set` of another key (the property F's main has, held on the same code).
 
 ### M4 — U7a's e2e scenes, the record, and the acceptance run
 
@@ -237,15 +249,15 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
 
 **What exists at its end.** The layout store holds one destination and the dialog's state, with their acts; a page and the Settings dialog can be opened from a test, and behave whole: what is drawn and what is not, Esc and ⌘W, where the keyboard returns, what an act that shows a tab closes, what a relaunch brings back. No control of the app opens either yet, and the four kinds are still tabs.
 
-**What it touches.** `src/shared/ipc/schema/layout.ts` (additions); `stores/layout.ts`; a new directory `src/renderer/src/destination/` (`DestinationPage.tsx`, `SettingsDialog.tsx`, `escape.ts`, `copy.ts` and tests); `app/Shell.tsx`, `app/shell-view.ts`, `app/Toolbar.tsx`, `app/shell-actions.ts`, `keymap/actions-runtime.ts`, `session/visibility.ts`, `sidebar/Sidebar.tsx` (which row is current, and that no session row is selected under a page); their tests, and `stores/layout-persist.test.ts`.
+**What it touches.** `src/shared/ipc/schema/layout.ts` (additions); `stores/layout.ts`; a new directory `src/renderer/src/destination/` (`DestinationPage.tsx`, `SettingsDialog.tsx`, `escape.ts`, `copy.ts` and tests); `app/Shell.tsx`, `app/shell-view.ts`, `app/Toolbar.tsx`, `app/shell-actions.ts`, `keymap/actions-runtime.ts`, `sidebar/Sidebar.tsx` (which row is current, and that no session row is selected under a page); the eight readers of §N (`session/visibility.ts`, `attention/navigation.ts`, `app/plugin-toasts.ts`, `panel/ToolBody.tsx`, `library/ArtifactTab.tsx`, `tools/browser/covering.ts`, `engine-surface/panes.ts`, `tools/browser/agent/connect.ts`) and the test beside each; `stores/layout-persist.test.ts`.
 
 **Interfaces.** Exposes §F, §G's `destination` row and §H. Consumes U13a's `commitShown`, `stripOf`, `storedMain`, `frontOf` (R1 to R3); U8b's `cardColumnNow` if it is on master (R8); U11a's `Backdrop` if it is on master (R11).
 
 **Decisions.**
 1. *The state and its acts* are §F, in the layout store, each change one store write. `commitShown` gains its effect here: in the write that lands the strip, it also clears the page and closes the dialog, unless it runs inside `quietly`.
-2. *What a page hides keeps its box* (Reported, 8). While a page is open the main area's content, the card column and the side column are invisible and `inert` at the size they had; the page is drawn over the area right of the sidebar, under the banner row. They are not unmounted, not set to `display: none` and not squeezed to 0 px. The Overview's layer is not among what is hidden: it is drawn over the page. The in-app browser's native view yields through `holdCover()` for as long as a page is open.
-3. *What counts as on screen.* Behind a page: nothing of the main area or the side column. `visibleSessions` answers no session while a destination is open and is asked again when it changes; every other reader of "is this tab on screen" (the editor host's `shown`, the browser's `sessionsOnScreen`) answers no as well. The executor finds those readers first and gives each a case; a live dashboard behind a page must make no call. Behind the dialog: unchanged, by the section.
-4. *The card column and the side column.* If U8b is on master, `pageOpen` is set from `state.destination !== null` in `cardColumnNow`, the one place, so that U4's card and the Session cards icon agree. If it is not, decision 2 already hides the column, and U8b sets that line when it merges (§I). The side column's gate is in `Shell.tsx` and is decision 2.
+2. *Mounting and layout: what a page hides keeps its box* (Reported, 8). While a page is open the main area's content, the card column and the side column are invisible and `inert` at the size they had; the page is drawn over the area right of the sidebar, under the banner row. They are not unmounted, not set to `display: none` and not squeezed to 0 px. Nothing that decides whether a region is mounted, how wide it is or how much room it reserves reads whether a page is open: `shellGeometry`, `Shell`'s conditional mount of the card column and the padding it gives the main area for it, and the side column's mount all answer as if no page were open. The Overview's layer is not among what is hidden: it is drawn over the page.
+3. *The logical answer: behind a page nothing is on screen.* It is kept apart from decision 2. One selector says it, `pageOpen(state)` (§F), and the eight readers of §N each answer "not on screen" while it holds; §N names each reader, its owner, its change and its regression test, and the readers that ask only which session is in front and do not change. An executor who finds a ninth stops and reports it. The in-app browser's native views yield through `holdCover()`, held for as long as a page is open. Behind the dialog nothing of this applies: every session stays on screen, by the section, and the native views yield as under any dialog.
+4. *The card column reads both, in different places.* Whether its place is kept (its mount, and the main area's padding beside it) is decision 2: `Shell` computes it without the page. Whether it is drawn and whether it counts as shown is decision 3. If U8b is on master, `cardColumnNow` sets `pageOpen` from `pageOpen(state)`, so that `useCardColumn`, `useCardColumnShown` (U4's card), the Session cards icon and `toggleSessionCards` say "not shown", and `Shell` asks the pure `cardColumnShown` a second time with `pageOpen: false` for the mount and the padding; while the two differ the column is mounted, invisible and `inert`. That changes one expectation of U8b's M4 test ("the column is not drawn" becomes "is not drawn and keeps its place"). If U8b is not on master, `Shell`'s own condition is the box and decision 2 hides it; U8b sets `pageOpen` when it merges (§I). The side column's gate is in `Shell.tsx` and is decision 2.
 5. *The title bar in page mode.* The sidebar and Overview buttons stay. Then Back and the page's name. The chip, the "+", the surface icons and the session menu are not drawn. The two slots the strips are mounted in stay mounted and hidden, so that a strip keeps its scroll. The ring's slot stays.
 6. *Esc* is §H's table. For the dialog it is decided in `onEscapeKeyDown`, because Radix dismisses before any handler inside can speak; for the page, in a `window` listener as the Overview has. Both ask one function, `escapeTaker(target)`.
 7. *⌘W* is one line in the `tab.close` handler: `closeFront()` first, the tab only when it answered false.
@@ -256,29 +268,31 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
 
 **What it does not touch.** `TabRefSchema` and every `kind: 'settings' | 'customize' | 'projects' | 'artifacts'`. The openers. The usage pill. `src/shared/keymap/`, `src/main/menu.ts`.
 
-**What it proves.** A7, A9 and A10 as component tests (§H says which), and the store's half of A8. Its tests pin, in `stores/layout.test.ts`: every row of U13a's §C table, now with an effect: each action in its upper rows closes an open page and an open dialog in the same write, and `focusPane`, `openTab` with `activate: false`, `closeTab`, `togglePinned`, `setSplitRatio`, `dropSession` and `refreshTabTitles` close neither; `openDestination` closes the dialog and leaves the strip equal by reference; the same kind again changes only its fields; `closeDestination` and `closeSettings` leave the strip equal by reference; `closeFront` closes the dialog and keeps the page, then closes the page, then answers false; `setOverviewOpen(true)` closes the dialog and keeps the page; inside `quietly` an activating `openTab` closes neither. With a chat's creation held open: a page opened during the wait stays, and the chat arrives unselected; a chat asked for from a page that is still open when it arrives is selected and closes the page. With a split and a page open (A10): `pane.focusOther`, `panel.float` when it docks the card, and `main.expandArtifactPane` each close the page and leave the other pane's tab in front. In `stores/layout-persist.test.ts`: a page opened is written as `{ version: 1, destination }`, closed deletes the key; the lines of "At hydration". In the destination tests: §H's cases.
+**What it proves.** A7, A9 and A10 as component tests (§H says which), and the store's half of A8. Its tests pin, in `stores/layout.test.ts`: every row of U13a's §C table, now with an effect: each action in its upper rows closes an open page and an open dialog in the same write, and `focusPane`, `openTab` with `activate: false`, `closeTab`, `togglePinned`, `setSplitRatio`, `dropSession` and `refreshTabTitles` close neither; `openDestination` closes the dialog and leaves the strip equal by reference; the same kind again changes only its fields; `closeDestination` and `closeSettings` leave the strip equal by reference; `closeFront` closes the dialog and keeps the page, then closes the page, then answers false; `setOverviewOpen(true)` closes the dialog and keeps the page; inside `quietly` an activating `openTab` closes neither. With a chat's creation held open: a page opened during the wait stays, and the chat arrives unselected; a chat asked for from a page that is still open when it arrives is selected and closes the page. With a split and a page open (A10): `pane.focusOther`, `panel.float` when it docks the card, and `main.expandArtifactPane` each close the page and leave the other pane's tab in front. In `stores/layout-persist.test.ts`: a page opened is written as `{ version: 1, destination }`, closed deletes the key; the lines of "At hydration". In the destination tests: §H's cases. For decision 2, in `app/Shell.test.tsx`: with a session in front, the card column drawn and a side surface open, opening a page leaves the main area's element, the card column's and the side column's mounted (the same nodes), each invisible and `inert`, the grid's columns and the main area's padding unchanged; Back restores them without a remount. For decision 3: §N's test of each reader.
 
 ### M6 — The cutover: every way in, and the four tab kinds retire
 
 **What exists at its end.** The gear, ⌘, and MAWS › Settings… open the dialog; the sidebar's Projects, Artifacts and Customize rows, View › Artifacts and every link inside the app open a page or the dialog by what they opened before. No tab of the four kinds can exist; one stored by an earlier build is dropped at read, and where it was the tab in front its page opens.
 
-**What it touches.** `src/shared/ipc/schema/layout.ts`; `stores/layout-model.ts`; `main/Pane.tsx`, `main/Tab.tsx`, `main/artifacts.ts`; `app/Toolbar.tsx` (`toolbarTitle`), `app/slots.ts`; `gateway/actions.ts`; `customize/open.ts`, `customize/CustomizeView.tsx`; `tools/browser/chrome/Chrome.tsx`, `ProfilePopover.tsx`; `tools/maws/panes/connect.ts`, `engine-surface/panes.ts`; `panel/SurfaceRow.tsx`; `settings-tab/SettingsView.tsx` (the type's home, §I), `settings-tab/SupervisorSettings.tsx` (one attribute); `test/layout/rehearsal.ts` and its test; the unit tests of "What the code holds today".
+**What it touches.** `src/shared/ipc/schema/layout.ts`; `stores/layout-model.ts`; `main/Pane.tsx`, `main/Tab.tsx`, `main/artifacts.ts`; `app/Toolbar.tsx` (`toolbarTitle`), `app/slots.ts`; `gateway/actions.ts`; `customize/open.ts`, `customize/CustomizeView.tsx`, `projects/ProjectsView.tsx`; `tools/browser/chrome/Chrome.tsx`, `ProfilePopover.tsx`; `panel/host.ts`, `tools/maws/panes/connect.ts`, `tools/browser/agent/connect.ts`, `tools/maws/ask/connect.ts`, `engine-surface/panes.ts`; `panel/SurfaceRow.tsx`, `markup/session.ts`; `settings-tab/SettingsView.tsx` (the type's home, §I), `settings-tab/SupervisorSettings.tsx` (one attribute); `test/layout/rehearsal.ts` and its test; the unit tests of "What the code holds today".
 
-**Interfaces.** Consumes §F and §H. Exposes §G's retired kinds and `retiredFront`.
+**Interfaces.** Consumes §F and §H. Exposes §G's retired kinds, `retiredFront` and `pageAtStart`, and the host's `asked` option (§F).
 
-**Decisions.**
+**Decisions.** *Built as two commits, each green* (the review's second short point): first every way in is switched (decisions 1, 5, 6, 7 and 9) while the four kinds are still tab kinds that render: after it nothing in the app opens such a tab, and a stored one still draws; then the four kinds are retired (decisions 2 to 4 and the tests of decision 8). The milestone stays one, with one review.
+
 1. *Every way in* is §J's second table. The three openers keep their names and signatures and stop calling `revealMain()`: a page covers the side column whatever its state, and Back must find it as it was.
 2. *The schema.* The four schemas leave `TabRefSchema` and `TabRefV2Schema`, their cases leave `tabId`, `UNPINNABLE_KINDS` goes with its readers, and the four names join `RETIRED_KINDS`. A retired kind is dropped without a warning, as the Overview's is. `SettingsSection` and `CustomizeSection` stop being derived from a tab (§I).
-3. *A8.* `retiredFront(raw)` (§G) reads the stored value before the drop; hydration opens its page (§F, "At hydration"). The reader's existing rule names the tab in front of a pane whose active tab was dropped. A dropped Settings tab opens nothing.
-4. *The rehearsal learns the retirement* (§G, "The rehearsal"): per file, how many tabs of the four kinds were open and in the closed history, whether the tab in front was one, and which page results. It still prints nothing read from a file.
-5. *An agent's pane is not the person's act* (Reported, 5). `connectPaneShows`' calls into the store and the host, and the mod pane's `selectTab` calls, run inside `quietly`, each wrapped where it is made, also those made after an await. `quietly` is synchronous and holds nothing open across an await, so an act of the person's between an agent's request and its answer closes the page as usual.
-6. *An act on the side column leaves a page* (Reported, 6). `toggleSurface` and `toggleSessionCards` call `closeDestination()` first when a destination is open. Under the dialog they run as today.
+3. *A8.* `retiredFront(raw)` (§G) reads the stored value before the drop and answers a page, `'settings'` or null; `pageAtStart` (§G) is hydration's choice among the retired tab in front, the stored page and none (§F, "At hydration", rules 3 to 5), pure and in the shared schema file so that the store and the rehearsal run the same code. The reader's existing rule names the tab in front of a pane whose active tab was dropped. A dropped Settings tab opens nothing, and a stored page is not restored over it.
+4. *The rehearsal learns the retirement, and has an expectation of its own* (§G, "The rehearsal"; the review's sixth finding). Per file it counts the tabs of the four kinds that were open and in the closed history, reads which kind was in front with a reader of its own, written in `test/layout/rehearsal.ts` and sharing no code with `retiredFront`, and compares the page that reader expects with the page `pageAtStart` answers. A difference is the outcome `destination-mismatch`. `pageAtStart` joins the converters the rehearsal takes as an argument, so that its test can hand in a broken one. It still prints nothing read from a file.
+5. *What an agent or a mod asks for is not the person's act* (Reported, 5; §F, "Not the person's act"). `quietly(run)` holds only for what runs synchronously inside it. Where the open is deferred between the request and the commit, who asked travels as data with the request and is applied at the commit: `panelHost.addTool` and `panelHost.selectTab` take `asked: 'agent'`, the host keeps it on a queued add and on each queued open, and `applyAdd` and `activateIn` run their `openSession` inside `quietly` when it is set. The four listeners pass it on every call they make into the host, the calls after an await included; `connectPaneShows`' two calls that reach the store directly (`openFile`, and `openSession` for a terminal) run inside `quietly`. §F lists every deferral between such a request and the commit, and what carries the origin across each.
+6. *An act on the side column leaves a page* (Reported, 6). `toggleSurface` and `toggleSessionCards` call `closeDestination()` first when a destination is open, and so does `startMarkup`, which marks up what the side column shows. Under the dialog they run as today.
 7. *The Stop-all confirmation keeps Esc.* Its element is marked `data-escape-own`, the mark §H's table reads; it is the one in-place confirmation inside Settings.
 8. *Tests.* Deleted with the behaviour: `main/destinations.test.ts` (its successor is M5's store test), the singleton-tab cases of `stores/layout-model.test.ts`, `main/MainArea.test.tsx`, `main/TabStrip.overflow.test.tsx`, `shell/floating.test.ts` (Settings in front of the card) and `shell/transfer.test.ts`. Rewritten to the new acts: `gateway/actions.test.ts`, `tools/browser/chrome/ActionBar.test.tsx`, `ProfilePopover.test.tsx`, `customize/CustomizeView.test.tsx`, `settings-tab/SettingsView.test.tsx`, `sidebar/Sidebar.test.tsx` ("the footer gear"; which row is current), `app/Toolbar.test.tsx`, `app/Shell.test.tsx`, `app/Shell.chrome.test.tsx`, `transcript/view/rows/rows.test.tsx`. Fixture only: the rest of the list.
+9. *A page's name is drawn once, in the title bar* (the ruling on Reported, 9). `CustomizeView`'s own `<h1>Customize</h1>` goes, in the insertion this milestone already makes in that file; its header row keeps `data-customize-header`, the section tabs and the Project and Live session selects. The title bar's page name is the page's level-1 heading, and the page's region is labelled by it. `ProjectsView`'s own `<h1>Projects</h1>` repeats the title bar in the same way and goes for the same reason; what it labelled is labelled by the title bar's heading. That second removal is not in the ruling's words and is reported with this revision. With them move: the three cases of `customize/CustomizeView.test.tsx` that find the header through the heading (they find `[data-customize-header]`), and M8's two e2e lines.
 
-**What it does not touch.** The content of Settings, Customize, Projects and the library. `transcript/view/rows/Error.tsx` (it keeps calling the action with its number). Diagnostics and a project's Channel, which stay tabs. The usage pill.
+**What it does not touch.** The content of Settings, Customize, Projects and the library, beyond the two headings of decision 9. `transcript/view/rows/Error.tsx` (it keeps calling the action with its number). Diagnostics and a project's Channel, which stay tabs. The usage pill.
 
-**What it proves.** A7 and A9 end to end in the suites, and A8. Its tests pin, in `src/shared/ipc/schema/layout.test.ts`: A8's value (version 3, written as F writes it: a `settings` tab, a `customize` tab at section `skills` in front, a `projects` tab in the other pane, an `artifacts` tab in the closed history, session and file tabs among them) reads with the four gone, every other tab in its order, a tab active in each pane, no warning; `retiredFront` answers Customize at Skills for it, Projects and the library for their variants, null for a Settings tab in front and for any value that is not a layout; the same for a version-2 and a version-1 value. For `quietly`: with a page open, an agent's `show_pane` for a file adds its tab in front of the strip and the page stays; a session's row clicked while the `artifact` pane's read is still out closes the page, and the answer that then arrives opens nothing over it. In the store: that value hydrates with the page open and `destination` written; a second hydration of what was written opens the same page and writes nothing. In `test/layout/rehearsal.test.ts`: the new counts, and that a sentinel in a retired tab's fields reaches no output.
+**What it proves.** A7 and A9 end to end in the suites, and A8. Its tests pin, in `src/shared/ipc/schema/layout.test.ts`: A8's value (version 3, written as F writes it: a `settings` tab, a `customize` tab at section `skills` in front, a `projects` tab in the other pane, an `artifacts` tab in the closed history, session and file tabs among them) reads with the four gone, every other tab in its order, a tab active in each pane, no warning; `retiredFront` answers Customize at Skills for it, Projects and the library for their variants, `'settings'` for a Settings tab in front, and null for a tab of any other kind in front and for any value that is not a layout; the same for a version-2 and a version-1 value. `pageAtStart`, one case per line of §F's rules 3 to 5: a retired page in front wins over a stored page; a Settings tab in front gives none though a page is stored and the shape is the stored form's; a stored page with the stored form's shape and a Diagnostics tab in front is restored (the accepted case of §G: F can leave exactly this); a stored page with any other shape is not. In the store: A8's value hydrates with the page open and `destination` written; a second hydration of what was written opens the same page and writes nothing; the Settings case deletes the stored key. For decision 5, in `panel/host.test.tsx`, with hydration held open: an agent's `addTool` with `activate: true` for a session that is not the one stored in front, then the person opens a page (and, in a second case, the dialog), then the layout's read answers: the barrier applies the add, the session's tab is in front of the strip, and the page (the dialog) is still open; the same add without `asked` closes it. In `tools/maws/panes/connect.test.ts`: with a page open, `show_pane` for a file adds its tab in front of the strip and the page stays; a session's row clicked while the `artifact` pane's read is still out closes the page, and the add that then arrives leaves the strip's page state as the click left it. In `test/layout/rehearsal.test.ts`: the new counts; a converter whose `pageAtStart` always answers null, and one that always answers Projects, each make a file whose tab in front is a Customize tab end `destination-mismatch`; and a sentinel in a retired tab's fields reaches no output in any of these runs.
 
 ### M7 — Usage is a ring
 
@@ -304,7 +318,7 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
 
 **What exists at its end.** The e2e specs find Settings in a dialog and the three pages beside the sidebar, and hold the new scenes. The two reversed rulings are amended where they stand. The branch has passed typecheck, lint and the unit suite on the VM, and the hand-over is written into Progress.
 
-**What it touches.** `e2e/support/shell.ts`, `e2e/support/browser-import-scene.ts`, the specs of the table below, `e2e/cross-build.spec.ts`; `docs/charter.md`, `docs/doperpowers/ledgers/2026-10-24-P4-UX2.md`; this document's Progress.
+**What it touches.** `e2e/support/shell.ts`, `e2e/support/browser-import-scene.ts`, the specs of the table below (`e2e/browser-chrome.spec.ts` and `e2e/browser-import.spec.ts` among them), `e2e/cross-build.spec.ts`; `docs/charter.md`, `docs/doperpowers/ledgers/2026-10-24-P4-UX2.md`; this document's Progress.
 
 **Decisions.**
 1. *Helpers first.* `e2e/support/shell.ts` gains `settingsDialog(page)` (the dialog by its accessible name "Settings") and `openSettings(app, page)` (the menu's action, then the dialog visible), `pageRegion(page)` (`[data-region="page"]`) and `backToTabs(page)`; `openAppDestination` ends by asserting the row is `aria-current="page"` and the title bar names the page, not a selected tab; `usagePill` becomes `usageRing` (the title bar's `[data-usage-ring]`); `sidebarFooter` stays.
@@ -315,14 +329,16 @@ Expected size, lines added plus removed: M1 about 350; M2 about 350; M3 about 95
    | `settings.spec.ts` | the six that read content through the main pane's tabpanel | read through `settingsDialog`; "⌘, opens the tab" asserts the dialog and that the strip's tab count is unchanged |
    | `settings.spec.ts` | "WR #57: first tab click after choosing or dismissing the design-system popup navigates" | the same popup inside the dialog, then one click on a section link moves the view |
    | `settings.spec.ts` | "in a 50/50 split the view stacks inside its pane…" | the view's two container forms at the dialog's width and at the window's smallest |
-   | `settings.spec.ts` | "Customize and Projects are reachable without a chat…" | each opens as a page with Back and its name; no tab is added; the strip chords are dropped from the scene |
+   | `settings.spec.ts` | "Customize and Projects are reachable without a chat…" | each opens as a page with Back and its name; no tab is added; the strip chords are dropped from the scene; the level-1 heading "Projects" it asserts is the title bar's |
+   | `ux2-shell.spec.ts` | "Chrome: live Customize keeps scopes on its two control rows…" | the section tabs and the Project select stand in one row of `[data-customize-header]`; the heading it measured with them is the title bar's and leaves the measure |
    | `shell.spec.ts` | "a session opens in place of Settings or Diagnostics…" | its Diagnostics half stays; a new step: with Settings open, a click on the dimmed window closes it and the strip is as it was |
    | `shell.spec.ts` | "Float with no session in front…, and Settings over the card docks it" | Diagnostics stands for the tab with no session; a new step: Settings over the floating card leaves the card floating |
    | `shell.spec.ts` | `assertToolbarPlacement`; `ux2-shell.spec.ts` `singleChromeRow` | the ring is in the title bar and no usage control is in the sidebar's foot |
    | `ux2-shell.spec.ts` | the three that use a Settings tab as "another tab" | Diagnostics takes its place; the tab count after ⌘, is unchanged |
    | `accounts.spec.ts` | all three | the ring and the compact popover; the grid, its widths and the account actions through Settings › Usage |
    | `browser.spec.ts` | the cover scene's usage step | the popover now overlaps the pane: the view is covered while it is open |
-   | `support/browser-import-scene.ts` and its two specs | `openSettingsBrowser`, then acts on the session | the dialog is closed (Esc) before the scene clicks behind it; the import sheet is a layer over the dialog, closed first |
+   | `support/browser-import-scene.ts`, `browser-import.spec.ts`, `browser-chrome.spec.ts` | `openSettingsBrowser`, `importThrough` and `closeSheet`, then an act on the session | `openSettingsBrowser` reads `settingsDialog`. `closeSheet` asserts that the sheet is gone and that Settings is still open: closing the import sheet alone leaves the dialog. A new helper `closeSettings(s)` closes it, and each spec's `browserPanel` calls it before it clicks the session's row, so every `browserPanel` that follows `importThrough`, `openImportSheet` or `openSettingsBrowser` in the same launch is covered in one place per spec; both specs are read through for any other click behind an open dialog |
+   | `browser-chrome.spec.ts` | "4, 6: ⌘⇧B in the page hides the bar…": it opens Settings, changes the switch, then asks for the browser panel | Settings is closed before the session's row is clicked (a click on the dimmed window closes the dialog and goes nowhere, so the row would not open); the line that says the Settings tab hid the session's panel goes, since the panel is behind the dialog all along |
    | `org-page.spec.ts` | the unnamed `getByRole('dialog')` for its sheets | each sheet by its name; Esc closes the sheet and the dialog stays |
    | `design-systems.spec.ts`, `voice.spec.ts`, `supervisor.spec.ts`, `c11-shots.spec.ts`, `c12-live.spec.ts`, `c11-live.spec.ts` | the Settings locator | `settingsDialog` |
    | `discover.spec.ts`, `discover-connectors.spec.ts`, `discover-live.spec.ts`, `widgets.spec.ts`, `plugins-live.spec.ts`, `plugins-library-live.spec.ts` | Customize's content under `[data-region="main"]`; a Customize tab's close button | under `pageRegion`; `backToTabs` |
@@ -359,7 +375,13 @@ Working directory for every command: the branch's worktree (the controller's bri
 
        git fetch origin master && git merge origin/master
 
-   Never a rebase and never a force-push. After the merge, for each file this document names that the merge changed (`git diff --name-only ORIG_HEAD HEAD`), read it again against "What the code holds today" before building on it. For U7a, three merges are foreseen (§I): `app/Toolbar.tsx` if U13a's M4 is on master (apply decision 2 of M1 to the chip as it then is); `sidebar/menus.tsx` and `sidebar/ListedRow.tsx` if U9 is (Reported, 1: stop and report); `src/shared/ipc/schema/layout.ts`'s key list if U8b or U13a is (keep every line).
+   Never a rebase and never a force-push. After the merge, for each file this document names that the merge changed (`git diff --name-only ORIG_HEAD HEAD`), read it again against "What the code holds today" before building on it. For U7a, three merges are foreseen (§I): `app/Toolbar.tsx` if U13a's M4 is on master (apply decision 2 of M1 to the chip as it then is); `sidebar/menus.tsx` and `sidebar/ListedRow.tsx` if U9 is (keep U9's acts where §C puts them); `src/shared/ipc/schema/layout.ts`'s key list if U8b or U13a is (keep every line).
+
+   **Which way M2 is built** (M2, decision 1), asked after that merge and before M2 starts:
+
+       git grep -n "remoteSessionActions" HEAD -- src/renderer/src/app/session-actions.ts
+
+   A line printed: U9's menu is on master, and M2 extends its `record: false` case. Nothing printed: M2 gives the listed row its menu.
 
 2. **While building, after each push:**
 
@@ -423,12 +445,12 @@ Nothing else writes it and nothing times it out. `ipc/events.ts` is edited in th
     // sessions/remote-openers.ts
     export function openListed(appSessionId: AppSessionId, how?: { newTab: boolean }): boolean;   // passes `how` to the lane's opener; false: not listed, or its lane has no opener
 
-**The menu of a session row,** as `SessionItems` draws it, top to bottom. This order is the contract U9 inserts into.
+**The menu of a session row,** as `SessionItems` draws it, top to bottom. This order is the contract U7a and U9 both build to (U9's Decision Log holds the same table), whichever lands first.
 
 | the row | items |
 |---|---|
 | a record (this Mac's, or another machine's open here) | the record's actions as today (`sessionActionsFor`); Keep running where it has it; **Hide** or **Unhide** (M3); Share; Add owner |
-| a listing with no record | **Open**; **Open in new tab**; *U9's acts for a listing, when U9 lands*; **Hide** or **Unhide** (M3); Share; Add owner |
+| a listing with no record | **Open**; **Open in new tab**; *U9's acts for a listing, where U9 is on master*; **Hide** or **Unhide** (M3); Share; Add owner |
 
 `ListedRow` names its menu in `data-menu` always. Both row kinds draw the three dots (`SessionOverflow`) in the age's slot on hover.
 
@@ -440,6 +462,7 @@ Nothing else writes it and nothing times it out. `ipc/events.ts` is edited in th
 
     // sidebar/tree.ts
     | { id: string; kind: 'hidden'; key: ProjectKey; expanded: boolean; parent: string }   // a new member of TreeNode
+
     export const hiddenNodeId = (key: ProjectKey) => `hidden:${key}`;
     | { kind: 'hidden'; key: ProjectKey }                                                  // a new member of TreeCommand
 
@@ -451,10 +474,16 @@ Nothing else writes it and nothing times it out. `ipc/events.ts` is edited in th
 
 ### §E. The hidden store (M3; `stores/hidden.ts`, and the key in `src/shared/ipc/schema/layout.ts`)
 
-    export const SidebarHiddenSchema = z.strictObject({ version: z.literal(1), hidden: z.record(z.string().min(1), z.string()) });   // key `sidebar.hidden`: session address → when it was hidden (ISO-8601)
+    // key `sidebar.hidden`: session address → when it was hidden, and since when its entry is armed (ISO-8601; null: not armed)
+    export const SidebarHiddenSchema = z.strictObject({
+      version: z.literal(1),
+      hidden: z.record(z.string().min(1), z.strictObject({ at: z.string(), armedAt: z.string().nullable() })),
+    });
+    export type HiddenEntry = { at: string; armedAt: string | null };
+    export const HIDDEN_MAX = 500;
 
     export interface HiddenStore {
-      hidden: ReadonlyMap<AppSessionId, string>;
+      hidden: ReadonlyMap<AppSessionId, HiddenEntry>;
       leading: ReadonlySet<AppSessionId>;   // unhidden in this run, until its next turn ends; never stored
       acts: number;                         // counts hide and unhide, for the sidebar's held order
       load(): Promise<void>;
@@ -462,41 +491,71 @@ Nothing else writes it and nothing times it out. `ipc/events.ts` is edited in th
       unhide(id: AppSessionId): void;
     }
     export const useHidden: UseBoundStore<StoreApi<HiddenStore>>;
-    export function connectHidden(): () => void;   // follows the sessions store and the machines store; applies the two tables below
+    export function connectHidden(): () => void;   // follows the sessions store and the machines store; gathers each look and applies `afterLook`
+
+    // the rule, pure
+    /** What the window knows of a session at one look. */
+    export type Look =
+      | { route: 'runs'; working: boolean; turnStartedAt: string | null }   // a session MAWS runs on this Mac (its record's holder is `self`)
+      | { route: 'says'; working: boolean }                                 // any other record whose phase says its turns; a listing
+      | { route: 'transcript'; newestAt: string | null }                    // a record whose phase is `foreign`: nothing says its turns
+      | { route: 'nothing' };                                               // neither a digest nor a listing at this look
+
+    export const QUIET_MS = 120_000;
+    /** Whether the look finds the session working; null when it cannot say. */
+    export function working(look: Look, now: number): boolean | null;
+    /** The entry a hide makes at `now`. */
+    export function entryAt(look: Look, now: number): HiddenEntry;
+    /** One look at a hidden session: it returns, or its entry as it is afterwards (the same object when nothing changed). */
+    export function afterLook(entry: HiddenEntry, look: Look, now: number): 'returns' | HiddenEntry;
 
 **Reading and writing.**
 
 | event | what happens |
 |---|---|
 | first use | one `layout.get`; a later call shares it |
-| `hide` or `unhide` before the read has answered | drawn at once; remembered as "this address: hidden at T" or "this address: not hidden" |
+| `hide` or `unhide` before the read has answered | drawn at once; remembered as "this address: this entry" or "this address: not hidden" |
 | the read answers a valid value, or that the key is absent | the remembered acts are applied over it; if there were any, one write follows |
 | the read answers a value the schema refuses | read as empty, with one warning; the next act writes over it |
 | the read is refused, or throws | the acts of the run stay drawn; nothing is written; the next `hide` or `unhide` reads again |
-| an act after a read has answered | one `layout.set` of the whole value, 250 ms after the last act, and at once when the page unloads |
-| a write is refused | logged; the state stands, and the next act writes the whole value again |
+| an act, or an entry that `afterLook` armed, after a read has answered | one `layout.set` of the whole value, 250 ms after the last change, and at once when the page unloads |
+| a write is refused | logged; the state stands, and the next change writes the whole value again |
 
-**When a hidden session returns** (its entry is deleted and it ranks as any session). `T` is the entry's time. The connection keeps, per entry, what it saw at its previous look, for this run only.
+**When a hidden session returns** (its entry is deleted and it ranks as any session). The rule is the architect's of 2026-11-13, which replaces the child's sentence: a hidden session returns when a turn of its began after the hide; and where no datum says when a turn began, the window must have seen the session not working since the hide before it counts it as working again. An entry that has been so seen is *armed*, and the fact is stored.
 
-| the session | it returns when |
+| route | "working" means | what `afterLook` answers |
+|---|---|---|
+| `runs` | its phase is `starting`, `working` or `waiting` | It returns when `turnStartedAt` is later than `at`, armed or not. Otherwise an unarmed entry found not working is armed at `now`, so that the entry is right if a terminal later holds the session |
+| `says` | a record's phase is `starting`, `working` or `waiting`; a listing's state is `busy` | Unarmed: found not working, it is armed at `now`; found working, unchanged. Armed: found working, it returns; found not working, unchanged |
+| `transcript` | its newest transcript record (the digest's `lastTurnEndedAt`, which for these records is that) is newer than `now` less `QUIET_MS` | Unarmed: found not working, it is armed at `now`; found working, unchanged. Armed: it returns when its newest record is later than `armedAt`; otherwise unchanged |
+| `nothing` | it cannot say | unchanged |
+
+`entryAt` gives `at: now`, and `armedAt: now` when `working` answers false; when it answers true or cannot say, `armedAt` is null. A listing's `issued` is read nowhere: a listing is signed again for a rename or a change of owners while its state stays `busy`, and that is no turn.
+
+Which look a session gets, gathered by the connection:
+
+| the session | its look |
 |---|---|
-| a session MAWS runs on this Mac (its record's holder is `self`) | its digest's `turnStartedAt` is later than `T` |
-| any other record of this Mac (a terminal session, a job, a session at rest) | (a) its digest's phase is `starting`, `working` or `waiting` and at the previous look of this run it was none of them; or (b) at the first look of a run, or whenever its phase is `foreign` (no bridge says its turns), its digest's `lastTurnEndedAt`, which for these records is the transcript's newest record, is later than `T` |
-| a session on another machine, with or without a record here | its listing's `state` is `busy` and its `issued` is later than `T` |
-| a session on another machine that has no listing | never by itself |
+| this Mac's record, held by MAWS (`self`) | `runs`, from its digest; `nothing` while it has no digest |
+| any other record of this Mac (a terminal session, a job, a session at rest) | `transcript` when its digest's phase is `foreign`; else `says`, from the phase; `nothing` while it has no digest |
+| a session on another machine, with or without a record here | `says`, from its listing's state; `nothing` while it has no listing |
 
-(b) can bring back a terminal session that was hidden in the middle of a turn: at the next start of the app for a bridged one, at its next transcript record for one with no bridge. Nothing the index holds tells that turn from a new one (Reported, 3).
+The connection looks at every hidden session once when the store's read has answered and the sessions store holds its first values (the first look of a run), and again at each change of the digests, the records or the listings.
+
+So: a session hidden at rest returns at its next turn. One hidden in the middle of a turn stays hidden through that turn and returns at the next. A rename, or a change of owners, brings nothing back.
+
+**The limit that remains.** For a session other than one MAWS runs here, the window sees turns only while it runs. Hidden while it worked, such a session that ends that turn and begins another while the window is closed is found working by the first look of the next run, with an entry still unarmed: it stays hidden through that turn, is armed at the first look that finds it at rest, and returns at the turn after. Had the window seen it at rest before it closed, the entry was stored armed, and the first look that finds it working returns it. And a turn that both begins and ends while the window is closed is not seen on the `says` route at all: an armed session found at rest stays hidden until the next turn the window sees. A `foreign` record in that case does return at the first look, by its newer transcript record.
 
 **When an entry is dropped without a return.**
 
 | the session | its entry goes when |
 |---|---|
-| this Mac's | this Mac is loaded (`useMachines`' `loaded`) and the sessions store holds no record at the address: archived, deleted or gone |
-| another machine's | that machine is among `listedMachines` and neither `listed` nor `records` holds the address |
+| this Mac's | this Mac is loaded (`useMachines`' `loaded`) and the sessions store holds no record at the address: archived, deleted or gone. Never before this Mac is loaded: an empty list at a start is not evidence |
+| another machine's | never because the session is absent. The rows naming a machine do not say that its listing is whole, a machine can be offline for days, and a session archived there can be brought back. Its entry goes by Unhide, by a return, or by the bound |
 
-Never before this Mac is loaded, and never for a machine whose rows have not come: an empty list at a start is not evidence.
+**The bound.** At a write, when the map holds more than `HIDDEN_MAX` entries, entries go until it holds `HIDDEN_MAX`: those of other machines' sessions first, oldest `at` first; this Mac's oldest only when no other is left.
 
-**When a lead ends** (`leading` loses the id): for a session MAWS runs, its digest's `lastTurnEndedAt` later than the unhide; for any other record of this Mac, the same field, which is then its next transcript record; for a listing, one issued after the unhide whose state is not `busy`; and the end of the run.
+**When a lead ends** (`leading` loses the id): for a session MAWS runs, its digest's `lastTurnEndedAt` later than the unhide; for any other, the first look that finds it not working after a look since the unhide found it working; and the end of the run.
 
 ### §F. The destination and the Settings dialog (M5; root UC-12, which this child owns)
 
@@ -519,22 +578,41 @@ Never before this Mac is loaded, and never for a machine whose rows have not com
     closeFront(): boolean;                                  // ⌘W: closes the dialog if it is open, else the page; false when neither was
 
     // stores/layout.ts, the module
+    /** The logical answer the readers of §N ask: a page is open, so nothing behind it is on screen. Never read by what mounts or lays out. */
+    export const pageOpen = (state: Pick<LayoutState, 'destination'>): boolean => state.destination !== null;
     /** What the person is looking at: 'settings', 'page:<kind>', or `frontOf(state)`. */
     export function placeOf(state: Pick<LayoutState, 'main' | 'destination' | 'settings'>): string;
-    /** Runs `run` as something that is not the person's act: a tab it brings to the front closes neither the page nor the dialog. Synchronous. */
+    /** Runs `run` as something that is not the person's act: a tab it brings to the front closes neither the page nor the dialog. It holds only for what runs synchronously inside it. */
     export function quietly<T>(run: () => T): T;
+
+    // panel/host.ts (M6): who asked travels with the request
+    addTool<P>(toolId: string, opts: AddToolOptions<P> & { asked?: 'agent' }): string;
+    selectTab(id: string, opts?: { focus?: boolean; asked?: 'agent' }): void;
 
 **What closes what.**
 
 | act | the page | the dialog |
 |---|---|---|
 | any action that lands through `commitShown` (U13a's table), outside `quietly` | closes | closes |
-| the same inside `quietly`; `focusPane`; `openTab` with `activate: false`; every other change of the strip | stays | stays |
+| the same inside `quietly`, or reached through a host call that carries `asked: 'agent'`; `focusPane`; `openTab` with `activate: false`; every other change of the strip | stays | stays |
 | `openDestination` | opens or changes | closes |
 | `openSettings` | stays | opens or changes |
 | `setOverviewOpen(true)` | stays (the Overview is drawn over it) | closes |
 | `closeFront` | closes when no dialog is open | closes |
 | a session that starts waiting; a record, a digest, a listing arriving; a tab's title changing | stays | stays |
+
+**Not the person's act.** An agent's `show_pane`, the Browser following an agent, MAWS's ask sheet and a mod's pane bring a tab or a side surface forward by themselves. Each closes neither the page nor the dialog, and the tab it brings to the front is in front of the strip behind them, as it would be with neither open. `quietly` covers a call that reaches the store in the same synchronous run. Everywhere else the origin is data: `asked: 'agent'` on the call into the host, kept by the host until the commit. Every deferral between such a request and `commitShown`:
+
+| the deferral | where | what carries the origin across it |
+|---|---|---|
+| an `addTool`, or a further open of the same tool, made before the layout is read and applied at the barrier | `panel/host.ts`: `pending`, each entry's `opens`, `passBarrier` | `asked` is stored on the pending entry and on each queued open; `applyAdd` and `activateIn` run their `openSession` inside `quietly` when it is set |
+| an await inside `show_pane` before its `addTool`: the artifact's lookup (the bridge allows 8 s), the browser's | `tools/maws/panes/connect.ts` | the call made after the await passes `asked: 'agent'`; no `quietly` scope spans an await, so an act of the person's in between closes the page as usual |
+| the layout store's replay, at its read, of strip changes made before it | `stores/layout.ts`, `early` | nothing that closes is replayed: the replay changes the strip only. Whether an act showed a tab before the read (rule 2 of "At hydration") is recorded at the call, and a call inside `quietly` does not record it |
+| a mod's panes, reconciled only once the layout and the session's roster are read | `engine-surface/panes.ts` | it selects a tab only for a session it finds on screen at that moment (§N), so it never opens a session; its calls pass `asked` all the same |
+| MAWS's ask sheet waiting until its session is shown | `tools/maws/ask/connect.ts`, `waiting` | it opens once the person has shown the session; its `addTool` passes `asked`, for the first row's case |
+| the store's close guard answering after an open | `stores/layout.ts`, `openSession` | not an act of showing: it ends in `dropSession` |
+
+No timer stands between such a request and a commit. Three late arrivals are the person's own and are not exempted: New chat, which has U13a's arrival rule (`placeOf`, M5); and a fork's tab after its adoption (`sessions/record-ops.ts`) and after a resubmit (`composer/resubmit-seam.ts`), which take the front when they arrive, as they do today.
 
 **While `customize/CustomizeView.tsx` still takes a section** (until U11c): the page gives it `plugins` for `show` `all` or `plugins`, `skills` for `skills`, `mcp` for `connectors`; a `discover` view is delivered through today's `useDiscoverRequest`. No opener of U7b writes `all`.
 
@@ -549,19 +627,19 @@ Never before this Mac is loaded, and never for a machine whose rows have not com
 **At hydration.** The page to open is the first of these that applies, and whatever results is what `destination` holds afterwards (written, or deleted, when it differs from the file):
 
 1. If the person opened or closed a page before the read answered: that.
-2. If an act that shows a tab ran before the read answered: none.
-3. `retiredFront(raw)` (§G), when it answers a page: that page (A8).
-4. The stored `destination`, when it parses and the stored `main.tabs` is in this build's stored form (`canonical`, R2): that page.
+2. If an act of the person's that shows a tab ran before the read answered: none.
+3. A retired tab was in front (`retiredFront`, §G): a Customize, Projects or Artifacts tab opens its page (A8); a Settings tab opens none, and the stored page is not restored over it.
+4. The stored `destination`, when it parses and the stored `main.tabs` has the stored form's shape (`canonical`, R2): that page.
 5. Otherwise none. A stored value that does not parse is left in the file, with one warning, until the next page is opened or closed.
 
-A read of `destination` that failed writes nothing (R9's rule, kept whether or not U8b has landed).
+Rules 3 to 5 are `pageAtStart` (§G). `canonical` is a test of shape, not of who wrote the value: it says that `current` is `none` and `none` is the only set. A read of `destination` that failed writes nothing (R9's rule, kept whether or not U8b has landed).
 
 ### §G. What is stored, and what build F does with it
 
 | key | what this build writes | what F does with it | this build, then F, then this build |
 |---|---|---|---|
-| `sidebar.hidden` (U7a) | `{ version: 1, hidden }` after each hide or unhide | Never asks for it: the key is outside F's `LayoutKeySchema`. F's main holds it in memory with the rest of the file and writes it back whole with every write of its own. F draws every session, hidden or not. | The entries are as they were. A session that started a turn while F ran returns at the first look (§E). |
-| `destination` (U7b) | `{ version: 1, destination }` while a page is open; the key is deleted when none is | The same: never read, kept through F's writes. F shows its tabs. | If F wrote `main.tabs` (it does at its next tab change, or at once when its reader rewrote the value), the page is not restored and the key is deleted. If F wrote no tabs, the page the wave's build was quit on opens again. |
+| `sidebar.hidden` (U7a) | `{ version: 1, hidden: { <address>: { at, armedAt } } }` after each hide or unhide and each arming; at most 500 entries | Never asks for it: the key is outside F's `LayoutKeySchema`. F's main holds it in memory with the rest of the file and writes it back whole with every write of its own. F draws every session, hidden or not. | The entries are as they were, each armed or not as it was stored. What happened while F ran is read as §E reads a closed window: a session MAWS runs returns by its turn start; any other returns when an armed entry is found working, and a turn it began and ended meanwhile is not seen. |
+| `destination` (U7b) | `{ version: 1, destination }` while a page is open; the key is deleted when none is | The same: never read, kept through F's writes. F shows its tabs. | By §F's rules 3 to 5. If F left a retired tab in front, that decides: its page, or none for Settings. If F left `main.tabs` in another shape (it files a session's tab under its project as soon as it changes the tabs), the stored page is not restored and the key is deleted. **Accepted:** if F left a legal one-set layout with no retired tab in front (it ran with tabs of no session only, or changed none), the page the wave's build was quit on opens again, and the person leaves it with Back. No witness and no marker is stored to tell that case apart; M6's test pins it. |
 | `main.tabs` (U7b) | as U13a writes it; never a tab of the four kinds | F reads it as U13a's document says. In F the person can open Settings, Customize, Projects and Artifacts as tabs, and F stores them. | F's tabs of the four kinds are dropped at read, from the panes and the closed history; where one was in front and is a page's, that page opens (A8); the value is written back without them, once. |
 | the Settings dialog | nothing | — | — |
 | either settings file | unchanged by both landings | as with master | — |
@@ -569,12 +647,14 @@ A read of `destination` that failed writes nothing (R9's rule, kept whether or n
 **In the other direction: a layout F wrote, read by this build** is A8, proved by M6's unit test on the reader and by *(destinations, both ways)*. **A layout this build wrote, read by F:** F meets no tab kind it does not know (this build adds none) and two top-level keys it does not read.
 
     // src/shared/ipc/schema/layout.ts (M6)
-    /** The page a stored value's tab in front stands for, read before retired kinds are dropped: Customize, Projects or the library; null for anything else. Total: it never throws. */
-    export function retiredFront(stored: unknown): Destination | null;
+    /** What a stored value's tab in front was, read before retired kinds are dropped: the page of a Customize, Projects or Artifacts tab; 'settings' for a Settings tab; null for anything else. Total: it never throws. */
+    export function retiredFront(stored: unknown): { page: Destination } | 'settings' | null;
+    /** The page hydration opens by rules 3 to 5 of "At hydration". Pure, so the store and the rehearsal run the same code. */
+    export function pageAtStart(input: { rawMain: unknown; canonical: boolean; stored: Destination | null }): Destination | null;
 
-It reads the set that was showing (`sets[current]`; a version-1 value is its own), that set's focused pane, and the tab whose id is the pane's `activeTabId`. A `customize` tab answers `view: 'mine'` and its section as `show` (`mcp` as `connectors`).
+`retiredFront` reads the set that was showing (`sets[current]`; a version-1 value is its own), that set's focused pane, and the tab whose id is the pane's `activeTabId`. A `customize` tab answers `view: 'mine'` and its section as `show` (`mcp` as `connectors`).
 
-**The rehearsal** (root UC-14; R6). M6 adds to each file's facts, computed from the raw value and printed as numbers and fixed words: tabs of the four kinds open, by kind; the same in the closed history; `front` as one of `settings`, `customize`, `projects`, `artifacts`, `other`, `none`; and the page that results as one of `customize`, `projects`, `library`, `none`. Two words join `OUTCOMES`: `retired-kept` (a tab of the four survived the read) and `no-active-tab` (a pane with tabs and none active). The tab comparison becomes: tabs in, less the retired, equal tabs out.
+**The rehearsal** (root UC-14; R6). M6 adds to each file's facts, computed from the raw value and printed as numbers and fixed words: tabs of the four kinds open, by kind; the same in the closed history; `front` as one of `settings`, `customize`, `projects`, `artifacts`, `other`, `none`; `expected`, the page that front calls for; and `page`, what `pageAtStart` answers; the last two each one of `customize`, `projects`, `library`, `none`, with Customize's `show` word after it. `front` and `expected` come from a reader of the raw file written in `test/layout/rehearsal.ts`, which shares no code with `retiredFront` or `pageAtStart`: a Customize, Projects or Artifacts tab in front expects its page, a Settings tab none, and any other front the file's own `destination` when it holds one and `current` and the only set are `none`, else none. Three words join `OUTCOMES`: `retired-kept` (a tab of the four survived the read), `no-active-tab` (a pane with tabs and none active) and `destination-mismatch` (`page` is not `expected`). The tab comparison becomes: tabs in, less the retired, equal tabs out. `pageAtStart` is a member of the converters the rehearsal takes as an argument.
 
 ### §H. Keys and focus (M5; A7, A10)
 
@@ -613,7 +693,7 @@ The rule is root UC-8's: whoever lands second merges master and keeps both.
 | `src/shared/ipc/schema/layout.ts` | U13a, U8b | U13a: `Strip`, `storedMain`, `stripOf`, `LAYOUT_DEFAULTS.main`. U8b: three schemas and three literals at the end of `LayoutKeySchema`. U7a: one schema, one literal. U7b: two schemas, one literal, the four tab schemas and `RETIRED_KINDS` | the key list is one line per landing: keep every line |
 | `ipc/events.ts` | U13a, U8b | both: the `hydrate` call. U7a: the local snapshot's closure, above it | hunks do not meet |
 | `sidebar/Sidebar.tsx` | U13a | U13a: a project's activation no longer touches the strip; the New chat row. U7a: the heading's word, the rows shown, the tree's nodes. U7b: the foot, which row is current | hunks do not meet |
-| `sidebar/ProjectRow.tsx`, `sidebar/menus.tsx` | U13a, U9 | U13a: the call behind a project's New chat. U9: its acts for a listing. U7a: the Hidden row; the session items | U9 after U7a (Reported, 1): its acts go between "Open in new tab" and Hide |
+| `sidebar/ProjectRow.tsx`, `sidebar/menus.tsx`, `sidebar/ListedRow.tsx` | U13a, U9 | U13a: the call behind a project's New chat. U9: its acts for a listing, and `data-menu` for a listed row. U7a: the Hidden row; the session items | neither of U7a and U9 goes first by rule (Reported, 1): both build to §C's order, and the second to land merges and keeps U9's acts between "Open in new tab" and Hide |
 | `app/Toolbar.tsx` | U13a, U9 | U13a: `ProjectChip`. U9: the session menu's disabled sentences. U7a: two classes on the chip. U7b: page mode, the ring's slot, `toolbarTitle` | O-03's classes are applied to the chip as master has it |
 | `e2e/shell.spec.ts`, `e2e/sessions.spec.ts`, `e2e/remote.spec.ts`, `e2e/cross-build.spec.ts` | U13a, U9, U8b, U6a | each adds or rewrites its own scenes | U7's scenes are new blocks, except the exact menu lists |
 | `stores/layout.ts` | U13a (owner), U8b | U8b: three slices and the side column's acts. U7b: §F | U7b starts from a master that holds U13a; U8b on either side |
@@ -632,20 +712,27 @@ The rule is root UC-8's: whoever lands second merges master and keeps both.
 
 Neither assumes the other's content: the dialog draws whatever `SettingsView` the `settingsTab` slot holds and passes it a section, and `SettingsView` fills its host. U7b must not assume `SECTION_TABLE`, `SETTINGS_ROWS` or the search exist; U11a must not assume a Settings tab, a stored section or a main pane around the view.
 
-**Consumed and not waited for.** U6a: R13, nothing else. U9: the listed rows, as its document describes them; no code. U1a: nothing; `waits` is read by Needs you, not by U7. U8b: R8 to R10.
+**Consumed and not waited for.** U6a: R13, nothing else. U9: §C's order, which its Decision Log carries too; where its menu is on master when M2 starts, `remoteSessionActions`' `record: false` case, which M2 then extends (M2, decision 1). U1a: nothing; `waits` is read by Needs you, not by U7. U8b: R8 to R10, R16 and R17.
 
 ### §J. Insertions in files other children own (root UC-8)
 
 | file | owner | the insertion | milestone |
 |---|---|---|---|
-| `ipc/events.ts`, `stores/sessions.ts`, `sessions/remote-openers.ts`, `session/visibility.ts`, `gateway/actions.ts`, `engine-surface/panes.ts`, `tools/maws/panes/connect.ts` | no child | §B; §C; no session on screen behind a page; `settings.open` calls `openSettings`; the two `quietly` wraps | M1, M2, M5, M6 |
+| `ipc/events.ts`, `stores/sessions.ts`, `sessions/remote-openers.ts`, `gateway/actions.ts` | no child | §B; §C; `settings.open` calls `openSettings` | M1, M2, M6 |
+| `session/visibility.ts`, `attention/navigation.ts`, `app/plugin-toasts.ts`, `engine-surface/panes.ts` | no child | §N: each answers "not on screen" while a page is open | M5 |
+| `tools/maws/panes/connect.ts`, `engine-surface/panes.ts`, `markup/session.ts`, `projects/ProjectsView.tsx` | no child | `asked: 'agent'` on every call into the host, and `quietly` around the two calls that reach the store (§F); `startMarkup` leaves a page first; the page's own heading removed (M6, decision 9) | M6 |
+| `app/session-actions.ts` | U9 | only where U9's menu is on master when M2 starts: `open` and `openInNewTab` at the head of `remoteSessionActions`' `record: false` case | M2 |
 | `stores/layout.ts` | U13 | §F: state, acts, `commitShown`'s effect, hydration and persistence of `destination`, `placeOf`, `quietly` | M5 |
 | `stores/layout-model.ts`, `main/Tab.tsx`, `main/artifacts.ts` | U13 | the four kinds' cases removed; `openArtifacts` calls `openDestination` | M6 |
 | `main/Pane.tsx` | U9 | the four kinds' cases and their two helper components removed | M6 |
-| `app/Shell.tsx`, `app/shell-view.ts`, `app/slots.ts`, `panel/SurfaceRow.tsx` | U8 | the page's mount and what it hides; `pageOpen`; the `settingsTab` slot's prop type; two calls of `closeDestination` | M5, M6 |
+| `app/Shell.tsx`, `app/shell-view.ts`, `app/slots.ts`, `panel/SurfaceRow.tsx` | U8 | the page's mount and what it hides, with the card column's place kept; `pageOpen` in `cardColumnNow`; the `settingsTab` slot's prop type; two calls of `closeDestination` | M5, M6 |
+| `panel/ToolBody.tsx`, `panel/host.ts` | U8 | §N: `ctx.visible` is false while a page is open; §F: `asked` on `addTool` and `selectTab`, kept on a queued add and its queued opens, applied in `applyAdd` and `activateIn` | M5, M6 |
+| `library/ArtifactTab.tsx` | U10 | §N: a main-tab editor's `visible` is false while a page is open | M5 |
+| `tools/browser/covering.ts`, `tools/browser/agent/connect.ts` | U12 | §N: `sessionsOnScreen` answers none while a page is open; the Browser does not follow an agent behind a page. §F: `asked` on the follow's `addTool` | M5, M6 |
+| `tools/maws/ask/connect.ts` | U1 | §F: `asked` on the ask sheet's `addTool` | M6 |
 | `app/shell-actions.ts`, `keymap/actions-runtime.ts` | U6 | `closeFront()` in `tab.close`; `placeOf` in the arrival rule | M5 |
 | `settings-tab/SettingsView.tsx`, `settings-tab/UsageSection.tsx` (new), `settings-tab/rows.ts` if it exists, `settings-tab/SupervisorSettings.tsx` | U11 | the Usage entry and the component that mounts the panel; the type's home (§I); one attribute | M6, M7 |
-| `customize/open.ts`, `customize/CustomizeView.tsx` | U11 | the three openers and `selectSection` call `openDestination` | M6 |
+| `customize/open.ts`, `customize/CustomizeView.tsx` | U11 | the three openers and `selectSection` call `openDestination`; the view's own heading removed (M6, decision 9) | M6 |
 | `tools/browser/chrome/Chrome.tsx`, `ProfilePopover.tsx` | U12 | one call each: `openSettings('browser')` | M6 |
 | `accounts/copy.ts` | no child | two strings (§L) | M7 |
 
@@ -666,12 +753,12 @@ Neither assumes the other's content: the dialog draws whatever `SettingsView` th
 
 | item | a session MAWS runs | a terminal session on this Mac | a session on another machine |
 |---|---|---|---|
-| S-11 | named by this Mac's index: changes | the same index: changes | open here: named by its machine's index, so it changes when that machine runs the wave's build. Only listed: named by its listing, which this change does not reach (Reported, 2). The desk's web view names every session by its listing and shows no change |
+| S-11 | named by this Mac's index: changes | the same index: changes | open here: named by its machine's index, so it changes when that machine runs the wave's build. Only listed: named by its listing. Once U9 is on that machine, the listing of a session MAWS runs there carries its record's title (U9's listing rule), so the six words reach the listed row through the record; a terminal session's listing keeps the title its member frame states. The desk's web view names every session by its listing and follows the same two cases; nothing in `apps/desk-web` changes |
 | #407 | the word is about this Mac's reads, whatever the sessions | the same | not this item: a machine whose link is down greys its rows in place, as today |
 | O-03 | not a session surface | — | — |
 | O-38 | unchanged, already built | unchanged, already built | this item: its row's menu, ⌘-click and middle-click, through its lane's opener; for a terminal session there (lane A) the same, by that lane's opener |
 | O-16: the act | the same on all three: an entry in this window's own store; nothing is sent, so no offer is needed (root UC-7) | the same | the same, for a row with a record here and for one that is only listed |
-| O-16: the return | exact: its turn start | by the phase entering a turn while the app runs, or by a transcript record later than the hide (§E) | by its listing going `busy`; none without a listing |
+| O-16: the return | exact: its turn start is later than the hide | no turn start exists: an armed entry returns when the session is seen working, by its phase where a bridge says its turns, by a newer transcript record where none does (§E) | the same rule by its listing's `busy`; its listing's `issued` is not read; none without a listing |
 | O-47, O-40 | not session surfaces: the same whatever is in front | — | — |
 
 ### §L. Copy
@@ -701,20 +788,37 @@ Each citation was read again for this document at `readable/app-5.1231.2/`; S-11
 | O-40, the dialog | The `/settings` route turns into the page behind it and opens a dialog (`web/app/v1/index-m4Lmn-QT.js:23530-23541`, `:22785-22815`, `:22354-22438`, `:22500-22541`); the dialog is `SettingsModal` (`cc011544b-6SoHAY-3.js:2743-2748`), centred with a 16 px margin, at most 1024 by 800 px, larger on a large window (`shared-61-2ybPsRVk.js:6175-6192`), with a Close button (`cc011544b-6SoHAY-3.js:2509`); the app menu's ⌘, navigates to that route (`main-process/index.chunk-BV3uOqbK.js:276110-276122`). A full page with "Close settings" is the route's fallback (`cf4f70727-Crsbk-hp.js:1976-1987`) | The box is MAWS's library dialogs' (960 by 800, never more than 85 % of the window's height) and it is dismissed as MAWS's dialogs are: law 7. It is not restored at a relaunch. Read in the source, not in the running app; U14's sitting has the look |
 | O-40, the pages | Customize is a page under the sidebar layout (`index-m4Lmn-QT.js:23576-23584`; `c63a78ed4-C3ocXnDa.js:2078-2085`); the Artifacts list and the Projects list are routes under the same parent (`:23718-23726`, `:23620-23636`), read in the route table only | The comparison for the library and for Projects is by kind: Desktop's projects are chat projects. MAWS hides its strip while a page is open; Desktop has none to hide |
 
+### §N. What is on screen behind a page (M5)
+
+Two things, kept apart. *Mounting and layout:* what a page hides keeps its box, and nothing that mounts or measures reads the page (M5, decision 2). *The logical answer:* a page is open, so nothing behind it is on screen; `pageOpen(state)` says it, and these eight readers ask it. Behind the Settings dialog none of them changes.
+
+| reader | file · owner | behind a page | its regression test |
+|---|---|---|---|
+| `visibleSessions`, and the connection that reports it | `session/visibility.ts` · no child | no session of the main area, the side column or a card; the connection runs again when the page opens or closes | `session/visibility.test.ts`: with a session in front, a page opening sends `session.setVisible` false and `attention.viewing` null, Back sends them true again; the dialog opening sends nothing |
+| `requestOnScreen` | `attention/navigation.ts` · no child | false | `attention/navigation.test.ts`: ⇧⌘J with the waiting session's tab in front behind a page opens that session, which leaves the page |
+| `shownHere` | `app/plugin-toasts.ts` · no child | false; `engine-surface/asks.ts` reads it and needs no edit | `app/plugin-toasts.test.ts`: a mod's toast for the session behind a page is not shown; `engine-surface/asks.test.ts`: its prompt request is not this window's to answer |
+| the `shown` of a mod's panes | `engine-surface/panes.ts` · no child | false: a pane the engine shows gets its tab unselected, and a focus request is answered as for a session this window does not show | `engine-surface/panes.test.tsx` |
+| `ctx.visible` of every side-column tool: Review, Files, Source control, the Terminal (whose renderer releases its acceleration on it), the Browser, Artifacts with its dashboards and viewers, the Side pane and its threads, the ask sheet, a mod's pane | `panel/ToolBody.tsx` · U8 | false, from the one line that gives it | `panel/host.test.tsx`: a tool's `visible` goes false when a page opens and true at Back, its instance the same object; `tools/terminal/terminal.test.tsx`: the terminal's renderer is told hidden |
+| `visible` of every main-tab artifact editor: documents, decks, designs, dashboards (`tools/dashboard/DashboardPanel.tsx`, whose live queries stop on it), pages and files (`tools/artifacts/viewers/ByteViewer.tsx`), the connectors' tab state | `library/ArtifactTab.tsx` · U10 | false, from the one line that gives it | `library/ArtifactTab.test.tsx`; `tools/dashboard/live.compiled.test.tsx`: a live query makes no call while its tab is behind a page, and one catch-up at Back |
+| `sessionsOnScreen`, and the in-app browser's native views | `tools/browser/covering.ts` · U12 | none; the views are covered by a `holdCover()` that `Shell` holds for as long as a page is open | `tools/browser/covering.test.ts`; `app/Shell.browser-cover.test.tsx`: `browser.view.cover` true when a page opens over a mounted pane and false at Back, and true under the Settings dialog through the watch of the DOM |
+| the Browser following an agent | `tools/browser/agent/connect.ts` · U12 | it does not open the Browser, as for a session that is not in front | `tools/browser/agent/connect.test.ts` |
+
+Readers that ask only which session is in front, and do not change: `shownSession()` in `tools/maws/ask/connect.ts` (the sheet it opens is drawn when the page is left), `side/actions.ts` and `tools/browser/comment/actions.ts` (acts of the person's, from surfaces a page hides; the second's notice goes through `sessionsOnScreen` and so becomes a toast behind a page), `tools/agents/actions.ts`, `tools/code/open-file.ts`, `sessions/attach.ts`, and `markup/session.ts` (M6, decision 6). `openCardSession` in `shell/floating.ts` is read only through the first two rows. `overviewShownIn` in `tools/browser/covering.ts` is unchanged: the Overview is drawn over a page. `customize/discover/DiscoverGrid.tsx`'s observer watches the page's own content. `currentRow`, `useCurrentRow` and `focusedProject` do not change while a page is open (U13a's §F).
+
 ## Acceptance
 
-The acceptance is the section's A1 to A10 as written there, read with the rulings on "Reported to the architect". "Unit" is run by the milestone's executor on the VM and again by class 1a. "E2e" is written in M4 and M8 and run by the architect on a Mac.
+The acceptance is the section's A1 to A10 as written there, read with the rulings of "Reported to the architect, and ruled". "Unit" is run by the milestone's executor on the VM and again by class 1a. "E2e" is written in M4 and M8 and run by the architect on a Mac.
 
 | item | proved by | milestone |
 |---|---|---|
 | A1 six words, mentions, the search unchanged | unit (`sessions.test.ts`), on the record's title for all three routes | M1 |
-| A2 Hide, Hidden · N, Unhide at the head, across a relaunch, the return, Needs you | unit (`hidden.test.ts`, `derive.test.ts`, `Sidebar.test.tsx`); e2e "hide and unhide", the step in `remote.spec.ts`, *(sidebar, both ways)* | M3, M4 |
+| A2 Hide, Hidden · N, Unhide at the head, across a relaunch, the return, Needs you | unit (`hidden.test.ts` with `afterLook`'s table, the drop rule and the bound; `derive.test.ts`; `Sidebar.test.tsx`); e2e "hide and unhide", the step in `remote.spec.ts`, *(sidebar, both ways)*. "A hidden session that starts a new turn returns by itself" is read with §E's rule and its limit, by the architect's ruling | M3, M4 |
 | A3 a listed row opens in a tab of its own | unit (the listed row's cases, failing before and passing after); e2e, the step in `remote.spec.ts` | M2, M4 |
 | A4 "reconnecting" | unit (`events.test.ts`, `Sidebar.test.tsx`) | M1 |
 | A5 the chip stays in its box | e2e "a long project name stays inside the chip's box" | M1, M4 |
 | A6 the ring, the popover, Settings › Usage, the foot | unit (`UsageRing.test.tsx`, `UsagePanel.test.tsx`, Settings' and the sidebar's tests); e2e `accounts.spec.ts` | M7, M8 |
 | A7 the dialog and the pages | unit (the store's table; §H's cases); e2e "Settings is a dialog", "a page beside the sidebar" | M5, M6, M8 |
-| A8 a layout from build F | unit (the reader; the store's hydration); the rehearsal; e2e *(destinations, both ways)* | M6, M8 |
+| A8 a layout from build F | unit (the reader; `retiredFront` and `pageAtStart`; the store's hydration, the accepted case of §G among its cases); the rehearsal, with its own expectation; e2e *(destinations, both ways)* | M6, M8 |
 | A9 nothing takes the page or the dialog away; the relaunch | unit (the store's table; "At hydration"); e2e "a page beside the sidebar" | M5, M8 |
 | A10 ⌘⇧\ under a page | unit (the store, with a split); e2e "⌘⇧\ under a page" | M5, M8 |
 
@@ -724,11 +828,11 @@ Each line has an owner other than an executor. The controller writes into Progre
 
 | what | when it can start | what it needs | what comes back, and what a failure means |
 |---|---|---|---|
-| **The branch review, U7a** | after M4 | `doperpowers:review-code`, the xhigh panel by size (about 35 files, about 2,100 lines; nothing in it is delicate by the root), over `origin/master...ux-wave/U7`. Lenses: the hidden store's reads and writes under a refused read; the return and drop tables on each route, and that no evidence-free prune exists; the tree's keys and where focus lands after Hide and Unhide; the cut against Claude Desktop's function and the search untouched; the merges of §I | a verdict and findings; the fixes are one wave through the controller |
-| **The branch review, U7b** | after M8 | the xhigh panel: root UC-10 calls the reader of the stored layout delicate. Lenses: the stored layout in both directions with F, and "At hydration" line by line; `commitShown`'s table, what closes and what must not, `quietly` included; §H's takers and where the keyboard returns; what stays mounted and what counts as on screen behind a page; the seam with U11a; that no re-expressed scene proves less than it did | the same |
+| **The branch review, U7a** | after M4 | `doperpowers:review-code`, the xhigh panel by size (about 35 files, about 2,100 lines; nothing in it is delicate by the root), over `origin/master...ux-wave/U7`. Lenses: the hidden store's reads and writes under a refused read; `afterLook`'s table on each route with its stated limit, the drop rule (never by absence on another machine) and the bound; the tree's keys and where focus lands after Hide and Unhide; the cut against Claude Desktop's function and the search untouched; the merges of §I | a verdict and findings; the fixes are one wave through the controller |
+| **The branch review, U7b** | after M8 | the xhigh panel: root UC-10 calls the reader of the stored layout delicate. Lenses: the stored layout in both directions with F, and "At hydration" line by line; `commitShown`'s table, what closes and what must not, and every deferral of §F's list carrying who asked to the commit; §H's takers and where the keyboard returns; that the box and the logical answer stay apart (M5, decisions 2 to 4) and that §N's list is whole; the seam with U11a; that no re-expressed scene proves less than it did | the same |
 | **The e2e scenes of U7a**, each alone first, then its group, on a Mac under the load rule | after M4 | `shell.spec.ts` (group `layout`; also in `default`): the two new scenes and the long shell scene. `sessions.spec.ts` (group `default`): "foreign-live: …". `remote.spec.ts` (group `remote`, `MAWS_REMOTE_E2E=1`): the scene that opens a listed row | Verdicts by scene. The chip scene red: the name still runs under the first tab. "hide and unhide" red at the relaunch: the key is not written or not read. The menu lists red: an item is missing or out of §C's order. The remote step red at ⌘-click: a listed row does not reach its opener with the request |
 | **The e2e scenes of U7b** | after M8 | Alone first: the three new scenes of `shell.spec.ts`, "the ring", and every scene of M8's table. Then the groups: `layout`, `settings` (which also runs the org page, the Channel, Share and the registry), `default`, `discover`, `widgets`, `browser`, `browser-import`, `browser-chrome`, `design-systems`, `voice`, `supervisor-daemon`, `remote`, `library`, `deliverables`. `dashboard-live-data` and `connectors-direct` are gated by their own flags; `c11-shots`, `c11-live`, `c12-live`, `plugins-live`, `plugins-library-live` and `discover-live` have live or shot gates and are typechecked, then run at the next live sitting | Verdicts by group. "Settings is a dialog" red at Esc: a taker of §H is out of order. "a page beside the sidebar" red at the scroll offset: what the page hides lost its box (M5, decision 2). Red at Needs you: something closed the page that is not the person's act. The dashboard step red: a tab behind a page still counts as on screen (M5, decision 3) |
-| **The rehearsal over the owner's layout files** (root UC-14) | after M6's review | A copy of `<userData>/layout.json` from each of the owner's machines, in a directory outside any repository, on a machine with a checkout of `ux-wave/U7b` and its dependencies. Run, reading structure and counts only: `MAWS_LAYOUT_REHEARSAL=<that directory> ./node_modules/.bin/vitest run test/layout/owner-files.test.ts --silent=false` | One entry per file, each ending `pass`, of this shape (the numbers are invented): `file 1 of 2  main.tabs v3: 1 set, 11 tabs (session 7, file 1, artifact 1, settings 1, customize 1), 1 pinned, 2 closed, 0 reader warnings; retired 2 open, 1 closed; front customize` then `-> strip: 9 tabs, 1 pane, merged no, canonical yes; missing 0, added 0, twice 0; active in every pane yes; page customize   pass`. Any other word stops the landing: `retired-kept` or `no-active-tab` means the reader is wrong for a layout the owner really has. Only these lines are quoted anywhere |
+| **The rehearsal over the owner's layout files** (root UC-14) | after M6's review | A copy of `<userData>/layout.json` from each of the owner's machines, in a directory outside any repository, on a machine with a checkout of `ux-wave/U7b` and its dependencies. Run, reading structure and counts only: `MAWS_LAYOUT_REHEARSAL=<that directory> ./node_modules/.bin/vitest run test/layout/owner-files.test.ts --silent=false` | One entry per file, each ending `pass`, of this shape (the numbers are invented): `file 1 of 2  main.tabs v3: 1 set, 11 tabs (session 7, file 1, artifact 1, settings 1, customize 1), 1 pinned, 2 closed, 0 reader warnings; retired 2 open, 1 closed; front customize, expected customize skills` then `-> strip: 9 tabs, 1 pane, merged no, canonical yes; missing 0, added 0, twice 0; active in every pane yes; page customize skills   pass`. Any other word stops the landing: `retired-kept` or `no-active-tab` means the reader is wrong for a layout the owner really has, and `destination-mismatch` that the page it would open is not the one the file's own front calls for. Only these lines are quoted anywhere |
 | **The cross-build run with F as the peer** | after M4 for U7a, after M8 for U7b | `scripts/ci-gate.sh "$PWD" --gates e2e:cross-build --peer f1852de3a --label u7a-xb` (then `u7b-xb`), in the background | The run's id, with *(sidebar, both ways)*, and for U7b *(destinations, both ways)*, named as run and green. A scene reported as skipped is not evidence. Until it is green no build that holds the landing runs on a profile the owner uses |
 | **The owner's look** | before M5 starts | "What the owner should look at", below | the owner's word; a change of what is drawn comes back as an amendment of the section |
 | **Class 1a** | once per landing, on the head its pull request will carry, after the review's fixes | `scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u7a` (then `u7b`), in the background | the run's id |
@@ -758,6 +862,7 @@ Two, each opened on the architect's word and never by an executor. Each body:
 - names its class 1a run by id, on the head it carries;
 - names the branch review's verdict and what was done with each finding;
 - names its residue: what is not verified, what waits (S-03, S-08; for U7a also O-40 and O-47), and anything logged as debt;
+- U7a's states the limit of §E in one sentence: a session MAWS does not run here, hidden while it worked, which ends that turn and begins another while the window is closed, stays hidden through that second turn and returns at the one after;
 - names its cross-build run with F by id, with its scene named as run and not skipped; U7b's gives the rehearsal's lines;
 - says which e2e groups ran and where;
 - ends with the line `Sminos-Session: ux-wave#10d85d03 (MAWS on macbook)` and carries no other attribution.
@@ -779,11 +884,36 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
 - Observation: every citation of Claude Desktop the section builds on was read again at `readable/app-5.1231.2/` and stands; one is narrower than the source (the dialog's second, larger size).
   Evidence: `shared-61-2ybPsRVk.js:6183-6185`; the others at the lines the section gives.
 
+- Observation (the review, 2026-11-13): a machine named by the rows is in `listedMachines` whether or not the hub's snapshot is complete or the machine pending, so "named and absent" is not "gone".
+  Evidence: `applyRows` in `stores/sessions.ts`; `takeRows` in `ipc/events.ts`; the case "keeps the named machine's restored tabs while the rows are incomplete or it is pending…" in `ipc/events.test.ts`.
+- Observation (the review): a listing is signed again, with a new `issued`, whenever any field changes, so a newer `busy` listing can be a rename.
+  Evidence: `#evaluate` and `#sign` in `src/endpoint/listings.ts`.
+- Observation (the review): an `addTool` made before the layout is read is queued in the panel host and applied later, outside any synchronous scope of its caller.
+  Evidence: `pending` and `passBarrier` in `panel/host.ts`, unchanged on `origin/ux-wave/U8b`.
+- Observation (the review): the shape U13a calls canonical is one build F writes itself.
+  Evidence: `git show f1852de3a:src/renderer/src/stores/layout-model.ts`, `openTab`: a tab of no session stays in the set that is showing.
+- Observation: eight readers ask whether something is on screen, by six different rules; and three more listeners than `show_pane` bring a side surface forward without the person.
+  Evidence: §N's table; `tools/browser/agent/connect.ts`, `tools/maws/ask/connect.ts`, `engine-surface/panes.ts`.
+- Observation: Projects draws its own level-1 heading, as Customize does.
+  Evidence: `projects/ProjectsView.tsx`, `<h1 id={heading}>Projects</h1>`.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets one adversarial review before an executor starts, dispatched by the architect. Each branch gets the `doperpowers:review-code` xhigh panel, with the lenses of "Proof that an executor does not run": U7a by size, U7b by size and because the root calls the reader of the stored layout delicate. Class 1a on GitHub Actions is the gate of record for each landing.
   Rationale: root UC-10. Rejected for U7a: a single reviewer, since the hidden store's rules on three routes and a stored key are more than one pass holds beside the sidebar's tree.
   Date/Author: 2026-11-13, the document's author.
+
+- Decision: one revision on the adversarial review (one P1, six P2, three short points) and on the architect's rulings of 2026-11-13, which bind where they differ from the review's smallest change. The cut into U7a and U7b stands.
+  (1) *Referred and ruled:* the child's rule for when a hidden session returns ("a record's turn start; a listing's `busy` state issued after it") is replaced. No datum says when a turn began for a session MAWS does not run, and a listing's `issued` moves for a rename. The rule is §E's: a turn start later than the hide where one exists; elsewhere an entry is armed once the session was seen not working since the hide, and an armed entry returns when the session is seen working. The stored value is `{ at, armedAt }` per address. The architect amends the child's file. Rejected: an observed change into `busy` kept in memory only, which a relaunch forgets; a rule on `issued` with exceptions for renames.
+  (2) Another machine's hidden entry is never dropped for being absent; the key is bounded at 500 entries instead, other machines' oldest first. Rejected: carrying the rows' `complete` and `pending` into the store, since absence on another machine is not evidence even then.
+  (3) `quietly` holds only synchronously; who asked travels as data (`asked` on the panel host's `addTool` and `selectTab`) across every deferral, which §F lists. `panel/host.ts`, `tools/browser/agent/connect.ts` and `tools/maws/ask/connect.ts` join §J.
+  (4) A retired Settings tab in front suppresses the stored page; `canonical` is stated as a test of shape; a legal one-set layout left by F with no retired tab in front may restore the page, accepted and pinned by a test, with no witness or marker.
+  (5) The readers of "is this on screen" are listed whole, with owners and tests (§N), and the logical answer is kept apart from mounting and layout, the card column's place among it.
+  (6) The rehearsal has an expectation of its own and the outcome `destination-mismatch`, with a unit case that makes it fail.
+  (7) `e2e/browser-chrome.spec.ts` joins M8. M6 is built as two green commits.
+  (8) On the thirteen points: 1, neither U7a nor U9 goes first by rule, and M2's decision 1 is written both ways; 2, accepted with U9's listing rule added; 3, replaced by (1); 4, 5, 7 and 8, accepted as repaired above; 6, the default stands; 9, changed: U7b removes Customize's own heading; 10 to 13, accepted.
+  Rationale: the review's findings were each confirmed in the code it cites; the rulings are the architect's.
+  Date/Author: 2026-11-13, the document's author, on the architect's rulings.
 
 ## Outcomes & Retrospective
 
