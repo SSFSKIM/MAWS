@@ -9,6 +9,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { carriedOf } from '@shared/engine/arrival-schema';
 import type { SessionEvent } from '@shared/graph/events';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
@@ -20,12 +21,19 @@ import type { Row } from './rows';
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
 const notices = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'notice' ? [`${row.outcome ?? 'no outcome'}: ${row.text}`] : []));
 // the lines drawn from task.notification events: an older host's ends
-const legacyLines = (events: SessionEvent[], rows: Row[]) => {
+const legacyRows = (events: SessionEvent[], rows: Row[]) => {
   const ids = new Set(events.flatMap((event) => (event.kind === 'task.notification' ? [rowId.notice(null, event.id, 0)] : [])));
-  return rows.filter((row) => ids.has(row.id)).map((row) => (row.kind === 'notice' ? `${row.at}: ${row.outcome}: ${row.text}` : row.id));
+  return rows.filter((row) => ids.has(row.id));
 };
+const lineOf = (row: Row) => (row.kind === 'notice' ? `${row.at}: ${row.outcome}: ${row.text}` : row.id);
+const legacyLines = (events: SessionEvent[], rows: Row[]) => legacyRows(events, rows).map(lineOf);
+// the tasks whose ends the events' arrivals tell
+const arrivedTasks = (events: SessionEvent[]) => new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'task' && entry.taskId !== null ? [entry.taskId] : [])) : [])));
+// an older host's events before `at`, the modern normaliser's from it (the serving host changed at `at`)
+const cutAt = (at: number) => [...older.filter((event) => event.seq !== null && event.seq < at), ...modern.filter((event) => event.seq !== null && event.seq >= at)];
 const older = JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.base-events.json'), 'utf8')) as SessionEvent[];
 const modern = journalToEvents(loadUxwaveJournal('u3-tasks-r1'));
+const BUSY_MONITOR = 'completed: Monitor "uxw busy monitor" stream ended';
 const FAILURES = ['failed: Background command "uxw fail" failed with exit code 1', 'failed: Background command "uxw busy fail" failed with exit code 1'];
 
 describe('a background task’s end told by an older engine host', () => {
@@ -80,16 +88,89 @@ describe('a background task’s end told by an older engine host', () => {
     expect(notices(rowsOf(withAllExpanded(state))).filter((line) => line === FAILURES[1])).toHaveLength(1); // the arrival's, at 578
   });
 
-  it('an older host’s history followed by one modern arrival keeps every line of that history', () => {
+  it('an older host’s history followed by one modern arrival keeps every line of that history but the one the arrival tells', () => {
     const carriers = modern.filter((event) => event.kind === 'user.message' && event.arrival !== undefined);
     const last = carriers.at(-1)!.seq!;
     const history = older.filter((event) => event.seq !== null && event.seq < last);
-    const before = legacyLines(history, rowsOf(withAllExpanded(reduce(history))));
-    expect(before.length).toBeGreaterThan(0);
-    const after = [...history, ...modern.filter((event) => event.seq !== null && event.seq >= last)];
+    const before = legacyRows(history, rowsOf(withAllExpanded(reduce(history))));
+    const after = cutAt(last);
+    const told = arrivedTasks(after.filter((event) => event.seq! >= last));
+    expect(told.size).toBeGreaterThan(0);
+    const kept = before.filter((row) => row.kind === 'notice' && !told.has(row.taskId!));
+    expect(kept.length).toBeGreaterThan(0);
+    expect(kept.length).toBeLessThan(before.length); // the arrival's task ended in the history too
     const rows = rowsOf(withAllExpanded(reduce(after)));
-    expect(legacyLines(after, rows)).toEqual(before);
-    expect(notices(rows).length).toBeGreaterThan(before.length); // the arrival's own line, beside them
+    expect(legacyLines(after, rows)).toEqual(kept.map(lineOf));
+    const lines = notices(rows);
+    expect(new Set(lines).size, 'no completion drawn twice').toBe(lines.length);
+  });
+
+  // The whole-branch review's finding 3, its handover round (the architect's ruling of 2026-11-13): the fallback of an
+  // unmarked notification yields to the same task's end arrival (its id, and an outcome) in the window.
+  const ended = (rows: Row[], taskId: string) => rows.filter((row) => row.kind === 'notice' && row.taskId === taskId && row.outcome !== null);
+  const fallbackOf = (taskId: string) => rowId.notice(null, older.find((event) => event.kind === 'task.notification' && event.taskId === taskId)!.id, 0);
+  const taskOf = (line: string) => {
+    const row = rowsOf(withAllExpanded(reduce(older))).find((drawn) => drawn.kind === 'notice' && `${drawn.outcome}: ${drawn.text}` === line);
+    return row?.kind === 'notice' ? row.taskId! : '';
+  };
+
+  it.each([
+    [578, FAILURES[1]],
+    [829, BUSY_MONITOR],
+  ])('the host changed at seq %i: the completion the older host told and the arrival tells again is one line, the arrival’s', (at, line) => {
+    const taskId = taskOf(line);
+    expect(taskId).not.toBe('');
+    const rows = rowsOf(withAllExpanded(reduce(cutAt(at))));
+    expect(ended(rows, taskId)).toHaveLength(1);
+    expect(ended(rows, taskId)[0]!.id).not.toBe(fallbackOf(taskId));
+    expect(ended(rows, taskId)[0]!.id.startsWith('notice:')).toBe(true);
+    const lines = notices(rows);
+    expect(new Set(lines).size, 'no completion drawn twice').toBe(lines.length);
+  });
+
+  it('the arrival streams in after the older host’s line was drawn: that line leaves, the arrival’s stands at its own place', () => {
+    const taskId = taskOf(FAILURES[1]);
+    const events = cutAt(578);
+    let state = reduce(events.filter((event) => event.seq! < 578));
+    const fallback = rowsOf(withAllExpanded(state)).find((row) => row.id === fallbackOf(taskId));
+    expect(fallback, 'drawn while no arrival stands').toBeDefined();
+    for (let at = events.findIndex((event) => event.seq! >= 578); at < events.length; ) {
+      const seq = events[at]!.seq;
+      let end = at;
+      while (end < events.length && events[end]!.seq === seq) end += 1;
+      state = applyEvents(state, events.slice(at, end));
+      expect(ended(rowsOf(withAllExpanded(state)), taskId), `at seq ${seq}`).toHaveLength(1); // never two, never none
+      at = end;
+    }
+    const rows = rowsOf(withAllExpanded(state));
+    const [arrival] = ended(rows, taskId);
+    expect(arrival!.id).not.toBe(fallbackOf(taskId));
+    expect(arrival!.turnId).not.toBe(fallback!.turnId); // the arrival's turn, not the task's
+  });
+
+  it('the arrival is already in the window when the older host’s notification pages in: the fallback is not drawn', () => {
+    const taskId = taskOf(FAILURES[1]);
+    const events = cutAt(578);
+    // an older page rebuilds the store from the whole history, the arrival held before it
+    const rows = rowsOf(withAllExpanded(reduce(events)));
+    expect(rows.some((row) => row.id === fallbackOf(taskId))).toBe(false);
+    expect(ended(rows, taskId)).toHaveLength(1);
+  });
+
+  it('a monitor’s event arrival (no outcome) for the same task leaves the older host’s end line standing', () => {
+    const taskId = taskOf(BUSY_MONITOR);
+    const end = modern.find((event) => event.kind === 'user.message' && carriedOf(event.arrival).some((entry) => entry.class === 'task' && entry.taskId === taskId && entry.outcome !== null));
+    expect(end?.kind).toBe('user.message');
+    if (end?.kind !== 'user.message') return;
+    const last = older.at(-1)!;
+    const event: SessionEvent = {
+      ...end, id: 'later:event-arrival' as typeof end.id, messageUuid: 'later-event-arrival' as NonNullable<typeof end.messageUuid>, seq: (last.seq ?? 0) + 1, at: last.at,
+      arrival: carriedOf(end.arrival).map((entry) => (entry.class === 'task' ? { ...entry, outcome: null, summary: 'uxw busy monitor: tick', durationMs: null } : entry)),
+    };
+    const rows = rowsOf(withAllExpanded(reduce([...older, event])));
+    expect(rows.some((row) => row.id === fallbackOf(taskId))).toBe(true);
+    expect(notices(rows)).toContain('no outcome: uxw busy monitor: tick'); // the event's own line, drawn
+    expect(notices(rows).filter((line) => line === BUSY_MONITOR)).toHaveLength(1);
   });
 
   it('no recorded session of a host that sends arrivals draws an older host’s line', () => {
