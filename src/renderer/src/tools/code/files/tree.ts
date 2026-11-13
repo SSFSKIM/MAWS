@@ -3,9 +3,10 @@
 // components. Pure. Paths are absolute and POSIX; the renderer has no `node:path`.
 import type { SessionRecord } from '@shared/graph/session';
 import type { FilesEntry, FilesListOutput } from '@shared/ipc/schema/files';
+import { workingFolder } from '@shared/sessions/working-folder';
 
 export type Listing = { status: 'loading' } | { status: 'ok'; value: FilesListOutput } | { status: 'error'; message: string };
-export type RootRole = 'directory' | 'additional directory' | 'worktree';
+export type RootRole = 'directory' | 'additional directory' | 'worktree' | 'working folder';
 export interface RootCandidate {
   path: string;
   role: RootRole;
@@ -31,8 +32,10 @@ export function sameFile(real: string, given: string): boolean {
 }
 
 // The session's roots as the record declares them, in the service's order (directory, additional directories, the
-// worktree when it differs), each with the role its row names.
-export function rootsFor(record: Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'>): RootCandidate[] {
+// worktree when it differs), each with the role its row names. UX wave U8c-2 (§G): then the selector's launch folder and
+// working folder where a fact names them, as the files service appends them while its admission holds (the service
+// lists the root or does not); the record's word, labelled as Files labels them. A session that has not moved adds none.
+export function rootsFor(record: Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'> & Partial<Pick<SessionRecord, 'launchFolder' | 'agentFolder'>>): RootCandidate[] {
   const out: RootCandidate[] = [];
   const add = (path: string, role: RootRole) => {
     if (!out.some((c) => c.path === path)) out.push({ path, role });
@@ -40,6 +43,9 @@ export function rootsFor(record: Pick<SessionRecord, 'directory' | 'additionalDi
   add(record.directory, 'directory');
   for (const path of record.additionalDirectories) add(path, 'additional directory');
   if (record.worktree) add(record.worktree.path, 'worktree');
+  const { launch, path } = workingFolder(record);
+  add(launch, 'directory');
+  add(path, 'working folder');
   return out;
 }
 

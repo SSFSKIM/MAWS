@@ -1,6 +1,7 @@
 // Main's source control service (E6 execution document, Design §1, §3, §10; parent §3 F, P-12). Every command names a
 // session; the checkout is resolved here from main's read model (the session's working folder,
-// `workingFolder(record).path`), so the renderer cannot aim git at a directory the session does not work in. Everything
+// `workingFolder(record).path`, through the files service's admission: `capture`, UX wave U8c-2), so the renderer
+// cannot aim git at a directory the session does not work in; no act runs while that is not the launch folder. Everything
 // but `status` runs only in a checkout the engine trusts, read on demand with the captured login-shell environment (the
 // file the engine itself reads). A local mutation validates the renderer's paths against a fresh status, runs through
 // the mutating runner (hooks on, transport off), answers the status read after, and asks C4's watcher to re-read the
@@ -42,6 +43,8 @@ import type {
 import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
 import { workingFolder } from '@shared/sessions/working-folder';
+import { admittedFolder } from '../files/allowlist';
+import { FILES_REFUSAL } from '../files/service';
 import type { MutateRun } from '../git/mutate';
 import { GitCommandError, NotARepositoryError, type GitRun } from '../git/runner';
 import { withoutUserInfo } from '../git/service';
@@ -62,8 +65,12 @@ export const COMMIT_TIMEOUT_MS = 60_000; // hooks run linters
 // request deadline has already answered for (the daemon shape's `timeout`) never starts afterwards, and the command's
 // budget covers the wait rather than accepting it.
 export const SCM_ADMIT_MS = 30_000;
-// RED STUB (M3's cases first): the names the cases import, with nothing behind them yet.
+// UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, M3 decision 8, §G): a caller's
+// check of the folder a request uses, awaited on the folder the request captured before anything reads there; it throws
+// to refuse the request (scm's handlers give one to a request from another machine: the home rule, `coversHomeAt`).
 export type FolderGuard = (folder: string) => Promise<void>;
+// Every act while the session's working folder is not its launch folder: the existing code for a view that no longer
+// matches, since an added code would take a wire major.
 export const AWAY_DETAIL = 'The session is working in another folder now, so nothing was changed';
 const GH_PROBE_KEPT_MS = 10 * 60_000;
 const PR_STATE_KEPT_MS = 60_000;
@@ -120,8 +127,8 @@ export class ScmService {
 
   // Trust, the remotes, the defaults a push or PR would start from and gh's state; answered for any checkout, trusted or
   // not (gh is probed outside it). `refresh` probes gh again.
-  async status(appSessionId: AppSessionId, { refresh = false }: { refresh?: boolean } = {}): Promise<ScmStatus> {
-    const checkout = this.checkout(appSessionId);
+  async status(appSessionId: AppSessionId, { refresh = false }: { refresh?: boolean } = {}, guard?: FolderGuard): Promise<ScmStatus> {
+    const { checkout } = await this.capture(appSessionId, guard);
     const [trust, gh] = await Promise.all([this.trust(checkout), this.gh(refresh)]);
     const repository = trust.keyKind === 'repo';
     const remotes = repository ? await this.remotes(trust.directory, await this.pushReader()) : [];
@@ -139,8 +146,10 @@ export class ScmService {
     };
   }
 
-  stage({ appSessionId, paths }: ScmPathsInput): Promise<ScmMutation> {
-    return this.mutation(appSessionId, (status) => {
+  async stage({ appSessionId, paths }: ScmPathsInput, guard?: FolderGuard): Promise<ScmMutation> {
+    const at = await this.capture(appSessionId, guard);
+    if (at.moved) return away();
+    return this.mutation(at.checkout, (status) => {
       const targets = stageTargets(status, paths);
       return isRefusal(targets) ? targets : { commands: [['add', '--', ...targets.paths.map(literal)]], timeoutMs: LOCAL_TIMEOUT_MS };
     });
@@ -149,8 +158,10 @@ export class ScmService {
   // Without a commit yet `restore` cannot resolve HEAD; `rm --cached` takes the entry out of the index instead. Its `-f`
   // only lifts the check that the index matches the file or HEAD (an added file edited since, `AM`, fails it): with
   // `--cached` the working tree is never touched, so this unstages exactly as `restore --staged` would.
-  unstage({ appSessionId, paths }: ScmPathsInput): Promise<ScmMutation> {
-    return this.mutation(appSessionId, (status) => {
+  async unstage({ appSessionId, paths }: ScmPathsInput, guard?: FolderGuard): Promise<ScmMutation> {
+    const at = await this.capture(appSessionId, guard);
+    if (at.moved) return away();
+    return this.mutation(at.checkout, (status) => {
       const targets = unstageTargets(status, paths);
       if (isRefusal(targets)) return targets;
       const verb = status.head === '' ? ['rm', '--cached', '-r', '-f'] : ['restore', '--staged'];
@@ -160,8 +171,10 @@ export class ScmService {
 
   // Unstaged entries take the index's content; untracked ones are deleted (`-d` for a directory entry; never `-x`, so
   // ignored files are never touched). Both run in one chained operation, the restore first.
-  discard({ appSessionId, entries }: ScmDiscardInput): Promise<ScmMutation> {
-    return this.mutation(appSessionId, (status) => {
+  async discard({ appSessionId, entries }: ScmDiscardInput, guard?: FolderGuard): Promise<ScmMutation> {
+    const at = await this.capture(appSessionId, guard);
+    if (at.moved) return away();
+    return this.mutation(at.checkout, (status) => {
       const targets = discardTargets(status, entries);
       if (isRefusal(targets)) return targets;
       const commands: string[][] = [];
@@ -176,10 +189,12 @@ export class ScmService {
 
   // The message is one argument after `-m` (a leading dash is its value, a multi-line message stays whole); the
   // repository's hooks run unless the owner asked to skip them for this commit.
-  async commit({ appSessionId, message, noVerify }: ScmCommitInput): Promise<ScmMutation> {
+  async commit({ appSessionId, message, noVerify }: ScmCommitInput, guard?: FolderGuard): Promise<ScmMutation> {
     if (message.includes('\0')) throw new Error('a commit message cannot hold a NUL character');
+    const at = await this.capture(appSessionId, guard);
+    if (at.moved) return away();
     return this.mutation(
-      appSessionId,
+      at.checkout,
       (status) => commitRefusal(status, message) ?? { commands: [['commit', '-m', message, ...(noVerify ? ['--no-verify'] : [])]], timeoutMs: COMMIT_TIMEOUT_MS },
       async (checkout) => {
         // One read gives the sha and subject of the same commit, still inside the checkout's chain.
@@ -189,14 +204,16 @@ export class ScmService {
     );
   }
 
-  async planPush({ appSessionId, remote }: ScmPushPlanInput): Promise<ScmPlanResult> {
-    const checkout = this.checkout(appSessionId);
+  async planPush({ appSessionId, remote }: ScmPushPlanInput, guard?: FolderGuard): Promise<ScmPlanResult> {
+    const { checkout, moved } = await this.capture(appSessionId, guard);
+    if (moved) return away();
     const draft = await planPush(await this.sources(checkout), { remote });
     return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: (await this.keysOf(checkout)).checkout });
   }
 
-  async planPr({ appSessionId, ...fields }: ScmPrPlanInput): Promise<ScmPlanResult> {
-    const checkout = this.checkout(appSessionId);
+  async planPr({ appSessionId, ...fields }: ScmPrPlanInput, guard?: FolderGuard): Promise<ScmPlanResult> {
+    const { checkout, moved } = await this.capture(appSessionId, guard);
+    if (moved) return away();
     const draft = await planPr(await this.sources(checkout), fields);
     return isRefusal(draft) ? draft : this.plans.issue(draft, { appSessionId, key: (await this.keysOf(checkout)).checkout });
   }
@@ -205,8 +222,9 @@ export class ScmService {
   // flight), once the checkout's key is known and again at admission; then the token, the revalidation in the
   // repository's turn, and the spawn only when nothing moved. Refused `busy` from the queue (P5 O3-E, SCM_ADMIT_MS), the
   // token is unspent and the sheet's Retry runs it.
-  async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr'): Promise<ScmRunStarted> {
-    const checkout = this.checkout(appSessionId);
+  async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr', guard?: FolderGuard): Promise<ScmRunStarted> {
+    const { checkout, moved } = await this.capture(appSessionId, guard);
+    if (moved) return away(); // before the token is spent
     const running = ({ checkout: key }: Keys) => (this.runner.isRunning(key) ? refusal('busy', BUSY_DETAIL) : null);
     return this.admitted(checkout, async (keys): Promise<ScmRunStarted> => {
       const busy = running(keys);
@@ -227,20 +245,22 @@ export class ScmService {
 
   // Cancel and the latest run start nothing of the owner's, so they are not behind the trust gate: a run started before
   // trust was withdrawn can still be watched and stopped.
-  async cancel({ appSessionId, token }: ScmRunInput): Promise<void> {
-    this.runner.cancel((await this.keysOf(this.checkout(appSessionId))).checkout, token);
+  async cancel({ appSessionId, token }: ScmRunInput, guard?: FolderGuard): Promise<void> {
+    const { checkout } = await this.capture(appSessionId, guard);
+    this.runner.cancel((await this.keysOf(checkout)).checkout, token);
   }
 
-  async last(appSessionId: AppSessionId): Promise<ScmRemoteLast> {
-    return this.runner.last((await this.keysOf(this.checkout(appSessionId))).checkout);
+  async last(appSessionId: AppSessionId, guard?: FolderGuard): Promise<ScmRemoteLast> {
+    const { checkout } = await this.capture(appSessionId, guard);
+    return this.runner.last((await this.keysOf(checkout)).checkout);
   }
 
   // The current branch's PR and its checks. Without an answer to ask for (untrusted, not a repository, detached, no
   // remote, gh missing or signed out) `pr` is null and `error` names the refusal; a failure to ask is gh's reason. An
   // answer is kept 60 s per checkout and branch, a failure is not, nor one a run of the checkout ended under; `refresh`
   // asks gh again and probes gh itself again.
-  async prState({ appSessionId, refresh }: ScmPrStateInput): Promise<ScmPrState> {
-    const checkout = this.checkout(appSessionId);
+  async prState({ appSessionId, refresh }: ScmPrStateInput, guard?: FolderGuard): Promise<ScmPrState> {
+    const { checkout } = await this.capture(appSessionId, guard);
     const [trusted, gh] = await Promise.all([this.trust(checkout).then((trust) => trust.trusted), this.gh(refresh)]);
     const answer = (branch: string | null, error: string | null, pr: ScmPrState['pr'] = null): ScmPrState =>
       ({ checkedAt: new Date(this.now()).toISOString(), branch, gh, pr, error });
@@ -294,13 +314,14 @@ export class ScmService {
   }
 
   /**
-   * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether the session's checkout is a home of the
-   * machine (`homes`) or above one, by its realpath, by git's top level there, or by its repository's trust key (the main
+   * 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): whether a checkout is a home of the machine
+   * (`homes`) or above one, by its realpath, by git's top level there, or by its repository's trust key (the main
    * worktree's root), a checkout another machine's caller reaches nothing of. A checkout that doesn't resolve, or whose
-   * top level git doesn't answer, is one too: nothing of it is known to lie below a home.
+   * top level git doesn't answer, is one too: nothing of it is known to lie below a home. UX wave U8c-2: judged on the
+   * folder a request captured (`checkout` here), which the handlers' guard hands it, so the check and the request read
+   * one folder.
    */
-  async coversHome(appSessionId: AppSessionId, homes: readonly string[]): Promise<boolean> {
-    const checkout = this.checkout(appSessionId);
+  async coversHomeAt(checkout: string, homes: readonly string[]): Promise<boolean> {
     const real = await realpath(checkout).catch(() => null);
     if (real === null || coversHome(real, homes)) return true;
     // the final review: git's own top level there, the work tree every command acts on (a home that is a linked worktree
@@ -317,10 +338,18 @@ export class ScmService {
     return key.keyKind === 'repo' && coversHome(key.trustKey, homes);
   }
 
-  private checkout(appSessionId: AppSessionId): string {
+  // UX wave U8c-2 (M3 decision 8): the one read of the record a request makes, serving the whole of it. The folder is the
+  // session's working folder as the admission takes it (the record's own folder as it names it; a folder one of its facts
+  // names, as the realpath the admission checked; one not admitted fails the request with the files service's refusal);
+  // the caller's guard is awaited on that folder before anything reads there; `moved` says whether it is the launch
+  // folder, from the same record, so an act's check and its folder cannot come from two reads.
+  private async capture(appSessionId: AppSessionId, guard?: FolderGuard): Promise<{ checkout: string; moved: boolean }> {
     const record = this.deps.view.record(appSessionId);
     if (record === null) throw new Error(`unknown app session: ${appSessionId}`);
-    return workingFolder(record).path;
+    const admitted = await admittedFolder(record, 'path');
+    if (admitted === null) throw new Error(FILES_REFUSAL);
+    await guard?.(admitted.folder);
+    return { checkout: admitted.folder, moved: workingFolder(record).moved };
   }
 
   // E11: the key and the store only; the files trust would load are the session's trust card's to read
@@ -392,11 +421,10 @@ export class ScmService {
   // after (what is answered). Git's own failure is the refusal `git_failed` with both streams; a timeout goes to the
   // router. Once any command ran, the watcher is asked to re-read the root, whatever the outcome.
   private async mutation(
-    appSessionId: AppSessionId,
+    checkout: string,
     decide: (status: GitStatus) => Decided | ScmRefusal,
     facts: (checkout: string) => Promise<{ commit?: { sha: string; subject: string } }> = async () => ({}),
   ): Promise<ScmMutation> {
-    const checkout = this.checkout(appSessionId);
     return this.admitted(checkout, async (): Promise<ScmMutation> => {
       if (!(await this.trust(checkout)).trusted) return refusal('untrusted', UNTRUSTED_DETAIL);
       let before: GitStatus;
@@ -541,6 +569,9 @@ export class ScmService {
     }
   }
 }
+
+// An act while the session is away from its launch folder (UX wave U8c-2): nothing is run.
+const away = (): ScmRefusal => refusal('changed', AWAY_DETAIL);
 
 // One promise chain per key of `chains`: work starts after every earlier work of the key settled, whichever way it
 // settled; the key is dropped once its last work settled.

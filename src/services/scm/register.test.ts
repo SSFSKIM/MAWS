@@ -21,7 +21,7 @@ describe('main answers scm.* on the services bus', () => {
   beforeEach(() => {
     service = {
       status: vi.fn(), stage: vi.fn(), unstage: vi.fn(), discard: vi.fn(), commit: vi.fn(), planPush: vi.fn(), planPr: vi.fn(), run: vi.fn(),
-      cancel: vi.fn(), last: vi.fn(), prState: vi.fn(), coversHome: vi.fn(async () => false),
+      cancel: vi.fn(), last: vi.fn(), prState: vi.fn(), coversHomeAt: vi.fn(async () => false),
     };
     bus = fakeBus();
     registerScmHandlers(service as unknown as ScmService, bus);
@@ -30,20 +30,29 @@ describe('main answers scm.* on the services bus', () => {
 
   // 2026-11-06 (the home-root rule): another machine's request (the endpoint seam's `remote`) on a session whose checkout is
   // the machine's home, or above it, runs nothing; this machine's own client's runs as before, its checkout never asked.
-  it('runs nothing for a remote request on a session working in the machine’s home, and runs a local one', async () => {
+  // UX wave U8c-2 (M3 decision 8): the check is a guard every command is handed for a remote request, which the service
+  // awaits on the folder it captured; the handler reads no record of its own.
+  it('hands a remote request a guard that refuses a checkout working in the machine’s home, and a local one none', async () => {
     const remote = { client: endableClientRef('endpoint'), remote: true as const };
-    service.coversHome.mockResolvedValue(true);
-    service.status.mockResolvedValue({ directory: '/r', repository: false, trusted: false, trustKey: '/r', remotes: [], defaultRemote: null, defaultBase: null, gh: { state: 'missing' }, checkedAt: 'now' });
-    service.stage.mockResolvedValue({ refused: 'untrusted', detail: 'x', output: '' });
+    const status = { directory: '/r', repository: false, trusted: false, trustKey: '/r', remotes: [], defaultRemote: null, defaultBase: null, gh: { state: 'missing' }, checkedAt: 'now' };
+    service.status.mockImplementation(async (_id: string, _options: unknown, guard?: (folder: string) => Promise<void>) => {
+      await guard?.('/r'); // as the service awaits it, on the folder it captured
+      return status;
+    });
+    service.stage.mockImplementation(async (_input: unknown, guard?: (folder: string) => Promise<void>) => {
+      await guard?.('/r');
+      return { refused: 'untrusted', detail: 'x', output: '' };
+    });
+    service.coversHomeAt.mockResolvedValue(true);
     expect(await bus.invoke('scm.status', { appSessionId }, remote)).toEqual({ ok: false, error: { code: 'internal', message: SCM_HOME_REFUSAL } });
     expect(await bus.invoke('scm.stage', { appSessionId, paths: ['a.txt'] }, remote)).toEqual({ ok: false, error: { code: 'internal', message: SCM_HOME_REFUSAL } });
-    expect(service.status).not.toHaveBeenCalled();
-    expect(service.stage).not.toHaveBeenCalled();
-    expect(service.coversHome).toHaveBeenCalledWith(appSessionId, expect.any(Array));
-    service.coversHome.mockClear();
+    expect(service.coversHomeAt).toHaveBeenCalledWith('/r', expect.any(Array));
+    for (const name of ['status', 'stage'] as const) expect(service[name].mock.calls.at(-1)!.at(-1), name).toEqual(expect.any(Function));
+    service.coversHomeAt.mockClear();
     expect(await invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: '/r' } });
-    expect(service.coversHome).not.toHaveBeenCalled();
-    service.coversHome.mockResolvedValue(false);
+    expect(service.status.mock.calls.at(-1)).toEqual([appSessionId, {}, undefined]);
+    expect(service.coversHomeAt).not.toHaveBeenCalled();
+    service.coversHomeAt.mockResolvedValue(false);
     expect(await bus.invoke('scm.status', { appSessionId }, remote)).toMatchObject({ ok: true, value: { directory: '/r' } });
   });
 
@@ -58,13 +67,13 @@ describe('main answers scm.* on the services bus', () => {
     };
     for (const [name, input] of Object.entries(inputs)) {
       expect(await invoke(`scm.${name}`, input), name).toEqual({ ok: true, value: refusal });
-      expect(service[name as keyof typeof inputs]).toHaveBeenCalledWith(input);
+      expect(service[name as keyof typeof inputs]).toHaveBeenCalledWith(input, undefined);
     }
     service.status.mockResolvedValue({
       directory: '/r', repository: false, trusted: false, trustKey: '/r', remotes: [], defaultRemote: null, defaultBase: null, gh: { state: 'missing' }, checkedAt: 'now',
     });
     expect(await invoke('scm.status', { appSessionId })).toMatchObject({ ok: true, value: { directory: '/r' } });
-    expect(service.status).toHaveBeenCalledWith(appSessionId);
+    expect(service.status).toHaveBeenCalledWith(appSessionId, {}, undefined);
   });
 
   it('binds the plans, the runs by kind, cancel, the latest run and PR state', async () => {
@@ -78,20 +87,20 @@ describe('main answers scm.* on the services bus', () => {
     service.prState.mockResolvedValue({ checkedAt: 'now', branch: null, gh: { state: 'missing' }, pr: null, error: 'untrusted' });
 
     expect(await invoke('scm.push.plan', { appSessionId, remote: 'origin' })).toEqual({ ok: true, value: expired });
-    expect(service.planPush).toHaveBeenCalledWith({ appSessionId, remote: 'origin' });
+    expect(service.planPush).toHaveBeenCalledWith({ appSessionId, remote: 'origin' }, undefined);
     const pr = { appSessionId, title: 'T', body: '', base: 'main', draft: true };
     expect(await invoke('scm.pr.plan', pr)).toEqual({ ok: true, value: expired });
-    expect(service.planPr).toHaveBeenCalledWith(pr);
+    expect(service.planPr).toHaveBeenCalledWith(pr, undefined);
     expect(await invoke('scm.push', { appSessionId, token })).toEqual({ ok: true, value: { started: true, token } });
-    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'push');
+    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'push', undefined);
     expect(await invoke('scm.pr.create', { appSessionId, token })).toEqual({ ok: true, value: { started: true, token } });
-    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'pr');
+    expect(service.run).toHaveBeenLastCalledWith({ appSessionId, token }, 'pr', undefined);
     expect(await invoke('scm.remote.cancel', { appSessionId, token })).toEqual({ ok: true, value: undefined });
-    expect(service.cancel).toHaveBeenCalledWith({ appSessionId, token });
+    expect(service.cancel).toHaveBeenCalledWith({ appSessionId, token }, undefined);
     expect(await invoke('scm.remote.last', { appSessionId })).toEqual({ ok: true, value: null });
-    expect(service.last).toHaveBeenCalledWith(appSessionId);
+    expect(service.last).toHaveBeenCalledWith(appSessionId, undefined);
     expect(await invoke('scm.pr.state', { appSessionId, refresh: true })).toMatchObject({ ok: true, value: { error: 'untrusted' } });
-    expect(service.prState).toHaveBeenCalledWith({ appSessionId, refresh: true });
+    expect(service.prState).toHaveBeenCalledWith({ appSessionId, refresh: true }, undefined);
     // a token is a uuid: anything else never reaches the service
     expect(await invoke('scm.push', { appSessionId, token: 'push origin main' })).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
     expect(service.run).toHaveBeenCalledTimes(2);
