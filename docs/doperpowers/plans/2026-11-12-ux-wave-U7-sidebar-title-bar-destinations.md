@@ -960,6 +960,11 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   Rationale: two whole-suite runs on one shared VM make every other builder's checks time out; M4 runs it a milestone later on the whole landing.
   Date/Author: 2026-11-13, the controller.
 
+- Decision (M3, the executor's, folded by the controller). The hidden store is built as `createHiddenStore(client, { writeDelayMs, now })`, so each test has a store and a clock of its own. `HiddenStore` gains `attach(sources)`, through which the connection hands the store the looks, and `review()`, so that `hide` can take its look for `entryAt`. The end of a lead for a session MAWS runs reads `lastTurnEndedAt` from a source of its own, so §E's `Look` stays as written. A wake timer looks again at an unarmed `foreign` entry once `QUIET_MS` has passed: nothing in any store changes to cause that look, and without it the entry would never arm. Looks run only after the read has answered, the first of them at the answer; leads are the exception. For the drop rule an archived record counts as gone. The bound also applies in memory, so what is drawn is what is stored. A stored key that is not an address counts as another machine's. A refused read is logged.
+  Hide also stands in the menu of a Needs you row of a record, because that menu is the same `SessionItems`. Its keyboard rule moves focus only when the act comes from a tree row. A listed session's Needs you row still has no menu (M2, decision 4), and the row's button is drawn on no Needs you row. After an act that moves focus, Radix's restore of focus on close is cancelled. The Hidden row closes when its count reaches 0, so the next Hide finds it closed. Hidden rows are drawn flat after the Hidden row, with no fold motion; indented rows carry `data-indented`. The button's glyphs are an eye and an eye struck through.
+  No wire bump: `layout.*` commands are not on the wire manifest, and no wire file changed. The e2e lists M3 made false were changed in M3 (`e2e/shell.spec.ts` long scene, `e2e/sessions.spec.ts` "foreign-live: …" twice, and with the button `e2e/ux1-sidebar.spec.ts`'s hover measure); M4 writes the new scenes.
+  Date/Author: 2026-11-13, M3's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
