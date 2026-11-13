@@ -4,7 +4,8 @@
 // attribute step, which moves no position, so the node stays selected while the person types; ProseMirror ignores the
 // field's events and the view's own mutations. A remote change to the node redraws it, never under a focused field.
 import type { Editor, NodeViewRenderer, NodeViewRendererProps } from '@tiptap/core';
-import type { Node as PMNode } from '@tiptap/pm/model';
+import { GapCursor } from '@tiptap/pm/gapcursor';
+import type { Node as PMNode, ResolvedPos } from '@tiptap/pm/model';
 import { Selection } from '@tiptap/pm/state';
 import type { NodeView } from '@tiptap/pm/view';
 
@@ -29,6 +30,12 @@ export function setAttr(editor: Editor, getPos: NodeViewRendererProps['getPos'],
   if (typeof pos !== 'number' || !editor.isEditable) return;
   editor.view.dispatch(editor.state.tr.setNodeAttribute(pos, attr, value));
 }
+
+// `valid` is the gap cursor's own test of a place (prosemirror-gapcursor 1.4.1), left out of its typings
+const isGap = ($pos: ResolvedPos): boolean => (GapCursor as unknown as { valid($pos: ResolvedPos): boolean }).valid($pos);
+/** Where the caret goes back to after a node that ends at `$after`. */
+const caretAfter = ($after: ResolvedPos): Selection =>
+  Selection.findFrom($after, 1, true) === null && isGap($after) ? new GapCursor($after) : Selection.near($after);
 
 export const atomView =
   (spec: AtomSpec): NodeViewRenderer =>
@@ -68,7 +75,8 @@ export const atomView =
         // composing Return and then a plain one; leaving on the first would hand the second to the page, splitting the line
         if (event.isComposing) return;
         // Escape, or Enter in a one-line field, hands the caret back to the document after the node: right after an
-        // inline atom, in the nearest text after a block one (before it, or the atom itself, when nothing follows)
+        // inline atom, in the nearest text after a block one; when no text follows a block one, at the gap after it
+        // (U10a, decision 11: what is typed there makes a paragraph), or the atom itself where that is no place
         const done = event.key === 'Escape' || (event.key === 'Enter' && !(control instanceof HTMLTextAreaElement && !event.metaKey && !event.ctrlKey));
         if (!done) return;
         // P3-F: the field's key, kept from the page and from any surface around it
@@ -83,7 +91,7 @@ export const atomView =
         if (typeof pos !== 'number') return;
         // the page takes the keyboard now (P3-F), not on the frame after, which the hidden field would leave to nothing
         editor.view.focus();
-        editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(pos + node.nodeSize))).scrollIntoView());
+        editor.view.dispatch(editor.state.tr.setSelection(caretAfter(editor.state.doc.resolve(pos + node.nodeSize))).scrollIntoView());
       });
       input = control;
       panel.append(control);

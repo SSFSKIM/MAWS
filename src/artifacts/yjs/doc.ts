@@ -13,13 +13,36 @@ export type Node = Y.Node;
 // 2.0.0-15. A prerelease change to the ProseMirror mapping means normalizing the documents tagged with the old value.
 export const bindingVersion = 'y14-rc28/ypm2-15';
 
-// gc on: deleted content is collected, versions are full states (no state-pair snapshots).
-export const newDoc = (): Doc => new Y.Doc({ gc: true });
+// Every Y.Doc MAWS makes comes from one of the three constructors below (lint holds this inside the module), and each
+// passes through `built` (UX wave U10a, l6-artifacts-07 (a): a formatting clean-up is never a write of its own). After a
+// transaction that applied someone else's update to formatted text, Yjs removes the formatting markers left redundant
+// in a second transaction of its own, with no origin (`cleanupYTextAfterTransaction`, `@y/y` 14.0.0-rc.28
+// src/utils/Transaction.js): in the live doc the host refuses that write and resets the document; in a replica it is
+// sent on as the reader's own edit. Yjs reads `transaction._needFormattingCleanup` right after the `afterTransaction`
+// event (the type's observer sets it before the event, whatever made the transaction not local, an apply inside an
+// open transaction included), so clearing it there cancels that clean-up. `cleanupFormatting` stays as Yjs sets it, so
+// a writer's own deletion still removes the markers it empties, inside its own transaction and its own row. The cost is
+// markers that change no character's format, left where two writers' edits meet. doc.test.ts pins the behaviour against
+// a doc built with Yjs's defaults, so a re-pin that moves the clean-up fails there first.
+function built(doc: Y.Doc): Doc {
+  doc.on('afterTransaction', (transaction) => {
+    transaction._needFormattingCleanup = false;
+  });
+  return doc;
+}
+
+// gc on: deleted content is collected, versions are full states (no state-pair snapshots). The live doc, every replica
+// of a main doc, and a scratch copy read once.
+export const newDoc = (): Doc => built(new Y.Doc({ gc: true }));
 
 // An artifact's suggestion doc (P3-A M8, S1's topology), and every replica that writes or shows it: gc off, so content a
 // suggestion deletes stays readable for the diff against the main doc, and flagged as v14's suggestion doc, so the
 // binding's automatic formatting clean-up is not itself shown as a suggestion.
-export const newSuggestionDoc = (): Doc => new Y.Doc({ gc: false, isSuggestionDoc: true });
+export const newSuggestionDoc = (): Doc => built(new Y.Doc({ gc: false, isSuggestionDoc: true }));
+
+// gc off: history's docs (a version's state and the one it is compared with keep what a change deleted, for the diff),
+// and the scratch docs a restore, an accept or a reject is planned on.
+export const newDocGcOff = (): Doc => built(new Y.Doc({ gc: false }));
 
 // Makes `doc` write under a known clientID (the host's replica of one actor reuses its bound clientID across reloads,
 // so the state vector holds one host clientID per actor). Only after the doc has loaded that clientID's whole history:
