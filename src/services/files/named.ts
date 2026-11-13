@@ -36,6 +36,8 @@ const NEWLINE = 0x0a;
 const REQUEST_RECORD = Buffer.from('{"type":"api-request'); // the engine's per-request records, skipped unparsed as TranscriptJobs skips them
 const EMPTY: Buffer = Buffer.alloc(0);
 const NO_CALLS: string[] = [];
+const CALL_ID = Buffer.from('"id":"'); // how the engine writes a tool_use block's id (pinned over test/fixtures/transcripts/)
+const QUOTE = 0x22;
 
 interface Span {
   offset: number; // of the line's first byte
@@ -95,6 +97,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   const entriesMax = bounds.entries ?? NAMED_CACHE_ENTRIES;
   const waitingMax = bounds.waiting ?? NAMED_WAITING_MAX;
   const waitMs = bounds.waitMs ?? NAMED_WAIT_MS;
+  const pendingMax = bounds.pending ?? NAMED_PENDING_MAX;
 
   const entries = new Map<string, Entry>(); // per session and path, the least recently asked first
   const waiting = new Map<string, Job>(); // in the order asked
@@ -134,8 +137,20 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   // The newest record of a region that names the path, the calls the results it met wait for, newest first.
   function scanner(read: Read, path: string) {
     const needles = needlesOf(path).map((needle) => Buffer.from(needle));
-    const pending = new Map<string, { needle: Buffer; waits: { when: PendingCall['when']; record: Span }[] }>();
+    const pending = new Map<string, { when: PendingCall['when']; record: Span }[]>(); // per call id, the newest results waiting for it
     const state = { found: null as Found | null, pending };
+
+    // The waited-for call ids a line holds, in one pass over it however many wait: each `"id":"…"` read and looked up.
+    function waitedIdsIn(line: Buffer): string[] {
+      const ids: string[] = [];
+      for (let at = line.indexOf(CALL_ID); at !== -1; at = line.indexOf(CALL_ID, at + CALL_ID.length)) {
+        const close = line.indexOf(QUOTE, at + CALL_ID.length);
+        if (close === -1) break;
+        const id = line.toString('utf8', at + CALL_ID.length, close);
+        if (pending.has(id) && !ids.includes(id)) ids.push(id);
+      }
+      return ids;
+    }
 
     // One whole line of `buffer`, [start, end), whose first byte is at `base + start` in the file.
     async function consider(buffer: Buffer, start: number, end: number, base: number, names: boolean): Promise<void> {
@@ -144,7 +159,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       const line = buffer.subarray(start, end);
       if (line.subarray(0, REQUEST_RECORD.length).equals(REQUEST_RECORD)) return;
       const candidate = names && needles.every((needle) => line.includes(needle));
-      const calls = pending.size === 0 ? NO_CALLS : [...pending].filter(([, { needle }]) => line.includes(needle)).map(([id]) => id);
+      const calls = pending.size === 0 ? NO_CALLS : waitedIdsIn(line);
       if (!candidate && calls.length === 0) return;
       const row = await parse(line);
       const span = { offset: base + start, length };
@@ -155,15 +170,17 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
           return;
         }
         for (const { toolUseId, when } of claim.pending) {
-          const entry = pending.get(toolUseId) ?? { needle: Buffer.from(JSON.stringify(toolUseId)), waits: [] };
-          if (!entry.waits.some((wait) => wait.when === when)) entry.waits.push({ when, record: span }); // the newest result of each form
-          pending.set(toolUseId, entry);
+          const waits = pending.get(toolUseId);
+          if (waits === undefined) {
+            if (pending.size >= pendingMax) continue; // past the bound an older result is not waited for: the refusal
+            pending.set(toolUseId, [{ when, record: span }]);
+          } else if (!waits.some((wait) => wait.when === when)) waits.push({ when, record: span }); // the newest result of each form
         }
       }
       for (const id of calls) {
         const found = callClass(row, id);
         if (found === null) continue; // not the call's record (the result itself, say)
-        const match = pending.get(id)!.waits.find((wait) => wait.when === found);
+        const match = pending.get(id)!.find((wait) => wait.when === found);
         pending.delete(id); // the nearest older call decides
         if (match) {
           state.found = { record: match.record, call: { ...span, toolUseId: id, when: match.when } };

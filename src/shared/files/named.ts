@@ -69,19 +69,38 @@ const CHARACTER_REFERENCE = /&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]*)
 const SCHEME = /^[a-zA-Z][a-zA-Z0-9+.-]*:/; // the window's `SCHEME` (markdown/sanitize.ts)
 const PERCENT_ESCAPE = /%([0-9a-fA-F]{2})/g;
 const LINE = /(?:#L(\d+)|:(\d+))$/; // the click's line suffix (markdown/Link.tsx)
+const CHIP_SCHEME = 'maws-path:'; // the window's path chip (markdown/sanitize.ts, `remarkTranscriptSources`)
 
 // The path a link with this destination asks for (click source 1): Markdown's backslash escapes resolved, remark's href,
 // `decodeURI`, the line suffix off once, `.` and `..` collapsed. Null for a destination that is no path chip (a scheme in
 // front, or empty) or that this reading does not recognise: a character reference, a letter or digit written as `%XX`
 // (which is what lets the search pass a line over by its bytes, `needlesOf`), or an href `decodeURI` cannot read.
+// Step 7 (Decision Log 12): the window parses `maws-path:<href>` as a URL before the click reads it (rehype-harden's
+// `transformUrl`), so the destination is named only when the same reading of that serialisation gives the same path.
+// The parser can only take a name away: where it reads a host, a port, a user or a query or fragment boundary into the
+// href, the click asks for another path than the transcript wrote, and the answer is null.
 export function clickPath(destination: string): string | null {
   if (destination === '' || CHARACTER_REFERENCE.test(destination)) return null;
   const url = destination.replace(BACKSLASH_ESCAPE, '$1');
   if (SCHEME.test(url)) return null;
-  for (const [, hex] of url.matchAll(PERCENT_ESCAPE)) if (asciiAlphanumeric(parseInt(hex, 16))) return null;
+  const href = hrefOf(url);
+  const path = pathOfHref(href);
+  if (path === null) return null;
+  let parsed: string;
+  try {
+    parsed = new URL(`${CHIP_SCHEME}${href}`).href.slice(CHIP_SCHEME.length);
+  } catch {
+    return null;
+  }
+  return pathOfHref(parsed) === path ? path : null;
+}
+
+// Steps 3 to 6 of §A on an href.
+function pathOfHref(href: string): string | null {
+  for (const [, hex] of href.matchAll(PERCENT_ESCAPE)) if (asciiAlphanumeric(parseInt(hex, 16))) return null;
   let decoded: string;
   try {
-    decoded = decodeURI(hrefOf(url));
+    decoded = decodeURI(href);
   } catch {
     return null;
   }
