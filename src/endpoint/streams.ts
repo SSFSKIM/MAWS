@@ -121,6 +121,8 @@ export type StreamsContext = {
   forwards: Forwards;
   now(): number;
   log(line: string): void;
+  /** P5 Decision Log 273: each chunk a tcp forward carries, either way (the machine's idle collection, as a cua pipe's). */
+  activity?(): void;
   /** The suites' seams: how a tcp stream connects, the input epochs' window, the re-check's retries, a stuck send's deadline. */
   connect?(port: number, host: Loopback): Socket;
   resumeMs?: number;
@@ -279,7 +281,7 @@ class TcpStream extends Stream {
   #writing = 0;
   #paused = false;
 
-  constructor(id: string, channel: RemoteChannel, act: string, binding: StreamBinding, credit: number, window: StreamWindow, over: (stream: Stream) => void, readonly forward: Forward) {
+  constructor(id: string, channel: RemoteChannel, act: string, binding: StreamBinding, credit: number, window: StreamWindow, over: (stream: Stream) => void, readonly forward: Forward, private readonly activity: () => void = () => {}) {
     super(id, channel, act, binding, credit, window, over);
   }
 
@@ -287,6 +289,7 @@ class TcpStream extends Stream {
   attach(socket: Socket): void {
     this.socket = socket;
     socket.on('data', (data: Buffer) => {
+      this.activity();
       this.push(this.#out, data);
       this.#out += data.byteLength;
     });
@@ -319,6 +322,7 @@ class TcpStream extends Stream {
   }
 
   input(m: StreamDataMessage): void {
+    this.activity();
     const bytes = Buffer.from(m.data, 'base64url');
     if (!this.take(bytes.byteLength)) return;
     if (m.offset !== this.#in) return this.end('malformed');
@@ -772,7 +776,7 @@ export class Streams {
       if (placeholder.ended || channel.closed) return 'gone';
       if (lost || socket.destroyed) return 'unreachable';
       if (this.#ctx.forwards.get(forward.device, forward.id) !== forward) return 'unknown';
-      const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward);
+      const stream = new TcpStream(m.id, channel, act, binding, m.credit, this.#windows.get(channel)!, (s) => this.#forget(s), forward, () => this.#ctx.activity?.());
       install(stream);
       stream.attach(socket);
       stream.open({});

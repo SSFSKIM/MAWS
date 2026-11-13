@@ -157,9 +157,12 @@ function KeyRow({
               {KEYBOARD.was(displayChord(row.id, row.chord))}
             </button>
           ) : (
-            <button type="button" className={TEXT_ACTION} onClick={onRecord} aria-label={`${KEYBOARD.change} ${row.title}`}>
-              {KEYBOARD.change}
-            </button>
+            // U6a: no Change on a row that takes no rebinding (a fixed key, or an action build F does not know: UC-14)
+            row.rebindable && (
+              <button type="button" className={TEXT_ACTION} onClick={onRecord} aria-label={`${KEYBOARD.change} ${row.title}`}>
+                {KEYBOARD.change}
+              </button>
+            )
           )}
         </span>
       </div>

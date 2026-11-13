@@ -8,7 +8,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { AppSessionId } from '@shared/graph/ids';
-import { createSession, focusedProject, NEW_CHAT, useSessionCreatorRegistered } from '../keymap/actions-runtime';
+import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { ipc } from '../ipc/client';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useMachines } from '../stores/machines';
@@ -105,7 +105,7 @@ function EmptyBoard({ indexing, onSessionCreated }: { indexing: { scanned: numbe
         disabled={!canCreate}
         title={canCreate ? undefined : 'Not available here'}
         onClick={async () => {
-          if ((await createSession(focusedProject())) !== null) onSessionCreated?.();
+          if ((await newChat()) !== null) onSessionCreated?.();
         }}
         className="rounded-sm border border-border-strong px-2.5 py-1 text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent"
       >

@@ -713,6 +713,23 @@ describe('find', () => {
     expect(editor().view.dom.querySelectorAll('.find-match')).toHaveLength(0);
   });
 
+  // U6a (the UX wave's U6, collisions: ⇧⌘F is View ▸ Files): with Shift down the document leaves the key to the menu
+  it('⇧⌘F opens no find bar and is neither prevented nor stopped; ⌘F still opens it', async () => {
+    const { editor } = await mount(doc(para('p1', 'alpha beta')));
+    const reached = vi.fn();
+    document.addEventListener('keydown', reached);
+    for (const key of ['f', 'F']) {
+      let kept = false;
+      act(() => void (kept = fireEvent.keyDown(editor().view.dom, { key, metaKey: true, shiftKey: true })));
+      expect(kept, key).toBe(true);
+    }
+    document.removeEventListener('keydown', reached);
+    expect(reached).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('searchbox', { name: 'Find in document' })).toBeNull();
+    act(() => void fireEvent.keyDown(editor().view.dom, { key: 'f', metaKey: true }));
+    expect(screen.getByRole('searchbox', { name: 'Find in document' })).toBeTruthy();
+  });
+
   const findCount = () => within(screen.getByRole('search')).getByRole('status').textContent;
 
   // P3-F panel scalpel-1#2 (X26): the keys of an IME composition are the IME's; its commit Enter does not step and its
@@ -905,8 +922,9 @@ describe('the mention picker', () => {
 // M8 fix wave 1: a new document's first tab is the host's; two editors open on the empty document wait for it, both bind
 // that one body, and what each types lands in it.
 // P4 W1-B (tracker L286; sitting candidate 8): an agent's note, made from markdown, is shown and stored from its first
-// sentence: an editor bound to it, before its create or after, writes no block before it. The trailing node (an empty
-// paragraph after a closing table, the mirror's last `&#160;`) is the editor's and stays.
+// sentence: an editor bound to it, before its create or after, writes no block before it. U10a (X-141): nor after it,
+// at the open; the trailing node (an empty paragraph after a closing table, the mirror's last `&#160;`) comes with the
+// person's first change.
 describe('a document made from markdown', () => {
   const NOTE = 'This note follows the P3 sitting.\n\n## Next steps\n\n- [ ] Book the room\n\n| Owner | Due date |\n| --- | --- |\n| Kim | Friday |';
   it.each(['made, then opened', 'opened, then made'])('starts with its content, %s', async (order) => {
@@ -926,9 +944,13 @@ describe('a document made from markdown', () => {
         ynodeToPmnode(tabBody(host.doc, 'tab00001')!, schemaFor()).forEach((block) => out.push(`${block.type.name}:${block.textContent}`));
         return out;
       };
-      await until(() => stored().length === 5, 'the trailing node at the host');
-      expect(stored()).toEqual(['paragraph:This note follows the P3 sitting.', 'heading:Next steps', 'taskList:Book the room', 'table:OwnerDue dateKimFriday', 'paragraph:']);
+      await until(() => stored().length === 4, 'the note at the host');
+      await ticks(30); // the undo manager's swap into the binding, a microtask after the mount, among them
+      expect(stored(), 'the open writes nothing').toEqual(['paragraph:This note follows the P3 sitting.', 'heading:Next steps', 'taskList:Book the room', 'table:OwnerDue dateKimFriday']);
       expect(editor!.state.doc.firstChild!.textContent).toBe('This note follows the P3 sitting.');
+      act(() => void editor!.commands.insertContentAt(editor!.state.doc.firstChild!.nodeSize - 1, ' Read.'));
+      await until(() => stored().length === 5, 'the trailing node at the host');
+      expect(stored()).toEqual(['paragraph:This note follows the P3 sitting. Read.', 'heading:Next steps', 'taskList:Book the room', 'table:OwnerDue dateKimFriday', 'paragraph:']);
     } finally {
       cleanup();
       host.destroy();

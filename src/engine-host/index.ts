@@ -4,8 +4,8 @@
 // E10: one bundle, two modes, decided at load: `process.parentPort` present → `utility` (an Electron utility process
 // forked by main, served over a MessagePort, as before); `--detached <supervisorDir>` in argv → `detached` (the
 // supervisor: the Electron binary as Node, outliving the app, served over a Unix socket; detached.ts).
-import { idleCollector } from '@shared/host/idle-collect';
-import { hostPing, runHost, type HostOn, type HostRegister } from '@shared/host/runtime';
+import { eventNews, idleCollector } from '@shared/host/idle-collect';
+import { hostPing, runHost, type DocPortEnd, type HostEmit, type HostOn, type HostRegister } from '@shared/host/runtime';
 import { captureShellEnvironment } from '@shared/host/shell-env';
 // C3 start
 import { dirname, join } from 'node:path';
@@ -100,17 +100,58 @@ const sessionHostDeps = (dir: string) => ({ hostsDir: hostsDirOf(dir), binary: s
 // P5 O16 M3: a session host's token, written beside it by the launch that started it
 const tokenOf = (dir: string, holderId: string): string => readFileSync(sessionHostPaths(hostsDirOf(dir), holderId, { userData: userData!, tmpdir: tmpdir() }).token, 'utf8').trim();
 
-const register: HostRegister = (untimedOn, emit, client) => {
+// P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects. Decision
+// Log 273: and a quiet period's, while a client holds interest or a row holds work but nothing runs. Activity is every
+// request handled (in flight until its handler settles, its client gone or not), every event emitted that is news (a
+// change of state, not a periodic memory sample's: eventNews), every line and document frame its client sends on the
+// detached socket or a document port, and every change the store's watcher hears; the I/O those start, a periodic
+// reconcile's included, is the collector's own last check (ioInFlight).
+let requests = 0;
+const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false, activity: { settled: () => requests === 0 && (supervision?.unoccupied() ?? false) } });
+
+const news = eventNews();
+
+// P5 Decision Log 273: a document port whose every message in is activity
+function activePort(port: DocPortEnd): DocPortEnd {
+  return {
+    postMessage: (message) => port.postMessage(message),
+    on(event: 'message' | 'close', listener: ((event: { data: unknown }) => void) | (() => void)) {
+      if (event === 'close') return port.on('close', listener as () => void);
+      return port.on('message', (data) => {
+        idle.activity();
+        (listener as (event: { data: unknown }) => void)(data);
+      });
+    },
+    start: () => port.start(),
+    close: () => port.close(),
+  };
+}
+
+const register: HostRegister = (untimedOn, untrackedEmit, untrackedClient) => {
+  const client: typeof untrackedClient = { ...untrackedClient, onDocPort: (handler) => untrackedClient.onDocPort((message, port) => (idle.activity(), handler(message, activePort(port)))) };
+  const emit: HostEmit = (name, payload) => {
+    if (news.news(name, payload)) idle.activity();
+    return untrackedEmit(name, payload);
+  };
   // P4-R6: each request's synchronous part recorded as the host's work while a scale seam watches (documents/host-work.ts)
   // P5 O7 M5a: every registration keeps its artifact writes for host.artifactOp, wherever the host registers them
-  const writes = keepArtifactWrites((name, handler) => untimedOn(name, (input, ctx) => timed('request', () => handler(input, ctx), () => name)));
+  const writes = keepArtifactWrites((name, handler) => untimedOn(name, (input, ctx) => timed('request', async () => {
+    idle.activity();
+    requests += 1;
+    try {
+      return await handler(input, ctx);
+    } finally {
+      requests -= 1;
+      idle.activity();
+    }
+  }, () => name)));
   const on: HostOn = writes.on;
   on('engine.ping', async () => hostPing(HOST_VERSION));
   // C4 start: the filesystem state service (fs.*) over the engine's store, read-only; C3's `session.events` answers an
   // app session with no process here from it (`diskEvents` below).
   // W7: a registry record of one of the process table's live pids is MAWS's own, never a holder
   let table: ProcessTable | null = null;
-  const fs = registerFs(on, emit, process.env, { ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
+  const fs = registerFs(on, emit, process.env, { activity: () => idle.activity(), ownPids: () => new Set(table?.list().flatMap((s) => (s.pid !== null && s.lifecycle !== 'exited' ? [s.pid] : [])) ?? []) });
   // C4 end
   // P3-A: the artifact store and its document service, closed at the end of engine.shutdown's body, which both modes run
   // on the way out (utility: main's quit; detached: the exit order and host.stopAll). M4: `artifacts.*`, `spaces.*` and
@@ -148,7 +189,6 @@ const register: HostRegister = (untimedOn, emit, client) => {
     gateFailed = true;
     console.warn(`[supervisor] the gate could not listen at ${gatePath}: ${error instanceof Error ? error.message : String(error)}`);
   });
-  const idle = idleCollector({ log: (line) => console.log(`[supervisor] ${line}`), quiet: () => supervision?.quiet() ?? false }); // P5 Decision Log 124's lever: a collection at each entry into Supervision's quiet, asked again as it collects
   // C3 start
   ipc = registerEngineIpc(on, emit, {
     afterShutdown: () => {
@@ -207,7 +247,7 @@ const register: HostRegister = (untimedOn, emit, client) => {
   // C3 end
   // P3-H H3b: route E's engine leg and the grant store's commands, main's alone; ended when the app goes (P5 O3-D M3), or,
   // for a client listing `host.connectors`, at its connection's end (P5 O4 M2, Interfaces §D)
-  connectors = registerConnectors(on, emit, client.connectorsPresence, { sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
+  connectors = registerConnectors(on, emit, client.connectorsPresence, { work: () => idle.work() /* P5 Decision Log 273 */, sessions: table, store, datasetRefresh, deliveryConfig: { userData, captureEnv: captureShellEnvironment } }); // WR 76/78: cold owner delivery; E3: its registry
   // C3: journal pruning at host start (E10: here, so a detached candidate that finds the lock held prunes nothing; and
   // every 24 h after, keeping every launch the table holds a row for, since a supervisor outlives the app by days)
   // P5 O16 M3 (D25): a detached host's starts once its adoptions have ended (`adoptAtStart`), keeping every launch a
@@ -250,6 +290,7 @@ if (mode === 'utility') {
     return { ipc, supervision };
   };
   runDetached(HOST_VERSION, register, {
+    activity: () => idle.activity(), // P5 Decision Log 273
     dir,
     modulePath: entryFile,
     log: openSupervisorLog(dir),

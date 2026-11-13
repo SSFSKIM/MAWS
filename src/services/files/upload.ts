@@ -16,6 +16,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
 import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { AlreadyThere, confirmOpens, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
@@ -108,7 +109,7 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
     if (separated) return refused(`${separated.name} has a path separator`);
     let base: string;
     try {
-      base = realpathSync(directories.worktree?.path ?? directories.directory); // links above it are the session's own spelling, as lane A resolves its cwd
+      base = realpathSync(workingFolder(directories).path); // links above it are the session's own spelling, as lane A resolves its cwd
     } catch (error) {
       return refused(`the session’s working directory could not be read (${errorText(error)}), so nothing was saved`);
     }
@@ -174,7 +175,7 @@ export function createUploadReader({ sessions, now = Date.now }: UploadReaderDep
     if (directories === null) return refused(sessions.record(id) === null && sessions.intent(id) == null ? `unknown app session: ${id}` : 'the session has no working directory');
     let base: string;
     try {
-      base = realpathSync(directories.worktree?.path ?? directories.directory);
+      base = realpathSync(workingFolder(directories).path);
     } catch (error) {
       return refused(`the session’s working directory could not be read (${errorText(error)})`);
     }

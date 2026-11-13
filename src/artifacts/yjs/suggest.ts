@@ -15,7 +15,7 @@ import * as delta from 'lib0/delta';
 import * as encoding from 'lib0/encoding';
 import * as Y from '@y/y';
 import { insertedBy, type ContentIds, type ContentMap, type ItemId } from './attribution';
-import type { Doc } from './doc';
+import { newDocGcOff, newSuggestionDoc, type Doc } from './doc';
 
 export interface SuggestionRange {
   start: ItemId;
@@ -56,8 +56,10 @@ export class SuggestionError extends Error {
   }
 }
 
+// A plan's scratch doc: gc off, so what the plan deletes stays readable to it. One that tidied formatting after the
+// applies below would plan against a state the main doc does not hold.
 const scratch = (state: Uint8Array, suggestion = false): Y.Doc => {
-  const doc = new Y.Doc({ gc: false, isSuggestionDoc: suggestion });
+  const doc = suggestion ? newSuggestionDoc() : newDocGcOff();
   Y.applyUpdateV2(doc, state);
   return doc;
 };
