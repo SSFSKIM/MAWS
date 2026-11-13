@@ -121,13 +121,60 @@ describe('cold customization inventory', () => {
     } });
     const answer = await read(cwd);
     expect(answer.skills).toEqual([
-      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'example@market' },
-      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'example@market' },
-      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'project@market' },
-      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'project@market' },
+      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'example@market', pluginName: 'example' },
+      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'example@market', pluginName: 'example' },
+      { name: 'Shared', description: 'One line continued', source: 'plugin', path: standard, plugin: 'project@market', pluginName: 'example' },
+      { name: 'Extra', description: 'Declared', source: 'plugin', path: declared, plugin: 'project@market', pluginName: 'example' },
     ]);
     expect(answer.warnings.join(' ')).toMatch(/Plugin.*MCP.*not inventoried/);
     expect((await read()).skills.every((row) => row.plugin === 'example@market')).toBe(true);
+  });
+
+  // UX wave U11a, §D "Skills" (P3, spikes/protocol-probe/findings-uxwave-u11-skill-names.txt): the engine names a plugin
+  // by its manifest's `name`, so `/<key up to @>:<skill>` runs nothing when the marketplace entry is named otherwise
+  it('names each plugin skill by its manifest’s name, which may differ from the installed key, and gives no other skill one', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    await skill(join(configHome, 'skills'), 'mine');
+    await skill(join(cwd, '.claude', 'skills'), 'ours');
+    const pluginRoot = join(root, 'plugin');
+    await skill(join(pluginRoot, 'skills'), 'folder-skill');
+    await skill(pluginRoot, 'declared', '---\nname: Declared\n---\n');
+    await json(join(pluginRoot, '.claude-plugin', 'plugin.json'), { name: 'fx-manifest', skills: ['./declared'] });
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins: { 'fx-entry@fx-market': [{ scope: 'user', installPath: pluginRoot }] } });
+    const answer = await read(cwd);
+    expect(answer.skills.filter((row) => row.source === 'plugin').map((row) => [row.name, row.plugin, row.pluginName])).toEqual([
+      ['Shared', 'fx-entry@fx-market', 'fx-manifest'],
+      ['Declared', 'fx-entry@fx-market', 'fx-manifest'],
+    ]);
+    const others = answer.skills.filter((row) => row.source !== 'plugin');
+    expect(others.map((row) => row.source)).toEqual(['user', 'project']);
+    expect(others.every((row) => !('pluginName' in row))).toBe(true);
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
+  });
+
+  it('gives a plugin skill a null pluginName where the manifest’s name cannot be read or is not one the engine loads', async () => {
+    const plugins: Record<string, { scope: 'user'; installPath: string }[]> = {};
+    const manifests: [string, unknown][] = [
+      ['absent', undefined],
+      ['unnamed', { description: 'no name' }],
+      ['numbered', { name: 7 }],
+      ['empty', { name: '' }],
+      ['spaced', { name: 'two words' }],
+      ['long', { name: 'x'.repeat(257) }],
+      ['broken', '{"name": "half'],
+    ];
+    for (const [key, manifest] of manifests) {
+      const installPath = join(root, 'plugins', key);
+      await skill(join(installPath, 'skills'), `${key}-skill`, `---\nname: ${key}-skill\n---\n`);
+      if (typeof manifest === 'string') await file(join(installPath, '.claude-plugin', 'plugin.json'), manifest);
+      else if (manifest !== undefined) await json(join(installPath, '.claude-plugin', 'plugin.json'), manifest);
+      plugins[`${key}@fx-market`] = [{ scope: 'user', installPath }];
+    }
+    await json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins });
+    const answer = await read();
+    expect(answer.skills.map((row) => [row.name, row.pluginName])).toEqual(manifests.map(([key]) => [`${key}-skill`, null]).sort());
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
   });
 
   it('follows disk skill symlinks but refuses plugin declarations and links that escape their installation', async () => {
