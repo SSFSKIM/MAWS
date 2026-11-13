@@ -18,7 +18,7 @@ import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../../ipc/client';
 import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
 import { useLayout, type LayoutState } from '../../../stores/layout';
-import { groupForOpen, groupOf, sideGroups, surfaceRefs, surfaceTabs } from '../../../panel/surface-model';
+import { groupOf, sideGroups, surfaceRefs, surfaceTabs, type SideGroupName } from '../../../panel/surface-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskSheetParams } from '../actions';
 import { applyAskEvents, askSheet, reloadAsks } from './store';
@@ -29,16 +29,22 @@ function openSheet(appSessionId: AppSessionId, askId: string): void {
   if (!usePanelHost.getState().tools.has(ASK_SHEET_TOOL_ID)) return;
   const layout = useLayout.getState();
   const visible = layout.regions.panel.collapsed ? [] : surfaceTabs(layout, appSessionId);
-  if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId)) {
-    automatic.set(appSessionId, {
-      inViewBefore: inViewBefore(layout, appSessionId),
-      stop: askSheet(appSessionId).subscribe((state, before) => {
-        // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
-        if (state.asks !== before.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
-      }),
+  const opened = !visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId) ? { inViewBefore: null as string | null, stop: () => {} } : null;
+  const before = opened && shownBefore(layout, appSessionId);
+  if (opened) {
+    opened.stop = askSheet(appSessionId).subscribe((state, prev) => {
+      // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
+      if (state.asks !== prev.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
     });
+    automatic.set(appSessionId, opened);
   }
-  panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
+  const tabId = panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
+  // The branch review's finding 1: the sheet's group is the one the host put it in (its one resolver, which reads the
+  // keyboard too), read back from where its tab now is; the tab it displaced in that group is the one it gives back.
+  if (opened && before) {
+    const group = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    opened.inViewBefore = group === null ? null : before[group];
+  }
 }
 
 // Asks that opened while their session was not shown, oldest first. One table for the window (App.tsx connects once),
@@ -49,12 +55,11 @@ const waiting = new Map<AppSessionId, string[]>();
 // tab in view the sheet takes the place of its group's tab, which it gives back then (null: the column was hidden).
 const automatic = new Map<AppSessionId, { stop: () => void; inViewBefore: string | null }>();
 
-function inViewBefore(layout: LayoutState, appSessionId: AppSessionId): string | null {
+// Each group's tab in view before the sheet opens; null while the column is hidden or the right side collapsed.
+function shownBefore(layout: LayoutState, appSessionId: AppSessionId): Record<SideGroupName, string | null> | null {
   const groups = sideGroups(layout, appSessionId);
   if (layout.regions.panel.collapsed || groups.hidden) return null;
-  const sheet = surfaceRefs(layout, appSessionId).find((tab) => tab.toolId === ASK_SHEET_TOOL_ID);
-  const group = (sheet && groupOf(groups, sheet.id)) ?? groupForOpen(groups, ASK_SHEET_TOOL_ID, null, null);
-  return (group === 'lower' ? groups.lower?.shown : groups.upper.shown)?.id ?? null;
+  return { upper: groups.upper.shown?.id ?? null, lower: groups.lower?.shown?.id ?? null };
 }
 
 function stopAutomatic(appSessionId: AppSessionId): void {
