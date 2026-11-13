@@ -5,6 +5,7 @@
 // menu, a machine's own row's included, offers no Channel. `sidebar/menus.tsx` keeps its own inline reading.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge, ProjectRecord } from '@shared/ipc/schema';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
@@ -51,7 +52,7 @@ const REGISTRY: OrgProjects = {
   removals: [],
   seen: {},
 };
-const ELSEWHERE = addressOf(OTHER_MACHINE, 'loose'); // a session on another machine in no project: its machine's own row
+const ELSEWHERE = addressOf(OTHER_MACHINE, 'loose' as AppSessionId); // a session on another machine in no project: its machine's own row
 
 beforeEach(() => {
   resetShellStores();
