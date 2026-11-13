@@ -84,6 +84,9 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
     panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
+    panelGroups: { version: 1, lower: {} }, // UX wave U8b
+    panelWidths: { version: 1, wide: null, narrow: null },
+    cardsOpen: ['environment'],
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: true,
