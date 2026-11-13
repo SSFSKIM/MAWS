@@ -28,7 +28,8 @@ How to see it working: the unit tests named under each milestone fail before its
 - [x] (2026-11-12 02:10Z) M1's follow-up at the architect's request: a refused custom callback or reconnect is followed by a sign-in through the engine's own listener, reported as `fallback` (`2aac33196`), reviewed clean. P1 runs at `2aac33196`.
 - [x] (2026-11-12) P2 and P3 answered by the architect's probes (branch `ux-wave/probe3-u11` at `7f3f6c692`); the rulings are written into §C's `<place>`, §D's Skills, §H and the Decision Log, and M6 and M7 are built to them.
 - [x] (2026-11-12 02:08Z) M2 — Org sheets: refusals that name a next step; the grant sheet's read; the paused live query (`18bf9a01b`, `dd6626fd5`), reviewed clean.
-- [ ] M3 — one scrim, also where dialogs stack; the Channel's gutter and names.
+- [x] (2026-11-12 03:55Z) M3 — one scrim, also where dialogs stack; the Channel's gutter and names (`ba1ffbf36`, `1478db973`, `22b9fa856`; the review's two fix waves, `744dec08e`, `66dc8ad00`, `f0845e1d9`, `2350849f1`), reviewed clean.
+- [x] (2026-11-12 03:55Z) Master `e71334239` merged (`b622bdc1a`): U6a's keymap is on the branch, so M5 is released.
 - [x] (2026-11-12 03:41Z) M4 — the Channel says it is offline, or refused (`d3c3fa456`, `e1d925148`, `0adbfd07c`; the review's fix, a refusal that stands through another tab's open, `3ffc6dd65`, `8a6a631c2`), reviewed clean. P4 waits for a Mac.
 - [ ] M5 — the Channel from the palette and the View menu.
 - [ ] M6 — the Connectors dialog.
@@ -516,6 +517,7 @@ From the worktree of branch `ux-wave/U11a`. `vmcheck` below stands for `~/.local
    - `e2e/c11-live.spec.ts` has no gate group, so its edits run only at a live sitting;
    - the gate cannot switch the sign-in spike on (`MAWS_SIGNIN_SPIKE`);
    - the document editor's confirm stays outside the shared backdrop (it never stacks);
+   - `EnrollSheet.test.tsx`'s re-enroll case (master's) prints an uncaptured "[org] command failed … no answer for org.enroll.approve" from an unanswered fake call;
    - where the main root of a session's repository cannot be read (git answers nothing, or another machine does not offer the reading), the Connectors dialog's head names the session's folder, a narrower place than the engine's switch reaches (P2).
 
 7. **The architect's, after the hand-back.** The e2e runs of "Proof that an executor does not run"; class 1a on the head handed back, in the background (`scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u11a`); the xhigh panel; class 1a again on the final head if the panel changed the branch; the pull request. Whoever merges master into the branch after this point makes the wire's files again as step 5 does.
@@ -1152,6 +1154,10 @@ Found while checking the sections against the code at `48619c824`, then by the a
 - Decision (the architect's ruling): a board id is never written as `#` and three or six hex digits in this branch's files (comments, test names, strings); M3's fix wave rewrote every one the branch had added as "board NNN" in 34 files, and `test/support/tokens-guard.test.ts` stays as it is.
   Rationale: the guard reads such an id as a colour literal, and its rule is right.
   Date/Author: 2026-11-12, the wave's architect; applied by M3's executor.
+
+- Decision (M3's second review, fixed): a person's directed message is a `words` entry (it names a member, with no session title or machine chip), not one of §E's say, exchange or to-human rows, so it keeps its layout and the e2e names check finds its rows by their alias part; a row that names a session without the `Names` group is still a fault, and the scene asserts a directed person's message is present at each width.
+  Rationale: §E's order governs the rows that name a session.
+  Date/Author: 2026-11-12, M3's executor on the task review; folded by the controller.
 
 ## Outcomes & Retrospective
 
