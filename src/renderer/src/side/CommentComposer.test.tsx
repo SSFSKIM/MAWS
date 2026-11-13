@@ -37,7 +37,7 @@ function withParent(process: 'ready' | 'exited', turn = false) {
 }
 
 const BUILT = [{ type: 'text', text: 'the built message' }];
-const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: null } } as const;
+const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' } } as const;
 const box = () => screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
 const titleOf = (input: HTMLInputElement) => input.closest('label')!.getAttribute('title');
 

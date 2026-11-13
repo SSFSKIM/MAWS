@@ -9,10 +9,11 @@
 // checkbox, "Send to main", unchecked unless the surface asked for main. Whether a tick can send is the session's port's
 // answer (`capability('send')`), the composer's own, so one rule covers a session MAWS runs, a terminal session and one
 // on another machine; whether unchecked can is known here for an archived session, one with no conversation to fork,
-// and one on another machine (where the box is ticked and locked). A state that cannot send is locked out with its
-// reason as the box's title; with neither, the reason is a line under the field. A tick sends through `sendComments`,
-// which starts a session that is not running itself (the button reads Starting… meanwhile); once it went, the host's
-// place is told where it went (`place`; the sheet, with none, says what is not a plain delivery as a toast).
+// and one on another machine (where the box is ticked and locked). The box cannot be moved into a state that can't
+// send, its reason the box's title; a state it is in that can't send says why in a line under the field. A tick sends
+// through `sendComments`, which starts a session that is not running itself (the button reads Starting… meanwhile);
+// once it went, the host's place is told where it went (`place`; the sheet, with none, says what is not a plain
+// delivery as a toast).
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -149,11 +150,11 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
   const mainRefusal = sendable.available ? null : sendable.reason;
   const threadRefusal = threadRemote !== null ? COPY.threadRemote(machine) : availability === 'archived' ? ARCHIVED : forkable ? null : COPY.noConversation;
   const refusalOf = (to: CommentDestination) => (to === 'main' ? mainRefusal : threadRefusal);
-  // ticked and locked where unchecked can't send and a tick can (another machine's session, whatever its port says
-  // meanwhile), unchecked and locked the other way round; neither, the person's choice
-  const locked: boolean | null = threadRemote !== null || (threadRefusal !== null && mainRefusal === null) ? true : mainRefusal !== null && threadRefusal === null ? false : null;
-  const toMain = locked ?? wantsMain;
+  // ticked and locked for another machine's session (no side thread there yet, whatever its port says meanwhile);
+  // otherwise the person's choice, which cannot be moved into a state that can't send
+  const toMain = threadRemote !== null || wantsMain;
   const destination: CommentDestination = toMain ? 'main' : 'thread';
+  const otherRefusal = refusalOf(toMain ? 'thread' : 'main');
   const ready = status?.process === 'ready';
   const turn = controls?.turn() ?? null; // a bridged session's own turn; null where the status says it (lane B)
   const running = turn ? turn.running : ready && Boolean(status?.turn);
@@ -213,10 +214,10 @@ export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending
     destination,
     toMain,
     setToMain: setWantsMain,
-    // UX wave U5a: the box is off while a send is on its way, where one state is locked, and where neither can send
-    toMainFixed: sending || locked !== null || (mainRefusal !== null && threadRefusal !== null),
-    // its title: why it is locked, else what a tick does now (the composer's words)
-    toMainTitle: threadRemote !== null ? COPY.threadRemote(machine) : (mainRefusal ?? threadRefusal ?? (starts ? STARTS : running ? COPY.mainBusy : COPY.mainIdle)),
+    // UX wave U5a: the box is off while a send is on its way, and where the state it would move to can't send
+    toMainFixed: sending || otherRefusal !== null,
+    // its title: why a tick can't send, or why it can't be left, else what a tick does now (the composer's words)
+    toMainTitle: (threadRemote !== null ? threadRefusal : null) ?? mainRefusal ?? (toMain ? threadRefusal : null) ?? (starts ? STARTS : running ? COPY.mainBusy : COPY.mainIdle),
     unsendable: refusalOf(destination), // the line under the field when the state it is in can't send
     mainEnabled: mainRefusal === null,
     screenshot,

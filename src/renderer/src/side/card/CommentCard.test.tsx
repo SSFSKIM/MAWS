@@ -62,7 +62,7 @@ function withParent(process: 'ready' | 'exited') {
 
 // UX wave U5a: a ticked comment's content is main's, sent through the session's port as a typed message is
 const BUILT = [{ type: 'text', text: 'the built message' }];
-const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: null } } as const;
+const MAIN_SENDS = { 'side.comment.content': { content: BUILT }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' } } as const;
 
 beforeEach(() => {
   resetShellStores();
@@ -373,7 +373,7 @@ describe('dismissal', () => {
       await act(async () => {});
       expect(field().disabled).toBe(true);
       fireEvent.keyDown(field(), { key: 'Enter' });
-      await act(() => fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: null }));
+      await act(() => fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q0' }));
       expect(fake.invoked('session.send')).toHaveLength(1);
       expect(fake.invoked('side.comment.content')).toHaveLength(1);
       expect(useCommentCard.getState().open).toBeNull();
@@ -459,7 +459,7 @@ describe('the checkbox and the one send path', () => {
     useSessions.setState({ records: new Map([[PARENT, record(PARENT, { title: { text: 'Q3 plan', source: 'user' }, holder: { kind: 'terminal', pid: 42 } })]]), engine: new Map() });
     applyLaneAState(PARENT, laneAState(PARENT));
   }
-  const LINK = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null } as const;
+  const LINK = { state: 'up' as const, refusal: null, carrier: 'direct' as const, member: 'm', clientClass: 'native-mac', rights: [] as string[], reason: null };
   function onStudio(id: AppSessionId, lane: 'A' | 'B') {
     useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
     useSessions.setState({ listed: new Map([[id, { ...remoteRow(OTHER_MACHINE, lane === 'A' ? 'eng-r' : 'app-r', { lane, ...(lane === 'A' && { availability: 'foreign_held' }) }), appId: id }]]), listedMachines: new Set([OTHER_MACHINE]) });
@@ -524,6 +524,7 @@ describe('the checkbox and the one send path', () => {
   });
 
   it('an archived session: the checkbox and Send are off, and the reason is a line under the field', async () => {
+    withParent('exited');
     act(() => useSessions.setState({ digests: new Map([[PARENT, digest(PARENT, { availability: 'archived' })]]) }));
     mount();
     pick();
@@ -559,7 +560,7 @@ describe('the checkbox and the one send path', () => {
     expect(field().disabled).toBe(true);
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(card()).toBeNull();
-    await act(() => fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: null }));
+    await act(() => fake.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q0' }));
     expect(note()!.textContent).toBe('Sent to Q3 plan');
     expect(fake.invoked('session.send')).toHaveLength(1);
 

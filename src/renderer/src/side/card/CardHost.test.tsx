@@ -15,7 +15,8 @@ import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hideSideChild, showSideChild, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
 import { CLAIM_DEADLINE_MS, closeCard, notePlace, openCard, resetPlaceNotes, useCommentCard } from './store';
-import { holdPendingSend, resetLaneAStore } from '../../stores/lane-a'; // UX wave U5a
+import { applyLaneAState, holdPendingSend, resetLaneAStore } from '../../stores/lane-a'; // UX wave U5a
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { shownSession } from '../../panel/host'; // UX wave U5a
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
@@ -443,6 +444,7 @@ describe('the place’s note', () => {
   it('a pending line names its state in the session’s words, and Show brings that session’s tab to the front', () => {
     const key = { writer: 'maws/m', seq: 1 };
     useSessions.setState({ records: new Map() });
+    applyLaneAState(PARENT, laneAState(PARENT)); // the session's bridge, whose deliveries name nothing yet
     holdPendingSend(PARENT, key, 'the words');
     render(<Host frame={frameOf('k1')} />);
     act(() => notePlace('h1', { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' }));

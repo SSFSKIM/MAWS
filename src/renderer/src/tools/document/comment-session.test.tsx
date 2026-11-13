@@ -192,6 +192,7 @@ const destination = () => ((screen.getByRole('checkbox', { name: 'Send to main' 
 
 describe('a comment from a document with no chat beside it', () => {
   it('beside a chat: the card goes to the shown session and does not name it', async () => {
+    act(() => useLayout.getState().openSession(SHOWN)); // UX wave U5a (decision 16): the card names a session the main area does not show
     const { comment } = mount({ appSessionId: SHOWN });
     comment();
     await act(async () => {});

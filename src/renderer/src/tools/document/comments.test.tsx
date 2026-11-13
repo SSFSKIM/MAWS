@@ -53,7 +53,7 @@ beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
   // UX wave U5a: a ticked comment's content is main's, sent through the session's port as a typed message is
-  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: null }, 'session.intent.get': null });
+  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' }, 'session.intent.get': null });
   window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();

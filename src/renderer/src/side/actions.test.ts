@@ -2,6 +2,7 @@
 // card docks the first message main sends it, so the card's Cancel hands the comment (or the promotion) back to the
 // editor; a summary row's Open obeys the panel rule; a promotion clips each exchange to the command's caps.
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
@@ -192,7 +193,7 @@ describe('sendComments, ticked: the session’s own conversation', () => {
   function laneB(turn = false, given: Parameters<typeof fakeClient>[0] = {}) {
     const engine = status(MAIN, { process: 'ready', ...(turn && { turn: { id: 'e1', origin: 'human', startedAt: 'x', acceptedAt: 'x', userMessageUuids: [] } }) } as never);
     useSessions.setState({ records: new Map([[MAIN, record(MAIN)]]), engine: new Map([[MAIN, engine]]) });
-    return fakeClient({ 'side.comment.content': { content: [IMAGE, TEXT] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: null }, 'session.steer': { messageUuid: null }, ...given });
+    return fakeClient({ 'side.comment.content': { content: [IMAGE, TEXT] }, 'session.queue.list': { entries: [], paused: false }, 'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q0' }, 'session.steer': { messageUuid: null }, ...given });
   }
   const terminal = (given: Parameters<typeof fakeClient>[0] = {}) => {
     useSessions.setState({ records: new Map([[MAIN, record(MAIN, { holder: { kind: 'terminal', pid: 42 } })]]) });
@@ -250,7 +251,7 @@ describe('sendComments, ticked: the session’s own conversation', () => {
 
   describe('a terminal session on another machine', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
-    const LINK = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null } as const;
+    const LINK = { state: 'up' as const, refusal: null, carrier: 'direct' as const, member: 'm', clientClass: 'native-mac', rights: [] as string[], reason: null };
     function remote(text: string) {
       useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
       applyLaneAState(REMOTE, laneAState(REMOTE, { link: LINK, acts: [] }));
@@ -271,7 +272,7 @@ describe('sendComments, ticked: the session’s own conversation', () => {
     });
 
     it('the window’s bound is the endpoint’s `SEND_TEXT_MAX`', () => {
-      const link = readFileSync(new URL('../../../endpoint/rl10/link.ts', import.meta.url), 'utf8');
+      const link = readFileSync(resolve(process.cwd(), 'src/endpoint/rl10/link.ts'), 'utf8'); // the suite runs from the repository's root
       const bound = /^const SEND_TEXT_MAX = ([\d_]+);$/m.exec(link)?.[1];
       expect(bound, 'src/endpoint/rl10/link.ts declares SEND_TEXT_MAX').toBeDefined();
       expect(REMOTE_TERMINAL_TEXT_MAX).toBe(Number(bound!.replaceAll('_', '')));
