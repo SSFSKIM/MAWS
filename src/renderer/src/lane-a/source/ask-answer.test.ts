@@ -1,8 +1,9 @@
 // The ask mod's answer to an async question (`ask-answer.ts`), through MAWS's own store, reducer and report, on rows in
 // the shapes 2.1.302 keeps them (local transcripts, read for their shapes): the prompt the plugin submits while the
-// session is idle, and the context on a tool's result or on the human's next prompt. Each draws as the line
-// `answered: …` where the answer reached the model, never as the harness's text, and the idle prompt's turn as one the
-// session continued, with no bubble of the owner's.
+// session is idle, and the context on a tool's result or on the human's next prompt. Each draws as the answer's notice
+// `answered: …` where the answer reached the model (UX wave U3, UC-2, class `answer`: MAWS's backfill draws it from the
+// arrivals reader), never as the harness's text, and the idle prompt's turn as one the session continued, with no
+// bubble of the owner's.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { reportRows } from '../../owner/report/project';
@@ -11,7 +12,7 @@ import type { Row } from '../../transcript/model/rows';
 import { answeredWords, askAnswers, CLARIFYING, isAnswerPrompt } from '../conversation/ask-answer';
 import { deliveredLines } from '../conversation/delivery-frame';
 import { Chain, SESSION } from '../test-support/chain-rows';
-import { ANSWERED } from './ask-answer';
+import { NOTICE } from '../../transcript/model/copy';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
 
 const QUESTIONS = [
@@ -29,7 +30,7 @@ async function drawn(rows: JsonObject[]) {
   return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}) };
 }
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
-const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'error' ? [r.text] : []));
+const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' && r.class === 'answer' ? [r.text] : []));
 const dividers = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'divider' ? [r.origin] : []));
 const HARNESS = /AskUserQuestion|plugin sent a message|surfaces a prompt/;
 
@@ -79,13 +80,13 @@ describe("the ask mod's answer", () => {
     c.end();
     const { rows, report } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     // The turn the answer opened reads as one the session continued ("Continued for …").
     expect(dividers(rows)).toEqual(['engine']);
-    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(rows.find((r) => r.kind === 'error')?.turnId);
+    expect(rows.find((r) => r.kind === 'divider')?.turnId).toBe(rows.find((r) => r.kind === 'notice')?.turnId);
     expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
     // The report folds the answered turn's work and keeps the line, the persistent row it is.
-    expect(lines(report)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(report)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
   });
 
@@ -97,8 +98,8 @@ describe("the ask mod's answer", () => {
     const { rows } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual([]);
     expect(lines(rows)).toEqual([
-      `${ANSWERED}: Which color do you prefer? → Blue · Which season do you prefer? → Summer`,
-      `${ANSWERED}: Which color do you prefer? → teal, if we have it`,
+      NOTICE.answered('Which color do you prefer? → Blue · Which season do you prefer? → Summer'),
+      NOTICE.answered('Which color do you prefer? → teal, if we have it'),
     ]);
   });
 
@@ -118,9 +119,9 @@ describe("the ask mod's answer", () => {
     const { rows } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.', 'And the font?']);
     const turns = rows.flatMap((r) => (r.kind === 'user' ? [r.turnId] : []));
-    expect(rows.flatMap((r) => (r.kind === 'error' ? [[r.text, r.turnId]] : []))).toEqual([
-      [`${ANSWERED}: Color → Blue · Season → Summer`, turns[0]],
-      [`${ANSWERED}: Color → teal, if we have it`, turns[1]],
+    expect(rows.flatMap((r) => (r.kind === 'notice' ? [[r.text, r.turnId]] : []))).toEqual([
+      [NOTICE.answered('Color → Blue · Season → Summer'), turns[0]],
+      [NOTICE.answered('Color → teal, if we have it'), turns[1]],
     ]);
   });
 });
@@ -143,7 +144,7 @@ describe("the ask mod's answer under either plugin's name", () => {
     expect(askAnswers(idle)).toEqual([{ call: 'toolu_01RZQ8nn9jVyPaqznEmsoXMr', text: CHOSEN }]);
     const { rows } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(dividers(rows)).toEqual(['engine']);
     expect([...bubbles(rows), ...lines(rows)].some((text) => HARNESS.test(text))).toBe(false);
   });
@@ -161,7 +162,7 @@ describe("the ask mod's answer under either plugin's name", () => {
     c.answer('Blue.');
     c.end();
     const { rows } = await drawn(c.rows);
-    expect(lines(rows)).toEqual([`${ANSWERED}: Color → Blue · Season → Summer`]);
+    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(bubbles(rows)).toEqual(['Pick my colors.']);
   });
 

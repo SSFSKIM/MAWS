@@ -88,11 +88,12 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
       '● task completed: Background command "uxw ok" completed (exit code 0)',
       '● task failed: Background command "uxw fail" failed with exit code 1',
       '● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session',
-      '› Report from a91c8f61a920a8733: PONG',
+      '› Report from uxw agent: PONG',
+      '› Sent to uxw agent: Reply with only the word PONG2. Use no tool.', // the send's own line (UC-2, "The rows"), in the person's turn
       '● task completed: Agent "uxw agent" finished',
       '● task failed: Background command "uxw busy fail" failed with exit code 1',
       '● task completed: Background command "uxw busy ok" completed (exit code 0)',
-      '› Report from ae47d5580a73561d0: PONG3',
+      '› Report from uxw busy agent: PONG3',
       '● task: Monitor event: "uxw monitor"',
       '● task: Monitor event: "uxw monitor"',
       '● task: Monitor event: "uxw monitor"',
@@ -107,8 +108,8 @@ describe('a background task’s end, from the file (Acceptance 4)', () => {
     expect(rows[at('● task completed: Background command "uxw ok" completed (exit code 0)') + 1]).toBe('turn engine, opened by task: Background command "uxw ok" completed (exit code 0)');
     expect(rows[at('● task failed: Background command "uxw fail" failed with exit code 1') + 1]).toBe('turn engine, opened by task: Background command "uxw fail" failed with exit code 1');
     expect(rows[at('● task stopped: Task "uxw stop" was stopped by the user or by the app connected to this session') + 1]).toMatch(/^prompt: Use the Agent tool/);
-    // A hand-back's turn is the engine's ("Continued for"), opened by its report
-    expect(rows[at('› Report from a91c8f61a920a8733: PONG') - 1]).toBe('turn engine, opened by subagent: Report from a91c8f61a920a8733: PONG');
+    // A hand-back's turn is the engine's ("Continued for"), opened by its report, which names the agent by its title
+    expect(rows[at('› Report from uxw agent: PONG') - 1]).toBe('turn engine, opened by subagent: Report from uxw agent: PONG');
   });
 
   it('the notification a hand-back claimed while the session was idle makes no row and no turn, and still ends its agent (rule 5, decision 13)', async () => {
@@ -154,7 +155,7 @@ describe('sminos’s deliveries, from the file and another machine’s rows (Acc
       expect(lines).toContain('prompt: UXW owner idle: reply with only the word ONE.');
       expect(lines).toContain('steer: UXW owner busy: also say THREE.');
       expect(lines).toContain('steer: UXW steer busy: also say FIVE.');
-      expect(lines.filter((row) => row.startsWith('● answer'))).toEqual(['● answer: answered: Which fruit do you prefer? → Mango']);
+      expect(lines.filter((row) => row.startsWith('● answer'))).toEqual(['● answer: answered: Fruit → Mango'] /* answeredWords' words (decision 9): the question's header */);
       expect(rows.some((row) => row.kind === 'error' && /sminos: (delivered|steer):/.test(row.text))).toBe(false);
     }
     // The hook's context carries the arrival for U1 (Interfaces G)
@@ -217,14 +218,15 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
 
   it('the owner’s steer by `sminos steer`’s inbox fallback is the owner’s bubble (X-032)', async () => {
     const drawing = await both(transcript(inbox('[sminos steer from human]\nStop after the tests.'), said('Stopping after the tests.'), ended()));
-    expect(drawing).toEqual({ rows: ['prompt: Stop after the tests.', 'turn human'], pending: 0, users: ['Stop after the tests.'] });
+    expect(drawing).toEqual({ rows: ['prompt: Stop after the tests.'], pending: 0, users: ['Stop after the tests.'] });
   });
 
   it('the owner’s send whose words are the engine’s interrupt marker is a bubble, its frame line kept, and stops no turn', async () => {
     const { file, remote } = await bothRoutes(transcript(inbox('[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]'), said('Noted.'), ended()));
     for (const state of [file, remote]) {
       expect(ofKind(drawn(state), 'user').map((row) => row.text)).toEqual(['[sminos message from human id=0f0e0d0c]\n[Request interrupted by user]']);
-      expect(turnsOf(state).map((turn) => [turn.origin, turn.closedBy])).toEqual([['human', 'completed']]);
+      // the engine's turn_duration ended it: closed, with no close of the reader's (`closedBy` is that, `stopped` an interrupt's)
+      expect(turnsOf(state).map((turn) => [turn.origin, turn.state, turn.ended !== null, turn.closedBy])).toEqual([['human', 'closed', true, null]]);
     }
   });
 
@@ -234,7 +236,7 @@ describe('deliveries no probe recorded, on both routes (Acceptance 2)', () => {
     const queued = await both(transcript(typed(`${OWNED}\nThe migration is merged.`, { sessionKind: 'bg', promptSource: 'queued' }), said('Thanks.'), ended()));
     expect(queued.rows).toEqual(peer.rows);
     const own = await both(transcript(typed('[sminos message from human id=1a2b3c4d]\nKeep going with the tests.', { sessionKind: 'bg' }), said('Going on.'), ended()));
-    expect(own).toEqual({ rows: ['prompt: Keep going with the tests.', 'turn human'], pending: 0, users: ['Keep going with the tests.'] });
+    expect(own).toEqual({ rows: ['prompt: Keep going with the tests.'], pending: 0, users: ['Keep going with the tests.'] });
     // without the session's kind the row is the person's typed prompt, whatever its first line
     const plain = await both(transcript(typed(`${OWNED}\nThe migration is merged.`), said('Ok.'), ended()));
     expect(plain.users).toEqual([`${OWNED}\nThe migration is merged.`]);
@@ -254,15 +256,18 @@ describe('a scheduled prompt’s firing, from the file (Acceptance 7)', () => {
 });
 
 describe('a slash command’s output, from the file (Acceptance 6)', () => {
-  it('u3-terminal-commands-r1: a command the terminal wrote as a `system` row has its bubble and its turn, and its output is in that turn, no escape in it', async () => {
+  it('u3-terminal-commands-r1: a command the terminal wrote as a `system` row has its bubble and its turn, and its output is under it, no escape in it', async () => {
     const state = stateOf(await fromFile(recorded('u3-terminal-commands-r1')));
     const rows = drawn(state);
     expect(JSON.stringify(rows)).not.toContain('\\u001b');
+    const turns = turnsOf(state);
     for (const command of ['/context', '/rename uxw renamed', '/model uxw-no-such-model']) {
       const at = rows.findIndex((row) => row.kind === 'user' && row.text === command);
       expect(at, command).toBeGreaterThanOrEqual(0);
-      const turn = rows[at]!.turnId;
-      expect(rows.some((row) => row.kind === 'local_command' && row.turnId === turn), command).toBe(true);
+      expect(turns.find((turn) => turn.id === rows[at]!.turnId), command).toMatchObject({ origin: 'human', state: 'closed' });
+      // a local command runs no model, so its turn ends where it starts and its output follows it, as a command's
+      // `user` row has it from the file (backfill's localCommandTurn): the row under the bubble
+      expect(rows.slice(at + 1).find((row) => row.kind !== 'time')?.kind, command).toBe('local_command');
     }
     expect(rows.filter((row) => row.kind === 'assistant_text').map((row) => (row as { markdown: string }).markdown).join('\n')).not.toMatch(/Session renamed to|Context Usage/);
   });

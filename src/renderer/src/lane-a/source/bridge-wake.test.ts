@@ -1,20 +1,20 @@
 // The bridge's wake (doperpowers PR 233, `STEER_WAKE` and `DELIVERY_WAKE` in `hooks/mods/bridge.tsx`): a prompt of the
 // bridge's own, first line `[sminos bridge]`, that points a session at a row its turn left unread. It reaches the
 // transcript as the bridge's prompt as the user, or, after an Esc, as the engine's peer message for the bridge's inbox
-// frame, idle or queued into a running turn. Each is drawn as the bridge's line in the turn, never as the owner's bubble
-// nor a peer's message, the turn it opens one the session continued; and none is a delivery, so none takes a send.
+// frame, idle or queued into a running turn. Each is drawn as the wake's notice in the turn (UX wave U3, UC-2, class
+// `wake`: MAWS's backfill draws it from the arrivals reader), never as the owner's bubble nor a peer's message, the turn
+// it opens the engine's; and none is a delivery, so none takes a send.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { createTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import { deliveredLines, deliveryAsDrawn, deliveryFrame, isBridgeWake } from '../conversation/delivery-frame';
-import { WAKE_SENDER, WAKE_TEXT } from './bridge-wake';
+import { NOTICE } from '../../transcript/model/copy';
 import { freshSource, subagentLookupOf } from '../plane-transcript';
 
 const SESSION = 'sess-1';
 const STEER_WAKE = '[sminos bridge]\nA note was added to the conversation while you were finishing your answer. Read it and act on it.';
 const DELIVERY_WAKE = '[sminos bridge]\nA message for you was added to the conversation while your turn was stopped, before you read it. Read it and act on it.';
-const LINE = `${WAKE_SENDER}: ${WAKE_TEXT}`;
 
 let n = 0;
 const uuid = () => `00000000-0000-4000-8000-${String(++n).padStart(12, '0')}`;
@@ -49,7 +49,7 @@ async function drawn(rows: JsonObject[]): Promise<Row[]> {
   return store.getState().entries.fresh.rows;
 }
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
-const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'error' ? [[r.text, r.scope, r.severity, r.turnId]] : []));
+const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' ? [[r.class, r.text, r.turnId]] : []));
 const dividers = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'divider' ? [[r.turnId, r.origin]] : []));
 
 describe("the bridge's wake", () => {
@@ -93,10 +93,10 @@ describe("the bridge's wake", () => {
     expect(bubbles(drawnRows)).toEqual(['List the files.', 'use the split store']);
     const turns = dividers(drawnRows);
     expect(turns.map(([, origin]) => origin)).toEqual(['human', 'engine']);
-    expect(lines(drawnRows)).toEqual([[LINE, 'plugin', 'notice', turns[1][0]]]);
+    expect(lines(drawnRows)).toEqual([['wake', NOTICE.wake, turns[1][0]]]);
     // The line comes before the answer it led to.
     const order = drawnRows.filter((r) => r.turnId === turns[1][0] && r.kind !== 'divider').map((r) => r.kind);
-    expect(order).toEqual(['error', 'assistant_text']);
+    expect(order).toEqual(['notice', 'assistant_text']);
   });
 
   it('through the inbox after an Esc, is the bridge’s line in a turn the session continued, not a peer session’s message', async () => {
@@ -107,7 +107,7 @@ describe("the bridge's wake", () => {
     expect(drawnRows.filter((r) => r.kind === 'agent_message')).toEqual([]);
     const turns = dividers(drawnRows);
     expect(turns.map(([, origin]) => origin)).toEqual(['human', 'engine']);
-    expect(lines(drawnRows)).toEqual([[LINE, 'plugin', 'notice', turns[1][0]]]);
+    expect(lines(drawnRows)).toEqual([['wake', NOTICE.wake, turns[1][0]]]);
   });
 
   it('queued into a running turn through the inbox, is the bridge’s line in that turn, opening none', async () => {
@@ -117,18 +117,20 @@ describe("the bridge's wake", () => {
     expect(drawnRows.filter((r) => r.kind === 'agent_message')).toEqual([]);
     const turns = dividers(drawnRows);
     expect(turns).toHaveLength(1);
-    expect(lines(drawnRows)).toEqual([[LINE, 'plugin', 'notice', turns[0][0]]]);
+    expect(lines(drawnRows)).toEqual([['wake', NOTICE.wake, turns[0][0]]]);
   });
 
   it('is not read off a delivery whose words open with the line: the drawn copy lost its frame, the held row did not have it as a wake', async () => {
     const ownFrame = '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]';
     const peerFrame = '[sminos chat MAWS ab12cd34:3 from fakepeer → @you]';
     const words = STEER_WAKE;
-    for (const [frame, shown] of [[ownFrame, words], [peerFrame, `*From fakepeer*\n\n${words}`]] as const) {
+    for (const [frame, own] of [[ownFrame, true], [peerFrame, false]] as const) {
       const drawnRows = await drawn([asUser(`${frame}\n${words}`, 0), answer('Read.', 1)]);
-      expect(bubbles(drawnRows), frame).toEqual([shown]);
+      // the owner's: their bubble; a peer's: its message line in a peer's turn (UC-2, class `peer`; O-41)
+      expect(bubbles(drawnRows), frame).toEqual(own ? [words] : []);
+      expect(drawnRows.filter((r) => r.kind === 'agent_message'), frame).toHaveLength(own ? 0 : 1);
       expect(lines(drawnRows), frame).toEqual([]);
-      expect(dividers(drawnRows).map(([, origin]) => origin), frame).toEqual(['human']);
+      expect(dividers(drawnRows).map(([, origin]) => origin), frame).toEqual([own ? 'human' : 'peer']);
     }
   });
 });

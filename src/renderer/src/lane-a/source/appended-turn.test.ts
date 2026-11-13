@@ -10,7 +10,7 @@ import { createTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import { Chain, frame, SESSION, wakeAfterStop, wakeForNote } from '../test-support/chain-rows';
 import { FakePlane, mount, settle } from '../test-support/fake-plane';
-import { WAKE_SENDER, WAKE_TEXT } from './bridge-wake';
+import { NOTICE } from '../../transcript/model/copy';
 import { PlaneTranscript, freshSource, subagentLookupOf } from '../plane-transcript';
 
 type User = Extract<Row, { kind: 'user' }>;
@@ -23,12 +23,12 @@ async function drawn(rows: JsonObject[], off: JsonObject[] = []) {
   return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}), entry, turns };
 }
 const user = (rows: Row[], text: string) => rows.find((row): row is User => row.kind === 'user' && row.text === text);
-const notices = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'error' ? [row.text] : []));
+const notices = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'notice' ? [row.text] : []));
 /** The notices the store holds, folded turns' too: the bridge's mirror lines would be among them. */
 const held = (entry: { state: { turns: Map<unknown, { events: { kind: string }[] }>; loose: { kind: string }[] } }) =>
   [...[...entry.state.turns.values()].flatMap((turn) => turn.events), ...entry.state.loose].flatMap((event) => (event.kind === 'notice.posted' ? [(event as unknown as { text: string }).text] : []));
 const turnOf = (rows: Row[], text: string) => rows.find((row) => row.kind === 'assistant_text' && row.markdown === text)?.turnId;
-const LINE = `${WAKE_SENDER}: ${WAKE_TEXT}`;
+const LINE = NOTICE.wake; // the wake's notice (UX wave U3, UC-2, class `wake`)
 
 describe('a row the bridge appended while no turn ran', () => {
   // Under either plugin the bridge runs in: doperpowers before the roll, sminos after (doperpowers' sminos plugin design, §11).

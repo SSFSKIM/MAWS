@@ -62,14 +62,17 @@ export interface BackfillContext {
   localCaveat: MessageUuid | null;
   // UX wave U3 (UC-2; the U3a document, M3): what the arrivals reader left open after the records mapped so far, which
   // it reads in order (rule 5); a terminal's scheduled fire, held for the meta row after it, which opens the turn it
-  // stands in; and whether the last record was a delivery the bridge appended, whose mirror line then draws nothing
+  // stands in; whether the last record was a delivery the bridge appended, whose mirror line then draws nothing; and the
+  // last record when it was a command's `user` row, whose `system` copy under it is no second command
   arrivals: OpenArrivals;
   heldFire: SessionEvent | null;
   appendedLast: boolean;
+  commandLast: MessageUuid | null;
 }
 
-// What the bridge delivered while no turn ran (withWaitingWords): the owner's words, or a peer's delivery's events.
-type Waiting = { kind: 'own'; uuid: MessageUuid; content: string } | { kind: 'peer'; events: SessionEvent[] };
+// What the bridge delivered while no turn ran (withWaitingWords): the owner's words, drawn already as a prompt waiting
+// for its turn, or a peer's delivery's events, placed when a turn starts.
+type Waiting = { kind: 'own'; uuid: MessageUuid } | { kind: 'peer'; events: SessionEvent[] };
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -97,6 +100,7 @@ export function createBackfillContext(init: {
     arrivals: nothingOpen,
     heldFire: null,
     appendedLast: false,
+    commandLast: null,
   };
 }
 
@@ -116,6 +120,8 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
   const arrivals = read.arrivals;
   const afterAppended = ctx.appendedLast;
   ctx.appendedLast = false;
+  const echoedCommand = record.type === 'system' && ctx.commandLast !== null && record.parentUuid === ctx.commandLast && localCommandKind(record) === 'echo';
+  ctx.commandLast = record.type === 'user' && localCommandKind(record) === 'echo' ? uuid : null;
   const events: SessionEvent[] = [];
   let ordinal = 0;
   const base = (): EventBase => {
@@ -154,7 +160,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
       assistantEvents(record, uuid, ctx, base, events);
       break;
     case 'system':
-      systemEvents(record, arrivals, afterAppended, ctx, base, events);
+      if (!echoedCommand) systemEvents(record, arrivals, afterAppended, ctx, base, events);
       break;
     case 'attachment': // context injections: on the chain, nothing to show, except a relay's receipt in a child, a prompt taken mid-turn (W1) and what arrived from elsewhere (UC-2)
       if (taskNotificationAttachment(record, uuid, arrivals, ctx, base, events)) break;
@@ -458,8 +464,8 @@ function arrivalEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Ar
     case 'own': {
       if (isBridgeRow(record)) {
         ctx.appendedLast = true;
-        if (ctx.running) steered(uuid, first.words, base, events);
-        else ctx.waitingWords.push({ kind: 'own', uuid, content: first.words });
+        steered(uuid, first.words, base, events);
+        if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid });
         return;
       }
       if (ctx.inToolLoop) return steered(uuid, first.words, base, events);
@@ -835,38 +841,35 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   const row = ctx.bridgeRows.get(key);
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
-  if (!ctx.running) {
-    ctx.waitingWords.push({ kind: 'own', ...row });
-    return true;
-  }
-  events.push({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
-  events.push({ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' });
+  steered(row.uuid, row.content, base, events);
+  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid });
   return true;
 }
 
 // P5 O9 (the fix wave): words the bridge delivers while no turn runs go in as such a row too: after a stop, since the
 // engine then refuses a plugin's prompt (the bridge wakes the session through its inbox, which the engine keeps as a
 // peer message); or the row lands as the turn it was given into ends (the bridge's wake is then its prompt as the user).
-// No turn runs to take them as sent during it, so they wait for the turn that answers them, as desk-web's view has them
-// (`renderer/src/lane-a/source/appended-turn.ts`): the bridge's wake opens a turn of the words', the first its prompt
-// (the wake's own text the model's context, no bubble) and any others sent during it; any other turn that starts first
-// takes them all as sent during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing
-// here) is not one that runs: the next turn's start closes it, stopped.
+// No turn runs to take them as sent during it, so they are a prompt waiting for the turn that answers them, as
+// desk-web's view has them (`renderer/src/lane-a/source/appended-turn.ts`): drawn where they went in, and taken by the
+// next turn that starts. The bridge's wake opens a turn of the words', the first its prompt (the wake's own text the
+// model's context, no bubble) and any others sent during it; any other turn that starts first takes them all as sent
+// during it. A turn the interrupt left open on this mapping (the marker opens and ends nothing here) is not one that
+// runs: the next turn's start closes it, stopped.
 // (UX wave U3: the wake is the reader's class `wake`, its line the wake's notice in that turn; a peer's delivery the
-// bridge appended while no turn ran waits alike, its message and companion taken at the turn's start.)
+// bridge appended while no turn ran waits too, its message and companion placed at the turn's start, since a peer's
+// message is no prompt that waits.)
 function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
   const start = events.findIndex((event) => event.kind === 'turn.started');
   let out = events;
   if (start >= 0 && ctx.waitingWords.length > 0) {
     const waiting = ctx.waitingWords.splice(0);
-    const said = (row: { uuid: MessageUuid; content: string }): SessionEvent => ({ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
-    const sentDuring = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
+    const taken = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [{ ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
     const first = wake ? waiting.find((row) => row.kind === 'own') : undefined;
     if (first !== undefined) {
       ctx.lastTurnUserUuid = first.uuid;
       const opened = { ...events[start], userMessageUuid: first.uuid, origin: null } as SessionEvent;
-      out = [...events.slice(0, start), opened, said(first), ...sentDuring(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
-    } else out = [...events, ...sentDuring(waiting)];
+      out = [...events.slice(0, start), opened, ...taken(waiting.filter((row) => row !== first)), ...events.slice(start + 1)];
+    } else out = [...events, ...taken(waiting)];
   }
   for (const event of out) {
     if (event.kind === 'turn.started') ctx.running = true;
