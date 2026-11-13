@@ -90,7 +90,7 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
       ],
       agents: [], skills: ['skilly'], terminalSlashCommands: [], revision: 1,
     });
-    const items = slashItems(c, new Set(), []);
+    const items = slashItems(c, new Set());
     expect([byName(items, 'mine').origin, byName(items, 'tool:go').origin, byName(items, 'skilly').origin]).toEqual(['custom', 'plugins', 'skills']);
   });
 
