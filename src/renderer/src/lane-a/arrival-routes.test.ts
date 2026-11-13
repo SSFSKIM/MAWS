@@ -176,6 +176,21 @@ describe('sminos’s deliveries, from the file and another machine’s rows (Acc
     const hook = (await fromFile(recorded('u3-sminos-r1-terminal'))).find((event) => event.kind === 'user.message' && event.arrival !== undefined && event.arrival[0]?.class === 'answer');
     expect(hook).toMatchObject({ isSynthetic: true, origin: 'task-notification', arrival: [{ class: 'answer', tool: 'sminos', call: 'toolu_01LHmQnUatVVN4dGUBrrJefV', dismissed: false }] });
   });
+
+  // The whole-branch review's finding 1: a window of history that begins at the hook's answer (transcript line 112) has
+  // no turn open for it; the answer is kept at the window's start, and the whole file, which an older page rebuilds the
+  // view from, draws it once in the turn that took it
+  it('u3-sminos-r1-terminal from line 112, the hook’s answer, on both routes: the answer’s line is drawn, as from the whole file', async () => {
+    const whole = recorded('u3-sminos-r1-terminal');
+    const window = `${whole.split('\n').slice(111).join('\n')}`;
+    expect(rowsIn(window)[0]).toMatchObject({ type: 'attachment', attachment: { type: 'hook_additional_context' } });
+    const answers = (state: TranscriptState) => arrivalRows(drawn(state)).filter((row) => row.startsWith('● answer'));
+    for (const text of [window, whole]) {
+      const { file, remote } = await bothRoutes(text);
+      expect(answers(file)).toEqual(['● answer: answered: Fruit → Mango']);
+      expect(answers(remote)).toEqual(['● answer: answered: Fruit → Mango']);
+    }
+  });
 });
 
 // Rows written by hand, in the shapes the recorded ones have (no probe recorded them), with invented names and words.

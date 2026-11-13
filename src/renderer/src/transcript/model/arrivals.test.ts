@@ -323,6 +323,40 @@ describe('the first carrier stands (decision 8, as revised)', () => {
   });
 });
 
+// The whole-branch review's finding 1: an arrival with no turn open (a window of history that begins at it) is kept loose
+// at the window's start, never dropped, and is the arrival its uuid names: a later carrier under it changes nothing, a
+// withdrawal takes it out
+describe('an arrival with no turn open', () => {
+  const answer: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q9', summary: 'Your questions have been answered: "Which fruit?"="Mango". You can now continue with these answers in mind.', answers: null, dismissed: false };
+  const line = NOTICE.answered('Which fruit? → Mango'); // the call is not in the window: the words are the summary's pairs
+
+  it('is kept at the window’s start, before the first turn, and drawn there', () => {
+    const b = builder();
+    carry(b, 'a1', [answer], 'The human responded to your async AskUserQuestion (call tu-q9): Mango');
+    b.text('m1', 0, 'Mango it is.');
+    const list = shown(rowsOf(reduce(b.events)));
+    expect(list[0]).toMatchObject({ kind: 'notice', id: rowId.notice(null, uuid('a1'), 0), turnId: null, class: 'answer', text: line });
+    expect(of(list, 'notice')).toHaveLength(1);
+    expect(list.some((row) => row.kind === 'assistant_text')).toBe(true);
+  });
+
+  it('stands under its uuid: a later carrier of it in a turn draws no second line, and a withdrawal takes it out', () => {
+    const b = builder();
+    carry(b, 'a1', [answer]);
+    b.turn('u1', 'and then?');
+    let state = reduce(b.events);
+    const step = (emit: () => void) => {
+      const from = b.events.length;
+      emit();
+      state = applyEvents(state, b.events.slice(from));
+      return of(rowsOf(withAllExpanded(state)), 'notice').map((row) => [row.text, row.turnId]);
+    };
+    expect(step(() => carry(b, 'a1', [answer]))).toEqual([[line, null]]);
+    expect(step(() => carry(b, 'a1', [], ''))).toEqual([]);
+    expect(step(() => carry(b, 'a1', [answer]))).toEqual([[line, state.order.at(-1)]]); // placed anew, in the turn that runs
+  });
+});
+
 describe('a provisional line needs its turn’s end (decision 21)', () => {
   const provisional = (b: Builder) => {
     engineTurn(b);

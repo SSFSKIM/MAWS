@@ -4,7 +4,7 @@
 // the turn the engine opens, settled by the result that names its run, withdrawn when it does not, and given up at the
 // next idle after a turn that did not name it. Each transition is pinned on the probes' recorded sessions
 // (spikes/protocol-probe/fixtures/uxwave/); rows written by hand are invented.
-import { readdirSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { describe, expect, it } from 'vitest';
@@ -252,6 +252,62 @@ describe('a turn’s origin, twice (pitfall 5)', () => {
     expect(turns[own]).toMatchObject({ origin: 'human', state: 'closed' });
     expect(turns[own - 1]!.events.some((event) => event.kind === 'user.message' && event.content === 'Without using any tool, reply with only the word READY.')).toBe(true); // the turn before it is the person's last
     expect(turns.find((turn) => turn.events.some((event) => event.seq === 100))).toMatchObject({ origin: 'peer' });
+  });
+});
+
+// The whole-branch review's finding 4: a second arrival at the head of the turn the engine opened joins the turn the
+// first one opened, in both branches that open one (a peer's delivery and the owner's own): one engine init, reply and
+// result is one turn. The recorded session with a second delivery (invented words) written in directly after the first,
+// before the model's first block; the rows after it move one seq on.
+// The whole-branch review's finding 2: a gap's reseed (`meta transcript_reseed`) reads the transcript's rows with what
+// the live reader already knows, so a completion a hand-back claimed on the live wire is not told a second time.
+describe('a reseed reads on from what the live wire told', () => {
+  it('u3-tasks-r1 through the hand-back at seq 337, then the notification it claimed (transcript line 114) by a reseed: its task ends, and no turn and no second completion is drawn', () => {
+    const n = normalizer();
+    const before = r1.filter((row) => row.seq <= 337).flatMap((row) => n.push(row));
+    expect(n.state.arrivals.open.handbacks.has('a91c8f61a920a8733')).toBe(true); // the hand-back claims its task's next notification
+    const claimed = JSON.parse(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u3-tasks-r1.transcript.jsonl'), 'utf8').split('\n')[113]!) as Record<string, unknown>;
+    expect(claimed).toMatchObject({ queueTranscriptOnly: true, origin: { kind: 'task-notification' } });
+    const reseeded = n.push({ seq: 338, direction: 'meta', at: '2026-11-12T14:53:00.000Z', frame: { event: 'transcript_reseed', rows: [claimed] } });
+    expect(reseeded.map((event) => event.kind)).toEqual(['task.notification']);
+    expect(reseeded[0]).toMatchObject({ taskId: 'a91c8f61a920a8733', status: 'completed' });
+    const rows = drawn(stateOf([...before, ...reseeded]));
+    expect(rows.filter((row) => row.kind === 'agent_message' && row.text.startsWith('Report from uxw agent'))).toHaveLength(1);
+    expect(notices(rows).filter((line) => line.includes('Agent "uxw agent" finished'))).toEqual([]);
+  });
+});
+
+describe('a second arrival at the head of the engine’s turn joins the turn the first opened', () => {
+  const journal = loadUxwaveJournal('u3-sminos-r1-maws');
+  const withSecond = (seq: number, from: string, to: string, uuid: string): JournalRow[] => {
+    const second = JSON.parse(JSON.stringify(frameAt(journal, seq)).split(from).join(to)) as Record<string, unknown>;
+    expect(JSON.stringify(second)).toContain(to);
+    return journal.flatMap((row) => (row.seq < seq ? [row] : row.seq === seq ? [row, { ...row, seq: seq + 1, frame: { ...second, uuid } }] : [{ ...row, seq: row.seq + 1 }]));
+  };
+  const holding = (state: TranscriptState, seqs: number[]) => turnsOf(state).filter((turn) => turn.events.some((event) => event.kind === 'user.message' && seqs.includes(event.seq!)));
+
+  it('u3-sminos-r1-maws with a second peer’s message after seq 100: one turn, a peer’s, holds both lines', () => {
+    const rows = withSecond(100, 'id=8f775ba5]\\nUXW peer idle: reply with only the word TWO.', 'id=8f775ba6]\\nUXW peer idle: then add the word THREE.', 'c7b77db4-0000-4000-8000-0000000000b2');
+    const events = live(rows);
+    expect(events.filter((event) => event.seq === 101).map((event) => event.kind)).toEqual(['user.message', 'peer.message']);
+    const state = stateOf(events);
+    const turns = holding(state, [100, 101]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ origin: 'peer', state: 'closed' });
+    const lines = drawn(state).filter((row) => row.turnId === turns[0]!.id && row.kind === 'agent_message').map((row) => (row.kind === 'agent_message' ? row.text : ''));
+    expect(lines).toEqual([expect.stringContaining('reply with only the word TWO.'), expect.stringContaining('then add the word THREE.')]);
+  });
+
+  it('u3-sminos-r1-maws with a second send of the owner’s after seq 54: one turn, the person’s, holds both, the second taken into it', () => {
+    const rows = withSecond(54, 'id=328cfd59]\\nUXW owner idle: reply with only the word ONE.', 'id=328cfd5a]\\nUXW owner idle: and the word TWO after it.', '5c14a56c-0000-4000-8000-0000000000b2');
+    const events = live(rows);
+    expect(events.filter((event) => event.seq === 55).map((event) => event.kind)).toEqual(['user.message', 'command.lifecycle']);
+    const state = stateOf(events);
+    const turns = holding(state, [54, 55]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0]).toMatchObject({ origin: 'human', state: 'closed' });
+    const users = drawn(state).filter((row) => row.turnId === turns[0]!.id && row.kind === 'user').map((row) => (row.kind === 'user' ? `${row.steer ? 'steer' : 'prompt'}: ${row.text}` : ''));
+    expect(users).toEqual(['prompt: UXW owner idle: reply with only the word ONE.', 'steer: UXW owner idle: and the word TWO after it.']);
   });
 });
 

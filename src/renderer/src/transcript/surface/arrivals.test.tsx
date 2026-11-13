@@ -166,6 +166,25 @@ describe('two notices from one carrier', () => {
     expect(concealed(first.container, '.transcript-notice')).toBe(false);
   });
 
+  // The whole-branch review's finding 5: the owner is elected among the notices drawn after the fold
+  it('in a closed turn whose fold drops the first notice, the notice it keeps asks for the carrier and draws the answer', async () => {
+    const EVENT = '<task-notification>\n<task-id>bt0</task-id>\n<summary>Monitor "watch logs" event: a line arrived</summary>\n</task-notification>';
+    const monitorEvent: ArrivalEntry = { ...taskEnd, taskId: 'bt0', toolUseId: null, runId: null, outcome: null, summary: 'Monitor "watch logs" event: a line arrived' };
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', { messageUuid: uuid('n1'), content: `${EVENT}\n${TASK}`, isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [monitorEvent, taskEnd] });
+    b.text('m1', 0, 'Noted.');
+    b.end([], { origin: 'task-notification', numTurns: 1 });
+    const store = await mounted(b);
+    const kept = store.rows().filter((row): row is Extract<Row, { kind: 'notice' }> => row.kind === 'notice');
+    expect(kept.map((row) => row.text)).toEqual(['Background command "count files" failed with exit code 1']);
+    const view = renderRow(kept[0]!, { storeKey: store.key });
+    expect(asks('UserMessage')).toHaveLength(1);
+    expect(asks('UserMessage')[0]).toMatchObject({ instanceId: 'n1' });
+    await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props, { type: 'Text', children: ['the carrier, as a mod draws it'] })));
+    expect(view.container.querySelector('[data-plugin-drawn="UserMessage"]')?.textContent).toBe('the carrier, as a mod draws it');
+  });
+
   it('opening the second notice’s line opens it and asks nothing; opening the first asks with the message expanded', async () => {
     const { first, second } = await both();
     await act(() => fake.reply('session.ui.render', answer(asks('UserMessage')[0]!.props)));

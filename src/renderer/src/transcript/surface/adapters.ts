@@ -270,7 +270,12 @@ function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessa
 
 // The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
 // with the notices it draws, in its order (the ids it gives that no earlier message gave).
+let indexBuilds = 0;
+/** How many times a turn's notice-to-carrier index was built: for tests, which count builds rather than time them. */
+export const noticeIndexBuilds = (): number => indexBuilds;
+
 function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): { carrier: UserMessageEvent; ids: RowId[] } | null {
+  indexBuilds += 1;
   const given = new Set<RowId>();
   for (const e of turn.events) {
     if (e.kind !== 'user.message' || !e.isSynthetic || e.arrival === undefined) continue;

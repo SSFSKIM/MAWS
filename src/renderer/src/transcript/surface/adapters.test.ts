@@ -2,14 +2,14 @@ import { cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { parseTranscriptProps } from '@shared/engine/surface-rows';
 import { renderRow } from '../view/rows/test-support';
-import { rowsOf, withAllExpanded } from '../model/derive';
+import { rowsOf, turnRows, withAllExpanded } from '../model/derive';
 import { applyEvents, createState, withReaderState } from '../model/reduce';
 import type { Row } from '../model/rows';
 import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import type { ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, noticeIndexBuilds, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
 
 afterEach(cleanup);
 
@@ -421,6 +421,54 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     const reports = tasks.rows.filter((r): r is Extract<Row, { kind: 'agent_message' }> => r.kind === 'agent_message' && r.report !== undefined);
     expect(reports.map((row) => ask(tasks.state, row)?.props.text)).toEqual(['PONG', 'PONG3']); // the hand-backs at seq 337 and 666
     for (const row of reports) expect(ask(tasks.state, row)?.props.from).toEqual({ name: 'general-purpose' }); // the agent's type, which the engine names it by (its origin's `name`)
+  });
+
+  // The whole-branch review's finding 5: the drawing owner of a carrier is elected among the notices the fold keeps, so a
+  // drawn notice never follows an owner that is not mounted
+  it('a closed turn whose carrier’s first notice the fold drops: the notice it keeps owns the carrier’s ask', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    const event = '<task-notification>\n<task-id>bt0</task-id>\n<summary>Monitor "watch logs" event: a line arrived</summary>\n</task-notification>';
+    b.emit('user.message', { messageUuid: uuid('n1'), content: `${event}\n${TASK}`, isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [taskEntry({ taskId: 'bt0', runId: null, outcome: null, summary: 'Monitor "watch logs" event: a line arrived' }), taskEntry({ runId: null })] });
+    b.text('m1', 0, 'Noted.');
+    b.end([], { origin: 'task-notification', numTurns: 1 });
+    const state = applyEvents(createState(null, null), b.events);
+    const kept = rowsOf(state).filter((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
+    expect(kept.map((row) => row.outcome)).toEqual(['failed']); // the monitor's event folded with its turn
+    const turn = state.turns.get(kept[0]!.turnId!)!;
+    const drawn = turnRows(state, turn.id);
+    expect(noticeFollows(kept[0]!, turn, undefined, drawn)).toBeNull();
+    expect(arrivalInput(kept[0]!, turn, { ...closed, drawn })).toMatchObject({ instanceId: 'n1', props: { origin: { kind: 'task-notification' } } });
+    // opened, both are drawn: the first asks again and the kept one follows it
+    const open = turnRows(withAllExpanded(state), turn.id);
+    const both = open!.filter((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
+    expect(both.map((row) => noticeFollows(row, turn, undefined, open))).toEqual([null, 'n1']);
+  });
+
+  // The whole-branch review's finding 6: the notice-to-carrier index is built once per turn's event list and read by every
+  // row; an update that leaves a turn's list untouched builds nothing for it (counted, not timed)
+  it('builds a turn’s notice index once for all its rows, and not again on an update that leaves its events untouched', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    for (let n = 0; n < 40; n++) b.emit('user.message', { messageUuid: uuid(`n${n}`), content: '', isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [taskEntry({ taskId: `bt${n}`, runId: `run-${n}` })] });
+    b.end([], { origin: 'task-notification', numTurns: 1 });
+    b.turn('u2', 'and the next one?');
+    let state = applyEvents(createState(null, null), b.events);
+    const notices = rowsOf(withAllExpanded(state)).filter((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
+    expect(notices).toHaveLength(40);
+    const turn = state.turns.get(notices[0]!.turnId!)!;
+    const askAll = (of: typeof turn) => { for (const row of notices) { arrivalInput(row, of, closed); noticeFollows(row, of, undefined); } };
+    const before = noticeIndexBuilds();
+    askAll(turn);
+    askAll(turn);
+    expect(noticeIndexBuilds() - before).toBe(1);
+    const from = b.events.length;
+    b.text('m2', 0, 'Streaming on in the next turn.');
+    state = applyEvents(state, b.events.slice(from));
+    const untouched = state.turns.get(turn.id)!;
+    expect(untouched.events).toBe(turn.events);
+    askAll(untouched);
+    expect(noticeIndexBuilds() - before).toBe(1);
   });
 });
 
