@@ -311,6 +311,7 @@ interface AskRecord {
   answers: AskAnswer[] | null; // from `maws.ask.answered`, else an answered result
   asked: boolean; // acknowledged without answers: an async ask
   cancelled: AskCancelReason | null; // from `maws.ask.cancelled`: why
+  stopped: boolean; // UX wave U2: its result is a refusal that reads stopped (the person's Stop), on every route
   resulted: boolean;
   error: string | null;
 }
@@ -587,7 +588,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), agentOf, context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
-          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
+          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, stopped: false, resulted: false, error: null });
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1
           const input = SendFileInputSchema.safeParse(event.input);
@@ -636,7 +637,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         // denial or a plain error text, never wrapped in `<tool_use_error>` (DC9: but the ask mod's is, and answered above).
         if (pending?.kind === 'question' && event.isError && event.denial === null && !(askMod && pending.answers !== null)) pending.error = engineRefusalOf(resultText(event.content));
         const ask = asks.get(event.toolUseId); // E1
-        if (ask) resultOfAsk(ask, event);
+        // UX wave U2 (the architect's ruling on the stopped ask): a refusal that reads stopped withdraws the ask, as the
+        // host's own cancellation does live, so a file and another machine's rows read it the same
+        if (ask) resultOfAsk(ask, event, event.denial !== null && denialDisposition(event.denial, context, context.continued.has(event.toolUseId)).disposition === 'stopped');
         const delivery = deliveries.get(event.toolUseId); // E1
         if (delivery) resultOfDelivery(delivery, event);
         if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
@@ -1206,8 +1209,12 @@ function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: Transcr
 }
 
 // E1 start: the capsule and the delivery row from their records.
-function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>): void {
+function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>, stopped: boolean): void {
   ask.resulted = true;
+  if (stopped) {
+    ask.stopped = true;
+    return;
+  }
   if (result.isError) {
     ask.error = toolErrorText(resultText(result.content));
     return;
@@ -1240,12 +1247,12 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   const blocking = opened?.blocking ?? input?.blocking ?? true;
   const answers = ask.answers ?? steers?.get(askId) ?? null;
   const asked = ask.asked || opened?.blocking === false;
-  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
+  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null || ask.stopped ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
   return {
     id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
     questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
-    cancelReason: state === 'cancelled' ? ask.cancelled : null,
+    cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
   };
 }
 

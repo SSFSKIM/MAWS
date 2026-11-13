@@ -15,6 +15,7 @@ import { createBackfillContext, recordToEvents } from '../../../../engine-host/f
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
+import { builder, tool, type Builder } from './test-events';
 import type { Cell, Row } from './rows';
 
 type Divider = Extract<Row, { kind: 'divider' }>;
@@ -113,5 +114,57 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
     const drawing = drawn(cut.flatMap((record) => recordToEvents(parseTranscriptRecord(record), ctx)));
     expect(reading(callOf(drawing, REJECTED))).toMatchObject({ status: 'stopped', disposition: 'stopped', label: 'Stopped: `git push --force`' });
     expect(linesOf(drawing)[0]).toMatchObject({ state: 'stopped', denied: 0 });
+  });
+});
+
+// UX wave U2 (the architect's ruling on the stopped ask, 2026-11-13): an ask whose result is a refusal reading stopped is
+// withdrawn, as the host's own cancellation says live: `cancelled`, `withdrawn`, no error text. Answers win first, the
+// host's own reason wins over the derived one, and every other error result stays `error` with its text.
+describe('an ask the person’s Stop interrupted', () => {
+  const ASK = 'mcp__maws__ask';
+  const QUESTIONS = [{ id: 'q1', question: 'Which palette?', modality: 'choice', options: [{ label: 'Warm' }, { label: 'Cool' }] }];
+  const REFUSED = 'The user doesn’t want to proceed with this tool use.';
+  const askOf = (b: Builder) => drawn(b.events).find((row): row is Extract<Row, { kind: 'ask' }> => row.kind === 'ask');
+  const asking = () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_ask', ASK, { title: 'Palette', questions: QUESTIONS }, 'msg_1');
+    return b;
+  };
+
+  it('a rejected result nothing followed reads cancelled, withdrawn, with no error; and so after its turn ends aborted', () => {
+    const b = asking();
+    b.result('toolu_ask', REFUSED, { isError: true, denial: 'user-rejected' });
+    expect(askOf(b)).toMatchObject({ state: 'cancelled', cancelReason: 'withdrawn', error: null });
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools' });
+    expect(askOf(b)).toMatchObject({ state: 'cancelled', cancelReason: 'withdrawn', error: null });
+  });
+
+  it('the host’s own reason wins over the derived one: `exit` stays `exit`', () => {
+    const b = asking();
+    b.result('toolu_ask', REFUSED, { isError: true, denial: 'user-rejected' });
+    b.emit('maws.ask.cancelled', { askId: 'toolu_ask', toolUseId: tool('toolu_ask'), reason: 'exit' });
+    expect(askOf(b)).toMatchObject({ state: 'cancelled', cancelReason: 'exit', error: null });
+  });
+
+  it('a denied, not stopped, result stays `error` with its text', () => {
+    const b = asking();
+    b.result('toolu_ask', 'Permission to use mcp__maws__ask has been denied.', { isError: true, denial: 'permission-rule' });
+    expect(askOf(b)).toMatchObject({ state: 'error', cancelReason: null, error: 'Permission to use mcp__maws__ask has been denied.' });
+  });
+
+  it('an answered ask whose turn was stopped later stays `answered`', () => {
+    const b = asking();
+    b.emit('maws.ask.answered', { askId: 'toolu_ask', toolUseId: tool('toolu_ask'), answers: [{ id: 'q1', question: 'Which palette?', status: 'answered', value: ['Cool'] }], delivery: 'result' });
+    b.result('toolu_ask', REFUSED, { isError: true, denial: 'user-rejected' });
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools' });
+    expect(askOf(b)).toMatchObject({ state: 'answered', cancelReason: null });
+  });
+
+  it('a rejected ask the model went on from reads `error` with its text', () => {
+    const b = asking();
+    b.result('toolu_ask', REFUSED, { isError: true, denial: 'user-rejected' });
+    b.text('msg_2', 0, 'I will pick the palette myself.');
+    expect(askOf(b)).toMatchObject({ state: 'error', cancelReason: null, error: REFUSED });
   });
 });

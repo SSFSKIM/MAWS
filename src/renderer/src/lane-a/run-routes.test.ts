@@ -76,17 +76,17 @@ describe('a call the person’s Stop interrupted is the same refused call by eve
     }
   });
 
-  it('p1-maws-ask-interrupt: the ask’s result carries user-rejected on all three, and the turn the Stop cut reads stopped with no denied count', async () => {
+  it('p1-maws-ask-interrupt: the ask reads the same row on all three (withdrawn), and the turn the Stop cut reads stopped with no denied count', async () => {
     const drawn = await routes('p1-maws-ask-interrupt', 'p1-maws-ask-interrupt');
     for (const { route, events, rows } of drawn) {
       expect(rejectedResults(events).map((line) => line.split(' ')[1]), route).toEqual(['user-rejected']);
       expect(refusedCalls(rows).filter((line) => !line.startsWith('ask ')), route).toEqual([]); // the ask is a row of its own kind, no cell
       expect(firstLine(rows), route).toBe('turn stopped · 0 denied · 0 auto-denied');
+      // live by the host's own `maws_ask_cancelled` (seq 97), from the file and the link by the refusal that reads stopped
+      // (the architect's ruling on the stopped ask)
+      const asks = rows.flatMap((row) => (row.kind === 'ask' ? [{ state: row.state, cancelReason: row.cancelReason, error: row.error }] : []));
+      expect(asks, route).toEqual([{ state: 'cancelled', cancelReason: 'withdrawn', error: null }]);
     }
-    // Reported to the architect with M1 (a statement of the document the code does not bear out): the ask's row is not
-    // the same by every route, before M1 as after it. Live, MAWS's own `maws_ask_cancelled` meta row (seq 97) makes it
-    // `cancelled`; the file has no such row and the ask's error result makes it `error`. The ask's row is U1's (UC-3).
-    expect(drawn.map(({ route, rows }) => `${route}: ${refusedCalls(rows).join(', ')}`)).toEqual(['live: ask cancelled', 'file: ask error', 'link: ask error']);
   });
 });
 
