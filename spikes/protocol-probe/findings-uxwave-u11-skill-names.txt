@@ -1,0 +1,84 @@
+UX wave, child U11a, P3: is a skill's name on disk the engine's name for it? (docs/doperpowers/plans/
+2026-11-12-ux-wave-U11a-settings-connectors-org.md on ux-wave/U11a: P3 in "Probes and checks", §D "Skills", point 6;
+2026-11-12, VM dc-uxwave2-e584, branch ux-wave/probe3-u11)
+
+Question. "Use in chat" will insert `/<name> ` for a person's and a project's skill and `/<plugin>:<name> ` for a
+plugin's, <name> being what Customize lists and <plugin> the installed plugin's key up to its `@`. Customize lists
+the inventory's `name` (src/engine-host/customization/inventory.ts:154, `words.name ?? basename(path)`: the front
+matter's `name`, else the folder's name; CustomizeView.tsx:194 shows `skill.name`) and a plugin skill's `plugin` is the
+key of installed_plugins.json (inventory.ts:195). Does the engine run the skill when that form is a message's first
+token, per group and per variant (front-matter name equal to the folder's, and different)?
+
+Verdict. Person: confirmed. Project: confirmed. Plugin: confirmed when the plugin's manifest `name` equals its
+marketplace entry's name (the key's part before `@`); NOT confirmed when they differ.
+  - Person and project, both variants: the inserted form runs the skill. With a front-matter name that differs from
+    the folder's, the front-matter name runs it AND the folder's name runs it; the engine's replay of the command
+    names the folder either way (`<command-name>/p3u-person-dir</command-name>` for `/p3u-person-label now`).
+  - Plugin, manifest name = entry name, both variants: `/<key before @>:<front-matter name>` runs the skill (and the
+    folder's name runs it too, as above).
+  - Plugin whose manifest `name` (`p3u-manifest`) differs from its marketplace entry (`p3u-entry`, key
+    `p3u-entry@p3u-market`): the engine names the plugin by the MANIFEST, `p3u-manifest:p3u-mani-skill`. The inserted
+    `/p3u-entry:p3u-mani-skill now` runs nothing: no command replay, no skill body, and the text reaches the model as
+    an ordinary message (it answered that no such command is installed), with no error on the wire. 2 of 2 runs.
+    `/p3u-manifest:p3u-mani-skill` and the bare `/p3u-mani-skill` run it.
+  So the plugin group keeps "Use in chat" only if <plugin> is the plugin's manifest name (`.claude-plugin/plugin.json`
+  `name` under the row's installPath, which the inventory already reads at inventory.ts:205-206), not the key up to
+  `@`; or the form is checked against the engine's list once the chat starts. Which is the architect's call. The key
+  rule alone fails silently for any plugin whose marketplace names it differently from its manifest.
+
+The engine's lists do not agree on which name they show (lists journal u11-skill-names-lists.jsonl):
+  - the initialize answer's `commands` (seq 6), what MAWS's composer reads: the FRONT-MATTER name, plugin skills as
+    `<manifest name>:<front-matter name>` (`p3u-person-label`, `p3u-plugin:p3u-plug-label`, `p3u-manifest:p3u-mani-skill`);
+  - `system/init` `skills` and `slash_commands` (seq 28): the FOLDER's name (`p3u-person-dir`, `p3u-plugin:p3u-plug-dir`);
+    `plugins` names the second plugin `p3u-manifest`;
+  - get_skills_dialog (seq 39): `name` the folder's, `display_name` the front matter's; plugin skills carry
+    `handles.aliases` with the bare name (`p3u-plug-label`, `p3u-mani-skill`), which is why the bare form runs.
+
+MAWS's inventory for the same files (fixtures/uxwave/u11-skill-names-inventory.json, read by
+uxwave-u11-skill-inventory.test.ts against the run's scratch HOME and repository): p3u-person-label, p3u-person-same,
+p3u-project-label, p3u-project-same (plugin null); p3u-plug-label, p3u-plug-same (plugin `p3u-plugin@p3u-market`);
+p3u-mani-skill (plugin `p3u-entry@p3u-market`).
+
+Per group, variant and form (fixtures/uxwave/u11-skill-names-<form>.jsonl, `:` written `_`; the record
+u11-skill-names.ndjson; every form sent as `/<form> now`, the first and only message of a fresh MAWS launch):
+  group    variant        form sent                     engine's name (init)         inventory's form  ran
+  person   same           p3u-person-same               p3u-person-same              (this)            yes
+  person   dir            p3u-person-label              p3u-person-dir               (this)            yes
+  person   dir            p3u-person-dir   (folder)     p3u-person-dir                                 yes
+  project  same           p3u-project-same              p3u-project-same             (this)            yes
+  project  dir            p3u-project-label             p3u-project-dir              (this)            yes
+  project  dir            p3u-project-dir  (folder)     p3u-project-dir                                yes
+  plugin   same           p3u-plugin:p3u-plug-same      p3u-plugin:p3u-plug-same     (this)            yes
+  plugin   same           p3u-plug-same    (bare)       p3u-plugin:p3u-plug-same                       yes
+  plugin   dir            p3u-plugin:p3u-plug-label     p3u-plugin:p3u-plug-dir      (this)            yes
+  plugin   dir            p3u-plugin:p3u-plug-dir (folder)  p3u-plugin:p3u-plug-dir                    yes
+  plugin   manifest≠entry p3u-entry:p3u-mani-skill      p3u-manifest:p3u-mani-skill  (this)            NO
+  plugin   manifest≠entry p3u-manifest:p3u-mani-skill   p3u-manifest:p3u-mani-skill                    yes
+  plugin   manifest≠entry p3u-mani-skill   (bare)       p3u-manifest:p3u-mani-skill                    yes
+  "Ran" is seen three ways in each journal and its session's transcript: the wire replays the command (a `user`
+  frame, isReplay true, `<command-name>/<engine's name></command-name>` at seq 28); the session's transcript holds the
+  skill's body as a user row with isMeta true (line 4; the wire does not carry it); and the result is the skill's
+  codeword, which only its body names. In the one NO case none of the three: no `<command-name>` frame, no body row,
+  and the result (seq 169) is the model's own reply. 2 runs each (run 2 to /tmp), the same in every case.
+
+Method.
+  Engine 2.1.322 under vm-run.sh (VM.md; vm-check.mjs's claims re-checked on this VM first), model haiku (resolves to
+  claude-haiku-5-5), route: the gateway through the loopback forward. Scenario scenarios/pass3/uxwave-u11-skill-names.mjs:
+  scratch config home $HOME/.claude; person skills in $HOME/.claude/skills/<folder>/SKILL.md, project skills in the
+  scratch repository's .claude/skills/<folder>/SKILL.md; a local directory marketplace `p3u-market` with two plugins,
+  added and installed with the engine's own CLI as a person does (`claude plugin marketplace add <dir>`, `claude
+  plugin install p3u-plugin@p3u-market`, `claude plugin install p3u-entry@p3u-market`; both installed at user scope,
+  keys `p3u-plugin@p3u-market` and `p3u-entry@p3u-market`, enabled in the user settings). Each SKILL.md is front
+  matter `name` and `description` and the body "Reply with only the word <CODEWORD> and nothing else. Do not use any
+  tool." Every session is MAWS's launch (uxwave-common-arrivals.mjs mawsLaunch: launch.ts's flags, setting sources
+  user,project,local, MAWS's environment and initialize), in the scratch repository.
+  The inventory read: P3_HOME=<scratch>/home P3_CWD=<scratch>/work P3_OUT=… vitest run --config
+  spikes/protocol-probe/uxwave-u11-skill-inventory.vitest.config.ts (readCustomizationInventory itself).
+
+Beside the question.
+  - A slash form the engine does not know is not refused: it goes to the model as text, which answers in its own words
+    (result subtype `success`, no tool used). A wrong inserted form therefore fails without any error MAWS could show.
+  - A person's or project's skill with a front-matter name different from its folder shows in the transcript (and so
+    in MAWS's transcript row) under the folder's name, not the name Customize listed.
+  - The bare form of a plugin skill runs it (get_skills_dialog's alias), but would collide with a person's or project's
+    skill of that name; not tried.
