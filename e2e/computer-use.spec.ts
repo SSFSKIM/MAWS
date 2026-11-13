@@ -87,7 +87,13 @@ const interruptsIn = (rows: JournalRow[]) =>
   rows.filter((row) => row.direction === 'out' && (row.frame as { type?: string; request?: { subtype?: string } }).request?.subtype === 'interrupt').map((row) => (row.frame as { request: unknown }).request);
 // The strip: a zero-height mount whose state is its attribute, and its line, the status region drawn over the transcript.
 const stripIn = (pane: Locator) => pane.locator('[data-computer-use-strip]');
-const shot = async (pane: Locator, name: string) => test.info().attach(name, { body: await pane.screenshot(), contentType: 'image/png' });
+// A picture of the pane's body, its tab panel: the pane element itself is `display: contents` (main/Pane.tsx) and has no
+// box of its own, nor has the strip's zero-height mount.
+const shot = async (pane: Locator, name: string) => {
+  const body = pane.locator('[role="tabpanel"]').first();
+  await expect(body).toBeVisible();
+  await test.info().attach(name, { body: await body.screenshot(), contentType: 'image/png' });
+};
 const followedItsRecording = (c: ComputerUseCase, id: AppSessionId) => expect(metaEvents(c.journal(id)), `the journal of ${id}`).not.toContain('replay_mismatch');
 
 test('computer use in the session (A6): a running js call draws "Computer use running" with Stop and its row reads "Used computer use"; Stop writes the composer’s interrupt and the line lingers past the call’s timeout_ms; a later call’s ordinary result takes it away', async () => {

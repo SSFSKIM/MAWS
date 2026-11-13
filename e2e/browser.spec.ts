@@ -1193,10 +1193,19 @@ test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 37
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(469);
     await expectOnPane(s, t, pane, 'panel');
     await expect.poll(innerWidth).toBe(375);
-    await expect(chip).toHaveText('375 × 812');
+    // the chip reads what the page reads (the view's real size, Interfaces §D): at 125% Mobile's 1,015 points of height
+    // fit this room only on a tall enough window, so its height is the page's own, read from the page, not a constant
+    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
+    const chipAgainstPage = async () => {
+      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
+      return text === page ? 'the same' : `chip ${text}, page ${page}`;
+    };
+    await expect.poll(chipAgainstPage, { message: 'the chip reads the page’s innerWidth × innerHeight' }).toBe('the same');
+    expect(await chip.textContent()).toMatch(/^375 × \d+$/);
     await overflow(s, panel, 'Reset zoom');
     await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
     await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
+    await expect(chip).toHaveText('375 × 812'); // at 100% the room made above holds the whole size again
 
     // Tablet does not fit this pane: disabled, its hint in place of its numbers
     const tablet = await viewportItem(s, panel, 'tablet');
