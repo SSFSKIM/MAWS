@@ -555,26 +555,32 @@ describe('a comment on its way outlives its card', () => {
     expect(active).toBe(1); // the overlay
     comment();
     await act(async () => {});
+    expect(active).toBe(2); // UX wave U5a (decision 17): and the draft's thread, until its comment ends
     await sendSideThread('Please explain');
-    expect(active).toBe(2); // and the send
+    expect(active).toBe(3); // and the send
     view.unmount();
-    expect(active).toBe(2); // the overlay's release waits for its queued withdrawal
+    expect(active).toBe(3); // the overlay's release waits a microtask
     await act(async () => {});
-    expect(active).toBe(1); // the send's stays
+    expect(active).toBe(2); // the comment in flight's and the send's stay
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
     expect(active).toBe(0);
   });
 
-  it('a send refused after its card went withdraws the draft (P2 toasts the refusal)', async () => {
+  // UX wave U5a (§D, decision 17): the comment stands again in its pass, its card reopened by the host with the reason,
+  // so its thread stays; the person's Close then withdraws it
+  it('a send refused after its card went reopens the card on its comment and keeps the thread; Close then withdraws it', async () => {
     const { doc, comment } = mountLive();
     comment();
     await act(async () => {});
     await sendSideThread('Please explain');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD_BARE, reason: 'no_engine_session', message: 'Not yet' }));
+    expect(getThread(doc, passage.threadId)).not.toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('Not yet');
+    expect(useNotices.getState().notices).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
-    expect(useNotices.getState().notices).toHaveLength(1);
   });
 
   // P3-F (L154; B's Decision Log 26 residue): a message typed later in the Side thread's own reply box, the card's

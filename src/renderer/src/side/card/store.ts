@@ -175,11 +175,7 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
   if (context.phase?.kind === 'thread') {
     const serial = ++serials;
     show({ serial, parent: context.appSessionId, anchor, host, hostId, claimMode: context.claimMode ?? null, openedAt: Date.now(), target, rect: placement?.rect ?? null, phase: context.phase });
-    if (hostId === null) {
-      setTimeout(() => {
-        if (useCommentCard.getState().open?.hostId === null) closeCard(serial);
-      }, CLAIM_DEADLINE_MS);
-    }
+    claimBy(serial, hostId);
     return;
   }
   const entry = hostId === null ? undefined : hosts.get(hostId);
@@ -204,8 +200,18 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
   const comment: PassComment = { id: String(++comments), anchor: withoutScreenshot(anchor), text: '', screenshot: anchor.screenshot ?? null, rect: placement?.rect ?? null, flight: null, refused: null };
   const next = { ...pass, comments: [...pass.comments, comment] };
   passes.set(key, next);
-  useCommentCard.setState({ passes, open: cardOn(key, next, comment, hostId) });
+  const card = { ...cardOn(key, next, comment, hostId), claimMode: context.claimMode ?? null };
+  useCommentCard.setState({ passes, open: card });
   left.told();
+  claimBy(card.serial, hostId);
+}
+
+// An unhosted card still unclaimed after CLAIM_DEADLINE_MS closes.
+function claimBy(serial: number, hostId: string | null): void {
+  if (hostId !== null) return;
+  setTimeout(() => {
+    if (useCommentCard.getState().open?.hostId === null) closeCard(serial);
+  }, CLAIM_DEADLINE_MS);
 }
 
 const show = (card: OpenCard) => {

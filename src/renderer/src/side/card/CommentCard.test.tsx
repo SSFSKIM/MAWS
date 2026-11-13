@@ -305,7 +305,8 @@ describe('dismissal', () => {
     }
   });
 
-  it('one card per window: a new pick replaces the open card and its draft', async () => {
+  // UX wave U5a (M3): the new pick's comment joins the first, which stays a line of the one card
+  it('one card per window: a new pick opens the card on a new comment, the first one kept in the pass', async () => {
     mount();
     pick();
     await userEvent.type(field(), 'Draft');
@@ -315,15 +316,17 @@ describe('dismissal', () => {
     expect(document.querySelectorAll('[data-comment-card]')).toHaveLength(1);
     expect(card()!.dataset.anchorLocator).toBe('p.lead');
     expect(field().value).toBe('');
+    expect(card()!.querySelector('[data-pass-comment]')!.textContent).toContain('Draft');
   });
 
-  it('a refusal arriving after the card closed mid-send is a toast with its reason', async () => {
+  it('a refusal arriving after the card closed mid-send and its host went is a toast with its reason', async () => {
     fake = fakeClient();
     window.maws = fake.client as unknown as PreloadBridge;
-    mount();
+    const view = mount();
     pick();
     await userEvent.type(field(), 'Why?{Enter}');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    view.unmount();
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: 'b2222222-2222-4222-8222-222222222222', reason: 'unknown_session', message: 'The session is gone' }));
     expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: The session is gone']);
   });
@@ -578,7 +581,8 @@ describe('the checkbox and the one send path', () => {
     expect(card()!.querySelector('[data-card-parent]')).toBeNull();
   });
 
-  it('while the content and then the send are on their way: the field is off, a second Send does nothing, Close closes, and the answer still lands; a refusal after Close is a toast', async () => {
+  // UX wave U5a (M3, §D): a refusal with no card open and the host still mounted reopens the card on the comment
+  it('while the content and then the send are on their way: the field is off, a second Send does nothing, Close closes, and the answer still lands; a refusal after Close reopens the card with its reason', async () => {
     fake = fakeClient({ 'session.queue.list': { entries: [], paused: false } });
     window.maws = fake.client as unknown as PreloadBridge;
     mount();
@@ -604,8 +608,11 @@ describe('the checkbox and the one send path', () => {
     await userEvent.click(box());
     await userEvent.type(field(), 'Again{Enter}');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
+    expect(card()).toBeNull();
     await act(() => fake.fail('side.comment.content', 'comments.0.screenshot: not found', 'invalid_input'));
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['The comment was not sent: comments.0.screenshot: not found']);
+    expect(screen.getByRole('alert').textContent).toContain('comments.0.screenshot: not found');
+    expect(field().value).toBe('Again');
+    expect(useNotices.getState().notices).toEqual([]);
   });
 
   it('a start: the button reads Starting… while the send starts the session itself, with no acquisition of its own', async () => {

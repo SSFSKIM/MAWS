@@ -14,7 +14,7 @@ import { resetPanelStores } from '../../test-support/panel';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hideSideChild, showSideChild, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
-import { CLAIM_DEADLINE_MS, closeCard, notePlace, openCard, resetPlaceNotes, useCommentCard } from './store';
+import { CLAIM_DEADLINE_MS, closeCard, notePlace, openCard, passKey, resetPlaceNotes, useCommentCard } from './store';
 import { applyLaneAState, holdPendingSend, resetLaneAStore } from '../../stores/lane-a'; // UX wave U5a
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { shownSession } from '../../panel/host'; // UX wave U5a
@@ -396,6 +396,8 @@ describe('the place’s note', () => {
   });
   afterEach(() => resetPlaceNotes());
   const sent = () => document.querySelector<HTMLElement>('[data-sent-note]');
+  // UX wave U5a (M3): a note is the pass's, drawn by every host of its subject
+  const place = (host: 'browser' | 'artifact-page' | 'artifact', subject = 'subject-1') => passKey(host, subject, PARENT);
 
   it('docked, the line is in the strip, one line in flow; an open card is drawn in its stead', () => {
     render(
@@ -403,7 +405,7 @@ describe('the place’s note', () => {
         <CommentCardHost subject="subject-1" hostId="h1" host="browser" mode="tab" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
       </div>,
     );
-    act(() => notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    act(() => notePlace(place('browser'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
     expect(sent()!.textContent).toBe('Sent to Q3 plan');
     expect(sent()!.closest('[data-card-dock]')).not.toBeNull();
     expect(sent()!.className).toContain('text-ui-sm');
@@ -416,11 +418,11 @@ describe('the place’s note', () => {
     expect(sent()!.textContent).toBe('Sent to Q3 plan');
   });
 
-  it('anchored over an HTML page, the line is in the box’s top right corner; another host’s note is not drawn', () => {
+  it('anchored over an HTML page, the line is in the box’s top right corner; another subject’s note is not drawn', () => {
     render(<Host frame={frameOf('k1')} />);
-    act(() => notePlace('h2', { kind: 'sent', text: 'Sent to elsewhere', at: Date.now() }));
+    act(() => notePlace(place('artifact-page', 'subject-2'), { kind: 'sent', text: 'Sent to elsewhere', at: Date.now() }));
     expect(sent()).toBeNull();
-    act(() => notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    act(() => notePlace(place('artifact-page'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
     expect(sent()!.className).toMatch(/\btop-2\b/);
     expect(sent()!.className).toMatch(/\bright-2\b/);
     expect(sent()!.className).toContain('pointer-events-auto');
@@ -436,7 +438,7 @@ describe('the place’s note', () => {
     const where = { left: card()!.style.left, top: card()!.style.top };
     act(() => {
       closeCard();
-      notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
+      notePlace(place('artifact'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
     });
     expect({ left: sent()!.style.left, top: sent()!.style.top }).toEqual(where);
   });
@@ -447,7 +449,7 @@ describe('the place’s note', () => {
     applyLaneAState(PARENT, laneAState(PARENT)); // the session's bridge, whose deliveries name nothing yet
     holdPendingSend(PARENT, key, 'the words');
     render(<Host frame={frameOf('k1')} />);
-    act(() => notePlace('h1', { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' }));
+    act(() => notePlace(place('artifact-page'), { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' }));
     const line = document.querySelector<HTMLElement>('[data-pending-note]')!;
     expect(line.textContent).toContain('Not confirmed yet in Q3 plan');
     expect(sent()).toBeNull();
