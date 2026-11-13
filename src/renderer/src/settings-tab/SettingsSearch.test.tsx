@@ -334,6 +334,15 @@ describe('Search settings: the keys', () => {
     }
   });
 
+  it('⌘F in a sheet opened from Settings stays the sheet’s', () => {
+    renderView({ ...SETTINGS_DEFAULTS_V21, keymap: { 'session.new': null } });
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    const cancel = within(screen.getByRole('dialog', { name: 'Reset every key binding?' })).getByRole('button', { name: 'Cancel' });
+    cancel.focus();
+    expect(commandF(cancel)).toBe(true);
+    expect(document.activeElement).not.toBe(field());
+  });
+
   it('in the narrow form the field is a first row over the links, and the results a list at most 12rem high that scrolls', () => {
     renderView();
     const label = field().closest('label')!;

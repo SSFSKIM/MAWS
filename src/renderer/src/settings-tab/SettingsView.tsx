@@ -120,9 +120,11 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
     landing.focus({ preventScroll: true });
     mark.mark(landing);
   };
-  // ⌘F, not ⇧⌘F (Files) nor any other chord on F
+  // ⌘F, not ⇧⌘F (Files) nor any other chord on F, from the view itself: a sheet opened from Settings is portaled out of
+  // it and keeps its keys, though React bubbles them here
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.code !== 'KeyF' || !event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || field.current === null) return;
+    if (!(event.target instanceof Node) || !event.currentTarget.contains(event.target)) return;
     event.preventDefault();
     event.stopPropagation();
     field.current.focus();
