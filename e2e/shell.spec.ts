@@ -754,8 +754,8 @@ test('Settings is a dialog', async () => {
 // same tab with its draft, and to the side surface as it was, with nothing of the side column written by the visit.
 // A session's row leaves the page. A request raised while a page is open shows under Needs you and on the Overview
 // button, and the page stays. A relaunch with the page open shows the page; with the dialog open over it, the page
-// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub draws
-// no transcript today (its history never reaches the app, and the daemon relay is being repaired on master); it is
+// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub gives
+// its sessions no history (its answer is empty by design, so a transcript there has no rows to scroll); it is
 // proved on a replayed session by library.spec.ts's "a replayed session's transcript keeps its scroll offset across a
 // page and Back".
 test('a page beside the sidebar', async () => {
