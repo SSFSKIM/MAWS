@@ -17,6 +17,7 @@ import { useSettings } from '../../stores/settings';
 import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
+import { DRAFT_DELAY_MS } from './drafts';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
 import { UNAVAILABLE_TITLE } from './nodes/Pasted';
 import type { Serialized } from './serialize';
@@ -1120,6 +1121,69 @@ describe('the editor’s take-back, Esc and load', () => {
   });
 });
 
+// UX wave U4a, the branch panel's findings 1 and 5: a take-back's load supersedes what this mount had pending, and the
+// focus it asked for while the box was held reaches the box when the hold ends
+describe('a take-back’s load and what this mount had pending', () => {
+  const taken = () => docOf([paragraph(textNode('taken back'))]);
+  async function emptiedPending() {
+    const { port, saved } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} />);
+    await act(async () => handle.current?.restored());
+    act(() => handle.current?.insertText('x'));
+    act(() => void handle.current?.fill('', 'replace')); // typed and deleted: an empty box's write is pending
+    return { saved, handle, view };
+  }
+
+  it('the pending write’s timer saves nothing over the loaded message', async () => {
+    const { saved, handle } = await emptiedPending();
+    act(() => void handle.current!.load(taken()));
+    await act(() => new Promise((resolve) => setTimeout(resolve, DRAFT_DELAY_MS + 250)));
+    expect(saved).toEqual([]);
+    expect(handle.current?.serialize().display).toBe('taken back');
+  });
+
+  it('the unmount flush saves nothing over the loaded message', async () => {
+    const { saved, handle, view } = await emptiedPending();
+    act(() => void handle.current!.load(taken()));
+    view.unmount();
+    expect(saved).toEqual([]);
+  });
+
+  it('a load made while the box was held gets its focus when the hold ends, unless the focus has gone elsewhere since', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const outside = document.createElement('button');
+    const field = document.createElement('input');
+    document.body.append(outside, field);
+    onTestFinished(() => {
+      outside.remove();
+      field.remove();
+    });
+    const held = (disabled: string | null) => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} disabled={disabled} />;
+    const { container, rerender } = render(held('Taking the message back…'));
+    await act(async () => handle.current?.restored());
+    const content = contentOf(container);
+    outside.focus(); // Edit was pressed on the row: the focus is on its control
+    act(() => void handle.current!.load(taken()));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50))); // the hold outlasts the frame Tiptap's focus waits
+    expect(document.activeElement).toBe(outside); // a held box takes no focus
+    rerender(held(null));
+    await waitFor(() => expect(document.activeElement).toBe(content));
+    act(() => handle.current?.insertText('!'));
+    expect(handle.current?.serialize().display).toBe('taken back!'); // typing reaches the message, at its end
+    // once more, the focus moving to another field before the hold ends
+    act(() => handle.current?.clear());
+    rerender(held('Taking the message back…'));
+    outside.focus();
+    act(() => void handle.current!.load(taken()));
+    field.focus();
+    rerender(held(null));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(document.activeElement).toBe(field);
+  });
+});
+
 // UX wave U4a M6 (l3-input-12, l3-input-09; decisions 22 and 23): the line under the text while recalling or searching,
 // Ctrl+R's search of the prompt history, and the paste that stays text with a chip that opens.
 describe('the box’s helpers: the history line, its search and the paste', () => {
@@ -1202,6 +1266,22 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     expect(line()).toBeNull();
     await press('Escape', { repeat: true }); // the press's repeat is the search's too
     expect(onEscape).not.toHaveBeenCalled();
+  });
+
+  // the branch panel's finding 6: a held Enter's repeats never send
+  it('a held Enter that took the match sends nothing at its repeats; a fresh Enter sends', async () => {
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onSubmit });
+    await search();
+    await type('docs');
+    await press('Enter');
+    const repeat = await press('Enter', { repeat: true });
+    await press('Enter', { repeat: true });
+    expect(repeat.defaultPrevented).toBe(true); // the repeat is consumed, not typed as a line break
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(shown(handle)).toBe('deploy the docs');
+    await press('Enter');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
   });
 
   it('takes the match into the box with Enter, without sending; the next Enter sends it', async () => {
