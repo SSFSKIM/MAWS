@@ -92,8 +92,11 @@ function kindOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionKind | 
   }
 }
 
+// A file call's path, by its detail. A read that returned image blocks is an image detail, whose caption is the path the
+// call asked for (`detailOf` in cells.ts), so it is keyed by its file as any other read is.
 function pathOf(cell: Cell): string | null {
-  const path = cell.detail.kind === 'edit' ? cell.detail.filePath : cell.detail.kind === 'read' ? (cell.detail.files[0]?.path ?? '') : '';
+  const { detail } = cell;
+  const path = detail.kind === 'edit' ? detail.filePath : detail.kind === 'read' ? (detail.files[0]?.path ?? '') : detail.kind === 'image' ? (detail.caption ?? '') : '';
   return path === '' ? null : path;
 }
 
