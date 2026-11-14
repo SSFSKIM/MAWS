@@ -4,7 +4,7 @@
 // and publishing the child it draws for the unread rule.
 import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import { promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -28,8 +28,9 @@ import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { openSideThread, revealNewThread, SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw'; // UX wave U4a
+import { BtwWidget } from './BtwWidget'; // UX wave U4a
 import { registerSidePane } from './register';
-import { resetSideQuestions, setInlineQuestions, sideChildrenShown, sidePaneOf, useSidePane } from './store';
+import { btwCardOf, resetSideQuestions, setInlineQuestions, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane } from './store';
 import { sideThreadsOf, sideTool } from './SideTool';
 import { promotionQuestionOf, ThreadView } from './ThreadView';
 // E4d start
@@ -422,6 +423,25 @@ describe('the Side pane and side questions', () => {
     expect(screen.getByRole('button', { name: '/btw side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
     await userEvent.click(screen.getByRole('button', { name: '/btw side questions' }));
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
+  });
+
+  // M7's review, 2: a pick of /btw (or a bare /btw) in a thread hosted in its parent's pane answers where a typed question
+  // does, under the thread, with its field focused; no card opens in the thread's pane
+  it('a pick of /btw in a hosted thread opens the questions under its thread view, focused, and no card', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([]);
+    useSessions.setState((s) => ({ engine: new Map(s.engine).set(ONE, status(ONE, { process: 'ready' } as never)) }));
+    act(() => openSideThread(A, ONE));
+    mount();
+    expect(sideChildrenShown().get(A)).toBe(ONE); // hosted: the pane draws it
+    const close = vi.fn();
+    render(<BtwWidget appSessionId={ONE} args="" close={close} />);
+    expect(close).toHaveBeenCalledTimes(1);
+    const view = document.querySelector<HTMLElement>(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`);
+    expect(view).not.toBeNull();
+    expect(document.activeElement).toBe(view!.querySelector('textarea'));
+    expect(document.querySelector('[data-btw-card]')).toBeNull();
+    expect(btwCardOf(useBtwCards.getState(), ONE).view).toBe('closed');
   });
 
   it('a promoted thread’s header shows its opening question, read from the thread’s first prompt', () => {

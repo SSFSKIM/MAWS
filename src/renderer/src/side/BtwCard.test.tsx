@@ -22,9 +22,10 @@ import { resetLaneAWatches } from '../lane-a/watches';
 import { resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useMachines } from '../stores/machines';
+import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
+import { A, B, mainShowing, panelOf, resetPanelStores } from '../test-support/panel';
 import { preloadOf } from '../test-support/preload-of';
 import { SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
@@ -144,6 +145,36 @@ describe('the /btw card', () => {
     await screen.findByText('ZEBRA');
     await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
     expect(chip()!.querySelector('[data-btw-unseen]')).toBeNull(); // seen once the card was open
+  });
+
+  // M7's review, 1: folding or closing hides the conversation and keeps a question not asked yet
+  it('a question typed and not asked is still in the field after a fold and after a close, and nothing was asked', async () => {
+    withProcess(A, 'ready');
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await settle();
+    await userEvent.type(field(), 'half a question');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    await userEvent.click(chip()!);
+    expect(field().value).toBe('half a question');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Close side chat' }));
+    act(() => openBtwCard(A));
+    expect(field().value).toBe('half a question');
+    expect(fake.invoked('session.sideQuestion')).toEqual([]);
+  });
+
+  // M7's review, 3: a card mounted in a pane that is not on screen (a kept tab, a covered main area) sees nothing
+  it('an answer that settles while the session is not on screen is unseen until it is shown, though its card is open', async () => {
+    listing([pending({ question: 'Over here?' })]);
+    act(() => openBtwCard(B));
+    render(<BtwCard appSessionId={B} />); // mounted, as a kept tab's content is, while the window shows A
+    await screen.findByText('Over here?');
+    act(() => onSideOperation(completion(B, 'op-1', answered('ZEBRA'))));
+    await screen.findByText('ZEBRA');
+    const unseen = () => btwUnseen(btwCardOf(useBtwCards.getState(), B), sidePaneOf(useSidePane.getState(), B).exchanges ?? []);
+    expect(unseen()).toBe(true);
+    act(() => useLayout.setState({ main: mainShowing(B) }));
+    expect(unseen()).toBe(false);
   });
 
   it('closing while an answer is awaited loses nothing: the exchange is there at the next open, unseen until then', async () => {
