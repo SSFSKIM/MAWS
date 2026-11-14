@@ -52,12 +52,29 @@ export const PLACE_WORDS = {
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
-// UX wave U4a M6 (l3-input-07; decision 24): what a row draws dimmed beside the name: for a name another listed project
-// shares, the part of its path that tells it apart (the sidebar's rule, `projectSuffixes`), else the folder's name where
-// it differs from the project's; every row's title is its whole path.
-function ProjectName({ project, suffix }: { project: ProjectRecord; suffix: string | null }) {
-  const folder = basename(project.directory);
-  const detail = suffix ?? (folder !== project.name ? folder : null);
+// UX wave U4a M6 (l3-input-07; decision 24): what each row draws dimmed beside the name. For a name another listed
+// project shares, the part of its path that tells it apart: the sidebar's part of the parent path (`projectSuffixes`),
+// or, where that ties with a namesake's (two folders under one parent), the shortest tail of the whole path that
+// differs. Otherwise the folder's name where it differs from the project's. Every row's title is its whole path.
+function rowDetails(projects: readonly ProjectRecord[]): Map<ProjectRecord['id'], string | null> {
+  const suffixes = projectSuffixes(projects);
+  const tail = (p: ProjectRecord, depth: number) => p.directory.split('/').filter(Boolean).slice(-depth).join('/') || '/';
+  return new Map(projects.map((p) => {
+    const suffix = suffixes.get(p.id) ?? null;
+    if (suffix === null) {
+      const folder = basename(p.directory);
+      return [p.id, folder !== p.name ? folder : null];
+    }
+    const tied = projects.filter((other) => other.id !== p.id && other.name === p.name && suffixes.get(other.id) === suffix);
+    if (tied.length === 0) return [p.id, suffix];
+    const parts = p.directory.split('/').filter(Boolean).length;
+    let depth = 1;
+    while (depth < parts && tied.some((other) => tail(other, depth) === tail(p, depth))) depth++;
+    return [p.id, tail(p, depth)];
+  }));
+}
+
+function ProjectName({ project, detail }: { project: ProjectRecord; detail: string | null }) {
   return (
     <>
       <span className="min-w-0 truncate">{project.name}</span>
@@ -106,7 +123,7 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
   const digests = useSessions((s) => s.digests);
   const ordered = useMemo(() => recentProjects({ records, digests, projects: places?.projects ?? [] }), [records, digests, places]);
   const shown = ordered.filter((p) => matchesProject(p, query));
-  const suffixes = useMemo(() => projectSuffixes(ordered), [ordered]);
+  const details = useMemo(() => rowDetails(ordered), [ordered]);
   const choose = (place: Pick<SpawnTarget, 'checkout' | 'label'>) => {
     useRemoteSpawn.getState().choose(appSessionId, { machine, name, key: null, ...place });
     onDone();
@@ -136,7 +153,7 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
             const chosen = project.directory === target.checkout;
             return (
               <Command.Item key={project.id} value={`project:${project.id}`} disabled={disabled} onSelect={() => choose({ checkout: project.directory, label: project.name })} title={formatCwd(project.directory)} aria-current={chosen || undefined} className={ITEM}>
-                <ProjectName project={project} suffix={suffixes.get(project.id) ?? null} />
+                <ProjectName project={project} detail={details.get(project.id) ?? null} />
                 <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
                   {chosen ? '✓' : ''}
                 </span>
@@ -165,7 +182,7 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
   const projects = useMemo(() => all.filter((p) => machineOf(p.id) === ipc.localMachine), [all]);
   const ordered = useMemo(() => recentProjects({ records, digests, projects, rows: [] }), [records, digests, projects]);
   const shown = ordered.filter((p) => matchesProject(p, query));
-  const suffixes = useMemo(() => projectSuffixes(ordered), [ordered]);
+  const details = useMemo(() => rowDetails(ordered), [ordered]);
   const noProject = binding.projectId === null && binding.label !== null;
   return (
     <Command label="Projects" shouldFilter={false} loop>
@@ -193,7 +210,7 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
                 aria-current={chosen || undefined}
                 className={ITEM}
               >
-                <ProjectName project={project} suffix={suffixes.get(project.id) ?? null} />
+                <ProjectName project={project} detail={details.get(project.id) ?? null} />
                 <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
                   {chosen ? '✓' : ''}
                 </span>
