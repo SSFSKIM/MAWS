@@ -1,0 +1,144 @@
+UX wave, U11: which setting of engine 2.1.322 switches a connector (an MCP server) off for new sessions at user scope
+(every project) and at project scope (this project only), per kind of server, with its sign-in kept? (2026-11-14,
+build host under vm-run.sh, branch ux-wave/probe-connector-scopes; builds on findings-uxwave-u11-connector-off-place.txt)
+
+Question. A connector that is off must cost a new session nothing: not in `system/init`'s `tools`, not among the
+deferred tool names tool search can load, and its OAuth sign-in kept so that switching it back on asks for none. For
+servers from (a) the project's .mcp.json, (b) `claude mcp add --scope user`, (c) `claude mcp add --scope local`,
+(d) a plugin: which setting does that at user scope and at project scope, where does it live, and which scope wins
+when the two disagree?
+
+Verdict.
+  - User scope, every kind: `deniedMcpServers: [{serverName}]` in the user settings file ($HOME/.claude/settings.json).
+    It is honoured outside managed settings: from the user, project and local settings files and from --settings
+    alike. The server is gone from mcp_status and from init's mcp_servers (not listed as disabled), its tools are in
+    neither `tools` nor the deferred names, it is never dialled, and the stored sign-in is untouched: removing the
+    entry brings it back connected on the stored token. A plugin's server is matched by its engine name
+    `plugin:<plugin>:<server>`, not by the server's name in the plugin's .mcp.json.
+  - Project scope, every kind: either
+      `disabledMcpServers: [names]` under `projects[<repository's main root>]` in $HOME/.claude.json (what mcp_toggle
+      and `/mcp disable` write): the server stays listed with status `disabled` in mcp_status and init's mcp_servers,
+      no tools, no deferred names, never dialled, sign-in kept; or
+      `deniedMcpServers` in <root>/.claude/settings.local.json (private to the person; <root>/.claude/settings.json is
+      the shared, committed file and works the same): the server is absent altogether, as at user scope.
+  - Precedence. The deny list is a union of every source, and nothing re-enables a denied server: user off + project
+    "on" stays off (an allowlist naming it in the project's local settings does not help); user on + project off is
+    off. So "off for every project except this one" cannot be written with the deny list. It can with the allowlist:
+    `allowedMcpServers` is honoured outside managed settings too, and the user and local lists are unioned (user
+    [cs-user] + local [cs-oauth] loads both). An allowlist blocks every server it does not name, though (every other
+    file server, every plugin server, claude.ai connectors by the bundle; the SDK server `maws` stays connected), so
+    using it means MAWS keeps the user list equal to "every connector on at user scope". For a whole plugin,
+    `enabledPlugins` resolves the other way: the project file wins in both directions.
+  - What does not switch anything: `disabledMcpServers` at the top level of $HOME/.claude.json or in a settings file;
+    `enabledMcpjsonServers` (an approval list: a session under MAWS's launch approves a trusted folder's .mcp.json
+    servers anyway, cli.pretty.js Qyt ~477539 `approved by non_interactive`); `disabledMcpjsonServers` for anything
+    but kind (a).
+  - Partial switches. `disabledMcpjsonServers` (any of user, project, local settings or --settings) removes a
+    .mcp.json server entirely and nothing else; with `enabledMcpjsonServers` naming the same server in the other
+    scope, disabled wins both ways. A permission deny rule `mcp__<server>` removes the tools from `tools` and the
+    deferred names but the server still connects and uses its sign-in (it costs a process or a connection), and an
+    allow rule in another scope does not lift it. `--strict-mcp-config --mcp-config` loads only the listed servers,
+    plugin servers included in what is dropped; a listed HTTP server with the same {type,url,headers} reuses the
+    stored sign-in.
+  - Sign-in. Every switch above keeps the credential store entry; the case's own session never dials a switched-off
+    server (deny, disabledMcpServers, allowlist, plugin off) and the next session with the switch removed connects on
+    the stored token with no sign-in step. Two ways lose it: `claude mcp remove` deletes the server's credential
+    entry (the re-added server reads `needs-auth`), and a server that once read `needs-auth` is written to
+    $HOME/.claude/mcp-needs-auth-cache.json, after which new sessions report `needs-auth` without dialling it even
+    once a token is in the store (seen in base-no-signin's then-on session; the cache's lifetime was not read).
+    Deleting a server from $HOME/.claude.json by editing the file keeps the token: put back, it connects.
+
+Method.
+  Engine 2.1.322 under spikes/protocol-probe/vm-run.sh (VM.md), route the gateway through the loopback forward.
+  Scenario scenarios/pass3/uxwave-u11-connector-scopes.mjs, as
+    ./vm-run.sh --prefix conn --out <dir> run run-pass3.mjs uxwave-u11-connector-scopes
+  Every session is MAWS's launch (uxwave-common-arrivals.mjs mawsLaunch: setting sources user,project,local, no
+  --strict-mcp-config, MAWS's environment with ENABLE_TOOL_SEARCH, its initialize and the `maws` SDK server), cwd the
+  scratch repository's root. Servers, all invented: cs-proj (the repository's committed .mcp.json; the user settings
+  carry enableAllProjectMcpServers as in the place probe), cs-user and cs-oauth (`claude mcp add --scope user`, stdio
+  and HTTP), cs-local (`claude mcp add --scope local`), and plugin:cs-plug:cs-pserver and plugin:cs-plug:cs-poauth
+  (stdio and HTTP in the .mcp.json of plugin cs-plug, installed from the local marketplace cs-market with `claude
+  plugin install`). The two HTTP servers are a stub in the scenario that answers only a request bearing the token
+  seeded for it in $HOME/.claude/.credentials.json under `mcpOAuth` (as a completed sign-in leaves one), else 401 with
+  RFC 9728 metadata, and counts every request with the token it bore.
+  Per case: every file restored to the baseline; the switch applied; a session reads mcp_status until no cs-* server
+  is pending, sends one prompt ("Reply with only the word ok", haiku) so `system/init` is sent and the transcript
+  gets its `deferred_tools_delta` attachment, ends. Then the configuration files are restored, the credential store
+  and needs-auth cache left as the case left them, and a second session (`-then-on`, no prompt) reads mcp_status.
+  Two full runs gave the same statuses, tools, deferred names, request paths and credential counts in every case
+  (compared field by field; the second, which added allow-user-allow-local, is committed). Spend: under $0.02.
+  Citations: journal fixtures/uxwave/u11-connector-scope-<case>.jsonl line N is seq N; the first mcp_status answer at
+  seq 22 or 23, the settled one at 25 where there are two; system/init at seq 30 (28 where one mcp_status sufficed);
+  deferred names in the record's `deferred` (the transcript's `deferred_tools_delta` at line 6, as the scenario read
+  it: the cs-* names, the count of all names, the pending, needs-auth and failed server lists); the then-on journal's
+  mcp_status at seq 25. The record fixtures/uxwave/u11-connector-scope.ndjson holds one case a line (line given below),
+  with the files as applied, the stub's request counts and the credential store before and after.
+  Trimmed for review: the engine transcripts of 27 cases are not committed (4.0 MB), only base's
+  (u11-connector-scope-base.transcript.jsonl, the full deferred list). Before removal each one's line 6 was checked
+  equal to its case's `deferred` in the record, and its MCP names equal to the MCP names in init's `tools`.
+
+Cases (P: = plugin:cs-plug:; "all six" = cs-proj, cs-user, cs-oauth, cs-local, P:cs-pserver, P:cs-poauth).
+  case (record line)            switch                                         loaded (init seq 30/28)              then-on
+  base (2)                      none                                           all six connected; tools and         all six
+                                                                               deferred: all six's ping; both HTTP
+                                                                               servers dialled with their token
+  base-no-signin (3)            credential store emptied                       cs-oauth, P:cs-poauth `needs-auth`,  same, with the
+                                                                               no tools; deferred line 6 lists them  token restored:
+                                                                               in needsAuthMcpServers                no request made
+  dms-project-key (4)           disabledMcpServers [all six] under             all six listed `disabled` (init 28),  all six connected,
+                                projects[<root>] in .claude.json               tools none, deferred none, no request tokens used
+  dms-top-level (5)             same list at the top level of .claude.json     all six connected (no effect)        all six
+  dms-user-settings (6)         same list in the user settings file            all six connected (no effect)        all six
+  djs-user/-project/-local/     disabledMcpjsonServers [all six] in user,      cs-proj absent (not listed); the     all six
+    -flag (7-10)                project, local settings, --settings            other five connected
+  ejs-not-listed (11)           no enableAll; enabledMcpjsonServers [other]    all six connected                    all six
+  djs-user-ejs-local (12)       user disabled [cs-proj], local enabled         cs-proj absent                       all six
+  ejs-user-djs-local (13)       user enabled [cs-proj], local disabled         cs-proj absent                       all six
+  deny-user/-project/-local/    deniedMcpServers {serverName} for the six      cs-*: four absent; P:cs-pserver,     all six
+    -flag (14-17)               bare names in user, project, local, --settings P:cs-poauth connected (bare names
+                                                                               do not match a plugin's server)
+  deny-user-plugin-name (18)    user deniedMcpServers [P:cs-pserver,           both plugin servers absent; the      all six
+                                P:cs-poauth]                                   four others connected
+  deny-user-allow-local (19)    user deny [cs-user]; local allowedMcpServers   cs-user absent (deny wins); plugin   all six
+                                [six bare names]                               servers absent (not on the list)
+  allow-user (20)               user allowedMcpServers [cs-user]               cs-user alone (and maws)             all six
+  allow-user-allow-local (21)   user allow [cs-user]; local allow [cs-oauth]   cs-user and cs-oauth (lists unioned) all six
+  perm-deny-user (22)           user permissions.deny mcp__<each of six>       all six connected, both HTTP dialled all six
+                                                                               with tokens; tools none, deferred none
+  perm-deny-user-allow-local    user deny mcp__cs-user; local allow it         all connected; cs-user's tool absent  all six
+    (23)                                                                       from tools and deferred
+  strict (24)                   --strict-mcp-config --mcp-config {cs-user,     cs-user, cs-oauth only (init 28);    all six
+                                cs-oauth}                                      cs-oauth on the stored token
+  plugin-off-user (25)          user enabledPlugins cs-plug@cs-market false    both plugin servers absent           all six
+  plugin-off-project (26)       user true (installed); project file false      both plugin servers absent           all six
+  plugin-on-project (27)        user false; project file true                  all six connected                    all six
+  remove-by-file (28)           cs-user, cs-oauth deleted from .claude.json    those two absent                     put back: both
+                                by editing it                                                                        connected, token
+  remove-by-cli (29)            `claude mcp remove --scope user` both          those two absent; the record's        re-added with the
+                                                                               credsBefore lacks cs-oauth's entry    CLI: cs-oauth
+                                                                               the engine uses                       `needs-auth`
+  Sign-in, every case: the record's credsBefore and credsAfter list the same entries (four; three in remove-by-cli
+  after the CLI removed one), and `hits` show the switched-off HTTP servers never requested; the then-on `hits`
+  show each restored HTTP server dialled with the seeded token. The stub saw only the token stored under
+  `<name>|sha256(JSON.stringify({type,url,headers}))[:16]` (the field order as written), and `claude mcp remove`
+  deleted exactly that entry: the key the engine reads.
+
+Beside the question.
+  - Seen: where deny, allowlist or plugin-off removes a server, mcp_status and init's mcp_servers omit it; only
+    disabledMcpServers keeps it listed (`disabled`). A connectors list that shows off servers has to come from MAWS's
+    own reading of the files, except for disabledMcpServers.
+  - Seen: init's `tools` and the transcript's deferred names agree in every case (with ENABLE_TOOL_SEARCH, every MCP
+    tool is deferred, maws's included; the attachment is `deferred_tools_delta.addedNames`, its `needsAuthMcpServers`,
+    `pendingMcpServers` and `failedMcpServers` naming servers without tools). The cs-* names are in the record for
+    every case; the full list in base's transcript.
+  - Read, not run (claude.ai connectors; no account here): the engine lists them as `claude.ai <display name>`, type
+    claudeai-proxy, scope claudeai (cli.pretty.js iys ~475221, the name ~475319). The disabled check (zo, ~477301)
+    applies to every configured client by name (~33296, ~33428), so disabledMcpServers under the project key switches
+    one off per project, as mcp_toggle does; the deny matcher (vXn ~476395) matches a claudeai-proxy server by its
+    name and by the connector its id resolves to, so a user-settings deny entry {serverName: "claude.ai <name>"}
+    should switch it off everywhere (not run: whether that serverName passes the settings schema with its space and
+    dot). All of them at once: `disableClaudeAiConnectors: true` in any settings source (rPe ~540226) or
+    ENABLE_CLAUDEAI_MCP_SERVERS=false. Their sign-in is the account's, held by claude.ai, not in the local credential
+    store, so no local switch can lose it.
+  - Read, not run: `/mcp disable` documents itself as writing disabledMcpServers in the project entry (~836614);
+    built-in server Zv is the one exception (opt-in through enabledMcpServers, ~477303).
