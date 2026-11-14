@@ -887,18 +887,10 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   const list = page.locator('[data-chrome-tabs] [role="tablist"]');
   const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow, 'the strip overflows by more than the step short of its end').toBeGreaterThan(80);
-  await list.evaluate((el) => { el.scrollLeft = el.scrollWidth - el.clientWidth - 40; });
-  const settledOffset = async () => {
-    let last = -1;
-    await expect.poll(async () => {
-      const now = await list.evaluate((el) => el.scrollLeft);
-      const settled = now === last;
-      last = now;
-      return settled;
-    }, { message: 'the strip’s scroll has settled', intervals: [250] }).toBe(true);
-    return last;
-  };
-  expect(await settledOffset(), 'the strip is scrolled, short of its end').toBe(overflow - 40);
+  // the offset the scene sets is known, so every read below waits on that value, not on two reads agreeing
+  const offset = overflow - 40;
+  await list.evaluate((el, to) => { el.scrollLeft = to; }, offset);
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'the strip is scrolled, short of its end' }).toBe(offset);
   const centre = await list.evaluate((el) => {
     const r = el.getBoundingClientRect();
     return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('[role="tab"]')?.getAttribute('data-tab-id') ?? null;
@@ -907,8 +899,7 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   const inFront = list.locator(`[role="tab"][data-tab-id="${centre}"]`);
   await inFront.click();
   await expect(inFront).toHaveAttribute('aria-selected', 'true');
-  const offset = await settledOffset();
-  expect(offset, 'putting the tab in view in front moved nothing').toBe(overflow - 40);
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'putting the tab in view in front moved nothing' }).toBe(offset);
   const [stripBox, tabBox] = [await box(list), await box(inFront)];
   expect(tabBox.x + tabBox.width, 'the tab in front is in view').toBeLessThanOrEqual(stripBox.x + stripBox.width + 1);
   expect(tabBox.x, 'the tab in front is in view').toBeGreaterThanOrEqual(stripBox.x - 1);

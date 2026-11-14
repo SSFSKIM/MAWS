@@ -785,16 +785,20 @@ test('a page beside the sidebar', async () => {
     await composer.click();
     await page.keyboard.type(DRAFT);
     await expect(composer).toHaveText(DRAFT);
-    // layout.json settled on what is drawn: the side surface stored, and two reads in a row the same (the store writes a
-    // key 250 ms after its last change; typing changes neither key)
-    const sides = () => JSON.stringify({ regions: storedKey(userData, 'regions'), surfaces: storedKey(userData, 'panelTools.surfaces') });
-    let read = '';
+    // layout.json holds the side column as drawn: the panel open and the Files tab in a stack. The store writes a key 250
+    // ms after its last change (write-behind, so the bound is a slow machine's); opening the surface changes these two keys
+    // and typing changes neither, so once both hold it nothing of the side column is still to be written. A failure prints
+    // what the file held.
+    const sideColumn = () => ({
+      panel: (storedKey(userData, 'regions') as { panel?: unknown } | undefined)?.panel ?? null,
+      surfaces: (storedKey(userData, 'panelTools.surfaces') as { stacks?: Record<string, string[]> } | undefined) ?? null,
+    });
     await expect.poll(() => {
-      const now = sides();
-      const settled = now === read && now.includes('"files"');
-      read = now;
-      return settled;
-    }, { message: 'layout.json holds the side surface, settled', intervals: [400] }).toBe(true);
+      const held = sideColumn();
+      const shown = (held.panel as { collapsed?: boolean } | null)?.collapsed === false && Object.values(held.surfaces?.stacks ?? {}).some((stack) => stack.some((tabId) => tabId === 'files' || tabId.startsWith('files:')));
+      return { shown, held };
+    }, { message: 'layout.json holds the side column as drawn', timeout: 15_000 }).toMatchObject({ shown: true });
+    const drawn = sideColumn();
 
     // the page: everything right of the sidebar
     await openAppDestination(page, 'Customize');
@@ -825,7 +829,7 @@ test('a page beside the sidebar', async () => {
     await expect(region).toHaveAttribute('data-destination', 'customize');
 
     // Back: the same tab with its draft, the side surface as it was, nothing written
-    await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
+    await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back', timeout: 15_000 }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     await backToTabs(page);
     await expect(behind).toHaveJSProperty('inert', false);
     await expect(files).toBeVisible();
@@ -833,14 +837,9 @@ test('a page beside the sidebar', async () => {
     await expect(composer).toHaveText(DRAFT);
     // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
     // `panelTools.surfaces` before `destination` (persistedKeys' order), so once the key is gone a write of either made
-    // by the visit or by Back has landed; four more reads then hold the two keys as they were.
-    await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed' }).toBe(false);
-    let held = 0;
-    await expect.poll(() => {
-      if (sides() !== read) return `changed: ${sides()}`;
-      held += 1;
-      return held >= 4 ? 'held' : 'reading';
-    }, { message: 'regions and the side surfaces unchanged by the visit', intervals: [250], timeout: 5_000 }).toBe('held');
+    // by the visit or by Back has landed, and the side column reads as it was drawn.
+    await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed', timeout: 15_000 }).toBe(false);
+    expect(sideColumn(), 'nothing of the side column written by the visit').toEqual(drawn);
 
     // a session's row leaves the page and shows that session
     await openAppDestination(page, 'Projects');

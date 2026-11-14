@@ -641,17 +641,20 @@ test('a replayed session’s transcript keeps its scroll offset across a page an
   const scroller = page.locator('[data-region="main"] [data-transcript-scroller]');
   await expect(scroller.locator('[data-row-id]').first(), 'the transcript’s rows are drawn').toBeVisible();
   await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), { message: 'the transcript overflows its pane' }).toBeGreaterThan(0);
+  // The offset is read when the wheel's scroll has ended: the scroller's own `scrollend`, which the browser fires once a
+  // scroll, smooth or not, has finished (bounded, so a wheel that moved nothing fails here rather than at the timeout).
+  await scroller.evaluate((el) => {
+    (window as unknown as { __scrollEnded: Promise<number | null> }).__scrollEnded = new Promise((resolve) => {
+      el.addEventListener('scrollend', () => resolve(el.scrollTop), { once: true });
+      setTimeout(() => resolve(null), 10_000);
+    });
+  });
   const box = (await scroller.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, -600);
-  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop), { message: 'the transcript scrolled up from its end' }).toBeGreaterThan(0);
-  let offset = -1;
-  await expect.poll(async () => {
-    const now = await scroller.evaluate((el) => el.scrollTop);
-    const settled = now === offset;
-    offset = now;
-    return settled;
-  }, { message: 'the scroll has settled', intervals: [250] }).toBe(true);
+  const offset = await page.evaluate(() => (window as unknown as { __scrollEnded: Promise<number | null> }).__scrollEnded);
+  expect(offset, 'the wheel’s scroll ended').not.toBeNull();
+  expect(await scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop), 'the transcript scrolled up from its end').toBeGreaterThan(0);
   const front = () => activeMainTab(page).getAttribute('aria-label');
   const tab = await front();
   expect(tab, 'the session’s tab is in front').toBeTruthy();
