@@ -298,7 +298,7 @@ export interface BtwCard {
   view: BtwCardView;
   focus: boolean;
   question: string;
-  seen: ReadonlySet<string>;
+  seen: ReadonlySet<string>; // each settled exchange seen, by its id and its state
 }
 const CLOSED: BtwCard = { view: 'closed', focus: false, question: '', seen: new Set() };
 
@@ -329,7 +329,9 @@ export const takeBtwFocus = (parent: AppSessionId): void => patchCard(parent, (c
 export const foldBtwCard = (parent: AppSessionId): void => patchCard(parent, (card) => (card.view === 'open' ? { ...card, view: 'folded', focus: false } : card));
 export const closeBtwCard = (parent: AppSessionId): void => patchCard(parent, (card) => (card.view === 'closed' ? card : { ...card, view: 'closed', focus: false }));
 
-const settled = (exchanges: readonly SideExchange[]): string[] => exchanges.flatMap((e) => (e.state === 'pending' ? [] : [e.id]));
+// Each settled exchange by its id and how it settled (the panel's finding 10): a late answer that replaces a failure keeps
+// the exchange's id (`onSideOperation`), and is news all the same.
+const settled = (exchanges: readonly SideExchange[]): string[] => exchanges.flatMap((e) => (e.state === 'pending' ? [] : [`${e.id}\u0000${e.state}`]));
 
 // The open card on screen has seen every settled exchange it draws.
 export function markBtwSeen(parent: AppSessionId, exchanges: readonly SideExchange[]): void {
