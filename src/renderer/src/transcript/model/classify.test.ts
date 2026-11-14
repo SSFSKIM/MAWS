@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { classifyTool, continuedAfter, denialDisposition, presentationOf, stoppedMember, type ClassifyContext } from './classify';
 import { DENIAL_KINDS } from '@shared/graph/enums';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AgentId } from '@shared/graph/ids';
 import { api, builder, MODEL, parent, tool, uuid } from './test-events';
 
 const base: ClassifyContext = { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
@@ -178,20 +180,20 @@ describe('continuedAfter', () => {
   it('a block of the next API message counts: its delta, its completion or its call', () => {
     const delta = rejectedCall();
     delta.emit('assistant.block.delta', { apiMessageId: api('msg_2'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null, toolUseId: null, toolName: null });
-    expect([...continuedAfter(delta.events)]).toEqual([tool('toolu_a')]);
+    expect([...continuedAfter(delta.events, null)]).toEqual([tool('toolu_a')]);
     const text = rejectedCall();
     text.text('msg_2', 0, 'Understood, leaving the linter for now.');
-    expect([...continuedAfter(text.events)]).toEqual([tool('toolu_a')]);
+    expect([...continuedAfter(text.events, null)]).toEqual([tool('toolu_a')]);
     const call = rejectedCall();
     call.emit('tool.use', { toolUseId: tool('toolu_b'), toolName: 'Read', input: {}, apiMessageId: api('msg_2'), messageUuid: null });
-    expect([...continuedAfter(call.events)]).toEqual([tool('toolu_a')]);
+    expect([...continuedAfter(call.events, null)]).toEqual([tool('toolu_a')]);
   });
 
   it('a later call of the call’s own message does not count: the engine starts a call before its message is whole', () => {
     const b = rejectedCall();
     b.toolUse('toolu_b', 'Read', { file_path: 'notes.md' }, 'msg_1', 1);
     b.result('toolu_b', 'The user doesn’t want to proceed with this tool use.', REJECTED);
-    expect(continuedAfter(b.events).size).toBe(0);
+    expect(continuedAfter(b.events, null).size).toBe(0);
   });
 
   it('another call’s result, the interrupt marker, an API error envelope, a subagent’s block and the turn’s end do not count', () => {
@@ -201,7 +203,7 @@ describe('continuedAfter', () => {
     b.text('msg_err', 0, 'API Error: 500 upstream', { isApiErrorMessage: true });
     b.emit('assistant.block.complete', { messageUuid: uuid('child-1'), apiMessageId: api('msg_child'), blockIndex: 0, block: { type: 'text', text: 'child output' }, model: MODEL, supersedes: [], aborted: false, userMessageUuids: [] }, { parentToolUseId: parent('toolu_agent') });
     b.end(['u1'], { terminalReason: 'aborted_tools', isError: true, result: 'error_during_execution' });
-    expect(continuedAfter(b.events).size).toBe(0);
+    expect(continuedAfter(b.events, null).size).toBe(0);
   });
 
   it('work before the result is not work after it, and a block with no message id counts for nothing', () => {
@@ -211,7 +213,35 @@ describe('continuedAfter', () => {
     b.text('msg_2', 0, 'Running the linter meanwhile.');
     b.emit('assistant.block.delta', { apiMessageId: null, blockIndex: 0, blockType: 'text', textDelta: 'x', thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null, toolUseId: null, toolName: null });
     b.result('toolu_a', 'The user doesn’t want to proceed with this tool use.', REJECTED);
-    expect(continuedAfter(b.events).size).toBe(0);
+    expect(continuedAfter(b.events, null).size).toBe(0);
+  });
+
+  // The branch review's first finding: which loop counts is the transcript's. A child agent's own transcript keeps its
+  // events' parent attribution (the file's context and the wire's lane name the call that launched it), so its loop is
+  // its own agent's events; an agent below it is not its work.
+  describe('in a child agent’s own transcript', () => {
+    const CHILD = 'agent-child' as AgentId;
+    const GRANDCHILD = 'agent-grandchild' as AgentId;
+    // the events from `from` on, as an agent's: its id, and the call that launched it as their parent
+    const asAgent = (events: readonly SessionEvent[], from: number, agentId: AgentId, launch: string): SessionEvent[] =>
+      events.map((event, i) => (i < from ? event : { ...event, agentId, parentToolUseId: parent(launch) }));
+
+    it('the child’s next API message counts, though every event of the child names the call that launched it', () => {
+      const b = rejectedCall();
+      b.text('msg_2', 0, 'Leaving the linter for now.');
+      const events = asAgent(b.events, 0, CHILD, 'toolu_launch');
+      expect([...continuedAfter(events, CHILD)]).toEqual([tool('toolu_a')]);
+      expect(continuedAfter(events, null).size, 'read as a main loop, they are a child’s events').toBe(0);
+    });
+
+    it('an agent below the child does not count: its blocks are its own loop’s', () => {
+      const b = rejectedCall();
+      const from = b.events.length;
+      b.text('msg_grandchild', 0, 'Grandchild looking.');
+      b.toolUse('toolu_g', 'Read', { file_path: 'notes.md' }, 'msg_grandchild', 1);
+      const events = asAgent(asAgent(b.events, 0, CHILD, 'toolu_launch'), from, GRANDCHILD, 'toolu_spawned_by_child');
+      expect(continuedAfter(events, CHILD).size).toBe(0);
+    });
   });
 
   it('only user-rejected results are read', () => {
@@ -220,6 +250,6 @@ describe('continuedAfter', () => {
     b.toolUse('toolu_a', 'Bash', { command: 'make lint' }, 'msg_1', 0);
     b.result('toolu_a', 'Permission to use Bash has been denied.', { isError: true, denial: 'permission-rule' });
     b.text('msg_2', 0, 'Trying another way.');
-    expect(continuedAfter(b.events).size).toBe(0);
+    expect(continuedAfter(b.events, null).size).toBe(0);
   });
 });

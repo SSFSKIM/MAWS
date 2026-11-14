@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { SessionId } from '@shared/graph/ids';
+import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal, loadUxwaveJournal, TRANSCRIPT_FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -240,6 +240,78 @@ describe('a stopped member of its run is the same row in the same run by every r
       expect(rowsOf(state).some((r) => r.id === send!.id), `${route}: the folded turn hides the send's row`).toBe(false);
       expect({ denied: line.denied, caption: line.caption, firstDeniedCell: line.firstDeniedCell, denials: line.summary.denials.map((d) => [d.kind, d.disposition]) }, route)
         .toEqual({ denied: 1, caption: '', firstDeniedCell: send!.id, denials: [['permission-rule', 'denied']] });
+    }
+  });
+});
+
+// The branch review's first finding: a child agent's own transcript, drawn as its drill-in draws it by each route. Live,
+// the child's events are the session's journal through the normaliser, selected as the child source selects them (its
+// agent's events, but the parent's reports on it); from the file, the child's own transcript through a chain follower
+// that has the child's context, as `fs.agentEvents` follows it; through the file's rows, the reader of another machine's
+// rows with the child's id. The child's events keep the attribution each route gives them (the call that launched it,
+// live and from the file). A rejected call the child went on from reads denied, and its turn, whose end nobody sees,
+// closes at rest as no Stop.
+describe('a rejected call a child agent went on from reads denied by every route, and its turn is no Stop', () => {
+  const at = (ms: number) => new Date(Date.parse('2026-09-28T12:00:00.000Z') + ms).toISOString();
+  const CHILD = 'a7c1d2e3f4a5b6c7d';
+  const LAUNCH = 'toolu_routes_launch';
+  const PUSH = { type: 'tool_use', id: 'toolu_routes_child_push', name: 'Bash', input: { command: 'git push --force' } };
+  const REFUSED = 'The user doesn’t want to proceed with this tool use.';
+  const AFTER = [{ type: 'text', text: 'Leaving the push to you.' }];
+  const own = (event: SessionEvent) => (event.agentId as string | null) === CHILD && !('taskId' in event && (event.taskId as string | null) === CHILD); // `ownOf`, transcript/source/ipc.ts
+
+  let seq = 0;
+  const row = (direction: JournalRow['direction'], ms: number, frame: unknown): JournalRow => ({ seq: (seq += 1), direction, at: at(ms), frame });
+  const message = (ms: number, id: string, content: unknown[], lane: string | null) => row('in', ms, {
+    type: 'assistant', message: { model: 'claude-test', id, type: 'message', role: 'assistant', content, stop_reason: null, stop_sequence: null, usage: { input_tokens: 1, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 1 } },
+    parent_tool_use_id: lane, uuid: `a-${id}`, timestamp: at(ms), session_id: SESSION,
+  });
+  const journal = [
+    row('meta', 0, { event: 'spawn', pid: 4102, cwd: '/tmp/maws-synth-routes', bin: 'claude', args: ['-p'] }),
+    row('out', 10, { type: 'user', uuid: 'u-routes-3', message: { role: 'user', content: 'Have an agent publish the branch.' }, parent_tool_use_id: null, origin: { kind: 'human' } }),
+    row('in', 20, { type: 'command_lifecycle', command_uuid: 'u-routes-3', state: 'started', uuid: 'cl-routes-3', session_id: SESSION }),
+    row('in', 30, { type: 'system', subtype: 'init', cwd: '/tmp/maws-synth-routes', model: 'claude-test', permissionMode: 'default', tools: [], slash_commands: [], agents: [], skills: [], plugins: [], mcp_servers: [], capabilities: [], claude_code_version: '2.1.322', output_style: 'default', uuid: 'sys-routes-3', session_id: SESSION }),
+    message(40, 'msg_routes_launch', [{ type: 'tool_use', id: LAUNCH, name: 'Agent', input: { description: 'Publish the branch', prompt: 'Push the branch.' } }], null),
+    row('in', 50, { type: 'system', subtype: 'task_started', task_id: CHILD, tool_use_id: LAUNCH, description: 'Publish the branch', subagent_type: 'general-purpose', is_backgrounded: false, spawn_depth: 1, task_type: 'local_agent', prompt: 'Push the branch.', uuid: 'sys-routes-task', session_id: SESSION }),
+    message(60, 'msg_routes_child_1', [PUSH], LAUNCH),
+    row('in', 70, {
+      type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: PUSH.id, content: REFUSED, is_error: true }] }, parent_tool_use_id: LAUNCH, uuid: 't-routes-child-push', timestamp: at(70),
+      tool_use_result: `Error: ${REFUSED}`, tool_result_meta: [{ id: PUSH.id, non_execution_kind: 'user-rejected' }], session_id: SESSION,
+    }),
+    message(80, 'msg_routes_child_2', AFTER, LAUNCH),
+  ];
+  const record = (uuid: string, parentUuid: string | null, ms: number, body: Record<string, unknown>) => ({ uuid, parentUuid, timestamp: at(ms), sessionId: SESSION, isSidechain: true, agentId: CHILD, ...body });
+  const text = [
+    record('c-1', null, 55, { type: 'user', message: { role: 'user', content: 'Push the branch.' } }),
+    record('c-2', 'c-1', 60, { type: 'assistant', message: { id: 'msg_routes_child_1', role: 'assistant', model: 'claude-test', content: [PUSH] } }),
+    record('c-3', 'c-2', 70, { type: 'user', toolDenialKind: 'user-rejected', toolUseResult: `Error: ${REFUSED}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: PUSH.id, content: REFUSED, is_error: true }] } }),
+    record('c-4', 'c-3', 80, { type: 'assistant', message: { id: 'msg_routes_child_2', role: 'assistant', model: 'claude-test', content: AFTER } }),
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n';
+
+  /** The file route: the child's own transcript, followed with the child's context (`fs.agentEvents`). */
+  async function fromChildFile(): Promise<SessionEvent[]> {
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(text), SESSION as SessionId, { agentId: CHILD as AgentId, parentToolUseId: LAUNCH as ParentToolUseId }, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+    await follower.start();
+    follower.stop();
+    return events;
+  }
+
+  it('the call reads denied, and at rest the child’s turn reads no Stop, live, from the file and from its rows', async () => {
+    const routes = {
+      live: fromJournal(journal).filter(own),
+      file: await fromChildFile(),
+      link: await freshSource(rowsIn(text), SESSION, subagentLookupOf([]), CHILD).snapshot(),
+    };
+    expect(routes.live.filter((e) => e.kind === 'tool.result').map((e) => [e.parentToolUseId, e.kind === 'tool.result' && e.denial]), 'the wire names the launching call').toEqual([[LAUNCH, 'user-rejected']]);
+    expect(routes.file.filter((e) => e.kind === 'tool.result').map((e) => [e.parentToolUseId, e.kind === 'tool.result' && e.denial]), 'the file’s context names it too').toEqual([[LAUNCH, 'user-rejected']]);
+    for (const [route, events] of Object.entries(routes)) {
+      const state = withAllExpanded(applyEvents(createState(null, CHILD as AgentId), events));
+      const rows = rowsOf(state);
+      const call = callsOf(rows).find((cell) => cell.toolUseId === PUSH.id);
+      expect(call && { status: call.status, disposition: call.classification.denial?.disposition }, route).toEqual({ status: 'denied', disposition: 'denied' });
+      const line = restingRows(state, rows).find((r): r is Extract<Row, { kind: 'divider' }> => r.kind === 'divider');
+      expect(line && { state: line.state, denied: line.denied }, `${route}, at rest`).toEqual({ state: 'completed', denied: 1 });
     }
   });
 });

@@ -8,17 +8,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
-import type { SessionId } from '@shared/graph/ids';
+import type { AgentId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill';
 import { journalToEvents } from '../dev/journal';
-import { rowsOf, withAllExpanded } from './derive';
+import { restingRows, rowsOf, withAllExpanded } from './derive';
 import { dividerCopy } from './copy';
 import { turnContextOf } from './cells';
 import { continuedAfter } from './classify';
 import { applyEvents, createState, withUi } from './reduce';
-import { builder, tool, type Builder } from './test-events';
+import { builder, parent, tool, type Builder } from './test-events';
 import type { Cell, Row } from './rows';
 
 type Divider = Extract<Row, { kind: 'divider' }>;
@@ -180,6 +180,46 @@ describe('a rejected call the model went on from (denials.jsonl, its first turn)
   });
 });
 
+// The branch review's first finding: in a child agent's own transcript every event keeps the parent attribution the
+// file's context and the wire's lane give it, and the reducer applies them to the child's own turn. A rejected call the
+// child went on from reads denied, and its turn, whose end nobody sees, closes as no Stop at rest; the work of an agent
+// below the child is no such evidence. The routes' half is in `lane-a/run-routes.test.ts`.
+describe('a rejected call in a child agent’s own transcript', () => {
+  const CHILD = 'agent-child' as AgentId;
+  // the events from `from` on, as an agent's: its id, and the call that launched it as their parent
+  const asAgent = (events: readonly SessionEvent[], from: number, agentId: AgentId, launch: string): SessionEvent[] =>
+    events.map((event, i) => (i < from ? event : { ...event, agentId, parentToolUseId: parent(launch) }));
+  const childDrawing = (events: SessionEvent[]) => {
+    const state = withAllExpanded(applyEvents(createState(null, CHILD), events));
+    const rows = rowsOf(state);
+    return { rows, resting: restingRows(state, rows) };
+  };
+  const rejected = () => {
+    const b = builder();
+    b.toolUse('toolu_child_push', 'Bash', { command: 'git push --force' }, 'msg_child_1', 0);
+    b.result('toolu_child_push', 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
+    return b;
+  };
+
+  it('the child’s own next message: the call reads denied, and at rest its turn closes as no Stop', () => {
+    const b = rejected();
+    b.text('msg_child_2', 0, 'Leaving the push to you.');
+    const { rows, resting } = childDrawing(asAgent(b.events, 0, CHILD, 'toolu_launch'));
+    expect(reading(callOf(rows, 'toolu_child_push'))).toMatchObject({ status: 'denied', disposition: 'denied' });
+    expect(linesOf(resting)[0]).toMatchObject({ state: 'completed', denied: 1 });
+  });
+
+  it('an agent below the child working after it: the call stays stopped, and at rest its turn closes as stopped', () => {
+    const b = rejected();
+    const from = b.events.length;
+    b.text('msg_grandchild_1', 0, 'Grandchild looking.');
+    const events = asAgent(asAgent(b.events, 0, CHILD, 'toolu_launch'), from, 'agent-grandchild' as AgentId, 'toolu_spawned_by_child');
+    const { rows, resting } = childDrawing(events);
+    expect(reading(callOf(rows, 'toolu_child_push'))).toMatchObject({ status: 'stopped', disposition: 'stopped' });
+    expect(linesOf(resting)[0]).toMatchObject({ state: 'stopped', denied: 0 });
+  });
+});
+
 // UX wave U2 (the architect's ruling on the stopped ask, 2026-11-13): an ask whose result is a refusal reading stopped is
 // withdrawn, as the host's own cancellation says live: `cancelled`, `withdrawn`, no error text. Answers win first, the
 // host's own reason wins over the derived one, and every other error result stays `error` with its text.
@@ -255,8 +295,8 @@ describe('the turn’s context, once per revision', () => {
     for (const [i, id] of ['toolu_a', 'toolu_b', 'toolu_c'].entries()) b.toolUse(id, 'Bash', { command: `step ${i}` }, 'msg_1', i);
     for (const id of ['toolu_a', 'toolu_b', 'toolu_c']) b.result(id, 'The user doesn’t want to proceed with this tool use.', { isError: true, denial: 'user-rejected' });
     b.toolUse('toolu_d', 'Read', { file_path: 'notes.md' }, 'msg_1', 3); // the same message: no work after them
-    expect(continuedAfter(b.events).size).toBe(0);
+    expect(continuedAfter(b.events, null).size).toBe(0);
     b.text('msg_2', 0, 'Going another way.');
-    expect([...continuedAfter(b.events)].sort()).toEqual(['toolu_a', 'toolu_b', 'toolu_c']);
+    expect([...continuedAfter(b.events, null)].sort()).toEqual(['toolu_a', 'toolu_b', 'toolu_c']);
   });
 });
