@@ -10,6 +10,11 @@ export const surface = (page: Page, toolId: string): Locator => page.locator(`[d
 export const mainTabs = (page: Page): Locator => page.locator('[data-chrome-tabs]');
 export const mainTab = (page: Page, name: string | RegExp): Locator => mainTabs(page).getByRole('tab', { name, exact: typeof name === 'string' });
 export const mainTabById = (page: Page, id: string): Locator => mainTabs(page).locator(`[role="tab"][data-tab-id="${id}"]`);
+// The strip's tabs as mounted, drawn or not. Under a page the strip is invisible, and under the Settings dialog everything
+// outside the dialog is hidden from accessibility, so a role query of the strip finds nothing there; an inventory of what
+// the strip holds counts hidden tabs too (UX wave U7b). A tab a person clicks is found by `mainTab`.
+export const mountedTabs = (page: Page): Locator => mainTabs(page).locator('[role="tab"]');
+export const mountedTab = (page: Page, name: string | RegExp): Locator => mainTabs(page).getByRole('tab', { name, exact: typeof name === 'string', includeHidden: true });
 export const activeMainTab = (page: Page): Locator => page.locator('[data-chrome-tabs]:has([data-focused="true"]) [data-focused="true"] [role="tab"][aria-selected="true"], [data-chrome-tabs]:not(:has([data-focused="true"])) [role="tab"][aria-selected="true"]').first();
 export const sessionCards = (page: Page): Locator => page.getByRole('complementary', { name: 'Session cards', exact: true });
 export const sidebarFooter = (page: Page): Locator => page.locator('[data-region="sidebar"] footer');
@@ -40,7 +45,7 @@ export async function openAppDestination(page: Page, name: 'Projects' | 'Artifac
   await expect(entry).toHaveAttribute('aria-current', 'page');
   await expect(pageTitle(page).getByRole('heading', { level: 1, name, exact: true })).toBeVisible();
   await expect(pageRegion(page)).toBeVisible();
-  await expect(mainTab(page, name)).toHaveCount(0);
+  await expect(mountedTab(page, name), 'no tab of the page is mounted in the strip').toHaveCount(0);
 }
 
 const namedSurface = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface][aria-label=${JSON.stringify(name)}]`);

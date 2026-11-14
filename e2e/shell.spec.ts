@@ -458,7 +458,8 @@ test('Float with no session in front: disabled with its reason, the action float
     await expect(main).toHaveJSProperty('inert', true);
     // Settings is drawn over the floating card, which stays floating under it and after it
     const dialog = await openSettings(app, page);
-    await expect(card).toBeVisible();
+    // under the modal dialog the card is hidden from accessibility, so it is found with its hidden kin; it stays drawn
+    await expect(panel.getByRole('region', { name: 'Session card', includeHidden: true })).toBeVisible();
     await expect(main).toHaveJSProperty('inert', true);
     await dialog.getByRole('button', { name: 'Close', exact: true }).click();
     await expect(dialog).toHaveCount(0);
@@ -688,7 +689,8 @@ test('Settings is a dialog', async () => {
     await (await sidebarRow(page, FIX)).click();
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX]);
     const main = page.locator('[data-region="main"]');
-    const composer = main.getByRole('textbox', { name: 'Message' });
+    // read under the dialog too, where everything outside it is hidden from accessibility
+    const composer = main.getByRole('textbox', { name: 'Message', includeHidden: true });
     await composer.click();
     await page.keyboard.type(DRAFT);
     await expect(composer).toHaveText(DRAFT);
@@ -782,9 +784,17 @@ test('a page beside the sidebar', async () => {
       offset = now;
       return settled;
     }, { message: 'the scroll has settled', intervals: [250] }).toBe(true);
-    await page.waitForTimeout(600); // past the layout store's 250 ms write, so layout.json holds what is drawn
-    const stored = { regions: storedKey(userData, 'regions'), surfaces: storedKey(userData, 'panelTools.surfaces') };
-    expect(stored.surfaces, 'the side surface is in layout.json').toBeTruthy();
+    // layout.json settled on what is drawn: the side surface stored, and two reads in a row the same (the store writes a
+    // key 250 ms after its last change; typing and scrolling change neither key)
+    const sides = () => JSON.stringify({ regions: storedKey(userData, 'regions'), surfaces: storedKey(userData, 'panelTools.surfaces') });
+    let read = '';
+    await expect.poll(() => {
+      const now = sides();
+      const settled = now === read && now.includes('"files"');
+      read = now;
+      return settled;
+    }, { message: 'layout.json holds the side surface, settled', intervals: [400] }).toBe(true);
+    const stored = JSON.parse(read) as { regions: unknown; surfaces: unknown };
 
     // the page: everything right of the sidebar
     await openAppDestination(page, 'Customize');
@@ -815,15 +825,23 @@ test('a page beside the sidebar', async () => {
     await expect(region).toHaveAttribute('data-destination', 'customize');
 
     // Back: the same tab at the same scroll offset with its draft, the side surface as it was, nothing written
+    await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     await backToTabs(page);
     await expect(behind).toHaveJSProperty('inert', false);
     await expect(files).toBeVisible();
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
     expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
     await expect(composer).toHaveText(DRAFT);
-    await page.waitForTimeout(600); // a write the visit made would have landed by now
-    expect(storedKey(userData, 'regions'), 'regions unchanged by the visit').toEqual(stored.regions);
-    expect(storedKey(userData, 'panelTools.surfaces'), 'the side surfaces unchanged by the visit').toEqual(stored.surfaces);
+    // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
+    // `panelTools.surfaces` before `destination` (persistedKeys' order), so once the key is gone a write of either made
+    // by the visit or by Back has landed; four more reads then hold the two keys as they were.
+    await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed' }).toBe(false);
+    let held = 0;
+    await expect.poll(() => {
+      if (sides() !== read) return `changed: ${sides()}`;
+      held += 1;
+      return held >= 4 ? 'held' : 'reading';
+    }, { message: 'regions and the side surfaces unchanged by the visit', intervals: [250], timeout: 5_000 }).toBe('held');
 
     // a session's row leaves the page and shows that session
     await openAppDestination(page, 'Projects');
@@ -1644,13 +1662,15 @@ const overviewGroups = (board: Locator) =>
     ),
   );
 
+// What a strip holds, as mounted: under a page the strip is invisible, and under the Settings dialog everything outside
+// the dialog is hidden from accessibility, so the tablist is found with its hidden kin too (UX wave U7b).
 const tabLabels = (page: Page, strip: string) =>
   page
-    .getByRole('tablist', { name: strip })
+    .getByRole('tablist', { name: strip, includeHidden: true })
     .locator('[role="tab"]')
     .evaluateAll((els) => els.map((el) => el.getAttribute('aria-label') ?? ''));
 
-const selectedTab = (page: Page, strip: string) => page.getByRole('tablist', { name: strip }).locator('[role="tab"][aria-selected="true"]').getAttribute('aria-label');
+const selectedTab = (page: Page, strip: string) => page.getByRole('tablist', { name: strip, includeHidden: true }).locator('[role="tab"][aria-selected="true"]').getAttribute('aria-label');
 
 // Hovers a session's row (its project expanded, W11) with the pointer and returns its open hover card. The hover is
 // retried from a neutral point: now and then, right after a Radix menu has closed, Chromium keeps the synthetic pointer's

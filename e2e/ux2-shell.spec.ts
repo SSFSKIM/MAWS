@@ -12,7 +12,7 @@ import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
-import { hideSurface, moveSideTab, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
+import { backToTabs, hideSurface, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -91,7 +91,7 @@ async function singleChromeRow(page: Page): Promise<void> {
 }
 // UX wave U7b (O-40): Settings is a dialog over the window and adds no tab; Esc closes it.
 async function settingsAddsNoTab(maws: MawsLaunch): Promise<void> {
-  const tabs = maws.page.locator('[data-chrome-tabs]').getByRole('tab');
+  const tabs = mountedTabs(maws.page); // the strip is hidden from accessibility under the dialog: its mounted tabs
   const before = await tabs.count();
   await menu(maws.app, 'settings.open');
   await expect(settingsDialog(maws.page)).toBeVisible();
@@ -872,6 +872,35 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await menu(maws.app, 'diagnostics.open'); // UX wave U7b: Diagnostics stands for the tab of no session Settings was
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(22);
   await settingsAddsNoTab(maws);
+  // UX wave U7b (M5's observation): a page leaves the strip's scroll position as it was. The overflowing strip scrolled
+  // to its middle and the tab drawn there put in front; Customize opened as a page, where the strip is invisible and its
+  // host changes width; Back shows the same offset with the same tab in front.
+  const list = page.locator('[data-chrome-tabs] [role="tablist"]');
+  const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow, 'the strip overflows').toBeGreaterThan(0);
+  await list.evaluate((el) => { el.scrollLeft = Math.round((el.scrollWidth - el.clientWidth) / 2); });
+  const middle = await list.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const x = box.left + box.width / 2;
+    return Array.from(el.querySelectorAll('[role="tab"]')).findIndex((tab) => { const r = tab.getBoundingClientRect(); return r.left <= x && r.right >= x; });
+  });
+  expect(middle, 'a tab is drawn at the strip’s middle').toBeGreaterThanOrEqual(0);
+  const inFront = list.locator('[role="tab"]').nth(middle);
+  await inFront.click();
+  await expect(inFront).toHaveAttribute('aria-selected', 'true');
+  let offset = -1;
+  await expect.poll(async () => {
+    const now = await list.evaluate((el) => el.scrollLeft);
+    const settled = now === offset;
+    offset = now;
+    return settled;
+  }, { message: 'the strip’s scroll has settled', intervals: [250] }).toBe(true);
+  expect(offset, 'the strip is scrolled, short of its end').toBeGreaterThan(0);
+  expect(offset, 'the strip is scrolled, short of its end').toBeLessThan(overflow);
+  await openAppDestination(page, 'Customize');
+  await backToTabs(page);
+  await expect(inFront).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'Back shows the strip at the same offset' }).toBe(offset);
   for (const dimensions of [...SIZES, { width: 900, height: 820 }, { width: 620, height: 820 }]) {
     await size(maws, dimensions.width, dimensions.height);
     const all = page.getByRole('button', { name: 'All tabs', exact: true });

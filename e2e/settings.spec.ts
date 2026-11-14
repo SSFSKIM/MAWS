@@ -6,7 +6,7 @@
 // relaunch over the same profile. The monospace-font case needs the harness's `#probe` page (`pnpm e2e:settings` builds
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
-import { mainTab, mainTabs, openAppDestination, pageRegion, pageTitle, settingsDialog } from './support/shell';
+import { mountedTab, mountedTabs, openAppDestination, pageRegion, pageTitle, settingsDialog } from './support/shell';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { tmpdir } from 'node:os';
@@ -34,7 +34,7 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 }
 const accelerator = (app: ElectronApplication, id: string) => app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.accelerator ?? null, id);
 const panel = settingsDialog; // UX wave U7b: Settings is read in its dialog, not the main pane's tab panel
-const tabCount = (page: Page) => mainTabs(page).getByRole('tab').count();
+const tabCount = (page: Page) => mountedTabs(page).count(); // under the dialog or a page the strip is hidden: its mounted tabs
 const keyRow = (page: Page, title: string) => panel(page).getByRole('table', { name: 'Key bindings' }).getByRole('row', { name: title, exact: true });
 // P5 O3-A (docs/doperpowers/plans/2026-10-28-p5-o3-spine.md §3): the client's file and the machine's, each its owner's fields
 const readSettings = (userData: string) => JSON.parse(readFileSync(join(userData, 'settings.json'), 'utf8')) as Record<string, unknown> & { version: number; keymap: object };
@@ -89,7 +89,7 @@ test('settings: a v2 file migrates; ⌘, opens the dialog; a chord is recorded, 
       await expect(settingsDialog(page)).toBeVisible();
       await expect(panel(page).getByRole('region', { name: 'Keyboard' })).toBeVisible();
       expect(await tabCount(page), 'no tab is added').toBe(tabs);
-      await expect(mainTab(page, /Settings/)).toHaveCount(0);
+      await expect(mountedTab(page, /Settings/)).toHaveCount(0);
 
       const fallback = panel(page).getByRole('combobox', { name: 'When auto mode is unavailable' });
       await expect(fallback.locator('option')).toHaveText(['Manual', 'Accept edits', 'Plan', 'Bypass permissions', "Don't ask"]);
@@ -751,7 +751,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
         // one page at a time: Customize replaces Projects, and neither is a tab
         await opened('Customize');
         await expect(pageRegion(page)).toHaveAttribute('data-destination', 'customize');
-        await expect(mainTab(page, /Projects|Customize/)).toHaveCount(0);
+        await expect(mountedTab(page, /Projects|Customize/)).toHaveCount(0);
         await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
       }
       expect(await page.evaluate(async () => { const snapshot = await window.maws.invoke('session.list', {}); return snapshot.ok ? snapshot.value.sessions.length : -1; })).toBe(0);

@@ -1679,7 +1679,8 @@ type StoredSets = { version: number; current: string; sets: Record<string, { pan
 type StoredSurfaces = { pinnedTools: string[]; contexts: Record<string, string>; stacks: Record<string, string[]> };
 type StoredRegions = { version: number; sidebar: { width: number; collapsed: boolean } };
 const layoutOf = async <T>(page: Page, key: 'main.tabs' | 'panelTools.surfaces' | 'regions') => value(await invoke(page, 'layout.get', { key })).value as T | null;
-const stripIds = (page: Page) => mainTabs(page).getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+// The strip's tabs as mounted: under a page this build's strip is invisible, and a role query of it would find none.
+const stripIds = (page: Page) => mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
 const pinnedIn = (stored: StoredSets | null) => Object.values(stored?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.pinned).map((tab) => tab.id)));
 const notice = (page: Page) => page.locator('[data-toast-viewport]').getByText(ONE_STRIP_NOTICE);
 // Every console message the page gave, of every type (Playwright keeps them from the first load: e2e/support/launch.ts)
