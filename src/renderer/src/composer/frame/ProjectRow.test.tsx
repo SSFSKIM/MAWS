@@ -105,6 +105,23 @@ describe('the project row', () => {
     expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]);
   });
 
+  // M6 re-review: with a third namesake whose parent part alone would read "x" too, every row of the name is told apart
+  // by its whole path, so no two read alike
+  it('keeps every row of a shared name distinct when some of their parent parts tie', async () => {
+    const [x, y, z] = [at('repo-x' as ProjectId), at('repo-y' as ProjectId), at('repo-z' as ProjectId)];
+    useSessions.setState({
+      projects: new Map([
+        [x, project(x, 0, { name: 'repo', directory: '/work/x', createdAt: '2026-03-01T00:00:00.000Z' })],
+        [y, project(y, 1, { name: 'repo', directory: '/work/y', createdAt: '2026-02-01T00:00:00.000Z' })],
+        [z, project(z, 2, { name: 'repo', directory: '/x/repo', createdAt: '2026-01-01T00:00:00.000Z' })],
+      ]),
+      records: new Map(),
+    });
+    render(<ProjectRow binding={binding()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]);
+  });
+
   it('searches names and paths, says when nothing matches, and chooses a project, a new one or none', async () => {
     const b = binding();
     render(<ProjectRow binding={b} />);
@@ -297,6 +314,19 @@ describe('the project row on another machine', () => {
     render(<ProjectRow binding={binding()} appSessionId={TAB} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
     await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]));
+  });
+
+  it('keeps every row of a shared name there distinct when some of their parent parts tie', async () => {
+    roster();
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('x', 'repo', '/Users/mini/src/x', '2026-03-01T00:00:00.000Z'), theirs('y', 'repo', '/Users/mini/src/y', '2026-02-01T00:00:00.000Z'), theirs('z', 'repo', '/Users/mini/x/repo')], revision: 1 } };
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]));
   });
 
   it('takes the home for Don’t work in a project, and opens that machine’s folder sheet for New project', async () => {
