@@ -52,9 +52,8 @@ function WaitingLine({ parent, exchange, className }: { parent: AppSessionId; ex
 }
 
 function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwCardPlacement }) {
-  const log = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
-  const side = useSideAsk(parent, log);
+  const side = useSideAsk(parent);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const focus = useBtwCards((s) => btwCardOf(s, parent).focus);
   useEffect(() => markBtwSeen(parent, exchanges ?? []), [parent, exchanges]); // open on screen: every settled one is seen
@@ -63,7 +62,7 @@ function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwC
     field.current?.focus();
     takeBtwFocus(parent);
   }, [focus, parent]);
-  const { shown, question, setQuestion, canAsk, note, refusal } = side;
+  const { log, shown, question, setQuestion, canAsk, note, refusal } = side;
   const box = placement === 'corner' ? `${CORNER} w-[320px] max-w-[calc(100%-24px)] max-h-[min(360px,calc(100%-68px))]` : 'w-full max-h-[360px]';
   return (
     <section data-btw-card={placement} aria-label={COPY.card} className={`${box} flex min-h-0 flex-col overflow-hidden rounded-lg ${SURFACE} text-ui`}>

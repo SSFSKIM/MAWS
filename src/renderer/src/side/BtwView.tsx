@@ -11,7 +11,7 @@
 // UX wave U4a (O-20): since a session's own `/btw` answers in its card (BtwCard.tsx), this view is a side thread's
 // questions under its thread view; the card asks, lists and draws its exchanges through the same hook and row
 // (`useSideAsk`, `Exchange`), with its own waiting line in place of the spinner.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
 import { STARTS } from '../composer/submit/submit-state';
@@ -29,9 +29,10 @@ import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, use
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
 
-// Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is the scroller
-// kept at its newest exchange.
-export function useSideAsk(parent: AppSessionId, log: RefObject<HTMLElement | null>) {
+// Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is for the
+// scroller, kept at its newest exchange.
+export function useSideAsk(parent: AppSessionId) {
+  const log = useRef<HTMLDivElement>(null);
   const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const driven = useDrivenAsk(parent); // P5 O9 M5
@@ -55,7 +56,7 @@ export function useSideAsk(parent: AppSessionId, log: RefObject<HTMLElement | nu
   const last = shown.at(-1);
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight; // the newest exchange in view
-  }, [log, shown.length, last?.state]);
+  }, [shown.length, last?.state]);
 
   // P2-A: the session started first when it has no ready process; null when it can be asked, else the words shown
   const started = async (): Promise<boolean> => {
@@ -96,13 +97,12 @@ export function useSideAsk(parent: AppSessionId, log: RefObject<HTMLElement | nu
   };
   const canClear = !shown.every((e) => e.state === 'pending') && clearUnavailable === null;
   const clear = () => void clearSide(parent);
-  return { shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
+  return { log, shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
 }
 
 export function BtwView({ parent }: { parent: AppSessionId }) {
-  const log = useRef<HTMLDivElement>(null);
-  const side = useSideAsk(parent, log);
-  const { shown, question, setQuestion, canAsk, note, refusal } = side;
+  const side = useSideAsk(parent);
+  const { log, shown, question, setQuestion, canAsk, note, refusal } = side;
 
   return (
     <div data-side-btw-view={parent} className="flex h-full min-h-0 flex-col">
