@@ -53,23 +53,27 @@ export const PLACE_WORDS = {
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 // UX wave U4a M6 (l3-input-07; decision 24): what each row draws dimmed beside the name. For a name another listed
-// project shares, the part of its path that tells it apart: the sidebar's part of the parent path (`projectSuffixes`),
-// or, where that ties with a namesake's (two folders under one parent), the shortest tail of the whole path that
-// differs. Otherwise the folder's name where it differs from the project's. Every row's title is its whole path.
+// project shares, the part of its path that tells it apart: the sidebar's part of the parent path (`projectSuffixes`)
+// when those parts are distinct across every project of that name; where any two of them tie (two folders under one
+// parent), every project of that name takes instead the shortest tail of its whole path that no other of the name
+// shares at that depth. Otherwise the folder's name where it differs from the project's. Every row's title is its
+// whole path.
 function rowDetails(projects: readonly ProjectRecord[]): Map<ProjectRecord['id'], string | null> {
   const suffixes = projectSuffixes(projects);
-  const tail = (p: ProjectRecord, depth: number) => p.directory.split('/').filter(Boolean).slice(-depth).join('/') || '/';
+  const parts = (p: ProjectRecord) => p.directory.split('/').filter(Boolean);
+  const tail = (p: ProjectRecord, depth: number) => parts(p).slice(-depth).join('/') || '/';
   return new Map(projects.map((p) => {
     const suffix = suffixes.get(p.id) ?? null;
     if (suffix === null) {
       const folder = basename(p.directory);
       return [p.id, folder !== p.name ? folder : null];
     }
-    const tied = projects.filter((other) => other.id !== p.id && other.name === p.name && suffixes.get(other.id) === suffix);
-    if (tied.length === 0) return [p.id, suffix];
-    const parts = p.directory.split('/').filter(Boolean).length;
+    const namesakes = projects.filter((other) => other.name === p.name);
+    const parentParts = new Set(namesakes.map((other) => suffixes.get(other.id)));
+    if (parentParts.size === namesakes.length) return [p.id, suffix];
+    const others = namesakes.filter((other) => other.id !== p.id);
     let depth = 1;
-    while (depth < parts && tied.some((other) => tail(other, depth) === tail(p, depth))) depth++;
+    while (depth < parts(p).length && others.some((other) => tail(other, depth) === tail(p, depth))) depth++;
     return [p.id, tail(p, depth)];
   }));
 }
