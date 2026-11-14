@@ -63,7 +63,8 @@ export interface ScmStore {
   discard(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, directory: string, entries: ScmDiscardInput['entries']): Promise<ScmMutationResult>;
   commit(ui: StoreApi<ScmUi>, appSessionId: AppSessionId): Promise<ScmMutationResult>; // the session's draft and Skip hooks
   // ref-counted: seeds the run from `scm.remote.last` and follows its events; `ownRuns`, whether the session's own runs
-  // run in the checkout the page shows (its launch folder; UX wave U8c-2: no act runs elsewhere), true unless said
+  // run in the checkout the page shows (its launch folder; UX wave U8c-2: no act runs elsewhere), true unless said; the
+  // first holder's word stands while it is held (one page per session holds it: the tool's body)
   resume(appSessionId: AppSessionId, options?: { ownRuns?: boolean }): () => void;
   started(appSessionId: AppSessionId, plan: RemotePlan): void; // `scm.push`/`scm.pr.create` answered `started` for the plan
   reset(): void; // tests

@@ -108,10 +108,11 @@ function prStateEnabled(branch: string | null, scm: ScmStatus | undefined): bool
 
 // The PR state of the session's checkout on `branch`, read again when its repository's head or refs move. The query is
 // the session's and its checkout's (`checkout`, the working folder the surface shows), so the tool and the row share one
-// poll, while main answers for the branch the checkout was on when asked; a query that stops asking keeps its last answer. So an answer is shown only while there
-// is something to ask and only when it names the current branch: after a switch nothing is said until the new branch's
-// answer, and nothing on a detached head or once trust or the last remote is gone. An answer naming no branch (main
-// found the checkout untrusted, not a repository or detached) carries no PR and stands: the row reads trust from it.
+// poll, while main answers for the branch the checkout was on when asked; a query that stops asking keeps its last
+// answer. So an answer is shown only while there is something to ask and only when it names the current branch: after
+// a switch nothing is said until the new branch's answer, and nothing on a detached head or once trust or the last
+// remote is gone. An answer naming no branch (main found the checkout untrusted, not a repository or detached) carries
+// no PR and stands: the row reads trust from it.
 // E11: an answer naming another branch is asked again at once, once per pair of branches (a switch made while nothing
 // showed the query leaves a fresh answer for the old branch, which the poll would otherwise keep for up to 2 minutes).
 export function usePrState(appSessionId: AppSessionId, { checkout, branch, scm }: { checkout: string; branch: string | null; scm: ScmStatus | undefined }) {
