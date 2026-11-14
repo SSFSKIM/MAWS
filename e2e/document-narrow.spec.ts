@@ -409,9 +409,9 @@ test('UX wave U5a: in a body under 720 px, a comment’s card that became its si
       }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
     });
 
-    // the answer: the thread's turn ends. Its engine takes requests once it is ready, which the card shows when the
-    // thread's own row of the comment is drawn as taken (no longer waiting in MAWS's queue): the host writes the prompt
-    // to the engine only once it is ready
+    // the answer: the thread's turn ends. Its engine takes requests only once it is ready; the card shows that when it
+    // draws the thread's own row of the comment as taken (no `data-pending`, so no longer waiting in MAWS's queue): the
+    // host wrote the prompt to the engine, which it does only once the child's process is ready
     await expect(card.locator('[data-card-thread] section.transcript-user:not([data-pending])'), 'the comment taken by the thread').toBeVisible({ timeout: 20_000 });
     value(await invoke(page, 'session.getContextUsage', { appSessionId: child as never, detail: 'summary' }));
     await expect(card, 'folded to the passage’s mark').toHaveCount(0, { timeout: 20_000 });
