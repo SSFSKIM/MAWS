@@ -81,6 +81,9 @@ const locals = new Map<AppSessionId, SideExchange[]>();
 const standsIn = new Map<string, string>();
 // The latest listing asked per parent: an older answer arriving after it is dropped.
 const listings = new Map<AppSessionId, number>();
+// The completions patched in per parent, counted: a listing asked before one and answered after it holds that exchange
+// as it was before, so it is dropped and asked again (the host settles its entry before the completion goes out).
+const completions = new Map<AppSessionId, number>();
 let localSerial = 0;
 
 const localsOf = (parent: AppSessionId) => locals.get(parent) ?? [];
@@ -110,8 +113,10 @@ export async function refreshSide(parent: AppSessionId, client: MawsBridge = ipc
   if (drivenByBridge(parent)) return show(parent, []); // P5 O9 M5: no host log; this window's locals only
   const serial = (listings.get(parent) ?? 0) + 1;
   listings.set(parent, serial);
+  const completed = completions.get(parent) ?? 0;
   const result = await client.invoke('side.question.list', { appSessionId: parent });
   if (listings.get(parent) !== serial) return;
+  if ((completions.get(parent) ?? 0) !== completed) return refreshSide(parent, client);
   if (!result.ok) {
     console.warn('[side] side.question.list failed', result.error.message);
     if (sidePaneOf(useSidePane.getState(), parent).exchanges === null) show(parent, []);
@@ -210,6 +215,7 @@ export function onSideOperation(event: OperationEvent, client: MawsBridge = ipc)
   } else if (entry.state === 'pending') {
     settled = { ...entry, state: 'failed', error: event.outcome.error.message, answeredAt: at };
   } else return;
+  completions.set(parent, (completions.get(parent) ?? 0) + 1);
   patch(parent, { exchanges: exchanges.map((e) => (e === entry ? settled : e)) });
 }
 
@@ -349,6 +355,7 @@ export function resetSideQuestions(): void {
   locals.clear();
   standsIn.clear();
   listings.clear();
+  completions.clear(); // UX wave U4a
   heldSince.clear(); // UX wave U4a
   useBtwCards.setState({ cards: new Map() }); // UX wave U4a
   usePromotions.setState({ inFlight: new Map() }); // UX wave U4a
