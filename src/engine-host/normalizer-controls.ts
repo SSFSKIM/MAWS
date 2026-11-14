@@ -11,7 +11,7 @@ import { CanUseToolRequestSchema, ElicitationRequestSchema, HookCallbackRequestS
 // E1 start
 import { withQuestionIds } from '@shared/maws/ask';
 import { readMcpMessage, toolCallOf } from '@shared/maws/rpc';
-import { ArtifactDeliverySchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
+import { ArtifactDeliverySchema, AskAnswerSchema, AskResultSchema, isMawsToolName, parseRecordedToolArguments, SendFileResultSchema, ShowPaneResultSchema } from '@shared/maws/tools';
 import { ArtifactUpdateInputSchema, HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A: retired, read as before
 // E1 end
 // E4c start (frozen since the browser tools left the server, P1 A-54)
@@ -39,8 +39,11 @@ export interface InboundEntry {
 }
 // E1: one call of the `maws` server, remembered by its raw name and arguments (as the wire carried them) until the host's
 // answer; `admitted` whether the arguments parse with the tool's input schema, decided once at the call (residue 1:
-// a refused call yields no `maws.*` event, so the host and the normaliser agree on the same calls). `askId`: an admitted
-// ask's id (the tool-use id, else the request id: residue 2), else null.
+// a refused call yields no `maws.*` event, so the host and the normaliser agree on the same calls). UX wave U6d: the
+// schema is the one the record was written under (`parseRecordedToolArguments`, at the call and again at the answer), so
+// a call for the retired `artifact` pane is admitted as every earlier build admitted it, and its refusal is still a pane
+// call with that error: the one call the host refuses that is mapped. `askId`: an admitted ask's id (the tool-use id,
+// else the request id: residue 2), else null.
 export interface McpCall {
   tool: string;
   askId: string | null;
@@ -152,11 +155,11 @@ export function mapInboundRequest(inbound: InboundTable, frame: ControlRequestFr
       // before the removal maps as it always did
       // P3-A: so is a call of the retired `artifact_update`
       const admitted = isMawsToolName(tool)
-        ? parseToolArguments(tool, args).ok
+        ? parseRecordedToolArguments(tool, args).ok
         : tool === HISTORICAL_ARTIFACT_UPDATE
           ? ArtifactUpdateInputSchema.safeParse(args).success
           : isBrowserToolName(tool) && parseBrowserToolArguments(tool, args).ok;
-      const ask = admitted && tool === 'ask' ? parseToolArguments('ask', args) : null;
+      const ask = admitted && tool === 'ask' ? parseRecordedToolArguments('ask', args) : null;
       const askId = ask?.ok ? (toolUseId ?? requestId) : null;
       remember({ kind: 'mcp', toolUseId, callbackId: null, mcp: { tool, askId, toolUseId, args, admitted } });
       if (ask?.ok && askId !== null) {
@@ -219,7 +222,7 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
 
 // E1 start: the host's answer to a `tools/call` of the `maws` server, for an admitted call only: `maws.delivery.file`
 // for a `send_file` whose result reads `delivered`, `maws.pane.shown` for a `show_pane` (what opened, or the error text
-// of a pane this build lacks or a window that never answered), `maws.ask.answered` for a blocking ask answered with its
+// of a pane this build lacks, a window that never answered or, since U6d, the retired `artifact` pane), `maws.ask.answered` for a blocking ask answered with its
 // AskResult (an async ask's `asked` acknowledgement yields nothing: its answers come with the `maws_ask_answered` meta
 // row). Anything else (another tool, a result that parses as neither) is visible as the call's `tool.result` alone.
 function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: EventSink, attribution: Attribution, openAsks: OpenAsks): void {
@@ -232,13 +235,13 @@ function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: E
   const json = isError ? null : parseJson(text);
   if (call.tool === 'send_file') {
     const parsed = SendFileResultSchema.safeParse(json);
-    const args = parseToolArguments('send_file', call.args);
+    const args = parseRecordedToolArguments('send_file', call.args);
     if (!parsed.success || !args.ok) return;
     out.emit({ kind: 'maws.delivery.file', toolUseId: call.toolUseId, requestId, deliverables: parsed.data.deliverables, caption: args.data.caption ?? null, urgency: args.data.urgency ?? 'normal' }, attribution);
     return;
   }
   if (call.tool === 'show_pane') {
-    const args = parseToolArguments('show_pane', call.args);
+    const args = parseRecordedToolArguments('show_pane', call.args);
     const parsed = ShowPaneResultSchema.safeParse(json);
     if (!args.ok || (!isError && !parsed.success)) return;
     out.emit({ kind: 'maws.pane.shown', toolUseId: call.toolUseId, requestId, pane: args.data.pane, target: args.data.target ?? null, opened: parsed.success ? parsed.data.opened : null, error: isError ? text : null }, attribution);

@@ -31,6 +31,7 @@ import {
   MAWS_TOOLS,
   mawsServerInfo,
   mawsToolList,
+  parseRecordedToolArguments, // U6d
   parseToolArguments,
   SendFileInputSchema,
   SendFileResultSchema,
@@ -266,6 +267,34 @@ describe('X9 refusals: one text per offender', () => {
     expect(TOOL_ERRORS.paneTimeout).toBe('show_pane: no MAWS window answered within 8 s');
     expect(TOOL_ERRORS.artifactPaneRetired).toBe('show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.'); // U6d
     expect(TOOL_ERRORS.artifactPaneRetired).toHaveLength(178);
+  });
+});
+
+// U6d (Interfaces §B): records are read with the schema they were written under; only show_pane's differs
+describe('X9 records: parseRecordedToolArguments', () => {
+  const target = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+  it('reads an earlier build\'s call for the artifact pane, with its at, as that build took it', () => {
+    expect(parseRecordedToolArguments('show_pane', { pane: 'artifact', target, at: { tab: 't2', block: 'b7' } })).toEqual({ ok: true, data: { pane: 'artifact', target, at: { tab: 't2', block: 'b7' } } });
+    expect(parseRecordedToolArguments('show_pane', { pane: 'artifact' })).toEqual({ ok: true, data: { pane: 'artifact' } });
+    expect(parseRecordedToolArguments('show_pane', { pane: 'terminal' })).toEqual({ ok: true, data: { pane: 'terminal' } });
+  });
+
+  it('refuses what every earlier build refused: a line or an unknown key on the artifact pane, an at on another pane, an unknown pane', () => {
+    for (const args of [{ pane: 'artifact', target, line: 3 }, { pane: 'artifact', extra: true }, { pane: 'file', target: 'a.ts', at: { block: 'b1' } }, { pane: 'nope' }, null]) {
+      const refused = parseRecordedToolArguments('show_pane', args);
+      expect(refused.ok === false && refused.error, JSON.stringify(args)).toMatch(/^show_pane: invalid arguments: /);
+    }
+  });
+
+  it('is parseToolArguments for every other tool', () => {
+    const calls: [Parameters<typeof parseToolArguments>[0], unknown][] = [
+      ['send_file', { files: ['a.txt'], caption: 'Report' }], ['send_file', { files: [] }],
+      ['ask', { questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] }] }], ['ask', { questions: [] }],
+      ['artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }], ['artifact_read', { id: 'dash' }], ['artifact_read', { id: 3 }],
+      ['artifact_search', { query: 'launch plan' }], ['artifact_list', {}], ['artifact_screenshot', { id: 'dash', width: 10 }],
+    ];
+    for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
   });
 });
 

@@ -677,3 +677,15 @@ export function parseToolArguments<N extends MawsToolName>(name: N, args: unknow
   if (name === 'show_pane' && pane !== undefined && parsed.error.issues.some((issue) => issue.path.length === 1 && issue.path[0] === 'pane')) return { ok: false, error: TOOL_ERRORS.unknownPane(String(pane)) };
   return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };
 }
+
+// U6d (Interfaces §B; decision 18): a record's arguments, read with the schema they were written under, so a journal of
+// any build yields the events it always did. For `show_pane` the recorded schema decides (every pane a record can name,
+// and `at`; its refusal's text is read by nobody); every other tool is `parseToolArguments`. The normaliser's one parser
+// of a `maws` call; the host's tools keep `parseToolArguments`.
+type RecordedToolInput<N extends MawsToolName> = N extends 'show_pane' ? ShowPaneRecordedInput : ToolInput<N>;
+export function parseRecordedToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string } {
+  if (name !== 'show_pane') return parseToolArguments(name, args) as { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string };
+  const parsed = ShowPaneRecordedInputSchema.safeParse(args);
+  if (parsed.success) return { ok: true, data: parsed.data as RecordedToolInput<N> };
+  return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };
+}
