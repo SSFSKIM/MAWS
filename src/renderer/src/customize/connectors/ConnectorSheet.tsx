@@ -10,7 +10,7 @@
 // configuration's page, a removal), the one scope is a plain line, so it stays in view with the command closed. The
 // binary is `plugins.env`'s, read at every opening: until it answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
-import type { McpActionInputs, McpRemoteAdd, PluginsScope } from '@shared/plugins/cli';
+import { isMcpEntryAdd, type McpActionInputs, type McpRemoteAdd, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
@@ -18,6 +18,7 @@ import { FixedScope, type EngineResolution } from '../../widgets/plugins/Confirm
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { CONNECTORS as C } from './copy';
+import { CustomConnectorSheet } from './CustomConnectorSheet';
 import { existingOf, nameProblem, scopesFor, urlProblem, writesFor, type ConfiguredServers } from './present';
 
 type Add = McpRemoteAdd; // Discover's add: a remote server by name and URL (UX wave U11g narrows the action's two inputs)
@@ -28,14 +29,16 @@ export interface ConnectorSheetEnv {
   engine: EngineResolution;
   configured: ConfiguredServers; // configured in every scope that applies here (the inventory for `cwd`)
   retryServers(): void; // read them again
+  place?: string | null; // UX wave U11g: the page's name for its place, which the custom sheet's "Add to" names
 }
 
 export function ConnectorSheet({ request, env, onConfirm, onClose }: { request: PluginsRequest; env: ConnectorSheetEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
+  if (request.action === 'mcp-add' && isMcpEntryAdd(request.input)) return <CustomConnectorSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} />; // UX wave U11g
   return request.action === 'mcp-add' ? <AddSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} /> : <RemoveSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} />;
 }
 
 // Until `plugins.env` answers there is no command to detail: the sheet says it is resolving the engine, or why it cannot.
-function Unresolved({ engine }: { engine: EngineResolution }) {
+export function Unresolved({ engine }: { engine: EngineResolution }) {
   if (engine.state === 'error')
     return (
       <p role="alert" className="m-0 text-ui-sm text-danger">
@@ -73,7 +76,7 @@ function Details({ engine, request, scope, cwd }: { engine: EngineResolution; re
   );
 }
 
-function Problem({ text, id }: { text: string | null; id: string }) {
+export function Problem({ text, id }: { text: string | null; id: string }) {
   return text === null ? null : (
     <p id={id} role="alert" data-connector-problem className="m-0 text-ui-sm text-danger [overflow-wrap:anywhere]">
       {text}
@@ -82,7 +85,7 @@ function Problem({ text, id }: { text: string | null; id: string }) {
 }
 
 // Why Add waits on what is configured here, with Retry where reading again may help; nothing once it is read whole.
-function Configured({ configured, retry }: { configured: ConfiguredServers; retry(): void }) {
+export function Configured({ configured, retry }: { configured: ConfiguredServers; retry(): void }) {
   if (configured.state === 'read') return null;
   if (configured.state === 'reading')
     return (
