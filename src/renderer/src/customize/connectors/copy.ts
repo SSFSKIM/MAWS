@@ -1,9 +1,13 @@
 // Customize › Connectors' words (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "Adding",
 // "Signing in", "My items", "Failure handling"). Plain and literal: a state says only what MAWS observed.
 import type { ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
+import { MCP_ENTRY_BOUNDS as BOUND } from '@shared/plugins/cli';
 
 type Step = Exclude<ConnectorSignInChanged['state'], 'done' | 'failed' | 'cancelled'>;
 type Reason = NonNullable<ConnectorSignInChanged['reason']>;
+
+// A limit as §E writes it: the constant the check uses, with a comma between thousands (UX wave U11g, R11).
+const limit = (n: number): string => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 
 export const CONNECTORS = {
   tab: 'Connectors',
@@ -109,9 +113,15 @@ export const CONNECTORS = {
   rowNameRule: { headers: 'Use letters, digits and hyphens in a header name, without spaces.', env: 'Use letters, digits and underscores in a variable name, not starting with a digit.' } as const,
   rowDuplicate: { headers: (name: string) => `Two headers are named ${name}.`, env: (name: string) => `Two variables are named ${name}.` } as const,
   controlCharacter: 'This field can’t hold a line break or a control character.',
-  tooLong: 'This is too long to add.',
-  tooManyRows: 'Too many rows to add.',
-  tooLarge: 'This configuration is too large to add.',
+  // over a bound (R11): what is over, then the limit the check uses
+  tooManyArgs: `Too many arguments. The limit is ${limit(BOUND.args)}.`,
+  tooManyHeaders: `Too many headers. The limit is ${limit(BOUND.headers)}.`,
+  tooManyVariables: `Too many variables. The limit is ${limit(BOUND.env)}.`,
+  urlTooLong: `The URL is too long. The limit is ${limit(BOUND.url)} characters.`,
+  commandTooLong: `The command is too long. The limit is ${limit(BOUND.command)} characters.`,
+  argTooLong: (k: number) => `Argument ${k} is too long. The limit is ${limit(BOUND.arg)} characters.`,
+  valueTooLong: `This value is too long. The limit is ${limit(BOUND.value)} characters.`,
+  tooLarge: `This configuration is too large to add. The limit is ${limit(BOUND.json)} bytes.`,
   // Discover
   unavailable: 'Anthropic’s directory is unavailable.',
   retry: 'Retry',

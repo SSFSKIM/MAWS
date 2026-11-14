@@ -59,16 +59,21 @@ const isEmptyRow = ({ name, value }: McpPair) => name === '' && value === '';
 // the others hold; the whole entry is checked last, for its size.
 const STAND_IN = { url: 'http://x', command: 'x' } as const;
 
+// A control character, or a bound: what is over and the limit (R11). A row's name over its length is §A's `name`, not a
+// bound, so it reads as the name's rule.
 function boundWords(problem: McpEntryProblem): string {
-  switch (problem.code) {
-    case 'control':
-      return C.controlCharacter;
-    case 'too-many':
-      return problem.field === 'headers' || problem.field === 'env' ? C.tooManyRows : C.tooLong;
-    case 'too-large':
-      return C.tooLarge;
+  if (problem.code === 'control') return C.controlCharacter;
+  if (problem.code === 'too-large') return C.tooLarge;
+  if (problem.code === 'too-many') return problem.field === 'headers' ? C.tooManyHeaders : problem.field === 'env' ? C.tooManyVariables : C.tooManyArgs;
+  switch (problem.field) {
+    case 'url':
+      return C.urlTooLong;
+    case 'command':
+      return C.commandTooLong;
+    case 'args':
+      return C.argTooLong((problem.index ?? 0) + 1);
     default:
-      return C.tooLong;
+      return C.valueTooLong; // a header's or a variable's value
   }
 }
 
@@ -116,7 +121,7 @@ export function checkCustom(fields: CustomFields, servers: readonly Customizatio
   const probe = (rows: McpPair[]) => (remote(type) ? mcpEntryProblem({ type, url: STAND_IN.url, headers: rows }) : mcpEntryProblem({ type, command: STAND_IN.command, args: [], env: rows }));
   const problems = rowProblems(rowsField, sent, probe);
   const whole = probe(sent);
-  const rowsProblem = whole !== null && whole.field === rowsField && whole.code === 'too-many' ? C.tooManyRows : null;
+  const rowsProblem = whole !== null && whole.field === rowsField && whole.code === 'too-many' ? boundWords(whole) : null;
   let at = 0;
   const rows: RowCheck[] = pairs.map((pair) => {
     const emptied = remote(type) ? remoteEmptiedNamesIn(pair.value) : [];

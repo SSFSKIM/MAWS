@@ -68,15 +68,21 @@ function useConnectorManage(cwd: string | null, place: string | null, configured
   // U11g: the page's inventory, read again at a custom sheet's opening (the same query as the page's, so they share it)
   const inventory = useCustomizationInventory(cwd);
   const { refetch } = inventory;
+  // A read begun after the opening: with an answer in hand a refetch cancels any read in flight and starts its own; with
+  // none yet, TanStack Query joins the read in flight, which began before the opening, so that one is let end and a read
+  // is begun after it (M2's review).
+  const unanswered = inventory.data === undefined;
   const askIn = useCallback<AskIn>(
     (key, request, runIn) => {
       const opening = ++openings.current;
       const custom = request.action === 'mcp-add' && isMcpEntryAdd(request.input);
       setAsking({ key, request, engine: { state: 'loading' }, opening, runIn, read: custom ? 'out' : null });
       void reread().then((read) => setAsking((current) => (current?.opening === opening ? { ...current, engine: resolutionOf(read) } : current)));
-      if (custom) void refetch().then(() => setAsking((current) => (current?.opening === opening ? { ...current, read: 'answered' } : current)));
+      if (!custom) return;
+      const readAfterOpening = unanswered ? refetch().then(() => refetch()) : refetch();
+      void readAfterOpening.then(() => setAsking((current) => (current?.opening === opening ? { ...current, read: 'answered' } : current)));
     },
-    [reread, refetch],
+    [reread, refetch, unanswered],
   );
   const ask = useCallback((key: string, request: PluginsRequest) => askIn(key, request, null), [askIn]);
   const manage = useMemo<Manage>(() => ({ cwd: runCwd, ops, ask, reloadMods: null }), [runCwd, ops, ask]);
