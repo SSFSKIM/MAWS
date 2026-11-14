@@ -341,7 +341,9 @@ export class EditorController {
     // UX wave U4a (l3-input-08): Enter sends whatever the line count; Shift+Enter (the hard break's own key) and ⌥Enter
     // break the line; ⌘Enter reached the dispatcher as `composer.queue` above
     if (event.key === 'Enter' && plain) {
-      void this.submit();
+      // a held Enter's repeats are consumed and send nothing: the press may have been one that took a search's match
+      // (the panel's finding 6), and no send is made by holding the key
+      if (!event.repeat) void this.submit();
       return true;
     }
     if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) return editor.commands.setHardBreak();
