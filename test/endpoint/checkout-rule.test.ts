@@ -586,14 +586,14 @@ describe('the checkout bounds and the folders a record’s facts name', () => {
       return listed.ok ? (listed.value as { worktrees: { path: string }[] }).worktrees.map((entry) => entry.path) : listed.error;
     };
     const forged = { directory: one.root, additionalDirectories: [], worktree: null, agentFolder: { checkout: composed, cwd: composed, branch: null, linked: true } };
-    expect(await listedPaths(), 'the machine lists the worktree as git spells it').toEqual([one.root, decomposed]);
-    expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
+    expect.soft(await listedPaths(), 'the machine lists the worktree as git spells it').toEqual([one.root, decomposed]);
+    expect.soft(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
     moved(f, 'app-forged', forged);
     const a = await openRemote(f, org.a1, org.A);
-    expect(code(await call(a, 'git.status', { directory: composed }, B('app-forged')))).toBe('no-target');
+    expect.soft(code(await call(a, 'git.status', { directory: composed }, B('app-forged')))).toBe('no-target');
     // and once the registered folder is gone, its registration kept: the sibling is still not it
     rmSync(decomposed, { recursive: true, force: true });
-    expect(await listedPaths()).toEqual([one.root, decomposed]);
+    expect.soft(await listedPaths()).toEqual([one.root, decomposed]);
     expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
   });
 });
