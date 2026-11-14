@@ -22,6 +22,9 @@ export interface Slots {
   topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
   browserTab: ComponentType<{ tab: Extract<TabRef, { kind: 'browser' }> }>; // E4a: a session's browser tab as a main tab
   artifactsLibrary: ComponentType<Record<never, never>>; // P3-G (§D5): the Artifacts tab's content; P3-L registers the library
+  // UX wave U8b (UC-9; its execution document, Interfaces §C.1): the card column's two places for its siblings' cards
+  sessionCardWaiting: ComponentType<{ appSessionId: AppSessionId }>; // U1b: the waiting-requests card, first, while a request of the session waits
+  sessionCardFoot: ComponentType<{ appSessionId: AppSessionId }>; // U4b: the /btw card, under the last card; whether it draws is its own
 }
 
 // A store rather than a plain map, so a registration after the first render still reaches the page.

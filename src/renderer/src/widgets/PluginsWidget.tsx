@@ -20,14 +20,14 @@ import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { useAvailability } from '../sessions/availability';
 import { useLoadedPlugins } from '../sessions/observed';
 import { useSessions } from '../stores/sessions';
-import { LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
+import { BEFORE_START, LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './copy';
 import { AddMarketplaceDialog } from './plugins/AddMarketplaceDialog';
 import { AddMenu, type MarketplaceDialog } from './plugins/AddMenu';
 import type { EngineResolution } from './plugins/ConfirmSheet';
 import { LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
-import { LoadedLine } from './plugins/LoadedLine';
+import { LoadedLine, NotObservedLine } from './plugins/LoadedLine';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { ManageMarketplaces } from './plugins/ManageMarketplaces';
 import { usePluginManifests } from './plugins/manifests';
@@ -44,6 +44,7 @@ import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
 import { openDiscover, takeDiscoverRequest, useDiscoverRequest } from '../customize/open';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
+import { useCloseOnLeavingForRemote, useTabPlace } from './tab-place';
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets). P5 O6 M4: this machine's, whose
 // plugin CLI the change runs (another machine's sessions are not reloaded by it).
@@ -107,8 +108,20 @@ const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { ap
 });
 
 export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
+  // UX wave U11a (§D "Plugins"): before the first message the library manages the tab's folder; a tab set to another
+  // machine reads nothing of this Mac's
+  const place = useTabPlace(appSessionId);
+  useCloseOnLeavingForRemote(place, close);
   // the CLI's cwd: the launch's directory (which the host compares for project and local scope), else the record's
   const cwd = useSessions((s) => s.engine.get(appSessionId)?.cwd ?? s.records.get(appSessionId)?.directory ?? null);
+  if (place.kind === 'remote') {
+    return (
+      <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} close={close}>
+        <p className="m-0 text-fg-muted">{BEFORE_START.remote(place.machine)}</p>
+      </WidgetFrame>
+    );
+  }
+  if (place.kind === 'local') return <LibraryBeforeStart appSessionId={appSessionId} folder={place.folder} close={close} />;
   // P5 O6 M4: the plugin CLI runs on this machine until O4 spans machines, so another machine's session's directory is
   // never read or changed here as if it were this machine's.
   if (machineOf(appSessionId) !== ipc.localMachine) {
@@ -119,6 +132,16 @@ export function PluginsWidget({ appSessionId, close }: { appSessionId: AppSessio
     );
   }
   return <SessionLibrary cwd={cwd} appSessionId={appSessionId} presentation={{ variant: 'modal', appSessionId, close }} />;
+}
+
+// UX wave U11a (§D "Plugins"): an unstarted tab's library, over its folder (the engine's config home when none is chosen,
+// as Customize reads the user configuration), with no session: its loaded line says "Not observed yet" alone, and Open
+// Discover opens Customize for the same page (the user configuration's with no folder).
+function LibraryBeforeStart({ appSessionId, folder, close }: { appSessionId: AppSessionId; folder: string | null; close(): void }) {
+  const env = usePluginsEnv();
+  const directory = folder ?? env.data?.configHome ?? null;
+  if (directory === null) return <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.plugins} command="plugins" state={env.state === 'error' ? 'error' : 'loading'} error={env.error ?? null} size="library" close={close} />;
+  return <LibraryBody key={directory} cwd={directory} session={null} presentation={{ variant: 'modal', appSessionId, close }} beforeStart={{ discoverAt: folder }} />;
 }
 
 // The session modal alone keeps dormant-session Refresh. The embedded library exposes ready-process reloads only.
@@ -135,7 +158,8 @@ function usePluginSession(appSessionId: AppSessionId, allowAcquire: boolean): Pl
   return { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire };
 }
 
-function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; discover?: DiscoverOption }) {
+// `beforeStart`: an unstarted tab's library (U11a), with the page Open Discover opens
+function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; discover?: DiscoverOption; beforeStart?: { discoverAt: string | null } }) {
   const readySessions = useSessions((s) => readyCount(s.engine));
   const env = usePluginsEnv();
   const { reread } = env;
@@ -202,17 +226,18 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
   const toolbar = discover && tab === 'discover' ? <DiscoverToolbar tab="plugins" add={add} /> : showing ? null : <PluginsToolbar add={add} />;
   // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize › Plugins › Discover for the
   // session's own directory (the CLI's cwd here), the modal closed; with no directory known there is nothing to open
+  const discoverAt = beforeStart ? beforeStart.discoverAt : cwd;
   const heading = discover ? (
     <LibrarySwitch tab={tab} onChange={switchTo} second={DISCOVER.discover} />
   ) : (
     <button
       type="button"
       data-open-discover
-      disabled={cwd === null}
+      disabled={discoverAt === null && !beforeStart}
       onClick={() => {
-        if (cwd === null) return;
+        if (discoverAt === null && !beforeStart) return;
         if (presentation.variant === 'modal') presentation.close();
-        openDiscover(cwd);
+        openDiscover(discoverAt);
       }}
       className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
     >
@@ -245,6 +270,8 @@ function LibraryBody({ cwd, session, presentation, discover }: { cwd: string | n
                   allowAcquire={session.allowAcquire}
                   onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
                 />
+              ) : beforeStart ? (
+                <NotObservedLine />
               ) : (
                 <p data-plugins-session-unavailable className="m-0 border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">{SESSION_UNAVAILABLE}</p>
               )}

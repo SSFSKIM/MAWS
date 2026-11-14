@@ -37,13 +37,17 @@ export const ACTIONS = {
   'session.new':          { title: 'New chat',                    chord: 'Cmd+N',        sink: 'menu', menu: 'file', scope: 'app' },   // New chat (2026-10-01): registered with the session creator; disabled until one exists
   'tab.close':            { title: 'Close tab',                   chord: 'Cmd+W',        sink: 'menu', menu: 'file', scope: 'app' },
   'tab.reopen':           { title: 'Reopen closed tab',           chord: 'Cmd+Shift+T',  sink: 'menu', menu: 'file', scope: 'app' },
-  // View, in its order (U6a; l7-shell-07): Overview, Artifacts, Tabs ▸, the panes, the regions, the side surfaces and More
-  // surfaces ▸, the moves between them, then Comments ▸, Appearance ▸ and Usage (accounts.open, in C11's block below)
+  // View, in its order (U6a; l7-shell-07): Overview, Artifacts, Tabs ▸, Project channel (U11a), the panes, the regions,
+  // the side surfaces and More surfaces ▸, the moves between them, then Comments ▸, Appearance ▸ and Usage (accounts.open,
+  // in C11's block below)
   'tab.overview':         { title: 'Overview',                    chord: 'Cmd+0',        sink: 'menu', menu: 'view', scope: 'app' },
   'artifacts.open':       { title: 'Artifacts',                   chord: null,           sink: 'menu', menu: 'view', scope: 'app' },   // P3-G (§D5): opens or activates the Artifacts tab, as the sidebar's row does
   'tab.select':           { title: 'Select tab 1–9',              chord: 'Cmd+1',        sink: 'menu', menu: 'view', submenu: 'Tabs', scope: 'app' },   // the menu expands this to nine items Cmd+1 … Cmd+9 with arg 1..9
   'tab.next':             { title: 'Next tab',                    chord: 'Ctrl+Tab',     sink: 'renderer', menu: 'view', submenu: 'Tabs', scope: 'pane' },
   'tab.previous':         { title: 'Previous tab',                chord: 'Ctrl+Shift+Tab', sink: 'renderer', menu: 'view', submenu: 'Tabs', scope: 'pane' },
+  // U11a (S-10; its execution document's Interfaces §F): the Channel of the focused tab's project; registered while that
+  // project has one. No default chord, and no rebinding while build F stands (`isRebindable`)
+  'channel.open':         { title: 'Project channel',             chord: null,           sink: 'menu', menu: 'view', scope: 'app' },
   'pane.split':           { title: 'Split / move to other pane',  chord: 'Cmd+\\',       sink: 'menu', menu: 'view', scope: 'app' },
   'pane.focusOther':      { title: 'Focus other pane',            chord: 'Cmd+Shift+\\', sink: 'menu', menu: 'view', scope: 'app' },
   // P4-B3 (X32 amendment; its Decision Log 12): the focused pane takes the main area and the session beside it floats in
@@ -64,7 +68,7 @@ export const ACTIONS = {
   'surface.browser': { title: 'Browser', chord: null, sink: 'menu', menu: 'view', scope: 'app' },
   'surface.source-control': { title: 'Source control', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.subagents': { title: 'Subagents', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
-  'surface.background': { title: 'Background work', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
+  'surface.background': { title: 'Background tasks', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.session-info': { title: 'Session info', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   'surface.ask-sheet': { title: 'Questions', chord: null, sink: 'menu', menu: 'view', submenu: 'More surfaces', scope: 'app' },
   // P4-B3 (X38; its Decision Log 21): the focused main artifact tab into the panel ("Show in panel"), and the shown

@@ -1,14 +1,10 @@
 // D6 / UX2-K: one app destination, with disk configuration independent of session lifetime.
 import { Tabs } from 'radix-ui';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { CommandOutput } from '@shared/ipc/schema';
-import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
 import { ipc } from '../ipc/client';
 import { useCurrentRow } from '../keymap/actions-runtime';
 import { localProjectOfSet } from '../stores/org-projects'; // P5 O6 M5
-import { IpcCommandError } from '../ipc/query';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { projectLabels } from '../sidebar/project-labels';
@@ -21,7 +17,7 @@ import { DiscoverToolbar } from './discover/DiscoverToolbar';
 import { SkillsDiscover, SkillsManage } from './discover/SkillsDiscover';
 import { SortIcon } from '../app/IconButton';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
-import { hasPluginSkills, skillsView, type SkillGroup } from '../widgets/skills/skills';
+import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { McpBody, present } from '../widgets/McpWidget';
 import { useEngineRead } from '../widgets/read';
@@ -32,11 +28,12 @@ import { ConnectorsSection } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
 import { configuredOf } from './connectors/present';
 import { machineOf } from '@shared/machine/address';
+import { useCustomizationInventory, type Inventory } from './inventory'; // UX wave U11a: shared with an unstarted tab's dialogs
+import { InventoryState } from './InventoryState';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
 const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
-type Inventory = CommandOutput<'customization.inventory'>;
 
 export function CustomizeView({ section }: { section: CustomizeSection }) {
   // Once visited, keep cwd-scoped plugin operations and their confirmation sheets alive across section switches.
@@ -71,18 +68,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
     .sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
-  const client = useQueryClient();
-  // every CLI change the runner makes (an MCP server added or removed among them) reads the configuration again
-  useEffect(() => ipc.on('plugins.changed', () => void client.invalidateQueries({ queryKey: ['maws', 'customization.inventory'] })), [client]);
-  const inventory = useQuery({
-    queryKey: ['maws', 'customization.inventory', { cwd }],
-    queryFn: async () => {
-      // P5 O6 M4: Customize is this machine's, as its plugin and connector actions are, until O4 spans machines.
-      const answer = await ipc.invoke('customization.inventory', { cwd }, { machine: ipc.localMachine });
-      if (!answer.ok) throw new IpcCommandError(answer.error);
-      return answer.value;
-    },
-  });
+  const inventory = useCustomizationInventory(cwd);
   const selectSection = (next: string) => useLayout.getState().openTab({ kind: 'customize', section: next as CustomizeSection });
   const setProject = (value: string) => {
     if (value === DIRECTORY_PAGE) return;
@@ -140,19 +126,9 @@ function DirectoryPlugins({ cwd, appSessionId, scope }: { cwd: string | null; ap
   return <PluginsLibrary cwd={directory} appSessionId={appSessionId} scope={scope} discover={{ cwd }} />;
 }
 
-function InventoryState({ error, pending, warnings, refresh }: { error: Error | null; pending: boolean; warnings?: string[]; refresh(): void }) {
-  const failures = warnings?.filter((warning) => warning !== CUSTOMIZATION_INVENTORY_COVERAGE) ?? [];
-  return <>
-    {pending && <p role="status" className="m-0 p-2 text-ui-sm text-fg-muted">Reading configuration…</p>}
-    {error && <p role="alert" className="m-0 p-2 text-ui-sm text-danger">{error.message} <button type="button" className={BUTTON} onClick={refresh}>Retry</button></p>}
-    {failures.length > 0 && <details className="mb-2 px-2 text-ui-sm text-warning"><summary className="rounded-sm outline-accent focus-visible:outline-2">Some configuration could not be read</summary><ul>{failures.map((warning, index) => <li key={index} className="[overflow-wrap:anywhere]">{warning}</li>)}</ul></details>}
-    {warnings?.includes(CUSTOMIZATION_INVENTORY_COVERAGE) && <details className="mb-2 px-2 text-ui-sm text-fg-muted"><summary className="rounded-sm outline-accent focus-visible:outline-2">Inventory coverage</summary><p className="my-1 [overflow-wrap:anywhere]">{CUSTOMIZATION_INVENTORY_COVERAGE}</p></details>}
-  </>;
-}
-
 // Skills' two views (P4-AGG M3): My items, the skills on disk; Discover, the plugins whose skills are known. An item
 // Discover shows installed here opens My items searched to its plugin.
-function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventory: ReturnType<typeof useQuery<Inventory, Error>>; scope: ReactNode }) {
+function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventory: ReturnType<typeof useCustomizationInventory>; scope: ReactNode }) {
   const [view, setView] = useState<LibraryTab>('myItems');
   const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   const refresh = () => void inventory.refetch();
@@ -189,14 +165,7 @@ function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventor
 }
 
 function DiskSkills({ inventory, refresh, scope, switcher }: { inventory: Inventory; refresh(): void; scope: ReactNode; switcher: ReactNode }) {
-  const groups = useMemo(() => {
-    const result: SkillGroup[] = [];
-    for (const [source, group] of [['project', 'here'], ['user', 'yours'], ['plugin', 'added']] as const) {
-      const rows = inventory.skills.filter((skill) => skill.source === source).map((skill) => ({ name: skill.name, invocation: null, description: skill.description, source, plugin: skill.plugin, path: skill.path }));
-      if (rows.length) result.push({ group, rows });
-    }
-    return result;
-  }, [inventory]);
+  const groups = useMemo(() => diskSkillGroups(inventory.skills, { invocable: false }), [inventory]);
   const view = useLibraryStore((s) => s.skills);
   const plugins = hasPluginSkills(groups);
   const shown = skillsView(groups, { ...view, sort: plugins ? view.sort : 'name' });
@@ -229,6 +198,6 @@ function LiveConnectorStatus({ appSessionId }: { appSessionId: AppSessionId }) {
   const read = useEngineRead('session.mcpStatus', { appSessionId });
   return <>
     <InventoryState error={read.error ? new Error(read.error) : null} pending={read.state === 'loading'} refresh={read.refetch} />
-    {read.data && <McpBody compact view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
+    {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
   </>;
 }

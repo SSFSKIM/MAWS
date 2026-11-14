@@ -314,43 +314,82 @@ describe('the pane bridge, window side (E1)', () => {
   });
 
   // E4a start (Design §14, Decision Log 7): the `browser` pane validates its target as main will, so a refused address
-  // is the model's error to read before anything opens; a valid one (as parsed) or none opens the Browser tool with the
-  // session and the request's own id, so a pinned tool showing another session opens the tab in this one (P-21) and two
-  // windows handling one request reach one tab in main.
-  describe('browser (E4a)', () => {
+  // is the model's error to read before anything opens. U12a (M1; Interfaces §B): a valid one is opened by the window
+  // itself, through main's `browser.tabs.open` with `reload` and the request's own id (two windows handling one request
+  // reach one tab and one outcome in main), and only once main has answered does the Browser tool open for the session,
+  // on the tab main selected; the answer carries main's `page`. A refused open is a refusal and opens nothing (R9).
+  describe('browser (E4a; U12a)', () => {
     const browserTool = () => {
       const { tool, probe } = probeTool('browser', { title: 'Browser', multiInstance: false });
       registerPanelTool(tool);
       return probe;
     };
+    const opened = (tabId: string) => ({ kind: 'panel-tool', toolId: 'browser', tabId, title: 'Browser' });
 
-    it('a valid target opens the Browser tool on it, parsed, with the session and the request id', async () => {
+    it('a valid target is opened by main first, parsed, with reload and the request id; the tool opens on its answer, which carries page', async () => {
       const probe = browserTool();
       show(fake, { pane: 'browser', target: 'https://Example.com' });
       await settle();
-      expect(probe.created.map((init) => init.params)).toEqual([{ target: 'https://example.com/', appSessionId: A, requestId: 'r1' }]);
-      const [opened] = panelOf(A)!.tabs;
-      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser', tabId: opened!.id, title: 'Browser' } } }]);
+      expect(fake.invoked('browser.tabs.open')).toEqual([{ appSessionId: A, url: 'https://example.com/', select: true, reuse: 'url', reload: true, requestId: 'r1' }]);
+      expect(probe.created).toEqual([]); // held: nothing opened, nothing answered
+      expect(panelOf(A)?.tabs ?? []).toEqual([]);
+      expect(fake.invoked('maws.pane.answer')).toEqual([]);
+      await fake.reply('browser.tabs.open', { tab: {}, reused: true, page: 'reloaded' });
+      expect(probe.created.map((init) => init.params)).toEqual([{ appSessionId: A }]);
+      const [tab] = panelOf(A)!.tabs;
+      expect(panelOf(A)!.activeTabId).toBe(tab!.id);
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: opened(tab!.id), page: 'reloaded' } }]);
     });
 
-    it('a refused target answers navigationRefused, nothing opened', async () => {
+    it('two windows given one request both ask main with its id and answer alike', async () => {
+      browserTool();
+      const second = connectPaneShows(fake.client);
+      try {
+        show(fake, { pane: 'browser', target: 'https://a.test/' });
+        await settle();
+        expect(fake.invoked('browser.tabs.open')).toHaveLength(2);
+        expect(new Set(fake.invoked('browser.tabs.open').map((input) => JSON.stringify(input))).size).toBe(1);
+        await fake.reply('browser.tabs.open', { tab: {}, reused: false, page: 'opened' });
+        await fake.reply('browser.tabs.open', { tab: {}, reused: true, page: 'opened' });
+        const [first, other] = fake.invoked('maws.pane.answer');
+        expect(first).toEqual(other);
+        expect(first).toMatchObject({ result: { ok: true, page: 'opened' } });
+      } finally {
+        second();
+      }
+    });
+
+    it('a refused target answers navigationRefused and asks main nothing', async () => {
       const probe = browserTool();
       show(fake, { pane: 'browser', target: 'file:///etc/hosts' });
       show(fake, { pane: 'browser', target: 'wikipedia.org', requestId: 'r2' });
       await settle();
       expect(probe.created).toEqual([]);
+      expect(fake.invoked('browser.tabs.open')).toEqual([]);
       expect(fake.invoked('maws.pane.answer')).toEqual([
         { appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.navigationRefused('file:///etc/hosts') } },
         { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.navigationRefused('wikipedia.org') } },
       ]);
     });
 
-    it('no target opens the tool on the session’s own state, with the session and the request id', async () => {
+    it('no target asks main nothing and opens the tool on the session’s own state; the answer has no page', async () => {
       const probe = browserTool();
       show(fake, { pane: 'browser', target: null });
       await settle();
-      expect(probe.created.map((init) => init.params)).toEqual([{ appSessionId: A, requestId: 'r1' }]);
-      expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { ok: true, opened: { kind: 'panel-tool', toolId: 'browser' } } });
+      expect(fake.invoked('browser.tabs.open')).toEqual([]);
+      expect(probe.created.map((init) => init.params)).toEqual([{ appSessionId: A }]);
+      const [tab] = panelOf(A)!.tabs;
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: opened(tab!.id) } }]);
+    });
+
+    it('an open main refuses opens no tool and answers browserOpenFailed with the target as given and main’s message', async () => {
+      const probe = browserTool();
+      show(fake, { pane: 'browser', target: 'https://Example.com' });
+      await settle();
+      await fake.fail('browser.tabs.open', 'unknown session', 'invalid_input');
+      expect(probe.created).toEqual([]);
+      expect(panelOf(A)?.tabs ?? []).toEqual([]);
+      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.browserOpenFailed('https://Example.com', 'unknown session') } }]);
     });
   });
   // E4a end

@@ -1026,6 +1026,9 @@ describe('filesystem state service: a contested session (W7)', () => {
     await expect.poll(() => batches().filter((e) => e.kind === 'notice.posted' && e.key === 'transcript_refold').length, { timeout: 3_000, interval: 10 }).toBe(1);
     expect(batches().find((e) => e.kind === 'boundary.retraction')).toMatchObject({ reason: 'transcript_branch', retractedMessageUuids: ['m1'] });
     expect(service.heldElsewhere(A1)).toBe(false);
+    // X-168: MAWS's own process still runs it, so the terminal's going supplies no exit (the one there is the backfill's,
+    // made before MAWS's record was read)
+    expect(batches().filter((e) => e.kind === 'process.exited')).toHaveLength(1);
   });
 
   const serviceWithOwnPid = async () => {
@@ -1093,5 +1096,49 @@ describe('filesystem state service: a contested session (W7)', () => {
     expect(fs.heldElsewhere(A1, null)).toBe(false);
     expect(fs.heldElsewhere(A1, exitAt)).toBe(true); // it held the session after that exit
     expect(fs.heldElsewhere(A1, new Date(Date.now() + 60_000).toISOString())).toBe(false); // an exit after it left
+  });
+
+  // X-168: a terminal session whose turn ended, its process then gone, and no exit in its transcript.
+  it("a terminal session's follow supplies one process.exited when its process goes, and another when a resumed one goes", async () => {
+    const at = (s: number) => `2026-09-28T10:00:0${s}.000Z`;
+    const ended = (uuid: string, parentUuid: string, s: number) => JSON.stringify({ type: 'system', subtype: 'turn_duration', uuid, parentUuid, durationMs: 5, cwd: '/work/a', entrypoint: 'cli', timestamp: at(s) });
+    const path = await fixture.addTranscript('/work/a', S1, [record('user', 'u1', null, 'cli', at(0)), record('assistant', 'a1', 'u1', 'cli', at(1)), ended('d1', 'a1', 2)]);
+    service = new FsService({
+      paths: fixture.paths,
+      emit: (name, payload) => {
+        const checked = validateEventPayload(name, payload);
+        if (!checked.ok) throw new Error(`invalid ${name}: ${JSON.stringify(checked.issues)}`);
+        emitted.push({ name, payload } as Emitted);
+        return true;
+      },
+    });
+    await service.start();
+    await service.scan([]);
+    await service.bind([{ sessionId: S1, appSessionId: A1 }]);
+    const exits = () => batches().filter((e) => e.kind === 'process.exited');
+    const terminal = async () => {
+      child = spawn('/bin/sleep', ['30'], { stdio: 'ignore' });
+      await fixture.addRegistryRecord(child.pid!, { sessionId: S1, kind: 'interactive', entrypoint: 'cli', cwd: '/work/a', startedAt: Date.now() });
+      await service!.holdersNow({ sessionIds: [S1], directories: null });
+      return child.pid!;
+    };
+    const first = await terminal();
+    await service.eventsSnapshot(A1, null); // a pane follows the session while its terminal runs
+    await settled();
+    expect(exits()).toEqual([]);
+
+    child!.kill('SIGKILL');
+    await fixture.removeRegistryRecord(first);
+    await expect.poll(() => exits().length, { timeout: 3_000, interval: 10 }).toBe(1);
+    expect(exits()[0]).toMatchObject({ id: `session:${S1}:exited`, at: at(2), reason: 'unknown', seq: null, agentId: null });
+
+    const second = await terminal(); // resumed in a terminal, it works again
+    await fixture.appendLines(path, [record('user', 'u2', 'd1', 'cli', at(5)), record('assistant', 'a2', 'u2', 'cli', at(6)), ended('d2', 'a2', 7)]);
+    await expect.poll(() => batches().some((e) => e.kind === 'turn.ended' && e.at === at(7)), { timeout: 3_000, interval: 10 }).toBe(true);
+    expect(exits()).toHaveLength(1);
+    child!.kill('SIGKILL');
+    await fixture.removeRegistryRecord(second);
+    await expect.poll(() => exits().length, { timeout: 3_000, interval: 10 }).toBe(2);
+    expect(exits()[1]).toMatchObject({ id: `session:${S1}:exited@2`, at: at(7), reason: 'unknown', seq: null });
   });
 });

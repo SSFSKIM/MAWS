@@ -43,6 +43,10 @@ const declaredItem = (w: (typeof WIDGET_COMMANDS)[number], action: SlashAction):
 
 const hidden = (command: SessionCatalog['commands'][number]): boolean => command.name.startsWith('__') || command.description.startsWith('(removed)');
 
+// UX wave U11a (§C, "Names"): the one name whose declared description wins over the engine's catalogue, so `/mcp` reads
+// as the dialog it opens in a started chat too
+const DECLARED_DESCRIPTION: ReadonlyMap<string, string> = new Map<string, string>(WIDGET_COMMANDS.filter((w) => w.name === 'mcp').map((w) => [w.name, w.description]));
+
 // The palette's items in the order it reads with nothing typed (UX wave U4a, decision 17 h; the owner's answer to "/
 // order"): first the panels this session has (`widgets`), in the order WIDGET_COMMANDS declares them, each once, whatever
 // the catalogue calls the name; then the catalogue's other entries in its order, its built-in commands first, then
@@ -60,7 +64,7 @@ export function slashItems(catalog: SessionCatalog, widgets: ReadonlySet<string>
   const dispatch = (name: string): SlashAction => (widgets.has(name) ? { kind: 'widget' } : closed[name] === undefined && !terminalOnly.has(name) ? { kind: 'text' } : unavailable(name, TERMINAL_ONLY_HINT));
   const entries = catalog.commands
     .filter((c) => !panelNames.has(c.name) && !hidden(c))
-    .map((c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name) }));
+    .map((c): SlashItem => ({ name: c.name, title: `/${c.name}`, description: DECLARED_DESCRIPTION.get(c.name) ?? c.description, argumentHint: c.argumentHint, origin: originOf(c, skills), action: dispatch(c.name) }));
   const byKind = ORIGIN_ORDER.flatMap((origin) => entries.filter((item) => item.origin === origin));
   const declared = WIDGET_COMMANDS.filter((w) => !widgets.has(w.name) && !listed.has(w.name)).map((w) => declaredItem(w, unavailable(w.name, UNAVAILABLE_HINT)));
   return [...panels, ...byKind, ...declared];

@@ -25,7 +25,7 @@ import { queryClient } from '../../ipc/query';
 import { connectPanelHost, instanceIds, instanceOf, isRestoredLog, panelHost, pendingAdds, registerPanelTool, shownSession, togglePinned, usePanelHost } from '../../panel/host';
 import { PanelHost } from '../../panel/PanelHost';
 import { PanelRegion } from '../../panel/PanelRegion';
-import { persistLayout, useLayout } from '../../stores/layout';
+import { panelWidthClass, persistLayout, useLayout } from '../../stores/layout';
 import { activeTab, allTabs, sessionOfTab } from '../../stores/layout-model';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
@@ -172,7 +172,10 @@ const api: PanelHarnessApi = {
       disposers.get(toolId)?.();
       disposers.delete(toolId);
     }),
-  setWidth: (px) => useLayout.getState().setPanel({ width: px, collapsed: false, maximized: false }),
+  setWidth: (px) => {
+    useLayout.getState().setPanel({ collapsed: false, maximized: false });
+    useLayout.getState().setPanelWidth(px); // UX wave U8b: the width of the class in view, as the region's bar writes it
+  },
   collapseSidebar: (on) => useLayout.getState().setSidebar({ collapsed: on }),
   maximize: (on) => useLayout.getState().setPanel(on ? { maximized: true, collapsed: false } : { maximized: false }),
   collapse: (on) => useLayout.getState().setPanel(on ? { collapsed: true, maximized: false } : { collapsed: false }),
@@ -300,7 +303,8 @@ function Controls() {
 // The panel's three widths and maximize (R7), through C5's store as the region's own controls write it.
 const WIDTHS = [280, 380, 640] as const;
 function WidthControls() {
-  const { width, maximized, collapsed } = useLayout((s) => s.regions.panel);
+  const { maximized, collapsed } = useLayout((s) => s.regions.panel);
+  const width = useLayout((s) => s.panelWidths[panelWidthClass(s)]); // UX wave U8b: the width in use
   return (
     <div role="group" aria-label="panel width" className="flex gap-1">
       {WIDTHS.map((px) => (

@@ -26,7 +26,10 @@ const frames = async (n = 3) => {
 };
 const mainPlaces = () => main.callsOf('browser.view.place').filter((call) => call.surface === 'main');
 const covers = () => main.callsOf('browser.view.cover').map((call) => call.covered);
-const openSurface = (id: string) => act(() => useLayout.getState().setPanelTabs(A, { tabs: [ref(`${id}:aaaaaaaa`)], activeTabId: `${id}:aaaaaaaa` }));
+const openSurface = (id: string) => act(() => {
+  useLayout.getState().setPanelTabs(A, { tabs: [ref(`${id}:aaaaaaaa`)], activeTabId: `${id}:aaaaaaaa` });
+  useLayout.getState().showSurfaceTab(A, `${id}:aaaaaaaa`); // UX wave U8b: a write of refs shows nothing
+});
 function renderShell() {
   const root = document.createElement('div');
   root.id = 'root';

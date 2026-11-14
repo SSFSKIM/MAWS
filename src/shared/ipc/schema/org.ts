@@ -765,6 +765,14 @@ export const CHANNEL_CLOSED_REASONS = ['signed-out', 'no-hub', 'unknown-project'
  * answer: one told before it describes an older state than the answer does.
  */
 const RevSchema = z.number().int().nonnegative();
+/**
+ * UX wave U11a M4 (S-09; docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, Interfaces §F): the
+ * channel's own reach while it is not live, and the hub's refusal of it while that stands, told with every open answer
+ * and as a change whenever either moves. `reach` turns `unreachable` at an attestation read or a socket that fails before
+ * its welcome, and stays so through every retry until the channel is live. `refused` is apart from it: the hub ended the
+ * channel's socket for good (`credentials`: the hub sign-in has ended; `removed`: the hub no longer admits the member),
+ * nothing is retried, and it stands until the session's next change.
+ */
 const ChannelOpenSchema = z.strictObject({
   ok: z.literal(true),
   rev: RevSchema,
@@ -774,6 +782,8 @@ const ChannelOpenSchema = z.strictObject({
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(), // the last `caught-up`'s time; null until one
   live: z.boolean(), // the socket is open and caught up
+  reach: z.enum(['connecting', 'unreachable']).optional(), // present exactly while the answer is open and `live` is false
+  refused: z.enum(['credentials', 'removed']).optional(), // present while the hub has ended this channel's socket for good and the channel waits for the session's next change
   hosts: z.array(ChannelHostSchema).optional(), // M7b: every machine's to-human entries, oldest first
   machines: z.array(ChannelMachineSchema).optional(), // M7b: each machine whose entries the channel reads
 });
@@ -799,9 +809,9 @@ export const CHANNEL_TEXT_MAX = 100_000;
 /**
  * A change since the last: `upserts` are the events new or judged again since, by offset, each replacing what a tab holds
  * at its offset; `removed` the offsets main no longer draws (let go by its bound, or failing now), so a tab holds exactly
- * main's set; the sessions, the pending words, `unverified`, `asOf` and `live` are whole. `reset` replaces every event a
- * tab holds with `upserts`: told when a judgment at a new head or certificate set changed verdicts, when another reader's
- * log was dropped, and for the first change after a closed one.
+ * main's set; the sessions, the pending words, `unverified`, `asOf`, `live`, `reach` and `refused` are whole. `reset`
+ * replaces every event a tab holds with `upserts`: told when a judgment at a new head or certificate set changed
+ * verdicts, when another reader's log was dropped, and for the first change after a closed one.
  */
 /**
  * M7b: the to-human entries' change since the last, by `key`, beside the log's: `upserts` are new (an entry's content
@@ -821,6 +831,8 @@ const ChannelDeltaSchema = z.strictObject({
   unverified: z.number().int().nonnegative(),
   asOf: z.string().nullable(),
   live: z.boolean(),
+  reach: z.enum(['connecting', 'unreachable']).optional(), // U11a M4: whole, as on the open answer
+  refused: z.enum(['credentials', 'removed']).optional(),
   reset: z.literal(true).optional(),
   hosts: ChannelHostsDeltaSchema.optional(), // M7b
   machines: z.array(ChannelMachineSchema).optional(), // M7b: whole

@@ -9,10 +9,11 @@ import type { ProjectRecord } from '@shared/ipc/schema';
 import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
-import { orgIndex } from '../stores/org-projects';
+import { orgIndex, type RowKey } from '../stores/org-projects';
+import type { OrgProjects } from '../stores/registry';
 import type { ListedSession } from '../stores/sessions';
 import { TEST_MACHINE, OTHER_MACHINE } from '../../../../test/support/machine';
-import { channelEntries, channelProjectName, placeByTime, toHumanEntries, waitingFor, type ChannelEntry, type StreamEntry, type ToHumanEntry } from './project';
+import { channelEntries, channelOfRow, channelProjectName, channelProjects, placeByTime, toHumanEntries, waitingFor, type ChannelEntry, type StreamEntry, type ToHumanEntry } from './project';
 import type { ChannelHost, ChannelMachine } from '@shared/ipc/schema/org';
 import { record as recordOf, remoteRow } from '../../../../test/support/builders';
 
@@ -224,6 +225,61 @@ describe('waitingFor', () => {
     const index = orgIndex([mine], TEST_MACHINE);
     expect(channelProjectName(index, SMNS)).toBe('maws');
     expect(channelProjectName(index, 'nobody')).toBeNull();
+  });
+});
+
+// UX wave U11a M5 (S-10; Interfaces §F, "The Channel's entries"): the projects that have a channel, as the sidebar's menus
+// answer it (has-channel.test.tsx holds the two equal on the sidebar itself).
+describe('channelProjects and channelOfRow', () => {
+  const HUB = '2a3b4c5d-6e7f-4081-9293-a4b5c6d7e8f9';
+  const LOCAL = '3b4c5d6e-7f80-4192-a3a4-b5c6d7e8f9a0';
+  const SEEN = '4c5d6e7f-8091-4203-b4b5-c6d7e8f9a0b1';
+  const QUIET = '5d6e7f80-91a2-4314-c5c6-d7e8f9a0b1c2';
+  const checkout = (id: string, name: string, org: { key: string; smnsId: string | null } | null, over: Partial<ProjectRecord> = {}): ProjectRecord =>
+    ({ id: addressOf(TEST_MACHINE, id), name, directory: `/w/${id}`, order: 0, createdAt: T(0), org: org === null ? undefined : { ...org, name, source: org.smnsId === null ? 'folder' : 'smns' }, ...over }) as unknown as ProjectRecord;
+  const registry: OrgProjects = {
+    projects: [
+      { id: HUB, name: 'Orchard', hub: true, renamable: false, locations: [] },
+      { id: LOCAL, name: 'Ledger', hub: false, renamable: true, locations: [] },
+      { id: SEEN, name: 'Reports', hub: true, renamable: false, locations: [] },
+      { id: QUIET, name: 'Quiet', hub: false, renamable: false, locations: [] },
+    ],
+    keys: { [HUB]: `smns:${HUB}` as OrgKey, [LOCAL]: `smns:${LOCAL}` as OrgKey, [SEEN]: `id:${SEEN}` as OrgKey, [QUIET]: `id:${QUIET}` as OrgKey },
+    moved: {},
+    removals: [],
+    seen: {},
+  };
+  const records = [
+    checkout('p-north', 'northwind', { key: `smns:${SMNS}`, smnsId: SMNS }), // a .smns project the registry does not hold
+    checkout('p-orchard', 'Orchard', { key: `smns:${HUB}`, smnsId: HUB }), // a hub project of the registry
+    checkout('p-ledger', 'Ledger', { key: `smns:${LOCAL}`, smnsId: LOCAL }), // a registry project kept off the hub
+    checkout('p-scratch', 'scratch', { key: 'folder:/w/p-scratch', smnsId: null }), // a folder with no project id
+    checkout('p-hidden', 'hidden', { key: 'smns:hidden-one', smnsId: 'hidden-one' }, { hidden: true }), // no row: hidden
+    checkout('p-north-2', 'northwind (copy)', { key: 'smns:north-copy', smnsId: SMNS }), // a second row of the same id
+  ];
+  const index = orgIndex(records, TEST_MACHINE, registry);
+
+  it('lists each project of a shown row that has a channel once, by its row’s name, in name order', () => {
+    expect(channelProjects(index)).toEqual([
+      { project: SMNS, name: 'northwind' },
+      { project: HUB, name: 'Orchard' },
+      { project: SEEN, name: 'Reports' },
+    ]);
+  });
+
+  it('answers a row’s channel: a hub project’s id, a .smns project’s id, and null for a project kept off the hub, a folder or a key no row has', () => {
+    const rowOf = (record: ProjectRecord) => index.keyOf(record);
+    expect(channelOfRow(rowOf(records[0]), index)).toBe(SMNS);
+    expect(channelOfRow(rowOf(records[1]), index)).toBe(HUB);
+    expect(channelOfRow(rowOf(records[2]), index)).toBeNull();
+    expect(channelOfRow(rowOf(records[3]), index)).toBeNull();
+    expect(channelOfRow(`id:${SEEN}` as RowKey, index)).toBe(SEEN);
+    expect(channelOfRow(`id:${QUIET}` as RowKey, index)).toBeNull();
+    expect(channelOfRow('smns:nobody' as RowKey, index)).toBeNull();
+  });
+
+  it('lists nothing signed out of every project id', () => {
+    expect(channelProjects(orgIndex([records[3]], TEST_MACHINE))).toEqual([]);
   });
 });
 

@@ -531,6 +531,32 @@ describe('attention service merges broker items with the derived kinds', () => {
 
   // C12: a release under the memory budget is not an attention event (D-18, §5.7): nothing is raised, whatever the
   // session held before (a released session held no request, so it lost none)
+  // UX wave U8b M6 (X-168): a session read from disk now ends with the follower's exit (reason unknown, `seq` null)
+  // whether or not its last turn ended, so the case below runs for sessions that ended long ago. It raises nothing: the
+  // same history with and without the supplied exit gives the same list, and nothing new is emitted for the exit.
+  it('the exit a follower supplies to a session read from disk raises nothing', () => {
+    const disk = (kind: string, payload: Record<string, unknown>, at: string) => ({ ...event(kind, payload), seq: null, at }) as SessionEvent;
+    const history = [
+      disk('turn.started', { userMessageUuid: 'u-1', origin: null }, '2026-09-01T09:00:00.000Z'),
+      disk('turn.ended', { isError: false, terminalReason: null, result: 'success', resultText: null, isEchoReceipt: false, origin: null, errors: [] }, '2026-09-01T09:00:05.000Z'),
+      disk('turn.started', { userMessageUuid: 'u-2', origin: null }, '2026-09-01T09:00:10.000Z'),
+      disk('turn.ended', { isError: true, terminalReason: null, result: 'error_during_execution', resultText: null, isEchoReceipt: false, origin: null, errors: ['overloaded'] }, '2026-09-01T09:00:15.000Z'),
+      disk('task.notification', { taskId: 'task-old', toolUseId: null, status: 'completed', summary: 'done', outputFile: null, reason: null }, '2026-09-01T09:01:00.000Z'),
+    ];
+    const exit = disk('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, '2026-09-01T09:01:00.000Z');
+    const without = setup();
+    without.batch(...history);
+    const withExit = setup();
+    withExit.batch(...history);
+    const emitted = withExit.changed.length;
+    withExit.batch(exit);
+    expect(withExit.last().map((i) => i.kind)).toEqual(['error']); // the history's own failed turn, as before: not the exit's
+    expect(withExit.last()).toEqual(without.last());
+    expect(withExit.changed.length).toBe(emitted); // the list did not change, so nothing was emitted or persisted
+    withExit.batch(...history, exit); // a second read of the same history
+    expect(withExit.last()).toEqual(without.last());
+  });
+
   it('a budget exit raises nothing and keeps what the session already had', () => {
     const { batch, last, changed } = setup();
     batch(event('turn.ended', { isError: true, terminalReason: 'model_error', result: 'x', resultText: null, isEchoReceipt: false, origin: 'human', errors: [] }));

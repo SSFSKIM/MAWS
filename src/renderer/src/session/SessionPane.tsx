@@ -43,6 +43,7 @@ import { READ_REFUSED } from '@shared/org/reader'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 525
 import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
+import { ComputerUseStrip } from '../computer-use/Strip'; // UX wave U12a
 import { BtwCard } from '../side/BtwCard'; // UX wave U4a
 
 type PaneIndex = 0 | 1;
@@ -133,16 +134,17 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
     <div className="flex h-full flex-col">
       {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
       {!compact && <ReportBar appSessionId={id} />}
+      {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
       {/* UX wave U4a (M7): a positioned box around the transcript's scroller, so the session's `/btw` card is a layer of the
           pane over the transcript's bottom right corner and not of the scroller */}
       {!compact && <div className="relative flex min-h-0 flex-1 flex-col">
-        <div className="min-h-0 flex-1 overflow-auto">
+        <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
           <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} waiting={noticed ? undefined : 'stacked'} /* UX wave U4a: the composer's stack draws a waiting message */ />
         </div>
         <BtwCard appSessionId={id} />
       </div>}
-      <div className={`shrink-0 ${compact ? "py-2" : "pt-4 pb-4"}`}>
+      <div className={`shrink-0 ${compact ? "py-2" : "scroll-gutter-under pt-4 pb-4"}`}>
         <ComposerColumn>
           {compact && <BtwCard appSessionId={id} placement="flow" /* UX wave U4a: no transcript here, so directly above the frame */ />}
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}

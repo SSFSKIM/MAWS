@@ -19,6 +19,12 @@
 //   from offset 0 on their own socket.
 // - A socket the hub refuses the project (404) ends the channel `unknown-project` until the tab's next open or another
 //   hub; one that ends `removed` or with the hub sign-in waits, as the Registry feed does, for the session's next change.
+// - UX wave U11a M4 (S-09; docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, Interfaces §F): while
+//   not live, every answer and change carries the channel's own reach, `connecting` until an attestation read or a socket
+//   before its welcome fails, then `unreachable` through every retry until the channel is live; a live channel that loses
+//   its socket reads `connecting`. The hub's end of the socket for good is told apart, as `refused` (`credentials`, or
+//   `removed`), until the session's next change. A new sign-in or hub, a released channel opened again, and any start
+//   after the hub ended the channel begin again at `connecting`.
 // - The owner's words: a leading `@alias` addresses a session the log's lifecycle names, held past the bound (address.ts,
 //   cache.ts), and untagged words go to everyone. Nothing is sent signed out, with no hub, or to a project the hub
 //   refused. Main is the one source of a word's state: a channel shows only the signed-in org's, member's and device's
@@ -89,6 +95,9 @@ export interface Channels {
 }
 
 type Snapshot = { head: SignedOrgState; certificates: Certificates };
+type Open = Extract<ChannelAnswer, { ok: true }>;
+/** Interfaces §F: whether the channel's own connection is being tried or has failed, while it is not live. */
+type Standing = NonNullable<Open['reach']>;
 
 interface Channel {
   readonly loaded: Promise<void>;
@@ -97,7 +106,7 @@ interface Channel {
   /** The whole answer for a tab that opens it; the first is what the next change is told against. */
   opened(): ChannelAnswer;
   send(text: string): Promise<ChannelSendResult>;
-  /** The session changed, or (`reopened`) a tab opened it again: what was parked may open again. */
+  /** The session changed, or (`reopened`) a tab opened it: what the hub ended may open again (§F says when). */
   reconcile(reopened?: boolean): void;
   release(): void;
   retain(): void;
@@ -153,8 +162,15 @@ export function createChannels(deps: ChannelsDeps): Channels {
     let connecting: HubAccess | null = null;
     let welcomed = false;
     let caughtUp = false;
-    /** The hub refused the project (`unknown-project`), or ended the member's or the sign-in's access (`parked`). */
-    let ended: 'unknown-project' | 'parked' | null = null;
+    /**
+     * The hub refused the project (`unknown-project`), or ended the sign-in's access (`credentials`) or the member's
+     * (`removed`): those two are the answer's `refused`, and wait for the session's next change.
+     */
+    let ended: 'unknown-project' | NonNullable<Open['refused']> | null = null;
+    /** §F: the reach told while not live (`deps.reach` is the network path's). */
+    let standing: Standing = 'connecting';
+    /** The session value the last reconcile saw: another (a sign-in, a sign-out, another hub) starts reach again. */
+    let seen: SignedIn | null | undefined;
     let attested = false;
     let reading: Promise<void> | null = null;
     /** The snapshot the held log was last judged under, whole; another (a head or certificates since) judges it again. */
@@ -235,7 +251,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
         if (current.hub === null) return { ok: false, reason: 'no-hub', rev };
       }
       const live = socket !== null && welcomed && caughtUp && current !== null && current.hub === socketHub;
-      return { ok: true, rev, events, sessions, pending, unverified, asOf, live, ...toHuman };
+      const refused = ended === 'credentials' || ended === 'removed' ? { refused: ended } : {};
+      return { ok: true, rev, events, sessions, pending, unverified, asOf, live, ...(live ? {} : { reach: standing }), ...refused, ...toHuman };
     }
 
     function scheduleEmit(): void {
@@ -247,7 +264,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
       (emitTimer as { unref?: () => void }).unref?.();
     }
 
-    const restOf = (a: ChannelAnswer & { ok: true }) => JSON.stringify([a.sessions, a.pending, a.unverified, a.asOf, a.live, a.machines]);
+    const restOf = (a: Open) => JSON.stringify([a.sessions, a.pending, a.unverified, a.asOf, a.live, a.reach, a.refused, a.machines]);
     /** The to-human entries' change since those told: whole (`reset`) after a reset or with none told, else by key. */
     function hostsDelta(now: readonly ChannelHost[], whole: boolean) {
       const before = toldHosts;
@@ -290,7 +307,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
         const hostsMoved = toHuman !== null && (toHuman.reset === true || toHuman.upserts.length > 0 || toHuman.removed.length > 0);
         if (!reset && upserts.length === 0 && removed.length === 0 && rest === toldRest && !hostsMoved) return;
         toldRest = rest;
-        const { sessions, pending, unverified, asOf, live, machines } = now;
+        const { sessions, pending, unverified, asOf, live, reach, refused, machines } = now;
         change = {
           project,
           ok: true,
@@ -302,6 +319,8 @@ export function createChannels(deps: ChannelsDeps): Channels {
           unverified,
           asOf,
           live,
+          ...(reach === undefined ? {} : { reach }),
+          ...(refused === undefined ? {} : { refused }),
           ...(reset ? { reset: true as const } : {}),
           ...(toHuman === null ? {} : { hosts: toHuman, machines }),
         };
@@ -350,6 +369,13 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (!stopped) enterWrite(); // a stopped channel's last write is `close`'s
     }
 
+    /** §F: reach moved, told even when nothing else changed. */
+    function moveReach(to: Standing): void {
+      if (standing === to) return;
+      standing = to;
+      scheduleEmit();
+    }
+
     function dropSocket(): void {
       socket?.close();
       socket = null;
@@ -364,7 +390,11 @@ export function createChannels(deps: ChannelsDeps): Channels {
           log(`the attestations did not read: ${(error as Error).message}`);
           return null;
         });
-        if (records === null || stopped) return;
+        if (stopped) return;
+        if (records === null) {
+          if (deps.session.current()?.hub === hub) moveReach('unreachable'); // a read for a hub no longer the session's says nothing
+          return;
+        }
         await enqueue('the attestations', async () => {
           const current = signedIn();
           if (current !== null && held !== null && (await held.attest(records, groundOf(current, project)))) changed();
@@ -418,6 +448,7 @@ export function createChannels(deps: ChannelsDeps): Channels {
           void enqueue('caught up', () => {
             held?.caughtUp(offset, new Date(now()).toISOString());
             caughtUp = true;
+            standing = 'connecting'; // §F: live, reach absent; what the next loss of the socket starts from
             changed();
           });
         },
@@ -426,12 +457,19 @@ export function createChannels(deps: ChannelsDeps): Channels {
         },
         onClosed: (code) => {
           if (!mine()) return;
+          const wasLive = welcomed && caughtUp;
+          const beforeWelcome = !welcomed;
           welcomed = false;
           caughtUp = false;
-          if (code === CLOSE_UNKNOWN_PROJECT || code === CLOSE_CREDENTIALS || code === CLOSE_REMOVED) {
-            ended = code === CLOSE_UNKNOWN_PROJECT ? 'unknown-project' : 'parked';
+          const terminal = code === CLOSE_UNKNOWN_PROJECT || code === CLOSE_CREDENTIALS || code === CLOSE_REMOVED;
+          if (terminal) {
+            ended = code === CLOSE_UNKNOWN_PROJECT ? 'unknown-project' : code === CLOSE_CREDENTIALS ? 'credentials' : 'removed';
             socket = null; // the hub it was for stays `socketHub`, so a change that keeps it keeps the refusal
           }
+          // §F: a live channel that loses its socket is connecting again; one that fails before its welcome is unreachable,
+          // and a refusal leaves reach as it was
+          if (wasLive) standing = 'connecting';
+          else if (beforeWelcome && !terminal) standing = 'unreachable';
           scheduleEmit();
         },
         socket: deps.socket,
@@ -449,9 +487,20 @@ export function createChannels(deps: ChannelsDeps): Channels {
       if (stopped) return;
       words.recall(inLog); // the signer's words the project's last channel let go, but none its log holds
       const current = deps.session.current();
-      // a parked socket opens again at any change, as the Registry feed does; a project the hub refused, only at the
-      // tab's next open or with another hub
-      if (reopened || ended === 'parked' || (current?.hub ?? null) !== socketHub) ended = null;
+      // §F: a new sign-in or hub, a sign-out, or a released channel opened again starts reach again
+      const released = reopened && refs === 0;
+      const started = current !== seen || released;
+      seen = current;
+      const anotherHub = (current?.hub ?? null) !== socketHub;
+      // a refusal (`credentials`, `removed`) stands, as the Registry feed's does, until the session's next change or a
+      // released channel opened again: another tab's open of a channel still held keeps it. A project the hub refused
+      // opens again at any tab's open or with another hub. Either way the channel starts again.
+      const clears = ended === 'unknown-project' ? reopened || anotherHub : !reopened || released || anotherHub;
+      if (ended !== null && clears) {
+        ended = null;
+        standing = 'connecting';
+      }
+      if (started) standing = 'connecting';
       if (current === null) {
         dropSocket();
         scheduleEmit();

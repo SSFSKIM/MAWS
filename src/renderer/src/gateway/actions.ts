@@ -11,7 +11,8 @@ import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 
 type SettingsSection = Extract<TabTarget, { kind: 'settings' }>['section'];
-// settings.open's numeric arg names a section by its place in the Settings tab's index.
+// settings.open's numeric arg names a section by its place in this list, the Settings index's order when the numbers were
+// given (U11a M9: the index's order is SECTION_TABLE's now, and this list stays as callers know it).
 export const SETTINGS_SECTIONS = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications'] as const satisfies readonly NonNullable<SettingsSection>[];
 
 // The instruction names a control in ClaudeUsage's panel, so it stays long enough to read and act on (M4 decisions).

@@ -81,6 +81,17 @@ describe('slash items union the catalogue, the widget catalogue and MAWS actions
     expect(byName(items, 'rewind').action).toEqual({ kind: 'widget' });
   });
 
+  // UX wave U11a (§C, "Names"): `/mcp` reads as the dialog it opens, in a started chat (whose catalogue lists the engine's
+  // own description) and before the first message alike; every other name keeps the engine's description
+  it('describes /mcp in MAWS’s words in a started and an unstarted chat', () => {
+    const catalog = autoRouted();
+    expect(catalog.commands.find((c) => c.name === 'mcp')?.description).toBe('Manage MCP servers'); // the engine's own
+    const started = slashItems(catalog, new Set());
+    expect(byName(started, 'mcp')).toMatchObject({ origin: 'engine', description: 'Connectors in this chat (MCP servers)' });
+    expect(byName(started, 'compact').description).toBe(catalog.commands.find((c) => c.name === 'compact')!.description);
+    expect(byName(slashItems(EMPTY_CATALOG, new Set()), 'mcp')).toMatchObject({ origin: 'widget', description: 'Connectors in this chat (MCP servers)' });
+  });
+
   it('classifies custom and plugin commands and skills', () => {
     const c = projectCatalog('L', {
       commands: [
@@ -110,7 +121,7 @@ describe('slash and @ ranking is deterministic', () => {
     // `model` by prefix, then the names holding `mo` (memory: me-mo-ry), then names holding m…o apart, each tier in the
     // list's order: the declared `memory` stands at the list's end and still comes before every subsequence match
     expect(ranked.slice(0, 4)).toEqual(['engine:model', 'engine:auto-mode-setup', 'widget:memory', 'engine:fewer-permission-prompts']);
-    expect(ranked).not.toContain('engine:mcp'); // `mcp` holds no `o` and its description ("Manage MCP servers") no word starting `mo`
+    expect(ranked).not.toContain('engine:mcp'); // `mcp` holds no `o` and its description ("Connectors in this chat (MCP servers)") no word starting `mo`
     expect(ranked.indexOf('engine:fast')).toBeGreaterThan(ranked.indexOf('widget:memory')); // a description word after every name
     expect(rankItems('mo', items)).toEqual(rankItems('mo', items)); // pure
   });

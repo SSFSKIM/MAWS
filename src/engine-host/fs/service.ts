@@ -5,7 +5,8 @@
 // leave as `session.eventBatch`; subagent, workflow and task sidecars are listed and read on change or on request.
 // W7: it also watches a contested session (MAWS's own process and a foreign one both hold it) for the foreign process's
 // first write, which it reports as `fs.foreignWrite` (main yields MAWS's process), and re-folds a follower that held a
-// branch back once the foreign holder exits.
+// branch back once the foreign holder exits. X-168: the same exit, with no live process left, has the follower supply
+// the `process.exited` the terminal's transcript never holds.
 // Read-only: it never writes under the config home.
 import { createHash } from 'node:crypto';
 import { open } from 'node:fs/promises';
@@ -248,8 +249,14 @@ export class FsService {
         this.send('fs.holderChanged', { sessionId, appSessionId: this.bindings.appIdOf(sessionId), holder, registry, job });
         if (holder.kind === 'none') this.foreignLeftAt.set(sessionId, Date.now()); // W7
         else this.foreignLeftAt.delete(sessionId);
-        // W7: the foreign holder exited; a follower that kept MAWS's branch in view meanwhile folds the other one in
-        if (holder.kind === 'none') for (const entry of this.follows.values()) if (entry.sessionId === sessionId && entry.agentId === null) void entry.follow.refold();
+        // The session's own followers hear of it in their own order. Its foreign holder exited: W7, a follower that kept
+        // MAWS's branch in view meanwhile folds the other one in, and X-168, with no live process left, the follower
+        // supplies the exit the transcript lacks (ChainFollower.refold). A holder came or changed: the follower reads it,
+        // and a holder that returns arms the next exit.
+        for (const entry of this.follows.values()) {
+          if (entry.sessionId !== sessionId || entry.agentId !== null) continue;
+          void (holder.kind === 'none' ? entry.follow.refold() : entry.follow.poke());
+        }
       },
       { ...options.holders, contests: (sessionId, by, startedAt) => this.contestChanged(sessionId, by, startedAt) },
     );

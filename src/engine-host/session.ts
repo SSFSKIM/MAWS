@@ -193,6 +193,17 @@ function stdioConfigOf(server: object): { type?: unknown; command?: unknown; arg
   return typeof config === 'object' && config !== null ? config : undefined;
 }
 
+// U12a (docs/doperpowers/plans/2026-11-12-ux-wave-U12a-browser-computer-use-delivery.md, M1): whether the launch gives the
+// engine MAWS's in-app browser as a backend, a non-empty `CUA_BROWSER_BACKENDS` in the settings environment (the launch
+// mapping's `extraSettingsOf`). The `maws` server's instructions and `show_pane`'s note follow it; the handshake begins
+// before the engine's first frame, so nothing later than the spec decides it.
+function hasInAppBrowser(spec: LaunchSpec): boolean {
+  const env = spec.extraSettings?.env;
+  if (typeof env !== 'object' || env === null) return false;
+  const backends = (env as Record<string, unknown>).CUA_BROWSER_BACKENDS;
+  return typeof backends === 'string' && backends !== '';
+}
+
 // P5 O16 M3a fix wave 2: a test seam, null in production. `beforeFold` runs synchronously as an adoption's fold begins,
 // while the fold holds the event loop, so a test can make the session host's ring overflow under a reader that reads
 // nothing, deterministically (holder/adoption.test.ts); a throw is a failed fold.
@@ -393,6 +404,7 @@ export class EngineSession {
     // E1: served from construction on, since the engine's MCP handshake begins before initialize is answered (E0a Q1)
     this.maws = new SessionMaws({
       appSessionId: opts.spec.appSessionId, appVersion: opts.appVersion, appAttached: opts.appAttached, rendersAnswered: opts.rendersAnswered /* P5 O5 M4 */, artifactScope: opts.artifactScope /* P2-E1 */, artifacts: opts.artifacts /* P3-A */, datasetRefresh: opts.datasetRefresh /* E3 */,
+      inAppBrowser: hasInAppBrowser(opts.spec), // U12a
       emit: (name, payload) => this.emit(name, payload),
       respond: (requestId, response, writeOpts) => this.respond(requestId, response, writeOpts),
       cwd: () => this.tracker.engineCwd ?? this.spec.cwd,

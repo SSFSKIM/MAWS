@@ -36,9 +36,9 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'tab.overview': 'Cmd+0', 'palette.open': 'Cmd+K', 'composer.focus': 'Cmd+L', 'composer.stop': 'Cmd+.', 'attention.next': 'Cmd+Shift+J',
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
 };
-// The rows of landed children: each must exist (U6b adds its seven).
+// The rows of landed children: each must exist (U6b adds its seven; U11a its one).
 const LANDED = [
-  'surface.terminal', 'surface.review', 'surface.files',
+  'surface.terminal', 'surface.review', 'surface.files', 'channel.open',
   // U4a: M2's rows
   'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue',
   // U4a: M3's rows
@@ -126,7 +126,7 @@ describe('keymap: the table', () => {
 
   it('titles the surface rows by the surface’s name alone (l7-shell-07)', () => {
     const surfaces = ACTION_IDS.filter((id) => id.startsWith('surface.')).map((id) => ACTIONS[id].title);
-    expect(surfaces).toEqual(['Terminal', 'Review', 'Files', 'Browser', 'Source control', 'Subagents', 'Background work', 'Session info', 'Questions']);
+    expect(surfaces).toEqual(['Terminal', 'Review', 'Files', 'Browser', 'Source control', 'Subagents', 'Background tasks', 'Session info', 'Questions']);
   });
 
   // C7 start: the composer's actions (C7 execution document, Keymap additions; W10: no ⌥Enter)

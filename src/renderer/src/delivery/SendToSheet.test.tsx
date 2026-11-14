@@ -96,7 +96,7 @@ describe('the Send to sheet: Notion', () => {
   it.each(['noSession', 'notFound'] as const)('offers app configuration without asking for a chat when no connector is found (%s)', async (why) => {
     status.notion = { target: 'notion', state: 'none', why };
     await openSheet();
-    expect(screen.getByText(/Settings.*Engine.*MCP servers/)).toBeTruthy();
+    expect(screen.getByText(/Settings.*Sessions.*MCP servers/)).toBeTruthy(); // U11a M9: the row moved to Sessions
     expect(screen.queryByText(/start.*session/i)).toBeNull();
     expect((sendButton() as HTMLButtonElement).disabled).toBe(true);
   });

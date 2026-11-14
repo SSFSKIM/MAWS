@@ -19,7 +19,7 @@
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
 import { addressed, localRef } from './support/address';
-import { surface, mainTabById } from './support/shell';
+import { sideColumn, surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator } from '@playwright/test';
@@ -506,10 +506,11 @@ test('previews: a single-select question lays its options beside the focused opt
 
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-    const askSurface = surface(s.page, 'ask-sheet');
-    // UX2-L caps a docked Questions surface at 420 px; maximize it to exercise the existing wide preview layout.
-    await askSurface.getByRole('button', { name: 'Expand surface', exact: true }).click();
-    await expect(askSurface.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
+    // A narrow tool opens 360 px wide (UX wave U8b); maximize it to exercise the existing wide preview layout, from the
+    // region's controls at the end of the side column's first strip.
+    const column = sideColumn(s.page);
+    await column.getByRole('button', { name: 'Expand surface', exact: true }).click();
+    await expect(column.getByRole('button', { name: 'Restore surface', exact: true })).toBeVisible();
 
     const section = sectionOf(sheet, 'q1');
     const radios = section.getByRole('radiogroup');
@@ -547,7 +548,7 @@ test('previews: a single-select question lays its options beside the focused opt
     await shoot(s, 'ask-previews');
 
     // Restore and take the panel to its narrowest: the pane under the options, as wide as they are.
-    await askSurface.getByRole('button', { name: 'Restore surface', exact: true }).click();
+    await column.getByRole('button', { name: 'Restore surface', exact: true }).click();
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     await resizer.focus();
     await s.page.keyboard.press('Home');
