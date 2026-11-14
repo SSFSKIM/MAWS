@@ -15,6 +15,7 @@ import { rowsOf, withAllExpanded } from './derive';
 import { turnId } from './keys';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Cell, Row } from './rows';
+import { BASH_RESULT, builder, task, tool } from './test-events';
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 
@@ -96,6 +97,42 @@ describe('a call the engine moved (decision 33; Interfaces C)', () => {
     expect(ran.status).toBe('done');
     const held = cells(rowsAt('u4p2-k-hook-1', 47)).find((cell) => cell.toolName === 'Bash')!;
     expect(held.label.startsWith('Moved')).toBe(false);
+  });
+});
+
+// The architect's ruling on M8's first concern (2026-11-13): the gap the ninth tracker row named is closed for this
+// landing's case. Since U8b's X-168 the chain follower supplies `process.exited { reason: 'unknown', seq: null }` for a
+// holder-less transcript whether or not its last turn ended (`supplyExit`, `exitAtLeaf` in
+// src/engine-host/fs/chain-follower.ts); a live holder supplies none. Fixture-shaped events: the shell call's result
+// carries the moved flag as `u4p1-a-seeded-1.jsonl` seq 45 does, beside a background agent whose end never came.
+describe('a moved call and an agent in a transcript whose last turn ended (the ninth tracker row, closed)', () => {
+  const endedTurn = () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'Read the sample notes' }, 'm1', 0);
+    b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+    b.result('a1', 'Async agent launched successfully.');
+    b.toolUse('t1', 'Bash', { command: 'node wait.cjs w1 40' }, 'm2', 0);
+    b.result('t1', 'Command was moved to the background', { structured: { ...BASH_RESULT(''), backgroundedToDeliverMessage: true } });
+    b.end(['u1'], { result: 'success', terminalReason: 'aborted_tools', endedForMessage: true });
+    return b;
+  };
+  const agentsRow = (rows: Row[]) => rows.find((row): row is RowOf<'subagent'> => row.kind === 'subagent')!;
+
+  it('holder-less: the synthesised exit (reason unknown, no seq) after the ended turn reads both the moved shell call and the agent stopped', () => {
+    const b = endedTurn();
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, { atMs: Date.parse(b.events.at(-1)!.at) });
+    const rows = drawn(reduce(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event))));
+    const cell = cellOf(rows, tool('t1'))!;
+    expect(cell.label).toMatch(/^Moved `node wait\.cjs w1 40` to the background after [\dhms ]+$/);
+    expect(cell.status).toBe('stopped');
+    expect(agentsRow(rows).status).toBe('stopped');
+  });
+
+  it('with a live holder, so no exit: the moved shell call and the agent read running', () => {
+    const rows = drawn(reduce(endedTurn().events));
+    expect(cellOf(rows, tool('t1'))!.status).toBe('running');
+    expect(agentsRow(rows).status).toBe('started');
   });
 });
 
