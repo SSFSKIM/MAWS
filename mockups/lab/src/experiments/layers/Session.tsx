@@ -76,7 +76,7 @@ export function Ask({ onAnswer }: { onAnswer: (a: Answer) => void }) {
  * What waits for you, as the glyphs the sidebar uses: no count, no word. It is the page's one tinted piece of glass.
  * It opens the list, with the approval answerable in place.
  */
-export function Waiting({ waiting, onAnswer, open: openAtOnce, alone }: { waiting: Session[]; onAnswer: (a: Answer) => void; open?: boolean; alone?: boolean }) {
+export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { waiting: Session[]; tint: string; onAnswer: (a: Answer) => void; open?: boolean; alone?: boolean }) {
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
@@ -85,7 +85,7 @@ export function Waiting({ waiting, onAnswer, open: openAtOnce, alone }: { waitin
   }, [openAtOnce, el]);
   return (
     <>
-      <GlassSurface asChild capsule thickness={THICKNESS} tint="#fd780f" interactive>
+      <GlassSurface asChild capsule thickness={THICKNESS} tint={tint} interactive>
         <button
           type="button"
           ref={setEl}

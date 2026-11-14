@@ -14,6 +14,7 @@ import {
 import { PanelLeft, PanelRight } from 'lucide-react';
 import { approval, projects, type Session } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
+import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
 import { paintField, type Strength } from './paint';
 import { GBtn, isYours, RootCtx } from './parts';
@@ -55,14 +56,14 @@ const NO_OUTER_SHADOW = {
 /** The painted field, shared by the two roots as one texture. */
 const FieldCtx = createContext<HTMLCanvasElement | null>(null);
 
-function Plane({ dark, strength, ground, onPaint }: { dark: boolean; strength: Strength; ground: string; onPaint: (c: HTMLCanvasElement) => void }) {
+function Plane({ field, strength, ground, onPaint }: { field: Field; strength: Strength; ground: string; onPaint: (c: HTMLCanvasElement) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const root = useGlassRoot();
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
     const draw = () => {
-      paintField(c, dark, strength, ground);
+      paintField(c, field, strength, ground);
       // The field is still: it is read once per painting, not on every frame.
       root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
       onPaint(c);
@@ -70,7 +71,7 @@ function Plane({ dark, strength, ground, onPaint }: { dark: boolean; strength: S
     draw();
     window.addEventListener('resize', draw);
     return () => window.removeEventListener('resize', draw);
-  }, [dark, strength, ground, root, onPaint]);
+  }, [field, strength, ground, root, onPaint]);
   return <canvas ref={ref} className="xl-plane" aria-hidden="true" />;
 }
 
@@ -142,7 +143,6 @@ function Room({ host }: { host: HTMLElement | null }) {
 }
 
 export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
-  const dark = scheme === 'dark';
   const flags = useMemo(addressFlags, [scene, scheme, knobs]);
   const x = (flags.get('x') ?? '').split(',');
   const [el, setEl] = useState<HTMLDivElement | null>(null);
@@ -157,7 +157,10 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     setStamp((n) => n + 1);
   }, []);
 
-  const ground = (GROUNDS[knobs.ground ?? 'warm'] ?? GROUNDS.warm!)[scheme];
+  // A colouring settles the field, the tint and the mark together; one that is about its ground also names it.
+  const colour = colouringOf(knobs.colour);
+  const tokens = colour.tokens[scheme];
+  const ground = (colour.ground ?? GROUNDS[knobs.ground ?? 'warm'] ?? GROUNDS.warm!)[scheme];
   const strength = (['whisper', 'soft', 'warm', 'vivid'].includes(knobs.field ?? '') ? knobs.field : 'warm') as Strength;
   const material = (['glass', 'veil', 'opaque'].includes(knobs.blocks ?? '') ? knobs.blocks : 'glass') as Material;
   const face = ['figtree', 'geist', 'system'].includes(knobs.face ?? '') ? knobs.face! : 'figtree';
@@ -212,9 +215,23 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-side={side ? 'open' : 'closed'}
             data-material={material}
             data-face={face}
-            style={{ '--xl-ground': ground, colorScheme: scheme } as CSSProperties}
+            data-aid={x.includes('field') ? 'field' : undefined}
+            data-colour={colour.id}
+            data-mark={colour.mark}
+            style={
+              {
+                '--xl-ground': ground,
+                '--xl-ink-rgb': tokens.ink,
+                '--xl-shade-rgb': tokens.shade,
+                '--xl-accent': tokens.accent,
+                '--xl-on-accent': tokens.onAccent,
+                '--xl-accent-mark': tokens.mark,
+                '--xl-focus': tokens.focus,
+                colorScheme: scheme,
+              } as CSSProperties
+            }
           >
-            <Plane dark={dark} strength={strength} ground={ground} onPaint={onPaint} />
+            <Plane field={colour.field[scheme]} strength={strength} ground={ground} onPaint={onPaint} />
             <LayoutPump layout={layout} />
             <Room host={el} />
             {dev && <Readout name="window" />}
@@ -223,6 +240,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               scene={scene}
               scheme={scheme}
               material={material}
+              tint={tokens.accent}
               layout={layout}
               stamp={`${stamp}`}
               flags={x}
@@ -254,6 +272,8 @@ interface ShellProps {
   scene: SceneId;
   scheme: Scheme;
   material: Material;
+  /** The seed of the page's one tinted piece of glass. */
+  tint: string;
   layout: string;
   stamp: string;
   flags: string[];
@@ -301,7 +321,7 @@ function Shell(p: ShellProps) {
 
   const trail = (
     <>
-      {scene !== 'settings' && p.waiting.length > 0 && <Waiting waiting={p.waiting} onAnswer={p.setAnswer} open={p.flags.includes('waiting')} alone={scene !== 'session'} />}
+      {scene !== 'settings' && p.waiting.length > 0 && <Waiting waiting={p.waiting} tint={p.tint} onAnswer={p.setAnswer} open={p.flags.includes('waiting')} alone={scene !== 'session'} />}
       {scene === 'session' && (
         <GlassSurface asChild capsule thickness={THICKNESS} foreground="vibrant">
           <div className="xl-host xl-round" data-glass-role="control" role="group" aria-label="Details">

@@ -9,7 +9,9 @@
 // tenth-percentile pixel: the worst tenth of what is behind it, so a calm average cannot carry a line that crosses
 // structure. Floors: 4.5:1 for text, 3:1 for text of 24 px or more (18.66 px when bold) and for icons. Lines inside
 // the transcript's faded edge bands are reported but not gated. Marks drawn in CSS (the state dots, the switch) are
-// not read. Options by environment: W, H (default 1440x900), WAIT, JSON=1 (every line), LOGS=1 (console output),
+// not read. Each glass body is also read against the field painted under it (its level, the hue the glass drew
+// from the hue it was given, and how far it stands from its ground). Options by environment: W, H (default 1440x900), WAIT, JSON=1 (every line), LOGS=1 (console output),
+// BRIEF=1 (a few lines per route),
 // PERF=1 (instead of contrast: frame intervals while the transcript scrolls end to end).
 import { chromium } from 'playwright-core';
 import { resolve } from 'node:path';
@@ -126,6 +128,27 @@ function collect() {
       return !!hit && (s.contains(hit) || hit.contains(s)) && !edgeOf(s, { top: r.top + r.height / 2, bottom: r.top + r.height / 2 });
     })
     .map(({ s, r }) => ({ label: nameOf(s).trim(), x: r.left, y: r.top, w: r.width, h: r.height }));
+  // The field as painted, under each body: what the glass had to work with. Read from the plane's own canvas.
+  const plane = root.querySelector('.xl-plane');
+  const pg = plane?.getContext('2d', { willReadFrequently: true });
+  if (pg && plane.clientWidth) {
+    const k = plane.width / plane.clientWidth;
+    for (const b of bodies) {
+      const X = Math.max(0, Math.round((b.x + 4) * k));
+      const Y = Math.max(0, Math.round((b.y + 4) * k));
+      const d = pg.getImageData(X, Y, Math.max(1, Math.min(plane.width - X, Math.round((b.w - 8) * k))), Math.max(1, Math.min(plane.height - Y, Math.round((b.h - 8) * k)))).data;
+      const sum = [0, 0, 0];
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4 * 7) {
+        for (let c = 0; c < 3; c++) {
+          const v = d[i + c] / 255;
+          sum[c] += v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+        }
+        n++;
+      }
+      b.under = sum.map((v) => v / n);
+    }
+  }
   return { lines: out, bodies };
 }
 
@@ -184,9 +207,31 @@ async function analyse(png, data, dpr) {
   const bodies = data.bodies.map((b) => {
     const d = px(b.x + 4, b.y + 4, b.w - 8, b.h - 8);
     const v = [];
-    for (let i = 0; i < d.length; i += 4 * 7) v.push((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255);
+    const sum = [0, 0, 0];
+    for (let i = 0; i < d.length; i += 4 * 7) {
+      v.push((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255);
+      for (let c = 0; c < 3; c++) sum[c] += lin(d[i + c]);
+    }
     v.sort((m, n) => m - n);
-    return { ...b, p10: q(v, 0.1), p50: q(v, 0.5), p90: q(v, 0.9) };
+    // The body as drawn against the field under it, in OKLCH: how far the glass moved the hue, and how far the
+    // body stands from its ground (the distance is what makes a tinted capsule findable).
+    const oklab = ([r, gg, bb]) => {
+      const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * gg + 0.0514459929 * bb);
+      const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * gg + 0.1073969566 * bb);
+      const s2 = Math.cbrt(0.0883024619 * r + 0.2817188376 * gg + 0.6299787005 * bb);
+      return [0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s2, 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s2, 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s2];
+    };
+    const lch = (lab) => ({ L: lab[0], C: Math.hypot(lab[1], lab[2]), H: (Math.atan2(lab[2], lab[1]) * 180 / Math.PI + 360) % 360 });
+    const drawnLab = oklab(sum.map((x) => x / v.length));
+    const underLab = b.under ? oklab(b.under) : null;
+    const lumOf = ([r, gg, bb]) => 0.2126 * r + 0.7152 * gg + 0.0722 * bb;
+    const drawnLum = lumOf(sum.map((x) => x / v.length));
+    const underLum = b.under ? lumOf(b.under) : null;
+    return {
+      ...b, p10: q(v, 0.1), p50: q(v, 0.5), p90: q(v, 0.9), drawn: lch(drawnLab), field: underLab && lch(underLab),
+      apart: underLab && Math.hypot(drawnLab[0] - underLab[0], drawnLab[1] - underLab[1], drawnLab[2] - underLab[2]),
+      against: underLum === null ? null : (Math.max(drawnLum, underLum) + 0.05) / (Math.min(drawnLum, underLum) + 0.05),
+    };
   });
   return { lines, bodies };
 }
@@ -248,10 +293,34 @@ for (const route of routes) {
     console.log(JSON.stringify({ route, ...res }));
     continue;
   }
+  if (process.env.BRIEF === '1') {
+    // One short block per route, for a matrix of colourings: the lowest text line and icon, anything under its
+    // floor, the range of the glass bodies' levels, the widest turn of hue through the glass, and the capsule.
+    const gatedB = res.lines.filter((l) => !l.edge);
+    const low = (what) => gatedB.filter((l) => (what === 'icon') === (l.floor === 3)).sort((a, b) => a.ratio - b.ratio)[0];
+    const t = low('text');
+    const ic = low('icon');
+    const failsB = gatedB.filter((l) => l.ratio < l.floor).sort((a, b) => a.ratio - b.ratio);
+    const plain = res.bodies.filter((b) => !/waiting/.test(b.label));
+    const cap = res.bodies.find((b) => /waiting/.test(b.label));
+    const turns = plain.filter((b) => b.field && b.field.C >= 0.03 && b.drawn.C >= 0.02).map((b) => ({ b, t: ((b.drawn.H - b.field.H + 540) % 360) - 180 })).sort((a, b) => Math.abs(b.t) - Math.abs(a.t));
+    console.log(`== ${route}`);
+    console.log(`   text ${t ? `${f2(t.ratio)} (${t.group})` : '–'} · icon ${ic ? `${f2(ic.ratio)} (${ic.group})` : '–'} · ${failsB.length} under the floor of ${gatedB.length}`);
+    if (plain.length) console.log(`   bodies ${f2(Math.min(...plain.map((b) => b.p10)))} to ${f2(Math.max(...plain.map((b) => b.p90)))} · least apart from the field ${Math.min(...plain.map((b) => b.apart ?? 9)).toFixed(3)} · widest turn ${turns[0] ? `${turns[0].t >= 0 ? '+' : ''}${Math.round(turns[0].t)}° (${turns[0].b.label.slice(0, 18)}, field H ${Math.round(turns[0].b.field.H)} C ${turns[0].b.field.C.toFixed(3)})` : 'none (no chroma)'}`);
+    if (cap) console.log(`   capsule level ${f2(cap.p50)} · drawn L ${f2(cap.drawn.L)} C ${cap.drawn.C.toFixed(3)} H ${Math.round(cap.drawn.H)} over field L ${f2(cap.field.L)} C ${cap.field.C.toFixed(3)} · apart ${cap.apart.toFixed(3)}, ${f2(cap.against)}:1`);
+    for (const l of failsB.slice(0, 8)) console.log(`     ${f2(l.ratio)} (floor ${l.floor}, behind ${f2(l.behind)}) ${l.what} ${Math.round(l.size)}px  ${l.group}  “${l.text}”`);
+    continue;
+  }
   console.log(`\n== ${route}`);
   if (process.env.LOGS === '1') for (const l of [...new Set(logs)]) console.log('  log: ' + l.slice(0, 400));
   else if (logs.length) console.log(`  ${new Set(logs).size} console warnings (LOGS=1 prints them)`);
-  for (const b of res.bodies) console.log(`  body ${b.label.padEnd(34)} ${String(Math.round(b.w)).padStart(4)}×${String(Math.round(b.h)).padEnd(4)} drawn level p10 ${f2(b.p10)} · p50 ${f2(b.p50)} · p90 ${f2(b.p90)}`);
+  for (const b of res.bodies) {
+    // Hue is only a reading where there is chroma to carry it.
+    const hue = (c) => (c.C < 0.02 ? '  –' : String(Math.round(c.H)).padStart(3));
+    const turn = b.field && b.field.C >= 0.02 && b.drawn.C >= 0.02 ? ((b.drawn.H - b.field.H + 540) % 360) - 180 : null;
+    const colour = b.field ? ` · field L ${f2(b.field.L)} C ${b.field.C.toFixed(3)} H ${hue(b.field)} → drawn L ${f2(b.drawn.L)} C ${b.drawn.C.toFixed(3)} H ${hue(b.drawn)}${turn === null ? '' : ` (${turn >= 0 ? '+' : ''}${Math.round(turn)}°)`} · apart ${b.apart.toFixed(3)}, ${f2(b.against)}:1` : '';
+    console.log(`  body ${b.label.slice(0, 34).padEnd(34)} ${String(Math.round(b.w)).padStart(4)}×${String(Math.round(b.h)).padEnd(4)} drawn level p10 ${f2(b.p10)} · p50 ${f2(b.p50)} · p90 ${f2(b.p90)}${colour}`);
+  }
   const gated = res.lines.filter((l) => !l.edge);
   const groups = new Map();
   for (const l of gated) {

@@ -1,8 +1,13 @@
 # Layers
 
 Design record for the round 2 synthesis `layers` (order 3). The contract is `mockups/lab/BRIEF.md` and
-`mockups/lab/ROUND2.md`. Values live in `layers.css` (tokens at the top) and `paint.ts` (the field); this file says
-what each part was lifted from, what happened where two parts met, what the idea breaks and what that costs.
+`mockups/lab/ROUND2.md`. Values live in `layers.css` (tokens at the top), `colour.ts` (everything a colouring
+settles), `paint.ts` and `paper.ts` (the two field painters); this file says what each part was lifted from, what
+happened where two parts met, what the idea breaks and what that costs.
+
+The owner chose this synthesis as the style of the redesign and, in the same message, dropped its colour. Colour is
+now a switch, and its record is section 12. Sections 0 to 11 are the experiment as it was built, under what is now
+the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
 
@@ -30,7 +35,7 @@ read off the chosen parts.
 | Energy | composed; nothing moves at rest except a running mark | Field, Quiet |
 | Type | one humanist sans and its mono; no serif anywhere (the owner's ruling) | Field's face, Quiet's sizes |
 | Material | glass over one painted plane, in the spatial register, extended to content | the assignment |
-| Colour commitment | the field is the only chromatic surface; ink is one warm neutral | Field |
+| Colour commitment | the field is the only chromatic surface; ink is one neutral. Under Paper, the default colouring, there is no chromatic surface at all (section 12) | Field; the owner's picture |
 | Accent job | "it is your move", and nothing else | Quiet |
 | Ground lightness | both schemes designed and measured to the same standard | the owner uses both |
 | Ground temperature | warm; the owner's ground candidates are the paper the field is painted on | Field |
@@ -105,8 +110,11 @@ groups, all on the texture: xl-pane; xl-lead (overlay plane; the sidebar toggle,
 family: thickness 8 everywhere. Pane 272 wide, r 20. Modules 296 wide, r 20. Blocks r 18, the message r 22.
   Composer r 26. Bars are capsules at span 36. Anchor: the window corner, at an 8 px margin. Rows inside a pane
   or module are r 12 (20 minus 8); fills inside a capsule are r 15 (18 minus 3).
-tint: one seed, #fd780f, on the waiting capsule. Glyphs on it are authored #2a1300; receded, the tint loses its
-  chroma and the glyphs return to the runtime's ink.
+tint: one seed, the colouring's accent (#fd780f under Orange), on the waiting capsule. Glyphs on it are the
+  colouring's authored ink (#2a1300 under Orange); receded, the tint loses its chroma and the glyphs return to
+  the runtime's ink. The runtime draws the seed itself in both schemes (drawn L, C and hue within 0.01, 0.005 and
+  1 degree of the seed for every colouring), so a seed is chosen as a fill is: clear of the levels where neither
+  ink holds.
 ink: on a host, the runtime's primary on children, with two authored levels under it (86 % and 76 % light, 92 %
   and 86 % dark). On a block or a module the words are not inside the host, so the page's own ink is used and
   every line is measured (section 7).
@@ -167,8 +175,9 @@ Path each surface took:
 | hairline / strong | ink 10 % / 17 % | ink 11 % / 18 % |
 | on the field: hover / selected / well | ink 5.5 % / 9 % / 6 % | white 7 % / 11.5 % / 8 % |
 | on glass: hover / current / well | ink 5 % / white 80 % with a contact shadow / ink 5.5 % | white 7.5 % / white 15 % / black 20 % |
-| accent fill | `#fd780f`, text on it `#2a1300` | same |
-| accent mark (glyphs) | `#c84c00` | `#fd780f` |
+| ink, accent fill, text on it, accent mark, focus, shadow tint | per colouring: section 12 | per colouring |
+| under Orange: accent fill | `#fd780f`, text on it `#2a1300` | same |
+| under Orange: accent mark (glyphs) | `#c84c00` | `#fd780f` |
 | solid (send, switch on) | ink | `rgb(241 237 232)` |
 | added / removed | `#1a6b40` / `#b03424` | `#74d3a3` / `#f6a092` |
 
@@ -188,6 +197,9 @@ capsule over the column's left edge, composer as wide as the column, 16 px from 
 side column and its toggle leave.
 
 ## 7. Legibility, measured
+
+This section is the Orange colouring's record, as measured before the Colour switch; every colouring's readings
+are in section 12.6, on the same floors.
 
 `measure.mjs` in this folder reads every visible line of text and every icon against the pixels behind it (one
 capture with text hidden; the line's tenth-percentile pixel). Floors: 4.5 for text, 3 for large text and icons.
@@ -292,10 +304,14 @@ Costs:
 
 ## 10. Knobs and address aids
 
-Knobs: Blocks (Glass, Veil, Opaque: this synthesis's own); Field strength (Whisper, Soft, Warm, Vivid); Ground
-(the two light and four dark candidates, paired); Typeface (Figtree, Geist, System).
+Knobs: Colour, first (section 12); Blocks (Glass, Veil, Opaque: this synthesis's own); Field strength (Whisper,
+Soft, Full, Vivid; the third was labelled Warm until a colouring could be cool, and its value is still `warm`);
+Ground (the two light and four dark candidates, paired; Paper and Cobalt bring their own ground and do not
+consult it); Typeface (Figtree, Geist, System). That is five, one more than the brief's "three or four at most":
+Colour was asked for by the owner and none of the other four could be folded into it.
 
-Address aids for captures, never design states: `x=tools,top,mid,card,waiting,nopane,noside`, `pose=inactive`,
+Address aids for captures, never design states: `x=tools,top,mid,card,waiting,nopane,noside,field` (the last
+shows the field alone), `pose=inactive`,
 `tier=css`, `rt=1`, `dev=1` (the runtime's checks and what each group resolved, in the console).
 
 ## 11. Rejected
@@ -308,9 +324,333 @@ Address aids for captures, never design states: `x=tools,top,mid,card,waiting,no
 - Modules spaced by the derived room (62 px): honest to the letter, but four modules no longer fit a 900 px
   window. They share one group, where 12 px is allowed.
 - The library's clearer material document for light blocks. It ships in a package this lab does not list as a
-  dependency, so it could not be tried.
+  dependency, so it could not be tried. (Tried later, for Paper, and not adopted: section 12.5.)
 - Raising the body's chroma retention so light blocks take more of the field's hue: the shipped material is
   already at the value tried; nothing changed.
+
+## 12. Colour
+
+Added 2026-11-14, after the owner chose Layers as the style and dropped its colour ("for color I'll actually abandon
+the strong orange #FD780F"). Colour is now the first knob. Sections 0 to 11 describe the experiment as it was built,
+under what is now the last position, Orange; where they name a hue, read "the colouring's".
+
+### 12.1 What a colouring is
+
+In Layers colour does three jobs, and a position of the switch settles all three together, in both schemes:
+
+1. **The field**: what is painted on the canvas and seen through every pane, block and module.
+2. **The tint glass picks up from it**: the library carries the field's hue into each body by itself; the page's
+   part is the ink's temperature and the tint under its CSS shadows (`--xl-shade-rgb`), because a brown shadow in a
+   blue room reads as dirt.
+3. **The mark that means "this session needs you"**: the waiting capsule's seed, the glyphs on waiting rows and
+   tabs, Approve, the send button when there is something to send, and keyboard focus.
+
+Each is one record in `colour.ts`: a field per scheme, six tokens per scheme (ink, shadow tint, accent, ink on the
+accent, the accent as a stroke, focus), the mark's form, and optionally its own ground. Nothing else in the
+experiment names a hue. The mark has two forms. `stroke` is Quiet's glyph drawn in the mark colour, as before.
+`badge` is the same glyph reversed out of a 20 px disc of the accent (18 px in a tab), for an accent that cannot be
+a 15 px stroke: the ink itself, which would be one more grey mark among the row's own. Inside the capsule a badge
+goes back to a plain glyph, since the capsule is already the filled thing. In every form the state is a shape first
+(a hand, a question mark, a list); no colouring says it by hue alone.
+
+The owner's answers, in order, shaped the list: "Show me a range", "Softer warm", "A different hue"; then "also want
+to try using full white and full black and other charecteristic color. if that could work"; then a picture, with
+"How about using imagery a bit like this? To answer about colour". The picture is the answer, so it is the first
+and default position and the others are the comparison set behind it.
+
+| position | in a sentence | mark |
+|---|---|---|
+| **Paper** (default) | No hue. A painted still life under the window: paper lifting off an ivory floor and passing into clear glass. | ink, as a badge |
+| Peach | Softer warm, the same family: Orange's dusk at about half its chroma. | apricot stroke |
+| Honey | Softer warm, moved from orange toward gold: late afternoon light. | gold stroke |
+| Rose | A different hue that is still warm: blush, rose, mauve. | raspberry stroke |
+| Blue hour | A different hue that is cool: the sky after sunset, and the mark is the lit window. | amber stroke |
+| Opal | Several soft hues at once: peach, rose, lilac, sky, mint. | ink, as a badge |
+| Cobalt | Full white and full black with one characteristic colour, as light under the glass and as the mark. | cobalt stroke |
+| Orange (was) | The dropped colouring, unchanged, for reference. | `#fd780f` |
+
+### 12.2 Paper
+
+**Source.** The owner's picture is outside the repository and nothing of it is in here; this is what it shows, in
+words. A still, warm, almost colourless scene: a matte ivory ground; one sheet of paper that lifts in a slow curve
+and, along the same curve, becomes clear glass; the paper's lit crest near the ground's own level and its shaded
+underside a clear step below; one soft warm shadow on the floor; the glass nearly as light as the ground and
+declared by a thin bright rim, a faint reflection inside it and that shadow, not by any tint; near-black ink; one
+word in a light, high-contrast serif.
+
+**What was taken from it.** Colour stops being a hue and becomes four materials: paper, glass, shadow, ink. And the
+field stops being a wash and becomes a picture of that kind, painted by `paper.ts` on the same canvas the other
+fields use, so both glass roots refract it like any field.
+
+**The ground is the picture's ivory, and that is what makes the glass read.** `#e8e1db` (level 0.89), a shade
+deeper and greyer than the app's `#faf9f5` (0.98). The library's light glass draws at 0.90 to 0.99 at these sizes.
+On `#faf9f5` nothing separates the two, which is round 1's finding that glass over a pale flat ground is close to
+invisible. On the ivory every pane, block and module is the lighter thing, with its rim and a warm shadow under it:
+the picture's own answer, got by lowering the ground instead of colouring it. Measured, a body stands 0.04 to 0.08
+from the field under it in OKLab (1.13 to 1.28:1; blocks and modules 0.05 to 0.06), against 0.03 to 0.05 for the
+blocks and modules under Orange and 0.002 to 0.006 on pure white. It is a modest gain and a real one, and it is
+linear: every 0.01 the ground comes down is 0.01 more. Paper therefore brings its ground and the Ground knob is not
+consulted (dark `#181614`).
+
+**The picture** (all coordinates are shares of the window, so it is the same picture at every size):
+
+- *The arch.* A sheet lifts off the floor at the lower left. Its near edge is the crest: in at (−0.03, 0.815), up
+  to its highest at (0.17, 0.74), then one long fall to the fold at (0.56, 0.958). Above the crest the sheet's top
+  surface is a sliver that faces the light while the sheet rises and turns away past the crest (ground to
+  `rgb(243 238 232)`), with a soft far edge. Below the crest is the underside, painted rung by rung: from
+  `rgb(216 207 197)` near the left to `rgb(196 185 172)` at the fold, where the least light gets in; darkest just
+  under the edge, lifted a little near the floor by what the floor sends back. The crest itself is one 1.25 px
+  line of `rgb(251 248 244)`: the sheet's edge catching the light.
+- *The fold and the leaf.* At the fold the sheet turns upward and is glass from there: a leaf that rises to its
+  tip at (0.974, 0.122) and comes back down along a full belly. Paper passes into glass along the same curve:
+  opaque at the fold, a quarter left 0.3 of the way to the tip, gone at 0.42. The glass has a veil of white at
+  4 to 11 % (more toward the tip), a soft reflection that fills the upper leaf and ends on an edge of its own, a
+  rim (1.5 px of white at 95 % on the rising edge, 1.1 px at 66 % on the belly, each with a fine warm-dark line
+  beside it at 26 % so a white line holds on a ground nearly as light), and a heavier stroke where the two edges
+  meet at the tip, which is the glass's thickness.
+- *The shadows.* One contact shadow under the arch (`rgb(126 104 84)` at 30 %, blurred 20 px) and one thrown by
+  the leaf to the lower right (24 %, 22 px), lighter because the thing is clear, with a streak of light laid
+  inside it: what the glass gathers.
+- *The room.* A broad pool of light from the upper left at 12 % (more would lift the ground back toward the glass)
+  and a falloff of 10 % toward the far corner, so the ground is not flat; a grain of ±1.6 % over everything,
+  because paper is matte and a lens needs something fine to displace everywhere.
+
+**Composed for the window.** One strong form, placed where there is room. At 1440 by 900 the arch runs under the
+pane's empty lower third and the left margin, the fold sits under the composer, and the leaf rises through the
+right margin behind the modules. The reading column is ground and nothing else above y = 0.70; the only parts that
+cross it are the leaf's rim (a bright hairline) low on the right, and the arch's top surface and the upper slope of
+its underside behind the last lines of the transcript, where the scroll mask is already thinning them. New chat has
+no column and no modules, so there the whole form stands free and the composer's right end crosses the leaf.
+Settings has no side column and its rows are read on the field, so there the leaf's rim runs behind the controls;
+it is the weak scene (12.7). Nothing in the picture moves.
+
+**Field strength** is how far the shading departs from the ground: every depth above is multiplied by the knob
+(Whisper 0.29, Soft 0.62, Full 1, Vivid 1.47, capped at 1.6), so Whisper is an almost flat ivory with a rim on it.
+
+**Dark is the same room with the lamp low, not the light picture recoloured.** The ground is a warm near-black
+(`#181614`); one low lamp at the left leaves a pool of light on the floor (`rgb(255 224 188)` at 15 %, centred
+under the arch); the room falls off to black at 30 % toward the far corner. The paper is still ivory, so its top
+surface is the brightest broad thing in the room (`rgb(104 95 84)`), its edge is the brightest line
+(`rgb(196 184 168)`), and its underside sinks below the floor's own level (`rgb(52 47 42)` to `rgb(18 16 14)`).
+The glass has almost no body left (a veil of 4.5 %); it is rim (62 %), a reflection (7.5 %) and the light it lays
+on the floor (20 %). Rejected for dark: inverting the picture (black paper, which is a recolouring); moonlight (a
+blue, which is a hue this colouring does not have); glass that glows (it would be the brightest thing behind dark
+panes, where round 2 found text hard to read); and lighting the paper as brightly as by day (its top surface
+would sit at 0.6 under the pane and the composer, in the band where neither ink reads).
+
+**The mark is ink.** What stands out in a world of paper and glass is what stands out in the picture: the ink.
+The capsule's seed is the ink (`rgb(33 30 27)`, drawn at level 0.12 on a field of 0.91: 12:1 against its ground,
+the strongest mark of any colouring), its glyphs are paper (`#f4f0eb`), a waiting row carries an ink badge, and
+Approve is an ink button. At night the ink is the colour the paper was (`rgb(232 225 219)`, the light ground
+itself) and the capsule is a lit piece of paper. Weighed and not taken:
+
+- *A seal.* Cinnabar on ivory is the oldest "this needs your approval" there is, and it would be handsome. It is
+  also a strong red-orange between the orange the owner just dropped and the clay they ruled out before it, and
+  it is within a few degrees of the red already spent on removed lines (`#b03424`).
+- *Gold.* Foil on paper is premium in print; flat on a screen it is ochre, and at 15 px it has to be deepened to
+  bronze to hold 3:1.
+- *Blue-black ink.* The complement of the ivory and the most findable hue on it. It would be a fifth material in a
+  picture that has four, and on a control it reads as a link or a selection.
+- *Light.* A pane brighter than the paper is how the picture declares glass, and at night it works; by day white
+  on ivory is 1.3:1.
+
+What the ink costs: the mark shares its colour with the stop button, the switches and the unread dot, so it is
+told apart by form (a glyph in a disc) and place, not by colour; this is the monochrome end of "never by hue
+alone". If the owner wants one pigment in this world, the seal is the one to try first, with the removed-line red
+moved to make room.
+
+**One line of serif.** The new-chat line is set in Newsreader (installed; latin `woff2`, its optical-size axis at
+72) at weight 300, 37/44, tracking −0.014em, under this colouring only. The picture's one word is a display
+serif, and this is the one display line the app has. The owner's ruling against serif prose stands: nothing else
+is set in it, at any size, and the Typeface knob does not reach it. It is offered for the owner to rule on.
+
+**Tokens.** Ink `rgb(33 30 27)` light, `rgb(232 225 219)` dark. Shadow tint `rgb(84 62 42)`: the shadows under
+panes and blocks are the picture's warm floor shadow. Accent, mark and focus are the ink.
+
+### 12.3 The comparison set
+
+All six keep Field's composition (seven masses at the edges, four across the main space at about a third of their
+level, contour lines as the fine frequency) and change what the masses are. Fields are authored in OKLCH, because
+the two limits a field has to hold are stated that way: how light the ground under prose stays, and how deep the
+ground under dark glass stays. Each row gives the journey down the pane's column (top to bottom), then the mark.
+
+| | field, light (L, C, hue) | field, dark | mark: fill, ink on it; as a stroke (light / dark) | why this mark |
+|---|---|---|---|---|
+| **Peach** | 0.88 0.075 70 → 0.82 0.09 52 → 0.82 0.085 25 → 0.78 0.06 335: Orange's four hues at 45 to 55 % of their chroma and a step lighter | 0.66 0.12 62 → 0.58 0.13 45 → 0.50 0.13 20 → 0.42 0.10 332: embers cooled to two thirds | `#f3ac75`, `#2a1605`; `#a95f23` / `#f3ac75` | The dropped orange with its chroma cut from 0.19 to 0.11 and its lightness raised: the same meaning said more quietly. It stays lighter and yellower than the clay the owner ruled out earlier (`#d97757`, hue 39). |
+| **Honey** | 0.92 0.09 88 → 0.86 0.12 80 → 0.84 0.10 66 → 0.78 0.05 40 | 0.68 0.13 74 → 0.60 0.13 66 → 0.50 0.12 52 → 0.38 0.07 30 | `#f8bd2c`, `#271b00`; `#95680a` / `#f8bd2c` | Gold is warm without orange's heat, and amber is the long-standing colour of "attention, not alarm". |
+| **Rose** | 0.86 0.09 35 → 0.76 0.15 8 → 0.74 0.13 350 → 0.66 0.11 315 | 0.62 0.17 15 → 0.52 0.18 5 → 0.46 0.16 350 → 0.38 0.13 315: wine | light `#cb2865` with white; dark `#f77f9e` with `#2b0614`; `#c41f5f` / `#fa89a5` | The field's own hue, deepened. A fill this dark takes white ink in light, so the two schemes get different fills, each clear of the level where neither ink holds. |
+| **Blue hour** | 0.86 0.075 240 → 0.76 0.12 265 → 0.74 0.12 285 → 0.72 0.10 315; ink `rgb(22 25 34)` | 0.52 0.15 250 → 0.46 0.17 268 → 0.42 0.17 285 → 0.36 0.13 315; ink `rgb(234 237 244)` | `#faac27`, `#291a00`; `#9e620a` / `#fbb541` | The field's own hue cannot carry the mark: a blue capsule in a blue room is found by darkness alone, and blue on a control reads as a link. So the mark is the complement, one lit window at the blue hour, which is also where this colouring keeps its warmth. |
+| **Opal** | peach 0.88 0.09 60 → rose 0.80 0.11 8 → lilac 0.78 0.10 305 → sky 0.80 0.09 240, with mint 0.88 0.07 185 at the upper right; ink `rgb(27 26 30)` | 0.60 0.14 50 → 0.50 0.17 5 → 0.42 0.16 305 → 0.42 0.13 245, teal 0.50 0.10 190 | the ink (`rgb(27 26 30)` with white; dark `rgb(240 238 242)` with `#17161a`), as a badge | With five hues in the room no hue can mean anything, so the mark steps out of colour: the darkest thing on a light page, the lightest on a dark one. |
+| **Cobalt** | ground `#ffffff`. Eight placed masses of one blue, 0.80 0.11 258 to 0.66 0.19 264, under the pane, the modules, the composer and the tab capsule only; ink `rgb(12 13 17)` | ground `#000000`. The same masses at 0.40 to 0.50, C 0.15 to 0.22, over two broad floors of white at 5 %; ink `rgb(243 244 247)` | light `#194fe3`, dark `#2b62ef`, both with white; `#194fe3` / `#79abfd` | See 12.4. |
+
+Shadow tints follow the room: Peach `90 50 20`, Honey `90 60 0`, Rose `90 20 45`, Blue hour `30 40 95`, Opal
+`50 35 80`, Cobalt `10 30 110`. Focus is the accent where it can ring a white surface (Rose, Cobalt, the inks) and
+the stroke colour a step lighter where it cannot (Peach, Honey, Blue hour).
+
+### 12.4 Full white and full black: does it work?
+
+The owner's question was honest ("if that could work"), so here is a plain answer for the best version found.
+
+**What a field cannot do on a pure ground, the colour has to do.** On `#ffffff` light glass (0.92 to 1.00) has
+nothing to differ from, so a room-wide wash would have to be strong to show a pane, and then it is no longer full
+white. Cobalt therefore paints colour only under the glass (the pane, the modules, the composer, the tab capsule)
+and leaves the reading column pure. The colour is blue for three reasons that are not taste: on white, blue is the
+one hue that reads as shade and so as depth, where a pink or a yellow reads as a stain; saturated blue has the
+lowest luminance of any hue, so dark glass over it stays far below the level where text fails (bodies 0.30 and
+down); and it is the complement of the orange that was dropped. On `#000000` two broad floors of white at 5 % go
+under the glass first (round 1's remedy for faint colour turning into a wash), and the blue is then let through
+at full chroma on purpose: the pane is a slab of blue glass.
+
+**Verdict.** In dark it works, and is the most striking position of the eight: prose on true black, glass drawn
+by its rim and its lifted body, the pane lit blue. In light it half works: the pane, the modules and the composer
+read as blue-lit glass, but a transcript block on pure white is a white card and its shadow, the experiment's own
+idea (blocks of glass) is invisible exactly where it lives, and the distance from field to body there measured
+0.002 to 0.006 in OKLab against 0.05 under Paper. What it costs besides: white ink on black for hours (the ink is
+held at `rgb(243 244 247)`, not white, for that reason); a product that is no longer warm anywhere; and blue on a
+control competing with every link and selection convention.
+
+**The warm answer on pure grounds is not a field at all.** A yellow was built and dropped (12.5): as light under
+glass on white it is sallow. The warm version of "full white and full black" is marks only, and the switch already
+has it: Paper's picture is hueless, so the idea carries over; the Ground knob at `#ffffff · #000000` under any of
+the four warm colourings shows the rest.
+
+### 12.5 Rejected
+
+- **Sun**: pure grounds with a yellow (`oklch(0.88 0.18 97)`). Built twice. As light under glass on white it
+  yellows the panes without reading as sunlight; as marks only over neutral shade it is Paper with a louder
+  badge. In dark it is Honey on a blacker ground.
+- **Mono**: the owner's grounds with light and shade and no hue, and an amber mark. Built; it was the strongest
+  of the first round, and then the owner's picture arrived, which is the same idea with a form in it. Paper
+  replaces it.
+- **A coral or vermilion mark**, for any colouring: in light its stroke lands on the removed-line red.
+- **A violet mark** for the hueless and many-hued rooms: it would have been chosen because it was the one hue not
+  yet spent, which is a reason about the palette and not about the product.
+- **A cool mark in a cool room** (Blue hour in indigo): 12.3.
+- **Per-colouring removed and added colours.** The two diff hues stay fixed across the switch, so a colouring is
+  compared on the same content.
+- **The clearer material document** (the Glass slider at 0.25), which section 11 could not try. Tried here for
+  Paper by importing it from the library's web package by path. The pane shows a little more of the arch through
+  it; at window size the difference is slight, one dark line fell to 4.45 at Vivid, and the import is a path into
+  the package store. Not adopted, and no trace of the import remains.
+- **A field that changes with the scene** (a larger form on New chat). The field is one painting; a form that
+  jumped when a session opened would be motion at rest by another name.
+
+### 12.6 Readings, per colouring
+
+`measure.mjs`, same floors as section 7 (4.5 for text, 3 for large text and icons), 1440 by 900 at 2x, WebGPU, one
+build. Fourteen routes per colouring: the session at default strength in both schemes, then at its strongest (Field
+strength Vivid on the ground that hurts most, `#ffffff` in light and `#1f1f1f` in dark; Paper and Cobalt have
+their own ground) the session at rest, with the waiting list open (which is where Approve is read), with the row
+card open, and from the top with a tool run open, the settings page, and new chat. Of 11,680 gated readings none
+is under its floor, for any colouring. "Bodies" is the range of the glass bodies' drawn level at the
+strongest setting (the ink dead band is 0.39 to 0.49). "Turn" is how far the glass moved the hue it was given.
+"Capsule" is its drawn level, its distance from the field under it in OKLab, and its contrast against that field.
+
+| colouring | scheme | lowest text, default | lowest text, strongest | lowest icon | bodies | turn | capsule |
+|---|---|---|---|---|---|---|---|
+| Paper | light | 5.3 (caption on the field) | 4.88 (removed count, list open) | 3.3 | 0.90 to 0.99 | none | 0.12; 0.655; 12.1:1 |
+| Paper | dark | 5.1 (command tail) | 5.02 (command tail) | 3.9 | 0.15 to 0.31 | none | 0.89; 0.707; 13.8:1 |
+| Peach | light | 5.7 (caption on the field) | 4.98 (removed count, list open) | 3.3 | 0.92 to 0.99 | -3° at hue 70 | 0.72; 0.168; 1.6:1 |
+| Peach | dark | 5.4 (pane row) | 4.74 (pane row, new chat) | 3.8 | 0.17 to 0.35 | -9° at hue 31 | 0.73; 0.445; 5.7:1 |
+| Honey | light | 5.8 (caption on the field) | 5.07 (removed count, list open) | 3.3 | 0.92 to 1.00 | -4° at hue 88 | 0.74; 0.177; 1.5:1 |
+| Honey | dark | 5.4 (pane row) | 4.66 (pane row, new chat) | 3.8 | 0.17 to 0.35 | -10° at hue 66 | 0.75; 0.476; 6.2:1 |
+| Rose | light | 5.6 (caption on the field) | 4.84 (removed count, list open) | 3.3 | 0.92 to 0.99 | -5° at hue 356 | 0.37; 0.410; 4.2:1 |
+| Rose | dark | 5.5 (pane row) | 4.97 (pane row, new chat) | 3.9 | 0.17 to 0.34 | -3° at hue 354 | 0.65; 0.408; 4.8:1 |
+| Blue hour | light | 5.8 (caption on the field) | 4.92 (removed count, list open) | 3.3 | 0.92 to 1.00 | +6° at hue 277 | 0.70; 0.234; 1.6:1 |
+| Blue hour | dark | 5.6 (pane row) | 5.15 (pane row, settings) | 4.0 | 0.17 to 0.33 | +10° at hue 247 | 0.71; 0.524; 6.7:1 |
+| Opal | light | 5.8 (caption on the field) | 4.92 (removed count, list open) | 3.3 | 0.92 to 1.00 | -3° at hue 60 | 0.10; 0.691; 13.6:1 |
+| Opal | dark | 5.6 (pane row) | 5.12 (pane row, new chat) | 3.9 | 0.16 to 0.33 | -9° at hue 52 | 0.94; 0.635; 10.9:1 |
+| Cobalt | light | 5.8 (removed count) | 4.72 (removed count, list open) | 3.3 | 0.90 to 1.00 | +4° at hue 258 | 0.31; 0.485; 5.4:1 |
+| Cobalt | dark | 5.8 (pane row) | 5.13 (Approve, list open) | 4.2 | 0.09 to 0.30 | +10° at hue 267 | 0.38; 0.371; 3.4:1 |
+| Orange | light | 5.4 (caption on the field) | 4.87 (removed count, list open) | 3.3 | 0.90 to 0.99 | -9° at hue 70 | 0.57; 0.246; 2.1:1 |
+| Orange | dark | 5.3 (pane row) | 4.53 (pane row, new chat) | 3.7 | 0.17 to 0.36 | -10° at hue 56 | 0.58; 0.349; 3.7:1 |
+
+What the table says:
+
+- **Text.** Every colouring holds its floors. The lowest line in light is the same for all of them, the removed
+  count in the Changes module where the waiting list's shadow falls on it (4.7 to 5.1), so it is a property of
+  that red and not of a field. The lowest in dark is a pane row on new chat or settings, where the pane stands
+  over the field's brightest corner: Orange 4.53, Honey 4.66 and Peach 4.74 are the thin ones, because orange and
+  yellow carry the most luminance for their chroma. Section 8's warning stands and is now located: the margin is
+  in the dark pane, and it shrinks as the field moves toward yellow. Paper's dark pane holds 5.6; its lowest line
+  (5.02) is the running command's tail, where a block stands over the arch's lit top.
+- **The dead band.** No body is in it for any colouring: light bodies 0.90 and up, dark bodies 0.36 and down. Dark
+  fields were built to this: every dark mass is kept at or under the level of Orange's, and the yellows are darker
+  than their hue would suggest.
+- **The turn of hue** (round 2's finding of about 10 degrees on orange). It is not particular to orange and it is
+  not "toward red": every hue turns toward magenta. Warm fields move toward red by 9 to 10 degrees in dark and 3 to
+  9 in light; blues move toward violet by 9 to 10 in dark and 4 to 6 in light; Rose, already near that pole, moves
+  3 to 5. Consequences taken: Honey's dark field is authored at hue 74 to 30 where gold at 85 would have been
+  drawn greener than brass and was (the first build read as olive); Blue hour starts at 240, bluer than the
+  periwinkle it is meant to read as. Paper has no hue to turn.
+- **The mark, found.** Against its own field the capsule stands 0.17 (Peach, light) to 0.71 (Paper, dark) apart
+  in OKLab. The three pale fills (Peach, Honey, Blue hour's amber) are found in light by chroma, not by level:
+  1.5 to 1.7:1 against the field, as the orange was at 2.1. The two inks and Rose are found by level as well
+  (4.2:1 and up). The weakest is Peach in light, which is the price of the softness it was asked for.
+- **Glass against its ground in light.** The least distance from any body to the field under it, at the strongest
+  setting: Opal 0.006, Honey 0.015, Peach and Blue hour 0.019, Rose 0.022, Orange 0.030, Paper 0.039, and 0.000
+  for Cobalt's blocks on pure white.
+
+**Paper, receded** (`pose=inactive`, strongest setting), measured because it is where this colouring is thinnest.
+Light: lowest text 4.90, lowest icon 3.2, bodies 0.82 to 0.98, which is the ivory's own level (0.89), and with no
+hue to differ by a receded block had nothing left but its rim. So under Paper in light the CSS shadow does not
+leave in the receded pose; it stays at about half strength (the one exception to section 3, item 5). The result
+is the nearest the page comes to the owner's picture: glass as light as its ground, declared by a shadow. Dark:
+lowest text 4.91, bodies 0.12 to 0.23 on a ground of 0.09, still told apart. The cost is the capsule: its ivory
+seed recedes to level 0.20, 1.4:1 against the field, so in an unfocused dark window the mark at the top right is
+nearly gone and the badges on the rows, which are not glass, carry it alone.
+
+Looked at, not measured: Paper at 1280 by 800 and 1728 by 1117, with Blocks at Opaque, at Whisper and Vivid, with
+the waiting list open, and the field alone in both schemes (`x=field`).
+
+### 12.7 What the colour work showed to be fragile
+
+1. **In light, a colouring barely reaches the glass.** Light glass draws at 0.92 to 1.00 whatever is under it, so
+   the field shows between surfaces and faintly through the pane, and a block is a white card. Changing the hue
+   changes the room, not the blocks. The only thing that made light glass read better was Paper's lower ground.
+2. **The mark is a fill, and fills have a forbidden band.** The runtime draws the capsule's seed as given, in both
+   schemes. A seed between about 0.55 and 0.70 in lightness takes neither ink at 4.5. The orange sat just above
+   it. Rose and Cobalt needed a different fill per scheme, which the single `tint="#fd780f"` could not express.
+3. **A pale accent cannot be a stroke.** Any accent lighter than about 0.6 has to be deepened for a 15 px glyph
+   on light glass, and a deepened yellow or apricot is bronze: the hue's identity is gone in exactly the scheme
+   where it is needed. Hence the second form, the badge.
+4. **The warm red is taken.** The removed-line colour sits where a coral, a vermilion or a seal would go, so the
+   natural warm alternatives to orange are closed unless that red moves.
+5. **Shadows, contour ink and three inks were literals.** The CSS shadows were brown, which under a blue or
+   hueless field reads as dirt; they are a token now. The same was true of the contours' ink and of the tooltip
+   and solid colours in dark.
+6. **The dark pane's margin** (above): 4.53 at the strongest setting under Orange, 4.66 under Honey.
+7. **A picture field has a composition, and the layout can move under it.** Paper's form is placed for the
+   session: there the column is glass blocks and the form stays under the pane, the composer and the modules. The
+   settings page is the weak scene. Its rows are read directly on the field and scroll over the whole of it, so
+   the leaf's rim runs behind the segmented controls and the arch's edge can pass through a heading. Every line
+   still measures above its floor, and it is still lines behind words. The remedy to try, if the owner keeps the
+   picture, is a lower strength on that scene only, or a settings column that stands on a surface.
+8. **Five knobs.** The switch added one to an experiment that already had four.
+
+### 12.8 What changed in the code
+
+- `colour.ts` (new): the `Colouring` record, an OKLCH to sRGB conversion that gives up chroma until a colour is in
+  gamut, Field's geometry, and the eight colourings. Orange's masses are the old literals, unconverted.
+- `paper.ts` (new): the Paper field's painter. Splines in shares of the window, two lights (`DAY`, `NIGHT`).
+- `paint.ts`: takes a field instead of a scheme; the mass tables moved to `colour.ts`; a field that names a
+  picture is handed to its painter.
+- `Layers.tsx`: reads the knob, writes seven variables on the root (`--xl-ground`, `--xl-ink-rgb`,
+  `--xl-shade-rgb`, `--xl-accent`, `--xl-on-accent`, `--xl-accent-mark`, `--xl-focus`) and `data-colour`,
+  `data-mark`; a colouring's own ground wins over the Ground knob; the capsule's seed is passed to `Waiting`.
+- `Session.tsx`: `Waiting` takes its tint as a prop.
+- `layers.css`: the shadow recipes, the current-row shadow, focus, selection, the Approve hover and the dark
+  solid and tooltip colours are derived from those variables (Orange's values are the defaults in the sheet, so
+  it stands without the knob); the badge form; the serif face and the one rule that uses it; the shadow kept at
+  half under receded light glass for Paper; the `x=field` aid.
+- `meta.ts`: the Colour knob, first; notes rewritten; Field strength's third label.
+- `measure.mjs`: reads each glass body against the field painted under it (level, hue given and hue drawn,
+  distance, contrast), and has a `BRIEF=1` mode of a few lines per route for a matrix like the one above.
+
+Captures of record, in `shots/layers/`: for each colouring `layers-<scene>-colour-<id>.png` and
+`layers-<scene>-scheme-dark-colour-<id>.png` with scene `session`, `home`, `settings`; for Paper also the field
+alone, the two other window sizes, Whisper, Vivid, Opaque and the receded pose. The captures with no colour in
+their name are older and show Orange, which was then the only colouring.
 
 ## To ship this in the app
 
@@ -346,5 +686,17 @@ What the real renderer would need, against "The app today" in the brief.
   and none animates), drawn as the CSS platter or as library glass, chosen once.
 - **Fonts.** Figtree and Geist Mono bundled as local variable files; remote fonts cannot load. Korean falls to the
   system face.
+- **A colouring is one record, and Paper is the one to ship.** The theme carries what `colour.ts` carries: a
+  field, the ink, the shadows' tint, the accent with the ink on it and its stroke, focus, the mark's form, and
+  the ground. Under Paper the app's grounds become `#e8e1db` and `#181614` (today `#faf9f6` and `#131313`), the
+  accent becomes the ink, and a waiting row carries a badge. The terracotta goes with the orange.
+- **The picture is code, not an asset.** `paper.ts` paints it at the window's size and pixel ratio on every
+  resize and scheme change (a few hundred canvas operations, several of them blurred; measure it on a resize drag,
+  and paint to a smaller canvas and scale if it costs a frame). Its composition is tied to the shell's geometry
+  (the fold under the composer, the leaf behind the side column), so the two change together.
+- **The serif**, if the owner keeps it: Newsreader's latin optical-size file bundled locally, used for the
+  new-chat line and nothing else, with the system serif behind it for Korean.
+- **The clearer glass**, if it is wanted for Paper later, needs `@vitreajs/vitrea-web` as a direct dependency:
+  the React package names the material documents and exports none of them.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.
