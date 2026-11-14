@@ -952,6 +952,23 @@ describe('a page beside the sidebar', () => {
     expect(useLayout.getState().overviewOpen).toBe(true);
   });
 
+  // The branch review: the Overview opened from what a page then covers cannot give the keyboard back there; it goes to
+  // the page.
+  it('the Overview closed while a page covers the element it opened from gives the keyboard to the page', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    const tab = within(chromeTabs()).getByRole('tab', { selected: true });
+    act(() => tab.focus());
+    act(() => useLayout.getState().setOverviewOpen(true));
+    expect(document.activeElement).toBe(overviewPanel());
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(tab.closest('[inert]'), 'the opener is under the page').not.toBeNull();
+    act(() => useLayout.getState().setOverviewOpen(false));
+    expect(overviewPanel()).toBeNull();
+    expect(document.activeElement).toBe(document.getElementById('region-page'));
+  });
+
   it('⌘W closes the Settings dialog, then the page, and only then the tab in front', () => {
     offs.push(registerShellActions(fakeClient({}).client));
     useSessions.setState({ records: new Map([[A, record(A)]]) });
