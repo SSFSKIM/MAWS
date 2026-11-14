@@ -13,10 +13,9 @@ import { McpDetail } from './McpDetail';
 import { ReadDetail } from './ReadDetail';
 import { SearchDetail } from './SearchDetail';
 import { ShellDetail } from './ShellDetail';
-import { ThinkingDetail } from './ThinkingDetail';
 import { WebDetail } from './WebDetail';
 
-function Body({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
+function Body({ cell }: { cell: Cell }) {
   const { detail } = cell;
   switch (detail.kind) {
     case 'shell': return <ShellDetail cell={cell} detail={detail} />;
@@ -26,7 +25,7 @@ function Body({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
     case 'web': return <WebDetail detail={detail} />;
     case 'mcp': return <McpDetail cell={cell} detail={detail} />;
     case 'image': return <ImageDetail detail={detail} />;
-    case 'thinking': return <ThinkingDetail cell={cell} detail={detail} turnId={turnId} />;
+    case 'thinking': return null; // UX wave U2 (O-27): a thought is drawn by its thought line, never as a call's row
     case 'generic': return <GenericDetail cell={cell} detail={detail} />;
   }
 }
@@ -58,7 +57,7 @@ function SafeguardLine({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) 
 export function CellDetailView({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   return (
     <div className="transcript-cell-detail">
-      <Body cell={cell} turnId={turnId} />
+      <Body cell={cell} />
       {cell.toolUseId !== null && <SafeguardLine cell={cell} turnId={turnId} />}
     </div>
   );
