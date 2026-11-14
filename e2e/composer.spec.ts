@@ -859,6 +859,9 @@ test('U4a, take back: ↑ in the empty box returns the newest waiting message to
   await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
   await expect(messageIn(page, 0)).toHaveText('');
+  // the emptied box reaches the draft store (750 ms after the change) before ↑: a take-back stages only where no draft
+  // with a document is kept, and the first message, loaded and settled, was one (decision 13, the claim)
+  await expect.poll(async () => value(await invoke(page, 'session.drafts.get', { appSessionId: id as never })), { timeout: 10_000 }).toBeNull();
   await page.keyboard.press('ArrowUp');
   await expect(messageIn(page, 0)).toHaveText(steered);
   await expect(list).toHaveCount(0);
