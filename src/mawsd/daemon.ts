@@ -708,8 +708,9 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
     work: () => idle.work(), // P5 Decision Log 273
     log: (line) => log(`engine-host.sock: ${line}`),
     startedAt: (pid) => lockStartedAt(join(profileDir, 'supervisor'), pid),
-    // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold
-    intercept: (request, app) => (app.capabilities.includes(MACHINE_SPINE_CAPABILITY) && spineTakes(request.name, request.input) ? throughSpine(request) : interceptEngine(request)),
+    // P5 O3-D M5a (D44(3)): a post-D app's request the spine intercepts goes through it, the spine loaded for it if cold;
+    // one the loaded spine intercepts beyond those (the scenario stub's session.events, engine.budget) goes through it too
+    intercept: (request, app) => (app.capabilities.includes(MACHINE_SPINE_CAPABILITY) && front.takes(request.name, request.input) ? throughSpine(request) : interceptEngine(request)),
     refuseHello: (peer, appPid) => refuseSpineless(peer, appPid) ?? refuseConnectorless('engine-host.sock', peer, appPid), // P5 O3-D M5a (§L), under claimSpine; P5 O4 M2 (D11)
     deliverTo: (capabilities) => !capabilities.includes(MACHINE_SPINE_CAPABILITY), // P5 O3-D M5a: a post-D app's events come on machine.sock
     onDocument: (message, end) => {

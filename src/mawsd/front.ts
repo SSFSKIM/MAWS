@@ -210,6 +210,11 @@ export interface ServicesFront {
   // raw as before; host_unavailable when it fails to load otherwise. No `client` is the endpoint's own request.
   intercepted(name: string, input: unknown, client?: ClientRef): Promise<CommandResult<CommandName> | null>;
   intercepts(): CommandName[]; // the names the loaded spine intercepts now
+  // Whether an engine-host request goes through `intercepted`: a name spineTakes names (the spine loaded for it), or one
+  // the loaded spine intercepts beyond them (in launch mode `scenario`, the stub's session.events and engine.budget,
+  // src/services/sessions/stub-source.ts). `host.op` goes by its inner name only, as spineTakes reads it: its intercept
+  // is keyed by the wrapper, not by what it takes. In launch mode `index` the two are the same set (daemon-spine.test.ts).
+  takes(name: string, input: unknown): boolean;
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
   appEngine(): EngineConnection | null; // P5 O17 M9b: the attached app's connection, when its hello listed browser.engine
@@ -636,6 +641,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return input.ok ? run(name, taken.handler, input.value, { client: client ?? endpointClient, remote: true }) : input;
     },
     intercepts: () => [...intercepts.keys()].sort() as CommandName[],
+    takes: (name, input) => spineTakes(name, input) || (name !== 'host.op' && intercepts.has(name)),
     events(listener) {
       emitted.add(listener);
       return () => void emitted.delete(listener);

@@ -385,6 +385,7 @@ describe('Transcript', () => {
     const alert = await screen.findByRole('alert');
     expect(alert.textContent).toBe('Couldn’t load this conversationRetry');
     expect(alert.getAttribute('title')).toBe('engine-host is not running');
+    expect(document.querySelector('.transcript')!.getAttribute('data-hydration')).toBe('failed');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -399,10 +400,13 @@ describe('Transcript', () => {
     render(<Transcript source={source} variant="session" />);
     await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
     expect(screen.queryByText('Loading…'), 'nothing in the first 300 ms').toBeNull();
+    const root = document.querySelector('.transcript')!;
+    expect(root.getAttribute('data-hydration'), 'the read is out before the word shows').toBe('loading');
     expect(await screen.findByText('Loading…', undefined, { timeout: 1_000 })).toBeTruthy();
     await act(async () => answer(deniedThenAnswer()));
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
     expect(screen.queryByText('Loading…')).toBeNull();
+    expect(root.getAttribute('data-hydration')).toBe('ready');
   });
 
   it('says nothing for a read that answers within 300 ms, nor while rows it already drew stay on screen through a restart', async () => {

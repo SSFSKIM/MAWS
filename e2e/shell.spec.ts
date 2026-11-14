@@ -1318,6 +1318,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     // C6 registers the transcript slot: the session's transcript is mounted in place of C5's fallback.
     await expect(panel.locator('.transcript')).toHaveCount(1);
     await expect(panel.getByText('Transcript unavailable')).toHaveCount(0);
+    // The stub answers a session's history itself (empty and complete, stub-source.ts) through mawsd's relay, so the pane
+    // hydrates to nothing; one the relay sent on to the engine host stays reading (or fails)
+    await expect(panel.locator('.transcript[data-hydration="ready"]'), 'the stub answered the history read').toHaveCount(1);
+    await expect(panel.getByText('Couldn’t load this conversation')).toHaveCount(0);
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card
