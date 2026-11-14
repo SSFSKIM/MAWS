@@ -373,8 +373,9 @@ function errorOf(rec: ToolRecord): string | undefined {
 
 function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], category: ToolCategory, classification: Cell['classification'], turn: TurnContext, titles: ArtifactTitles): string {
   const input = record(rec.use.input);
-  // UX wave U2 (decision 23, R2): a stopped call that does not stand alone as a refusal reads one form on every family
-  if (status === 'stopped' && (classification.denial === null || stoppedMember(classification.denial))) return stoppedRowLabel(rec, detail, titles);
+  // UX wave U2 (decision 23, R2): a stopped call that does not stand alone as a refusal reads one form on every family;
+  // a moved call whose process exited is none of them: it has its result and keeps its moved words (U4a, decision 33)
+  if (status === 'stopped' && rec.moved !== true && (classification.denial === null || stoppedMember(classification.denial))) return stoppedRowLabel(rec, detail, titles);
   if (classification.denial) {
     const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
