@@ -3,7 +3,7 @@
 // names are rows of another kind rather than cells.
 import type { DenialKind, SafeguardVerdict } from '@shared/graph/enums';
 import type { SessionEvent } from '@shared/graph/events';
-import type { ApiMessageId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, ApiMessageId, ToolUseId } from '@shared/graph/ids';
 import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/maws/tools'; // E1
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
@@ -168,20 +168,26 @@ export function denialDisposition(kind: DenialKind, turn: DenialTurn, continued:
   }
 }
 
+// Whether an event is of the loop a transcript draws (`agentId`: the transcript's agent, null for the session's main
+// loop). The main loop's events have no parent attribution. A child agent's own transcript keeps its events' attribution
+// (the call that launched it, by the file's context and the wire's lane; none for a workflow agent), so its loop is its
+// own agent's events, as its source selects them (`ownOf`, transcript/source/ipc.ts); an agent below it is not.
+const ofLoop = (event: SessionEvent, agentId: AgentId | null) => (agentId === null ? event.parentToolUseId === null : event.agentId === agentId);
+
 // UX wave U2 (decision 23): the turn's `user-rejected` results after which work of the model follows, in one pass over
-// the turn's events. Work of the model is an assistant block of the main loop that belongs to another API message than
-// the one that made the call: a block's delta or completion, or a call, whose message id is set and is not the call's.
-// The engine starts a call before its message is whole, so a later call of the same message is no such work; nor is
-// another call's result, the interrupt marker, a steer, a hook's or a task's event, the engine's API error envelope, a
-// subagent's block or the turn's end.
-export function continuedAfter(events: readonly SessionEvent[]): ReadonlySet<ToolUseId> {
+// the turn's events. Work of the model is an assistant block of the transcript's own loop (`ofLoop`) that belongs to
+// another API message than the one that made the call: a block's delta or completion, or a call, whose message id is set
+// and is not the call's. The engine starts a call before its message is whole, so a later call of the same message is
+// no such work; nor is another call's result, the interrupt marker, a steer, a hook's or a task's event, the engine's
+// API error envelope, the block of an agent below the loop or the turn's end.
+export function continuedAfter(events: readonly SessionEvent[], agentId: AgentId | null): ReadonlySet<ToolUseId> {
   const messageOf = new Map<ToolUseId, ApiMessageId | null>();
   // the rejected results no work has followed yet, grouped by the message that made their call: a block of another
   // message settles a whole group at once, so each result is visited once and the pass stays linear
   const waiting = new Map<ApiMessageId | null, ToolUseId[]>();
   const continued = new Set<ToolUseId>();
   for (const event of events) {
-    if (event.parentToolUseId !== null) continue;
+    if (!ofLoop(event, agentId)) continue;
     if (event.kind === 'tool.result') {
       if (event.denial !== 'user-rejected') continue;
       const of = messageOf.get(event.toolUseId) ?? null;

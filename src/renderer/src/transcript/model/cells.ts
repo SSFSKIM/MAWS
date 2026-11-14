@@ -49,7 +49,7 @@ const contexts = new WeakMap<TurnState, { version: number; events: number; state
 export function turnContextOf(turn: TurnState): TurnContext {
   const known = contexts.get(turn);
   if (known && known.version === turn.version && known.events === turn.events.length && known.state === turn.state && known.closedBy === turn.closedBy && known.ended === turn.ended) return known.context;
-  const context = { closed: turn.state === 'closed', stopped: closedAsStopped(turn), continued: continuedAfter(turn.events), lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
+  const context = { closed: turn.state === 'closed', stopped: closedAsStopped(turn), continued: continuedAfter(turn.events, turn.agentId), lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
   contexts.set(turn, { version: turn.version, events: turn.events.length, state: turn.state, closedBy: turn.closedBy, ended: turn.ended, context });
   return context;
 }

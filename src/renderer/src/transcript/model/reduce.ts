@@ -61,6 +61,10 @@ export interface TurnState {
   // process exited unasked (C3's crash exit, E10's exit synthesised after a supervisor's death), so its divider reads in
   // the engine's words; null otherwise (a stop, a quit, a finish, a turn the reader had interrupted).
   closedCause: 'crash' | null;
+  // Additive (UX wave U2, the branch review): the agent whose loop this turn is, the transcript's (`agentId`; null for the
+  // session's main loop). A child's own events keep their parent attribution, so which events are the turn's own loop
+  // (`continuedAfter`) is relative to it.
+  agentId: AgentId | null;
   // Additive (M6, *Turn boundaries on this engine*): the engine accepted the turn (its `turn.started` arrived, or it
   // was opened by the engine's own output). A prompt's `user.message` arrives at the write and opens its turn pending
   // (`false`): its bubble shows, it has no divider, and it never receives another turn's events until it starts.
@@ -312,7 +316,7 @@ class Batch {
   }
 
   open(id: TurnId, origin: TurnOrigin, at: string, accepted = true): TurnState {
-    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null, closedCause: null, accepted };
+    const turn: TurnState = { id, origin, state: 'open', startedAt: at, endedAt: null, events: [], children: new Map(), live: new Map(), ended: null, version: 0, lastApiMessageId: null, closedBy: null, closedCause: null, agentId: this.state.agentId, accepted };
     this.state.turns.set(id, turn);
     this.order().push(id);
     this.touched.add(id);
@@ -1061,7 +1065,7 @@ const wasInterrupted = (turn: TurnState) => {
   if (turn.events.some((event) => event.kind === 'user.message' && isInterruptionMarker(event.origin, event.content))) return true;
   const rejected = turn.events.filter((event) => event.kind === 'tool.result' && event.denial === 'user-rejected');
   if (rejected.length === 0) return false;
-  const continued = continuedAfter(turn.events);
+  const continued = continuedAfter(turn.events, turn.agentId);
   return rejected.some((event) => event.kind === 'tool.result' && !continued.has(event.toolUseId));
 };
 
