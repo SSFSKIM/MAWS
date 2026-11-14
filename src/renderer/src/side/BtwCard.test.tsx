@@ -227,6 +227,26 @@ describe('the /btw card', () => {
     expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
   });
 
+  // the architect's review of finding 8: a listing asked before a completion and answered after it holds the exchange as
+  // it was, pending; it never takes the place of the answer this window has applied since
+  it('a listing that a completion crossed leaves the exchange answered, and the folded chip keeps its dot', async () => {
+    fake = fakeClient(); // every listing answered by hand
+    window.maws = fake.client as unknown as PreloadBridge;
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await act(() => fake.reply('side.question.list', { exchanges: [pending()] }));
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    expect(fake.pending('side.question.list')).toBe(1); // the chip's own listing, asked while the answer is awaited
+    act(() => onSideOperation(completion(A, 'op-1', answered('ZEBRA'))));
+    await act(() => fake.reply('side.question.list', { exchanges: [pending()] }));
+    expect(sidePaneOf(useSidePane.getState(), A).exchanges).toEqual([expect.objectContaining({ id: 'op-1', state: 'answered', response: 'ZEBRA' })]);
+    expect(waiting(chip()!)).toEqual([]);
+    expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
+    while (fake.pending('side.question.list') > 0) await act(() => fake.reply('side.question.list', { exchanges: [exchange({})] })); // the host's log, settled before its completion went out
+    expect(sidePaneOf(useSidePane.getState(), A).exchanges).toEqual([expect.objectContaining({ id: 'op-1', state: 'answered', response: 'ZEBRA' })]);
+    expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
+  });
+
   it('closing while an answer is awaited loses nothing: the exchange is there at the next open, unseen until then', async () => {
     withProcess(A, 'ready');
     listing([pending()]);
