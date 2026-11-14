@@ -15,6 +15,11 @@ is kept, working, as the record of the alternatives. Read "today" below as "Laye
 drawn from the rules Layers had then (they are kept in its sheet for this), each tag says "as it was" or "in Layers
 now", and Together's switch reads Yours, Before, In Layers.
 
+The board also follows Layers' defaults since then: it draws in Layers' default colouring (Warm paper, with the
+orange disc as the mark), with the painted form out of focus and in the system face. So "as it was" is the earlier
+form in today's colour and face. Where the text below says Paper, read "the default colouring"; its ground of its
+own is Warm paper's (`#f0dfd1`, `#1c150f`), and the readings of sections 2.13 and 5 were taken again under it.
+
 Not a design. After two rounds the owner chose Layers as the style and Paper as its colouring, and judged the large
 parts: the pane, the tabs, the composer as a whole, the tool-run summary, the approval, settings. The smaller parts
 of the session view were never put in front of them ("sessions just have so many components that I may not have
@@ -221,17 +226,19 @@ on every dark ground (level 0.22), so what a ground changes is how far the glass
 
 | dark | glass against the ground under it | reads as |
 |---|---|---|
-| **A `#181614`** Paper's own | 1.34:1 | warm, the paper's shadow still visible on the floor |
-| **B `#191919`** | 1.32:1 | the same depth with the warmth taken out; next to the warm ink it is faintly cool |
-| **C `#191c19`** | 1.29:1 | a green cast, which Paper has no other green to answer |
-| **D `#1f1f1f`** | 1.25:1 | lifted: the least distance between ground and glass, and the least contrast under prose |
-| **E `#000000`** | 1.59:1 | glass stands out most; the floor is gone, so the picture's shadows and the blocks' own have nothing to fall on |
+| **A** the colouring's own (`#1c150f` under Warm paper; Paper's was `#181614`) | 1.39:1 | warm, the paper's shadow still visible on the floor |
+| **B `#191919`** | 1.37:1 | the same depth with the warmth taken out; next to the warm ink it is faintly cool |
+| **C `#191c19`** | 1.34:1 | a green cast, which the colouring has no other green to answer |
+| **D `#1f1f1f`** | 1.29:1 | lifted: the least distance between ground and glass, and the least contrast under prose |
+| **E `#000000`** | 1.65:1 | glass stands out most; the floor is gone, so the picture's shadows and the blocks' own have nothing to fall on |
+
+(Under Paper, as first measured: 1.34, 1.32, 1.29, 1.25, 1.59.)
 
 **Pick: A.** Shadow is one of the colouring's four materials and black removes it. Of the owner's four, B is the
 nearest to it (they differ by three levels of blue) and E is the one that does the glass the most good.
 
-In the light scheme the page shows three: Paper's ivory `#e8e1db` (glass 1.14:1 against it), `#faf9f5` (1.04:1)
-and `#ffffff` (1.02:1). It is Layers' finding (its section 12.2) in one picture: on white a glass block is its
+In the light scheme the page shows three: the colouring's own (Warm paper's `#f0dfd1`, glass 1.15:1 against it;
+Paper's ivory `#e8e1db` read 1.14), `#faf9f5` (1.04:1) and `#ffffff` (1.02:1). It is Layers' finding (its section 12.2) in one picture: on white a glass block is its
 shadow and nothing else.
 
 ### 2.14 A question (found; drawn on a second pass)
@@ -320,18 +327,18 @@ dematerialised it steps out of the window without a slide.
 
 Layers' own `measure.mjs` (every line of text and every icon against the pixels behind it; floors 4.5 for text, 3
 for icons) was run on every page in both schemes, at rest and opened, on the send page's four states, on Together
-(today's letters and the suggested ones), on the rail, and on six pages over other dark grounds: 66 routes, 4,401
-gated readings, none under its floor (run on the merged lab, after Layers gained its five switches).
+(before and in Layers), on the rail, and on six pages over other dark grounds: 66 routes, 4,433 gated readings,
+none under its floor. These are the readings under Layers' defaults (Warm paper, the form out of focus, the system
+face); under Paper with the sharp form and Figtree, as the board was first built, the same 66 routes gave 4,401
+readings with none under, lowest 4.69 and 4.74.
 
 | | light | dark |
 |---|---|---|
-| lowest text | 4.69: a count on the field (2.3 B, opened), where the picture's paper is in shadow | 4.74: the capsule's clock (2.4 C) on `#1f1f1f`, on Together |
-| lowest text on Paper's own ground | the same | 4.93: a row of the library's menu (2.12 D) |
-| lowest icon | 3.09: the caret in the pane-foot piece (Layers' own mark, at its own 70 %) | 3.43: the same |
-| glass and platter bodies, drawn level | 0.82 to 1.00 | 0.09 to 0.29 |
+| lowest text | 4.82: a caption on the field (2.3, opened) | 4.76: the capsule's clock (2.4 C) on `#1f1f1f`, on Together |
+| lowest icon | 3.11: the caret in the pane-foot piece (Layers' own mark, at its own 70 %) | 3.42: the same |
+| glass and platter bodies, drawn level | 0.83 to 1.00 | 0.09 to 0.29 |
 
-No body is in the band where neither ink holds (0.39 to 0.49). On the two "needs you" pages the lowest lines are
-5.05 in light (prose on the field) and 5.25 in dark (an option's sentence on the form), 4.97 on `#1f1f1f`.
+No body is in the band where neither ink holds (0.39 to 0.49).
 
 Two things were changed by it. A count that stands on the field (2.3 B and C) read 3.71 in light where the picture's
 paper is in shadow, because Layers' green was chosen for glass; on the field it takes a deeper step (`#135a36`, and
