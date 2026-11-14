@@ -922,6 +922,35 @@ describe('peer messages from disk (E7)', () => {
 });
 // E7 end
 
+// UX wave U8c-2 (M5, §K): a shell call read from rows names the folder its own row records, which may be another than
+// the session's (the agent `cd`ed, or the engine moved it into a worktree). A call of any other tool names none, and a
+// row that records no folder gives its call none. Invented folders.
+describe('a shell call keeps the folder its row records (UX wave U8c-2)', () => {
+  const message = (id: string, name: string, input: unknown) => ({ id: `msg_${id}`, model: 'claude-sonnet-5', role: 'assistant', content: [{ type: 'tool_use', id, name, input }] });
+  const call = (n: number, cwd: string | null, name: string, input: unknown = { command: 'ls' }) =>
+    rec({ type: 'assistant', uuid: `a${n}`, parentUuid: n === 1 ? 'u1' : `a${n - 1}`, ...(cwd !== null && { cwd }), timestamp: at(n), message: message(`toolu_${n}`, name, input) });
+
+  it('sets each shell tool’s call to its row’s folder, and no other call’s', () => {
+    const events = mapAll([
+      rec({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/repo', timestamp: at(0), message: { role: 'user', content: 'go' } }),
+      call(1, '/repo', 'Bash'),
+      call(2, '/repo/.claude/worktrees/w1', 'Bash'),
+      call(3, '/repo/.claude/worktrees/w1/sub', 'PowerShell'),
+      call(4, '/repo/.claude/worktrees/w1', 'BashOutput', { bash_id: 'b1' }),
+      call(5, '/repo/packages/app', 'KillShell', { shell_id: 'b1' }),
+      call(6, '/repo', 'Monitor', { command: 'tail -f log' }),
+      call(7, '/repo/.claude/worktrees/w1', 'Read', { file_path: '/repo/a.ts' }),
+      call(8, null, 'Bash'),
+    ]);
+    const uses = only(events, 'tool.use');
+    expect(uses.map((use) => [use.toolName, use.cwd])).toEqual([
+      ['Bash', '/repo'], ['Bash', '/repo/.claude/worktrees/w1'], ['PowerShell', '/repo/.claude/worktrees/w1/sub'], ['BashOutput', '/repo/.claude/worktrees/w1'],
+      ['KillShell', '/repo/packages/app'], ['Monitor', '/repo'], ['Read', undefined], ['Bash', undefined],
+    ]);
+    expect(uses.slice(6).map((use) => 'cwd' in use)).toEqual([false, false]); // absent, not undefined: the event's shape is today's
+  });
+});
+
 // P5 O9 (the M8 sitting, recorded 2026-10-29 on engine 2.1.312): the engine writes `(no content)` for a message with no
 // content, here three records a plugin's start-up left before the first prompt (a meta and a plain user record of the
 // plugin's origin, and the output of the `/reload-plugins` it ran). Each is a record of nothing: no bubble, no turn, no

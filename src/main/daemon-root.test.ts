@@ -1,5 +1,9 @@
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import type { ClientRef } from '@shared/ipc/client'; // UX wave U5a
+import { THREAD_FROM_ONE_COMMENT } from '@shared/side/copy'; // UX wave U5a
+import type { BeforeHook } from './ipc/router'; // UX wave U5a
+import { SIDE_THREAD_MORE_MINOR } from './machines/side-thread-peer'; // UX wave U5a
 
 // P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 3; Interfaces §F, §G): main's root.
 // Loads the real `src/main/index.ts` as src/main/lifecycle.test.ts does (the same fakes), with the launch settled on
@@ -10,7 +14,8 @@ import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 const fake = vi.hoisted(() => {
   const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
   const windows: object[] = [];
-  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */, streaming: () => false, onStreaming: (owner: string) => (streamingOwners.push(owner), () => {}) /* P5 O4 M2: the app's connectors follow the machine host */ };
+  const daemon = { peer: null as { minor: number } | null }; // UX wave U5a: the attached daemon's welcome, as a hook reads it
+  const hosts = { start: vi.fn(async () => {}), stop: vi.fn(), dispatch: vi.fn(), onState: vi.fn(() => () => {}) /* E3: the dataset holds follow the host's state */, onEvent: vi.fn(() => () => {}) /* P4-AGG M2: the catalog hears plugins.changed */, snapshot: () => ({ state: 'down', pid: null }), servedFd: () => null /* P5 O5 M5: the cua relay reads the machine link */, streaming: () => false, onStreaming: (owner: string) => (streamingOwners.push(owner), () => {}) /* P5 O4 M2: the app's connectors follow the machine host */, peer: () => daemon.peer /* UX wave U5a: the hooks before the owner switch read the welcome */ };
   const streamingOwners: string[] = [];
   const appPath = `/tmp/maws-lifecycle-test-app-${process.pid}`;
   const app = {
@@ -32,7 +37,7 @@ const fake = vi.hoisted(() => {
   };
   // an event as Electron passes one (will-quit's is held by a step's promise: P5 O8 M2's rows cache)
   const emit = (event: string) => (listeners.get(event) ?? []).forEach((listener) => listener({ preventDefault: () => {} }));
-  return { listeners, windows, hosts, streamingOwners, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
+  return { listeners, windows, hosts, daemon, streamingOwners, app, appPath, emit, createWindow: vi.fn(() => void windows.push({})), showMessageBox: vi.fn(async () => ({ response: 1 })) };
 });
 
 vi.mock('electron', () => {
@@ -67,8 +72,8 @@ vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: 
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as string[][] /* P5 O4 M2 */ })); // plain records: the suite clears mocks between cases
-vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[]) => (router.before.push(names), () => {}) /* P5 O4 M2 */, CommandFailure: Error /* C11 */ }));
+const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as string[][] /* P5 O4 M2 */, hooks: [] as [string[], BeforeHook][] /* UX wave U5a */ })); // plain records: the suite clears mocks between cases
+vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[], hook: BeforeHook) => (router.before.push(names), router.hooks.push([names, hook]), () => {}) /* P5 O4 M2; UX wave U5a: the hook too */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O15 M2: of the library main takes only the command budgets (none here, every name at the host's 10 s); the
@@ -120,6 +125,27 @@ describe('main’s root on mawsd', () => {
   it('composes the app’s connectors over the machine host’s streamings and the router’s seam', async () => {
     expect(fake.streamingOwners).toContain('machine');
     expect(router.before).toEqual(expect.arrayContaining([expect.arrayContaining(['connectors.open', 'connectors.call']), ['delivery.cancel']]));
+  });
+
+  // UX wave U5a (Decision Log 52): on the route that carries it, a side thread of several comments that this Mac's daemon
+  // predates is refused before it goes; one comment goes on
+  it('refuses on the host route a side thread of several comments the attached daemon predates', async () => {
+    const hooks = router.hooks.filter(([names]) => names.includes('side.thread.open')).map(([, hook]) => hook);
+    expect(hooks).toHaveLength(1);
+    const hook = hooks[0]!;
+    const page = { id: 'page:3.1' } as unknown as ClientRef;
+    const anchor = (n: number) => ({ kind: 'browser-element', locator: `main > h${n}`, label: `Heading ${n}`, pageUrl: 'https://example.com/' });
+    const first = { kind: 'comment', anchor: anchor(1), text: 'Shorter.', screenshot: null };
+    const several = { appSessionId: 'a1111111-1111-4111-8111-111111111111', from: { ...first, more: [{ anchor: anchor(2), text: 'Bolder.', screenshot: null }] } };
+    fake.daemon.peer = { minor: SIDE_THREAD_MORE_MINOR - 1 };
+    try {
+      expect(await hook('side.thread.open', several, page)).toMatchObject({ ok: false, error: { message: THREAD_FROM_ONE_COMMENT } });
+      expect(await hook('side.thread.open', { ...several, from: first }, page)).toBeUndefined();
+      fake.daemon.peer = { minor: SIDE_THREAD_MORE_MINOR };
+      expect(await hook('side.thread.open', several, page)).toBeUndefined();
+    } finally {
+      fake.daemon.peer = null;
+    }
   });
 
   // P5 O3-E M2 (Interfaces §E): a page's git.watch and git.unwatch go through the watch replay, never straight to the

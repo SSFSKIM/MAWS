@@ -2,17 +2,25 @@
 // opens for an anchored comment. It is realpath-resolved (so a symlink is judged by where it points), must lie under an
 // allowed root (`<userData>/`, where E2's and E4's captures live, or the parent session's own directories, by E5's
 // containment check), be a regular file of at most 5 MiB (the API's per-image bound), and is typed by its magic bytes,
-// never by its name. Every refusal names its reason, which the composer's sheet shows.
+// never by its name. Every refusal names its reason, which the composer's sheet shows. UX wave U5a
+// (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 2): moved here from src/services/side/, its
+// checks unchanged, so the app's main process builds a send's content (`side.comment.content`) with the same reader the
+// machine's side does; nothing under src/main/ imports src/services/ (eslint.config.js, P5 O3-C rule B).
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import type { ContentBlock } from '@shared/graph/events';
 import { MAX_SEND_IMAGE_BYTES } from '@shared/engine/session-state-store';
-import { under } from '../files/allowlist';
+import { within } from '../machine/home-folders';
 import { InvalidSideInput } from './invalid';
 
 export class ScreenshotRefused extends InvalidSideInput {
-  constructor(readonly reason: string) {
-    super(['screenshot'], `screenshot: ${reason}`);
+  // `at`: where the comment whose screenshot this is sits in the command's input, before its `screenshot` (UX wave U5a:
+  // a later comment of several; empty for the one comment of today's inputs)
+  constructor(
+    readonly reason: string,
+    at: readonly (string | number)[] = [],
+  ) {
+    super([...at, 'screenshot'], `screenshot: ${reason}`);
     this.name = 'ScreenshotRefused';
   }
 }
@@ -26,7 +34,7 @@ async function readScreenshot(path: string, roots: readonly string[]): Promise<{
   const real = await realpath(path).catch(() => null);
   if (real === null) throw new ScreenshotRefused('not found');
   const allowed = await Promise.all(roots.map((root) => realpath(root).catch(() => null)));
-  if (!allowed.some((root) => root !== null && under(root, real))) throw new ScreenshotRefused('not under an allowed root');
+  if (!allowed.some((root) => root !== null && within(real, root))) throw new ScreenshotRefused('not under an allowed root');
   // O_NONBLOCK: a FIFO (or a device) under a root opens at once rather than holding a libuv thread until a writer
   // comes; the regular-file check below refuses it, and a regular file reads the same either way
   const handle = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK).catch(() => null);

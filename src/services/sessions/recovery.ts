@@ -131,7 +131,7 @@ async function rewoundTo(s: Setup, appSessionId: AppSessionId, target: MessageUu
 
 async function handOff(s: Setup, intent: SetupIntent): Promise<Reconciled> {
   const appSessionId = intent.appSessionId;
-  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage); // E11
+  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage, intent.message?.display ?? null); // E11; UX wave U5a: the title's count
   await s.intents.remove(appSessionId);
   s.emit('session.intent.changed', { appSessionId, intent: null });
   return 'handed_off';

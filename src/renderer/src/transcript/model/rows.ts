@@ -43,6 +43,14 @@ export interface AnchorFrame {
   screenshot: boolean;
 }
 
+// UX wave U5a (Interfaces §H, decision 13): one comment of a message that carried several, in the order made; `attachment`
+// is the index in the row's `attachments` of the screenshot its lead announced, when every announced one can be paired
+export interface UserComment {
+  anchor: Anchor;
+  text: string;
+  attachment?: number;
+}
+
 export interface RowBase {
   id: RowId;
   turnId: TurnId | null;
@@ -61,6 +69,8 @@ export type Row = RowBase &
         anchor?: Anchor;
         anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
+        comments?: UserComment[]; // UX wave U5a (§H): a message of two or more comments, which then has no `anchor` and no `anchorFrame`
+        commentsTo?: 'thread'; // UX wave U5a (M5's review): such a message framed for a side thread, which only a thread opens with
         // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): the prompt is MAWS's "Approve and retry" for
         // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
         consent?: { kind: 'command' | 'call'; subject: string };
@@ -272,6 +282,7 @@ export type CellDetail =
   | {
       kind: 'shell'; command: string; description: string | null; cwd: string | null; stdout: string; stderr: string; exitCode: number | null; interrupted: boolean;
       backgroundTaskId: TaskId | null; truncated: Truncation | null; spill: Spill | null;
+      rowCwd?: string; // UX wave U8c-2 (§K): the folder the call's row records, where the call was read from rows; absent live
     }
   | { kind: 'edit'; filePath: string; change: 'create' | 'update' | 'delete'; hunks: Hunk[]; added: number; removed: number }
   | { kind: 'read'; files: { path: string; range: [number, number] | null }[]; preview: string | null; truncated: Truncation | null }

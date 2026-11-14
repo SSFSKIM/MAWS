@@ -7,6 +7,7 @@ import type { AttentionItem } from '@shared/graph/attention';
 import type { EventName } from '@shared/ipc/schema';
 import { validateEventPayload } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { FakeLink, MINI, type FakeSub } from '../../../test/lane-b/fake-link';
 import { item } from '../../../test/support/builders';
 import { createRemoteAttention, type RemoteAttentionChange } from './remote-attention';
@@ -106,12 +107,13 @@ describe('the attention feed', () => {
     expect(l.attention.machine(STUDIO)).toMatchObject({ greyed: false, sessions: new Map() });
   });
 
-  it('greys a machine’s items when its link goes down, says them greyed, and restores them only at the next snapshot', () => {
+  it('greys a machine’s items once its link has been down a minute, says them greyed, and restores them only at the next snapshot', () => {
     const l = lab();
     l.rosterIs(MINI);
     const a = permission('app-1');
     l.snapshot([a]);
     l.mini.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
     expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: true });
     expect(l.attention.machine(MINI)!.greyed).toBe(true);
     expect(l.changes.at(-1)).toEqual({ machine: MINI, kind: 'greyed' });
@@ -170,7 +172,9 @@ describe('the attention feed', () => {
     expect(l.feeds()).toHaveLength(3);
   });
 
-  it('closes the old link’s feed when the roster makes the machine’s link again, ignoring what it still says, and keeps the items greyed until the new feed’s snapshot', () => {
+  // The UX wave, U9 (the architect's ruling of 2026-11-13): a link made again greys nothing by itself; its machine's items
+  // grey by the phase, as any link's, and once greyed stay so until the new feed's snapshot
+  it('closes the old link’s feed when the roster makes the machine’s link again, ignoring what it still says; the items grey by the new link’s phase until its snapshot', () => {
     const l = lab();
     l.rosterIs(MINI);
     const a = permission('app-1');
@@ -182,7 +186,12 @@ describe('the attention feed', () => {
     l.rosterIs(MINI);
     expect(old.closed).toBe(true);
     expect(l.feeds(next)).toHaveLength(1);
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: false }); // the new link is up
+    expect(l.attention.machine(MINI)!.greyed).toBe(false);
+    next.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
     expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: true });
+    next.set('up');
     old.sink.event({ epoch: EPOCH, seq: 99 }, { appSessionId: 'app-9', items: [question('app-9')] });
     old.sink.ended('behind');
     vi.advanceTimersByTime(0);
@@ -277,6 +286,7 @@ describe('the attention feed', () => {
     l.feed().sink.ended('not-offered');
     expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: false });
     l.mini.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
     expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [fallback], greyed: true });
     expect(l.attention.machine(MINI)!.greyed).toBe(true);
     l.mini.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds either
@@ -345,6 +355,7 @@ describe('the attention feed', () => {
     l.streams.set(MINI, [a]);
     l.feed().sink.ended('not-offered');
     l.mini.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS); // offline: greyed
     l.mini.set('up'); // a new channel: the feed asked again
     expect(l.attention.follows(MINI)).toBe(true);
     l.attention.sayAgain();
@@ -352,3 +363,63 @@ describe('the attention feed', () => {
   });
 });
 
+// The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, the Decision Log's ruling of
+// 2026-11-13 that a Needs you item greys by the machine's phase): a machine's items are greyed, and leave the count and
+// the dock badge, exactly when O-39's phase (src/shared/machine/link-phase.ts) says offline or removed. While the link
+// reconnects, within the minute an act is held, they stay counted.
+describe('greyed by the machine’s phase', () => {
+  const greyedSaid = (l: ReturnType<typeof lab>) => l.said('remote.attention').filter((p) => p.greyed === true);
+
+  it('a link down after up greys nothing before the minute and greys its items at it', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    const a = permission('app-1');
+    l.snapshot([a]);
+    l.mini.set('down', null);
+    expect(l.attention.machine(MINI)!.greyed).toBe(false);
+    expect(greyedSaid(l)).toEqual([]);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS - 1);
+    expect(l.attention.machine(MINI)!.greyed, 'reconnecting: counted').toBe(false);
+    expect(greyedSaid(l)).toEqual([]);
+    vi.advanceTimersByTime(1);
+    expect(l.attention.machine(MINI)!.greyed, 'offline').toBe(true);
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: true });
+    expect(l.changes.at(-1)).toEqual({ machine: MINI, kind: 'greyed' });
+  });
+
+  it('a link back up before the minute never greys, and a later loss has its own minute', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    l.snapshot([permission('app-1')]);
+    l.mini.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS - 1_000);
+    l.mini.set('up');
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS * 2);
+    expect(greyedSaid(l)).toEqual([]);
+    expect(l.changes.filter((c) => c.kind === 'greyed')).toEqual([]);
+    l.mini.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS - 1);
+    expect(l.attention.machine(MINI)!.greyed).toBe(false);
+    vi.advanceTimersByTime(1);
+    expect(l.attention.machine(MINI)!.greyed).toBe(true);
+  });
+
+  it('a first attempt that failed greys at once: the machine was never up in this run', () => {
+    const l = lab();
+    l.mini.set('connecting', null);
+    l.rosterIs(MINI);
+    expect(l.attention.machine(MINI)!.greyed, 'connecting is not offline').toBe(false);
+    l.mini.set('down', null);
+    expect(l.attention.machine(MINI)!.greyed).toBe(true);
+    expect(l.changes.at(-1)).toEqual({ machine: MINI, kind: 'greyed' });
+  });
+
+  it('a machine that removed this Mac greys at once', () => {
+    const l = lab();
+    l.rosterIs(MINI);
+    const a = permission('app-1');
+    l.snapshot([a]);
+    l.mini.end('removed');
+    expect(l.said('remote.attention').at(-1)).toEqual({ machine: MINI, items: [a], greyed: true });
+  });
+});

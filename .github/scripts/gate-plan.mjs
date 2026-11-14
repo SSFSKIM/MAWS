@@ -93,6 +93,8 @@
 // placement's timeout and self-hosted setup, and carries overflow: 'ec2' or 'mini' (the job name and ci-gate tail identify it). No sample: no change.
 // MAC_MINI_OVERFLOW=off disables mini moves. Its normal placement's lanes must be free in MAC_MINI_LANES,
 // published by the mini: absent, unreadable or stale publication holds both lanes, so no mini overflow before deployment.
+// The variable itself (the plan step's env, read at plan time) carries `windows`, the mini's scheduled holds: one in force
+// or starting within three hours that holds a lane this run's jobs take adds one advisory line (`mini_window`), never a move.
 // The old full-round rule runs in shadow with independent queues. The entry point emits its count as the plan check's
 // `EC2 overflow shadow` notice, `old_rule_count=<n>`, readable through the Checks annotations API for EC2 release accounting.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
@@ -606,8 +608,55 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   // The peer, when a trailer names one, and the groups its minor brought in.
   const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${heldBy && peerAdditions.length > 0 ? `; ${peerAdditions.map((group) => `e2e:${group}`).join(', ')} ${peerAdditions.length === 1 ? 'is' : 'are'} checked in run ${heldBy[1]} (${heldBy[2]}), so not here` : peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
   const peerWaitLine = peerWait.length > 0 ? 'The peer verdict is awaited on hosted Linux; this run fails if its holder does not pass the check.' : '';
+  // The mini's scheduled holds (ci-kit's MAC_MINI_LANES `windows`: each active or starting within six hours, UTC to the
+  // minute, start inclusive, end exclusive). When one in force now or starting within MINI_WINDOW_AHEAD holds a lane a
+  // job of this run takes, the summary says so, once, and `mini_window` carries the line for ci-gate.sh to print at
+  // launch. Advisory: an absent or unreadable value or a malformed entry says nothing and moves no job, and a window is
+  // an absolute time, so the value's own age does not matter. A host job takes the host lane, a guest-only job the VM
+  // lane, and a solo job either (ci-kit admits a solo placement only while both are free).
+  const MINI_WINDOW_AHEAD = 3 * 3600_000;
+  const minuteOf = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(value)) return NaN;
+    const time = Date.parse(value);
+    return Number.isFinite(time) && new Date(time).toISOString().slice(0, 16) === value.slice(0, 16) ? time : NaN;
+  };
+  const windows = (() => {
+    try {
+      const lanes = JSON.parse(env.MAC_MINI_LANES ?? '');
+      return lanes?.v === 1 && Array.isArray(lanes.windows) ? lanes.windows : [];
+    } catch {
+      return [];
+    }
+  })().flatMap((window) => {
+    const [from, until] = [minuteOf(window?.from), minuteOf(window?.until)];
+    const lanes = window?.lanes;
+    const ok = from < until && Array.isArray(lanes) && lanes.length > 0 && lanes.every((name) => name === 'host' || name === 'vm') && typeof window.why === 'string';
+    return ok ? [{ from, until, lanes, why: window.why.replace(/\p{Cc}+/gu, ' ').trim() }] : [];
+  }).filter(({ from, until }) => Number.isFinite(now) && until > now && from <= now + MINI_WINDOW_AHEAD).sort((a, b) => a.from - b.from);
+  const lanesOf = (json) => (!onTheMini.includes(json) ? [] : json === JSON.stringify(RUNNERS.macSolo) ? ['host', 'vm'] : GUEST.some((runner) => JSON.stringify(runner) === json) ? ['vm'] : ['host']);
+  const miniJobs = [
+    ...['static', 'unit', 'probes'].filter((gate) => gates.has(gate)).map((gate) => [gate, JSON.stringify(runners[gate])]),
+    ...(gates.has('unit:darwin') ? [['unit:darwin', JSON.stringify(unitDarwinRunner)]] : []),
+    ...(gates.has('packaged') && !packagedHosted ? [['packaged', JSON.stringify(RUNNERS.macos)]] : []),
+    ...planned.map((entry) => [`e2e:${entry.group}${entry.copy ? ' (mini copy)' : ''}`, entry.runner]),
+  ].map(([name, json]) => ({ name, lanes: lanesOf(json) }));
+  const held = windows.map((window) => ({ window, jobs: miniJobs.filter((job) => job.lanes.some((lane) => window.lanes.includes(lane))).map((job) => job.name) })).find(({ jobs }) => jobs.length > 0);
+  const clock = (time) => `${new Date(time).toISOString().slice(time - now < 86_400_000 ? 11 : 0, 16)}Z`;
+  const miniWindowLine = !held ? '' : (() => {
+    const { window: { from, until, lanes, why }, jobs } = held;
+    const heldLanes = lanes.includes('host') ? (lanes.includes('vm') ? 'the host and VM lanes are' : 'the host lane is') : 'the VM lane is';
+    const reason = why ? ` (${why})` : '';
+    return from <= now
+      ? `Mac mini: ${heldLanes} held until ${clock(until)}${reason}, so this run's jobs there wait until then: ${jobs.join(', ')}.`
+      : `Mac mini: ${heldLanes} held ${clock(from)}-${clock(until)}${reason}, so this run's jobs there not started by ${clock(from)} wait until ${clock(until)}: ${jobs.join(', ')}.`;
+  })();
+  if (miniWindowLine) outputs.mini_window = miniWindowLine;
   let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (every live group\'s run flag at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
+  if (miniWindowLine) {
+    summary += `\n${miniWindowLine.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}\n`;
+    stdout += `${miniWindowLine}\n`;
+  }
   if (peerWaitLine) {
     summary += `\n${peerWaitLine}\n`;
     stdout += `${peerWaitLine}\n`;

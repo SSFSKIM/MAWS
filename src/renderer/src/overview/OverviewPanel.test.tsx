@@ -13,6 +13,7 @@ import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { registerReplaceGuard, useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
+import { DestinationPage } from '../destination/DestinationPage';
 import { OverviewLayer, placeRect } from './OverviewPanel';
 
 const nine = scenarioFile('nine-sessions');
@@ -371,6 +372,20 @@ describe('placeRect', () => {
   });
 });
 
+
+// UX wave U7b (Interfaces §H, row 7): the Overview is drawn over a page and takes Esc first; one Esc closes it, and the
+// page under it stays.
+it('with a page open under it, one Esc closes the Overview and the page stays', async () => {
+  const user = userEvent.setup();
+  render(<><World /><DestinationPage /></>);
+  act(() => useLayout.getState().openDestination({ kind: 'library' }));
+  act(() => useLayout.getState().setOverviewOpen(true));
+  expect(document.activeElement).toBe(panel());
+  await user.keyboard('{Escape}');
+  expect(screen.queryByRole('dialog', { name: 'Overview' })).toBeNull();
+  expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+  expect(document.getElementById('region-page')).not.toBeNull();
+});
 
 it('Escape dismisses the Overview even after focus moves outside it', async () => {
   const user = userEvent.setup();

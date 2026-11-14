@@ -4,6 +4,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesEntry } from '@shared/ipc/schema/files';
+import type { SessionRecord } from '@shared/graph/session';
 import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
@@ -39,6 +40,33 @@ describe('files tree', () => {
       { path: '/wt', role: 'worktree' },
     ]);
     expect(rootsFor(record('a', { directory: '/repo', worktree: { path: '/repo', branch: null } }))).toEqual([{ path: '/repo', role: 'directory' }]);
+  });
+
+  // UX wave U8c-2, M3 (§G): the launch folder and the working folder a fact names are candidates too, after the record's
+  // own, in the service's order (it lists them only while the admission holds); a session that has not moved has none.
+  // M4 decision 4: while the session is moved, the working folder is labelled `working folder` and the launch folder
+  // `directory`, whatever today's rule would call them, on both kinds of move.
+  it('adds the launch folder and the working folder a fact names as candidates, each once, labelled as moved', () => {
+    const cd = record('a', { directory: '/repo', agentFolder: { checkout: '/repo-wt', cwd: '/repo-wt/src', branch: 'w', linked: true } });
+    expect(rootsFor(cd)).toEqual([
+      { path: '/repo', role: 'directory' },
+      { path: '/repo-wt', role: 'working folder' },
+    ]);
+    const tool = record('a', { directory: '/repo/.claude/worktrees/w1', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'w1' }, launchFolder: '/repo' });
+    expect(rootsFor(tool)).toEqual([
+      { path: '/repo/.claude/worktrees/w1', role: 'working folder' },
+      { path: '/repo', role: 'directory' },
+    ]);
+    const toolInside = record('a', { directory: '/repo/.claude/worktrees/w1/src', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'w1' }, launchFolder: '/repo' });
+    expect(rootsFor(toolInside)).toEqual([
+      { path: '/repo/.claude/worktrees/w1/src', role: 'directory' },
+      { path: '/repo/.claude/worktrees/w1', role: 'working folder' },
+      { path: '/repo', role: 'directory' },
+    ]);
+    const filed = record('a', { directory: '/repo/.claude/worktrees/w1', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'w1' } });
+    expect(rootsFor(filed)).toEqual([{ path: '/repo/.claude/worktrees/w1', role: 'directory' }]); // not moved: today's labels
+    const inside = record('a', { directory: '/repo/sub', agentFolder: { checkout: '/repo', cwd: '/repo/sub', branch: 'main', linked: false } });
+    expect(rootsFor(inside).map((c) => c.path)).toEqual(['/repo/sub', '/repo']);
   });
 
   it('matches a root realpath to its record entry through /tmp and case', () => {
@@ -449,6 +477,79 @@ describe('files tool', () => {
     await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
     expect(item('app').getAttribute('aria-expanded')).toBe('true');
     expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: bareOf(A), path: '/Users/new/work/app' }]);
+  });
+
+  // UX wave U8c-2 (M4 decision 4, §I): while the session is moved, the root that is the working folder is listed first,
+  // labelled "working folder", and expanded once; nothing is collapsed and the selection stays. Back at the launch folder,
+  // its root is first again.
+  describe('the agent moved', () => {
+    const MOVED: Record<string, FilesEntry[] | string> = { ...REPO, '/wt': [file('/wt/w.ts')], '/wt/src': [file('/wt/src/x.ts')] };
+    const put = (over: Partial<SessionRecord>) =>
+      act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r', additionalDirectories: ['/docs'], ...over })) })));
+    const byCd = { agentFolder: { checkout: '/wt', cwd: '/wt', branch: 'w', linked: true } };
+    const rootsListed = () => main.callsOf('files.list').filter((input) => input.path === undefined).length;
+
+    it('lists the working folder first after a cd, labelled and expanded, keeping open rows and the selection; back, the launch root is first', async () => {
+      const tree = { ...MOVED };
+      main = mainWith(tree);
+      render(<TestHost />);
+      openTool();
+      await screen.findByText('src');
+      fireEvent.click(item('src'));
+      await screen.findByText('app.ts');
+      tree[''] = [dir('/r'), dir('/docs'), dir('/wt')]; // the service appends the admitted working folder
+      put(byCd);
+      await waitFor(() => expect(items()[0]).toBe('wtworking folder'));
+      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'rdirectory', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']));
+      expect(item('src').getAttribute('aria-selected')).toBe('true');
+      tree[''] = [dir('/r'), dir('/docs')];
+      put({});
+      await waitFor(() => expect(items()[0]).toBe('rdirectory'));
+      expect(items()).toEqual(['rdirectory', 'src', 'app.ts', 'staged.ts', '.env', 'link-outSymbolic link → /elsewhere/secret', 'docsadditional directory']);
+    });
+
+    it('lists the working folder first after a move by the tool, ahead of the directory the engine files the session in', async () => {
+      const tree = { ...MOVED, '': [dir('/wt/src'), dir('/wt'), dir('/r')] };
+      main = mainWith(tree);
+      put({ directory: '/wt/src', additionalDirectories: [], worktree: { path: '/wt', branch: 'w' }, launchFolder: '/r' });
+      render(<TestHost />);
+      openTool();
+      await waitFor(() => expect(items()).toEqual(['wtworking folder', 'w.ts', 'srcdirectory', 'rdirectory']));
+    });
+
+    // Held open: a roots listing is in flight when the agent moves. Its answer lands (without the working folder), and the
+    // listing the move asked for replaces it; the first root is never one the listing does not hold.
+    it('keeps the root in use while a listing in flight lands without the working folder, then lists it first', async () => {
+      const tree = { ...MOVED };
+      const answers: ReturnType<typeof deferred<ReturnType<typeof answer>>>[] = [];
+      let hold = false;
+      main = installFakeMain((name, input) => {
+        if (QUIET[name]) return QUIET[name];
+        if (name === 'files.watch' || name === 'files.unwatch') return answer();
+        if (name !== 'files.list') return fail(`unexpected ${name}`);
+        const path = (input.path as string | undefined) ?? '';
+        const found = tree[path];
+        const reply = typeof found === 'string' ? fail(found) : answer({ root: path === '' ? null : '/r', path, entries: found, truncated: false });
+        if (!hold || path !== '') return reply;
+        const held = deferred<ReturnType<typeof answer>>();
+        answers.push(held);
+        return held.promise;
+      });
+      render(<TestHost />);
+      openTool();
+      await screen.findByText('src');
+      hold = true;
+      fireEvent.click(screen.getByRole('button', { name: FILES_COPY.refresh }));
+      await waitFor(() => expect(answers).toHaveLength(1)); // the old listing, in flight
+      put(byCd); // the move asks again; the store re-lists once the flight lands
+      await act(async () => answers[0].resolve(answer({ root: null, path: '', entries: [dir('/r'), dir('/docs')], truncated: false })));
+      await waitFor(() => expect(answers).toHaveLength(2));
+      expect(items()[0]).toBe('rdirectory'); // the root in use stays: the working folder is not listed yet
+      expect(item('r').getAttribute('aria-expanded')).toBe('true');
+      expect(rootsListed()).toBe(3);
+      await act(async () => answers[1].resolve(answer({ root: null, path: '', entries: [dir('/r'), dir('/docs'), dir('/wt')], truncated: false })));
+      await waitFor(() => expect(items().slice(0, 3)).toEqual(['wtworking folder', 'w.ts', 'rdirectory']));
+    });
   });
 
   it('lists the roots again when the session record changes its directories', async () => {

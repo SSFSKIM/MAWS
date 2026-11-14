@@ -428,6 +428,7 @@ jobs:
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           MAC_EC2: ${{ vars.MAC_EC2 }}
           MAC_MINI_OVERFLOW: ${{ vars.MAC_MINI_OVERFLOW }}
+          MAC_MINI_LANES: ${{ vars.MAC_MINI_LANES }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}

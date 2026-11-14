@@ -494,8 +494,8 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   await expect(viewer.locator('[data-picking]')).toHaveCount(0); // one pick per Comment
   await expect.poll(() => pinnedUnder(content.locator('#hero'), card), { message: 'the card 4 px under the heading, at its left' }).toBe(true);
 
-  // Side thread routes it: the card becomes the thread, answered in the card
-  await expect(card.getByRole('radio', { name: 'Side thread' })).toBeChecked();
+  // "Send to main" unchecked routes it to a side thread (UX wave U5a): the card becomes the thread, answered in the card
+  await expect(card.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
   await card.getByRole('textbox', { name: 'Comment' }).fill(CARD_COMMENT);
   await card.getByRole('button', { name: 'Send' }).click();
   await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
@@ -516,6 +516,10 @@ test('an HTML artifact in the panel’s Artifacts tool: its versions switch, Com
   const pdf = join(saved, 'Dashboard.pdf');
   await expect.poll(() => (existsSync(pdf) ? readFileSync(pdf).subarray(0, 5).toString('latin1') : ''), { timeout: 60_000, message: 'the exported PDF saved' }).toBe('%PDF-');
   await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
+  // UX wave U5a (A18, §J): the save's folder is kept as main's layout key, for the next export's dialog, also after a
+  // relaunch (the e2e seam skips the dialog and still records the folder)
+  const layout = JSON.parse(readFileSync(join(c.maws.userData, 'layout.json'), 'utf8')) as Record<string, unknown>;
+  expect(layout['library.exportFolder']).toEqual({ path: saved });
   expect(c.maws.consoleErrors()).toEqual([]);
 });
 

@@ -148,6 +148,7 @@ export interface TranscriptContextValue {
   disclosures: Disclosures;
   idPrefix: string; // unique per mounted transcript: row element ids are `<idPrefix>-<rowId>`
   sessionDirectory?: string | null; // additive: where the session runs (its record's), for a shell call that names no cwd
+  sessionCwd?: string | null; // additive (UX wave U8c-2, §K): the agent's folder while the session is in its launch folder
   effort?: string | null; // additive (W8): the effort the session runs at, which the live thinking label names; null when unknown
   motion?: WorkMotion; // additive (W8): the work area's fold as motion, one per mounted transcript
   // additive (P2-E1): 'local' draws the owner channel through MAWS's own presenter whatever the engine surface's

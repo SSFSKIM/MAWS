@@ -19,7 +19,7 @@ import { displayTitle } from './title';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { selectOffline, useMachines } from '../stores/machines';
-import { reachableCheckouts, rowProjects, selectOrgIndex, sessionsOfRow } from '../stores/org-projects';
+import { reachableCheckouts, rowOfListed, rowProjects, selectOrgIndex, sessionsOfRow } from '../stores/org-projects';
 import { isRegistryRecord, locationAddress } from '../stores/registry'; // the project registry
 import { removeLocation } from '../sidebar/registry-acts';
 
@@ -78,15 +78,21 @@ async function removeProject(projectId: ProjectId): Promise<void> {
   }
 }
 
+// The UX wave, U9 (R2, S-02, A9): the project-wide acts stay this Mac's. "Archive sessions" walks this Mac's records only:
+// with `session.archive` offered on other machines, the row's walk would end processes there, more than one click on a
+// project was ever asked to do; its sheet says so where the project has sessions on other machines.
 async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
   const row = rowOf(projectId);
   if (!row) return;
   const { sessions, project, key, index } = row;
-  const ids = sessionsOfRow(sessions, ipc.localMachine, key).filter((r) => !r.archived && up(machineOf(r.appId))).map((r) => r.appId);
+  const local = ipc.localMachine;
+  const open = sessionsOfRow(sessions, local, key).filter((r) => !r.archived);
+  const ids = open.filter((r) => machineOf(r.appId) === local).map((r) => r.appId);
   if (ids.length === 0) return;
+  const elsewhere = open.some((r) => machineOf(r.appId) !== local) || [...sessions.listed.values()].some((l) => !sessions.records.has(l.appId) && rowOfListed(index, l) === key);
   const yes = await confirm({
     title: `Archive ${ids.length} ${ids.length === 1 ? 'session' : 'sessions'} in ${index.orgs.get(key)?.name ?? project.name}?`,
-    body: 'Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.',
+    body: `Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions.${elsewhere ? ' Sessions on other machines are not archived from here.' : ''}`,
     confirmLabel: 'Archive',
     destructive: false,
   });
@@ -99,9 +105,12 @@ async function archiveProjectSessions(projectId: ProjectId): Promise<void> {
   if (refused.length > 0) fail(`Not archived: ${refused.join('; ')}`);
 }
 
+// The UX wave, U9 (S-02, "Not included"): "Archive sessions older than a week" acts on this Mac's checkouts only; it is no
+// longer sent to the row's other machines, whose link refused it in engineer's words.
 async function archiveOlder(projectId: ProjectId): Promise<void> {
   const row = rowOf(projectId);
-  const targets = row ? rowProjects(row.index, row.key, up).map((p) => p.id) : [projectId]; // one the page does not know: main says
+  const here = (id: ProjectId) => machineOf(id) === ipc.localMachine;
+  const targets = (row ? rowProjects(row.index, row.key, up).map((p) => p.id) : [projectId]).filter(here); // one the page does not know: main says
   let archived = 0;
   let skipped = 0;
   for (const target of targets) {

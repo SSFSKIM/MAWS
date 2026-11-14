@@ -14,6 +14,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { squeezedControls } from './support/toolbar-controls';
+import { CHILD, FIRST_REPLY, invoke, PARENT, sideThreadOf, startSessionCase, value } from './support/library-session'; // UX wave U5a
+import { SideJournal } from './support/side-replay'; // UX wave U5a
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -337,4 +339,85 @@ test('at the panel’s 280 px minimum a document’s and a dashboard’s toolbar
     await record.getByRole('button', { name: 'Back', exact: true }).click();
   }
   for (const body of shots) await test.info().attach('panel-280-toolbars', { body, contentType: 'image/png' });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8; A17, decision 20): when the agent's
+// answer to a document comment arrives, the passage is tinted once, and in a body under 720 px the card, floating over
+// the text there, folds to the passage's mark unless the keyboard is in it. A live parent on C3's replay transport (the
+// library's session case, support/library-session.ts) beside the document in the 600 px panel; the comment, unchecked,
+// becomes its side thread in the card, which takes the keyboard, so the person clicks back into the page first; the
+// thread's replay then holds at a context read until the test asks one, and its answer ends the turn: the signal.
+test('UX wave U5a: in a body under 720 px, a comment’s card that became its side thread folds to the passage’s mark when the answer arrives, once the keyboard is back in the page, and the passage is tinted once', async () => {
+  test.setTimeout(180_000);
+  const c = await startSessionCase((cwd) => {
+    const parent = new SideJournal(PARENT, cwd);
+    parent.turn(FIRST_REPLY); // the case's first prompt
+    const thread = new SideJournal(CHILD, cwd);
+    const first = thread.prompt(); // the comment
+    thread.rename('Fold review'); // the host names the thread by its anchor (the replay matches a write by type and subtype)
+    thread.holdAtContextUsage(); // the thread waits here until the test lets it answer
+    thread.reply(first, 'The date reads Friday now.');
+    thread.completed(first);
+    return [parent, thread];
+  });
+  try {
+    const { page, maws, parent } = c;
+    const { artifact } = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Fold review' }));
+    await openArtifactInPanel(page, artifact.id);
+    await pinSurfaceForSessions(page, 'Artifacts');
+    await (await sidebarRow(page, { appSessionId: parent as never })).click(); // the main area on the parent, the document beside it
+    const record = page.locator('[data-region="panel"]').locator(`[data-artifact-record="${artifact.id}"]`);
+    const text = record.locator('.ds-doc .ProseMirror');
+    await expect(text).toBeVisible({ timeout: 15_000 });
+    await resizePanel(page, PANEL_PX);
+    expect((await box(record.locator('.doc-editor-body'))).width, 'a body under 720 px: the card floats over the text').toBeLessThan(720);
+    await text.click();
+    await page.keyboard.type('The review is on Friday.');
+    await expect(text.locator('p')).toHaveText(['The review is on Friday.']);
+
+    // the comment, unchecked: the card becomes its side thread
+    await selectIn(text, 0, 'Friday');
+    await record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true }).click();
+    const card = page.locator('[data-comment-card]');
+    await expect(card).toHaveAttribute('data-anchor-locator', 'Friday');
+    await card.getByRole('textbox', { name: 'Comment' }).fill('Make the date bold.');
+    await expect(card.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
+    const child = await sideThreadOf(page, parent);
+    await expect(text.locator('[data-thread]'), 'the comment’s mark').toHaveCount(1);
+
+    // the keyboard back in the page (the thread's card took it), then the tint counted from here on. The card floats
+    // below the passage's line, over the editor's empty lower part (where the editor's own centre falls), so the person
+    // clicks the line itself, at its start, clear of the card and of the passage's mark
+    const line = text.locator('p').first();
+    const lineBox = await box(line);
+    const cardBox = await box(card);
+    const at = { x: lineBox.x + 2, y: lineBox.y + lineBox.height / 2 };
+    const underCard = at.x >= cardBox.x && at.x <= cardBox.x + cardBox.width && at.y >= cardBox.y && at.y <= cardBox.y + cardBox.height;
+    expect(underCard, `the line's start clear of the card: ${JSON.stringify({ at, cardBox })}`).toBe(false);
+    await line.click({ position: { x: 2, y: lineBox.height / 2 } });
+    await expect.poll(() => card.evaluate((el) => el.contains(document.activeElement)), { message: 'the keyboard is out of the card' }).toBe(false);
+    await expect(card, 'the card stays as its thread meanwhile').toHaveAttribute('data-card-phase', 'thread');
+    await text.evaluate((root) => {
+      const seen = { tints: 0, on: false };
+      (window as unknown as { __u5aTint: typeof seen }).__u5aTint = seen;
+      new MutationObserver(() => {
+        const on = root.querySelector('.doc-answered') !== null;
+        if (on && !seen.on) seen.tints += 1;
+        seen.on = on;
+      }).observe(root, { subtree: true, childList: true, attributes: true, attributeFilter: ['class'] });
+    });
+
+    // the answer: the thread's turn ends
+    value(await invoke(page, 'session.getContextUsage', { appSessionId: child as never, detail: 'summary' }));
+    await expect(card, 'folded to the passage’s mark').toHaveCount(0, { timeout: 20_000 });
+    await expect(text.locator('[data-thread]'), 'the mark stays').toHaveCount(1);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __u5aTint: { tints: number } }).__u5aTint.tints), { message: 'the passage tinted' }).toBe(1);
+    await expect(text.locator('.doc-answered'), 'the tint fades').toHaveCount(0, { timeout: 5_000 });
+    expect(await page.evaluate(() => (window as unknown as { __u5aTint: { tints: number } }).__u5aTint.tints), 'tinted once').toBe(1);
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await c.cleanup();
+  }
 });

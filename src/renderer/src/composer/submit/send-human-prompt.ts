@@ -12,6 +12,7 @@ import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandOutput, MawsBridge } from '@shared/ipc/schema';
 import type { SendUpload } from '@shared/ipc/schema/files';
+import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
 import { ipc } from '../../ipc/client';
 import { acquireSession, acquisitionWords, cardWords } from '../../sessions/acquire';
 import { readSessionQueue, useQueueStore } from '../../stores/queue';
@@ -55,6 +56,9 @@ export interface HumanPromptResult {
   messageUuid?: MessageUuid; // sent, steered
   queueId?: string; // queued (the host's queue, paused or non-empty)
   reason?: string; // refused: the words; held: 'trust' | 'relay'
+  // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 8): unconfirmed only, the key of
+  // the pending send that holds the words (absent when the bridge named none, so none was made)
+  pendingKey?: DeliveryKey;
 }
 
 // The extracted wire dispatch, also used by the standalone editor's existing explicit send/steer API. Only the

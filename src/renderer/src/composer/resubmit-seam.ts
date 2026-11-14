@@ -28,6 +28,7 @@
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { machineOf } from '@shared/machine/address';
+import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
 import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
@@ -183,8 +184,11 @@ export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
 // re-attached, so a resend is the message as typed; an anchored bubble's comment goes back in its framing.
 function serialized(appSessionId: AppSessionId, edit: InlineEdit) {
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
-  const sessionId = status?.engineSessionId ?? useSessions.getState().records.get(appSessionId)?.engineSessionId ?? null;
-  return framed(serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd: status?.cwd ?? '', literal: true }), edit.framing);
+  const session = useSessions.getState().records.get(appSessionId);
+  const sessionId = status?.engineSessionId ?? session?.engineSessionId ?? null;
+  // UX wave U8c-2 (M4 decision 1): the composer's folder, the agent's as the record says; the status's only without a record
+  const cwd = session ? workingFolder(session).cwd : (status?.cwd ?? '');
+  return framed(serializeDraft(prefillToDoc(editPrefill(edit)), { sessionId, cwd, literal: true }), edit.framing);
 }
 
 // E11 (scale-review C scalpel-2#1): the edited comment (X10's anchored message) framed again with the lead, the

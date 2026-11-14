@@ -5,7 +5,7 @@
 // With --mini-copy, the same graph decides the run's mini copies instead (miniCopyAt, below).
 import { execFileSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -147,7 +147,8 @@ export function advisoryTrailers(lines) {
 // --mini-copy: the MiniCopy trailers instead (ci-gate.sh, before its alert check, whose plan they change), the copies
 // also on stderr. Not computed (no merge base, no TypeScript), the run has no copy and its summary an E2E-Coverage note
 // saying so; a push never waits on it.
-const main = process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+// Real paths on both sides: a script reached through a symlinked directory (macOS's /var) is still run as the CLI.
+const main = process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
 if (main && process.argv.includes('--mini-copy')) {
   let output;
   try {

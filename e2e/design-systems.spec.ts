@@ -40,6 +40,7 @@ import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { accentBand, ACCENT_DECK, deckHeadline, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
+import { settingsDialog } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
 interface Row {
@@ -557,7 +558,7 @@ test('the chain governs the pin: the house system with no defaults, then a docum
   expect(await pinOf(inSpace), 'a Space with no default: the house system').toBe(byTitle.MAWS);
 
   await menu(launch!.app, 'settings.open');
-  const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
+  const panel = settingsDialog(page); // UX wave U7b: Settings is a dialog over the window, not a main tab
   const owner = panel.getByRole('combobox', { name: 'Default design system' });
   const chemistry = panel.getByRole('combobox', { name: 'Design system for Chemistry' });
   await expect(owner).toBeVisible({ timeout: 15_000 });

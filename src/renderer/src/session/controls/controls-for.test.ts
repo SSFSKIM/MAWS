@@ -17,7 +17,8 @@ import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state
 import { useSessions } from '../../stores/sessions';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session';
 import { ALL_OPEN, remoteSessionState } from '../../lane-b/test-support/remote-session';
-import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { answerSession, askSession, compactSession, controlsFor, drivenByBridge, screenshotRoom, sendToSession, sessionControls, stopSessionTask, useSessionControls } from './controls-for';
+import { FILES_MAX, LANE_A_WORDS } from './lane-a'; // UX wave U5a
 import { READER } from '../../sessions/share/copy'; // board 525
 import { readerGradeOf, resetReader, useReader } from '../../sessions/share/reader'; // board 525
 
@@ -274,6 +275,23 @@ describe('useSessionControls', () => {
   });
 });
 
+// UX wave U8c-2 (M4 decision 9): a terminal session's controls are built again from the store's record at every render,
+// so its location chip follows the record's working folder with no edit of its own.
+describe('a terminal session’s chip follows its record', () => {
+  it('names the new working folder once the record says the agent moved, and the launch folder again after', () => {
+    const at = (checkout: string | null) => record(APP, { holder: terminal, directory: '/work/c', ...(checkout ? { agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } } : {}) });
+    useSessions.setState({ records: new Map([[APP, at(null)]]) });
+    applyLaneAState(APP, laneAState(APP));
+    const { client } = fakeClient({ 'laneA.catalog': null });
+    const { result } = renderHook(() => useSessionControls(APP, { client })?.bindings().location.path);
+    expect(result.current).toBe('/work/c');
+    act(() => useSessions.setState({ records: new Map([[APP, at('/work/c/.claude/worktrees/w1')]]) }));
+    expect(result.current).toBe('/work/c/.claude/worktrees/w1');
+    act(() => useSessions.setState({ records: new Map([[APP, at(null)]]) }));
+    expect(result.current).toBe('/work/c');
+  });
+});
+
 describe('a caller outside the pane', () => {
   it('reaches the session’s port from the stores', async () => {
     useSessions.setState({ records: new Map([[APP, record(APP)]]) });
@@ -319,5 +337,26 @@ describe('a caller outside the pane', () => {
     expect(await compactSession(APP, undefined, none.client)).toEqual({ state: 'refused', code: 'held', message: held });
     expect(await stopSessionTask(APP, 'task-1', none.client)).toEqual({ state: 'refused', code: 'held', message: held });
     expect(none.calls).toEqual([]);
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 9): how many screenshots a message
+// to the session can carry, and the sentence the composer says when it can't carry more
+describe('screenshotRoom', () => {
+  it('is unbounded for a session MAWS runs', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP)]]) });
+    expect(screenshotRoom(APP)).toBeNull();
+  });
+
+  it('is the bridge’s four files for a terminal session on this Mac, and none for one on another machine', () => {
+    useSessions.setState({ records: new Map([[APP, record(APP, { holder: terminal })]]) });
+    applyLaneAState(APP, laneAState(APP));
+    expect(FILES_MAX).toBe(4);
+    expect(screenshotRoom(APP)).toEqual({ max: 4, reason: LANE_A_WORDS.tooManyFiles });
+
+    const remote = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: remote }]]) });
+    applyLaneAState(remote, laneAState(remote, { link: { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null }, acts: [] }));
+    expect(screenshotRoom(remote)).toEqual({ max: 0, reason: LANE_A_WORDS.remoteMedia });
   });
 });

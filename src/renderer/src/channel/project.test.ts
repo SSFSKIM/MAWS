@@ -10,7 +10,7 @@ import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema
 import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { orgIndex, type RowKey } from '../stores/org-projects';
-import type { OrgProjects } from '../stores/registry';
+import { EMPTY_REGISTRY, registryRecords, type OrgProjects } from '../stores/registry';
 import type { ListedSession } from '../stores/sessions';
 import { TEST_MACHINE, OTHER_MACHINE } from '../../../../test/support/machine';
 import { channelEntries, channelOfRow, channelProjectName, channelProjects, placeByTime, toHumanEntries, waitingFor, type ChannelEntry, type StreamEntry, type ToHumanEntry } from './project';
@@ -218,6 +218,26 @@ describe('waitingFor', () => {
     const s1 = record('s1', mine.id);
     const bySession = new Map<AppSessionId, AttentionItem[]>([[s1.appId, [item(s1.appId, 'i3', { state: 'delivered' })]]]);
     expect(waitingFor({ project: SMNS, index: orgIndex([mine], TEST_MACHINE), projects: new Map([[mine.id, mine]]), records: new Map([[s1.appId, s1]]), listed: new Map(), bySession, greyed: new Set() })).toEqual([]);
+  });
+
+  // ticket 644: another machine's session whose folder is the registry's location there is the project's as the sidebar
+  // files it: by its listing, so not while its listing's key is none of the key table's (its machine's row holds it)
+  it('takes another machine’s session as the sidebar files it, by its listing, though the registry knows its project', () => {
+    const registry: OrgProjects = {
+      ...EMPTY_REGISTRY,
+      projects: [{ id: SMNS, name: 'maws', hub: true, renamable: true, locations: [{ machine: OTHER_MACHINE, pid: 'p9', path: '/w/p9', key: KEY, name: 'maws', source: 'remote', acts: true }] }],
+      keys: { [SMNS]: KEY },
+    };
+    const projects = registryRecords(registry, TEST_MACHINE);
+    const index = orgIndex(projects.values(), TEST_MACHINE, registry);
+    const held = { appId: addressOf(OTHER_MACHINE, 'r1'), projectId: addressOf(OTHER_MACHINE, 'p9') } as unknown as SessionRecord;
+    const bySession = new Map<AppSessionId, AttentionItem[]>([[held.appId, [item(held.appId, 'i5')]]]);
+    const waiting = (orgKey: OrgKey | null) => waitingFor({
+      project: SMNS, index, projects, records: new Map([[held.appId, held]]),
+      listed: new Map([[held.appId, { machine: OTHER_MACHINE, orgKey } as unknown as ListedSession]]), bySession, greyed: new Set(),
+    }).map((i) => i.id);
+    expect(waiting(null), 'its listing’s key is none of the table’s').toEqual([]);
+    expect(waiting(KEY), 'listing and registry agree').toEqual(['i5']);
   });
 
   it('names the project by its smnsId', () => {

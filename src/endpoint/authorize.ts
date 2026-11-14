@@ -18,7 +18,8 @@
 //      its recorded one is `unavailable` only after the caller's rank on the recorded one (P5 O7 M4, fix wave 1); then,
 //      for the `checkout` rule (P5 O7 M4), the input's path within the session's checkout, and for the `task-list` rule
 //      (P5 O7 M8), the input's list the session's own (`no-target`; `unavailable` when the session moved to another
-//      engine session since it was placed);
+//      engine session since it was placed); and (the UX wave, U9 M2) for a fork, whose floor is a right on the machine,
+//      `view` on its source as well (`grade`);
 //   5. a by-effect command's rule gives the grade its input takes (`no-rule`), held to the floor, and the standing is
 //      checked again at it; a call is a read, so anything graded above `view` must come as an act (`act-required`);
 //   6. the machine's policy: a head too old stops every action but a delivered state (`state-too-old`), read-only
@@ -90,6 +91,7 @@
 // sminos's hello doesn't advertise it, and `unavailable` while none is connected; its `record` target rule places a lane B
 // session through RL10's members join (`AuthorizeContext.members`, targets.ts).
 import { isMachineFeedSub, type Action, type Certificates, type DeviceClass, type OrgState, type RefusalReason, type Right, type SessionRef, type SubMessage } from 'org-protocol';
+import { DRAIN_REPLIES } from '@shared/host/host-supervisor'; // UX wave U9: a completion's act, placed by its record
 import type { ClientRef, Reader } from '@shared/ipc/client';
 import { gradeOf as declaredGrade, type Grade, type GradeSpec, type MachineGrade, type SessionRank } from '@shared/ipc/grades';
 import { REGISTRY, type WireRegistry } from '@shared/ipc/registry';
@@ -205,6 +207,8 @@ const refuse = (reason: RefusalReason): Decision => ({ ok: false, reason });
 type Standing = { decision: Decision; presence?: () => Promise<Decision> };
 const decided = (decision: Decision): Standing => ({ decision });
 /** The part of a record a decision rests on. */
+/** UX wave U9 (M2): the rows that fork their target session, which the caller must also view (step 4). */
+const FORKS: ReadonlySet<string> = new Set(['session.fork']);
 const standingOf = (record: SessionRecord | null) => (record === null ? null : JSON.stringify([record.owners, record.access ?? 'listed', record.shares ?? []]));
 /**
  * P5 O12 M11: the record a decision reads of `target`: the source's, else, for a lane B session spawned by `launchedBy`'s
@@ -239,10 +243,10 @@ class Reads implements EffectReads {
   ) {}
 
   /** How this decision places a lane B session (`live`: targets.ts' `Placing`), or an artifact (through the cache). */
-  placing(live: boolean): Placing {
+  placing(live: boolean, byRecord = false): Placing {
     const held = this.held();
     const { members } = this.ctx;
-    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }), ...(members === undefined ? {} : { members }) };
+    return { dispatch: this.dispatch, log: (line) => this.ctx.log(line), live, ...(byRecord && { byRecord }), artifact: (artifactId) => this.artifact(artifactId), ...(held === undefined ? {} : { held }), ...(members === undefined ? {} : { members }) };
   }
 
   /** P5 O7 M5c: the leases and runs the asking channel holds (none for the endpoint's own re-checks, which name the artifact). */
@@ -453,7 +457,8 @@ export class Authorizer {
 
     // 4. The caller's standing at the floor, before anything of the session is read.
     // An engine host act's engine session is checked against the live row where it runs (actions.ts's context check).
-    const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'));
+    // UX wave U9 (M1): a completion's act (a pane's answer) is placed by its record, with no status read (targets.ts)
+    const placing = reads.placing(!(kind === 'act' && row.executor === 'engine-host'), kind === 'act' && DRAIN_REPLIES.has(name));
     // P5 O7 M5a: a machine owner stands on every artifact, read before any link is placed; a listing by a session is
     // the session's, which they view as anyone does (the short cut admits artifacts, never a session).
     const shortCut = row.target === 'artifact' && (await reads.owners()).includes(who.member) ? artifactShortCut(name, input, action, reads.held()) : null;
@@ -465,6 +470,8 @@ export class Authorizer {
     const record = target === undefined ? null : reads.record(target, resolved.kind === 'session' ? resolved.launchedBy : undefined);
     const atFloor = await this.#stands(floor, target, record, who, reads, artifact);
     if (atFloor !== null) return no(atFloor);
+    // UX wave U9 (M2): a fork's floor is a right on the machine, which ranks nothing of its source: `view` on that too
+    if (FORKS.has(name) && !rankAtLeast(sessionRank(record, who.member, await reads.owners()), 'view')) return no('grade');
     // Placed on its recorded engine session, but not runnable against it now: said only to a caller who stands on it.
     if (resolved.kind === 'session' && resolved.unavailable === true) return no('unavailable');
     // A checkout read's path, read only for a caller who views the session: in its checkout, or no target of it.

@@ -246,8 +246,8 @@ describe('listed rows in the project list', () => {
     expect(shape(entries)).toEqual([[ORG, [addr('s1')], []], [machineKey(OTHER_MACHINE), [there('b1')], [there('b3')]]]);
   });
 
-  // P5 O7 M2: the record main read over the link for a lane B row it opened stands where the row stood (its project is
-  // unknown here), so one row per address, and it doesn't move when the record arrives
+  // P5 O7 M2: the record main read over the link for a lane B row it opened stands where the row stood, so one row per
+  // address, and it doesn't move when the record arrives
   it('draws a record at a listed address where its listing was filed when its project is not known here', () => {
     const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: there('maws-b') as ProjectId });
     const entries = list(listedMap(listedOn('b1', { orgKey: ORG })), { records: recs(local, recorded) });
@@ -696,6 +696,28 @@ describe('sidebar row text', () => {
     expect(rowBranch(record('w', { worktree: { path: '/w/.claude/worktrees/a', branch: 'HEAD' }, branch: '' }))).toBeNull(); // W9 (H2): no branch names
   });
 
+  // UX wave U8c-2 (M4 decision 11): the row's branch follows the agent into a linked worktree,
+  // whichever way it got there, and go when it is back in its launch checkout.
+  it('names the branch of the linked worktree the agent works in, by a cd or by the tool', () => {
+    const W1 = '/w/.claude/worktrees/w1';
+    const byCd = record('c', { directory: '/w', branch: 'main', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } });
+    expect(rowBranch(byCd)).toBe('w1');
+    const byTool = record('t', { directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/w', branch: 'w1' });
+    expect(rowBranch(byTool)).toBe('w1');
+    const backByCd = record('b', { directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/w', branch: 'w1', agentFolder: { checkout: '/w', cwd: '/w', branch: 'main', linked: false } });
+    expect(rowBranch(backByCd)).toBeNull(); // filed in the worktree, its agent back in the launch checkout
+  });
+
+  // UX wave U8c-2 (fix wave 1, the architect's ruling): a search finds a session by every word its rows show and by the
+  // agent's working branch as well, so the Resume picker's row (which shows the record's branch) is found by it too.
+  it('the search finds a moved session by the branch the record shows and by the working branch', () => {
+    const W1 = '/w/.claude/worktrees/w1';
+    const byCd = record('c', { directory: '/w', branch: 'main', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } });
+    expect(sessionMatcher('main', new Map())(byCd)).toBe(true); // the record's branch, which the Resume picker shows
+    expect(sessionMatcher('w1', new Map())(byCd)).toBe(true); // the working branch, which the sidebar's row shows
+    expect(sessionMatcher('feature', new Map())(byCd)).toBe(false);
+  });
+
   it('the waiting item a hover card shows is the one main notifies: an actionable item outranks an older held message', () => {
     const r = record('r');
     const held = item('r', 'held_peer_message', '2026-09-28T09:00:00Z', { summary: 'Message from reviewer' });
@@ -774,6 +796,36 @@ describe('the project registry’s rows', () => {
     expect([row(new Set()).others, row(new Set()).listed.map((l) => l.appId)]).toEqual([1, []]);
     expect([row(new Set([`id:${SEEN_ID}` as RowKey])).others, row(new Set([`id:${SEEN_ID}` as RowKey])).listed.map((l) => l.appId)]).toEqual([0, [there('b9')]]);
     expect(row(new Set()).project).toBeNull(); // still no folder to act through
+  });
+
+  // ticket 644: the registry places another machine's locations among the projects, so a record main read over that
+  // machine's link has a known project; its listing still decides its row, so the row stands where the listed row stood
+  // (the one the person clicked) when the record arrives. This Mac's record with a known project is filed by it, as before.
+  describe('a record at a listed address whose project the registry places', () => {
+    const listingAt = (machine: MachineRef, session: string, orgKey: OrgKey | null, project: string | null): ListedSession =>
+      ({ ...remoteRow(machine, session, { orgKey, project }), appId: addressOf(machine, session) as AppSessionId });
+    const held = sessionOn(OTHER_MACHINE, 'b1', { projectId: there('scrape') as ProjectId }); // its folder is the registry's location on B
+    const filed = (records: SessionRecord[], listing: ListedSession) =>
+      projectList(input({ records: new Map(records.map((r) => [r.appId, r])), digests: new Map(), projects: all, rows: [], registry, listed: new Map([[listing.appId, listing]]) }))
+        .filter((e) => e.sessions.length + e.listed.length > 0)
+        .map((e) => [e.key, e.sessions.map((r) => r.appId), e.listed.map((l) => l.appId)]);
+
+    it('keeps another machine’s session under its machine’s row when its listing’s key is none of the key table’s', () => {
+      const listing = listingAt(OTHER_MACHINE, 'b1', null, null);
+      expect(filed([], listing), 'listed only').toEqual([[machineKey(OTHER_MACHINE), [], [there('b1')]]]);
+      expect(filed([held], listing), 'its record held').toEqual([[machineKey(OTHER_MACHINE), [there('b1')], []]]);
+    });
+
+    it('files it under the registry project’s row when its listing and the registry agree on the key', () => {
+      const listing = listingAt(OTHER_MACHINE, 'b1', `id:${AWAY_ID}` as OrgKey, AWAY_ID);
+      expect(filed([], listing), 'listed only').toEqual([[`id:${AWAY_ID}`, [], [there('b1')]]]);
+      expect(filed([held], listing), 'its record held').toEqual([[`id:${AWAY_ID}`, [there('b1')], []]]);
+    });
+
+    it('files this Mac’s record by its known project, a listing at its address notwithstanding', () => {
+      const mine = sessionOn(TEST_MACHINE, 'a1', { projectId: app.id });
+      expect(filed([mine], listingAt(TEST_MACHINE, 'a1', null, null))).toEqual([['remote:example.org/app', [addr('a1')], []]]);
+    });
   });
 
   it('signed out, rows are as before: by label, naming no registry and no machine beyond their checkouts', () => {

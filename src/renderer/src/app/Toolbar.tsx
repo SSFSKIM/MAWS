@@ -1,26 +1,36 @@
 // The toolbar, which is also the window's title bar (`titleBarStyle: 'hiddenInset'`, §3; mockup 01): a drag region
 // with the traffic lights' 78 px clearance and sidebar/Overview toggles across the sidebar's width,
-// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the usage slot,
-// the session actions menu and the panel toggle.
+// the project chip and the focused pane's active tab as the title (with the branch chip on a session), the session
+// actions menu and the panel toggle, then, at the title bar's own right end, the usage slot (UX wave U7b, O-47: the ring,
+// after the surface icons and outside their overflow; on a page too, where it stands at the window's right edge).
 // Every control is `no-drag`, so clicks reach it rather than moving the window.
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decision 5): while a
+// page is open the title bar spans to the window's right edge and holds, after the sidebar and Overview buttons, Back and
+// the page's name (the page's level-1 heading) where the chip and the strip were. The chip, the surface icons and the
+// session menu are not drawn; the two slots the strips mount in stay mounted, invisible and inert, so a strip keeps its
+// scroll and its "+" is not drawn either.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { type ReactNode } from 'react';
 import { DropdownMenu } from 'radix-ui';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { TabRef } from '@shared/ipc/schema/layout';
+import type { Destination, TabRef } from '@shared/ipc/schema/layout';
 import { runAction, useCurrentRow } from '../keymap/actions-runtime';
 import { revealRow, sidebarListsRow } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
-import { branchLabel, recordBranch } from '../sessions/branch-label';
+import { branchLabel } from '../sessions/branch-label';
+import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { machineName, rowName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { useMachines } from '../stores/machines';
 import { ipc } from '../ipc/client';
 import { FolderIcon, Icon, IconButton, SidebarIcon } from './IconButton';
+import { DESTINATION } from '../destination/copy';
+import { PAGE_TITLE_ID } from '../destination/DestinationPage';
 import { useShellGeometry, useShellView } from './shell-view';
+import { useSlot } from './slots';
 import { mountChromeTabs } from '../main/chrome-tabs';
 import { SurfaceRow } from '../panel/SurfaceRow';
 import { runSessionAction, SESSION_ACTIONS, sessionActionsFor, useSessionActionEnabled, type SessionActionId } from './session-actions';
@@ -29,6 +39,7 @@ import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M9
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
+import { useSessionActionUnavailable } from '../lane-b/remote-unavailable'; // the UX wave, U9
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
@@ -60,7 +71,7 @@ export function toolbarTitle(
       const record = records.get(tab.appSessionId);
       const row = record ? undefined : listed.get(tab.appSessionId)?.title.trim(); // P5 O9 M9: a session of another machine has its row alone
       const title = row || displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
-      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
+      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(record ? workingBranch(record) : null) }; // W9 (H2); UX wave U8c-2: the working folder's
     }
     case 'file':
       return { title: basename(tab.path), branch: null };
@@ -68,14 +79,6 @@ export function toolbarTitle(
       return { title: `Diff · ${tab.ref}`, branch: null };
     case 'diagnostics':
       return { title: 'Diagnostics', branch: null };
-    case 'settings':
-      return { title: 'Settings', branch: null };
-    case 'projects':
-      return { title: 'Projects', branch: null };
-    case 'customize':
-      return { title: 'Customize', branch: null };
-    case 'artifacts': // P3-G
-      return { title: 'Artifacts', branch: null };
     case 'artifact': // P3-L
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, branch: null };
     case 'browser': // E4a
@@ -84,6 +87,9 @@ export function toolbarTitle(
       return { title: CHANNEL.title(channelProject), branch: null };
   }
 }
+
+// The room the usage ring takes from the surface icons' count: its 28 px button (UX wave U7b, M7 decision 1).
+const USAGE_RING_ROOM = 28;
 
 export function Toolbar() {
   const sidebar = useLayout((s) => s.regions.sidebar);
@@ -95,6 +101,7 @@ export function Toolbar() {
   const listed = useSessions((s) => s.listed); // P5 O7 M6: another machine's listed rows count
   const waiting = useAttention((s) => selectNeedsYou(s, { records, recordsVersion, listed }).filter((row) => row.tier === 1).length);
   const overviewOpen = useLayout((s) => s.overviewOpen);
+  const destination = useLayout((s) => s.destination); // UX wave U7b
   const appSessionId = tab?.kind === 'session' ? tab.appSessionId : null;
   const split = useLayout((s) => currentSet(s.main).panes.length === 2);
   // Budget against the grid's actual header, not the window: a full-height surface can leave only 360px.
@@ -103,10 +110,11 @@ export function Toolbar() {
   const stripRoom = split ? 240 : 180;
   const projectChip = geometry.chrome >= leading + stripRoom + 322;
   const controlsRoom = geometry.chrome - leading - 16 - stripRoom - (projectChip ? 96 : 0);
-  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28) / 30));
+  const surfaceIcons = Math.max(0, Math.floor((controlsRoom - 28 - USAGE_RING_ROOM) / 30));
+  const Usage = useSlot('topBarEnd');
 
   return (
-    <header data-toolbar className={`${geometry.mainHidden ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
+    <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
         className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
         style={{ width: leading }}
@@ -132,15 +140,18 @@ export function Toolbar() {
         </div>
       </div>
       {/* UX wave U7, O-03: the wrapper owns the chip's 96 px and clips; the button fills it and truncates, its focus ring inset */}
-      {projectChip && <div className="max-w-24 min-w-0 shrink overflow-hidden"><ProjectChip /></div>}
-      <div ref={mountChromeTabs} data-chrome-tabs className="flex h-full min-w-0 flex-1 items-stretch">
+      {destination !== null && <PageTitle destination={destination} />}
+      {projectChip && destination === null && <div className="max-w-24 min-w-0 shrink overflow-hidden"><ProjectChip /></div>}
+      <div ref={mountChromeTabs} data-chrome-tabs inert={destination !== null} className={`flex h-full min-w-0 flex-1 items-stretch ${destination !== null ? 'invisible' : ''}`}>
         <div data-chrome-slot="0" className="contents" />
         <div data-chrome-slot="1" className="contents" />
       </div>
       <div className="ml-auto flex shrink-0 items-center gap-1 px-2">
-        <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
+        {destination === null && <SurfaceRow maxIcons={surfaceIcons} overflowControls={<>
           {appSessionId && <SessionMenuOverflow appSessionId={appSessionId} />}
-        </>} />
+        </>} />}
+        {/* eslint-disable-next-line react-hooks/static-components -- the usage slot is registered once at composition */}
+        <Usage />
       </div>
     </header>
   );
@@ -179,6 +190,24 @@ function ProjectChip() {
   );
 }
 
+// UX wave U7b: Back and the page's name; Back leaves the page (U6b's history takes it over when it lands).
+function PageTitle({ destination }: { destination: Destination }) {
+  return (
+    <div data-page-title className="flex min-w-0 shrink items-center gap-1 pr-2">
+      <button
+        type="button"
+        aria-label={DESTINATION.back}
+        title={DESTINATION.backTitle}
+        onClick={() => useLayout.getState().closeDestination()}
+        className="inline-flex size-7 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent [-webkit-app-region:no-drag] hover:bg-bg-hover hover:text-fg focus-visible:outline-2"
+      >
+        <Icon><path d="M10 3.5 5.5 8l4.5 4.5" /></Icon>
+      </button>
+      <h1 id={PAGE_TITLE_ID} className="m-0 min-w-0 truncate text-ui font-semibold text-fg">{DESTINATION.names[destination.kind]}</h1>
+    </div>
+  );
+}
+
 const BoardIcon = () => (
   <Icon>
     <rect x="2" y="2.5" width="5" height="5" rx="1" />
@@ -202,6 +231,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
+  const mine = useSessions((s) => s.listed.get(appSessionId)?.mine ?? false); // the UX wave, U9: the listing's
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
@@ -210,7 +240,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
       {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
     </SessionMenu>;
   }
-  const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading, mine }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <SessionMenu disabled={ids.length === 0 && !shareable}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
@@ -245,8 +275,11 @@ function SessionMenu({ disabled, children }: { disabled: boolean; children: Reac
   </DropdownMenu.Sub>;
 }
 
-// `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words.
-function SessionMenuItem({ id, appSessionId, label, gap = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
+// `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words; the UX wave,
+// U9: else the window's helper's sentence for an act on another machine.
+function SessionMenuItem({ id, appSessionId, label, gap: given = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
+  const remoteGap = useSessionActionUnavailable(id, appSessionId);
+  const gap = given ?? remoteGap;
   const enabled = useSessionActionEnabled(id) && gap === null;
   return (
     <DropdownMenu.Item

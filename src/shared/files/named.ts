@@ -6,7 +6,7 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { parseAnchoredText } from '../anchor/message';
+import { readAnchoredMessage } from '../anchor/message';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -996,8 +996,11 @@ const MCP_TOOL = /^mcp__([^_].*?)__(.+)$/; // the window's `MCP_TOOL` (model/cla
 const TOOL_NAME_MAX = 1024;
 export const isMcpTool = (toolName: string): boolean => toolName.length <= TOOL_NAME_MAX && MCP_TOOL.test(toolName);
 
-// The path of the anchored comment's tag that ends `text` (click source 4), as the window parses it.
-export const anchorPath = (text: string): string | null => parseAnchoredText(text)?.anchor.path ?? null;
+// The paths of the anchored comments' tags in `text` (click source 4), as the window parses it (`userTextOf`,
+// model/user-text.ts): the one comment's, or, for a message of several comments (UX wave U5a, whose bubble draws a chip
+// for each), every comment's that has a path, in the order made.
+export const anchorPaths = (text: string): string[] =>
+  (readAnchoredMessage(text)?.comments ?? []).flatMap(({ anchor }) => (anchor.path === undefined ? [] : [anchor.path]));
 
 export interface PendingCall {
   toolUseId: string;
@@ -1064,7 +1067,28 @@ function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
 // blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
 function* personNames(content: unknown, path: string): Steps<boolean> {
   const texts = yield* textsOf(content);
-  return (yield* linksTo(texts, path)) || isThePath(anchorPath(texts.join('\n\n')), path);
+  return (yield* linksTo(texts, path)) || (yield* anchorNames(texts.join('\n\n'), path));
+}
+
+// The anchor form's read of a person's message (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,
+// Decision Log 54): the window reads it only when it holds a tag; the meter is charged for the reader's one pass over the
+// text, as the link pass's loops are, and then a step and the path's compare for each comment read, at most
+// MESSAGE_COMMENTS_MAX, since the reader reads no more.
+function* anchorNames(text: string, path: string): Steps<boolean> {
+  if (!text.includes('<maws_anchor')) return false;
+  const m = meterFor(text);
+  try {
+    charge(m, text.length + 1);
+    for (const { anchor } of readAnchoredMessage(text)?.comments ?? []) {
+      yield;
+      charge(m, (anchor.path?.length ?? 0) + 1);
+      if (isThePath(anchor.path, path)) return true;
+    }
+  } catch (error) {
+    if (error instanceof ScanRefused) return false;
+    throw error;
+  }
+  return false;
 }
 
 // Whether a record names `path` (Interfaces §A, the table of `rowClaim`), or which calls a result form of it waits for.

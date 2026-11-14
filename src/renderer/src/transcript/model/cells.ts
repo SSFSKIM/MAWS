@@ -206,6 +206,7 @@ function detailOf(rec: ToolRecord, status: Cell['status']): CellDetail {
       const exitCode = parsed ? Number(parsed[1]) : status === 'done' ? 0 : null;
       return {
         kind: 'shell', command: str(input.command, use.toolName), description: typeof input.description === 'string' ? input.description : null, cwd: typeof input.cwd === 'string' ? input.cwd : null,
+        ...(use.cwd !== undefined && { rowCwd: use.cwd }), // UX wave U8c-2 (§K): the folder the call's row records, kept apart from the input's
         stdout, stderr, exitCode, interrupted: s.interrupted === true, backgroundTaskId: rec.backgroundTaskId, truncated: truncationOf(stdout), spill: spillOf(result),
       };
     }

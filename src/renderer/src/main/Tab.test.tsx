@@ -29,6 +29,8 @@ import { useSessions } from '../stores/sessions';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
+import { useMachines } from '../stores/machines'; // the UX wave, U9
 
 const DECK = '00000000-0000-4000-8000-000000000001';
 const ARTIFACT: TabRef = { id: tabId({ kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE }), kind: 'artifact', artifactId: DECK, machine: TEST_MACHINE, pinned: false };
@@ -225,5 +227,33 @@ describe('a session tab driven through its holder’s bridge', () => {
     render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
     expect(marker()?.textContent).toBe('Background job');
     expect(marker()?.title).toBe('Running as bg · job-1 · driven through sminos’s bridge');
+  });
+});
+
+// The UX wave, U9 (O-39, A2; T5 amended): another machine's session tab carries its title in the disabled token only in
+// the offline and removed phases, never while its machine connects or reconnects within the minute; its status glyph is
+// its own (an idle glyph is in the faint tone whatever the link does), so the title is read by its own element.
+describe('a session tab of another machine by its link’s phase', () => {
+  const onB = addressOf(OTHER_MACHINE, 'b-title' as AppSessionId);
+  const tab: TabRef = { id: `session:${onB}`, kind: 'session', appSessionId: onB, pinned: false, title: 'B’s shared session' };
+  const here: MachineState = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T08:00:00.000Z', generation: 0 };
+  const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, ...over });
+  const titleFaint = () => within(document.querySelector<HTMLElement>(`[data-tab-id="${tab.id}"]`)!).getByText('B’s shared session').classList.contains('text-fg-faint');
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+  it('greys the title offline and removed, not while the machine connects or reconnects', () => {
+    useSessions.setState({ records: new Map([[onB, record(onB, { title: { text: 'B’s shared session', source: 'user' } })]]) });
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'connecting', generation: 0 })]));
+    render(<Tab tab={tab} pane={0} domId="t-0" active stop onKeyDown={() => {}} />);
+    expect(titleFaint(), 'connecting').toBe(false);
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down' })]));
+    expect(titleFaint(), 'reconnecting').toBe(false);
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', generation: 0 })]));
+    expect(titleFaint(), 'offline').toBe(true);
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', refusal: 'removed' })]));
+    expect(titleFaint(), 'removed').toBe(true);
+    act(() => useMachines.getState().applyRoster([here, studio({})]));
+    expect(titleFaint(), 'up').toBe(false);
+    act(() => useSessions.setState({ records: new Map() }));
   });
 });

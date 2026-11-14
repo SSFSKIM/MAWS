@@ -7,6 +7,9 @@
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { PTY_FRAMES_CAPABILITY, ATTACHMENT_CAPABILITY } from '@shared/host/socket-protocol';
 import { DRAIN_REPLIES } from '@shared/host/host-supervisor'; // P5 O16 M3b fix wave 2
+import type { RequestId } from '@shared/graph/ids';
+import { PANE_ANSWER_MS } from '@shared/maws/panes';
+import { HostBridge } from '../engine-host/tool-server/bridge'; // UX wave U9: the old host's pane request
 import { MawsdScene, sleep, until } from '../../test/support/mawsd-scene';
 
 let scene: MawsdScene;
@@ -339,8 +342,8 @@ describe('the handover and the park', () => {
 // app's completions of the old host's in-flight calls go by main's machine.sock link (host-supervisor's `viaMachine`),
 // whose front forwards them to the host that raised each request: the draining host while it drains, a successor for its
 // own; one whose raising host is gone is answered host_unavailable at once and is no need (nothing woken, held or
-// launched). The front admits these names from main's local link; the remote endpoint's offers do not gain them
-// (test/endpoint/drain-replies.test.ts).
+// launched). The front admits these names from main's local link; the remote endpoint offers only a pane's answer, as an
+// act whose `host.op` goes by the same route (UX wave U9; test/endpoint/drain-replies.test.ts).
 describe('the completions of the old host’s calls', () => {
   const PANE = (requestId: string) => ({ appSessionId: 'app-1', requestId, pane: 'terminal', target: null, line: null });
   const ANSWER = (requestId: string) => ({ appSessionId: 'app-1', requestId, result: { ok: false, error: 'closed' } });
@@ -392,6 +395,51 @@ describe('the completions of the old host’s calls', () => {
     expect(late).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     expect(successor.named('maws.pane.answer')).toEqual([ANSWER('req-new')]); // never the successor's
     expect(old.named('maws.pane.answer')).toHaveLength(1);
+  });
+
+  // UX wave U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M1): another machine's pane answer comes
+  // through the remote endpoint as an act, the `host.op` it hands to mawsd's supervisor (src/endpoint/actions.ts). During
+  // the drain it reaches the old host, whose pane request (a real host bridge, at the pane's own deadline) it settles
+  // before that deadline; a status read sent beside it waits for the successor, which is why the endpoint reads none.
+  it('another machine’s pane answer during a deferred drain, carried by the endpoint’s op, settles the old host’s pane request before its deadline', { timeout: 30_000 }, async () => {
+    const panes = new HostBridge<{ requestId: RequestId }, unknown>({ send: () => {}, answerMs: PANE_ANSWER_MS });
+    const OP = (requestId: string) => ({ opId: `op-pane-answer-${requestId}`, opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER(requestId), context: { launchId: 'launch-1', engineSessionId: 'engine-1' } });
+    scene.engineSpawn = {
+      answers: {
+        ...{ 'host.supervisorStatus': () => holder(0) },
+        'host.op': (input) => {
+          const op = input as { input: { requestId: RequestId; result: unknown } };
+          return { state: 'done', result: { ok: true, value: { outcome: panes.answer(op.input.requestId, op.input.result) } } };
+        },
+        'host.handover': () => {
+          if (panes.pending > 0) return { state: 'deferred', inFlight: panes.pending };
+          scene.lastEngine().handOver();
+          return { state: 'detaching' };
+        },
+      },
+    };
+    const { daemon, shown } = await mainOnMawsd();
+    const old = scene.lastEngine();
+    const settled = panes.request({ requestId: 'req-old' as RequestId }, new AbortController().signal); // show_pane's call, held
+    await until(() => old.emitRaw('maws.pane.show', PANE('req-old')), 5_000, 'a ready link to the old host'); // the request's event
+    await until(() => shown.includes('req-old'), 5_000, 'the old host’s pane request at the app');
+    const cli = await scene.app('machine', { capabilities: [] });
+    expect(await cli.request('daemon.restartEngineHost')).toMatchObject({ ok: true, value: { state: 'deferred', inFlight: 1 } });
+    await until(() => daemon.hosts.snapshot('engine-host').state !== 'ready', 5_000, 'the old host draining');
+
+    let statusRead = false;
+    const status = daemon.hosts.forward('engine-host', { name: 'session.status', input: { appSessionId: 'app-1' } }).finally(() => (statusRead = true));
+    const sent = Date.now();
+    const answered = await daemon.hosts.forward('engine-host', { name: 'host.op', input: OP('req-old') });
+    expect(answered).toMatchObject({ ok: true, value: { state: 'done', result: { ok: true, value: { outcome: 'delivered' } } } }); // the old host's answer
+    await expect(settled).resolves.toEqual({ kind: 'answered', answer: ANSWER('req-old').result });
+    expect(Date.now() - sent).toBeLessThan(PANE_ANSWER_MS);
+    expect(old.named('host.op')).toEqual([OP('req-old')]);
+    expect(old.supervisor.exits).toEqual([]); // settled before the detach
+    expect(statusRead).toBe(false); // held for the successor
+    await until(() => scene.engines.length === 2 && daemon.hosts.snapshot('engine-host').state === 'ready', 10_000, 'the successor');
+    await status;
+    expect(scene.lastEngine().named('host.op')).toEqual([]); // never the successor's
   });
 
   it('the front admits each completion from the machine’s own client and forwards it to the engine host', { timeout: 20_000 }, async () => {

@@ -202,8 +202,9 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
   it('counts only live-target open threads and follows target deletion and undo with no mounted body (WR 49)', async () => {
     const { handle, state } = await opened();
     expect(state.snapshot().unresolved).toBe(0);
-    addThread(handle.doc, { threadId: 't1', slideId: 'a', elementId: 'p', quote: 'Hi', by: { kind: 'human' }, at: 1 });
-    addThread(handle.doc, { threadId: 't2', slideId: 'a', elementId: 'gone', quote: 'Gone', by: { kind: 'human' }, at: 2 });
+    // UX wave U5a (M7; A3): a comment counts once it holds a message
+    addThread(handle.doc, { threadId: 't1', slideId: 'a', elementId: 'p', quote: 'Hi', by: { kind: 'human' }, at: 1, body: 'Shorter?' });
+    addThread(handle.doc, { threadId: 't2', slideId: 'a', elementId: 'gone', quote: 'Gone', by: { kind: 'human' }, at: 2, body: 'Why?' });
     expect(state.snapshot().unresolved).toBe(1);
     const session = state.snapshot().session!;
     session.edit(() => deleteSlide(handle.doc, 'a'));

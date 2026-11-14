@@ -9,8 +9,9 @@ import { panelHost } from '../../panel/host';
 import { SurfaceRow } from '../../panel/SurfaceRow';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
+import { deferred, ok } from '../../test-support/code';
 import { panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
-import { A, B, DIR, scmMain, stubCanvas } from '../../test-support/scm';
+import { A, B, DIR, scmMain, stubCanvas, TOKEN } from '../../test-support/scm';
 import { at } from '../../../../../test/support/machine'; // P5 O6 M2: the page's ids; scm's A and B are main's
 import { useViewer } from '../code/viewer/viewer-store';
 import { registerScmTool, SCM_TOOL_ID, type ScmParams } from './index';
@@ -89,5 +90,146 @@ describe('the source control tool’s registration', () => {
     fireEvent.change(draft(), { target: { value: 'Unsaved draft' } });
     await act(() => panelHost.closeTab(panelOf(at(A))!.tabs[0].id));
     expect(panelOf(at(A))!.tabs).toEqual([]);
+  });
+});
+
+// UX wave U8c-2 (M4 decision 6, §I): the page starts over in the agent's new folder as it does for another session, the
+// commit message kept; while the session is away from its launch folder it draws its reads and none of its acts.
+describe('the agent away from the launch folder', () => {
+  const WT = `${DIR}/.claude/worktrees/w1`;
+  const moveTo = (checkout: string | null) =>
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(at(A), record(at(A), { directory: DIR, ...(checkout ? { agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } } : {}) })) })));
+  const acts = () => document.querySelectorAll('[data-scm-action], [data-scm-remote-action="push"], [data-scm-remote-action="pr"], [data-scm-sheet]').length;
+  const unstaged = () => screen.getByRole('region', { name: 'Unstaged' });
+
+  it('draws the page’s reads and no act while the session is moved, and every act again at the launch folder, the commit message kept', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    fireEvent.change(draft(), { target: { value: 'Keep me' } });
+    expect(acts()).toBeGreaterThan(0);
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    expect(document.querySelector('[data-scm-header]')?.textContent).toContain('main'); // the branch line
+    expect(acts()).toBe(0); // no Push or Open PR, no button on a row or a group, no sheet
+    expect(screen.queryByRole('textbox', { name: 'Commit message' })).toBeNull(); // no commit form
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-row][data-path="src/app.ts"] [data-scm-select]')!);
+    await waitFor(() => expect(fileHeader()).toBe('src/app.ts · Modified')); // its diff is a read
+    moveTo(null);
+    await waitFor(() => expect(draft().value).toBe('Keep me'));
+    expect(acts()).toBeGreaterThan(0);
+  });
+
+  // The branch review (finding 6): a run of the launch folder's runs on after the agent moves, and its events name the
+  // session; the page of the folder the agent moved to takes none of them, so it draws no run and no Cancel that could
+  // not reach it. The launch folder's page takes them again once the agent is back.
+  it('takes no output of a run of the launch folder on the page of the folder the agent moved to', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(2)); // the worktree's page asked for its own run: none
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    act(() => main.emit('scm.remote.output', { appSessionId: A, token: TOKEN, seq: 4, kind: 'stdout', text: 'Writing objects: 100%\n' }));
+    expect(useScm.getState().runs.get(at(A))).toBeNull();
+    expect(document.querySelector('[data-scm-output]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel the running command' })).toBeNull();
+    moveTo(null);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(3));
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    act(() => main.emit('scm.remote.output', { appSessionId: A, token: TOKEN, seq: 5, kind: 'stdout', text: 'done\n' }));
+    expect(useScm.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, running: true });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel the running command' })).toBeTruthy());
+  });
+
+  // Held open: a Discard sheet is open on the launch folder's page when the agent moves.
+  it('closes a sheet open at a move and clears the selection, leaving no control to confirm it', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-row][data-path="src/app.ts"] [data-scm-select]')!);
+    expect(selectedRow()).toBe('src/app.ts');
+    fireEvent.click(screen.getByRole('button', { name: 'Discard changes to src/app.ts' }));
+    await waitFor(() => expect(document.querySelector('[data-scm-sheet="discard"]')).not.toBeNull());
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    expect(document.querySelector('[data-scm-sheet]')).toBeNull();
+    expect(selectedRow()).toBeNull();
+    expect(screen.queryByRole('button', { name: /^Discard/ })).toBeNull();
+    moveTo(null);
+    await waitFor(() => expect(draft()).toBeTruthy());
+    expect(document.querySelector('[data-scm-sheet]')).toBeNull(); // the sheet is not opened again on return
+    expect(selectedRow()).toBeNull();
+  });
+
+  // Held open (M6; M4's re-review): a confirm still out at a move. Its sheet closed with the move; its answer, landing
+  // after the agent came back to the launch folder or while it is away, closes no sheet opened since and seeds no run on
+  // another folder's page.
+  const sheet = (kind: string) => document.querySelector<HTMLElement>(`[data-scm-sheet="${kind}"]`);
+  const awayAndBack = async () => {
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(sheet('discard') ?? sheet('push')).toBeNull());
+    moveTo(null);
+    await waitFor(() => expect(draft()).toBeTruthy());
+  };
+  const openPush = async () => {
+    await waitFor(() => expect(document.querySelector<HTMLButtonElement>('[data-scm-remote-action="push"]')?.disabled).toBe(false));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-remote-action="push"]')!);
+    await waitFor(() => expect(sheet('push')?.querySelector('[data-scm-plan-command]')).toBeTruthy());
+    return sheet('push')!;
+  };
+
+  it('closes no Discard sheet opened after the return with the answer of one confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.discard'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    const openDiscard = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes to src/app.ts' }));
+      await waitFor(() => expect(sheet('discard')).not.toBeNull());
+      return sheet('discard')!;
+    };
+    const first = await openDiscard();
+    fireEvent.click(within(first).getByRole('checkbox'));
+    fireEvent.click(within(first).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(main.callsOf('scm.discard')).toHaveLength(1));
+    await awayAndBack();
+    await openDiscard();
+    await act(async () => answer.resolve(ok({ ok: true, status: main.state.status, output: '' })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sheet('discard')).not.toBeNull();
+  });
+
+  it('closes no Push sheet opened after the return with the answer of one confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.push'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    fireEvent.click(within(await openPush()).getByRole('button', { name: 'Push' }));
+    await waitFor(() => expect(main.callsOf('scm.push')).toHaveLength(1));
+    await awayAndBack();
+    await openPush();
+    await act(async () => answer.resolve(ok({ started: true, token: TOKEN })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sheet('push')).not.toBeNull();
+  });
+
+  it('seeds no run on the page of the folder the agent moved to with the answer of a push confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.push'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    fireEvent.click(within(await openPush()).getByRole('button', { name: 'Push' }));
+    await waitFor(() => expect(main.callsOf('scm.push')).toHaveLength(1));
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(2)); // the worktree's page asked for its own run
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    await act(async () => answer.resolve(ok({ started: true, token: TOKEN })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(useScm.getState().runs.get(at(A))).toBeNull();
   });
 });

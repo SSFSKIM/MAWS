@@ -4,7 +4,7 @@ import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, stripOf, type L
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from './layout';
+import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, quietly, storedLayout } from './layout';
 import { sideGroups } from '../panel/surface-model'; // UX wave U8b
 import { buildFSchemaOf } from '../../../../test/support/layout-build-f'; // UX wave U8b
 
@@ -84,7 +84,8 @@ describe('layout persistence', () => {
   });
 
   it('writes tabs opened before hydration over an existing main.tabs, before any later change and on beforeunload', async () => {
-    const tabs: TabRef[] = [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, { id: 'settings', kind: 'settings', section: null, pinned: false }];
+    const notes: TabRef = { id: `file:${TEST_MACHINE}:/invented/notes.md`, kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false };
+    const tabs: TabRef[] = [{ id: 'diagnostics', kind: 'diagnostics', pinned: false }, notes];
     const saved = storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs, activeTabId: 'diagnostics' }] });
     const { store, hydrate, sets } = setup({ 'main.tabs': saved });
     store.getState().openSession(A); // a sidebar click or a notification navigation racing the first layout.get
@@ -92,7 +93,7 @@ describe('layout persistence', () => {
     window.dispatchEvent(new Event('beforeunload'));
     const written = sets().filter((s) => s.key === 'main.tabs');
     expect(written).toHaveLength(1);
-    expect(stripIn(written[0].value).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, 'settings']); // opened after the saved active tab, over the saved tabs
+    expect(stripIn(written[0].value).panes[0].tabs.map((t) => t.id)).toEqual(['diagnostics', `session:${A}`, notes.id]); // opened after the saved active tab, over the saved tabs
     expect(written[0].value).toEqual(storedMain(store.getState().main));
   });
 
@@ -729,6 +730,12 @@ describe('the side column’s first read of a profile', () => {
     return { store, sets, after };
   }
 
+  // UX wave U7b (Interfaces §G): no page means no key, so a first read never writes `destination`.
+  it('a first read of a profile that holds no destination writes the three keys of the side column and not this one', async () => {
+    const { sets } = await launch(fixed);
+    expect(sets().map((write) => write.key).sort()).toEqual(['cards.open', 'panelTools.groups', 'panelTools.widths']);
+  });
+
   it('reads F’s two stacked surfaces as two groups and drops the tabs F never closed, the pins and terminals kept', async () => {
     const f = {
       ...fixed,
@@ -907,5 +914,197 @@ describe('the side column’s first read of a profile', () => {
     expect((await launch({ ...fixed, ...SIDE_COLUMN_KEYS, 'cards.open': { version: 1, open: ['context', 'artifacts'] } })).store.getState().cardsOpen).toEqual(['environment']);
     warn.mockRestore();
     expect((await launch({ ...fixed, ...SIDE_COLUMN_KEYS, 'cards.open': { version: 1, open: ['context'] } })).store.getState().cardsOpen).toEqual(['context']);
+  });
+});
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F "At hydration"
+// and §G): the page under its own key, written while a page is open and deleted when none is.
+describe('the page’s key', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+  const PAGE = { kind: 'customize', view: 'mine', show: 'skills' } as const;
+  const stored = (destination: unknown) => ({ version: 1, destination });
+  // A version-1 `main.tabs`: not the stored form's shape (`canonical` false), as a build before U13a left it.
+  const v1 = { version: 1, panes: [{ tabs: [], activeTabId: '' }], focusedPane: 0, splitRatio: 0.5, closedTabs: [] };
+
+  // A launch over layout.json holding the fixed keys, the side column's and `given`; `failing` keys fail their read;
+  // `during` acts while the reads are pending. `pages()` is what was written to `destination`.
+  async function launch(given: Record<string, unknown>, opts: { failing?: string[]; during?: (store: ReturnType<typeof createLayoutStore>) => void } = {}) {
+    const file: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(LAYOUT_DEFAULTS.main), 'panel.pinned': [], ...SIDE_COLUMN_KEYS, ...given };
+    const fake = fakeClient({
+      'layout.list': { keys: Object.keys(file) },
+      'layout.get': ({ key }: { key: string }) => ({ value: file[key] ?? null }),
+      'layout.set': undefined,
+    });
+    const invoke = fake.client.invoke as unknown as (name: string, input: { key?: string }, ...rest: unknown[]) => Promise<unknown>;
+    const client = { ...fake.client, invoke: (name: string, input: { key?: string }, ...rest: unknown[]) => (name === 'layout.get' && opts.failing?.includes(input.key!) ? Promise.resolve({ ok: false, error: { code: 'internal', message: 'x' } }) : invoke(name, input, ...rest)) } as unknown as typeof fake.client;
+    const store = createLayoutStore();
+    running.push(persistLayout(client, store));
+    const hydrating = store.getState().hydrate(client, () => true);
+    opts.during?.(store);
+    await vi.runAllTimersAsync();
+    await hydrating;
+    const writes = () => fake.invoked('layout.set') as { key: string; value: unknown }[];
+    const pages = () => writes().filter((write) => write.key === 'destination').map((write) => write.value);
+    return { store, pages, writes };
+  }
+
+  it('a page opened is written as its stored form after the delay; closed, the key is deleted', async () => {
+    const { store, pages } = await launch({});
+    store.getState().openDestination(PAGE);
+    expect(pages()).toEqual([]);
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(pages()).toEqual([stored(PAGE)]);
+    store.getState().closeDestination();
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(pages()).toEqual([stored(PAGE), null]);
+    expect(storedLayout(store.getState()).get('destination'), 'what the suites hold against build F: null while no page is open').toBeNull();
+  });
+
+  it('the Settings dialog is never written', async () => {
+    const { store, pages } = await launch({});
+    store.getState().openSettings('voice');
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(pages()).toEqual([]);
+  });
+
+  it('rule 4: a stored page over the stored form’s shape opens, and nothing is written', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE) });
+    expect(store.getState().destination).toEqual(PAGE);
+    vi.advanceTimersByTime(1000);
+    expect(pages()).toEqual([]);
+  });
+
+  it('rule 5: a stored page over another shape of main.tabs does not open, and the key is deleted', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE), 'main.tabs': v1 });
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+  });
+
+  // Rule 4 asks the shape of the stored `main.tabs`, not of the default read in its place.
+  it('rule 5: a stored page over a main.tabs that does not parse does not open, and the key is deleted', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored(PAGE), 'main.tabs': { version: 9 } });
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('main.tabs'))).toHaveLength(1);
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+    warn.mockRestore();
+  });
+
+  it('rule 5: a stored page with no main.tabs in the file does not open, and the key is deleted', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE), 'main.tabs': null });
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+  });
+
+  it('a failed read of main.tabs opens no stored page and writes nothing to destination, the key left in the file', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { failing: ['main.tabs'] });
+    expect(store.getState().destination).toBeNull();
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(pages()).toEqual([]);
+    expect(error.mock.calls.filter(([line]) => String(line).includes('main.tabs'))).toHaveLength(1);
+    error.mockRestore();
+  });
+
+  it('rule 5: a stored value that does not parse opens nothing, is warned once, and is left in the file', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored({ kind: 'settings' }) });
+    expect(store.getState().destination).toBeNull();
+    expect(warn.mock.calls.filter(([line]) => String(line).includes('destination'))).toHaveLength(1);
+    vi.advanceTimersByTime(1000);
+    expect(pages()).toEqual([]);
+    store.getState().openDestination({ kind: 'library' }); // the next page opened replaces it
+    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    expect(pages()).toEqual([stored({ kind: 'library' })]);
+    warn.mockRestore();
+  });
+
+  it('rule 1: a page the person opened before the read is what stays open, written over the stored one', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { during: (s) => s.getState().openDestination({ kind: 'projects' }) });
+    expect(store.getState().destination).toEqual({ kind: 'projects' });
+    expect(pages()).toEqual([stored({ kind: 'projects' })]);
+  });
+
+  it('rule 1: a page the person opened and closed before the read leaves none, the stored key deleted', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { during: (s) => { s.getState().openDestination({ kind: 'projects' }); s.getState().closeDestination(); } });
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+  });
+
+  it('rule 2: an act of the person’s that showed a tab before the read leaves none, the stored key deleted', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { during: (s) => s.getState().openSession(A) });
+    expect(store.getState().destination).toBeNull();
+    expect(pages()).toEqual([null]);
+  });
+
+  it('rule 2 does not count an open made inside quietly: the stored page opens', async () => {
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { during: (s) => quietly(() => s.getState().openSession(A)) });
+    expect(store.getState().destination).toEqual(PAGE);
+    expect(pages()).toEqual([]);
+  });
+
+  it('a read of the key that failed writes nothing to it', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { store, pages } = await launch({ destination: stored(PAGE) }, { failing: ['destination'], during: (s) => s.getState().openDestination({ kind: 'projects' }) });
+    expect(store.getState().destination).toEqual({ kind: 'projects' });
+    expect(pages()).toEqual([]);
+    error.mockRestore();
+  });
+
+  // M6 (A8; "At hydration", rule 3): `main.tabs` as build F writes it, with tabs of the four retired kinds. The tab in
+  // front decides: a Customize, Projects or library tab opens its page, a Settings tab none and no stored page over it.
+  describe('rule 3: a retired tab in front', () => {
+    const session = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false };
+    const settingsTab = { id: 'settings', kind: 'settings', section: 'engine', pinned: false };
+    const customizeTab = { id: 'customize', kind: 'customize', section: 'skills', pinned: false };
+    const projectsTab = { id: 'projects', kind: 'projects', pinned: false };
+    const artifactsTab = { id: 'artifacts', kind: 'artifacts', pinned: false };
+    const fWrote = (active: string, key: string = at('proj-x')) => ({
+      version: 3,
+      current: key,
+      sets: { [key]: { panes: [{ tabs: [session, settingsTab, customizeTab], activeTabId: active }, { tabs: [projectsTab], activeTabId: 'projects' }], focusedPane: 0, splitRatio: 0.5 } },
+      closedTabs: [artifactsTab],
+    });
+    const RETIRED_IDS = ['settings', 'customize', 'projects', 'artifacts'];
+    const idsIn = (value: unknown) => JSON.stringify(value).match(/"id":"[^"]*"/g) ?? [];
+
+    it('A8: a Customize tab at Skills in front opens Customize at Skills, and the page and the tabs without the four are written; a second launch over what was written opens the same page and writes nothing', async () => {
+      const first = await launch({ 'main.tabs': fWrote('customize') });
+      expect(first.store.getState().destination).toEqual(PAGE);
+      expect(first.pages()).toEqual([stored(PAGE)]);
+      const tabs = first.writes().filter((write) => write.key === 'main.tabs');
+      expect(tabs).toHaveLength(1);
+      expect(idsIn(tabs[0].value).filter((id) => RETIRED_IDS.some((retired) => id === `"id":"${retired}"`))).toEqual([]);
+      expect(stripIn(tabs[0].value).panes.map((pane) => [pane.tabs.map((tab) => tab.id), pane.activeTabId])).toEqual([[[session.id], session.id]]);
+      const second = await launch(Object.fromEntries(first.writes().map((write) => [write.key, write.value])));
+      expect(second.store.getState().destination).toEqual(PAGE);
+      vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+      expect(second.writes()).toEqual([]);
+    });
+
+    it('a Projects tab in front opens Projects', async () => {
+      const value = fWrote(session.id);
+      const { store } = await launch({ 'main.tabs': { ...value, sets: { [at('proj-x')]: { ...value.sets[at('proj-x')], focusedPane: 1 } } } });
+      expect(store.getState().destination).toEqual({ kind: 'projects' });
+    });
+
+    it('a Settings tab in front opens no page, and a stored page over tabs of the stored form’s shape is deleted, not restored', async () => {
+      const { store, pages } = await launch({ 'main.tabs': fWrote('settings', 'none'), destination: stored({ kind: 'library' }) });
+      expect(store.getState().destination).toBeNull();
+      expect(store.getState().settings, 'the dialog is never opened by a relaunch').toBeNull();
+      expect(pages()).toEqual([null]);
+    });
+  });
+
+  it('a profile that holds no destination costs no read of it', async () => {
+    const fake = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs', 'panel.pinned', ...Object.keys(SIDE_COLUMN_KEYS)] }, 'layout.get': () => ({ value: null }), 'layout.set': undefined });
+    await createLayoutStore().getState().hydrate(fake.client, () => true);
+    expect((fake.invoked('layout.get') as { key: string }[]).map((read) => read.key)).not.toContain('destination');
   });
 });

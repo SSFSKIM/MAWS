@@ -343,3 +343,31 @@ describe('the seam’s registry read', () => {
     expect(await reading.registryRead?.read()).toEqual(READ);
   });
 });
+
+// The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M2's Decisions): the machine's
+// ceiling as a fork from another machine is judged against it, which the daemon hands the session service: the loaded
+// module's own policy read, as it stands when asked. Unloaded, or from a module that has none, every mode is above it:
+// no act from another machine reaches the services while no endpoint is loaded.
+describe('the seam’s ceiling', () => {
+  class CeilingModule extends Module {
+    ceiling = 'acceptEdits';
+    aboveCeiling(mode: string): boolean {
+      return mode !== 'default' && mode !== this.ceiling;
+    }
+  }
+
+  it('is the loaded module’s, read at each ask, and refuses every mode while nothing is loaded or the module has none', async () => {
+    const unloaded = new LazyEndpoint('b1', loader().load);
+    await unloaded.start(services());
+    expect(unloaded.aboveCeiling('default')).toBe(true);
+    const without = new LazyEndpoint('b1', loader().load);
+    await without.start(services(true));
+    expect(without.aboveCeiling('default')).toBe(true);
+    const modules: CeilingModule[] = [];
+    const judging = new LazyEndpoint('b1', async () => ({ createEndpoint: (options) => (modules.push(new CeilingModule(options)), modules.at(-1)!) }));
+    await judging.start(services(true));
+    expect([judging.aboveCeiling('default'), judging.aboveCeiling('acceptEdits'), judging.aboveCeiling('bypassPermissions')]).toEqual([false, false, true]);
+    modules[0].ceiling = 'bypassPermissions';
+    expect(judging.aboveCeiling('bypassPermissions')).toBe(false);
+  });
+});

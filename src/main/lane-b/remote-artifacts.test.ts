@@ -189,7 +189,8 @@ describe('the machine’s artifacts feed', () => {
     feed().sink.subbed('snapshot', { epoch: 'artifacts:boot1', seq: 0 });
     feed().sink.event({ epoch: 'artifacts:boot1', seq: 1 }, { name: 'artifacts.changed', payload: { artifactId: A1, kind: 'document', revision: 4, change: 'updated' } });
     feed().sink.event({ epoch: 'artifacts:boot1', seq: 2 }, { name: 'library.changed', payload: { revision: 9 } });
-    expect(l.emitted.map((e) => [e.machine, e.name])).toEqual([
+    // the UX wave, U9 (M5): the machine's settled word, said at the roster's `up` (./remote.ts), is no artifact's
+    expect(l.emitted.filter((e) => e.name !== 'remote.settled').map((e) => [e.machine, e.name])).toEqual([
       [MINI, 'artifacts.resync'], // every opening: what changed before it reached no one
       [MINI, 'artifacts.changed'],
       [MINI, 'library.changed'],
@@ -298,6 +299,8 @@ describe('Save As of a remote artifact', () => {
       env: {},
       local: LOCAL,
       remote: (machine) => l.adapter.artifacts.files(machine),
+      layout: { get: () => null, set: () => {} }, // UX wave U5: no export folder kept
+      sessionFolder: () => null,
     });
     expect(await files.saveAs({ artifactId: A1, source: { export: { revision: 3, format: 'pdf' } } }, null, MINI)).toEqual({ saved: true, path: join(saves, 'Q3 plan.pdf') });
     expect(readFileSync(join(saves, 'Q3 plan.pdf')).equals(exported)).toBe(true);

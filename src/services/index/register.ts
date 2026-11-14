@@ -23,10 +23,17 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
   // An app session id with no row (an unstarted tab) is an answer, not an error.
   register('session.get', ({ appSessionId }, { reader }) => index.sessions.get(appSessionId as AppSessionId, reader));
   register('session.update', ({ appSessionId, patch }, { reader }) => {
-    // The whole record is this command's answer, and a reader must never be answered it (it holds paths, settings and a
-    // spawn's signed act): a reader's update is `session.reader.update` (Decision Log, "M6a Task 1's fork")
-    if (reader !== undefined) throw new Error('session.update takes no reader: a reader updates through session.reader.update');
-    return applyPatch(index, appSessionId as AppSessionId, patch as SessionPatch);
+    const app = appSessionId as AppSessionId;
+    if (reader === undefined) return applyPatch(index, app, patch as SessionPatch);
+    // The whole record is this command's answer, and a reader must never be answered the owners' reading of it: a
+    // reader's update is `session.reader.update` (Decision Log, "M6a Task 1's fork"). The UX wave (U9, R9, as amended
+    // there): an unarchive is the one a reader may make, its patch checked here whatever the endpoint admitted, and it is
+    // answered with the record as `session.get` answers that reader, read after the write, never `applyPatch`'s.
+    if (!isUnarchive(patch)) throw new Error('session.update takes no reader but for an unarchive: a reader updates through session.reader.update');
+    index.transaction(() => index.sessions.update(app, { archived: false }));
+    const record = index.sessions.get(app, reader);
+    if (record === null) throw new Error(`unknown app session: ${app}`);
+    return record;
   });
   // A member's write sends no session.changed and takes no revision (sessions.ts); the owners' does, as session.update's
   register('session.reader.update', ({ appSessionId, patch }, { reader }) => readerStateOf(index.transaction(() => applyReaderFields(index, appSessionId as AppSessionId, patch as ReaderPatch, reader ?? 'owner'))));
@@ -80,6 +87,9 @@ export function registerIndexHandlers(index: Index, { register }: Pick<ServicesB
     index.drafts.set(app, draft === null ? null : restoreWithheld(draft, index.drafts.get(app, reader)), reader, replaces);
   });
 }
+
+// U9 (R9): exactly `{archived: false}`, by the patch's own keys (an `undefined` field counts as named).
+const isUnarchive = (patch: unknown): boolean => typeof patch === 'object' && patch !== null && Object.keys(patch).length === 1 && (patch as { archived?: unknown }).archived === false;
 
 // `pinned` → setPinned; `lastSeen` (with or without `unread: false`, "Mark all read") → markSeen, which clears unread;
 // `unread` alone → setUnread; `title` (the override of the Title rule) and `archived` → update. One transaction.

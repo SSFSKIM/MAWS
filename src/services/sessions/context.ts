@@ -66,6 +66,9 @@ export interface SessionServiceDeps {
   now?: () => string;
   log?: (message: string) => void;
   systemRoot?: string; // P5 O7 M9: the tests' seam, the file-system root the machine's managed settings are read beneath
+  // the UX wave (U9, M2): whether the machine's ceiling refuses a session started from another machine in `mode`, read
+  // where a fork from another machine is allocated (mawsd: its endpoint's policy); absent, every such fork is refused
+  aboveCeiling?: (mode: string) => boolean;
 }
 
 export const WATCHDOG_MS = 150_000; // a launch with no status for this long fails (C3's own initialize deadline is 120 s, and 30 s for an engine that writes nothing at all)

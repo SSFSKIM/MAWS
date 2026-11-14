@@ -18,6 +18,7 @@
 // `org.projects.changed`, each the whole value, into the sessions store (`applyRegistry`), and a layout key that is no
 // row's any more moves whole to its successor (§J.2, `successorOf`), once this Mac's own projects are in.
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge, SessionDigest } from '@shared/ipc/schema';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgProjects, OrgRows } from '@shared/ipc/schema/org';
@@ -30,7 +31,8 @@ import { useLayout } from '../stores/layout';
 import { usePanelHost } from '../panel/host'; // UX wave U8b
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
-import { applyRemoteSession, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2
+import { startLiveWords } from '../lane-b/live-word'; // the UX wave, U9 (S-05)
+import { applyRemoteSession, applyRemoteSettled, holdsRemoteStatus, keepsRemoteStatus } from '../lane-b/remote-session'; // P5 O7 M2; U9 M5: the settled word
 import { machineOfRow, selectOrgIndex, setKeyOfProject, successorOf, type RowKey } from '../stores/org-projects'; // P5 O6 M5; the project registry: successorOf
 import { displayTitle } from '../sessions/title'; // P5 O6 M2: a session tab's last-known title
 import type { RekeyOf } from '../stores/layout-model';
@@ -44,7 +46,7 @@ import { useGit } from '../stores/git';
 import { queryClient } from './query';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { workingFolder } from '@shared/sessions/working-folder';
-import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
+import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, resetScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
@@ -135,6 +137,23 @@ export function connectShell(
     }
   };
 
+  // UX wave U8c-2 (M4 decision 2): the card's pull-request row and Source control read `scm.status` and `scm.pr.state` by
+  // the session alone, so a session whose working folder the store now holds differently has both reset (fix wave 1: an
+  // answer or a read still out was the checkout the agent left) and asked again; a change that leaves the folder (a
+  // title, the agent's folder inside the same checkout) touches neither. The branch review (finding 7): every path that
+  // replaces records runs it, a machine's changes (`ids`, the records they name) and its snapshot (every record held
+  // before); the hub's rows hold no folder and replace no record.
+  const askAgainWhereMoved = (before: ReadonlyMap<AppSessionId, SessionRecord>, ids: Iterable<AppSessionId> = before.keys()) => {
+    const after = sessions().records;
+    const moved = new Set<AppSessionId>();
+    for (const id of ids) {
+      const was = before.get(id);
+      const now = after.get(id);
+      if (was && now && was !== now && workingFolder(was).path !== workingFolder(now).path) moved.add(id);
+    }
+    if (moved.size > 0) resetScmQueries((appSessionId) => moved.has(appSessionId));
+  };
+
   // In arrival order; consecutive changes and consecutive digests of one machine go to the store as one call each.
   const apply = (queue: Queued[]) => {
     for (let i = 0; i < queue.length; ) {
@@ -149,6 +168,7 @@ export function connectShell(
           const before = sessions().records;
           sessions().applyChangedMany(events, m);
           closeArchived(events, before);
+          askAgainWhereMoved(before, events.map(({ record }) => record.appId));
         } else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d), m);
         i = j;
         continue;
@@ -227,6 +247,9 @@ export function connectShell(
       applyRemoteSession(state);
       if (!holdsRemoteStatus(state)) sessions().forgetStatuses(machineOf(state.address), (appSessionId) => appSessionId !== state.address);
     }),
+    // the UX wave, U9 (M5): main's word that a machine's generation settled, which a history read there waits for
+    on('remote.settled', applyRemoteSettled),
+    startLiveWords(), // the UX wave, U9 (S-05): a remote row's live word, from its open tab's held status
   ];
 
   // Replies apply only while this connection and the machine's link generation are live; the stores' own revisions
@@ -272,7 +295,11 @@ export function connectShell(
     attention().beginSnapshot(machine);
     const attended = answer('attention.list', live, client.invoke('attention.list', undefined, opts), (items) => attention().applySnapshot(items, machine), () => attention().cancelSnapshot(machine));
     const records = Promise.all([
-      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => sessions().applyList(value, machine), refused),
+      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => {
+        const before = sessions().records;
+        sessions().applyList(value, machine);
+        askAgainWhereMoved(before);
+      }, refused),
       answer('session.projects.list', live, client.invoke('session.projects.list', undefined, opts), (value) => sessions().applyProjects(value, machine), refused),
       answer('session.digests', live, client.invoke('session.digests', undefined, opts), ({ digests }) => sessions().applyDigests(digests, machine), refused),
     ]).then((applied) => applied.every(Boolean));
@@ -478,7 +505,10 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
     client.on('host.status', (_status, { machine }) => useGit.getState().retryUnanswered(machine)),
     client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
-    client.on('session.status', ({ appSessionId, status }) => refreshPublishedPrState(appSessionId, status.published, client)), // P5 E312
+    client.on('session.status', ({ appSessionId, status }) => {
+      const checkout = checkoutOf(appSessionId); // P5 E312; UX wave U8c-2: the PR state is its checkout's
+      if (checkout !== null) refreshPublishedPrState(appSessionId, checkout, status.published, client);
+    }),
   ];
   return () => offs.forEach((off) => off());
 }
@@ -486,9 +516,14 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // The repository a session's checkout is in, as the git store knows it (the surfaces that read the scm queries watch
 // the checkout): the checkout from the session's record, else from its `scm.status` answer.
 function repoRootOf(appSessionId: AppSessionId): string | null {
+  const checkout = checkoutOf(appSessionId);
+  return checkout === null ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
+}
+
+// The checkout a session works in as the page knows it: its record's working folder, else the folder its `scm.status` answered.
+function checkoutOf(appSessionId: AppSessionId): string | null {
   const record = useSessions.getState().records.get(appSessionId);
-  const checkout = record ? workingFolder(record).path : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
-  return checkout === undefined ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
+  return record ? workingFolder(record).path : (queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory ?? null);
 }
 // C8a end
 

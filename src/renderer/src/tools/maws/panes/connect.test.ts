@@ -404,3 +404,62 @@ describe('the pane bridge, window side (E1)', () => {
     expect(fake.invoked('maws.pane.answer')).toEqual([]);
   });
 });
+
+// UX wave U7b (M6, decision 5; Interfaces §F, "Not the person's act"): what an agent shows closes neither a page nor the
+// Settings dialog, and what it brings forward is in front of the strip behind them; across the artifact's lookup the
+// origin travels with the call, so the person's act in between closes the page as usual and the late add leaves it so.
+describe('show_pane behind a page (UX wave U7b)', () => {
+  const PAGE = { kind: 'projects' } as const;
+  const DASH = '00000000-0000-4000-8000-000000000002';
+
+  it('file: its tab is in front of the strip, and the page and the dialog stay', async () => {
+    useLayout.getState().openDestination(PAGE);
+    useLayout.getState().openSettings();
+    show(fake, { pane: 'file', target: '/repo/src/b.ts', line: 1 });
+    await settle();
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'file', path: '/repo/src/b.ts' });
+    expect(useLayout.getState().destination).toEqual(PAGE);
+    expect(useLayout.getState().settings).toEqual({ section: null });
+  });
+
+  it('a panel pane for a session not in front brings it to the front of the strip behind the page, which stays', async () => {
+    registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool);
+    useLayout.getState().openDestination(PAGE);
+    show(fake, { appSessionId: B });
+    await settle();
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    expect(useLayout.getState().destination).toEqual(PAGE);
+  });
+
+  describe('across the artifact’s lookup', () => {
+    beforeEach(() => {
+      disconnect();
+      fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' } }); // `artifacts.get` waits for the test's reply
+      disconnect = connectPaneShows(fake.client);
+      registerPanelTool(probeTool('artifacts', { title: 'Artifacts', multiInstance: false }).tool);
+    });
+    const artifact = { id: DASH, kind: 'html', title: 'Dashboard', handle: 'dash', createdBy: { kind: 'session', appSessionId: B }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3 };
+
+    it('the add that arrives after the read leaves the page open', async () => {
+      useLayout.getState().openDestination(PAGE);
+      show(fake, { appSessionId: B, pane: 'artifact', target: DASH });
+      await settle();
+      expect(fake.pending('artifacts.get')).toBe(1);
+      await fake.reply('artifacts.get', { artifact });
+      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['artifacts']);
+      expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+      expect(useLayout.getState().destination).toEqual(PAGE);
+    });
+
+    it('a session’s row clicked while the read is out closes the page, and the add that then arrives leaves it closed', async () => {
+      useLayout.getState().openDestination(PAGE);
+      show(fake, { appSessionId: B, pane: 'artifact', target: DASH });
+      await settle();
+      useLayout.getState().openSession(C); // the person's act
+      expect(useLayout.getState().destination).toBeNull();
+      await fake.reply('artifacts.get', { artifact });
+      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['artifacts']);
+      expect(useLayout.getState().destination).toBeNull();
+    });
+  });
+});

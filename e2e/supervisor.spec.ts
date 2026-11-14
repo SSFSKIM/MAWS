@@ -58,7 +58,7 @@
 //   (f) and (g) branch on `host.holder` (above): the older host's form is kept with an engine host that stands in for
 //        one before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, detached.ts).
 import { addressed } from './support/address';
-import { openSurface, sideColumn, surface } from './support/shell';
+import { openSurface, settingsDialog, sideColumn, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -581,7 +581,8 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
     await untilRequested(run.page, id);
 
     await menu(run.maws, 'settings.open');
-    const group = run.page.getByRole('group', { name: 'Background supervisor' });
+    // UX wave U7b: Settings is a dialog over the window, not a main tab
+    const group = settingsDialog(run.page).getByRole('group', { name: 'Background supervisor' });
     await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`));
     await shots(run.maws, 'settings-supervisor', () => group);
 

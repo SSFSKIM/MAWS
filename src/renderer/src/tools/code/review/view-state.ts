@@ -10,6 +10,7 @@ export type ReviewMode = 'unified' | 'split';
 
 export interface ReviewUi {
   session: AppSessionId | null; // the session the scope was decided for (a pinned tool's changes under it)
+  directory: string | null; // the working folder it was decided in (UX wave U8c-2: the agent moving starts it over); null until known
   scope: ReviewScope | null; // null until decided: defaultScope once the status (and This branch's availability) is known
   turnId: TurnId | null; // Last turn's turn; the chip shows while it is set
   selected: string | null; // a file's identity in its scope (ReviewFile.path), or a requested path not in the list
@@ -22,9 +23,10 @@ export interface ReviewUi {
   redecide: { path: string | null } | null; // an open() with no scope: the default decided again, with the path it named
 }
 
-export function createReviewUi(init: { session: AppSessionId | null; params?: ReviewParams | null; mode?: ReviewMode }): StoreApi<ReviewUi> {
+export function createReviewUi(init: { session: AppSessionId | null; directory?: string | null; params?: ReviewParams | null; mode?: ReviewMode }): StoreApi<ReviewUi> {
   return createStore<ReviewUi>()(() => ({
     session: init.session,
+    directory: init.directory ?? null,
     scope: null,
     turnId: null,
     selected: null,
@@ -38,10 +40,11 @@ export function createReviewUi(init: { session: AppSessionId | null; params?: Re
   }));
 }
 
-// A pinned tool shown for another session starts over there: its scope is decided again, its selection dropped. The
-// mode and the viewed marks (keyed by directory and scope) stay.
-export function forSession(session: AppSessionId | null): Partial<ReviewUi> {
-  return { session, scope: null, turnId: null, selected: null, hunk: 0, scrollTop: 0, redecide: null };
+// A pinned tool shown for another session starts over there, and so does a tool whose session's working folder changed
+// (UX wave U8c-2, M4 decision 5: the agent moved): its scope is decided again, its selection dropped, the scroll at the
+// top. The mode and the viewed marks (keyed by directory and scope, so a checkout's are found on return) stay.
+export function forSession(session: AppSessionId | null, directory: string | null): Partial<ReviewUi> {
+  return { session, directory, scope: null, turnId: null, selected: null, hunk: 0, scrollTop: 0, redecide: null };
 }
 
 // An open() (X5 re-targeting): a receipt's `{ scope: 'turn', turnId, path }` selects the turn and the path; a scope

@@ -172,6 +172,19 @@ describe('occupancy of a directory', () => {
     await expect(occupancyOf(deps, wt)).resolves.toEqual({ ...empty, self: 2, foreign: 1, liveAppSessionIds: ['a', 'b'] });
   });
 
+  // UX wave U8c-2, M3 (decision 9): a session whose agent works in the worktree occupies it, whichever way it got there,
+  // and a session occupies its launch folder while its agent is away; the record's word, nothing read there.
+  it('counts a session whose agent works here, and one whose launch folder is here', async () => {
+    const elsewhere = join(temp, 'elsewhere');
+    records.push(
+      record('cd', { directory: elsewhere, engineSessionId: sid('eng-cd'), agentFolder: { checkout: wt, cwd: join(wt, 'src'), branch: 'wt', linked: true } }),
+      record('tool', { directory: elsewhere, worktree: { path: elsewhere, branch: 'other' }, launchFolder: wt, engineSessionId: sid('eng-tool') }),
+      record('none', { directory: elsewhere, engineSessionId: sid('eng-none') }),
+    );
+    await expect(occupancyOf(deps, wt)).resolves.toEqual({ ...empty, idle: 2, idleAppSessionIds: ['cd', 'tool'] });
+    await expect(occupancyOf(deps, elsewhere)).resolves.toEqual({ ...empty, idle: 3, idleAppSessionIds: ['cd', 'tool', 'none'] });
+  });
+
   it('fails with C4’s message when the registry fails closed, never answering an empty directory', async () => {
     host.registryFailure = 'holder registry unreadable: EACCES';
     await expect(occupancyOf(deps, wt)).rejects.toThrow('holder registry unreadable: EACCES');

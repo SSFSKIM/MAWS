@@ -7,7 +7,7 @@
 import { ContextMenu } from 'radix-ui';
 import { useEffect, type KeyboardEvent, type MouseEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
-import { UNPINNABLE_KINDS, type Strip, type TabRef } from '@shared/ipc/schema/layout';
+import type { Strip, TabRef } from '@shared/ipc/schema/layout';
 import { PinIcon, useChordHint } from '../app/IconButton';
 import { BRIDGED_LINE, holderLine } from '../attention/derive'; // P5 O9
 import { GlyphMark } from '../attention/GlyphMark';
@@ -19,7 +19,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { machineOf } from '@shared/machine/address';
-import { selectOffline, useMachines } from '../stores/machines';
+import { useMachines } from '../stores/machines';
+import { selectShownOffline, usePhaseClock } from '../app/machine-mark'; // the UX wave, U9
 import { displayTitle } from '../sessions/title';
 // E5 start
 import { EDITOR_COPY } from '../tools/code/copy';
@@ -88,14 +89,6 @@ export function useTabLabel(tab: TabRef): TabLabel {
       return { title: `Diff · ${tab.ref}`, secondary: null, glyph: null, fileType: null };
     case 'diagnostics':
       return { title: 'Diagnostics', secondary: null, glyph: null, fileType: null };
-    case 'settings':
-      return { title: 'Settings', secondary: null, glyph: null, fileType: null };
-    case 'projects':
-      return { title: 'Projects', secondary: null, glyph: null, fileType: null };
-    case 'customize':
-      return { title: 'Customize', secondary: null, glyph: null, fileType: null };
-    case 'artifacts': // P3-G
-      return { title: 'Artifacts', secondary: null, glyph: null, fileType: null };
     case 'artifact': // P3-L
       return { title: artifactTitle ?? LIBRARY_COPY.fallbackTitle, secondary: null, glyph: null, fileType: null };
     case 'browser': // E4a
@@ -119,7 +112,8 @@ function useHolderMark(tab: TabRef): { text: string; title: string } | null {
 
 function useSessionOffline(tab: TabRef): boolean {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : null;
-  return useMachines((s) => appSessionId !== null && selectOffline(s, machineOf(appSessionId)));
+  const now = usePhaseClock(); // the UX wave, U9 (O-39): greyed only in the offline and removed phases
+  return useMachines((s) => appSessionId !== null && selectShownOffline(s, machineOf(appSessionId), now));
 }
 
 // A tab's full name, its accessible name, tooltip and All tabs line (U13a, §G): the title, then its place when the strip
@@ -226,9 +220,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       <ContextMenu.Trigger asChild>{element}</ContextMenu.Trigger>
       <ContextMenu.Portal>
         <ContextMenu.Content data-tab-focus-owner={tab.id} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-          {!UNPINNABLE_KINDS.has(tab.kind) && (
-            <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
-          )}
+          <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
           <TabMenuItem onSelect={() => moveToOtherPane(tab.id, pane)}>Move to other pane</TabMenuItem>
           {tab.kind === 'artifact' && <ShowInPanelItem tab={tab} />}
           <ContextMenu.Separator className="my-1 h-px bg-border" />

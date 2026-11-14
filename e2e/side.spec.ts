@@ -264,17 +264,19 @@ async function projectRows(page: Page, parent: string): Promise<{ id: string; le
 }
 
 test.describe('side threads, Send to main and /btw (E3)', () => {
-  test('1. the gutter’s comment mark opens the sheet: titled by the line, Side thread selected, Send disabled until text', async () => {
+  test('1. the gutter’s comment mark opens the sheet: titled by the line, "Send to main" unchecked (a side thread), Send disabled until text', async () => {
     const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent')]);
     const viewer = await openFile(c.page, c.repo, APP);
     const sheet = await commentOn(c.page, viewer, 3);
     await expect(sheet).toHaveAttribute('data-anchor-kind', 'file-line');
     await expect(sheet).toHaveAttribute('data-anchor-locator', `${c.repo.path(APP)}#L3`);
     await expect(sheet.getByText(`${c.repo.path(APP)}#L3`), 'the locator shown').toBeVisible();
-    await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).not.toBeChecked();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeEnabled();
-    await expect(sheet.locator('[data-destination="main"]'), 'the parent is idle: an ordinary prompt').toContainText('Sent now');
+    // UX wave U5a (A1): one checkbox in place of the two segments, unchecked; its caption is its title alone
+    const toMain = sheet.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain).not.toBeChecked();
+    await expect(toMain).toBeEnabled();
+    await expect(sheet.getByRole('radio'), 'no two-segment control').toHaveCount(0);
+    await expect(sheet.locator('label:has([data-send-to-main])'), 'the parent is idle: an ordinary prompt').toHaveAttribute('title', 'Sent now');
     await expect(sheet.locator('[data-comment-screenshot]'), 'the gutter gives no screenshot').toHaveCount(0);
     const send = sheet.getByRole('button', { name: 'Send' });
     await expect(send).toBeDisabled();
@@ -418,14 +420,17 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   });
 
   test('4. Send to main: idle, an ordinary prompt that opens a turn; mid-turn, a `next` steer drawn where it was delivered; each with its anchor chip, and the screenshot as an image', async () => {
+    // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8): the sheet's "Send to main" ticked is
+    // the window's one path (`side.comment.content`, then the session's own send); `side.sendToMain` stays on the wire with
+    // no caller in this window (R1), so its screenshot case here is what a window of an earlier build still sends.
     test.setTimeout(120_000);
     const replies = { sheet: 'Sheet comment read: the total is recomputed per call.', idle: 'Screenshot read: the total is drawn in the header.', steered: 'Folded the comment in after the step: the header shows the total.' };
     let steerUuid = '';
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
       parent.turn(replies.sheet); // the sheet's Send to main, the parent idle
-      parent.turn(replies.idle); // `side.sendToMain` with a screenshot, idle
-      const slow = parent.prompt(); // a prompt the test sends, whose Bash call is still running when the comment arrives
+      parent.turn(replies.idle); // `side.sendToMain` with a screenshot, idle (R1: an earlier build's window)
+      const slow = parent.prompt(); // a prompt the test sends, whose Bash call is still running when the sheet's comment arrives
       parent.toolCall(slow);
       steerUuid = parent.steer();
       parent.toolResult();
@@ -442,11 +447,12 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     writeFileSync(shotPath, solidPng(96, 48, [64, 128, 200]));
     const screenshot = { path: shotPath, width: 96, height: 48 };
 
-    // the sheet, Send to main, the parent idle: `session.send` (no priority), an ordinary prompt opening a turn
+    // the sheet, Send to main ticked, the parent idle: `session.send` (no priority), an ordinary prompt opening a turn; the
+    // engine receives one text block, today's text for that anchor to the byte
     const viewer = await openFile(page, repo, APP);
     const sheet = await commentOn(page, viewer, 3);
-    await sheet.locator('[data-destination="main"]').click();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeChecked();
+    await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
+    await expect(sheet.locator('label:has([data-send-to-main])')).toHaveAttribute('title', 'Sent now');
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
@@ -461,7 +467,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(main.getByText('Comment on "app.ts:3"', { exact: false }), 'the lead line is not drawn').toHaveCount(0);
     await expect(main.locator('[data-side-thread]'), 'no side thread').toHaveCount(0);
 
-    // a producer's screenshot, the parent idle: sent, with the image first
+    // a producer's screenshot, the parent idle, through `side.sendToMain` as an earlier build's window sends it (R1):
+    // sent, with the image first
     const idleComment = 'The total in the header looks stale.';
     expect(value(await invoke(page, 'side.sendToMain', { appSessionId: parent as never, anchor: fileAnchor(repo, 5), text: idleComment, screenshot }))).toMatchObject({ disposition: 'sent' });
     await expect(main.getByText(replies.idle)).toBeVisible({ timeout: 20_000 });
@@ -469,21 +476,26 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(bubble(idleComment).locator('img.transcript-attachment-image')).toBeVisible();
     expect((writtenUsers(maws, parent)[2]!.frame.message!.content as { type: string }[]).map((b) => b.type)).toEqual(['image', 'text']);
 
-    // mid-turn: a `next` steer, folded in at the tool boundary and drawn there
+    // mid-turn: the sheet ticked is a `next` steer (its title the composer's words for it), folded in at the tool
+    // boundary and drawn there
     const slowPrompt = 'Run the slow step, then report.';
     value(await invoke(page, 'session.send', { appSessionId: parent as never, content: slowPrompt }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { message: 'the slow turn is running' }).not.toBeNull();
     const steerComment = 'While you are in there, check line 7 too.';
-    expect(value(await invoke(page, 'side.sendToMain', { appSessionId: parent as never, anchor: fileAnchor(repo, 7), text: steerComment, screenshot }))).toMatchObject({ disposition: 'steered' });
-    await expect(main.getByText(replies.steered)).toBeVisible({ timeout: 20_000 });
+    await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+    const busySheet = await commentOn(page, viewer, 7);
+    await busySheet.getByRole('checkbox', { name: 'Send to main' }).check();
+    await expect(busySheet.locator('label:has([data-send-to-main])'), 'the composer’s words for a steer').toHaveAttribute('title', 'Sends at the next step');
+    await busySheet.getByRole('textbox', { name: 'Comment' }).fill(steerComment);
+    await busySheet.getByRole('button', { name: 'Send' }).click();
+    await expect(busySheet, 'a steer is a confirmed delivery: the sheet closes').toHaveCount(0);
+    await expect.poll(() => writtenUsers(maws, parent).length).toBe(5);
     const steer = writtenUsers(maws, parent)[4]!.frame;
     expect(steer.priority).toBe('next');
-    expect(steer.message!.content).toEqual([
-      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: readFileSync(shotPath).toString('base64') } },
-      { type: 'text', text: anchoredMessage({ anchor: fileAnchor(repo, 7), text: steerComment, destination: 'main', screenshot: true }) },
-    ]);
+    expect(steer.message!.content).toEqual([{ type: 'text', text: anchoredMessage({ anchor: fileAnchor(repo, 7), text: steerComment, destination: 'main', screenshot: false }) }]);
+    await showSession(page, parent);
+    await expect(main.getByText(replies.steered)).toBeVisible({ timeout: 20_000 });
     await expect(bubble(steerComment).locator('[data-chip="anchor"]')).toHaveText('app.ts:7');
-    await expect(bubble(steerComment).locator('img.transcript-attachment-image')).toBeVisible();
     // drawn at its delivery position: after the slow prompt's tool call, before the turn's reply
     const order = await main.evaluate((root, texts) => {
       const at = (text: string) => Array.from(root.querySelectorAll('*')).findIndex((el) => el.children.length === 0 && el.textContent?.includes(text));
@@ -696,7 +708,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const { child, viewer } = await openThreadFromGutter(c);
     // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row
     const sheet = await commentOn(page, viewer, 3);
-    await sheet.locator('[data-destination="main"]').click();
+    await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill('Is the recompute intended?');
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);

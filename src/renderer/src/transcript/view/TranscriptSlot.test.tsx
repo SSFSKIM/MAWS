@@ -148,7 +148,7 @@ describe('TranscriptSlot', () => {
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
     b.end(['u1']);
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project-wt', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
@@ -158,6 +158,49 @@ describe('TranscriptSlot', () => {
     act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
     await settle();
     expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt');
+  });
+
+  // UX wave U8c-2 (M5, §K): the slot hands down the selector's launch folder and the agent's folder while the session is
+  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) then names the
+  // launch folder, or no folder; a call read from rows names its own unless it ran in one of the two. Invented folders.
+  it('hands down the launch folder and the agent’s folder while the session is there, and neither while it reads moved', async () => {
+    const shells = () => {
+      const b = builder();
+      b.turn('u1', 'List it');
+      b.toolUse('t1', 'Bash', { command: 'ls' }); // live: no folder
+      b.result('t1', 'a', { structured: BASH_RESULT('a') });
+      b.toolUse('t2', 'Bash', { command: 'git status' });
+      Object.assign(b.events.at(-1)!, { cwd: '/repo/packages/app' }); // read from rows: the agent's sub-folder
+      b.result('t2', 'b', { structured: BASH_RESULT('b') });
+      b.toolUse('t3', 'Bash', { command: 'pwd' });
+      Object.assign(b.events.at(-1)!, { cwd: '/repo' }); // read from rows: the launch folder
+      b.result('t3', 'c', { structured: BASH_RESULT('c') });
+      b.end(['u1']);
+      return b.events;
+    };
+    const lines = async (key: string, record: Partial<SessionRecord>) => {
+      const id = at(key as AppSessionId);
+      const events = shells();
+      const records = useSessions.getState().records;
+      act(() => useSessions.setState({ records: new Map([[id, { directory: '/repo', worktree: null, holder: { kind: 'self' }, ...record } as unknown as SessionRecord]]) }));
+      onTestFinished(() => useSessions.setState({ records }));
+      const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events, lastSeq: events.length, complete: true } }));
+      window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+      const view = render(<TranscriptSlot appSessionId={id} />);
+      await settle();
+      expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
+      act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
+      await settle();
+      const shown = [...document.querySelectorAll('.transcript-shell')].map((shell) => shell.querySelector('.transcript-shell-meta')?.textContent ?? null);
+      view.unmount();
+      return shown;
+    };
+    // in the launch folder, the agent in a sub-folder of its checkout (not a move)
+    const there = { agentFolder: { checkout: '/repo', cwd: '/repo/packages/app', branch: 'main', linked: false } };
+    expect(await lines('app-slot-shell-there', there)).toEqual(['Session directory /repo', 'Session directory /repo', 'Session directory /repo']);
+    // moved by `cd` into a worktree: the live call names no folder, each row its own
+    const moved = { agentFolder: { checkout: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', branch: 'w1', linked: true } };
+    expect(await lines('app-slot-shell-moved', moved)).toEqual([null, 'cwd /repo/packages/app', 'cwd /repo']);
   });
 
   // A child agent's shell may have run in its own worktree, so its transcript names no directory it cannot vouch for.

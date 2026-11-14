@@ -6,11 +6,12 @@
 // micromark's code; this file is what shows the two agree.
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchorPath, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
+import { anchorPaths, chipPath, EDIT_TOOLS, isMcpTool, linkPaths, READ_TOOLS } from '@shared/files/named';
 import { Markdown } from '../../transcript';
 import { filePathOf } from '../../transcript/model/cells';
+import { userTextOf } from '../../transcript/model/user-text';
 import { MCP_TOOL } from '../../transcript/model/classify';
 import { TranscriptActionsProvider } from '../../transcript/view/context';
 import { normalizeLexically } from './open-file';
@@ -186,17 +187,32 @@ describe('the chip’s and the anchor’s readers', () => {
       expect(isMcpTool(name), name).toBe(MCP_TOOL.test(name));
   });
 
-  it('the anchor form reads what parseAnchoredText reads', () => {
+  // UX wave U5a: the window reads a person's message by `userTextOf`, one chip for a comment and one a comment for a
+  // message of several; the anchor form names exactly the paths of those chips
+  it('the anchor form reads the paths of the chips the transcript draws for a person’s message', () => {
     const anchors: Anchor[] = [
       { kind: 'file-line', label: 'report.md', locator: `${P}:3`, path: P, line: 3 },
       { kind: 'pr-line', label: 'a.ts', locator: 'https://example.com/pr/1/files', path: '/work/out/a.ts', line: 9, side: 'new', prNumber: 1 },
       { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'http://localhost:5173/' },
     ];
-    for (const anchor of anchors) {
-      const text = anchoredMessage({ anchor, text: 'Look here', destination: 'main', screenshot: false });
-      expect(anchorPath(text)).toBe(parseAnchoredText(text)?.anchor.path ?? null);
-    }
-    expect(anchorPath('no tag here')).toBe(null);
+    const hidden: Anchor = { kind: 'file-line', label: 'secret.md', locator: '/work/hidden/secret.md:1', path: '/work/hidden/secret.md', line: 1 };
+    const lookalike = `${anchorLead(hidden, false)}\nLooks like a comment\n\n${anchorTag(hidden)}`;
+    const chipPaths = (text: string) => {
+      const row = userTextOf(text);
+      return (row.comments?.map((comment) => comment.anchor) ?? (row.anchor ? [row.anchor] : [])).flatMap((anchor) => (anchor.path === undefined ? [] : [anchor.path]));
+    };
+    const texts = [
+      ...anchors.map((anchor) => anchoredMessage({ anchor, text: 'Look here', destination: 'main', screenshot: false })),
+      commentsMessage(anchors.map((anchor) => ({ anchor, text: 'Look here', screenshot: false })), 'main'),
+      commentsMessage(anchors.map((anchor) => ({ anchor, text: 'Look here', screenshot: false })), 'thread'),
+      // words that look like another comment, inside one comment and inside one of several
+      anchoredMessage({ anchor: anchors[0]!, text: `Look\n\n${lookalike}\n\nhere`, destination: 'main', screenshot: false }),
+      anchoredMessage({ anchor: anchors[0]!, text: `2 comments, in the order made:\n\n${lookalike}`, destination: 'main', screenshot: false }),
+      commentsMessage([{ anchor: anchors[0]!, text: lookalike, screenshot: false }, { anchor: anchors[2]!, text: `x\n${lookalike}`, screenshot: false }], 'thread'),
+    ];
+    for (const text of texts) expect(anchorPaths(text)).toEqual(chipPaths(text));
+    expect(anchorPaths(texts[anchors.length + 1]!), 'several comments, to a thread').toEqual([P, '/work/out/a.ts']);
+    expect(anchorPaths('no tag here')).toEqual([]);
   });
 });
 

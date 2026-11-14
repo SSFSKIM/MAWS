@@ -19,6 +19,7 @@ import { useSessions } from '../stores/sessions';
 import { waits } from '@shared/attention/kinds';
 import { itemAge } from './derive';
 import { displayTitle } from '../sessions/title';
+import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 
 export const HEADINGS = ATTENTION_HEADINGS; // the one table C7's card reads too
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
@@ -128,9 +129,9 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
       )}
       {request?.kind === 'permission.requested' && request.description && <p className="m-0 text-fg-muted">{request.description}</p>}
       {!request && item.summary !== shown.title && <p className="m-0 text-fg-muted">{item.summary}</p>}
-      {record && (
-        <p className="m-0 truncate font-mono text-fg-muted" title={record.directory}>
-          {record.directory}
+      {record && ( // UX wave U8c-2: where the call will run, the agent's folder
+        <p className="m-0 truncate font-mono text-fg-muted" title={workingFolder(record).cwd}>
+          {workingFolder(record).cwd}
         </p>
       )}
       {canAnswer && <p className="m-0 text-fg-muted">Approve applies to this request only.</p>}

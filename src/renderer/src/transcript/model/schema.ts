@@ -30,6 +30,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('shell'), command: z.string(), description: nullable(z.string()), cwd: nullable(z.string()), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()),
     interrupted: z.boolean(), backgroundTaskId: nullable(z.string()), truncated: nullable(TruncationSchema), spill: nullable(SpillSchema),
+    rowCwd: z.string().optional(), // UX wave U8c-2
   }),
   z.strictObject({ kind: z.literal('edit'), filePath: z.string(), change: z.enum(['create', 'update', 'delete']), hunks: z.array(HunkSchema), added: z.number(), removed: z.number() }),
   z.strictObject({ kind: z.literal('read'), files: z.array(z.strictObject({ path: z.string(), range: nullable(z.tuple([z.number(), z.number()])) })), preview: nullable(z.string()), truncated: nullable(TruncationSchema) }),
@@ -72,7 +73,7 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), unread: z.literal(true).optional() /* U4a */, anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), unread: z.literal(true).optional() /* U4a */, anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, comments: z.array(z.strictObject({ anchor: AnchorSchema, text: z.string(), attachment: z.number().int().nonnegative().optional() })).optional() /* UX wave U5a */, commentsTo: z.literal('thread').optional() /* UX wave U5a */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()), cut: z.literal(true).optional(), partway: z.literal(true).optional() }),
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.enum(['crash', 'message']).optional() /* E11; UX wave U4a */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),

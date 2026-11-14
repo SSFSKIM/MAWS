@@ -81,7 +81,7 @@ import { randomUUID } from 'node:crypto';
 import { MESSAGE_MAX_BYTES, type CallMessage, type Listing, type Signed } from 'org-protocol';
 import { ACQUIRE_WITHIN_MS, LATE, within } from './acquire';
 import { FOLLOW_OWNERS_CAPABILITY } from '@shared/host/socket-protocol';
-import { gradeOf } from '@shared/ipc/grades';
+import { gradeOf, type SessionRank } from '@shared/ipc/grades';
 import { remoteDaemonStatus, type DaemonStatus } from '@shared/ipc/schema/daemon';
 import { SESSION_SEARCH_LIMIT, SESSION_SEARCH_SESSIONS_MAX } from '@shared/ipc/schema/session';
 import { HISTORY_LIMIT_MAX, type HostEntry } from '@shared/ipc/schema/channel';
@@ -100,7 +100,7 @@ import { OFFERS, type Offers } from './offers';
 import { READER_ROUTED } from './readers';
 import { placeListings, policies, unsupported, type HeldSession } from './record-policy';
 import type { MachineSetup } from './policy';
-import type { Member } from './rl10/members';
+import type { Member, RecordSays } from './rl10/members';
 import { dispatchAs, type EndpointServices } from './services';
 import type { RecordSource, SessionTarget } from './sources';
 import { namedSessions, projectSessions, SESSION_NAMING, type SessionSafe } from './session-safe';
@@ -119,6 +119,8 @@ export type CallsContext = {
   records: RecordSource;
   machineOwners(): Promise<string[]>;
   recordFor(report: SessionReport): Promise<Signed<Listing> | null>;
+  /** U9: what a lane B session's spine record says of its listing (rl10/members.ts' `recordSays`); absent in a suite. */
+  recordSays?(listingId: string): RecordSays | null;
   /** P5 O7 M6: the member's ranks on the machine's sessions (`Authorizer.ranks`), for the `each-session` cut. */
   ranks(member: string): Promise<SessionRanks>;
   /** P5 O7 M5a2 fix wave 1: what an artifact answer says of sessions (session-safe.ts). */
@@ -229,8 +231,12 @@ const sessionOf = (v: unknown): string | null => (isObject(v) && isText(v.appSes
  * limit is spent on those (milestone fix: `session.search`'s 50 hits); the cut stays the authorization.
  * P5 O7 M5a: `ask`, the input the machine is asked for; `keep` is told whether the caller owns the machine (the `artifact`
  * rule's short cut, which holds every row for them), and what they asked.
+ * The UX wave (U9): `grade`, the rank the cut holds the caller to when it is not the command's own declared grade (the
+ * archived sessions' read, `session.list`, admitted and declared at `list`, keeps only the archived records they hold
+ * `manage` on).
  */
 type EachSession = {
+  grade?: SessionRank;
   sessions(output: unknown, input: unknown): string[];
   keep(output: unknown, kept: (id: string | null) => boolean, ownsMachine: boolean, input: unknown): unknown;
   narrow?(input: Fields, sessions: string[]): Fields;
@@ -251,7 +257,21 @@ function keptByKind(output: Fields, input: unknown): Fields {
   return { ...output, rows: kind === undefined ? rows : rows.filter((row) => row.kind === kind), counts };
 }
 
+/** The archived records of a `session.list` answer, each naming its app session. */
+const archivedOf = (output: unknown): Array<Fields & { appId: string }> =>
+  isObject(output) && Array.isArray(output.sessions) ? output.sessions.filter((record): record is Fields & { appId: string } => isObject(record) && isText(record.appId, 512) && record.archived === true) : [];
+
 const EACH_SESSION: Record<string, EachSession> = {
+  // The UX wave (U9, UC-7.4): the archived sessions' read behind Unarchive, each record kept for a caller who may manage
+  // it, as its owners alone may unarchive it; the machine answers it under the caller's reader, so each kept record
+  // carries their own reading. The read exists for Unarchive alone, so only archived records are kept: an unarchived one
+  // never leaves the machine through it, and a machine's unarchived records (a remote spawn's carries its signed action)
+  // never push the archived ones past the channel's ceiling (the whole-branch review's fix).
+  'session.list': {
+    grade: 'manage',
+    sessions: (output) => archivedOf(output).map((record) => record.appId),
+    keep: (output, kept) => (isObject(output) ? { ...output, sessions: archivedOf(output).filter((record) => kept(record.appId)) } : output),
+  },
   'attention.list': {
     sessions: (output) => (Array.isArray(output) ? output.map(sessionOf).filter((id) => id !== null) : []),
     keep: (output, kept) => (Array.isArray(output) ? output.filter((item) => kept(sessionOf(item))) : []),
@@ -497,7 +517,7 @@ export class Calls {
    */
   async #eachSession(dispatch: EndpointServices['dispatch'], member: string, m: CallMessage): Promise<Result | (() => Result)> {
     const filter = Object.hasOwn(EACH_SESSION, m.name) ? EACH_SESSION[m.name] : undefined;
-    const grade = gradeOf(m.name);
+    const grade = filter?.grade ?? gradeOf(m.name);
     if (filter === undefined || typeof grade !== 'string' || !isSessionRank(grade)) return { ok: false, code: 'unavailable' };
     if (!holdsToSchema(m.name, m.input)) return { ok: false, code: 'malformed' };
     const unavailable = (code: string) => ({ ok: false as const, code: code === 'host_unavailable' || code === 'timeout' ? 'unavailable' : code });
@@ -659,12 +679,15 @@ export class Calls {
     const out: Signed<Listing>[] = [];
     for (const { member: m, listingId, target } of this.ctx.members()) {
       if (listingId === null || !rankAtLeast(sessionRank(this.ctx.records.record(target), member, owners), 'list')) continue;
+      // U9: a lane B session's listing follows its record, as the one the hub keeps: none while archived, its title
+      const says = m.lane === 'B' ? (this.ctx.recordSays?.(listingId) ?? null) : null;
+      if (says?.archived === true) continue;
       const record = await this.ctx.recordFor({
         session: listingId,
         project: m.project,
         lane: m.lane,
         state: m.state,
-        title: m.title ?? '',
+        title: says?.title ?? m.title ?? '',
         owners: m.owners,
         ...(m.access === undefined ? {} : { access: m.access }),
         ...(m.shares === undefined ? {} : { shares: m.shares.map((share) => share.member) }),

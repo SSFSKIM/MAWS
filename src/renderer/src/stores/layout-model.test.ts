@@ -231,10 +231,11 @@ describe('a background open', () => {
     const m = twoPanes();
     expect(openTab(m, S('d'), bg)).toEqual(m);
     unchangedFront(openTab(m, S('d'), bg), ['session:c', 'session:d']);
-    const withSettings = focusPane(openTab(openTab(split(), { kind: 'settings', section: 'engine' }, { pane: 1 }), S('d')), 0);
-    const updated = openTab(withSettings, { kind: 'settings', section: 'keyboard' }, bg);
+    const file = (line: number) => ({ kind: 'file' as const, path: '/r/a.ts', line, appSessionId: null, machine: M });
+    const withFile = focusPane(openTab(openTab(split(), file(1), { pane: 1 }), S('d')), 0);
+    const updated = openTab(withFile, file(5), bg);
     unchangedFront(updated, ['session:c', 'session:d']);
-    expect(cur(updated).panes[1]!.tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
+    expect(cur(updated).panes[1]!.tabs.find((t) => t.id === `file:${M}:/r/a.ts`)).toEqual({ id: `file:${M}:/r/a.ts`, kind: 'file', path: '/r/a.ts', line: 5, appSessionId: null, machine: M, pinned: false });
   });
 
   it('that creates pane 1 does not focus it', () => {
@@ -316,7 +317,6 @@ describe('replacing the active session', () => {
   // lost (an unsaved file, a launch in flight) is the store's to keep out of this (`layout.ts` openSession)
   it('an unpinned tab of any kind gives its place to the session, remembered for ⌘⇧T', () => {
     const kinds: TabTarget[] = [
-      { kind: 'settings', section: null },
       { kind: 'diagnostics' },
       { kind: 'file', path: '/r/a.ts', line: null, appSessionId: 'a' as AppSessionId, machine: M },
       { kind: 'diff', appSessionId: 'a' as AppSessionId, ref: 'HEAD' },
@@ -342,28 +342,6 @@ describe('replacing the active session', () => {
     expect(ids(openSession(abc(), 'x' as AppSessionId, { how: 'tab' }))).toEqual([['session:a', 'session:b', 'session:c', 'session:x']]);
   });
 
-});
-
-// C11's eighth ask: a singleton tab kind, opened like any tab, closable, never pinned (W6: the Accounts tab, the other
-// singleton, retired into the top bar's usage popover).
-describe('the settings tab', () => {
-  const settings = (section: 'engine' | 'keyboard' | null) => ({ kind: 'settings' as const, section });
-
-  it('opens as a singleton: a second open activates the existing tab and updates its section', () => {
-    let m = openTab(abc(), settings('engine'));
-    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings']]);
-    m = openTab(activateTab(m, 'session:a'), settings('keyboard'));
-    expect(ids(m)).toEqual([['session:a', 'session:b', 'session:c', 'settings']]);
-    expect(active(m)).toEqual(['settings']);
-    expect(cur(m).panes[0].tabs.find((t) => t.id === 'settings')).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
-  });
-
-  it('is closable and never pinned', () => {
-    const m = openTab(base, settings(null));
-    expect(togglePinned(m, 'settings')).toBe(m);
-    expect(ids(closeTab(m, 'settings'))).toEqual([[]]);
-    expect(LayoutMainSchema.safeParse(storedMain(m)).success).toBe(true);
-  });
 });
 
 describe('file tabs and the panel’s session (C8’s tenth ask)', () => {
@@ -465,8 +443,8 @@ describe('the split’s float', () => {
 
   it('a tab change in S docks; one in A, or focus moving, keeps the float', () => {
     expect('floating' in cur(activateTab(floated(), 'session:e'))).toBe(false);
-    const inA = openTab(focusPane(floated(), 0), { kind: 'settings', section: null });
-    expect(ids(inA)).toEqual([[`artifact:${M}:doc-1`, 'settings'], ['session:d', 'session:e']]);
+    const inA = openTab(focusPane(floated(), 0), { kind: 'diagnostics' });
+    expect(ids(inA)).toEqual([[`artifact:${M}:doc-1`, 'diagnostics'], ['session:d', 'session:e']]);
     expect(cur(inA).floating).toEqual({ sessionTabId: 'session:d' });
     expect(floatingPane(cur(activateTab(inA, `artifact:${M}:doc-1`)))).toBe(1);
   });

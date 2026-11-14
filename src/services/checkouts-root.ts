@@ -15,7 +15,7 @@ import { createNamedPaths } from './files/named';
 import { registerFilesHandlers } from './files/register';
 import type { FilesService } from './files/service';
 import { createUpload, createUploadReader, scheduleUploadSweep } from './files/upload';
-import { FileLister, followSpineRoots, spineRoots } from './git/ls-files';
+import { FileLister, followSpineRoots, spineAdmitted, spineRoots } from './git/ls-files';
 import { createMutatingRunner } from './git/mutate';
 import { registerGitHandlers } from './git/register';
 import { createGitRunner } from './git/runner';
@@ -48,8 +48,9 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
   const git = new GitService({ emit: (change) => void bus.emit('git.changed', change), log: (line) => console.log(line) }); // P5 O3-E: [git] lines in mawsd's log
   registerGitHandlers(git, bus);
   // C7: the `@` menu's listing. Listable roots: the directories of every unarchived session, every setup intent and every
-  // project row, through the view (reader R13), read again after any record, project or intent change it reports
-  const lister = new FileLister({ run: createGitRunner(), roots: () => spineRoots(view) });
+  // project row, through the view (reader R13), read again after any record, project or intent change it reports; UX wave
+  // U8c-2: and, at each load outside them, the folders the records' facts name that the admission accepts then
+  const lister = new FileLister({ run: createGitRunner(), roots: () => spineRoots(view), admitted: spineAdmitted(view) });
   const unfollowRoots = followSpineRoots(view, lister);
   bus.register('git.lsFiles', (input) => lister.list(input));
   // C8c: files.* over each session's own directories (the allowlist through the view, reader R12: the record, else an

@@ -110,6 +110,31 @@ describe('startMarkup', () => {
   });
 });
 
+// UX wave U7b (M6, decision 6; the branch review): a page hides the side column, and a viewer that is not visible
+// registers no surface, so Mark up leaves the page first and resolves the surface once the column is drawn again.
+describe('startMarkup with a page open', () => {
+  it('leaves the page, then marks up the surface the viewer registers once the side column is drawn again', async () => {
+    const s = surface();
+    useLayout.getState().openDestination({ kind: 'projects' });
+    const off = useLayout.subscribe((state, previous) => {
+      if (previous.destination !== null && state.destination === null) requestAnimationFrame(() => registerMarkupSurface(scope, s));
+    });
+    await startMarkup();
+    off();
+    expect(useLayout.getState().destination).toBeNull();
+    expect(s.begin).toHaveBeenCalledTimes(1);
+    expect(useMarkup.getState().session).toMatchObject({ scope, still, size: { width: 800, height: 500 } });
+  });
+
+  it('with no surface once the page is left, the page stays closed and nothing starts', async () => {
+    useLayout.getState().openDestination({ kind: 'projects' });
+    await startMarkup();
+    expect(useLayout.getState().destination).toBeNull();
+    expect(useMarkup.getState().session).toBeNull();
+    expect(toasts()).toEqual([]);
+  });
+});
+
 describe('the session’s endings', () => {
   async function started() {
     const s = surface();

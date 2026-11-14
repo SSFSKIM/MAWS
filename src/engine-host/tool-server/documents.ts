@@ -5,11 +5,12 @@
 //                      `writeAs` with the session as actor), its op recorded in the write's savepoint (`withOp`, so a
 //                      repeated tool-use id answers the first result); the writer validates every op before its one
 //                      transaction, so a refusal writes nothing; the writer's carries go to the adapter's registry in
-//                      the same transaction, before A's service runs the adapter's hooks; `answering` posts the result
-//                      lines into the thread in the same transaction; the session's presence names the blocks while
-//                      the batch lands and drops them 4 s after (D11; P3-F wave S F19, was 1.5 s). P4-A2 (X35): while
-//                      its input streams the batch is shown provisionally (`./provisional.ts`); the write's frame
-//                      announces the commit to that layer, and any other ending of the call drops it.
+//                      the same transaction, before A's service runs the adapter's hooks; `answering` posts the agent's
+//                      `reply` (UX wave U5; else "Edited this passage.") into the thread in the same transaction; the
+//                      session's presence names the blocks while the batch lands and drops them 4 s after (D11;
+//                      P3-F wave S F19, was 1.5 s). P4-A2 (X35): while its input streams the batch is shown
+//                      provisionally (`./provisional.ts`); the write's frame announces the commit to that layer, and
+//                      any other ending of the call drops it.
 //   artifact_comments  the threads, open (orphans included), resolved or all, with their messages.
 //   artifact_reply     a message into a thread as the session.
 //   artifact_resolve   resolve or reopen a thread as the session.
@@ -333,7 +334,7 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
                   let answered: ArtifactEditResult['answered'];
                   if (applied.answer) {
                     const messageId = `${applied.answer.threadId}:${nanoid8()}`;
-                    reply(doc, applied.answer.threadId, { id: messageId, by: actor, at: now(), body: applied.answer.body });
+                    reply(doc, applied.answer.threadId, { id: messageId, by: actor, at: now(), body: input.reply ?? applied.answer.body }); // UX wave U5: the agent's words, else the plan's sentence
                     answered = { threadId: applied.answer.threadId, messageId };
                   }
                   outcome.result = { status: 'edited', artifactId: id, revision: 0, results: applied.results, orphaned: applied.orphaned, ...(answered && { answered }), ...(written.length > 0 && { viewWarnings: written }) /* P3-E */ };

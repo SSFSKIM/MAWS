@@ -10,7 +10,7 @@ import { status } from '../../../test/support/builders';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
 import type { HostDispatch } from '@shared/host/host-supervisor';
-import { ScreenshotRefused } from './screenshot';
+import { ScreenshotRefused } from '@shared/anchor/screenshot'; // UX wave U5a: the reader moved to shared, unchanged
 import { sendToMain } from './send-to-main';
 
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');

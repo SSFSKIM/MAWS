@@ -1,12 +1,13 @@
 // Shared by the index's tests (C4 M4): temporary directories for index files and project trees, and synthetic
 // transcript summaries shaped as discovery produces them. Never the owner's userData or store.
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { SessionId } from '@shared/graph/ids';
 import type { TranscriptSummary } from '@shared/wire/store';
 import { MIGRATIONS } from '../../src/services/index/migrations';
+import { runGit } from './git-fixture';
 
 // A fresh directory under the system temp dir, realpathed (macOS: /var → /private/var) so it compares equal to what the
 // index stores, with a remover for afterEach.
@@ -65,4 +66,24 @@ export function preAmendmentIndex(path: string, rows: { appId: string; sessionId
   } finally {
     raw.close();
   }
+}
+
+// UX wave U8c-2 (the live working folder): a repository the index's working-folder cases read git's own files in. A
+// checkout at `path` on `branch` with one commit holding `files`, made with the fixture's isolated git; then each
+// linked worktree a case wants, made with `git worktree add` exactly as the engine's tool or a person would.
+export async function gitCheckout(path: string, branch: string, files: Record<string, string> = { 'README.md': 'hello\n' }): Promise<string> {
+  mkdirSync(path, { recursive: true });
+  await runGit(path, ['init', '-q', '-b', branch]);
+  for (const [name, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(path, name)), { recursive: true });
+    writeFileSync(join(path, name), content);
+  }
+  await runGit(path, ['add', '.']);
+  await runGit(path, ['commit', '-q', '-m', 'initial']);
+  return path;
+}
+
+export async function gitWorktree(checkout: string, path: string, branch: string): Promise<string> {
+  await runGit(checkout, ['worktree', 'add', '-q', '-b', branch, path]);
+  return path;
 }

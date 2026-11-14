@@ -10,7 +10,7 @@ import type { EditorHostScope } from '../panel/editor-host';
 import { selectedPanelTabId, shownSession } from '../panel/host';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { queueComposerAttachment, useComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { compositeMarkup } from './composite';
 import type { Mark } from './drawing';
@@ -63,20 +63,15 @@ const panelScope = (): EditorHostScope | null => {
 export async function startMarkup(scope: EditorHostScope | null = panelScope()): Promise<void> {
   if (starting || useMarkup.getState().session !== null || scope === null) return;
   if (shownSession() === null || useLayout.getState().regions.panel.collapsed) return;
-  const surface = markupSurfaceOf(scope);
-  const element = surface?.element() ?? null;
-  const box = element?.getBoundingClientRect();
-  if (!surface || !element || !box || box.width < 1 || box.height < 1) return;
   starting = true;
-  let still: CapturedImage | null;
+  let taken: Taken | null;
   try {
-    still = await surface.begin();
-  } catch (error) {
-    console.warn('[markup] the still was not taken:', error instanceof Error ? error.message : error);
-    still = null;
+    taken = await takeStill(scope);
   } finally {
     starting = false;
   }
+  if (taken === null) return;
+  const { surface, element, box, still } = taken;
   if (still === null) {
     toast({ level: 'warning', text: MARKUP_COPY.captureFailed, actions: [], dismissible: true });
     return;
@@ -90,6 +85,29 @@ export async function startMarkup(scope: EditorHostScope | null = panelScope()):
   discarded = new AbortController();
   useMarkup.setState({ session: { id: ++serial, scope, surface, still, label: surface.label(), size: { width: box.width, height: box.height } } });
   watch(scope, surface);
+}
+
+type Taken = { surface: MarkupSurface; element: HTMLElement; box: DOMRect; still: CapturedImage | null };
+
+// The scope's surface and its still (null when the capture failed), or null when there is no surface to mark up.
+// UX wave U7b (M6, decision 6): Mark up leaves a page first. A viewer behind a page is not visible and registers no
+// surface, so the surface is resolved only once the side column it marks up is drawn again (two frames: one the
+// compositor has drawn). When none appears then, the page stays closed and nothing else happens.
+async function takeStill(scope: EditorHostScope): Promise<Taken | null> {
+  if (pageOpen(useLayout.getState())) {
+    useLayout.getState().closeDestination();
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  }
+  const surface = markupSurfaceOf(scope);
+  const element = surface?.element() ?? null;
+  const box = element?.getBoundingClientRect();
+  if (!surface || !element || !box || box.width < 1 || box.height < 1) return null;
+  try {
+    return { surface, element, box, still: await surface.begin() };
+  } catch (error) {
+    console.warn('[markup] the still was not taken:', error instanceof Error ? error.message : error);
+    return { surface, element, box, still: null };
+  }
 }
 
 // A panel scope stays live while its slot is rendered, regardless of which of the two tools is active.

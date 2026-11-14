@@ -24,7 +24,8 @@ import { deckCommentCounts } from '@artifacts/slides/comment-counts';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ArtifactEditorTarget } from '../../artifacts/registry';
 import type { CloseAsk } from '../../panel/editor-host'; // P4-B2
-import { commentDraftEntry } from '../document/comment-drafts'; // P4-B2
+import { commentDraftOf } from '../document/comment-drafts'; // P4-B2; UX wave U5a: the pass's
+import { artifactViews } from '../../artifacts/registry'; // UX wave U5a
 import { forgetCardActivation } from '../document/comments'; // P4-B2
 import { createHistoryApi } from '../document/history-api'; // M8: B's, reused
 
@@ -219,8 +220,8 @@ export class DeckTabState {
    * whose card goes with the state to the view the move keeps.
    */
   closeGuard = async (ask?: CloseAsk): Promise<boolean> => {
-    const draft = ask?.moving ? null : commentDraftEntry(this.artifactId); // P4-B2
-    if (draft?.hostId === this.commentHostId && draft.text.trim() && !(await this.deps.confirmDiscard(this.title, 'comment'))) return false;
+    const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B2; UX wave U5a: the last view's close asks
+    if (draft && !(await this.deps.confirmDiscard(this.title, 'comment'))) return false;
     const handle = this.current.handle;
     if (!handle) return true;
     const session = this.current.session;

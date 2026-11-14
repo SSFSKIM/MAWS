@@ -66,6 +66,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
 import { addressOf } from '../src/shared/machine/address';
+import { machineProjectId } from '../src/shared/machine/project-ids'; // the UX wave, U9: a plain folder's project, as sminos derives it
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
@@ -87,12 +88,14 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { activeMainTab, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
+import { activeMainTab, backToTabs, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
 import { backgroundAgentRecords, backgroundBashRecords, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U8b M9
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
 import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
+import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
+import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -605,7 +608,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(page.getByRole('menu')).toBeVisible();
       const items = await page.getByRole('menuitem').allTextContents();
       expect(items.slice(0, 3), 'a listed row’s menu: its two opens, then Hide').toEqual(['Open', 'Open in new tab', 'Hide']);
-      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'nothing after Hide but Share and Add owner').toEqual([]);
+      // after Hide, U9's acts over the link for a lane B listing that is yours, in their order, then Share and Add owner
+      const acts = remoteSessionActions({ lane: 'B', record: false, mine: true, remoteReading: true }).map((id) => SESSION_ACTIONS[id]);
+      expect(items.slice(3).filter((item) => item !== 'Share…' && item !== 'Add owner…'), 'after Hide, the acts over the link (U9) and nothing else but Share and Add owner').toEqual(acts);
       await page.keyboard.press('Escape');
       await expect(page.getByRole('menu')).toHaveCount(0);
 
@@ -1036,7 +1041,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
       // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
-      await sessionTab.click();
+      // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
+      // again (the strip is inert under a page, so the tab is not clicked)
+      await backToTabs(again);
+      await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
       await openSurface(again, 'Files');
       const files = surface(again, 'files');
       const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
@@ -1515,7 +1523,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await field.fill('');
     });
 
-    await test.step('M6: B’s daemon stopped greys what its session asks with its tab closed, and the dock badge drops', async () => {
+    await test.step('M6: B’s daemon stopped keeps what its session asks with its tab closed counted while B reconnects, then greys it and the dock badge drops', async () => {
       await b.request('session.send', { appSessionId: waitingApp, content: WAITING_AGAIN });
       const row = needsYouRow(again, waitingAddress);
       await quoting(expect(row, 'the second ask in A’s Needs you').toHaveAccessibleName(/ · Approval needed$/, { timeout: 60_000 }), async () => `${mainSaid(again)}\n${await bSaid()}`);
@@ -1523,12 +1531,22 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'the second ask counts in the dock badge' }).toBe('1');
       const stoppedAt = Date.now();
       await b.stop();
-      // main greys a machine's items at its link's `down`: drawn after the live rows, out of the count and the badge
-      await quoting(expect(row, 'greyed once B is gone').toHaveAttribute('data-greyed', 'true', { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
-      await expect(row).toHaveAccessibleName(/ · Approval needed, machine offline$/);
-      await expect(needsYouCount(again, 0)).toBeVisible();
+      // The UX wave, U9 (the architect's ruling of 2026-11-13): main greys a machine's items by its phase, the window's
+      // one rule (src/shared/machine/link-phase.ts): for the minute B's link reconnects the item stays live, in the count
+      // and the dock badge, its row saying so (sidebar/NeedsYou.tsx); past it, greyed, after the live rows, out of both
+      await quoting(expect(row, 'while B reconnects').toHaveAccessibleName(/ · Approval needed, reconnecting$/, { timeout: 60_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}\n${mainSaid(again)}`);
+      await expect(row, 'not greyed while B reconnects').not.toHaveAttribute('data-greyed', 'true');
+      await expect(needsYouCount(again, 1), 'counted while B reconnects').toBeVisible();
+      expect(await dockBadge(againApp), 'in the dock badge while B reconnects').toBe('1');
+      const down = await machineOf(again, b.ref);
+      const offlineAt = Date.parse(down?.since ?? new Date(stoppedAt).toISOString()) + REMOTE_ACT_PENDING_MS;
+      expect(Date.now(), 'the reconnecting reads were made inside the minute').toBeLessThan(offlineAt);
+      await quoting(expect(row, 'past the minute, greyed').toHaveAttribute('data-greyed', 'true', { timeout: Math.max(0, offlineAt - Date.now()) + 15_000 }), async () => `B on A: ${JSON.stringify(await machineOf(again, b.ref))}`);
+      await expect(row, 'past the minute, offline').toHaveAccessibleName(/ · Approval needed, machine offline$/);
       await expect.poll(() => dockBadge(againApp), { timeout: 30_000, message: 'a greyed item leaves the dock badge' }).toBe('');
-      console.log(`[e2e:remote] M6: B's item greyed and out of the badge ${Date.now() - stoppedAt} ms after B's daemon was told to stop`);
+      console.log(`[e2e:remote] M6: B's item counted while B reconnected, greyed and out of the badge ${Date.now() - stoppedAt} ms after B's daemon was told to stop`);
+      await expect(needsYouCount(again, 0), 'still out of the count').toBeVisible();
+      expect(await dockBadge(againApp), 'and of the badge').toBe('');
     });
   } finally {
     await a?.cleanup();
@@ -2379,9 +2397,10 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
 // its home, Trust and start sends again, and B starts the session in its home with no project. Claude Code never saves
 // trust for a home folder, so that start runs no bootstrap (services/sessions/launch-mapping.ts, `trustMapping`: each
 // launch attests it), and B's replay list holds none before the home session's journal.
-// In A's sidebar both sessions sit under B's machine row: A reads no project of a machine its org rows cover
-// (renderer/src/ipc/events.ts) and a listing joins only A's own projects (main/org/rows.ts), so a project B alone holds
-// has no row of A's, and a session in it or in none is filed under its machine (stores/org-projects.ts).
+// In A's sidebar both sessions sit under B's machine row: each is listed under a project the key table gives no row key
+// (a listing's `orgKey` is the table's entry for its project, main/org/rows.ts), so its listing files under its machine,
+// and the record A reads over the link files where its listing is, whether or not B's registry entry for the folder
+// has reached A (stores/org-projects.ts, ticket 644).
 const MF_FOLDER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000c8'; // the engine session ids the journals pin
 const MF_HOME_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000c9';
 const MF_FOLDER = ['Scratch', 'loose-notes'] as const; // the folder's path from B's home, no git repository on it
@@ -2531,7 +2550,7 @@ test('machine first: a New chat tab with no project starts on B, in a folder wit
       const record = await recordOnB(app);
       expect(record?.directory, 'it runs in the folder on B').toBe(folder);
       expect(record?.projectId, 'in the project B registered for the folder').toBe((await projectsOnB()).find((p) => p.directory === folder)?.id);
-      await underB(folderAddress, 'its row under B’s machine row: a project B alone holds has no row of A’s');
+      await underB(folderAddress, 'its row under B’s machine row: its listing’s project has no row key on A');
     });
 
     await test.step('a second New chat tab, B and Don’t work in a project: the first Send is refused untrusted, Review trust… shows B’s trust card for its home, and Trust and start sends again, so B starts the session in its home with no project', async () => {
@@ -2852,6 +2871,521 @@ test('a subagent of B’s terminal session, where B’s endpoint lists no rl2.ag
   }
 });
 
+// The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3; #563, O-39, S-01): a session tab of
+// B's keeps its pane through the link's drop, one status line above it, and the reader keeps their place (A4), for a
+// session MAWS runs on B (lane B) and for a terminal session of B's (lane A, which has no record by design); a Stop
+// pressed in A reaches B's engine and the turn ends, and one pressed once the link is down reads "Stopping…" and then
+// says it did not stop (A11). A's way to B is the hub alone (the relay), so cutting its pipe takes the link down. While
+// the link is down the reader also scrolls, selects and copies a paragraph, and sees no error text (`readWhileDown`;
+// the pane has no find to read a count from); a second outage with the reader at the end keeps the arriving row in view.
+const PLACE_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d5';
+const STOP_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d6';
+const PLACE_TURNS = 10; // enough of B's history for the pane to scroll
+const longReply = (turn: number) => Array.from({ length: 12 }, (_, k) => `B’s reply ${turn}, paragraph ${k + 1}.`).join('\n\n');
+const WHILE_DOWN_REPLY = 'B answered this while A was cut off.';
+const SECOND_DOWN_REPLY = 'B answered this through the second outage.';
+const PLACE_DRAFT = 'a draft kept while B reconnects';
+const STOP_FIRST_REPLY = 'B is ready to count.';
+const STOP_DELTAS = ['Counting ', 'on B: 1, 2, '];
+const RECONNECTING = `Reconnecting to ${B_NAME}…`;
+
+// The first row in view of the pane's transcript and its top against the scroller's: the reader's place.
+const placeIn = (page: Page) =>
+  main(page)
+    .locator('[data-transcript-scroller]')
+    .first()
+    .evaluate((scroller) => {
+      const top = scroller.getBoundingClientRect().top;
+      const row = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]')).find((r) => r.getBoundingClientRect().bottom > top + 1);
+      return row === undefined ? null : { id: row.dataset.rowId!, offset: Math.round(row.getBoundingClientRect().top - top), scrollHeight: scroller.scrollHeight };
+    });
+// Scrolls the pane's transcript up, as a reader's wheel does, until its place holds still.
+async function scrollUp(page: Page): Promise<{ id: string; offset: number; scrollHeight: number }> {
+  const scroller = main(page).locator('[data-transcript-scroller]').first();
+  const box = (await scroller.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -1_200);
+  let last = '';
+  await expect.poll(async () => {
+    const now = JSON.stringify(await placeIn(page));
+    const still = now === last && now !== 'null';
+    last = now;
+    return still;
+  }, { timeout: 10_000, intervals: [250] }).toBe(true);
+  return JSON.parse(last) as { id: string; offset: number; scrollHeight: number };
+}
+// Every alert the main region shows from now on, kept as text: an outage must draw none.
+async function keepAlerts(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __alerts: string[] }).__alerts = seen;
+    const region = document.querySelector('[data-region="main"]')!;
+    const look = () => region.querySelectorAll('[role="alert"]').forEach((el) => seen.push(el.textContent ?? ''));
+    new MutationObserver(look).observe(region, { subtree: true, childList: true, characterData: true });
+    look();
+  });
+}
+const alertsSeen = (page: Page) => page.evaluate(() => (window as unknown as { __alerts: string[] }).__alerts);
+const linkLine = (page: Page) => main(page).locator('[data-link-words="line"]');
+const primaryOf = (page: Page) => main(page).locator('[data-submit-state]');
+const toastsOf = (page: Page) => page.locator('[data-toast-viewport]');
+// The pane's error texts, by name: any alert in the main region, the transcript's failed read and older page
+// (src/renderer/src/transcript/model/copy.ts's HYDRATION.failed and OLDER.failed), and an act's ending without its
+// effect (UC-7.5's "Not sent", "Not stopped").
+const PANE_ERRORS = /Couldn’t load this conversation|Older messages didn’t load|Not sent|Not stopped/;
+async function paneErrors(page: Page): Promise<string[]> {
+  const alerts = await main(page).locator('[role="alert"]').allTextContents();
+  const words = await main(page).getByText(PANE_ERRORS).allTextContents();
+  return [...alerts.map((t) => `alert: ${t}`), ...words.map((t) => `text: ${t}`)];
+}
+// The transcript's scroller, and whether its last row is in view (the reader following the end).
+const scrollerOf = (page: Page) => main(page).locator('[data-transcript-scroller]').first();
+const lastRowInView = (page: Page) =>
+  scrollerOf(page).evaluate((scroller) => {
+    const rows = scroller.querySelectorAll<HTMLElement>('[data-row-id]');
+    const last = rows[rows.length - 1];
+    if (last === undefined) return false;
+    const box = scroller.getBoundingClientRect();
+    const at = last.getBoundingClientRect();
+    return at.bottom <= box.bottom + 2 && at.bottom > box.top && scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 2;
+  });
+
+/**
+ * What a reader does in the kept pane while its link is down (A4): scrolls, and the first row in view moves; selects a
+ * paragraph of that row and copies it, and the Mac's pasteboard reads it back (webContents' own copy, as Edit ▸ Copy);
+ * and sees no error text. MAWS's session pane has no find of its own (⌘F there is unbound: find is the Browser tool's
+ * and the document editor's), so a find and its count are not read here. Answers the place left once done.
+ */
+async function readWhileDown(page: Page, electron: ElectronApplication, before: { id: string }): Promise<{ id: string; offset: number; scrollHeight: number }> {
+  const moved = await scrollUp(page);
+  expect(moved.id, 'the reader scrolls the kept pane: another first row in view').not.toBe(before.id);
+  const copied = await scrollerOf(page).evaluate((scroller, id) => {
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+    const paragraph = Array.from(row?.querySelectorAll<HTMLElement>('p') ?? []).find((p) => (p.textContent ?? '').trim() !== '');
+    if (paragraph === undefined) return null;
+    const range = document.createRange();
+    range.selectNodeContents(paragraph);
+    const selection = window.getSelection()!;
+    selection.removeAllRanges();
+    selection.addRange(range);
+    return selection.toString();
+  }, moved.id);
+  expect(copied, `a paragraph of the row in view (${moved.id}) is selected`).toBeTruthy();
+  await withNativeClipboard(electron, [copied!], async () => {
+    await electron.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())!.webContents.copy());
+    await expect.poll(() => electron.evaluate(({ clipboard }) => clipboard.readText()), { message: 'the copy reads back from the pasteboard' }).toBe(copied);
+  });
+  await page.evaluate(() => window.getSelection()?.removeAllRanges());
+  expect(await paneErrors(page), 'no error text in the pane while the link is down').toEqual([]);
+  return (await placeIn(page))!;
+}
+
+/**
+ * B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A (with
+ * `open: false`, left as A's listed row, no tab of it opened: the UX wave, U9, M4's acts scene).
+ *
+ * The checkout is a plain folder (no git, no `.smns`), so sminos lists the session under B's own project, its
+ * `machine_project_id` (src/shared/machine/project-ids.ts), which is also the project B's registry gives the folder. A
+ * machine's own project takes no row key on A, so the session's row stays under B's machine row however its listing,
+ * its record and B's registry entry reach A, and in whichever order they arrive (ticket 644's filing).
+ */
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[] }, held: TerminalHeld) {
+  const checkout = join(opts.root, 'b-checkout');
+  const journals = join(opts.root, 'journals');
+  for (const dir of [checkout, journals]) mkdirSync(dir);
+  // the session's own journal, then one for each later launch on B in turn (the UX wave, U9: a fork's)
+  const fixture = [opts.journal.write(journals, 'b-session'), ...(opts.launches ?? []).map((launch, i) => launch.write(journals, `b-launch-${i + 1}`))].join(',');
+  const scene = (held.scene = await startRemoteScene({
+    scratch: join(opts.root, 'scene'),
+    aUserData: opts.aUserData,
+    b: {
+      root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    },
+  }));
+  const { b } = scene;
+  await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+  const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+  const app = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+  await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+  type Status = { process: string; turn: unknown; engineSessionId: string | null };
+  const status = () => b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+  const turnOver = async () => {
+    const s = await status();
+    return s !== null && s.process === 'ready' && s.turn === null;
+  };
+  const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: opts.first, display: opts.first }, options: {} });
+  expect(started.status, `B's session starts: ${JSON.stringify(started)}`).not.toBe('needs_trust');
+  await expect.poll(turnOver, { timeout: 60_000, message: `B's session ends its first turn\n${b.log().slice(-4000)}` }).toBe(true);
+  /** One more turn of B's own, written over its machine.sock as its own app's composer would. */
+  const sendOnB = (content: string) => b.request('session.send', { appSessionId: app, content });
+  const engine = (await status())?.engineSessionId ?? opts.journal.sessionId;
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+  keepMainLines(a);
+  const { page } = a;
+  await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+  const bProject = machineProjectId((await scene.org.chain()).org, B_NAME);
+  await scene.sminos.list({ engine, app, owners: [scene.member], project: bProject, title: opts.title, cwd: checkout });
+  await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: `B's session is a row of A's\n${mainSaid(page)}` }).toBe(true);
+  await expandMachine(page, b.ref);
+  const row = sessionRow(page, addressOf(b.ref, app));
+  await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+  if (opts.open !== false) {
+    await row.click();
+    await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+  }
+  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject };
+}
+
+test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-place-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-place-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const journal = new SideJournal(PLACE_SESSION, join(root, 'b-checkout'));
+    for (let turn = 1; turn <= PLACE_TURNS; turn += 1) journal.turn(longReply(turn));
+    journal.turn(WHILE_DOWN_REPLY);
+    journal.turn(SECOND_DOWN_REPLY);
+    const { scene, b, page, electron, turnOver, sendOnB } = await laneBOpened({ root, aUserData, journal, first: 'Write the first long reply.', firstReply: 'B’s reply 1, paragraph 1.', title: 'B’s long session' }, held);
+    // B's history, written on B before A reads it again
+    for (let turn = 2; turn <= PLACE_TURNS; turn += 1) {
+      await sendOnB(`Write long reply ${turn}.`);
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+    }
+    await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'B’s last reply in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    let place = await scrollUp(page);
+    await composerOf(page).click();
+    await page.keyboard.type(PLACE_DRAFT);
+    const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
+    await keepAlerts(page);
+
+    await test.step('the link down: the line says B reconnects, over the same pane, and a reply B writes meanwhile waits', async () => {
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page), 'the status line above the kept pane').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await expect(main(page).locator('[data-link-words="middle"]'), 'no words in the pane’s place').toHaveCount(0);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane, still mounted').toBe(true);
+      await sendOnB('Answer while A is cut off.');
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+      expect((await machineOf(page, b.ref))?.state, 'A has not seen it').not.toBe('up');
+      place = await readWhileDown(page, electron, place);
+      await expect(linkLine(page), 'still down, the line still above the pane').toHaveText(RECONNECTING);
+    });
+
+    await test.step('the link back: the same first row at the same place, the new reply below it, the draft, and no error drawn', async () => {
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await expect(linkLine(page), 'the line gone with the link up').toHaveCount(0);
+      await expect.poll(async () => ((await placeIn(page))?.scrollHeight ?? 0) > place.scrollHeight, { timeout: 60_000, message: 'the reply written meanwhile joins the transcript' }).toBe(true);
+      const after = (await placeIn(page))!;
+      expect(after.id, 'the same first row in view').toBe(place.id);
+      expect(Math.abs(after.offset - place.offset), `at the same place (${place.offset} px, then ${after.offset} px)`).toBeLessThanOrEqual(2);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane throughout').toBe(true);
+      await expect(composerOf(page), 'the draft kept').toHaveText(PLACE_DRAFT);
+      expect(await alertsSeen(page), 'no error drawn in the pane').toEqual([]);
+      const scroller = main(page).locator('[data-transcript-scroller]').first();
+      await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+      await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the reply below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+
+    await test.step('a second down and up with the reader at the end: the reply that arrives is in view', async () => {
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the reader follows the end' }).toBe(true);
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page)).toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await sendOnB('Answer through the second outage.');
+      await expect.poll(turnOver, { timeout: 60_000 }).toBe(true);
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again
+${mainSaid(page)}` }).toBe('up');
+      await expect(main(page).getByText(SECOND_DOWN_REPLY).first(), 'the reply that arrived').toBeVisible({ timeout: 60_000 });
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the last row in view: the reader still follows' }).toBe(true);
+      expect(await paneErrors(page)).toEqual([]);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('U9 A4, a terminal session of B’s: its recordless pane stays through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-la-place-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-la-place-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-terminal');
+    mkdirSync(checkout);
+    const scene = (held.scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData }));
+    const { b } = scene;
+    const engine = 'b0c0d0e0-0000-4000-8000-0000000000d7';
+    // The main transcript, chained: an ask and a long answer per turn (terminalRow's numbering, from 101)
+    const rows: PlaneRow[] = [];
+    const add = (type: 'user' | 'assistant', text: string) => {
+      const n = 101 + rows.length;
+      const row: PlaneRow = { ...terminalRow(n, type, text, null, checkout), sessionId: engine, parentUuid: rows.at(-1)?.uuid ?? null };
+      rows.push(row);
+      return row;
+    };
+    for (let turn = 1; turn <= PLACE_TURNS; turn += 1) {
+      add('user', `Write long reply ${turn}.`);
+      add('assistant', longReply(turn));
+    }
+    const plane = scene.sminos.laneA(PROJECT, { engine, title: 'B’s long terminal session', cwd: checkout, owners: [scene.member], launch: 'L-terminal-place', main: rows, agents: {}, subagents: [] });
+    const a = (held.a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+    keepMainLines(a);
+    const { page } = a;
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+    await expect
+      .poll(async () => (await rowsOf(page)).find((row) => row.machine === b.ref && row.session === engine) ?? null, { timeout: 60_000, message: `B's terminal session is a row of A's\n${mainSaid(page)}` })
+      .toMatchObject({ lane: 'A' });
+    await expandMachine(page, b.ref);
+    const row = sessionRow(page, addressOf(b.ref, engine));
+    await expect(row).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await quoting(expect(main(page).getByText(`B’s reply ${PLACE_TURNS}, paragraph 12.`).first(), 'the terminal session’s transcript in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    let place = await scrollUp(page);
+    await composerOf(page).click();
+    await page.keyboard.type(PLACE_DRAFT);
+    const pane = await main(page).locator('[data-transcript-scroller]').first().elementHandle();
+    await keepAlerts(page);
+
+    await test.step('the link down: the line says B reconnects, over the same pane, and rows the session writes meanwhile wait', async () => {
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page), 'the status line above the kept pane').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await expect(main(page).locator('[data-link-words="middle"]'), 'no words in the pane’s place').toHaveCount(0);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane, still mounted').toBe(true);
+      plane.append(null, add('user', 'Answer while A is cut off.'));
+      plane.append(null, add('assistant', WHILE_DOWN_REPLY));
+      place = await readWhileDown(page, a.app, place);
+      await expect(linkLine(page), 'still down, the line still above the pane').toHaveText(RECONNECTING);
+    });
+
+    await test.step('the link back: the same first row at the same place, the new rows below it, the draft, and no error drawn', async () => {
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+      await expect(linkLine(page), 'the line gone with the link up').toHaveCount(0);
+      await expect.poll(async () => ((await placeIn(page))?.scrollHeight ?? 0) > place.scrollHeight, { timeout: 60_000, message: 'the rows written meanwhile join the transcript' }).toBe(true);
+      const after = (await placeIn(page))!;
+      expect(after.id, 'the same first row in view').toBe(place.id);
+      expect(Math.abs(after.offset - place.offset), `at the same place (${place.offset} px, then ${after.offset} px)`).toBeLessThanOrEqual(2);
+      expect(await pane!.evaluate((node) => node.isConnected), 'the same pane throughout').toBe(true);
+      await expect(composerOf(page), 'the draft kept').toHaveText(PLACE_DRAFT);
+      expect(await alertsSeen(page), 'no error drawn in the pane').toEqual([]);
+      const scroller = main(page).locator('[data-transcript-scroller]').first();
+      await scroller.evaluate((node) => node.scrollTo({ top: node.scrollHeight }));
+      await expect(main(page).getByText(WHILE_DOWN_REPLY).first(), 'the rows below, once scrolled to').toBeVisible({ timeout: 30_000 });
+    });
+
+    await test.step('a second down and up with the reader at the end: the rows that arrive are in view', async () => {
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the reader follows the end' }).toBe(true);
+      scene.aHub.cut();
+      await quoting(expect(linkLine(page)).toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      plane.append(null, add('user', 'Answer through the second outage.'));
+      plane.append(null, add('assistant', SECOND_DOWN_REPLY));
+      scene.aHub.restore();
+      await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again
+${mainSaid(page)}` }).toBe('up');
+      await expect(main(page).getByText(SECOND_DOWN_REPLY).first(), 'the row that arrived').toBeVisible({ timeout: 60_000 });
+      await expect.poll(() => lastRowInView(page), { timeout: 10_000, message: 'the last row in view: the reader still follows' }).toBe(true);
+      expect(await paneErrors(page)).toEqual([]);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+/** B's lane B session open in A with a turn running on B, which only a Stop ends (SideJournal.stoppedTurn). */
+async function stoppableOpened(root: string, aUserData: string, held: TerminalHeld) {
+  const journal = new SideJournal(STOP_SESSION, join(root, 'b-checkout'));
+  journal.turn(STOP_FIRST_REPLY);
+  journal.stoppedTurn(STOP_DELTAS);
+  const opened = await laneBOpened({ root, aUserData, journal, first: 'Get ready to count.', firstReply: STOP_FIRST_REPLY, title: 'B’s counting session' }, held);
+  await opened.sendOnB('Count slowly.');
+  await quoting(expect(main(opened.page).getByText('Counting on B: 1, 2,').first(), 'the running turn’s text in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(opened.page));
+  await expect(primaryOf(opened.page), 'the composer offers Stop').toHaveText('Stop', { timeout: 30_000 });
+  return opened;
+}
+
+test('U9 A11, a Stop that reaches B: pressed in A on B’s running turn, B’s engine is interrupted and A reads the turn’s end', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-stop-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-stop-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { page, turnOver } = await stoppableOpened(root, aUserData, held);
+    expect(await turnOver(), 'B’s turn runs').toBe(false);
+    await primaryOf(page).click();
+    await expect.poll(turnOver, { timeout: 60_000, message: `B's turn ends at the Stop\n${mainSaid(page)}` }).toBe(true);
+    await expect(primaryOf(page), 'A reads the turn’s end: the composer offers Stop no more').not.toHaveText(/^Stop/, { timeout: 30_000 });
+    await expect(toastsOf(page), 'and says nothing failed').not.toContainText('Not stopped');
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('U9 A11, a Stop pressed once the line says B reconnects: it reads “Stopping…” under the link’s hold, then says it did not stop because B is offline', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-stop-cut-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-stop-cut-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { scene, page, turnOver } = await stoppableOpened(root, aUserData, held);
+    scene.aHub.cut();
+    await quoting(expect(linkLine(page), 'the status line').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+    await expect(primaryOf(page), 'Stop is left as it is while B reconnects: main’s hold answers it').toHaveText('Stop');
+    await primaryOf(page).click();
+    await expect(primaryOf(page), 'a Stop on its way').toHaveText('Stopping…', { timeout: 5_000 });
+    await expect(primaryOf(page)).toBeDisabled();
+    await quoting(expect(toastsOf(page), 'the notice once the hold gives up').toContainText(`Not stopped: ${B_NAME} is offline`, { timeout: REMOTE_ACT_PENDING_MS + 30_000 }), () => mainSaid(page));
+    await expect(primaryOf(page), 'Stopping… no more').not.toHaveText('Stopping…');
+    expect(await turnOver(), 'nothing reached B: its turn still runs').toBe(false);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M4; A8, A9, A10): the session acts on
+// B's session from A's window, over RL2, under the harness's accepting confirmation. Rename… on its listed row (A holds no
+// record of it) renames it on B and the row says the new title; Fork from its row's menu, its tab open, opens the fork in
+// a new tab on B's address, a session B's index holds as the source's fork; Archive from its menu closes its tab and its
+// row leaves A's sidebar; "Archived sessions…" on B's machine row lists it, and Unarchive brings its row back; archived
+// again, the sidebar footer's "Archived sessions…" lists it in B's section (M5, the architect's ruling (A)), and Unarchive
+// there brings it back too.
+const ACTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000d7';
+const ACTS_FORK = 'b0c0d0e0-0000-4000-8000-0000000000d8'; // the fork's launch on B, pinned by its own journal
+const ACTS_TITLE = 'B’s session to act on';
+const ACTS_REPLY = 'B is ready to be acted on.';
+const RENAMED_ON_A = 'Renamed from A';
+
+// The session tabs of A's strip, by address, as main last saved the layout (a renderer change reaches it a moment later).
+async function sessionTabsOf(page: Page): Promise<string[]> {
+  type Pane = { tabs: { kind: string; appSessionId?: string }[] };
+  const main = await invoke<{ value: { current: string; sets: Record<string, { panes: Pane[] }> } | null }>(page, 'layout.get', { key: 'main.tabs' });
+  const set = main.value === null ? undefined : main.value.sets[main.value.current];
+  return (set?.panes ?? []).flatMap((pane) => pane.tabs.flatMap((tab) => (tab.kind === 'session' && tab.appSessionId !== undefined ? [tab.appSessionId] : [])));
+}
+async function menuItemOfRow(page: Page, row: ReturnType<typeof sessionRow>, name: string) {
+  await row.click({ button: 'right' });
+  const item = page.getByRole('menu').getByRole('menuitem', { name, exact: true });
+  await expect(item, `the row's menu offers ${name}, enabled`).toBeVisible({ timeout: 10_000 });
+  await expect(item).not.toHaveAttribute('data-disabled', /.*/);
+  return item;
+}
+
+test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; Fork from its row opens a fork there in a new tab; Archive closes its tab and row; Unarchive brings it back, from B’s machine row and from the footer', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-acts-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-acts-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const journal = new SideJournal(ACTS_SESSION, join(root, 'b-checkout'));
+    journal.turn(ACTS_REPLY);
+    journal.rename(RENAMED_ON_A); // a live session is renamed through its engine (the host's `rename_session`)
+    const fork = new SideJournal(ACTS_FORK, join(root, 'b-checkout')); // the fork's engine: its prelude, no turn
+    const { scene, b, page, app, bProject } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
+    const address = addressOf(b.ref, app);
+    const row = sessionRow(page, address);
+    type Record = { title: { text: string }; archived: boolean; lineage: { parentAppSessionId: string } | null };
+    const onB = (id: string) => b.request<Record | null>('session.get', { appSessionId: id }).catch(() => null);
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists the session acts\n${mainSaid(page)}` }).toContain('rl2.session-acts');
+
+    await test.step('Rename… on the listed row: B’s engine takes the title, and A’s row says it', async () => {
+      await expect(row, 'a listed row: A holds no record of the session').toHaveAttribute('data-kind', 'listed');
+      await (await menuItemOfRow(page, row, 'Rename…')).click();
+      const sheet = page.getByRole('dialog', { name: 'Rename' });
+      await expect(sheet.getByRole('textbox', { name: 'Title' })).toHaveValue(ACTS_TITLE);
+      await sheet.getByRole('textbox', { name: 'Title' }).fill(RENAMED_ON_A);
+      await sheet.getByRole('textbox', { name: 'Title' }).press('Enter');
+      // the sheet closes only on B's answer: its engine took the journal's `rename_session` with this title (a replay
+      // writes no title into the engine's store, so B's record keeps its first prompt's title here)
+      await expect(sheet, 'B answered the rename').toBeHidden({ timeout: 30_000 });
+      await quoting(expect(row, 'A’s row says the new title').toHaveAttribute('aria-label', RENAMED_ON_A, { timeout: 10_000 }), () => mainSaid(page));
+    });
+
+    await test.step('Fork from the row’s menu, its tab open: the fork opens in a new tab on B’s address, a fork of the session on B', async () => {
+      await row.click();
+      await quoting(expect(main(page).getByText(ACTS_REPLY).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+      const before = await sessionTabsOf(page);
+      await (await menuItemOfRow(page, row, 'Fork')).click();
+      let forked: string | undefined;
+      await quoting(
+        expect.poll(async () => (forked = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'a new session tab opens' }).toBeDefined(),
+        () => mainSaid(page),
+      );
+      expect(forked!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${forked})`).toBe(true);
+      const bare = bareOf(forked!);
+      await expect.poll(async () => (await onB(bare))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(app);
+      expect(await sessionTabsOf(page), 'the source’s tab stays').toContain(address);
+      // sminos lists the fork as it lists every session of B's: B's machine row keeps a row once the source is archived
+      await scene.sminos.list({ engine: ACTS_FORK, app: bare, owners: [scene.member], project: bProject, title: 'B’s fork', cwd: join(root, 'b-checkout') });
+      await quoting(expect(sessionRow(page, forked!), 'the fork’s row in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    });
+
+    await test.step('Archive from the row’s menu: its tab closes, its row leaves A’s sidebar, and B’s record is archived', async () => {
+      await (await menuItemOfRow(page, row, 'Archive')).click();
+      // its tab open, A holds B's record, whose title the sheet says (B's own: the replay above keeps its first one)
+      const sheet = page.getByRole('dialog', { name: `Archive “${(await onB(app))!.title.text}”?` });
+      await expect(sheet).toContainText(`Ends its engine process on ${B_NAME} and hides it`);
+      await sheet.getByRole('button', { name: 'Archive' }).click();
+      await expect(sheet).toBeHidden({ timeout: 60_000 });
+      await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
+      await expect.poll(() => sessionTabsOf(page), { timeout: 10_000, message: 'the session’s tab is closed (the layout as main last saved it)' }).not.toContain(address);
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived' }).toBe(true);
+      // the hub's listing withdrawn as main holds the org's rows: the row stays gone once the hub has said so
+      await expect.poll(async () => (await rowsOf(page)).some((r) => r.machine === b.ref && r.session === app), { timeout: 30_000, message: 'the hub withdrew the session’s listing' }).toBe(false);
+      await expect(row).toHaveCount(0);
+    });
+
+    await test.step('“Archived sessions…” on B’s machine row lists it, and Unarchive brings its row back', async () => {
+      await machineRow(page, b.ref).locator('[data-project-line]').click({ button: 'right' });
+      await page.getByRole('menu').getByRole('menuitem', { name: 'Archived sessions…' }).click();
+      const dialog = page.getByRole('dialog', { name: `Archived sessions · ${B_NAME}` });
+      const listed = dialog.getByRole('listitem', { name: (await onB(app))!.title.text }); // B's record's own title (above)
+      await quoting(expect(listed, 'B answers the archived read').toBeVisible({ timeout: 30_000 }), () => mainSaid(page));
+      await listed.getByRole('button', { name: 'Unarchive' }).click();
+      await expect(listed).toBeHidden({ timeout: 30_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is unarchived' }).toBe(false);
+      await quoting(expect(row, 'its row is back in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    });
+
+    await test.step('Archived again, the footer’s “Archived sessions…” lists it under B’s name, and Unarchive there brings its row back', async () => {
+      await (await menuItemOfRow(page, row, 'Archive')).click();
+      const sheet = page.getByRole('dialog', { name: /^Archive “.*”\?$/ });
+      await sheet.getByRole('button', { name: 'Archive' }).click();
+      await expect(sheet).toBeHidden({ timeout: 60_000 });
+      await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived again' }).toBe(true);
+      await page.getByRole('button', { name: 'Archived sessions…', exact: true }).click();
+      const dialog = page.getByRole('dialog', { name: 'Archived sessions', exact: true });
+      const listed = dialog.getByRole('region', { name: B_NAME }).getByRole('listitem', { name: (await onB(app))!.title.text });
+      await quoting(expect(listed, 'B’s section of the footer’s sheet lists it').toBeVisible({ timeout: 30_000 }), () => mainSaid(page));
+      await listed.getByRole('button', { name: 'Unarchive' }).click();
+      await expect(listed).toBeHidden({ timeout: 30_000 });
+      await page.keyboard.press('Escape');
+      await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is unarchived from the footer' }).toBe(false);
+      await quoting(expect(row, 'its row is back in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // UX wave U8b (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md; A2 and A7, M6 and M8; X-168 and the
 // architect's ruling of 2026-11-13, Decision Log 13): a terminal session on B whose turn ended while an agent it started
 // in the background still works, beside a shell it runs in the background. A's card column for it draws the Subagents
@@ -2927,9 +3461,10 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
     await test.step('a pause of A’s link to B changes nothing', async () => {
       scene.aHub.cut();
       await expect.poll(linkState, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
-      // An offline machine's session tab holds only that (P5 Decision Log 28, T5; `main/Pane.tsx`), so while the link is
-      // down the agent is read where it stays drawn, on the card; its transcript row is read again once B is back.
-      await expect(main(page).locator('[data-machine-offline]'), 'the pane says B is offline').toBeVisible();
+      // The UX wave, U9 (M3, A4; P5 Decision Log 28 as it amends it): while the link reconnects the session's pane stays
+      // mounted under one status line, so the agent's row stays in view beside its card.
+      await quoting(expect(linkLine(page), 'the status line above the kept pane').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+      await expect(agentRow, 'the agent’s row stays in the kept pane while the link is down').toBeVisible();
       await expect(onCard, 'the agent stays on the Subagents card while the link is down').toBeVisible();
       await expect(onCard, 'the link down says nothing of the process: the agent still works').toContainText('Working');
       scene.aHub.restore();
@@ -2953,6 +3488,74 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
       await expect(done.locator(`[data-agent-row="${GONE_AGENT.agentId}"]`)).toContainText('ended with the session');
       console.log(`[e2e:remote] X-168: ${GONE.engine}/${GONE_AGENT.agentId} ended with the session on B's presence`);
     });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U8c-2 (§L, scene 3; docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md): a session MAWS
+// runs on B, the kind that has a record in A's window (a terminal session of B's has none: §E), whose agent reaches a
+// worktree beside B's checkout by `cd`. The replay writes the session's transcript in B's engine store; a row appended
+// there with the worktree's `cwd` is the move, as the engine records one. A's card names the worktree, Files lists it,
+// and a git read A makes there passes B's endpoint while git lists the worktree and is refused once its registration is
+// removed (the endpoint's admission, asked at each request).
+const MOVING_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e1';
+const MOVING_REPLY = 'B’s agent is about to move.';
+test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the worktree, Files lists it, and a git read there passes B’s endpoint only while it is registered', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-moved-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-moved-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const worktree = join(root, 'b-worktree'); // beside the repository
+    const journal = new SideJournal(MOVING_SESSION, checkout);
+    journal.turn(MOVING_REPLY);
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to move.', firstReply: MOVING_REPLY, title: 'B’s moving session' }, held);
+    // B's checkout made a repository now, with one worktree beside it on its own branch
+    git(checkout, 'init', '--quiet', '-b', 'main');
+    git(checkout, 'config', 'user.name', 'MAWS Fixture');
+    git(checkout, 'config', 'user.email', 'fixture@maws.invalid');
+    git(checkout, 'config', 'commit.gpgsign', 'false');
+    writeFileSync(join(checkout, NOTES), NOTES_TEXT);
+    git(checkout, 'add', '-A');
+    git(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'side', worktree);
+    const file = join(b.claudeConfigDir, 'projects', slugOf(checkout), `${MOVING_SESSION}.jsonl`);
+    await expect.poll(() => existsSync(file), { timeout: 30_000, message: `the replay wrote B’s transcript at ${file}` }).toBe(true);
+    const last = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { uuid?: string }).filter((row) => typeof row.uuid === 'string').at(-1);
+    const moved = { type: 'user', uuid: 'u8c2-remote-moved', parentUuid: last?.uuid ?? null, isSidechain: false, cwd: worktree, sessionId: MOVING_SESSION, version: '2.1.291', timestamp: new Date().toISOString(), userType: 'external', entrypoint: 'sdk-ts', message: { role: 'user', content: 'Now working beside the checkout.' } };
+    writeFileSync(file, `${JSON.stringify(moved)}\n`, { flag: 'a' });
+    type Folders = { agentFolder?: { checkout: string } };
+    await expect.poll(async () => (await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout ?? null, { timeout: 60_000, message: 'B’s record says where the agent is' }).toBe(worktree);
+
+    // A's card names the worktree, with the branch git reports there and where the session was launched
+    await showSessionCards(page);
+    const environment = sessionCard(page, 'Environment');
+    const fold = environment.getByRole('button').first();
+    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
+    await quoting(expect(environment.getByTestId('card-folder'), 'A’s card names the worktree').toHaveText(worktree, { timeout: 60_000 }), () => mainSaid(page));
+    await expect(environment.getByTestId('moved-from')).toHaveText('moved from b-checkout');
+    await quoting(expect(environment.getByText('⎇ side', { exact: true }), 'the branch git reports at the worktree, over the link').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    // Files lists it, first, as the working folder
+    await openSurface(page, 'Files');
+    const firstRoot = surface(page, 'files').locator('[role="treeitem"][data-kind="root"]').first();
+    await expect(firstRoot).toHaveAttribute('data-path', worktree, { timeout: 60_000 });
+    await expect(firstRoot).toContainText('working folder');
+
+    // A git read A makes at the worktree, as the session's: B's endpoint lets it through while git lists the worktree
+    const status = () => page.evaluate(([directory, machine, session]) => window.maws.invoke('git.status', { directory }, { machine, session } as never), [worktree, b.ref, app] as const);
+    const admitted = await status();
+    expect(admitted.ok, `the read passes while registered: ${JSON.stringify(admitted)}`).toBe(true);
+    // and refuses it once the registration is gone (the folder left as it is), asked again at this request: the
+    // endpoint's `no-target` (src/endpoint/authorize.ts, withinCheckout), which A's main hands on as the refusal
+    // (src/main/machines/remote/dispatch.ts, refusalError), not git's own failure at a folder it no longer knows
+    rmSync(join(checkout, '.git', 'worktrees', 'b-worktree'), { recursive: true, force: true });
+    const refusalOf = async () => { const answer = await status(); return answer.ok ? 'admitted' : ((answer.error.issues as { refusal?: unknown } | undefined)?.refusal ?? answer.error.message); }; // prettier-ignore
+    await expect.poll(refusalOf, { timeout: 30_000, message: 'the read is refused at B’s endpoint once the worktree is not registered' }).toBe('no-target');
+    expect((await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout, 'B’s record still names it: the refusal is the admission’s, at the act').toBe(worktree);
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

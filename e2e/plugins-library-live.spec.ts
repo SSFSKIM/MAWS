@@ -34,7 +34,7 @@ import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-tur
 import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './support/plugins-live';
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
-import { mainTab } from './support/shell';
+import { backToTabs, pageRegion } from './support/shell';
 import { newChatIn } from './support/sidebar';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the P2-B acceptance runs only under MAWS_E8_LIVE=1');
@@ -138,13 +138,13 @@ async function send(page: Page, text: string): Promise<void> {
   await page.keyboard.insertText(text);
   await page.keyboard.press('Enter');
 }
-// Back to the session after Discover: Open Discover leaves Customize the main tab, and the embedded library has no Close,
-// so the composer steps close Customize's tab first (none open: nothing to do).
+// Back to the session after Discover: Open Discover leaves Customize open, and the embedded library has no Close, so the
+// composer steps leave it first (none open: nothing to do). UX wave U7b (O-40): Customize is a page beside the sidebar,
+// left by its Back in the title bar; the session's tab, kept behind it, is shown again.
 async function backToSession(page: Page): Promise<void> {
-  const customize = mainTab(page, /^Customize/);
-  if ((await customize.count()) === 0) return;
-  await customize.getByRole('button', { name: /^Close / }).click();
-  await expect(customize).toHaveCount(0);
+  if ((await pageRegion(page).count()) === 0) return;
+  await expect(pageRegion(page)).toHaveAttribute('data-destination', 'customize');
+  await backToTabs(page);
   await expect(composer(page)).toBeVisible();
 }
 async function openWidget(page: Page, name: string): Promise<Locator> {
@@ -393,7 +393,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
     await step('discover', 'Open Discover from /plugins: counts on official cards, none on a directory-only card; supabase Installed in another project, installed here', async () => {
       if (!needsCatalogue()) return;
       await page.locator('[data-widget="plugins"]').getByRole('button', { name: 'Open Discover', exact: true }).click();
-      const w = page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+      const w = pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]'); // Customize's page (UX wave U7b)
       const discover = w.locator('[data-discover="plugins"]');
       await expect(discover.locator('[data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
       const search = w.getByRole('searchbox', { name: 'Search all sources' });
@@ -447,7 +447,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       await manage.getByRole('button', { name: 'Done' }).click();
     });
 
-    await step('back', 'Close Customize’s tab: the session is the main tab again, its composer shown', async () => {
+    await step('back', 'Back from Customize’s page: the session is the main tab again, its composer shown', async () => {
       await backToSession(page);
     });
 

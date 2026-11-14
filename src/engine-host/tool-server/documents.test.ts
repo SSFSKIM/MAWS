@@ -368,13 +368,54 @@ describe('artifact_edit', () => {
     expect(refusal).toMatchObject({ reason: 'removedByRestore', blocks: ['x1'] });
   });
 
-  it('answering posts the result lines into the thread as the session’s message, in the same write', async () => {
-    const { id, revision } = await readSeed();
-    const answer = json<{ answered: { threadId: string; messageId: string } }>(await edit({ artifact: id, baseRevision: revision, answering: 't3', ops: [{ op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' }] }));
-    expect(answer.answered.threadId).toBe('t3');
-    const message = getThread(live(id), 't3')!.messages.at(-1)!;
-    expect(message).toMatchObject({ id: answer.answered.messageId, by: { kind: 'session', appSessionId: SELF } });
-    expect(message.body).toContain('^p2');
+  // UX wave U5 (l6-artifacts-20, A18; the U5a execution document's Interfaces §I): the thread reads the agent's own words,
+  // or a fixed sentence, never the result lines, which the tool still answers the agent as before
+  describe('answering, and the reply posted with it', () => {
+    const op = { op: 'replace_text', block: 'p2', old: 'scheduled for Friday', new: 'scheduled for Monday' };
+    const REPLY = 'Moved the review to Monday, as the comment asked.';
+    const messagesOf = (id: string) => [...liveThreadIds(live(id))].sort().map((threadId) => getThread(live(id), threadId)!.messages.map((message) => message.body));
+
+    it('posts the reply as the session’s message in the thread, and answers the agent what the batch answers without one', async () => {
+      const a = await readSeed();
+      const replied = await edit({ artifact: a.id, baseRevision: a.revision, answering: 't3', reply: REPLY, ops: [op] });
+      const answer = json<{ answered: { threadId: string; messageId: string } }>(replied);
+      expect(answer.answered.threadId).toBe('t3');
+      expect(getThread(live(a.id), 't3')!.messages.at(-1)).toMatchObject({ id: answer.answered.messageId, by: { kind: 'session', appSessionId: SELF }, body: REPLY });
+
+      const b = await readSeed();
+      const plain = await edit({ artifact: b.id, baseRevision: b.revision, answering: 't3', ops: [op] });
+      // the same text but for what differs between two documents of one store: the id, the revision, the message's id
+      const bare = (result: McpToolResult, id: string) => {
+        const { messageId } = json<{ answered: { messageId: string } }>(result).answered;
+        return textOfResult(result).replaceAll(id, '<artifact>').replaceAll(messageId, '<message>').replace(/"revision": \d+/, '"revision": <n>');
+      };
+      expect(bare(replied, a.id)).toBe(bare(plain, b.id));
+      expect(textOfResult(plain)).toContain('replaced 1 occurrence(s) in ^p2');
+    });
+
+    it('posts “Edited this passage.” when the agent gave no reply', async () => {
+      const { id, revision } = await readSeed();
+      const answer = json<{ answered: { messageId: string } }>(await edit({ artifact: id, baseRevision: revision, answering: 't3', ops: [op] }));
+      expect(getThread(live(id), 't3')!.messages.at(-1)).toMatchObject({ id: answer.answered.messageId, body: 'Edited this passage.' });
+    });
+
+    it('ignores a reply on a batch that answers no thread', async () => {
+      const { id, revision } = await readSeed();
+      const before = messagesOf(id);
+      const answer = json(await edit({ artifact: id, baseRevision: revision, reply: REPLY, ops: [op] }));
+      expect(answer).not.toHaveProperty('answered');
+      expect(messagesOf(id)).toEqual(before);
+      expect(textOf(live(id), 'p2')).toContain('scheduled for Monday');
+    });
+
+    it.each([0, 2001])('refuses a reply of %i characters before anything is written', async (length) => {
+      const { id, revision } = await readSeed();
+      const before = { messages: messagesOf(id), text: textOf(live(id), 'p2') };
+      const refused = await edit({ artifact: id, baseRevision: revision, answering: 't3', reply: 'r'.repeat(length), ops: [op] });
+      expect(refused.isError).toBe(true);
+      expect(textOfResult(refused)).toMatch(/^artifact_edit: invalid arguments: reply: /);
+      expect({ messages: messagesOf(id), text: textOf(live(id), 'p2') }).toEqual(before);
+    });
   });
 
   it('publishes the agent’s cursor and the blocks the batch touched (an unscoped quote’s block, an insert’s new block), then drops both', async () => {

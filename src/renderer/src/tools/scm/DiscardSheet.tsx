@@ -3,7 +3,7 @@
 // destructive submit (C10's house rule: Enter never destroys anything). Rendered inside the tool through C10's `Sheet`
 // with its own close (the tool's `sheet` state), never through C10's dialog store. A refusal or a failed call shows in
 // the sheet and leaves it open; success closes it, and the lists move when the watcher's `git.changed` arrives.
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
@@ -23,11 +23,19 @@ export function DiscardSheet({ appSessionId, ui, directory, entries }: { appSess
   const deletes = entries.length - restores;
   const deletion = restores === 0;
   const close = () => ui.setState({ sheet: null });
+  // UX wave U8c-2 (M6): this sheet is still the one shown. A move closes it, and the agent back in the launch folder can
+  // have a new one open by the time an answer confirmed here lands: that answer is not the new sheet's to close or show.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => void (shown.current = false);
+  }, []);
 
   const submit = async () => {
     setRunning(true);
     setError(null);
     const result = await useScm.getState().discard(ui, appSessionId, directory, entries);
+    if (!shown.current) return; // closed meanwhile (a move, a pinned tool moving on, Cancel)
     setRunning(false);
     if (ui.getState().session !== appSessionId) return; // a pinned tool moved on: its sheet is already gone
     if (!result.ok) setError({ kind: 'error', text: result.error.message, output: '' });

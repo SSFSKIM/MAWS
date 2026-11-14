@@ -58,8 +58,11 @@ function Action({ label, glyph, git = true, enabled, onClick }: { label: string;
   );
 }
 
-export function FileRow({ group, entry, selected, enabled, actions }: { group: ScmGroupName; entry: ScmEntry; selected: boolean; enabled: boolean; actions: RowActions }) {
+// `acts` false (UX wave U8c-2: the session works away from its launch folder): the row keeps its selection and Open file,
+// which are reads, and draws none of its git actions.
+export function FileRow({ group, entry, selected, enabled, acts = true, actions }: { group: ScmGroupName; entry: ScmEntry; selected: boolean; enabled: boolean; acts?: boolean; actions: RowActions }) {
   const { path } = entry;
+  const offers = (shown: boolean) => acts && shown; // a git action of this row
   return (
     <li data-scm-row data-path={path} data-selected={selected || undefined} className={`group flex h-6 items-center pr-2 hover:bg-bg-hover ${selected ? 'bg-bg-active' : ''}`}>
       <button type="button" data-scm-select aria-current={selected || undefined} title={path} onClick={() => actions.select({ group, path })} className="flex h-full min-w-0 flex-1 items-center gap-1.5 pl-3 text-left text-ui text-fg">
@@ -70,20 +73,20 @@ export function FileRow({ group, entry, selected, enabled, actions }: { group: S
         <span className="min-w-0 flex-1 truncate text-ui-sm text-fg-faint">{dirOf(path)}</span>
       </button>
       <span className={`flex shrink-0 items-center gap-0.5 ${selected ? '' : 'opacity-0 group-focus-within:opacity-100 group-hover:opacity-100'}`}>
-        {group === 'staged' ? <Action label={SCM_COPY.unstage(path)} glyph="−" enabled={enabled} onClick={() => actions.unstage([path])} /> : null}
-        {group === 'unstaged' ? (
+        {offers(group === 'staged') ? <Action label={SCM_COPY.unstage(path)} glyph="−" enabled={enabled} onClick={() => actions.unstage([path])} /> : null}
+        {offers(group === 'unstaged') ? (
           <>
             <Action label={SCM_COPY.discard(path)} glyph="↺" enabled={enabled} onClick={() => actions.discard([{ path, group: 'unstaged' }])} />
             <Action label={SCM_COPY.stage(path)} glyph="+" enabled={enabled} onClick={() => actions.stage([path])} />
           </>
         ) : null}
-        {group === 'untracked' ? (
+        {offers(group === 'untracked') ? (
           <>
             <Action label={SCM_COPY.delete(path)} glyph="×" enabled={enabled} onClick={() => actions.discard([{ path, group: 'untracked' }])} />
             <Action label={SCM_COPY.stage(path)} glyph="+" enabled={enabled} onClick={() => actions.stage([path])} />
           </>
         ) : null}
-        {group === 'conflicts' ? <Action label={SCM_COPY.markResolved(path)} glyph="✓" enabled={enabled} onClick={() => actions.stage([path])} /> : null}
+        {offers(group === 'conflicts') ? <Action label={SCM_COPY.markResolved(path)} glyph="✓" enabled={enabled} onClick={() => actions.stage([path])} /> : null}
         {openable(entry) ? <Action label={SCM_COPY.open(path)} glyph="↗" git={false} enabled onClick={() => actions.open(path)} /> : null}
       </span>
     </li>

@@ -3,7 +3,8 @@
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
@@ -16,8 +17,7 @@ import { MCP_SERVERS, SECTIONS } from './copy';
 import { SEND_TO_COPY } from '../delivery/copy';
 import { waitingStatus } from '../test-support/host-status';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
-import { LAYOUT_DEFAULTS, TabRefSchema } from '@shared/ipc/schema/layout';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
 import { status } from '../../../../test/support/builders';
@@ -25,6 +25,9 @@ import { resetBudgetStore, useBudget } from '../budget/store';
 import { useSessions } from '../stores/sessions';
 import { REL } from '../test-support/relative-time';
 // C12 end
+import type { UsageSnapshot } from '@shared/usage/types'; // UX wave U7b (O-47): Settings › Usage
+import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
+import { useUsage } from '../stores/usage';
 
 let b: SettingsBridge;
 
@@ -49,11 +52,18 @@ const more = (of: HTMLElement) => within(of).getByRole('button', { name: /^(More
 // the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
 const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
 
+let usageFixture: UsageSnapshot;
+beforeAll(async () => {
+  const reader = new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => Date.parse('2026-09-29T07:36:17Z') });
+  usageFixture = await reader.snapshot([]);
+  reader.stop();
+});
 beforeEach(() => {
   useGateway.setState({ relay: null, directLogin: new Map() });
 });
 afterEach(() => {
   cleanup();
+  useUsage.setState({ snapshot: null, routed: null });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
   useAttention.setState({ notificationDelivery: null });
@@ -62,18 +72,19 @@ afterEach(() => {
 });
 
 describe('settings tab writes one field per row', () => {
-  // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own
-  const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Engine', 'Supervisor', 'Org'];
+  // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own.
+  // UX wave U7b (O-47): Usage after Gateway.
+  const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Usage', 'Engine', 'Supervisor', 'Org'];
   it('groups the index under App and Sessions & engine, Org and Customize after them, the footer kept; the body in the same order', () => {
     renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
     expect(within(index()).getAllByRole('button').map((x) => x.textContent)).toEqual([...ORDER, 'Customize ›']);
     // the headings stand before their sections, and nothing heads Org
-    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 10), 'Org', 'Customize ›']);
+    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 11), 'Org', 'Customize ›']);
     expect(index().textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
     const sections = [...document.querySelectorAll('[data-settings-body] section[aria-labelledby^="settings-"]')].map((s) => s.getAttribute('aria-labelledby'));
     expect(sections).toEqual(SECTION_TABLE.map(({ section }) => `settings-${section}`));
     expect(SECTION_TABLE.map(({ section }) => SECTIONS[section])).toEqual(ORDER);
-    expect(SECTION_TABLE.map(({ group }) => group)).toEqual(['app', 'app', 'app', 'app', 'app', 'app', 'sessions', 'sessions', 'sessions', 'sessions', null]);
+    expect(SECTION_TABLE.map(({ group }) => group)).toEqual(['app', 'app', 'app', 'app', 'app', 'app', 'sessions', 'sessions', 'sessions', 'sessions', 'sessions', null]);
     expect([...SETTINGS_SECTIONS]).toEqual(SECTION_TABLE.map(({ section }) => section));
   });
 
@@ -150,30 +161,20 @@ describe('settings tab writes one field per row', () => {
     expect(note.textContent).toContain("MAWS never stores a token; ClaudeUsage holds the relay's accounts.");
   });
 
-  // U11a M9 (ruled, point 12; UC-14): the stored tab keeps build F's ten sections; supervisor is reached in the page only
-  it('stores only the ten sections build F knows, each a section here; supervisor is never stored', () => {
-    const F_TEN = ['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser', 'artifacts', 'sessions', 'org'];
-    const stored = (section: string) => TabRefSchema.safeParse({ id: 'settings', kind: 'settings', section, pinned: false }).success;
-    for (const section of F_TEN) {
-      expect(stored(section), section).toBe(true);
-      expect(SETTINGS_SECTIONS, section).toContain(section);
-    }
-    expect(SETTINGS_SECTIONS.filter((section) => !F_TEN.includes(section))).toEqual(['supervisor']);
-    expect(stored('supervisor')).toBe(false);
-  });
-
   it('copy outside Settings names the MCP servers row where it now is', () => {
     expect(SEND_TO_COPY.notionNotFound).toContain(`Settings › ${SECTIONS.sessions} › ${MCP_SERVERS.label}`);
     expect(SEND_TO_COPY.notionNoSession).not.toContain('Settings › Engine');
   });
 
-  it('opens the Customize destination from the index without changing settings', () => {
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  it('opens the Customize page from the index, closing the Settings dialog, without changing settings', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: { section: null } });
     renderView();
     fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'plugins' });
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().settings).toBeNull();
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     expect(b.sets).toEqual([]);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
   });
 
   it('Engine and Sessions: the binary, the config home, and the subagent model as one field', async () => {
@@ -451,6 +452,26 @@ describe('settings tab writes one field per row', () => {
     fireEvent.change(font, { target: { value: 'MesloLGM Nerd Font Mono' } });
     fireEvent.keyDown(font, { key: 'Enter' });
     await vi.waitFor(() => expect(refusals).toBe(2));
+  });
+
+  // UX wave U7b (O-47; its execution document, M7 decisions 4 and 7): the whole usage panel as the section's content
+  it('Usage holds the grid with the account actions under the title “Claude accounts”, in the section’s measure', async () => {
+    useUsage.setState({ snapshot: usageFixture });
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    renderView(SETTINGS_DEFAULTS_V21, 'usage', ANSWERED);
+    expect(within(index()).getByRole('button', { name: 'Usage' }).getAttribute('aria-current')).toBe('true');
+    const usage = region('Usage');
+    expect(within(usage).getByRole('heading', { name: 'Usage' }).id).toBe('settings-usage');
+    expect(within(usage).getByRole('heading', { name: 'Claude accounts' })).toBeTruthy();
+    expect(within(usage).getByRole('heading', { name: 'Codex accounts' })).toBeTruthy();
+    const marked = usage.querySelector<HTMLElement>('[data-settings-row="usage.accounts"]')!;
+    expect(marked.getAttribute('data-settings-state')).toBe('default');
+    const panel = marked.querySelector<HTMLElement>('[data-usage-panel]')!;
+    expect(panel.className).not.toMatch(/(^|\s)(p|px|w)-/);
+    expect(panel.querySelector('[data-columns]')!.getAttribute('data-columns')).toBe('2');
+    expect(within(panel).getAllByRole('button', { name: 'Remove account…' })).toHaveLength(5);
+    expect(within(panel).getByRole('button', { name: 'Add account…' })).toBeTruthy();
+    await vi.waitFor(() => expect(b.calls.map((c) => c.name)).toContain('settings.usageControls'));
   });
 
   it('opens at the section it is given', () => {

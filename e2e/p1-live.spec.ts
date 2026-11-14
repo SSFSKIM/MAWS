@@ -599,7 +599,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
     const usersBefore = outUsers(sessionRows(l, parent)).length;
     const card = await pickTitle(l);
-    await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+    await expect(card.getByRole('checkbox', { name: 'Send to main' }), 'UX wave U5a: unchecked, a side thread').not.toBeChecked();
     await card.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.thread);
     const versionsOf = () => pagesOf(l, artifact!.deliverableId); // P3-L M6b: the store's versions, X12's record gone
     const versionsBefore = (await versionsOf()).length;
@@ -707,13 +707,16 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
       return bash !== undefined && ofKind(all, 'permission.requested').every((e) => resolved.has(e.requestId));
     }, allowed);
     const sheet = await pickTitle(l); // the card's composer half (P2-E1), with the sheet's names
-    await sheet.locator('[data-destination="main"]').click();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeChecked();
-    const caption = (await sheet.locator('[data-destination="main"]').textContent())?.trim() ?? '';
+    // UX wave U5a: the "Send to main" checkbox ticked; its caption is its title (the composer's words for a steer)
+    await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
+    await expect(sheet.getByRole('checkbox', { name: 'Send to main' })).toBeChecked();
+    const caption = (await sheet.locator('label:has([data-send-to-main])').getAttribute('title'))?.trim() ?? '';
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(PROMPTS.steer);
     const sentAt = Date.now();
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
+    // UX wave U5a (A2): the card's place says where it went, for about four seconds
+    await expect.soft(l.page.locator('[data-sent-note]'), 'the place’s line after a steer').toContainText('read at the next step');
     await drive(l, l.pane, parent, 'the steered turn’s end', async () => mainTurnsEnded(await events(l, parent)).length > turnsBefore && (await idleNow(l, parent)), allowed);
 
     const written = outUsers(sessionRows(l, parent)).map((r) => r.frame as { priority?: string; message?: { content?: unknown } });

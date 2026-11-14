@@ -183,6 +183,18 @@ describe('editor registrations', () => {
       await waitFor(() => expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n'));
       expect(disk.callsOf('files.write')).toHaveLength(1);
     });
+
+    // UX wave U7b (§N, the second table): a changed file's tab behind a page is not the focused one.
+    it('does not save a changed file’s tab behind a page, and the same key after Back saves it', async () => {
+      const { disk } = await openApp({ dirty: true });
+      act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+      runAction('file.save');
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(disk.callsOf('files.write')).toHaveLength(0);
+      act(() => useLayout.getState().closeDestination());
+      runAction('file.save');
+      await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+    });
   });
 
   describe('tab mark', () => {

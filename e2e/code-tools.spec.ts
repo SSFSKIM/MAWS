@@ -5,8 +5,13 @@
 // no harness API, so its cases read what they assert from the DOM and drive it with the clicks a reader makes; a line
 // is reached through Review's `Open file ↗` on a hunk at that line (the product's own path to a line), and a diff tab
 // is opened by writing it into layout.json and reloading (C5's restore path).
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { slugOf } from '../src/engine-host/fs/paths';
+import { ScratchRepo } from '../test/support/scratch-repo';
+import { StoreFixture } from '../test/support/store-fixture';
 import type { AppSessionId } from '../src/shared/graph/ids';
 import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
@@ -16,9 +21,10 @@ import {
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
 import { addressed, localRef } from './support/address';
-import { test, type MawsLaunch } from './support/launch';
+import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
-import { hideSurfaces, mainTabs, openSurface, pinSurfaceForSessions, unfoldSessionCard } from './support/shell';
+import { hideSurfaces, mainTabs, openSurface, pinSurfaceForSessions, sessionCard, sideColumn, surface, unfoldSessionCard } from './support/shell';
+import { sidebarRow } from './support/sidebar';
 
 const REFUSAL = "path outside the session's directories";
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
@@ -744,5 +750,238 @@ test.describe('the product in stub mode over a scratch repository', () => {
       },
       (scratch) => mkdirSync(scratch.path('locked'), { mode: 0o000 }),
     );
+  });
+});
+
+// ---- UX wave U8c-2 (§L, scene 1): the card and the code surfaces follow the agent -------------------------------------
+// docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md. A session discovered from a transcript of
+// invented rows in a scratch engine store, over a scratch repository with a worktree under `.claude/worktrees/`. No
+// engine runs: a move by `cd` is rows appended with another `cwd` (the engine's rows then keep the launch branch); a move
+// by the tool is the transcript and its folder renamed into the worktree's project folder with a `relocated` row and a
+// row there, as the engine does (engine 2.1.322, cli.pretty.js:381469-381548). Every step settles on what the screen
+// shows (a row's text, a mark, a listed file), never on two reads agreeing or on a read taken straight after a layout
+// change.
+
+// The app id of the session the index lists for the engine's session id, once it does.
+async function indexedSession(page: Page, sid: string): Promise<string> {
+  const find = () =>
+    page.evaluate(async (sid) => {
+      const listed = await window.maws.invoke('session.list', {});
+      if (!listed.ok) throw new Error(listed.error.message);
+      return listed.value.sessions.find((r) => r.engineSessionId === sid)?.appId ?? null;
+    }, sid);
+  await expect.poll(find, { timeout: 20_000, message: 'the session is indexed' }).not.toBeNull();
+  return (await find())!;
+}
+
+test.describe('the product over a session discovered from its transcript', () => {
+  test('the card and the code surfaces follow the agent', async () => {
+    const repo = await ScratchRepo.create({ sentinels: false });
+    const store = await StoreFixture.create();
+    const answers = mkdtempSync(join(tmpdir(), 'maws-u8c2-shell-')); // the terminals' answers, outside both checkouts
+    let asked = 0;
+    let maws: MawsLaunch | null = null;
+    try {
+      const sid = '5e551011-0000-4000-8000-0000000000d1';
+      const worktree = await repo.addManagedWorktree('w1');
+      const sub = join(worktree, 'sub');
+      mkdirSync(sub);
+      // One change in each checkout, so Review and Source control say which checkout they read.
+      writeFileSync(repo.path('README.md'), 'hello\nchanged in the repository\n');
+      writeFileSync(join(worktree, 'worktree-note.txt'), 'made in the worktree\n');
+      let turn = 0;
+      let parent: string | null = null;
+      const row = (cwd: string, gitBranch: string, text: string) => {
+        const uuid = `u8c-${String(++turn).padStart(4, '0')}`;
+        const made = { type: 'user', uuid, parentUuid: parent, cwd, gitBranch, sessionId: sid, timestamp: `2026-11-13T10:${String(turn).padStart(2, '0')}:00.000Z`, message: { role: 'user', content: text } };
+        parent = uuid;
+        return made;
+      };
+      const lines = (rows: object[]) => rows.map((r) => `${JSON.stringify(r)}\n`).join('');
+      let transcript = await store.addTranscript(repo.root, sid, [row(repo.root, 'main', 'Written in the repository')]);
+      writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+      maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: '', CLAUDE_CONFIG_DIR: store.configHome, MAWS_HARNESS: '0' } });
+      const { page } = maws;
+      const appId = await indexedSession(page, sid);
+      // Every record the window is sent for the session from here on, and any removal: the row is never absent.
+      await page.evaluate((id) => {
+        const seen: string[] = [];
+        (window as unknown as { __u8c2: string[] }).__u8c2 = seen;
+        window.maws.on('session.changed', ({ record }) => void (record.appId === id && seen.push(record.archived ? 'archived' : 'listed')));
+        window.maws.on('session.removed', ({ appSessionId }) => void (appSessionId === id && seen.push('removed')));
+      }, appId);
+      const sessionRow = () => sidebarRow(page, { appSessionId: appId });
+      await (await sessionRow()).click();
+
+      const moved = `moved from ${basename(repo.root)}`;
+      const card = () => unfoldSessionCard(page, 'Environment');
+      const folderRow = () => sessionCard(page, 'Environment').getByTestId('card-folder');
+      const movedFrom = () => sessionCard(page, 'Environment').getByTestId('moved-from');
+      const branchRow = (branch: string) => sessionCard(page, 'Environment').getByText(`⎇ ${branch}`, { exact: true });
+      const mark = async () => (await sessionRow()).getByRole('img', { name: 'Worktree', exact: true });
+      const hoverPlace = async () => {
+        const hover = page.locator('[data-hover-card]');
+        await expect(async () => {
+          await page.mouse.move(700, 20);
+          await (await sessionRow()).hover();
+          await expect(hover).toBeVisible({ timeout: 2_000 });
+        }).toPass({ timeout: 10_000 });
+        return hover.getByTestId('hover-place');
+      };
+      const review = async () => {
+        await openSurface(page, 'Review');
+        const body = surface(page, 'review').locator('[data-review]');
+        const uncommitted = body.locator('[data-chip="uncommitted"]');
+        await expect(uncommitted).toBeVisible({ timeout: 20_000 });
+        if ((await uncommitted.getAttribute('aria-pressed')) !== 'true') await uncommitted.click();
+        await expect(uncommitted).toHaveAttribute('aria-pressed', 'true');
+        return body;
+      };
+      const reviewRow = (body: Locator, path: string) => body.locator(`[role="option"] button[data-path="${path}"]`);
+      const firstRoot = async () => {
+        await openSurface(page, 'Files');
+        return surface(page, 'files').locator('[role="treeitem"][data-kind="root"]').first();
+      };
+      const sourceControl = async () => {
+        await openSurface(page, 'Source control');
+        return surface(page, 'source-control');
+      };
+      const scmActs = (tool: Locator) => tool.locator('[data-scm-action], [data-scm-remote-action="push"], [data-scm-remote-action="pr"]');
+      // The terminals: a tab of the side column's strip by its id, its worktree warning when in view.
+      const shownTab = () => sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip] [data-tab-id]:has([role="tab"][aria-selected="true"])');
+      const showTerminal = async (tabId: string) => {
+        await openSurface(page, 'Terminal');
+        await sideColumn(page).locator(`[data-side-strip] [data-tab-id="${tabId}"] [role="tab"]`).click();
+        await expect(shownTab()).toHaveAttribute('data-tab-id', tabId);
+        return surface(page, 'terminal').getByRole('status', { name: 'worktree warning' });
+      };
+      // The shown terminal's own shell asked where it runs: an invented marker and `pwd -P` typed into it, its answer
+      // written to a file outside both checkouts (the terminal draws on a canvas). A tab whose shell never starts, or
+      // whose spawn stays pending, never answers. A keystroke lost to a focus the click had not yet given is typed again.
+      const shellAnswer = async () => {
+        const file = join(answers, `answer-${++asked}.txt`);
+        const marker = `U8C2-SHELL-${asked}`;
+        const said = () => (existsSync(file) ? readFileSync(file, 'utf8').trim() : '');
+        await expect(surface(page, 'terminal').getByText('Starting shell…', { exact: true }), 'the shell has started').toHaveCount(0, { timeout: 20_000 });
+        await expect(async () => {
+          await surface(page, 'terminal').locator('[data-testid="terminal-surface"]').filter({ visible: true }).click();
+          await page.keyboard.type(`printf '%s:%s\\n' ${marker} "$(pwd -P)" > '${file}'\n`);
+          await expect.poll(said, { timeout: 5_000 }).toMatch(new RegExp(`^${marker}:`));
+        }).toPass({ timeout: 30_000 });
+        return said().slice(marker.length + 1);
+      };
+      const append = (rows: object[]) => appendFileSync(transcript, lines(rows));
+
+      // At the launch folder: the card names the repository, nothing says moved, no mark; Files' root and Review are the
+      // repository's. A terminal is opened here, before any move.
+      await card();
+      await expect(folderRow()).toHaveText(repo.root, { timeout: 20_000 });
+      await expect(branchRow('main')).toBeVisible({ timeout: 20_000 });
+      await expect(movedFrom()).toHaveCount(0);
+      await expect(await mark()).toHaveCount(0);
+      await openSurface(page, 'Terminal');
+      await expect(shownTab()).toHaveCount(1);
+      const before = (await shownTab().getAttribute('data-tab-id'))!;
+      expect(await shellAnswer(), 'the first terminal’s shell runs in the repository').toBe(repo.root);
+      await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' })).toHaveCount(0);
+
+      // `cd` into the worktree.
+      append([row(worktree, 'main', 'Working in the worktree')]);
+      await card();
+      await expect(folderRow(), 'the folder row names the worktree').toHaveText(worktree, { timeout: 20_000 });
+      await expect(movedFrom()).toHaveText(moved);
+      await expect(movedFrom()).toHaveAttribute('title', repo.root);
+      await expect(branchRow('worktree-w1'), 'the branch git reports at the worktree').toBeVisible({ timeout: 20_000 });
+      let body = await review();
+      await expect(reviewRow(body, 'worktree-note.txt'), 'Review lists the worktree’s change').toBeVisible({ timeout: 20_000 });
+      await expect(reviewRow(body, 'README.md'), 'and not the repository’s').toHaveCount(0);
+      let root = await firstRoot();
+      await expect(root).toHaveAttribute('data-path', worktree, { timeout: 20_000 });
+      await expect(root).toContainText('working folder');
+      let scm = await sourceControl();
+      await expect(scm.locator('[data-scm-row][data-path="worktree-note.txt"]')).toBeVisible({ timeout: 20_000 });
+      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toHaveCount(0);
+      await expect(scmActs(scm), 'no Push, no Open PR, no button on a row or a group').toHaveCount(0);
+      await expect(scm.getByRole('textbox', { name: 'Commit message' }), 'no commit form').toHaveCount(0);
+      await expect(await showTerminal(before), 'the terminal opened before stays in the repository').toContainText(`This terminal is in ${repo.root}; the session now runs in ${worktree}.`);
+      expect(await shellAnswer(), 'and its shell is still there').toBe(repo.root);
+      await sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip]').getByRole('button', { name: 'Add a tool', exact: true }).click();
+      await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+      await expect(shownTab()).not.toHaveAttribute('data-tab-id', before);
+      const after = (await shownTab().getAttribute('data-tab-id'))!;
+      expect(await shellAnswer(), 'a new terminal’s shell starts in the worktree').toBe(worktree);
+      await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' }), 'and warns of nothing').toHaveCount(0);
+      await expect(await mark(), 'the sidebar row carries the worktree mark').toBeVisible({ timeout: 20_000 });
+      await expect(await hoverPlace()).toContainText('worktree w1');
+      await page.mouse.move(700, 20);
+
+      // `cd` into a sub-folder of the worktree: the folder row's text ends with it, at the same height; nothing else moves.
+      await card();
+      await expect(branchRow('worktree-w1')).toBeVisible();
+      await expect(folderRow()).toHaveText(worktree); // the card as it shows the worktree, before the height is read
+      const heightOf = async () => (await sessionCard(page, 'Environment').boundingBox())!.height;
+      const heightIn = await heightOf();
+      append([row(sub, 'main', 'Working in a sub-folder')]);
+      await expect(folderRow(), 'the folder row ends with the sub-folder').toHaveText(/\/sub$/, { timeout: 20_000 });
+      await expect(folderRow()).toHaveText(sub);
+      await expect.poll(heightOf, { message: 'the card keeps its height' }).toBe(heightIn);
+      await expect(movedFrom()).toHaveText(moved);
+      await expect(branchRow('worktree-w1')).toBeVisible();
+      await expect(await mark()).toBeVisible();
+
+      // `cd` back into the repository: all of it returns, the mark included.
+      append([row(repo.root, 'main', 'Back in the repository')]);
+      await card();
+      await expect(folderRow()).toHaveText(repo.root, { timeout: 20_000 });
+      await expect(movedFrom()).toHaveCount(0);
+      await expect(branchRow('main')).toBeVisible({ timeout: 20_000 });
+      body = await review();
+      await expect(reviewRow(body, 'README.md')).toBeVisible({ timeout: 20_000 });
+      await expect(reviewRow(body, 'worktree-note.txt')).toHaveCount(0);
+      root = await firstRoot();
+      await expect(root).toHaveAttribute('data-path', repo.root, { timeout: 20_000 });
+      await expect(root).toContainText('directory');
+      scm = await sourceControl();
+      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toBeVisible({ timeout: 20_000 });
+      await expect(scmActs(scm).first(), 'every act is back').toBeVisible();
+      await expect(scm.getByRole('textbox', { name: 'Commit message' })).toBeVisible();
+      await expect(await showTerminal(before), 'the first terminal is where the session is again').toHaveCount(0);
+      await expect(await showTerminal(after), 'the second says it is in the worktree').toContainText(`This terminal is in ${worktree}; the session now runs in ${repo.root}.`);
+      expect(await shellAnswer(), 'where its shell still is').toBe(worktree);
+      await expect(await mark()).toHaveCount(0, { timeout: 20_000 });
+
+      // The tool's way: the transcript and its folder renamed into the worktree's project folder, a `relocated` row and a
+      // row there. The same card and the same mark; then back the same way.
+      const moveTranscript = (to: string, branch: string, text: string) => {
+        const project = join(store.paths.projects, slugOf(to));
+        const target = join(project, `${sid}.jsonl`);
+        mkdirSync(project, { recursive: true });
+        renameSync(transcript, target);
+        if (existsSync(join(dirname(transcript), sid))) renameSync(join(dirname(transcript), sid), join(project, sid));
+        transcript = target;
+        append([{ type: 'relocated', relocatedCwd: to, sessionId: sid }, row(to, branch, text)]);
+      };
+      moveTranscript(worktree, 'worktree-w1', 'Entered the worktree with the tool');
+      await card();
+      await expect(folderRow()).toHaveText(worktree, { timeout: 20_000 });
+      await expect(movedFrom()).toHaveText(moved);
+      await expect(branchRow('worktree-w1')).toBeVisible({ timeout: 20_000 });
+      await expect(await mark()).toBeVisible({ timeout: 20_000 });
+      moveTranscript(repo.root, 'main', 'Left the worktree with the tool');
+      await card();
+      await expect(folderRow()).toHaveText(repo.root, { timeout: 20_000 });
+      await expect(movedFrom()).toHaveCount(0);
+      await expect(await mark()).toHaveCount(0, { timeout: 20_000 });
+
+      const seen = await page.evaluate(() => (window as unknown as { __u8c2: string[] }).__u8c2);
+      expect(seen, 'never told archived or removed across the moves').not.toContain('archived');
+      expect(seen).not.toContain('removed');
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    } finally {
+      await maws?.cleanup();
+      repo.dispose();
+      await store.dispose();
+      rmSync(answers, { recursive: true, force: true });
+    }
   });
 });

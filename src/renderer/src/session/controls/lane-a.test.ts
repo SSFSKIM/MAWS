@@ -95,8 +95,15 @@ describe('send', () => {
     expect(await refused.controls.send('x', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: 'too many messages waiting for this session' });
     const key = { writer: 'maws/m', seq: 3 };
     const later = port({}, { 'laneA.send': { key, state: 'submitted' } });
-    expect(await later.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(await later.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false, pendingKey: key }); // UX wave U5a: the strip's key
     expect(useLaneA.getState().pendingSends.get(APP)).toEqual([{ key, text: 'slow words', state: 'sending', reason: null }]);
+  });
+
+  // UX wave U5a (decision 8): the pending send is named by its key; with none the bridge made no pending send to name
+  it('an unconfirmed answer naming no key holds nothing and carries no key', async () => {
+    const { controls } = port({}, { 'laneA.send': { key: null, state: 'submitted' } });
+    expect(await controls.send('lost words', { origin: 'comment' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(useLaneA.getState().pendingSends.get(APP)).toBeUndefined();
   });
 
   it('runs a `/` text whose route runs as a command, and refuses one whose route does not, sending nothing', async () => {
@@ -276,6 +283,15 @@ describe('the chips', () => {
     expect(controlsCapabilityMode()).toEqual({ available: false, reason: LANE_A_WORDS.mode }); // Q2's words where the gap is listed
     expect(bindings().directories.disabled).toBe(LANE_A_WORDS.directories);
     expect(bindings().location.path).toBe('/work/here');
+  });
+
+  // UX wave U8c-2 (M4 decision 10): the location chip names the working folder and the branch recorded for it.
+  it('names the working folder and its recorded branch in the location chip', () => {
+    const state = laneAState(APP);
+    applyLaneAState(APP, state);
+    const moved = { ...rec, branch: 'main', agentFolder: { checkout: '/work/here/.claude/worktrees/w1', cwd: '/work/here/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+    const { client } = fakeClient({ 'laneA.catalog': laneACatalog() });
+    expect(laneAControls(state, moved, { appSessionId: APP, client }).bindings().location).toMatchObject({ path: '/work/here/.claude/worktrees/w1', branch: 'w1' });
   });
 
   // sminos 1.27.14: the bridge reports the mode (main's state holds it only from such a bridge); MAWS shows it and when
@@ -485,7 +501,7 @@ describe('a grade refusal on another machine', () => {
     expect(await controls.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: WORDS });
     const key = { writer: 'remote/m', seq: 2 };
     const slow = remotePort({}, { 'laneA.send': { key, state: 'submitted' } });
-    expect(await slow.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(await slow.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false, pendingKey: key });
     applyLaneAState(APP, laneAState(APP, { link: LINK, acts: [], deliveries: [{ key, at: AT, state: 'refused', reason: WORDS }] }));
     expect(useLaneA.getState().pendingSends.get(APP)).toEqual([{ key, text: 'slow words', state: 'refused', reason: WORDS }]);
   });

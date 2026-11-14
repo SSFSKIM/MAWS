@@ -366,3 +366,62 @@ describe('the last assistant line and a message tool’s call', () => {
     expect(lastLine(turn)).toBe('Both stages ran; 37 labels are missing.');
   });
 });
+
+// UX wave U8c-2 (§A): where the agent is, the folder of the newest main-loop row the tail window holds. A `cd` moves no
+// transcript and writes no `relocated` row (the probe's findings), so the rows' own `cwd` is the one signal of it.
+describe("the newest row's folder", () => {
+  const whole = (...records: object[]) => Buffer.from(records.map(line).join(''), 'utf8');
+  const of = (bytes: Buffer, head = bytes, tail = bytes) => summarize(head, tail, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p');
+
+  it("is the cwd of the newest row that carries one, a sidechain row's and a bookkeeping row's skipped", () => {
+    const bytes = whole(
+      { type: 'user', uuid: 'u1', parentUuid: null, cwd: '/repo', gitBranch: 'main', isSidechain: false },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', cwd: '/repo/.claude/worktrees/w1', gitBranch: 'main', isSidechain: false },
+      { type: 'assistant', uuid: 's1', parentUuid: 'a1', cwd: '/elsewhere', isSidechain: true },
+      { type: 'last-prompt', lastPrompt: 'go' },
+    );
+    const summary = of(bytes);
+    expect(summary.newestCwd).toBe('/repo/.claude/worktrees/w1');
+    expect(summary.directory).toBe('/repo'); // the first row's, as before
+  });
+
+  it("follows a `cd` and a return in the rows' order, a `relocated` row naming none", () => {
+    const rows = [
+      { type: 'user', uuid: 'u1', parentUuid: null, cwd: '/repo', isSidechain: false },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', cwd: '/repo/.claude/worktrees/pz-beta/sub', isSidechain: false },
+    ];
+    expect(of(whole(...rows)).newestCwd).toBe('/repo/.claude/worktrees/pz-beta/sub');
+    // uxwave-folder-resume-cd*.jsonl: after a resume the rows name the launch folder again
+    const resumed = of(whole(...rows, { type: 'relocated', relocatedCwd: '/repo' }, { type: 'user', uuid: 'u2', parentUuid: 'a1', cwd: '/repo', isSidechain: false }));
+    expect(resumed.newestCwd).toBe('/repo');
+    expect(resumed.relocatedCwd).toBe('/repo');
+    expect(resumed.directory).toBe('/repo');
+  });
+
+  it("is null, never the head's, when the tail window holds no row with a folder", () => {
+    // The newest row alone is larger than the tail window: its start is cut away, so the tail holds no row with a folder.
+    const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/repo', isSidechain: false, message: { role: 'user', content: 'hi' } });
+    const big = line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', cwd: '/repo/.claude/worktrees/w1', isSidechain: false, message: { role: 'assistant', content: [{ type: 'text', text: 'y'.repeat(150 * 1024) }] } });
+    const bytes = Buffer.from(first + big, 'utf8');
+    const { head, tail } = headAndTail(bytes);
+    const summary = of(bytes, head, tail);
+    expect(summary.directory).toBe('/repo');
+    expect(summary.newestCwd).toBeNull();
+  });
+
+  it('counts a last line still being written by its start, unless that start says it is a sidechain row', () => {
+    const first = line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/repo', isSidechain: false, message: { role: 'user', content: 'hi' } });
+    const torn = (record: object) => {
+      const text = JSON.stringify(record);
+      return Buffer.from(first + text.slice(0, text.length - 20), 'utf8'); // cut inside the message, no newline
+    };
+    const main = torn({ parentUuid: 'u1', isSidechain: false, type: 'assistant', uuid: 'a1', cwd: '/repo/sub', message: { content: [{ type: 'text', text: 'x'.repeat(40) }] } });
+    expect(of(main).newestCwd).toBe('/repo/sub');
+    const sidechain = torn({ parentUuid: 'u1', isSidechain: true, type: 'assistant', uuid: 's1', cwd: '/elsewhere', message: { content: [{ type: 'text', text: 'x'.repeat(40) }] } });
+    expect(of(sidechain).newestCwd).toBe('/repo');
+  });
+
+  it('is null for a file of bookkeeping rows only', () => {
+    expect(of(whole({ type: 'custom-title', customTitle: 't' }, { type: 'relocated', relocatedCwd: '/repo' })).newestCwd).toBeNull();
+  });
+});

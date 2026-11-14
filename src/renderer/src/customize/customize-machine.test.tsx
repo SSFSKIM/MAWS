@@ -29,7 +29,7 @@ afterEach(() => {
   cleanup();
   forgetKeptOperations();
   useSessions.setState({ projects: new Map(), records: new Map(), engine: new Map() });
-  useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
   useMachines.setState({ loaded: new Set() });
   useCustomizeProject.setState({ projectId: undefined }, true);
 });
@@ -64,6 +64,9 @@ it('attaches only this machine’s live sessions in the page’s directory', asy
 
 it('Open Discover names this machine’s project for a directory, never another machine’s of the same path', () => {
   useSessions.setState({ projects: new Map([[R, project(R, 0, { name: 'On B', directory: '/two' })]]) });
+  const strip = useLayout.getState().main;
   openDiscover('/two');
   expect(useCustomizeProject.getState()).toEqual({ projectId: null, directory: '/two' });
+  expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' }); // UX wave U7b: a page, no tab
+  expect(useLayout.getState().main).toBe(strip);
 });

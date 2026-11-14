@@ -17,13 +17,15 @@
 //   3. The draft. B's `shared` session opened in A shows its transcript (B's engine config alone holds it); a draft typed
 //      into its composer is written to B's index; its Environment card shows B's branch, read by `git.watch` from B's
 //      mawsd over the link (the checkouts are `machine`-owned since P5 O3-E, so B's daemon alone answers them).
-//   4. The departure. B's daemon stops: within 2 s it is down, and its rows and its tab grey while A's rows are as they
-//      were. A session is seeded into B's config while B is down; B's daemon starts again over its profile, and within
+//   4. The departure. B's daemon stops: within 2 s it is down. The UX wave, U9 (O-39, #563; amending T5): for the minute
+//      an act is held its link reads reconnecting, so its rows stay live, chipped `@standin-b`, and its open tab keeps
+//      its pane and draft under one status line; past the minute its rows and its tab grey and the line says B is
+//      offline, while A's rows are as they were throughout. A session is seeded into B's config while B is down; B's daemon starts again over its profile, and within
 //      5 s of its services answering (its spine's first answer, what B's window loading was when B was an app) its rows
 //      are live again with no duplicate, and the new session, which B's restarted index stamps from a counter that
 //      starts again at zero, is listed (M4's generation reset).
 //   5. The relaunches. A relaunched with B up restores B's tab and its draft, read from B; A relaunched with B down keeps
-//      the tab, greyed.
+//      the tab, greyed, with nothing to keep in this run, so the offline words in its middle (U9).
 // P5 O5 M4 (docs/doperpowers/plans/2026-10-31-p5-o5-chromium.md, acceptance 5, the machine side): a second scene. B, a
 // daemon alone, is asked `artifacts.export` over a bare machine.sock client (as A's connection manager would forward it,
 // the remote half being O7 M5's): B's render seam starts B's render host, the file is under B's profile, and B's
@@ -48,7 +50,7 @@ import { mainTabById, unfoldSessionCard } from './support/shell';
 import { showProjectList, sidebarOf } from './support/sidebar';
 
 test.skip(process.env.MAWS_MACHINES_E2E !== '1', 'the two-machine scenes run under pnpm e2e:machines (MAWS_MACHINES_E2E=1)');
-test.setTimeout(300_000);
+test.setTimeout(360_000); // the UX wave, U9: step 4 waits out the minute a down link reads reconnecting
 
 const ORIGIN = 'https://github.com/example/shared.git';
 const A_BRANCH = 'main';
@@ -56,6 +58,10 @@ const B_BRANCH = 'standin-b';
 const [A_NAME, B_NAME] = ['standin-a', 'standin-b'];
 const DRAFT = 'a draft typed in A, kept on B';
 const OFFLINE = ', machine offline'; // the end of a greyed row's accessible name (src/renderer/src/app/machine-mark.ts)
+const REMOTE_ACT_PENDING_MS = 60_000; // the minute a down link reads reconnecting (src/shared/machine/remote-pending.ts)
+// The tab's word on its machine's link, as a line above a kept pane or in the middle of one with nothing to keep
+// (src/renderer/src/lane-b/link-status.tsx)
+const linkWords = (page: Page, where: 'line' | 'middle') => page.locator(`[data-region="main"] [data-link-words="${where}"]`);
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: isolatedGitEnv() }).trim();
 
 // The raw bridge's answer, or the test fails with the error it carried.
@@ -130,7 +136,7 @@ const rowsOfMachine = (page: Page, ref: MachineRef) =>
 const composerOf = (page: Page) => page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
 const draftText = (draft: unknown) => JSON.stringify(draft ?? null);
 
-test('two machines in one sidebar by org project; one leaving greys only its rows and comes back whole; its tab and draft follow it across A’s relaunches', async () => {
+test('two machines in one sidebar by org project; one leaving reads reconnecting, then greys only its rows, and comes back whole; its tab and draft follow it across A’s relaunches', async () => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-machines-')));
   // The profiles stay short and are the test's (each launch over them leaves them in place): B's sockets then stay in
   // <B>/mawsd (the link reads the fallback directory too), and both profiles outlive a quit for the relaunches.
@@ -255,7 +261,7 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       await a.page.mouse.move(700, 400);
     });
 
-    await test.step('4. the departure: B’s rows and tab grey within 2 s and A’s stay as they were; B comes back within 5 s, whole', async () => {
+    await test.step('4. the departure: B reconnecting for a minute, its rows live and its tab’s pane kept under a status line; then greyed while A’s stay as they were; B comes back within 5 s, whole', async () => {
       const aBefore = await rowsOfMachine(a.page, aRef);
       expect(aBefore.rows.map((r) => r.id).sort()).toEqual([`session:${aNotesAt}`, `session:${aSharedAt}`].sort());
 
@@ -264,15 +270,31 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       const down = (await machinesOf(a.page)).find((m) => m.ref === bRef)!;
       expect(exitedAt).toBeGreaterThan(0);
       expect(Date.parse(down.since) - exitedAt, 'B down within 2 s of its exit').toBeLessThanOrEqual(2_000);
-      await expect(sessionRowIn(a.page, sharedKey, bSharedAt), 'B’s rows grey').toHaveAttribute('aria-label', `B’s shared session${OFFLINE}`, { timeout: 2_000 });
+      // Reconnecting (O-39): nothing greyed, the pane kept under one status line (#563)
+      const tab = mainTabById(a.page, `session:${bSharedAt}`);
+      await expect(linkWords(a.page, 'line'), 'the kept pane’s status line').toHaveText(`Reconnecting to ${B_NAME}…`, { timeout: 2_000 });
+      await expect(linkWords(a.page, 'line')).toHaveAttribute('data-link-phase', 'reconnecting');
+      await expect(linkWords(a.page, 'middle'), 'no words in the pane’s place').toHaveCount(0);
+      await expect(composerOf(a.page), 'the pane is kept, its draft in the composer').toHaveText(DRAFT);
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt), 'B’s rows are not greyed while it reconnects').toHaveAttribute('aria-label', 'B’s shared session');
+      await expect(sessionRowIn(a.page, bMachineKey, bLooseAt)).toHaveAttribute('aria-label', 'B’s loose session');
+      await expect(projectRowByKey(a.page, bMachineKey)).toHaveAttribute('aria-label', B_NAME);
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt).locator('[data-machine-chip]')).toHaveText(`@${B_NAME}`);
+      await expect(tab, 'B’s open tab stays').toBeVisible();
+      // the title's own element: the tab's status glyph (an idle one) is in the faint tone whatever the link does
+      await expect(tab.getByText('B’s shared session', { exact: true }), 'its title not in the disabled token').not.toHaveClass(/\btext-fg-faint\b/);
+      expect(await rowsOfMachine(a.page, aRef), 'A’s rows, statuses and Needs-you entries are as they were').toEqual(aBefore);
+
+      // Past the minute, offline: B's rows and tab grey and the line says so, over the same pane
+      const offlineAt = Date.parse(down.since) + REMOTE_ACT_PENDING_MS;
+      await expect(sessionRowIn(a.page, sharedKey, bSharedAt), 'B’s rows grey past the minute').toHaveAttribute('aria-label', `B’s shared session${OFFLINE}`, { timeout: Math.max(0, offlineAt - Date.now()) + 5_000 });
       await expect(sessionRowIn(a.page, bMachineKey, bLooseAt)).toHaveAttribute('aria-label', `B’s loose session${OFFLINE}`);
       await expect(projectRowByKey(a.page, bMachineKey), 'B’s machine row greys with its machine').toHaveAttribute('aria-label', `${B_NAME}${OFFLINE}`);
       await expect(projectRowByKey(a.page, sharedKey), 'the shared row has A’s checkout, so stays live').toHaveAttribute('aria-label', 'shared');
       await expect(sessionRowIn(a.page, sharedKey, bSharedAt).locator('[data-machine-chip]')).toHaveText('offline');
-      const tab = mainTabById(a.page, `session:${bSharedAt}`);
-      await expect(tab, 'B’s open tab stays').toBeVisible();
       await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' }), 'its title in the disabled token (T5)').toBeVisible();
-      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'its content says B is offline').toHaveText(`${B_NAME} is offline`);
+      await expect(linkWords(a.page, 'line'), 'the status line says B is offline').toHaveText(`${B_NAME} is offline · this session reconnects when it’s back`);
+      await expect(composerOf(a.page), 'over the same pane').toHaveText(DRAFT);
       expect(await rowsOfMachine(a.page, aRef), 'A’s rows, statuses and Needs-you entries are as they were').toEqual(aBefore);
       await expect(invoke(a.page, 'session.list', {}, bRef)).rejects.toThrow(/host_unavailable/);
 
@@ -293,7 +315,8 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       await expect(sessionRowIn(a.page, bMachineKey, addressOf(bRef, bLater.appId)), 'the session seeded while B was down is listed').toBeVisible({ timeout: 15_000 });
       for (const at of [bSharedAt, bLooseAt]) await expect(sidebarOf(a.page).locator(`[data-kind="session"][data-menu="session:${at}"]`), 'no duplicate').toHaveCount(1);
       await expect(sidebarOf(a.page).locator(`[data-kind="project"][data-tree-id="p:${bMachineKey}"]`)).toHaveCount(1);
-      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'the kept tab is B’s session again').toHaveCount(0);
+      await expect(linkWords(a.page, 'line'), 'the kept tab is B’s session again, no line above it').toHaveCount(0);
+      await expect(composerOf(a.page), 'its draft still in the composer').toHaveText(DRAFT);
       expect(await rowsOfMachine(a.page, aRef)).toEqual(aBefore);
     });
 
@@ -311,7 +334,9 @@ test('two machines in one sidebar by org project; one leaving greys only its row
       a = await launchA();
       const tab = mainTabById(a.page, `session:${bSharedAt}`);
       await expect(tab, 'B’s tab is kept with B down').toBeVisible({ timeout: 20_000 });
-      await expect(a.page.locator('[data-region="main"] [data-machine-offline]'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline`, { timeout: 15_000 });
+      // nothing to keep in this run (B's record was never read), so the words in the pane's middle (U9, #563)
+      await expect(linkWords(a.page, 'middle'), 'greyed: its content says B is offline').toHaveText(`${B_NAME} is offline · this session reconnects when it’s back`, { timeout: 15_000 });
+      await expect(linkWords(a.page, 'line')).toHaveCount(0);
       // its title in the disabled token (T5): the session's own, which the tab kept, since B has not loaded in this run
       await expect(tab.locator('span.text-fg-faint', { hasText: 'B’s shared session' })).toBeVisible();
       expect(await stateOf(a.page, bRef)).not.toBe('up');

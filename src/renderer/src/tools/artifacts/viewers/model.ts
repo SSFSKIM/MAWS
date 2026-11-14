@@ -12,6 +12,7 @@ import { x12VersionLabel } from '@shared/maws/deliverable';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../../artifacts/open-at';
 import type { SessionRecord } from '@shared/graph/session';
+import { workingFolder } from '@shared/sessions/working-folder';
 
 export type BodyKind = 'html' | 'pdf' | 'video' | 'audio' | 'file';
 
@@ -96,9 +97,11 @@ const isNormal = (path: string): boolean => path.startsWith('/') && (path === '/
 // Whether a path lies under one of the session's directories (its directory, additional directories, worktree), judged
 // lexically: the only files the editor could both read and save, so the only ones Open as file is offered for (E2's
 // Decision Log 18; moved here by P3-L M5b, as the File viewer's Open as file reads it too). A path that is not normal is
-// under nothing (the files service would refuse it).
+// under nothing (the files service would refuse it). UX wave U8c-2 (§G): the selector's launch folder and working folder
+// count too, the record's word (the read is the files service's, under its admission).
 export function underSession(path: string, session: SessionRecord | undefined): boolean {
   if (!session || !isNormal(path)) return false;
-  const roots = [session.directory, ...session.additionalDirectories, ...(session.worktree ? [session.worktree.path] : [])];
+  const { launch, path: working } = workingFolder(session);
+  const roots = [session.directory, ...session.additionalDirectories, ...(session.worktree ? [session.worktree.path] : []), launch, working];
   return roots.some((root) => path === root || path.startsWith(root.endsWith('/') ? root : `${root}/`));
 }

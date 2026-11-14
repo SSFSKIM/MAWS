@@ -31,6 +31,7 @@ export interface ScmDraft {
 
 export interface ScmUi {
   session: AppSessionId | null; // the session the state below is for (a pinned tool's changes under it)
+  directory: string | null; // the session's working folder the page shows (UX wave U8c-2: the agent moving starts it over); null until known
   selected: ScmSelection | null;
   hunk: number; // the selected file's current hunk, 0-based
   navigate: number; // bumped by the hunk buttons: the body scrolls to `hunk` when it changes
@@ -47,9 +48,10 @@ export interface ScmUi {
   request: ScmParams | null; // an open() not yet applied against the shown session's status
 }
 
-export function createScmUi(init: { session: AppSessionId | null; params?: ScmParams | null; mode?: ScmMode }): StoreApi<ScmUi> {
+export function createScmUi(init: { session: AppSessionId | null; directory?: string | null; params?: ScmParams | null; mode?: ScmMode }): StoreApi<ScmUi> {
   return createStore<ScmUi>()(() => ({
     session: init.session,
+    directory: init.directory ?? null,
     selected: null,
     hunk: 0,
     navigate: 0,
@@ -92,6 +94,15 @@ export function forSession(ui: ScmUi, session: AppSessionId | null): Partial<Scm
     noVerify: draft?.noVerify ?? false,
     drafts,
   };
+}
+
+// UX wave U8c-2 (M4 decision 6): the session's working folder changed (the agent moved). The page starts over as for
+// another session: an open sheet closes, the selection, the notice, the last commit and the Output's run were the other
+// checkout's. The commit message and Skip hooks are kept for the session, and are offered again in the form once the
+// session is back in its launch folder (the page draws no form while it is away).
+export function forFolder(ui: ScmUi, directory: string | null): Partial<ScmUi> {
+  if (ui.directory === directory) return {};
+  return { directory, selected: null, hunk: 0, scrollTop: 0, sheet: null, lastCommit: null, notice: null, output: false };
 }
 
 const trimSlash = (path: string) => path.replace(/\/+$/, '');

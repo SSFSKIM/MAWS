@@ -601,3 +601,40 @@ describe('pickAt (Design §7): the context menu\'s one-shot pick', () => {
     expect(mode.state(A)!.dropped).toBe(1);
   });
 });
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, X-216, Interfaces §B.4): the window's
+// word that a tab's comment card opened (with the open comment's css) or closed goes to that tab's own page alone, and
+// to nothing for a tab main does not hold or whose view is gone. It arms, disarms and tells nothing else.
+describe('the card’s opening and closing, to the tab’s page (browser.comment.card)', () => {
+  const cards = (wc: FakeContents) => wc.sent().filter((message) => (message as { type: string }).type === 'card');
+
+  it('forwards an opening with its css, and a closing, to the tab’s own page only', () => {
+    const { wc } = store.add(A);
+    const other = store.add(B).wc;
+    mode.card(A, { css: '#increment' });
+    mode.card(A, null);
+    expect(cards(wc)).toEqual([
+      { type: 'card', open: true, css: '#increment' },
+      { type: 'card', open: false },
+    ]);
+    expect(cards(other)).toEqual([]);
+    expect(emitted).toEqual([]);
+    expect(mode.state(A)).toMatchObject({ armed: false, arming: false, epoch: 0 });
+  });
+
+  it('does nothing for a tab it does not hold, or whose view is gone', () => {
+    const { wc } = store.add(A);
+    expect(() => mode.card('b_cccccccccccc', { css: '#increment' })).not.toThrow();
+    store.destroyView(A);
+    mode.card(A, null);
+    expect(cards(wc)).toEqual([]);
+    expect(emitted).toEqual([]);
+  });
+
+  it('does nothing for a view whose page is destroyed but not yet gone from the tab', () => {
+    const { wc } = store.add(A);
+    wc.destroyed = true;
+    mode.card(A, { css: '#increment' });
+    expect(wc.send).not.toHaveBeenCalled();
+  });
+});

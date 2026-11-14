@@ -166,14 +166,35 @@ describe('main answers the record side of session.* from the index', () => {
     });
 
     // `session.update`'s answer is the whole record (paths, settings, a spawn's signed act), which a reader must never be
-    // answered; a reader's update is `session.reader.update` (Decision Log, "M6a Task 1's fork"). Refused before any write.
-    it('session.update with a reader is refused, and writes nothing', async () => {
+    // answered as the owners read it; a reader's update is `session.reader.update` (Decision Log, "M6a Task 1's fork").
+    // Refused before any write, but for the unarchive (the UX wave's U9, R9, below).
+    it('session.update with a reader is refused, and writes nothing, for every patch but exactly an unarchive', async () => {
       const { record } = index.sessions.upsertFromSummary(summary());
+      index.sessions.update(record.appId, { archived: true });
+      const patches = [{ pinned: true }, { archived: true }, { archived: false, pinned: true }, { archived: false, unread: false }, { title: { text: 'Mine', source: 'user' } }];
       for (const reader of [B, 'owner']) {
-        expect(await invoke('session.update', { appSessionId: record.appId, patch: { pinned: true } }, as(reader))).toMatchObject({ ok: false, error: { code: 'internal' } });
+        for (const patch of patches) expect(await invoke('session.update', { appSessionId: record.appId, patch }, as(reader)), `${reader} ${JSON.stringify(patch)}`).toMatchObject({ ok: false, error: { code: 'internal' } });
       }
       expect(index.sessions.get(record.appId)!.pinned).toBe(false);
+      expect(index.sessions.get(record.appId)!.archived).toBe(true);
       expect(index.sessions.get(record.appId, B)!.pinned).toBe(false);
+    });
+
+    // The UX wave (U9, R9, as the session that keeps master ruled it): an unarchive is the one `session.update` a reader may
+    // make, its patch checked here whatever the endpoint admitted, and it answers the record as `session.get` answers that
+    // reader, read after the write: never the owners' reading for a member.
+    it('session.update with a reader takes exactly `{archived: false}` and answers the record as that reader reads it', async () => {
+      const { record } = index.sessions.upsertFromSummary(summary());
+      index.sessions.setPinned(record.appId, true);
+      index.sessions.markSeen(record.appId, { messageUuid: 'm1' as MessageUuid, at });
+      for (const reader of [B, 'owner']) {
+        index.sessions.update(record.appId, { archived: true });
+        const answer = await invoke('session.update', { appSessionId: record.appId, patch: { archived: false } }, as(reader));
+        expect(answer, reader).toEqual({ ok: true, value: index.sessions.get(record.appId, reader) });
+        expect((answer.value as { archived: boolean }).archived).toBe(false);
+      }
+      const theirs = (await invoke('session.update', { appSessionId: record.appId, patch: { archived: false } }, as(B))).value as Record<string, unknown>;
+      expect({ pinned: theirs.pinned, lastSeen: theirs.lastSeen }).toEqual({ pinned: false, lastSeen: { messageUuid: null, at: null } });
     });
 
     it('session.reader.update writes a member’s own state and answers their ReaderState alone: no record, no change, no revision', async () => {

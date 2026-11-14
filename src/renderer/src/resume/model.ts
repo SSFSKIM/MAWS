@@ -18,7 +18,7 @@ import { lastActivity, seenActivity } from '../overview/derive';
 import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { issuedAt, listedMatcher, sessionMatcher } from '../sidebar/derive';
-import { orgIndex, rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
+import { orgIndex, rowOfListed, rowOfRecord, type OrgIndex, type RowKey } from '../stores/org-projects';
 import type { OrgProjects } from '../stores/registry';
 import type { ListedSession } from '../stores/sessions';
 
@@ -36,7 +36,7 @@ export const TOGGLE_KEYS: Record<string, keyof ChooserToggles> = { a: 'allProjec
 
 // Where the chooser opened: a project (null: a session without a project, so every project), and the session it was
 // opened from, which it does not list (`/resume` lists the others). P5 O6 M5: `row`, the sidebar row it opened on,
-// scopes it to the sessions that row groups, every machine's (`rowOfSession`); `projectId` is then the row's checkout
+// scopes it to the sessions that row groups, every machine's (`rowOfRecord`); `projectId` is then the row's checkout
 // (its branch for Current branch).
 export interface ChooserContext {
   projectId: ProjectId | null;
@@ -83,7 +83,7 @@ export const sessionBranch = (record: SessionRecord): string | null => branchLab
 // The candidates, newest first (ties by title, then id, so the order is stable while the stores change).
 //
 // P5 O7 M8: the listed sessions with no record here join them, filed as the sidebar files them (`rowOfListed`; a record
-// at a listed address whose project is not known here sits where its listing does, `rowOfListedRecord`). Another
+// at a listed address sits where its listing does, another machine's always, `rowOfRecord`). Another
 // member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
 // toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
 // names no folder, worktree or branch: All worktrees keeps them, Current branch none.
@@ -96,8 +96,7 @@ export function chooserRows({ records, digests, projects, context, toggles, bran
   const { row } = context;
   const shown = row === undefined ? undefined : new Set([row]); // the row it opened on is listed, as the sidebar showed it
   const recordRow = (record: SessionRecord): RowKey | null => {
-    const filed = rowOfListedRecord(index(), projects, record, listed, shown);
-    return filed === undefined ? rowOfSession(index(), projects, record, shown) : filed;
+    return rowOfRecord(index(), projects, record, listed, shown);
   };
   const inScope = (record: SessionRecord) => (row === undefined ? record.projectId === context.projectId : recordRow(record) === row);
   const drawsOthers = (filed: RowKey | null) => filed !== null && people.has(filed);

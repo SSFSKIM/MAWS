@@ -11,6 +11,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { isAppSynthesised } from '@shared/sessions/app-events';
 import { ipc } from '../../ipc/client';
 import { useTranscriptStore } from '../../stores/transcript';
+import { useHosts } from '../../stores/hosts'; // the UX wave, U9 (O-11b)
 import { turnId as turnIdOf } from '../model/keys';
 import { opensTurn } from '../model/head'; // UX wave U4a: promptOf, a joined message
 import type { TranscriptState } from '../model/reduce';
@@ -18,7 +19,7 @@ import type { Spill, TurnId } from '../model/rows';
 import type { RewindInterface } from '../view/context';
 import { HISTORY_OMITTED, HISTORY_TOO_LARGE, historyGapEvent, unseenTurnEndEvent } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED; M8: unseenTurnEndEvent
 import { remoteMachineName } from '../../lane-a/remote-session'; // P5 O7 M2: a machine's name for the bar's words
-import { remoteLaneBStateOf } from '../../lane-b/remote-session'; // P5 O15 M2b: the stream's latest answer at a loss
+import { historyReadsNow, isRemoteLaneB, remoteLaneBStateOf, whenHistoryReads } from '../../lane-b/remote-session'; // P5 O15 M2b: the stream's latest answer at a loss; U9 M5: the settled word
 import { HistoryPager, withHistoryGap, withOmittedBar, withoutOlderThanWindow } from './older';
 import type { TranscriptSource } from './types';
 
@@ -105,6 +106,86 @@ async function eventsOnceKnown(client: MawsBridge, appSessionId: AppSessionId, w
     for (const off of offs) off();
     if (watch) watch.batch = null;
   }
+}
+
+// The UX wave, U9 (O-11b; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a first read of a session
+// on this Mac that failed because its engine host was away (`host_unavailable`: a restart, an update's handover) is made
+// again at the host's next ready, once per ready, while the key stays hydrating (the pane's "Loading…"). The ready is the
+// engine host's state as the hosts store holds it, ordered by its revision: one newer than the read's start that is
+// already there when the failure is processed is that ready, taken at once. With no ready within HOST_RETURN_WAIT_MS, or a
+// second failure, the read fails as before ("Couldn’t load this conversation", with Retry), and a later ready still reads
+// it again. No timer retries: one read per ready cannot loop against a host that keeps failing. Another machine's session
+// heals at its link's return instead (the ticket on history read after a link's return), and any other failure fails at once.
+export const HOST_RETURN_WAIT_MS = 15_000;
+const engineHost = () => useHosts.getState().hosts.engine;
+const engineRevision = () => engineHost()?.revision ?? -1;
+
+// The revision of the first ready newer than `after`, or null at `ms` or when `ended` aborts first.
+function readyAfter(after: number, ms: number, ended: AbortSignal | null): Promise<number | null> {
+  return new Promise((resolve) => {
+    let off = () => {};
+    const done = (revision: number | null) => {
+      clearTimeout(timer);
+      off();
+      ended?.removeEventListener('abort', abort);
+      resolve(revision);
+    };
+    const abort = () => done(null);
+    const check = () => {
+      const host = engineHost();
+      if (host?.state === 'ready' && host.revision > after) done(host.revision);
+    };
+    const timer = setTimeout(() => done(null), ms);
+    ended?.addEventListener('abort', abort);
+    off = useHosts.subscribe(check);
+    check();
+  });
+}
+
+// After a read the host's absence failed for good: once the key has failed, it is read again at a ready newer than
+// `after` (the ready the failed read was made at, or the revision when the wait ran out), one already in the hosts store
+// when the key fails included (a ready that overtook the read), so each ready is taken once. Nothing is asked once the
+// key is let go, whole, or read again by someone else (a Retry), whose read waits for its own ready.
+function readAgainAtReady(key: string, after: number): void {
+  const transcripts = () => useTranscriptStore.getState();
+  let failed = false;
+  let done = false;
+  const stop = () => {
+    done = true;
+    offHosts();
+    offTranscripts();
+  };
+  const check = () => {
+    if (done) return;
+    const phase = transcripts().entries[key]?.phase;
+    if (!transcripts().attached(key) || phase === 'live' || (failed && phase !== 'failed')) return stop();
+    if (phase !== 'failed') return;
+    failed = true;
+    const host = engineHost();
+    if (host?.state !== 'ready' || host.revision <= after) return;
+    stop();
+    void transcripts().retry(key);
+  };
+  const offHosts = useHosts.subscribe(check);
+  const offTranscripts = useTranscriptStore.subscribe(check);
+  check();
+}
+
+async function eventsOnceHostIsBack(client: MawsBridge, appSessionId: AppSessionId, watch: KnownWatch | null): Promise<CommandResult<'session.events'>> {
+  const from = engineRevision();
+  const first = await eventsOnceKnown(client, appSessionId, watch);
+  const away = (result: CommandResult<'session.events'>) => !result.ok && result.error.code === 'host_unavailable';
+  if (machineOf(appSessionId) !== client.localMachine || !away(first)) return first;
+  const ended = watch?.ended.signal ?? null;
+  const ready = await readyAfter(from, HOST_RETURN_WAIT_MS, ended);
+  if (ended?.aborted) return first;
+  if (ready === null) {
+    readAgainAtReady(appSessionId, engineRevision());
+    return first;
+  }
+  const second = await eventsOnceKnown(client, appSessionId, watch);
+  if (away(second) && !ended?.aborted) readAgainAtReady(appSessionId, ready);
+  return second;
 }
 
 // The events main synthesises for a session (`isAppSynthesised`, as C10's `relay:direct_fallback` notice) are emitted
@@ -530,7 +611,11 @@ function sessionSource(client: MawsBridge, appSessionId: AppSessionId): Transcri
       if (events === null) {
         stale = false; // this read follows the transcript again
         tooLarge.delete('newest');
-        const read = valueOf(await eventsOnceKnown(client, appSessionId, subscription));
+        // the UX wave, U9 (M5, the ticket on history read after a link's return): another machine's history is read once main settled that machine's generation, or
+        // at the backstop, never beside its live sessions' resumes; at once when either has passed or it is not up
+        const machine = machineOf(appSessionId);
+        if (machine !== client.localMachine && isRemoteLaneB(appSessionId) && !historyReadsNow(machine)) await whenHistoryReads(machine);
+        const read = valueOf(await eventsOnceHostIsBack(client, appSessionId, subscription));
         const answer = withOmittedBar(withHistoryGap(read, bareOf(appSessionId), tooLargeWords('newest')), bareOf(appSessionId), omittedWords); // P5 O7 M2: the gap bar at a page partly gone; M4: and the omitted bar after its rows
         const app = valueOf(await client.invoke('session.appEvents', { appSessionId })).events;
         const earlier = answer.earlier ?? null;

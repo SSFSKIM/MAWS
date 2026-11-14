@@ -19,7 +19,6 @@ import { useLibraryStore } from '../widgets/plugins/library-store';
 import { CustomizeView } from './CustomizeView';
 import { useCustomizeProject } from './open';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
-import { activeTab } from '../stores/layout-model';
 import userEvent from '@testing-library/user-event';
 import { SkillsWidget } from '../widgets/SkillsWidget';
 import { resetCatalogStore } from '../stores/catalog';
@@ -47,7 +46,7 @@ beforeEach(() => {
   // U13a: the page's project is the current project, the row of the session in front (a session of P's)
   useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'One', directory: '/one' })], [Q, project(Q, 1, { name: 'Two', directory: '/two' })]]), records: new Map([[IN_FRONT, record(IN_FRONT, { projectId: P })]]), engine: new Map() });
   useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
-  useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
   useLayout.getState().openTab({ kind: 'session', appSessionId: IN_FRONT });
 });
 afterEach(() => {
@@ -78,7 +77,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   backend.script('session.reloadSkills', () => ({ opId: 'chrome-skills' }));
   mount('plugins');
 
-  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
   expect(within(pageHead).getByRole('tablist', { name: 'Customize sections' })).toBeTruthy();
   expect(within(pageHead).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
   expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
@@ -119,7 +118,7 @@ it('keeps the Skills scopes visible through search and detail without treating t
   useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
   mount('skills');
   await screen.findByRole('button', { name: 'View review' });
-  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
   expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
   const picker = screen.getByRole('combobox', { name: 'Live session' });
   const toolbar = picker.closest('[data-customize-toolbar]') as HTMLElement;
@@ -146,7 +145,7 @@ it('keeps the MCP session picker beside live connectors and switches only the li
   const live = await screen.findByRole('region', { name: 'Live connectors' });
   await within(live).findByText(bareOf(first.appSessionId));
   const picker = within(live).getByRole('combobox', { name: 'Live session' });
-  const pageHead = screen.getByRole('heading', { name: 'Customize' }).closest('header')!;
+  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
   expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
   const inventoryReads = backend.calls.filter((call) => call.command === 'customization.inventory').length;
   picker.focus();
@@ -257,6 +256,20 @@ it('shows a session directory no project has as its directory as itself, its pat
   expect([...select.options].map((option) => option.textContent)).not.toContain(worktree);
 });
 
+// UX wave U7b (O-40; Interfaces §J, "Every way in"): a section tab is the page's `show`, the page's view kept, and the
+// strip is not touched.
+it('switches its section as the page’s show, keeping its view', async () => {
+  useLayout.getState().openDestination({ kind: 'customize', view: 'discover', show: 'skills' });
+  const strip = useLayout.getState().main;
+  mount('skills');
+  await screen.findByRole('button', { name: 'View review' });
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Connectors' }));
+  expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'connectors' });
+  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Plugins' }));
+  expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
+  expect(useLayout.getState().main).toBe(strip);
+});
+
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
   const user = userEvent.setup();
   render(<QueryClientProvider client={new QueryClient()}><PlusMenu cwd="/two" editor={{ current: null }} /></QueryClientProvider>); // U11a: the menu's rows come from a hook over the query client
@@ -264,8 +277,10 @@ it('opens the connector Manage footer for the composer project even when no sess
   const connectors = screen.getByRole('menuitem', { name: 'Connectors' });
   act(() => connectors.focus());
   await user.keyboard('{ArrowRight}');
+  const strip = useLayout.getState().main;
   await user.click(await screen.findByRole('menuitem', { name: 'Manage connectors…' }));
-  expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'mcp' });
+  expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'connectors' }); // UX wave U7b: a page, no tab
+  expect(useLayout.getState().main).toBe(strip);
   expect(useCustomizeProject.getState().projectId).toBe(Q);
   expect(backend.calls).toEqual([]);
 });

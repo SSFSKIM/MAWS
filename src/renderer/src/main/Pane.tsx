@@ -7,7 +7,7 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import type { TabRef, TabSet } from '@shared/ipc/schema/layout';
 import { Diagnostics } from '../app/Diagnostics';
-import { useMachineMark } from '../app/machine-mark';
+import { phaseWords, useMachineMark } from '../app/machine-mark';
 import { useSlot } from '../app/slots';
 import { IconButton, MaximizeIcon, RestoreIcon, useChordHint } from '../app/IconButton';
 import { NEW_CHAT, newChat, runAction, useActionEnabled, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -17,6 +17,7 @@ import { EditorHeader } from '../panel/PanelHeader'; // P3-G
 import { ArtifactTab } from '../library/ArtifactTab'; // P3-L
 import { SessionPane } from '../session/SessionPane';
 import { useRemoteTranscriptHold } from '../lane-b/transcript-hold'; // P5 O15 M2b
+import { LinkMiddleWords, LinkStatusLine, usePaneToKeep } from '../lane-b/link-status'; // the UX wave, U9
 import { cardSession, expandPane } from '../shell/floating'; // P3-G; P4-B3: expandPane
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
 import { dropPanelRecord, useCoverState } from '../shell/transfer'; // P4-B3 M4
@@ -27,8 +28,6 @@ import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 import { createPortal } from 'react-dom';
 import { useChromeTabs } from './chrome-tabs';
-import { ProjectsView } from '../projects/ProjectsView';
-import { CustomizeView } from '../customize/CustomizeView';
 import { ChannelView } from '../channel/ChannelView'; // P5 O8 M7a
 
 type PaneIndex = 0 | 1;
@@ -165,14 +164,6 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
           <Diagnostics />
         </div>
       );
-    case 'settings':
-      return <SettingsTab section={tab.section} />;
-    case 'projects':
-      return <ProjectsView />;
-    case 'customize':
-      return <CustomizeView section={tab.section} />;
-    case 'artifacts': // P3-G (§D5)
-      return <ArtifactsTab />;
     case 'artifact': // P3-L: one artifact in its kind's editor
       return <ArtifactTab tab={tab} />;
     case 'browser': // E4a
@@ -186,15 +177,25 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
 // session, one focus target); the main region is at 0 px and inert then, so nothing is lost on screen. Held through the
 // pill too, so closing and reopening the card does not remount the pane behind it. (P4-B3: the split's card draws a
 // pane's session the main area no longer renders, so this holds there with nothing to hide.)
-// P5 O6 M5 (P5 Decision Log 28, T5): a kept tab of an offline machine's session says only that. P5 O15 M2b: a remote lane B
-// session's tab holds its transcript through that placeholder, so the pane rejoins it at `up` rather than reading the
-// whole history again (lane-b/transcript-hold.ts).
-function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
+// P5 O15 M2b: a remote lane B session's tab holds its transcript while it is mounted, so a pane that unmounts and mounts
+// again rejoins it rather than reading the whole history again (lane-b/transcript-hold.ts).
+// The UX wave, U9 (the ticket on a pane kept through a link's loss, O-39; amending P5 Decision Log 28's T5): a pane that has something to keep stays mounted whatever
+// its machine's link does, one status line above it carrying the phase's words; only a tab that has never had such a pane
+// in this run says them in its middle, until the link is up (lane-b/link-status.tsx). The pane sits in the same place of
+// the tree whether or not the line shows, so the line coming and going never remounts it.
+export function SessionTab({ tab, paneIndex }: { tab: Extract<TabRef, { kind: 'session' }>; paneIndex: PaneIndex }) {
   const inCard = useLayout((s) => cardSession(s) === tab.appSessionId);
   const machine = useMachineMark(tab.appSessionId);
   useRemoteTranscriptHold(tab.appSessionId);
-  if (machine.offline) return <p data-machine-offline className="m-0 flex h-full items-center justify-center text-ui text-fg-faint">{`${machine.name} is offline`}</p>;
-  return inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />;
+  const keeps = usePaneToKeep(tab.appSessionId);
+  const words = phaseWords(machine.phase, machine.name);
+  if (words !== null && !keeps) return <LinkMiddleWords phase={machine.phase} words={words} />;
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      {words !== null && <LinkStatusLine phase={machine.phase} words={words} />}
+      <div className="min-h-0 flex-1">{inCard ? <div data-session-in-card className="h-full" /> : <SessionPane appSessionId={tab.appSessionId} paneIndex={paneIndex} />}</div>
+    </div>
+  );
 }
 
 const TEXT_BUTTON =
@@ -217,19 +218,6 @@ function EmptyPane() {
       </div>
     </div>
   );
-}
-
-function SettingsTab({ section }: { section: Extract<TabRef, { kind: 'settings' }>['section'] }) {
-  const Slot = useSlot('settingsTab');
-  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
-  return <Slot section={section} />;
-}
-
-// P3-G (§D5): the Artifacts library, the slot P3-L registers (a placeholder until then).
-function ArtifactsTab() {
-  const Slot = useSlot('artifactsLibrary');
-  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
-  return <Slot />;
 }
 
 // A child agent's transcript in the main area (C6's child variant): the transcript slot alone, since nobody types to a

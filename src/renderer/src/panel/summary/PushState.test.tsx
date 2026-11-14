@@ -17,6 +17,7 @@ import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
+import { resetScmQueries } from '../../tools/scm/queries';
 import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
@@ -110,6 +111,60 @@ describe('push state row shows PR state, install and sign-in states and opens th
     await lineReads('PR #12 Open · 3 passed');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: true }]);
     await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_A }]));
+  });
+
+  // UX wave U8c-2 (M6; M4's re-review): a Refresh still out when the agent moves was asked of the checkout it left. The
+  // move resets the PR state (ipc/events.ts, `resetScmQueries`); the held answer, landing after it, is not written over
+  // the new checkout's.
+  it('writes no Refresh answer that lands after a move reset the PR state', async () => {
+    const user = userEvent.setup();
+    let moved = false;
+    bridge({ 'scm.pr.state': () => (moved ? { ...PR, pr: null } : PR) });
+    let held!: (answer: ScmPrState) => void;
+    const invoke = fake.client.invoke;
+    fake.client.invoke = ((command: CommandName, input: never, opts: never) =>
+      command === 'scm.pr.state' && (input as ScmPrStateInput).refresh
+        ? (void invoke(command, input, opts), new Promise((resolve) => (held = (value) => resolve({ ok: true, value })))) // recorded, then held
+        : invoke(command, input, opts)) as never;
+    await mount();
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
+    await waitFor(() => expect(fake.invoked('scm.pr.state')).toContainEqual({ appSessionId: MAIN_A, refresh: true }));
+    moved = true;
+    act(() => resetScmQueries((appSessionId) => appSessionId === A));
+    await lineReads('No PR for feature'); // the new checkout's answer
+    held(PASSED); // the old checkout's Refresh lands
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()?.textContent).toBe('No PR for feature');
+  });
+
+  // The branch review (finding 7): the PR state is the checkout's as well as the session's. Two checkouts on branches of
+  // one name (a worktree made with --force) have each its own answer: the row shown for the other one says nothing of the
+  // first one's PR while its own answer is out, and then says its own.
+  it('shows no PR of another checkout on a branch of the same name', async () => {
+    const OTHER_DIR = `${DIR}/.claude/worktrees/again`;
+    let held!: (answer: ScmPrState) => void;
+    const invoke = fake.client.invoke;
+    let asks = 0;
+    fake.client.invoke = ((command: CommandName, input: never, opts: never) => {
+      if (command !== 'scm.pr.state') return invoke(command, input, opts);
+      asks += 1;
+      if (asks === 1) return invoke(command, input, opts);
+      void invoke(command, input, opts); // recorded, then held
+      return new Promise((resolve) => (held = (value) => resolve({ ok: true, value })));
+    }) as never;
+    function At({ directory }: { directory: string }) {
+      useEffect(() => useGit.getState().watch(TEST_MACHINE, directory), [directory]);
+      return <QueryClientProvider client={queryClient}><PushState directory={directory} appSessionId={A} /></QueryClientProvider>;
+    }
+    const view = render(<At directory={DIR} />);
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    view.rerender(<At directory={OTHER_DIR} />);
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()?.textContent ?? '').not.toContain('#12');
+    await waitFor(() => expect(asks).toBe(2));
+    act(() => held({ ...PR, pr: null }));
+    await lineReads('No PR for feature');
   });
 
   it('says No PR for the branch, and why the PR state is unavailable', async () => {

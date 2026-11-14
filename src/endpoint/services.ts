@@ -122,6 +122,12 @@ export interface EndpointModule {
    * `maws project list`, `show` and `--into` (machine.sock's `projects.registry`). Absent from a module that has none.
    */
   registryRead?: RegistryRead;
+  /**
+   * The UX wave (U9, M2): whether the machine's ceiling, as its policy stands when asked, refuses a session started from
+   * another machine in `mode`, which `mawsd` hands the session service: a fork from another machine is held to it where
+   * it is allocated. Absent from a module that has none: every mode is refused.
+   */
+  aboveCeiling?(mode: string): boolean;
 }
 
 /**

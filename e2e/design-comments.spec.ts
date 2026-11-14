@@ -27,6 +27,9 @@ import { AgentSeam, refusalOf } from './support/dashboards';
 import { openFromLibrary, plain } from './support/design';
 import { AGENT_SESSION, asAgent, createDesign, derivedIdOf, DESIGN_FILES, editDesign, elementOf, filesOf, FRAMES, ok, pinOffset, seamInstalled, seed, threadsOf, viewOf } from './support/design';
 
+// UX wave U5a: the comment a scene posts in a thread so that it counts (M7's rule: a thread counts once it holds a message).
+const POSTED = 'Keep the header to one line.';
+
 let launch: MawsLaunch | null = null;
 let repo: ScratchRepo | null = null;
 let channel: string | null = null;
@@ -119,6 +122,12 @@ test('comments on a design’s boards and elements: the card, the pins through m
     await expect(thread).toHaveAttribute('data-status', 'resolved');
     await thread.getByRole('button', { name: 'Reopen' }).click();
     await expect(thread).toHaveAttribute('data-status', 'open');
+    // UX wave U5a (A3; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7's rule): a thread nothing was said
+    // in is no comment; once a comment is posted in it, the header counts it
+    await expect(panel.getByRole('button', { name: /^\d+ open comments?$/ }), 'a thread nothing was said in counts as none').toHaveCount(0);
+    await thread.getByRole('textbox', { name: 'Reply' }).fill(POSTED);
+    await thread.getByRole('textbox', { name: 'Reply' }).press('Enter');
+    await expect(thread.locator('.deck-thread-body')).toHaveText([POSTED]);
     await expect(panel.getByRole('button', { name: '1 open comment' })).toBeVisible(); // the header's count
     await toggleRail();
     await expect(rail).toHaveCount(0);

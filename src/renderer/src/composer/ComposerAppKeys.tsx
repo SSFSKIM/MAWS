@@ -14,16 +14,17 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { chipViewOf, closeChipWidget, closeModeMenu, requestChipWidget, requestModeMenu, useComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { tabOnScreen, useLayout } from '../stores/layout';
 import { useQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { sessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { isBusy } from './submit/submit-state';
+import { followStop } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
 
-// The session of the focused pane's active tab (in the strip's set, W12), if that tab is a session's.
+// The session of the focused pane's active tab (in the strip's set, W12), if that tab is a session's. UX wave U7b (§N, the
+// second table): none behind a page, so these keys work on nothing the person cannot see.
 export function focusedSession(): AppSessionId | null {
-  const tab = activeTab(useLayout.getState().main);
+  const tab = tabOnScreen(useLayout.getState());
   return tab?.kind === 'session' ? tab.appSessionId : null;
 }
 
@@ -40,9 +41,7 @@ export function stopFocused(client: MawsBridge = ipc): void {
     const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
     if (status?.process !== 'ready' || !isBusy(status, entries)) return;
   }
-  void controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true }).then((result) => {
-    if (!result.ok) console.warn('[composer] session.interrupt failed', result.error);
-  });
+  followStop(appSessionId, () => controls?.interrupt({ cancelEngineQueued: false, holdEngineQueued: true })); // the UX wave, U9 (S-01): one decision closes it (offline, one out), and a failed one says so
 }
 
 export function focusFocused(): void {

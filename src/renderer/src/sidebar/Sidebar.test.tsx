@@ -10,6 +10,9 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending'; // the UX wave, U9
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable'; // the UX wave, U9 (M4)
 import { useMachines } from '../stores/machines';
 import { registerSessionAction } from '../app/session-actions';
 import { registerEmptyChats, registerSessionCreator } from '../keymap/actions-runtime';
@@ -19,7 +22,7 @@ import { SessionDialogs } from '../sessions/SessionDialogs';
 import { Toolbar } from '../app/Toolbar';
 import { digest, item, project, record, remoteRow, status } from '../../../../test/support/builders';
 import { registerRemoteOpener } from '../sessions/remote-openers'; // P5 O8 M2
-import { registerAction } from '../keymap/actions-runtime'; // C11
+import { registerGatewayActions } from '../gateway/actions'; // UX wave U7b: the gear's real handler
 import { useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
@@ -1581,23 +1584,68 @@ describe('sidebar at scale', () => {
   });
 });
 
-// C11 start: the footer's gear opens the Settings tab once C11 registers settings.open (C11 execution document, M5)
+// C11 start: the footer's gear opens Settings once C11 registers settings.open (C11 execution document, M5); UX wave U7b:
+// the Settings dialog, over the tabs, which it leaves as they were
 describe('the footer gear', () => {
   beforeEach(() => fillStores(nine));
 
-  it('is disabled until settings.open has a handler, then runs it', () => {
+  it('is disabled until settings.open has a handler, then opens the Settings dialog', () => {
     render(<Sidebar />);
     const gear = screen.getByRole('button', { name: 'Workspace settings' }) as HTMLButtonElement;
     expect(gear.disabled).toBe(true);
-    const open = vi.fn();
-    act(() => void offs.push(registerAction('settings.open', open)));
+    act(() => void offs.push(registerGatewayActions()));
     expect(gear.disabled).toBe(false);
     expect(gear.title).toBe('Settings · ⌘,');
+    const strip = useLayout.getState().main;
     fireEvent.click(gear);
-    expect(open).toHaveBeenCalledOnce();
+    expect(useLayout.getState().settings).toEqual({ section: null });
+    expect(useLayout.getState().main).toBe(strip);
+    act(() => useLayout.getState().closeSettings());
   });
 });
 // C11 end
+
+// UX wave U7b (M5): under a page its row is current and no session row is selected, the session behind it not being on
+// screen; Back gives both back.
+describe('the sidebar under a page', () => {
+  beforeEach(() => fillStores(nine));
+
+  it('marks the open page’s row current and selects no session row, until Back', () => {
+    expand('proj-maws');
+    act(() => useLayout.getState().openSession(idOf('Fix sidebar drag')));
+    render(<Sidebar />);
+    const current = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-current');
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).not.toBe('true');
+    expect(current('Projects')).toBe('page');
+    expect(current('Customize')).toBeNull();
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(current('Artifacts')).toBe('page');
+    expect(current('Projects')).toBeNull();
+    act(() => useLayout.getState().closeDestination());
+    expect(row('Fix sidebar drag').getAttribute('aria-selected')).toBe('true');
+    expect(current('Artifacts')).toBeNull();
+  });
+
+  it('opens each row’s page from the row, the strip left as it was', () => {
+    render(<Sidebar />);
+    const strip = useLayout.getState().main;
+    const current = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-current');
+    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' });
+    expect(current('Customize')).toBe('page');
+    fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+    expect(current('Projects')).toBe('page');
+    expect(current('Customize')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Artifacts' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(current('Artifacts')).toBe('page');
+    expect(useLayout.getState().main).toBe(strip);
+    act(() => useLayout.getState().closeDestination());
+  });
+});
 
 // C12 start: the memory budget's released mark (C12 execution document, Interfaces "Surfaces of the budget"): one muted
 // word on an idle row, with the release's time and budget in its title; no glyph or unread change.
@@ -1828,6 +1876,25 @@ describe('the sidebar across machines', () => {
     expect(row('MAWS').dataset.offline).toBeUndefined();
   });
 
+  // The UX wave, U9 (O-39, A2): a machine whose link connects, or reconnects within the minute an act is held, is not
+  // greyed: its rows keep their @name chip, and its project rows read as live
+  it('greys nothing of a machine that connects or reconnects, its rows keeping their @name chip', () => {
+    fill();
+    act(() => useLayout.getState().setSidebar({ expandedProjects: ['repo:maws', `folder:${OTHER_MACHINE}:notes`] as ProjectKey[] }));
+    const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-27T10:00:00Z', generation: 0 } as const;
+    for (const studio of [
+      { state: 'connecting', since: new Date().toISOString(), generation: 0 },
+      { state: 'down', since: new Date().toISOString(), generation: 1 },
+    ] as const) {
+      act(() => useMachines.getState().applyRoster([here, { ref: OTHER_MACHINE, name: 'Studio', local: false, ...studio }]));
+      render(<Sidebar />);
+      expect(projectRows(), studio.state).toEqual(['MAWS', 'notes', 'This Mac', 'Studio']);
+      expect(row('Studio build').dataset.offline).toBeUndefined();
+      expect(chip('Studio build')).toBe('@Studio');
+      cleanup();
+    }
+  });
+
   it('marks Needs you rows with their machine, greys them in place while it is offline, and names no project by its machine', () => {
     fill();
     const waits = [studio('there'), studio('home'), at('home-here')] as AppSessionId[];
@@ -1907,6 +1974,113 @@ describe('listed rows from another machine', () => {
     expect(offline.dataset.offline).toBe('true');
     expect(chip('Studio build, machine offline')).toBe('offline');
     expect(offline.querySelector('[data-session-title]')!.className).toContain('text-fg-faint');
+  });
+
+  // The UX wave, U9 (S-02, O-48; Interfaces §6): every lane B listed row opens the session menu, with its acts over the link
+  // from the listing alone: Rename… and Archive for a session you own, Fork for any; a terminal session's listed row has
+  // none. Each is drawn disabled with the helper's sentence where the act can't work: on a machine whose build doesn't
+  // list `rl2.session-acts`, the update sentence (A14).
+  describe('the session menu of a listed row', () => {
+    const studioIs = (over: Partial<MachineState>) =>
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-10-28T10:00:00Z', generation: 1, ...over },
+      ]);
+    const menuOf = async (title: string) => {
+      fireEvent.contextMenu(row(title));
+      return within(await screen.findByRole('menu')).getAllByRole('menuitem');
+    };
+    beforeEach(() => {
+      for (const id of ['rename', 'fork', 'archive'] as const) offs.push(registerSessionAction(id, vi.fn()));
+      offs.push(registerRemoteOpener('B', vi.fn())); // the chain merge: a listing's opens (U7a) take lane B's opener
+    });
+    afterEach(async () => {
+      // a menu left open would hold its layer past the test
+      if (screen.queryByRole('menu') === null) return;
+      fireEvent.keyDown(document.activeElement ?? document.body, { key: 'Escape' });
+      await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
+    });
+
+    // the chain merge: U7a names every listed row's menu (its opens and Hide), a terminal session's included
+    it('names the session in data-menu on every listed row, a terminal session’s included', () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' }), listedOn('a1', { title: 'Studio terminal', lane: 'A' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      expect(row('Studio build').getAttribute('data-menu')).toBe(`session:${studio('b1')}`);
+      expect(row('Studio terminal').getAttribute('data-menu')).toBe(`session:${studio('a1')}`);
+    });
+
+    it('offers Rename…, Fork and Archive for a session you own, enabled on a machine that serves them', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build');
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive']);
+      expect(items.map((m) => m.hasAttribute('data-disabled'))).toEqual([false, false, false, false, false, false]);
+    });
+
+    it('draws each disabled with the update sentence on a machine whose build doesn’t list the capability (A14)', async () => {
+      studioIs({ capabilities: ['rl2.project-acts'], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build');
+      expect(items.map((m) => [m.textContent, m.hasAttribute('data-disabled'), m.getAttribute('title')])).toEqual([
+        ['Open', false, null],
+        ['Open in new tab', false, null],
+        ['Hide', false, null],
+        ['Rename…', true, 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
+        ['Fork', true, 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
+        ['Archive', true, 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
+      ]);
+    });
+
+    it('offers a record of another machine’s Rename… and Archive when its listing says it is yours, and Fork disabled for a member who doesn’t own the machine', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: false });
+      const recorded = record(studio('b1'), { projectId: null, title: { text: 'Studio build (record)', source: 'user' } });
+      fill([listedOn('b1', { title: 'Studio build' })], [here, recorded]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      const items = await menuOf('Studio build (record)');
+      expect(items.map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Open in split', 'Pin', 'Hide', 'Rename…', 'Fork', 'Archive']); // U7a's Hide after Pin
+      const fork = items.find((m) => m.textContent === 'Fork')!;
+      expect(fork.hasAttribute('data-disabled')).toBe(true);
+      expect(fork.getAttribute('title')).toBe('Only Studio’s owners can fork a session there.');
+    });
+
+    // The architect's ruling (Decision Log, SessionRow's overflow takes mine): the hover overflow is drawn from the facts
+    // its menu reads, so a record row of another machine has it whether its acts are Rename… and Archive (its listing says
+    // it is yours) or Fork alone (no listing says so yet)
+    it('draws the hover overflow on another machine’s record rows, yours and one whose only act is Fork', () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      const yours = record(studio('b1'), { projectId: null, title: { text: 'Yours (record)', source: 'user' } });
+      const theirs = record(studio('b2'), { projectId: null, title: { text: 'Theirs (record)', source: 'user' } });
+      fill([listedOn('b1', { title: 'Yours' })], [here, yours, theirs]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE]) });
+      expandAll();
+      render(<Sidebar />);
+      expect(within(row('Yours (record)')).getByRole('button', { name: 'Actions for Yours (record)' })).toBeTruthy();
+      expect(within(row('Theirs (record)')).getByRole('button', { name: 'Actions for Theirs (record)' })).toBeTruthy();
+    });
+
+    it('leaves the row at once when this window archives it, and it stays gone', async () => {
+      studioIs({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      fill([listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores' })]);
+      useSessions.getState().applyRows({ machines: [OTHER_MACHINE], rows: [...useSessions.getState().listed.values()], complete: true, pending: [], members: [], member: 'member-1' });
+      expandAll();
+      render(<Sidebar />);
+      act(() => useSessions.getState().noteArchived(studio('b1')));
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+      act(() => useSessions.getState().applyRows({ machines: [OTHER_MACHINE], rows: [listedOn('b1', { title: 'Studio build' }), listedOn('b2', { title: 'Studio chores' })], complete: true, pending: [], members: [], member: 'member-1' }));
+      expect(screen.queryByRole('treeitem', { name: 'Studio build' })).toBeNull();
+      expect(row('Studio chores')).toBeTruthy();
+    });
   });
 
   // P5 O7 M2: the record stands where its listing was filed (its project is not known here), so the row doesn't move
@@ -2052,6 +2226,20 @@ describe('listed rows from another machine', () => {
       expect(needsYou().map((b) => b.dataset.greyed ?? null)).toEqual([null, null]);
       expect(screen.getByRole('button', { name: 'Overview, 2 waiting' })).toBeTruthy();
     });
+
+    // The UX wave, U9 (the architect's ruling of 2026-11-13): main greys an item by its machine's phase, so a machine
+    // reconnecting within the minute keeps its item live and counted; the row says the machine reconnects
+    it('an item of a reconnecting machine is counted in its place and says “reconnecting”', () => {
+      fill([listedOn('b1', { title: 'Studio build' })]);
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [waitOn('b1')], greyed: false });
+      useMachines.getState().applyRoster([
+        { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-10-28T10:00:00Z', generation: 0 },
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'down', since: new Date().toISOString(), generation: 1 },
+      ]);
+      render(<><Toolbar /><Sidebar /></>);
+      expect(screen.getByRole('heading', { name: 'Needs you · 1' })).toBeTruthy();
+      expect(needsYou().map((b) => [b.getAttribute('aria-label'), b.dataset.greyed ?? null])).toEqual([['Studio · Studio build · Approval needed, reconnecting', null]]);
+    });
   });
 
   it('caps an expanded project at five over both kinds, then eight after Show more', async () => {
@@ -2116,7 +2304,9 @@ describe('listed rows from another machine', () => {
     const tabsBefore = useLayout.getState().main;
     fireEvent.contextMenu(row('Studio build'));
     const menu = await screen.findByRole('menu');
-    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false]]);
+    // the opens, Hide (U7's rule), then U9's acts over the link (disabled here: this case registers no handler for them),
+    // the order the architect ruled on 2026-11-13
+    expect(within(menu).getAllByRole('menuitem').map((m) => [m.textContent, m.hasAttribute('data-disabled')])).toEqual([['Open', false], ['Open in new tab', false], ['Hide', false], ['Rename…', true], ['Fork', true], ['Archive', true]]);
     await userEvent.click(within(menu).getByRole('menuitem', { name: 'Open' }));
     fireEvent.contextMenu(row('Studio build'));
     await userEvent.click(await screen.findByRole('menuitem', { name: 'Open in new tab' }));
@@ -2140,7 +2330,8 @@ describe('listed rows from another machine', () => {
     act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
     render(<Sidebar />);
     await user.click(within(row('Studio build')).getByRole('button', { name: 'Actions for Studio build' }));
-    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']);
+    // a listing you own: the opens, Hide, U9's acts (the architect's ruling of 2026-11-13)
+    expect(within(await screen.findByRole('menu')).getAllByRole('menuitem').map((m) => m.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive']);
     expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true'); // the dots open the menu, not the session
     await user.keyboard('{Escape}');
     await user.click(within(row('Terminal pass')).getByRole('button', { name: 'Actions for Terminal pass' }));
@@ -2166,6 +2357,20 @@ describe('listed rows from another machine', () => {
     await user.click(await screen.findByRole('menuitem', { name: 'Unhide' }));
     expect(drawn(row('MAWS')).map(([title]) => title)).toEqual(['Studio build', 'Sidebar pass']);
     expect(open).not.toHaveBeenCalled();
+  });
+
+  // UX wave U7b (M5): with no session tab in front, a listed row picked as the selection is not selected under a page,
+  // whose tab behind is not on screen; Back shows it selected again, the tab being the same.
+  it('a listed row picked with no session tab in front is not selected under a page, and is again at Back', async () => {
+    fill([listedOn('b1', { title: 'Studio build', lane: 'A' })]);
+    act(() => useLayout.getState().setSidebar({ expandedProjects: [ORG] as ProjectKey[] }));
+    render(<Sidebar />);
+    await userEvent.click(row('Studio build'));
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect(row('Studio build').getAttribute('aria-selected')).not.toBe('true');
+    act(() => useLayout.getState().closeDestination());
+    expect(row('Studio build').getAttribute('aria-selected')).toBe('true');
   });
 
   it('a selected listed row stays unselected once the shown tab changes, even when the tab it was picked over returns', async () => {
@@ -2418,5 +2623,34 @@ describe('New chat in a project with no folder here', () => {
     await userEvent.click(plus);
     await vi.waitFor(() => expect(spawnTargetOf(tab, null)).toEqual({ machine: OTHER_MACHINE, name: 'studio', checkout: '/srv/p-studio', key: null, label: 'scrape', registry: ID }));
     expect(asked).toEqual([null]);
+  });
+});
+
+// The UX wave, U9 (O-39, A2): a registry row's machines line says "offline" by the link's phase, as its rows grey: not
+// while the machine connects, nor while it reconnects within the minute an act is held; past the minute, and for a first
+// attempt that failed, it does.
+describe('a registry row’s machines line by the link’s phase', () => {
+  const ID = '7e9f2d83-5c4b-4a7f-9e0d-1b2c3d4e5f60';
+  const here = { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T08:00:00.000Z', generation: 0 } as const;
+  const studio = (over: Partial<MachineState>): MachineState => ({ ref: OTHER_MACHINE, name: 'studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'direct', ...over });
+  // the row by its name's start: offline, its name says so ("scrape, machine offline")
+  const machinesLine = () => within(screen.getByRole('treeitem', { name: /^scrape/ })).getByText((_, el) => el?.hasAttribute('data-row-machines') ?? false).textContent;
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+  it('names the machine plain while it connects or reconnects, and “offline” past the minute or when its first attempt failed', async () => {
+    fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] });
+    const location = { machine: OTHER_MACHINE, pid: 'p-studio', path: '/srv/p-studio', key: `folder:${OTHER_MACHINE}:p-studio` as OrgKey, name: 'p-studio', source: 'folder' as const, acts: true };
+    act(() => useSessions.getState().applyRegistry({ projects: [{ id: ID, name: 'scrape', hub: true, renamable: true, locations: [location] }], keys: { [ID]: `id:${ID}` as OrgKey }, moved: {}, removals: [], seen: {} }, TEST_MACHINE));
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'connecting', generation: 0 })]));
+    render(<Sidebar />);
+    expect(machinesLine(), 'connecting').toBe('studio');
+    // down a second short of the minute: reconnecting now, offline at the phase clock's own turn, with no roster change
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', since: new Date(Date.now() - REMOTE_ACT_PENDING_MS + 1_000).toISOString() })]));
+    expect(machinesLine(), 'reconnecting').toBe('studio');
+    await waitFor(() => expect(machinesLine(), 'past the minute, at the clock’s own turn').toBe('studio offline'), { timeout: 4_000 });
+    act(() => useMachines.getState().applyRoster([here, studio({ state: 'down', generation: 0 })]));
+    expect(machinesLine(), 'a first attempt that failed').toBe('studio offline');
+    act(() => useMachines.getState().applyRoster([here, studio({})]));
+    expect(machinesLine(), 'up').toBe('studio');
   });
 });

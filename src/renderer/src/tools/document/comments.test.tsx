@@ -10,7 +10,7 @@ import { addThread, discardThread, getThread, reply, resolve as resolveThread, t
 import type { CommentOverlayProps, DocumentComments } from '@artifacts/document/editor/comments/surface'; // P4-B1: DocumentComments
 import { newDoc, type Doc } from '@artifacts/yjs';
 import { AnchorSchema } from '@shared/anchor/anchor';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, readAnchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
@@ -18,8 +18,8 @@ import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
 import type { sendHumanPrompt } from '../../composer/submit/send-human-prompt'; // P3-F (L154)
-import { sendComment } from '../../side/actions';
-import { useCommentCard } from '../../side/card/store';
+import { sendComments } from '../../side/actions';
+import { dropSubject, resetPlaceNotes, useCommentCard } from '../../side/card/store';
 import { openComment } from '../../side/register';
 import { useNotices } from '../../stores/notices';
 import { useSessions } from '../../stores/sessions';
@@ -52,7 +52,10 @@ afterAll(() => {
 beforeEach(() => {
   resetShellStores();
   useNotices.setState({ notices: [] });
-  fake = fakeClient({ 'side.sendToMain': { messageUuid: null, disposition: 'sent' }, 'session.intent.get': null });
+  // UX wave U5a: a ticked comment's content is main's, sent through the session's port (here the mocked seam) as a typed
+  // message is
+  fake = fakeClient({ 'side.comment.content': { content: [{ type: 'text', text: 'the built message' }] }, 'session.intent.get': null });
+  seam.mockClear();
   window.maws = fake.client as unknown as PreloadBridge;
   offComposer = registerCommentComposer(openComment);
   const s = useSessions.getState();
@@ -62,6 +65,7 @@ afterEach(() => {
   cleanup();
   offComposer();
   useCommentCard.setState({ open: null });
+  resetPlaceNotes(); // UX wave U5a: and every pass
   delete (window as { maws?: unknown }).maws;
 });
 
@@ -90,14 +94,16 @@ describe('the artifact-comment anchor', () => {
 
   it('goes to the agent by both routes unchanged, its tag round-tripping', async () => {
     const anchor = artifactCommentAnchor({ artifactId: ARTIFACT, title: 'Q3 plan', ...passage });
-    await expect(sendComment('main', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null })).resolves.toEqual({ ok: true, disposition: 'sent' });
-    expect(fake.invoked('side.sendToMain')).toEqual([{ appSessionId: bareOf(PARENT), anchor, text: 'Should this be monthly?', screenshot: null }]);
-    const sent = sendComment('thread', { parent: PARENT, anchor, text: 'Should this be monthly?', screenshot: null }, { reveal: () => false });
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam, as a typed message
+    await expect(sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], true)).resolves.toEqual({ ok: true, to: 'main', disposition: 'sent' });
+    expect(fake.invoked('side.comment.content')).toEqual([{ comments: [{ anchor, text: 'Should this be monthly?', screenshot: null }] }]);
+    expect(seam.mock.calls.map(([id, content, options]) => [id, content, options])).toEqual([[PARENT, [{ type: 'text', text: 'the built message' }], { origin: 'comment' }]]);
+    const sent = sendComments(PARENT, [{ anchor, text: 'Should this be monthly?', screenshot: null }], false, { reveal: () => false });
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: 'c3333333-3333-4333-8333-333333333333' }));
     await sent;
     expect(fake.invoked('side.thread.open')).toEqual([{ appSessionId: bareOf(PARENT), from: { kind: 'comment', anchor, text: 'Should this be monthly?', screenshot: null } }]);
     for (const destination of ['thread', 'main'] as const) {
-      expect(parseAnchoredText(anchoredMessage({ anchor, text: 'Should this be monthly?', destination, screenshot: false }))).toEqual({ anchor, text: 'Should this be monthly?', destination });
+      expect(readAnchoredMessage(anchoredMessage({ anchor, text: 'Should this be monthly?', destination, screenshot: false }))).toEqual({ comments: [{ anchor, text: 'Should this be monthly?', screenshot: false }], destination });
     }
   });
 });
@@ -166,7 +172,8 @@ describe('the card on a document', () => {
     const { reach, comment } = mount();
     comment();
     await act(async () => {});
-    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?{Enter}');
     expect(reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');
     expect(card()).toBeNull();
@@ -187,9 +194,9 @@ describe('the card on a document', () => {
 // and its draft is the artifact's one draft, which the editor's next Comment refocuses.
 describe('the compose card in the margin and the draft rule', () => {
   // `slot`: where the overlay is drawn; a new slot remounts it under the same surface (the margin moving it, a tab switch)
-  // `draftRule`: the document's opt-in (DocumentPanel); a deck or a design leaves it out
-  function MarginEditor({ reach, onSurface, slot = 'a', draftRule = true }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string; draftRule?: boolean }) {
-    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(draftRule && { draftRule }) });
+  // UX wave U5a: the draft rule is every card host's (no opt-in)
+  function MarginEditor({ reach, onSurface, slot = 'a' }: { reach: CommentOverlayProps; onSurface(surface: DocumentComments): void; slot?: string }) {
+    const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan' });
     onSurface(comments);
     return (
       <div className="ds-doc">
@@ -200,19 +207,19 @@ describe('the compose card in the margin and the draft rule', () => {
       </div>
     );
   }
-  function mountMargin({ placement = 'margin', draftRule = true }: { placement?: 'margin' | null; draftRule?: boolean } = {}) {
+  function mountMargin({ placement = 'margin' }: { placement?: 'margin' | null } = {}) {
     const doc = newDoc();
     addThread(doc, { threadId: passage.threadId, tabId: 'tab1', blockId: 'p1', quote: passage.quote, anchor: { start: null, end: null, block: null }, by: { kind: 'human' }, at: 1 });
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), ...(placement && { placement }) };
     let surface: DocumentComments | null = null;
-    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} draftRule={draftRule} />);
+    const view = render(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} />);
     return {
       reach,
       view,
       surface: () => surface!,
       comment: () => act(() => surface!.opened(passage)),
       // the overlay drawn again elsewhere (a tab switch; the margin's cards giving way to the panel): a new host, the same card
-      remount: (slot = 'b') => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot={slot} draftRule={draftRule} />),
+      remount: (slot = 'b') => view.rerender(<MarginEditor reach={reach} onSurface={(s) => (surface = s)} slot={slot} />),
     };
   }
   const opened = async (m: ReturnType<typeof mountMargin>) => {
@@ -287,7 +294,7 @@ describe('the compose card in the margin and the draft rule', () => {
     const reach: CommentOverlayProps = { ...editorReach(doc), hosting: vi.fn(), placement: 'margin' };
     let surface: DocumentComments | null = null;
     function Body({ hostId, onSurface }: { hostId?: string; onSurface(surface: DocumentComments): void }) {
-      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', draftRule: true, ...(hostId !== undefined && { hostId }) });
+      const comments = useDocumentComments({ artifactId: ARTIFACT, appSessionId: PARENT, title: 'Q3 plan', ...(hostId !== undefined && { hostId }) });
       onSurface(comments);
       return (
         <div className="ds-doc">
@@ -408,7 +415,8 @@ describe('the compose card in the margin and the draft rule', () => {
   it('⌘Enter posts beside Enter (C3)', async () => {
     const m = mountMargin();
     await opened(m);
-    await userEvent.click(screen.getByRole('radio', { name: 'Send to main' }));
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false }); // UX wave U5a: the human send seam
+    await userEvent.click(screen.getByRole('checkbox', { name: 'Send to main' }));
     await userEvent.type(field(), 'Should this be monthly?');
     await userEvent.keyboard('{Meta>}{Shift>}{Enter}{/Shift}{/Meta}');
     expect(m.reach.record).toHaveBeenCalledWith(passage.threadId, 'Should this be monthly?');
@@ -445,30 +453,19 @@ describe('the compose card in the margin and the draft rule', () => {
     expect(document.activeElement).toBe(field());
   });
 
-  // Review finding 1: the draft rule is the document's opt-in; a deck's or a design's card (no draft() asked, no close
-  // guard reading it) keeps today's Escape and blur, and records nothing
-  it('without the opt-in (a deck, a design): Escape discards a typed comment, a blur keeps an empty one, nothing is recorded', async () => {
-    const m = mountMargin({ draftRule: false });
-    expect(m.surface().draft).toBeUndefined();
-    expect(m.surface().focusDraft).toBeUndefined();
-    await opened(m);
-    act(() => screen.getByRole('button', { name: 'Elsewhere' }).focus());
-    expect(card()).not.toBeNull(); // no blur rule
-    act(() => field().focus());
-    await userEvent.type(field(), 'Monthly?');
-    expect(commentDraftOf(ARTIFACT)).toBeNull();
-    fireEvent.keyDown(field(), { key: 'Escape' });
-    expect(card()).toBeNull();
-    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
-  });
-
-  it('the editor going drops its draft', async () => {
+  // UX wave U5a (decision 17): a host that unmounts because its surface was hidden keeps the comment and its thread; the
+  // artifact's end (its last view closed) takes both
+  it('the editor going keeps its typed comment and thread; the artifact’s end withdraws them', async () => {
     const m = mountMargin();
     await opened(m);
     await userEvent.type(field(), 'Monthly?');
     m.view.unmount();
     await act(async () => {});
+    expect(commentDraftOf(ARTIFACT)).toEqual({ threadId: passage.threadId, text: 'Monthly?' });
+    expect(m.reach.discard).not.toHaveBeenCalled();
+    act(() => dropSubject('artifact', ARTIFACT));
     expect(commentDraftOf(ARTIFACT)).toBeNull();
+    expect(m.reach.discard).toHaveBeenCalledWith(passage.threadId);
   });
 });
 
@@ -558,26 +555,32 @@ describe('a comment on its way outlives its card', () => {
     expect(active).toBe(1); // the overlay
     comment();
     await act(async () => {});
+    expect(active).toBe(2); // UX wave U5a (decision 17): and the draft's thread, until its comment ends
     await sendSideThread('Please explain');
-    expect(active).toBe(2); // and the send
+    expect(active).toBe(3); // and the send
     view.unmount();
-    expect(active).toBe(2); // the overlay's release waits for its queued withdrawal
+    expect(active).toBe(3); // the overlay's release waits a microtask
     await act(async () => {});
-    expect(active).toBe(1); // the send's stays
+    expect(active).toBe(2); // the comment in flight's and the send's stay
     await act(() => fake.reply('side.thread.open', { status: 'starting', appSessionId: CHILD_BARE }));
     expect(bodies(doc, passage.threadId)).toEqual(['Please explain']);
     expect(active).toBe(0);
   });
 
-  it('a send refused after its card went withdraws the draft (P2 toasts the refusal)', async () => {
+  // UX wave U5a (§D, decision 17): the comment stands again in its pass, its card reopened by the host with the reason,
+  // so its thread stays; the person's Close then withdraws it
+  it('a send refused after its card went reopens the card on its comment and keeps the thread; Close then withdraws it', async () => {
     const { doc, comment } = mountLive();
     comment();
     await act(async () => {});
     await sendSideThread('Please explain');
     await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     await act(() => fake.reply('side.thread.open', { status: 'refused', appSessionId: CHILD_BARE, reason: 'no_engine_session', message: 'Not yet' }));
+    expect(getThread(doc, passage.threadId)).not.toBeNull();
+    expect(screen.getByRole('alert').textContent).toContain('Not yet');
+    expect(useNotices.getState().notices).toHaveLength(0);
+    await userEvent.click(screen.getByRole('button', { name: 'Close' }));
     expect(getThread(doc, passage.threadId)).toBeNull();
-    expect(useNotices.getState().notices).toHaveLength(1);
   });
 
   // P3-F (L154; B's Decision Log 26 residue): a message typed later in the Side thread's own reply box, the card's

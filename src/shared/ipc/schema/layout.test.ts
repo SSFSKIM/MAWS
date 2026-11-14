@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, EMPTY_STRIP, events, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
+import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -54,13 +54,13 @@ describe('layout value shapes', () => {
     const diff = { id: 'diff:a1:HEAD', kind: 'diff', appSessionId: 'a1', ref: 'HEAD', pinned: false };
     const artifact = { id: 'artifact:0b6c', kind: 'artifact', artifactId: '0b6c', pinned: false };
     const browser = { id: 'browser:a1:b_0123456789ab', kind: 'browser', appSessionId: 'a1', browserTabId: 'b_0123456789ab', pinned: false };
-    const settings = { id: 'settings', kind: 'settings', section: null, pinned: false };
+    const diagnostics = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
     const v2 = {
       version: 2,
       current: 'proj-x',
       sets: {
         'proj-x': { panes: [{ tabs: [session(1), agent, file], activeTabId: 'file:/w/x.ts' }, { tabs: [diff, browser], activeTabId: 'session:a1' }], focusedPane: 1, splitRatio: 0.3, floating: { sessionTabId: 'session:a1', foldedPanel: true } },
-        none: { panes: [{ tabs: [loose, artifact, settings], activeTabId: 'artifact:0b6c' }], focusedPane: 0, splitRatio: 0.5 },
+        none: { panes: [{ tabs: [loose, artifact, diagnostics], activeTabId: 'artifact:0b6c' }], focusedPane: 0, splitRatio: 0.5 },
       },
       closedTabs: [file],
     };
@@ -77,7 +77,7 @@ describe('layout value shapes', () => {
           splitRatio: 0.3,
           floating: { sessionTabId: lifted(1).id, foldedPanel: true },
         },
-        none: { panes: [{ tabs: [{ ...loose, id: `file:${L}:/w/y.ts`, machine: L }, { ...artifact, id: `artifact:${L}:0b6c`, machine: L }, settings], activeTabId: `artifact:${L}:0b6c` }], focusedPane: 0, splitRatio: 0.5 },
+        none: { panes: [{ tabs: [{ ...loose, id: `file:${L}:/w/y.ts`, machine: L }, { ...artifact, id: `artifact:${L}:0b6c`, machine: L }, diagnostics], activeTabId: `artifact:${L}:0b6c` }], focusedPane: 0, splitRatio: 0.5 },
       },
       closedTabs: [{ ...file, id: `file:${L}:/w/x.ts`, appSessionId: at('a1'), machine: L }],
     };
@@ -129,10 +129,16 @@ describe('layout value shapes', () => {
   });
 
   it('accepts the key grammar and nothing else', () => {
-    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */]) {
+    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */, 'library.exportFolder' /* UX wave U5 */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
-    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */, 'library.other' /* UX wave U5 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+  });
+
+  // UX wave U5 (l6-artifacts-20): main's key for the last export's folder holds a path and nothing else
+  it('holds the last export’s folder as a path', () => {
+    expect(ExportFolderSchema.parse({ path: '/srv/exports' })).toEqual({ path: '/srv/exports' });
+    for (const value of [{ path: '' }, { path: '/a', at: 1 }, '/a', null]) expect(ExportFolderSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
   });
 
   // P4-B3 (Decision Log 22, X5 as amended): a panel tool's persisted params per panel tab, and the pin selection while no
@@ -247,17 +253,18 @@ describe('layout value shapes', () => {
     expect(TabRefSchema.safeParse({ ...tab, appSessionId: at('a1') }).success).toBe(false);
     expect(TabRefSchema.options.map((option) => option.shape.kind.value).at(-1)).toBe('channel');
     expect(tabId({ kind: 'channel', project })).toBe(tab.id);
-    expect(UNPINNABLE_KINDS.has('channel')).toBe(false);
     const v3 = { version: 3, current: 'none', sets: { none: { panes: [{ tabs: [tab], activeTabId: tab.id }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [tab] };
     expect(StoredMainSchema.parse(v3)).toEqual(v3);
   });
 
-  // E4a (X15): Settings › Browser is a section the settings tab opens at (the partition pill's click)
-  it('opens the settings tab at its browser section', () => {
-    const settings = { id: 'settings', kind: 'settings', section: 'browser', pinned: false };
-    expect(TabRefSchema.parse(settings)).toEqual(settings);
-    expect(TabRefSchema.safeParse({ ...settings, section: 'web' }).success).toBe(false);
-    expect(TabRefSchema.parse({ ...settings, section: 'org' })).toEqual({ ...settings, section: 'org' }); // P5 O8 M1: Settings › Org
+  // UX wave U7b (O-40): the Settings, Artifacts library, Projects and Customize tabs retired; none is a tab kind.
+  it('rejects a tab of the four retired kinds', () => {
+    for (const tab of [
+      { id: 'settings', kind: 'settings', section: 'browser', pinned: false },
+      { id: 'artifacts', kind: 'artifacts', pinned: false },
+      { id: 'projects', kind: 'projects', pinned: false },
+      { id: 'customize', kind: 'customize', section: 'skills', pinned: false },
+    ]) expect(TabRefSchema.safeParse(tab).success, tab.kind).toBe(false);
   });
 
   // W5: only `StoredMainSchema` still knows the Overview's tab, to drop it from a layout saved before the panel.
@@ -334,14 +341,82 @@ describe('layout value shapes', () => {
     expect(StoredMainSchema.parse(main)).toEqual({ ...main, panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], closedTabs: [lifted(1)] });
   });
 
-  // P3-G (§D5): the Artifacts tab, a singleton like Settings that the pin control never applies to.
-  it('admits the Artifacts tab as an unpinnable singleton', () => {
-    const artifacts = { id: 'artifacts', kind: 'artifacts', pinned: false };
-    expect(TabRefSchema.parse(artifacts)).toEqual(artifacts);
-    expect(TabRefSchema.safeParse({ ...artifacts, pinned: true }).success).toBe(false);
-    expect(TabRefSchema.safeParse({ ...artifacts, id: 'artifacts:2' }).success).toBe(false);
-    expect(tabId({ kind: 'artifacts' })).toBe('artifacts');
-    expect(UNPINNABLE_KINDS.has('artifacts')).toBe(true);
+  // UX wave U7b (O-40; its execution document, M6, A8, and Interfaces §F, "At hydration", and §G): a layout build F wrote
+  // with tabs of the four retired kinds reads without them, and what was in front decides the page hydration opens.
+  describe('the four retired tab kinds (A8)', () => {
+    const settingsTab = { id: 'settings', kind: 'settings', section: 'engine', pinned: false };
+    const customizeTab = (section: string) => ({ id: 'customize', kind: 'customize', section, pinned: false });
+    const projectsTab = { id: 'projects', kind: 'projects', pinned: false };
+    const artifactsTab = { id: 'artifacts', kind: 'artifacts', pinned: false };
+    const diagnostics = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    const notes = { id: `file:${L}:/invented/notes.md`, kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: L, pinned: false };
+    // As F writes it: version 3, sets by project, a Settings tab, a Customize tab at Skills in front, a Projects tab in
+    // the other pane, a library tab in the closed history, and session and file tabs among them.
+    const fWrote = (left: unknown[], active: string, focusedPane: 0 | 1 = 0, key = at('proj-x')) => ({
+      version: 3,
+      current: key,
+      sets: { [key]: { panes: [{ tabs: left, activeTabId: active }, { tabs: [projectsTab, lifted(2)], activeTabId: 'projects' }], focusedPane, splitRatio: 0.5 } },
+      closedTabs: [artifactsTab, lifted(3)],
+    });
+    const A8 = fWrote([lifted(1), settingsTab, customizeTab('skills'), notes], 'customize');
+    let warn: ReturnType<typeof vi.spyOn>;
+    beforeEach(() => void (warn = vi.spyOn(console, 'warn').mockImplementation(() => {})));
+    afterEach(() => warn.mockRestore());
+
+    it('reads A8’s value with the four gone, every other tab in its order, a tab active in each pane, and no warning', () => {
+      expect(StoredMainSchema.parse(A8)).toEqual({
+        ...A8,
+        sets: { [at('proj-x')]: { panes: [{ tabs: [lifted(1), notes], activeTabId: lifted(1).id }, { tabs: [lifted(2)], activeTabId: lifted(2).id }], focusedPane: 0, splitRatio: 0.5 } },
+        closedTabs: [lifted(3)],
+      });
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('retiredFront answers the page of a Customize, Projects or library tab in front, settings for a Settings tab, and null otherwise', () => {
+      expect(retiredFront(A8)).toEqual({ page: { kind: 'customize', view: 'mine', show: 'skills' } });
+      expect(retiredFront(fWrote([customizeTab('mcp')], 'customize'))).toEqual({ page: { kind: 'customize', view: 'mine', show: 'connectors' } });
+      expect(retiredFront(fWrote([customizeTab('plugins')], 'customize'))).toEqual({ page: { kind: 'customize', view: 'mine', show: 'plugins' } });
+      expect(retiredFront(fWrote([lifted(1)], lifted(1).id, 1)), 'the other pane focused').toEqual({ page: { kind: 'projects' } });
+      expect(retiredFront(fWrote([artifactsTab, lifted(1)], 'artifacts'))).toEqual({ page: { kind: 'library' } });
+      expect(retiredFront(fWrote([settingsTab, lifted(1)], 'settings'))).toBe('settings');
+      for (const front of [lifted(1), diagnostics, notes]) expect(retiredFront(fWrote([front, customizeTab('skills')], front.id)), front.kind).toBeNull();
+      expect(retiredFront(fWrote([], ''))).toBeNull();
+      for (const value of [undefined, null, 'customize', 3, [], {}, { version: 4, current: 'none', sets: {} }, { version: 3, current: 'none', sets: {} }, { version: 3, current: 'none' }, { version: 1 }, { version: 1, panes: 'x' }, { version: 3, current: 'none', sets: { none: { panes: [{ tabs: 'x' }] } } }]) {
+        expect(retiredFront(value), JSON.stringify(value)).toBeNull();
+      }
+    });
+
+    it('retiredFront reads a version-2 value and a version-1 value the same way', () => {
+      const v2 = { version: 2, current: 'proj-x', sets: { 'proj-x': { panes: [{ tabs: [session(1), customizeTab('skills')], activeTabId: 'customize' }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [] };
+      expect(retiredFront(v2)).toEqual({ page: { kind: 'customize', view: 'mine', show: 'skills' } });
+      expect(retiredFront({ ...v2, sets: { 'proj-x': { ...v2.sets['proj-x'], panes: [{ tabs: [session(1), settingsTab], activeTabId: 'settings' }] } } })).toBe('settings');
+      expect(retiredFront({ ...v2, current: 'proj-y' }), 'current names no set').toBeNull();
+      const v1 = { version: 1, panes: [{ tabs: [session(1)], activeTabId: session(1).id }, { tabs: [projectsTab], activeTabId: 'projects' }], focusedPane: 1, splitRatio: 0.5, closedTabs: [] };
+      expect(retiredFront(v1)).toEqual({ page: { kind: 'projects' } });
+      expect(retiredFront({ ...v1, focusedPane: 0 })).toBeNull();
+      expect(StoredMainSchema.parse(v1), 'the pane the drop empties goes, pane 0 focused').toEqual({ ...v1, panes: [{ tabs: [lifted(1)], activeTabId: lifted(1).id }], focusedPane: 0 });
+    });
+
+    // Rules 3 to 5 of "At hydration", one case each.
+    it('pageAtStart: a retired page in front wins over a stored page', () => {
+      expect(pageAtStart({ rawMain: A8, canonical: false, stored: { kind: 'projects' } })).toEqual({ kind: 'customize', view: 'mine', show: 'skills' });
+      expect(pageAtStart({ rawMain: fWrote([artifactsTab], 'artifacts', 0, 'none'), canonical: true, stored: { kind: 'projects' } })).toEqual({ kind: 'library' });
+    });
+
+    it('pageAtStart: a Settings tab in front opens none, though a page is stored and the shape is the stored form’s', () => {
+      expect(pageAtStart({ rawMain: fWrote([settingsTab], 'settings', 0, 'none'), canonical: true, stored: { kind: 'library' } })).toBeNull();
+    });
+
+    it('pageAtStart: a stored page over tabs of the stored form’s shape with Diagnostics in front is restored (F can leave exactly this)', () => {
+      const stored: Destination = { kind: 'customize', view: 'discover', show: 'connectors' };
+      expect(pageAtStart({ rawMain: fWrote([diagnostics], 'diagnostics', 0, 'none'), canonical: true, stored })).toEqual(stored);
+      expect(pageAtStart({ rawMain: fWrote([diagnostics], 'diagnostics', 0, 'none'), canonical: true, stored: null })).toBeNull();
+    });
+
+    it('pageAtStart: a stored page over tabs of any other shape is not restored', () => {
+      expect(pageAtStart({ rawMain: fWrote([diagnostics], 'diagnostics'), canonical: false, stored: { kind: 'projects' } })).toBeNull();
+      expect(pageAtStart({ rawMain: undefined, canonical: false, stored: { kind: 'projects' } }), 'no stored tabs').toBeNull();
+    });
   });
 
   // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact, pinnable like a file tab. P5 O6 M2:
@@ -353,7 +428,6 @@ describe('layout value shapes', () => {
     expect(TabRefSchema.safeParse({ ...tab, artifactId: undefined }).success).toBe(false);
     expect(TabRefSchema.safeParse({ ...tab, machine: undefined }).success).toBe(false);
     expect(tabId({ kind: 'artifact', artifactId: tab.artifactId, machine: L })).toBe(tab.id);
-    expect(UNPINNABLE_KINDS.has('artifact')).toBe(false);
     // a stored main.tabs holding one reads as it is, in a pane and in the closed-tab history
     const main = { ...STORED_EMPTY, sets: { none: { panes: [{ tabs: [tab], activeTabId: tab.id }], focusedPane: 0, splitRatio: 0.5 } }, closedTabs: [{ ...tab, pinned: false }] };
     expect(StoredMainSchema.parse(main)).toEqual(main);
@@ -435,7 +509,7 @@ describe('layout value shapes', () => {
       const main = v3([{ tabs: [lifted(1)], activeTabId: lifted(1).id }]);
       expect(StoredMainSchema.parse(main)).toEqual(main);
       expect(StoredMainSchema.safeParse(v3([{ tabs: [{ ...lifted(1), pinned: 'yes' }], activeTabId: lifted(1).id }])).success).toBe(false);
-      expect(StoredMainSchema.safeParse({ ...main, closedTabs: [{ id: 'settings', kind: 'settings', pinned: false }] }).success).toBe(false);
+      expect(StoredMainSchema.safeParse({ ...main, closedTabs: [{ id: 'diagnostics', kind: 'diagnostics', pinned: 'no' }] }).success).toBe(false);
       // a tab with no kind at all is malformed, not of an unknown kind
       expect(StoredMainSchema.safeParse(v3([{ tabs: [{ id: 'x', pinned: false }], activeTabId: 'x' }])).success).toBe(false);
       expect(warn).not.toHaveBeenCalled();

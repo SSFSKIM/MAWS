@@ -8,6 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import type { PanelHostProps } from '../panel/host-slot';
+import type { SettingsSection } from '../settings-tab/SettingsView';
 import { FALLBACKS } from './slot-fallbacks';
 
 export interface Slots {
@@ -18,7 +19,7 @@ export interface Slots {
   fileTab: ComponentType<{ tab: Extract<TabRef, { kind: 'file' }> }>; // C8
   diffTab: ComponentType<{ tab: Extract<TabRef, { kind: 'diff' }> }>; // C8
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
-  settingsTab: ComponentType<{ section: Extract<TabRef, { kind: 'settings' }>['section'] }>; // C11: the Settings tab's content, at a section
+  settingsTab: ComponentType<{ section: SettingsSection | null; request?: object }>; // C11: Settings' content, at a section (UX wave U7b: in the Settings dialog, and U11's sections; `request` is a new value at each explicit request for a section)
   topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
   browserTab: ComponentType<{ tab: Extract<TabRef, { kind: 'browser' }> }>; // E4a: a session's browser tab as a main tab
   artifactsLibrary: ComponentType<Record<never, never>>; // P3-G (§D5): the Artifacts tab's content; P3-L registers the library

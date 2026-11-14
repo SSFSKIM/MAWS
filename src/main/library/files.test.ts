@@ -1,18 +1,22 @@
 // The library's export formats and Save as (files.ts): the formats the exporter registry serves, and Save as… of an
-// export or of the stored file resolved through the host (with the e2e seam's folder).
+// export or of the stored file resolved through the host (with the e2e seam's folder), and the folder its dialog opens in.
 import { lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import JSZip from 'jszip';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ConfirmRequest } from '@shared/client/port';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientId, ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
+import type { MachineRef } from '@shared/machine/ref';
 import { artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
 import { zipFiles } from '../../render/design-systems/zip';
-import { createLibraryFiles, type LibraryFilesDeps } from './files';
+import { LayoutFileStore, type LayoutStore } from '../layout/store';
+import { createLibraryFiles, type LibraryFilesDeps, type RemoteLibraryFiles } from './files';
 
 // Run real filesystem operations, interleaving another writer at the asynchronous boundaries.
 const diskRace = vi.hoisted(() => ({
@@ -49,6 +53,16 @@ interface Stored {
   kind: ArtifactKind;
   title: string;
   files: Record<number, { name: string; path: string }>; // by revision; the highest is the latest
+  createdBy?: Actor; // a person's unless named
+  spaceDir?: string; // in a Space linked to this folder (SPACE); in none without it
+}
+const SPACE = '00000000-0000-4000-8000-0000000000a1';
+const MAKER = 'app-maker' as AppSessionId;
+
+// The layout store as main's keys use it, in memory: a fresh one per `deps` (nothing remembered from another test).
+function memoryLayout(): Pick<LayoutStore, 'get' | 'set'> {
+  const values = new Map<string, unknown>();
+  return { get: (key) => values.get(key) ?? null, set: (key, value) => void values.set(key, value) };
 }
 
 // The OS as the client port reaches it, as fakes a test reads: the save panel and the Replace question.
@@ -68,7 +82,8 @@ const replaceQuestion = (path: string): ConfirmRequest => ({
 
 function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os> = {}): LibraryFilesDeps & Os {
   const call = async <N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>> => {
-    if (name === 'artifacts.get') return { ok: true, value: { artifact: { id: ID, kind: stored.kind, title: stored.title, revision: 3 } } } as never;
+    if (name === 'artifacts.get') return { ok: true, value: { artifact: { id: ID, kind: stored.kind, title: stored.title, revision: 3, createdBy: stored.createdBy ?? { kind: 'human' }, ...(stored.spaceDir !== undefined && { spaceId: SPACE }) } } } as never;
+    if (name === 'spaces.list') return { ok: true, value: { spaces: [{ id: '00000000-0000-4000-8000-0000000000a0', name: 'Other', linkedDir: join(dir, 'elsewhere'), createdAt: 1 }, { id: SPACE, name: 'Launch', linkedDir: stored.spaceDir, createdAt: 2 }] } } as never;
     if (name === 'artifacts.content') {
       const { revision } = input as CommandInput<'artifacts.content'>;
       const at = revision ?? Math.max(...Object.keys(stored.files).map(Number));
@@ -86,6 +101,8 @@ function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os>
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
     confirmReplaceFolder: vi.fn(async () => false),
     env: {},
+    layout: memoryLayout(),
+    sessionFolder: () => null, // a Mac whose index knows no session
     ...over,
   };
   const port: LibraryFilesDeps['port'] = {
@@ -458,5 +475,111 @@ describe('library files', () => {
     await expect(files.saveAs({ artifactId: ID, source: { content: {} } }, null)).resolves.toEqual({ saved: true, path: join(into, 'budget.csv') });
     expect(readFileSync(join(into, 'budget.csv'), 'utf8')).toBe('month,amount\n');
     expect(seamed.showSaveDialog).not.toHaveBeenCalled();
+    expect(seamed.layout.get('library.exportFolder')).toEqual({ path: into }); // UX wave U5: the seam's save records its folder too
+  });
+});
+
+// UX wave U5 (l6-artifacts-20, A18; the U5a execution document's decision 14): the dialog opens in the folder of the last
+// export, kept across launches under main's layout key `library.exportFolder`; with none (or one that is no longer a
+// directory), an artifact of this Mac's Space's linked folder, else the folder of the session that made it, else Downloads
+describe('where the Save dialog opens', () => {
+  const pdf = (): CommandInput<'library.saveAs'> => {
+    mkdirSync(join(dir, 'artifacts', ID, 'exports'), { recursive: true });
+    writeFileSync(join(dir, 'artifacts', ID, 'exports', artifactExportName(7, 'pdf')), '%PDF-1.7 export');
+    return { artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } };
+  };
+  const folder = (name: string) => {
+    mkdirSync(join(dir, name), { recursive: true });
+    return join(dir, name);
+  };
+  // The default path the dialog was opened at, the dialog cancelled.
+  const opensAt = async (d: LibraryFilesDeps & Os, target?: MachineRef): Promise<string> => {
+    await createLibraryFiles(d).saveAs(pdf(), null, target);
+    return vi.mocked(d.showSaveDialog).mock.calls.at(-1)![0].defaultPath;
+  };
+  const sessions = (folders: Record<string, string>) => vi.fn((appSessionId: AppSessionId) => folders[appSessionId] ?? null);
+  const made = { kind: 'session', appSessionId: MAKER } as const;
+
+  it('opens in the folder the last export saved to, also after a relaunch', async () => {
+    const out = folder('out');
+    const file = join(dir, 'layout.json');
+    const first = deps({ kind: 'document', title: 'Plan', files: {} }, { layout: new LayoutFileStore(file), showSaveDialog: vi.fn(async () => ({ canceled: false, filePath: join(out, 'Plan.pdf') })) });
+    await expect(createLibraryFiles(first).saveAs(pdf(), null)).resolves.toEqual({ saved: true, path: join(out, 'Plan.pdf') });
+    expect(JSON.parse(readFileSync(file, 'utf8'))['library.exportFolder']).toEqual({ path: out });
+
+    const relaunched = deps({ kind: 'document', title: 'Plan', files: {}, spaceDir: folder('space') }, { layout: new LayoutFileStore(file) });
+    expect(await opensAt(relaunched)).toBe(join(out, 'Plan.pdf'));
+  });
+
+  it('passes over a stored folder that is no longer a directory, or a stored value of another shape', async () => {
+    const space = folder('space');
+    put('a-file', 'not a folder');
+    for (const value of [{ path: join(dir, 'gone') }, { path: join(dir, 'a-file') }, 'out', { path: space, more: 1 }]) {
+      const layout = memoryLayout();
+      layout.set('library.exportFolder', value);
+      expect(await opensAt(deps({ kind: 'document', title: 'Plan', files: {} }, { layout })), JSON.stringify(value)).toBe(join(dir, 'Downloads', 'Plan.pdf'));
+      expect(await opensAt(deps({ kind: 'document', title: 'Plan', files: {}, spaceDir: space }, { layout })), JSON.stringify(value)).toBe(join(space, 'Plan.pdf'));
+    }
+  });
+
+  it('with no stored folder: the Space’s linked folder, else the making session’s folder, else Downloads, each only while it is a directory', async () => {
+    const space = folder('space');
+    const work = folder('work');
+    put('a-file', 'not a folder');
+    const plan = (over: Partial<Stored>): Stored => ({ kind: 'document', title: 'Plan', files: {}, ...over });
+    expect(await opensAt(deps(plan({ spaceDir: space, createdBy: made }), { sessionFolder: sessions({ [MAKER]: work }) }))).toBe(join(space, 'Plan.pdf'));
+    expect(await opensAt(deps(plan({ spaceDir: join(dir, 'gone'), createdBy: made }), { sessionFolder: sessions({ [MAKER]: work }) }))).toBe(join(work, 'Plan.pdf'));
+    expect(await opensAt(deps(plan({ createdBy: made }), { sessionFolder: sessions({ [MAKER]: work }) }))).toBe(join(work, 'Plan.pdf'));
+    expect(await opensAt(deps(plan({ createdBy: made }), { sessionFolder: sessions({ [MAKER]: join(dir, 'a-file') }) }))).toBe(join(dir, 'Downloads', 'Plan.pdf'));
+    expect(await opensAt(deps(plan({ createdBy: made }), { sessionFolder: sessions({}) }))).toBe(join(dir, 'Downloads', 'Plan.pdf')); // a session this Mac's index does not know
+    const byPerson = sessions({ [MAKER]: work });
+    expect(await opensAt(deps(plan({}), { sessionFolder: byPerson }))).toBe(join(dir, 'Downloads', 'Plan.pdf'));
+    expect(byPerson).not.toHaveBeenCalled();
+  });
+
+  it('for an artifact of another machine: the stored folder, else Downloads, never a folder named on that machine', async () => {
+    const LOCAL = 'LocalMachineRef0000000' as MachineRef;
+    const OTHER = 'OtherMachineRef0000000' as MachineRef;
+    const space = folder('space');
+    const work = folder('work');
+    const remote: RemoteLibraryFiles = {
+      get: async () => ({ id: ID, kind: 'document', title: 'Plan', revision: 3, createdBy: made, spaceId: SPACE }) as never,
+      content: async () => {
+        throw new Error('an export is read without the stored file');
+      },
+      fetch: async (_source, to) => writeFileSync(to, '%PDF remote'),
+    };
+    const call = vi.fn(async () => {
+      throw new Error('nothing of this Mac’s store is read for another machine’s artifact');
+    });
+    const sessionFolder = sessions({ [MAKER]: work });
+    const there = deps({ kind: 'document', title: 'Plan', files: {}, spaceDir: space, createdBy: made }, { call, sessionFolder, local: LOCAL, remote: () => remote });
+    expect(await opensAt(there, OTHER)).toBe(join(dir, 'Downloads', 'Plan.pdf'));
+    there.layout.set('library.exportFolder', { path: work });
+    expect(await opensAt(there, OTHER)).toBe(join(work, 'Plan.pdf'));
+    expect(call).not.toHaveBeenCalled();
+    expect(sessionFolder).not.toHaveBeenCalled();
+  });
+
+  it('records the folder only once the copy is in place, and a failed write of it never fails the save', async () => {
+    const out = folder('out');
+    const layout = memoryLayout();
+    const cancelled = deps({ kind: 'document', title: 'Plan', files: {} }, { layout });
+    await expect(createLibraryFiles(cancelled).saveAs(pdf(), null)).resolves.toEqual({ saved: false });
+    const failed = deps({ kind: 'document', title: 'Plan', files: {} }, { layout, showSaveDialog: async () => ({ canceled: false, filePath: join(dir, 'missing', 'Plan.pdf') }) });
+    await expect(createLibraryFiles(failed).saveAs(pdf(), null)).rejects.toThrow(/ENOENT/);
+    expect(layout.get('library.exportFolder')).toBeNull();
+
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const full: Pick<LayoutStore, 'get' | 'set'> = {
+      get: () => null,
+      set: () => {
+        throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' });
+      },
+    };
+    const saving = deps({ kind: 'document', title: 'Plan', files: {} }, { layout: full, showSaveDialog: async () => ({ canceled: false, filePath: join(out, 'Plan.pdf') }) });
+    await expect(createLibraryFiles(saving).saveAs(pdf(), null)).resolves.toEqual({ saved: true, path: join(out, 'Plan.pdf') });
+    expect(readFileSync(join(out, 'Plan.pdf'), 'utf8')).toBe('%PDF-1.7 export');
+    expect(logged).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/library\.exportFolder.*ENOSPC/));
   });
 });

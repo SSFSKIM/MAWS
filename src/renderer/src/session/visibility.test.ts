@@ -146,6 +146,21 @@ describe('session visibility', () => {
     ]);
   });
 
+  // UX wave U7b (§N): behind a page nothing is on screen; behind the Settings dialog everything stays on screen.
+  it('a page opening sends false and viewing none; Back sends them true again; the Settings dialog sends nothing', () => {
+    useLayout.getState().openSession(A);
+    const viewing = () => fake.invoked('attention.viewing');
+    expect([sent(), viewing().at(-1)]).toEqual([[{ appSessionId: A, visible: true }], { appSessionId: A }]);
+    useLayout.getState().openDestination({ kind: 'projects' });
+    expect([sent().at(-1), viewing().at(-1)]).toEqual([{ appSessionId: A, visible: false }, { appSessionId: null }]);
+    useLayout.getState().closeDestination();
+    expect([sent().at(-1), viewing().at(-1)]).toEqual([{ appSessionId: A, visible: true }, { appSessionId: A }]);
+    const [sentBefore, viewingBefore] = [sent().length, viewing().length];
+    useLayout.getState().openSettings();
+    useLayout.getState().closeSettings();
+    expect([sent().length, viewing().length]).toEqual([sentBefore, viewingBefore]);
+  });
+
   it('is false while the right panel is maximized over the main region', () => {
     useLayout.getState().openSession(A);
     showSurface(A, 'terminal');

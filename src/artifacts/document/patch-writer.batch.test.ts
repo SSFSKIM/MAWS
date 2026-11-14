@@ -148,7 +148,9 @@ describe('pending and answering', () => {
     expect(textOf(doc, filled.results[0].newIds[0])).toBe('The first risk is the schedule.');
   });
 
-  it('answering a thread (S5 read check 6): the pin stays on the reworded words and the answer is the result lines', () => {
+  // UX wave U5 (l6-artifacts-20): the answer is a sentence a person reads, never the result lines (the tool posts the agent's
+  // `reply` in its place when it gave one, src/engine-host/tool-server/documents.ts)
+  it('answering a thread (S5 read check 6): the pin stays on the reworded words and the answer is the fixed sentence', () => {
     const doc = seedDoc(
       {
         type: 'doc',
@@ -176,12 +178,13 @@ describe('pending and answering', () => {
     transact(doc, () => {
       // `old` as copied from the read, a milestone in it (ignored)
       const res = applyEdit(doc, [{ op: 'replace_text', block: 'p1', old: '<c:t1>ships **quarterly**', new: 'ships monthly' }], { answering: 't1' });
-      expect(res.answer).toEqual({ threadId: 't1', body: 'replaced 1 occurrence(s) in ^p1' });
+      expect(res.answer).toEqual({ threadId: 't1', body: 'Edited this passage.' });
+      expect(res.results.map((result) => result.line)).toEqual(['replaced 1 occurrence(s) in ^p1']); // the agent's answer, as before
       reply(doc, 't1', { id: 't1:m1', by: agent, at: now(), body: res.answer!.body });
     });
     expect(updates).toHaveLength(1);
     expect(coveredIn(doc, 'p1').t1).toBe('ships monthly with design review');
-    expect(getThread(doc, 't1')?.messages.map((message) => message.body)).toEqual(['About "ships quarterly with design review"', 'replaced 1 occurrence(s) in ^p1']);
+    expect(getThread(doc, 't1')?.messages.map((message) => message.body)).toEqual(['About "ships quarterly with design review"', 'Edited this passage.']);
   });
 
   it('answering a thread that does not exist refuses the batch', () => {

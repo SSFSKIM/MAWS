@@ -246,6 +246,14 @@ export const commands = {
   },
   // E4d start
   'browser.comment.set': { input: z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean() }), output: BrowserCommentSetResultSchema, owner: 'main' },
+  // UX wave U5a (X-216; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §B.4 and §G): the tab's
+  // comment card opened on a comment (`css`, the css of its element) or closed (null); main forwards it to the tab's own
+  // page, and does nothing for a tab it does not hold or whose view is gone
+  'browser.comment.card': {
+    input: z.strictObject({ tabId: BrowserTabIdSchema, open: z.strictObject({ css: z.string().min(1).max(2000) }).nullable() }),
+    output: z.void(),
+    owner: 'main',
+  },
   // E4d end
   // E4b start: the import. One inspection and one run at a time, app-wide; `start` while one runs answers invalid_input.
   // `userDataDir: null` lists Chrome's default folder (under e2e, MAWS_E2E_CHROME_USER_DATA).

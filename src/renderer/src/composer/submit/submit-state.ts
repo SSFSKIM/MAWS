@@ -46,6 +46,11 @@ export interface SubmitInput {
   // Board 525: why the member's words don't go to another member's session (its machine refused them at the member's
   // grade), naming whom to ask; absent or null: nothing says so
   closed?: string | null;
+  // The UX wave, U9 (S-01): a Stop for the session has been out for more than 300 ms and has not settled
+  stopping?: boolean;
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): the session's machine is in its offline phase, with UC-7.5's sentences for Send and Stop;
+  // absent or null: it is not (while it connects or reconnects main holds the act, and nothing here changes)
+  offline?: { send: string; stop: string } | null;
 }
 
 export interface SubmitDecision {
@@ -90,6 +95,7 @@ export const SENDS_WHEN_STARTED = 'Sends once the session has started';
 export const ARCHIVED = 'Archived · unarchive it to continue';
 // P2-A end
 export const MODES_IN_TERMINAL = 'A terminal session runs `!` and `#` in its terminal'; // P5 O9 M5
+export const STOPPING = 'Stopping…'; // the UX wave, U9 (S-01)
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -149,6 +155,14 @@ function decideSubmit(i: SubmitInput): Decided {
     return decide('send', 'Send', !empty);
   }
   if ((i.closed ?? null) !== null) return decide('send', 'Send', false, i.closed); // board 525: Stop too, whatever the turn
+  // The UX wave, U9 (S-01): a Stop on its way for more than 300 ms reads so, disabled, until it settles, whatever the draft
+  if (i.stopping) return decide('stop', STOPPING, false, STOPPING);
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): in the machine's offline phase Send and Stop are closed with the phase's sentence
+  const offline = i.offline ?? null;
+  if (offline !== null && mode === 'send') {
+    const running = i.driven ? i.driven.running : isBusy(status, queue.entries);
+    return running && empty ? decide('stop', 'Stop', false, offline.stop) : decide('send', 'Send', false, offline.send);
+  }
   // P5 O9 M5: driven through its holder (lane A). Send goes in either turn state, never as a steer: the bridge reads words
   // sent while a turn runs at the turn's next model request; with the box empty during a turn, Stop interrupts.
   if (i.driven) {
