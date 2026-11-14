@@ -28,7 +28,7 @@ The to-human view (the report bar, "Working record", "To you", the advertisement
 - [x] M2 — What joins a run, its caption, and the turn's line. (2026-11-13, reviewed clean: `b2d5b372c..c53ef340c`, the rulings' and review's fixes `645beb489..f20efe7a4`.)
 - [x] M3 — What a row reads: a shell call with no description, an artifact call, a failed call. (2026-11-13, reviewed clean: `a9df42ade..acd7855ae`, the review's fixes `373fdd01a..aaa551c94`; `titlesOfTurn` is cached per turn state, `derive.ts:1385-1391`.)
 - [x] M4 — The run's row: one line, folded; thoughts in order; the running, the waiting and the thinking line. (2026-11-13, reviewed clean: `56020b7d8..b8c5a9cc6`.)
-- [ ] M5 — The e2e edits and scenes, the routes' proof whole, the record, and the acceptance run.
+- [x] M5 — The e2e edits and scenes, the routes' proof whole, the record, and the acceptance run. (2026-11-13, reviewed clean: `6483fc743..20b5a68ae`, the rulings' fixes `414fb6ae3..466455253` and `05d3bea05..0a3a3571a`. The e2e scenes are written and typechecked, not run: the architect's.)
 
 ## One pull request or two
 
@@ -903,4 +903,12 @@ One pull request from `ux-wave/U2a` to master, opened by the architect after the
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-13, at the executor's hand-back** (head `0a3a3571a` plus this document's commits; the branch's review, the e2e runs, the look and class 1a are the architect's and follow).
+
+What exists. On the model and the view MAWS draws: two or more calls in a row are one folded run whose line reads the waiting call (`Waiting for approval: …` in the warning tone), else the running foreground call, else Desktop's caption with its marks and line counts; a click opens it onto its blocks of calls with each thought of ten seconds or more, by the engine's recorded number, as a thought line at its place; a streaming thought reads its tier, effort and time under the line. A turn's line says what the turn did (`Worked for … · <caption> +N −N · N denied`), a running turn's reads `Working for …` and its counts so far, and a turn with nothing under it has none. A shell row with no description reads Desktop's short command, an artifact row names its artifact by the title a result gave, and a failed row carries the first line of its error. A file says what a wire says of a thought's duration (X1's optional `thinkingDurationMs`, minor 39, provisional) and of a refused call's kind, so a denied call stands alone and a stopped call is a stopped member of its run by every route; attention is raised from the wire only.
+
+The proof. `lane-a/run-routes.test.ts` draws every recording by the wire, the file and the file's rows and compares them at rest, row by row and call by call; exactly one named exception remains, the monitor's turn (Reported 10), and it ends when the live wire carries the monitor's event. Each milestone's typecheck, eslint and suites passed on the VM; the whole unit suite ran once at `20b5a68ae` with only the known set, the route differences then with the architect, and one load time-out that passes alone; after the last fixes `transcript`, `lane-a` and `test/` were run again (39 failures, all of the known set) and `run-routes` passed 230 of 230. The derivation reading is about a tenth above the base on the VM, within the budget (Surprises); the reading of record is the Mac's.
+
+What it cost against the plan. Every milestone took one or two fix waves, and five points went to the architect that the document had not settled: the stopped ask (built here), U3a's test expectations under C5, the cap's words (Desktop's, with the comma and counted by key), `TaskOutput`/`TaskStop` as commands, the refused send in the denied count, the one argument in `Tools.tsx`, and (A), (M) and (G) at M5. Six insertions in other landings' files in all, each in §I. Two of the document's commands were wrong and are corrected in place (the snapshot regeneration ran the whole suite; the base's merge was not to be run). M1's proof set missed one red test under `test/` that M5's whole run found; a milestone that changes what a recorded file carries should run `test/` whole.
+
+Left for the architect: the e2e groups of Proof 1 (the scenes M5 edited and the three it added), the measured anchoring half, OX7, the two-build scene, the look, the branch's xhigh review and class 1a; the minor's re-take at the chain merge. Residue in the tracker (four rows of The record and the O-28 sentence) and in the hand-back.
