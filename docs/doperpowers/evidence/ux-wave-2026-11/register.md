@@ -90,6 +90,10 @@ Verbatim, as chosen on the question cards; a note is the owner's own text. An an
 | Between the two scopes an off always wins in the engine: a connector off at user scope cannot be switched on for one project by an on/off setting (a plugin can). Which behaviour do you need for a connector with many tools? | Off by default, on per project (Recommended) |  |
 | In the "Add custom connector" form, should the value fields of request headers and environment variables show what is typed, or hide it behind dots with an eye button? | Plain text (Recommended) |  |
 | Word, PowerPoint and Excel files can be drawn inside MAWS with nothing installed on the Mac, but not exactly as Office draws them (a long Word file is one tall page with footnotes at the end; a slide deck has no animations; an Excel chart loses axis numbers and the legend). Is this look good enough to be how these files open in MAWS? | Yes, as drawn (Recommended) | the preview ships only if the containment test of the viewer passes; Excel's computed totals are a separate question |
+| In the agent's text in a chat, which look should a mention of an artifact and a link to a file have? | As Claude Desktop (Recommended) |  |
+| You click the agent's mention of an artifact that is already open as a main tab. What should happen? | Show that tab (Recommended) |  |
+| After the artifact-link change the agent can no longer open an artifact beside the chat by itself. It can still put six things on screen by itself: Review at a file, a file's tab at a line, the session's terminal, the Tasks panel, a page in the in-app browser, and Source control. Should "a file's tab" stay among them? | Keep all six (Recommended) |  |
+| An Excel file that an agent writes holds formulas but not their results. If MAWS previews Excel files (the last step of the preview work, and only if the viewer's containment test passes), may the preview work the totals out itself, with a calculator that is not Excel's? | Compute and say so (Recommended) | applies only if the Excel preview ships |
 
 ## Questions still open
 
