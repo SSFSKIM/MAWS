@@ -16,7 +16,7 @@
 // M7's seven cases drive the product as the owner does, over a scratch project the sidebar shows (support/
 // maws-tools.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
 // the console chip; (2) the Deliverables tool's list, viewer, versions and main tab; (3) a delivered file of every kind
-// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into the
+// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not (U6d: refused, opening nothing); (5) comment mode into the
 // comment card beside the element (P2-E1; E3's composer before it); (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay; P2-F added (8) the media viewers' fit, zoom and actual size (L95). Records
 // are written straight into the store's layout (`<userData>/deliverables/<appSessionId>/<id>.json`, the reader's format)
 // where no replay writes them; main's reader has no cache. MAWS_E2_SHOTS=1 also writes the evidence shots in both themes
@@ -890,13 +890,17 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
 });
 
 // ---- (4) show_pane 'artifact' (E2's 'deliverable'; over the recording's derived copy, its pane renamed) --------------
+// UX wave U6d (O-44; decision 22): the agent opens no artifact by itself. The pane is retired, so the host refuses the
+// call with the sentence that teaches the link, asks no window, and nothing opens, whether or not an artifact answers to
+// the target; the event carries the sentence. The cell draws the fixture's tool_result, which the replay plays as
+// recorded, so the refusal's words in a row are the model's unit test's and the paid live group's.
 
-test('show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Artifacts viewer and answers panel-tool', async () => {
+test('show_pane: a call for the retired artifact pane is answered with the sentence and opens nothing, also when an artifact the target names exists', async () => {
   test.setTimeout(180_000);
   await scene({ titles: ['E2: show_pane, nothing delivered', 'E2: show_pane, an artifact'] }, async (s) => {
     const [bare, seeded] = s.ids;
-    // the recording's target is `none`: an artifact may carry that id (Decision Log 34: the model names what it holds)
-    const none = seedArtifact(s.maws.userData, seeded, 'none', 'Release notes', [pageOf('RELEASE_NOTES', '#37474f')]);
+    // the recording's target is `none`: in the second session an artifact carries that id, which the call opened before
+    seedArtifact(s.maws.userData, seeded, 'none', 'Release notes', [pageOf('RELEASE_NOTES', '#37474f')]);
     await importSeeded(s.page);
     const answers = (id: string) => {
       const rows = s.journal(id);
@@ -904,37 +908,24 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
     };
     const panesShown = async (id: string) => ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error]);
 
-    await show(s, bare);
-    await replay(s, bare, SHOW_PANE_ARTIFACT);
-    for (let k = 0; k < 3; k++) await allowNext(s, bare); // terminal, artifact, nope (seqs 68, 85, 100)
-    await idle(s, bare);
-    expect(answers(bare)[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
-    expect(await panesShown(bare)).toEqual([
-      ['terminal', 'panel-tool', null],
-      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
-    ]);
-    // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no bodies.
-    // Read on the cell's own label: the turn's line says what the turn did in its rows' words (UX wave U2, O-15)
-    await unfoldWork(s.pane);
-    await expect(s.pane.locator('.transcript-cell-label').filter({ hasText: /^Could not open pane: the artifact pane is not available in this build of MAWS$/ })).toBeVisible();
-
-    await show(s, seeded);
-    await replay(s, seeded, SHOW_PANE_ARTIFACT);
-    await allowNext(s, seeded); // terminal
-    await allowNext(s, seeded); // artifact "none": the viewer opens on the artifact
-    const viewer = viewerOf(s.panel);
-    await expect(viewer).toHaveAttribute('data-artifact-viewer', none.id);
-    await expect(surface(s.page, 'artifacts')).toBeVisible();
-    await expect((await frameAt(s.page, await pageUrlOf(s.page, none.id))).locator('#heading')).toHaveText('RELEASE_NOTES');
-    await allowNext(s, seeded); // nope
-    await idle(s, seeded);
-    const shown = answers(seeded)[1]!;
-    expect(shown.isError).toBeUndefined();
-    expect(JSON.parse((shown.content[0] as { text: string }).text)).toMatchObject({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', title: 'Artifacts' } });
-    expect(await panesShown(seeded)).toEqual([
-      ['terminal', 'panel-tool', null],
-      ['artifact', 'panel-tool', null],
-    ]);
+    for (const id of [bare, seeded]) {
+      await show(s, id);
+      await replay(s, id, SHOW_PANE_ARTIFACT);
+      for (let k = 0; k < 3; k++) await allowNext(s, id); // terminal, artifact, nope (seqs 68, 85, 100)
+      await idle(s, id);
+      expect(answers(id)[1], id).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactPaneRetired }], isError: true });
+      expect(await panesShown(id), id).toEqual([
+        ['terminal', 'panel-tool', null],
+        ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
+      ]);
+      // nothing opened beside the chat: no Artifacts viewer, no Artifacts surface
+      await expect(viewerOf(s.panel)).toHaveCount(0);
+      await expect(surface(s.page, 'artifacts')).toHaveCount(0);
+      // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no
+      // bodies. Read on the cell's own label: the turn's line says what the turn did in its rows' words (UX wave U2, O-15)
+      await unfoldWork(s.pane);
+      await expect(s.pane.locator('.transcript-cell-label').filter({ hasText: /^Could not open pane: the artifact pane is not available in this build of MAWS$/ })).toBeVisible();
+    }
   });
 });
 

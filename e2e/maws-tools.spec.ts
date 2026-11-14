@@ -619,7 +619,7 @@ test('notes: an async ask answered with a note beside one answer and a skip with
 
 // ---- G5: show_pane --------------------------------------------------------------------------------------------------
 
-test('show_pane: the Terminal opens in the panel, an artifact no record answers to and an unknown pane are error cells', async () => {
+test('show_pane: the Terminal opens in the panel, the retired artifact pane and an unknown pane are error cells', async () => {
   await scene({ titles: ['E1 tools: show_pane'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -631,18 +631,18 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
-    // what the host answered: the renderer's Terminal, the renderer's "no artifact" (E2: the recording's target `none`
-    // names no record; the recording itself carried "not available", and the replay compares no bodies), the host's
+    // what the host answered: the renderer's Terminal, the host's refusal of the retired artifact pane (UX wave U6d: no
+    // window is asked; the recording itself carried "not available", and the replay compares no bodies), the host's
     // unknown pane
     const calls = mcpCalls(s.journal(id));
     expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'artifact', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
     expect(JSON.parse(resultText(results[0]!))).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
-    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
+    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactPaneRetired }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
       ['terminal', 'panel-tool', null],
-      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
+      ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
     ]);
 
     // the cells: what opened, and why nothing did twice. Read on the cells' own labels: the turn's line says what the
@@ -650,7 +650,8 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await unfoldWork(s.pane);
     const cell = (text: RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
     await expect(cell(/^Opened Terminal$/)).toBeVisible();
-    // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not available")
+    // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not
+    // available"), so the refusal's own words are the model's unit test's and the paid live group's (U6d, decision 22)
     await expect(cell(/^Could not open pane: the artifact pane is not available in this build of MAWS$/)).toBeVisible();
     await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible(); // the host's words go on to list the known panes
     await shoot(s, 'pane');
