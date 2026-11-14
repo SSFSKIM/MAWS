@@ -5,13 +5,16 @@
 // failure is not the store's (a timeout, an unavailable host).
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shared/ipc/schema/artifacts';
+import { tabId } from '@shared/ipc/schema/layout';
 import type { Space } from '@shared/artifacts/entity';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf, recordArtifactMachine } from '../artifacts/machines';
+import { artifactMachineOf, recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
+import { isOpen } from '../stores/layout-model';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
@@ -64,4 +67,16 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation,
   const layout = useLayout.getState();
   layout.revealMain();
   layout.openTab({ kind: 'artifact', artifactId, machine: artifactMachineOf(artifactId) ?? ipc.localMachine });
+}
+
+// UX wave U6d (card C5, "Show that tab"; the execution document's decisions 1 to 3): the main tab that already shows the
+// artifact, brought forward at the place `location` names, as a mention's click asks before it opens beside the chat.
+// The tab is looked for in this window's one strip on the machine the side column would read the artifact on
+// (`sessionArtifactMachine`, `openArtifactInPanel`'s rule), so a tab of the same id on another machine is not taken.
+// False, and nothing done, when the strip holds none; it awaits nothing.
+export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean {
+  const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
+  if (!isOpen(useLayout.getState().main, tabId({ kind: 'artifact', artifactId, machine }))) return false;
+  openArtifactTab(artifactId, location, machine);
+  return true;
 }
