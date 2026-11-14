@@ -2,7 +2,7 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 151 to build (143 of them in children now), none that still waits for the owner to answer (every question put to the owner is answered), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 152 to build (144 of them in children now), none that still waits for the owner to answer (every question put to the owner is answered), 2 for a design round, 6 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Built and on master, as the state column says: 81 items whole and 17 in part, from pull requests #604, #618, #623, #626, #631, #632, #634, #635, #637, #642, #643, #650, #651, #652, #655, #656 and #657 and the working-folder selector's landing (U8a, which has no pull request). Of an item built in part, the rest is owed by a later landing or a hands-on check, or the child's spec dropped it.
 
@@ -87,6 +87,7 @@ Verbatim, as chosen on the question cards; a note is the owner's own text. An an
 | When you type yourself, Korean or English, in a MAWS deck or document, have you ever seen the first letter or a jamo of a word go missing? (The comparison of 10-23 reported it; it only reproduced under automated typing.) | No, never seen it |  |
 | Connector switches (ticket #476): which model? A running session cannot drop a connector, so a switch for one session restarts that session's engine process. | Two switches, as scopes (typed) | typed on the card in place of an option; the options were "Two switches (Recommended)" (a default per machine and a switch per session), "One switch, like Claude Desktop" and "Per-machine default only": "two switches mean that a connector can be installed like plugin -- user scope and project scope." |
 | Where should "Add custom connector…" write: Claude Code's own config, or the list MAWS keeps in Settings that only sessions MAWS starts can see? | Claude Code's config (Recommended) |  |
+| Between the two scopes an off always wins in the engine: a connector off at user scope cannot be switched on for one project by an on/off setting (a plugin can). Which behaviour do you need for a connector with many tools? | Off by default, on per project (Recommended) |  |
 
 ## Questions still open
 
@@ -393,6 +394,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l8-settings-03 | mark | built, on master (#635) | The libraries work before the first message. |
 | l8-settings-04 | mark | built in part, on master (#635) | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
 | l8-settings-05 | mark | build | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope, as you confirmed on 11-14; the list MAWS keeps in Settings goes. |
+| #476 | ticket | build | You answered on 11-14: the two switches are scopes, as for a plugin: a connector is switched at user scope and at project scope. The probe of 11-14 on the pinned engine showed how an off connector is kept out of a session (it is not contacted, its tools are not listed, its sign-in is kept), and that between scopes off always wins: a connector off at user scope cannot be switched back on for one project by an on/off setting. You answered the same day: off by default, on per project. MAWS keeps the list of allowed connectors, so a connector is off until it is switched on for all projects or for one. Its design is written next. |
 | #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
 | l8-settings-06 | mark | built, on master (#635) | Settings is regrouped and its long notes shortened, then gets a search. |
 | l8-settings-11 | mark | build | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
@@ -404,7 +406,6 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | S-09 | sitting | built, on master (#635) | The Channel tab says it is offline and retrying as soon as its read fails. |
 | S-10 | sitting | built, on master (#635) | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
-| #476 | ticket | hands-on check (U14) | You answered on 11-14: the two switches are scopes, as for a plugin: a connector is installed at user scope or at project scope. No engine setting is yet shown to keep an off connector's tools out of a session at launch. A probe first, then its own design. |
 | l8-settings-12 | mark | later | A project settings page: after the registry lands, because a project then has locations on several machines. |
 | l8-settings-02 | mark | already built | Built: Customize is the home for plugins, skills and connectors. |
 | l8-settings-08 | mark | keep | Kept. |
