@@ -75,7 +75,7 @@ const DAY_MS = 86_400_000;
 // A delegation's id is its hub key's: 16 bytes of lowercase hex.
 const delegationId = () => randomBytes(16).toString('hex');
 /** Production's destination (M4c's *The destination*). */
-const DESTINATION: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const DESTINATION: ProvisioningSecret = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
 
 /** The org: what main's session and view would send for it, `now` the clock the ages and the pairing's end read. */
 function seededOrg(local: string, userData: string, now: number): { status: Registered; view: OrgView; grants: Record<string, GrantsView>; names: Map<string, string> } {
@@ -162,7 +162,7 @@ function seededOrg(local: string, userData: string, now: number): { status: Regi
         unsent: {
           rewrite: true,
           writing: false,
-          problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/ytdownload-505811/secrets/desk-provisioning-v2 for cli-owner@ytdownload-505811.iam.gserviceaccount.com',
+          problem: 'gcloud secrets versions add failed: PERMISSION_DENIED: Permission denied on secret projects/maws-example-prod/secrets/desk-provisioning-v2 for cli-owner@maws-example-prod.iam.gserviceaccount.com',
           generation: 1,
         },
         hubBehind: null,

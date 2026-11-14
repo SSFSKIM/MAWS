@@ -229,3 +229,21 @@ test('packaged shard failures retain their names but relaunch the packaged gate 
   assert.match(line, /red \(2\): packaged 1\/2 packaged 2\/2;/);
   assert.match(line, / --hosted-route direct --gates e2e:library,packaged --label /);
 });
+
+// A mini copy is relaunched as its plain group, never the copy job's own name: a guest copy job's groups on the guest
+// alone (--lane vm) under a label of their own; a host copy in the main relaunch, under the run's lane, whose plan copies
+// it to the home label again (no flag reaches that label); a guest copy whose original the main relaunch takes is left
+// to it too.
+test('refused or red mini copies relaunch as their plain groups: guest copies in the guest, host copies with the main relaunch', () => {
+  const jobs = ['success\te2e:c12', 'failure\te2e: mini copy (to-human, c12)', 'failure\te2e:lane-a (mini copy)', 'success\te2e:lane-a', 'failure\te2e:side', 'success\te2e:to-human', 'success\tplan'];
+  const out = refusals(jobs, [refusal('e2e: mini copy (to-human, c12)'), red('e2e:lane-a (mini copy)'), red('e2e:side')], { gates: 'e2e:c12,e2e:to-human,e2e:lane-a,e2e:side', class1a: '', lane: 'hosted', relaunch_peer: 'none' });
+  assert.equal(out,
+    'ci-gate: refused by the mini (1): e2e: mini copy (to-human, c12); green (3): e2e:c12 e2e:lane-a e2e:to-human; red (2): e2e:lane-a (mini copy) e2e:side; ' +
+      `relaunch the refused and the red (less any red baseline, Decision Log 58(c)): scripts/ci-gate.sh ${sha} --runner macos --lane hosted --peer none --gates e2e:lane-a,e2e:side --label f1-landing --evidence\n` +
+      `ci-gate: relaunch the mini copies in the guest: scripts/ci-gate.sh ${sha} --runner macos --lane vm --peer none --gates e2e:to-human,e2e:c12 --label f1-landing-mini --evidence\n`);
+  // Copies alone: no main relaunch; a copy whose original is red too goes with the original.
+  const alone = refusals(['failure\te2e: mini copy (to-human, c12)', 'failure\te2e:c12', 'success\te2e:to-human'], [refusal('e2e: mini copy (to-human, c12)'), red('e2e:c12')], { gates: 'e2e:c12,e2e:to-human', class1a: '' });
+  assert.match(alone, /--gates e2e:c12 --label f1-landing --evidence\nci-gate: relaunch the mini copies in the guest: .* --lane vm --gates e2e:to-human --label f1-landing-mini --evidence\n$/);
+  const onlyCopies = refusals(['failure\te2e: mini copy (to-human)', 'success\te2e:to-human'], [refusal('e2e: mini copy (to-human)')], { gates: 'e2e:to-human', class1a: '' });
+  assert.match(onlyCopies, /; the refused and the red are mini copies alone\nci-gate: relaunch the mini copies in the guest: scripts\/ci-gate\.sh \S+ --runner macos --lane vm --gates e2e:to-human --label f1-landing-mini --evidence\n$/);
+});

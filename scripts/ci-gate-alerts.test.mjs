@@ -418,6 +418,17 @@ test("a run whose e2e groups are all hosted puts no job on a Mac: guestRun says 
   assert.equal(macPlan({ gates: 'e2e:tools', variables: today }), null); // no tree
 });
 
+// A mini copy (gate-plan.mjs) is a Mac job of the run: a guest copy on the guest's labels, a host copy on the home host's.
+test("the tested plan's mini copies are Mac jobs: a hosted run with a guest copy takes the guest, one with a host copy needs the home host", () => {
+  const copied = tree(envOf('  CLASS1_E2E: side tools\n  MAC_VM_E2E: side\n  HOSTED_MAC_E2E: side tools\n'));
+  const ask = (gates, trailers) => macPlan({ ...copied, gates, runner: 'macos', trailers, variables: today });
+  assert.deepEqual(ask('e2e:side,e2e:tools', ''), { jobs: [], guest: 'none', home: [] });
+  assert.deepEqual(ask('e2e:side,e2e:tools', 'MiniCopy: side e2e/side.spec.ts'), { jobs: ['e2e:side'], guest: 'vm', home: [] });
+  // A host copy takes the home label, so the check holds it for the home runner as it holds a MAC_HOME_E2E group.
+  assert.deepEqual(ask('e2e:side,e2e:tools', 'MiniCopy: side e2e/x.ts\nMiniCopy: tools e2e/x.ts'), { jobs: ['e2e:side', 'e2e:tools'], guest: null, home: ['e2e:tools'] });
+  assert.deepEqual(ask('e2e:side,e2e:tools', 'MiniCopy: none (copies stand on 0123abcd)'), { jobs: [], guest: 'none', home: [] });
+});
+
 test('check: a hosted-only run goes ahead past a mini alert; a run with one hosted and one host group stops, naming the host one', () => {
   const issues = [{ number: 12, title: 'ci-kit alert: mini: SecurityAgent since 2026-10-17T20:06Z (source unknown)' }];
   const runners = [{ name: 'ci-kit-mac-mini', status: 'online' }];

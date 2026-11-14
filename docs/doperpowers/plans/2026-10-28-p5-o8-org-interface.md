@@ -1212,7 +1212,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 A failure at 4 or 5 leaves the slot held, with the reason under the delegation row. "Write the code again" retries 4 and 5 while this run holds the key pair. Once the app has quit, the key pair is gone, and the row offers only Discard (M3's), since a delegation whose private key nobody holds must not be published. The key pair and the code live only in main's memory and the child's stdin, and are dropped at publish, discard, sign-out or quit.
 
 *The destination.* `org.provisioningSecret {project, secret, account}` is a machine setting, set once in the Delegations section. Nothing is read from devcloud's files.
-- Production's is project `ytdownload-505811`, secret `desk-provisioning-v2` and account `cli-owner@ytdownload-505811.iam.gserviceaccount.com`. These are the secret B4 step 6 versions, and the account O14 names as the MacBook's gcloud identity with Secret Manager access (O14's Dependencies).
+- Production's is the owner's Google Cloud project (not recorded in this repository), secret `desk-provisioning-v2` and the owner's CLI service account. These are the secret B4 step 6 versions, and the account O14 names as the MacBook's gcloud identity with Secret Manager access (O14's Dependencies).
 - Devcloud's boot reads `latest` (B4 step 6), so the new version is what the next VM uses, provided the profile's `[desk] delegation_id` names the new delegation. The sheet says so for a delegation that isn't the profile's.
 
 *gcloud.* A GUI app's `PATH` lacks Homebrew, so main resolves `gcloud` explicitly:
@@ -2003,7 +2003,7 @@ Recorded in both documents' Outcomes: each item, with a transcript line, a scree
     npx vitest run --project node src/main/org/edits.test.ts
     npx vitest run --project node-timing test/org/org-page.local.test.ts
 
-The live check is the owner's, on staging first. In the Delegations section the owner names staging's secret (a scratch secret in `ytdownload-505811`, which the owner creates), creates a delegation, then checks the secret's new version by metadata alone (`gcloud secrets versions list <secret>`). A VM provisioned from it (`devcloud vm up` with the profile naming it, or the endpoint harness) lists. Then the owner renews and drops it. Production's first app-created delegation is the owner's, after M8.
+The live check is the owner's, on staging first. In the Delegations section the owner names staging's secret (a scratch secret in the owner's Google Cloud project, which the owner creates), creates a delegation, then checks the secret's new version by metadata alone (`gcloud secrets versions list <secret>`). A VM provisioned from it (`devcloud vm up` with the profile naming it, or the endpoint harness) lists. Then the owner renews and drops it. Production's first app-created delegation is the owner's, after M8.
 
 **M5b.**
 
@@ -3229,7 +3229,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - The code lives only in main's memory and the child's stdin. It is never logged, put on the clipboard, written to disk or sent to the renderer.
   - gcloud is resolved explicitly, and a missing or signed-out one, or a missing secret, refuses before anything is minted.
   - A failure after signing leaves the slot unsent with the reason.
-  - The destination (`project`, `secret`, `account`) is a machine setting. Production's is `ytdownload-505811` / `desk-provisioning-v2` / `cli-owner@ytdownload-505811.iam.gserviceaccount.com`, O14's.
+  - The destination (`project`, `secret`, `account`) is a machine setting. Production's is the owner's Google Cloud project / `desk-provisioning-v2` / the owner's CLI service account (not recorded in this repository), O14's.
   - A fake gcloud on a scratch `PATH` proves the custody.
   Rationale: P5 Decision Log 75 (1) already binds the custody (no code is ever a file on a Mac; it goes to Secret Manager), and after M8 the app is the only signer that can create a delegation. Rejected: (b) showing the code once with Copy, which breaks that rule; (c) a CLI helper over a pipe, the same custody with another process.
   Date/Author: 2026-11-06, the architect's ruling 1 (the architect's to decide, not the owner's), recorded by O8's executor.
