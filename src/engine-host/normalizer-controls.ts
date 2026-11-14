@@ -222,9 +222,10 @@ export function mapOutboundResponse(inbound: InboundTable, frame: ControlRespons
 
 // E1 start: the host's answer to a `tools/call` of the `maws` server, for an admitted call only: `maws.delivery.file`
 // for a `send_file` whose result reads `delivered`, `maws.pane.shown` for a `show_pane` (what opened, or the error text
-// of a pane this build lacks, a window that never answered or, since U6d, the retired `artifact` pane), `maws.ask.answered` for a blocking ask answered with its
-// AskResult (an async ask's `asked` acknowledgement yields nothing: its answers come with the `maws_ask_answered` meta
-// row). Anything else (another tool, a result that parses as neither) is visible as the call's `tool.result` alone.
+// of a pane this build lacks, a window that never answered or, since U6d, the retired `artifact` pane),
+// `maws.ask.answered` for a blocking ask answered with its AskResult (an async ask's `asked` acknowledgement yields
+// nothing: its answers come with the `maws_ask_answered` meta row). Anything else (another tool, a result that parses as
+// neither) is visible as the call's `tool.result` alone.
 function mapMawsAnswer(requestId: RequestId, call: McpCall, rpc: unknown, out: EventSink, attribution: Attribution, openAsks: OpenAsks): void {
   if (!call.admitted) return;
   const result = (rpc as { result?: { content?: unknown; isError?: unknown } } | null | undefined)?.result;
