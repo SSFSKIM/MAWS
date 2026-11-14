@@ -282,16 +282,15 @@ test('settings: Engine shows the resolved binary, its version and the tested one
 });
 
 // WR #57: the first click after a choice from a select's popup is not swallowed. UX wave U7b: the popup is inside the
-// Settings dialog, and the click is one on a section link of its index, which moves the view. What this can prove on
-// macOS: the gate's keys reach the page, not the native menu, so the choice below is the page's (ArrowDown and Enter on
-// the focused select) and the native menu may stay drawn over the window; that the first click after the choice
-// navigates. The scene's last steps are there so the app can quit: an app with a native menu open cannot. Every Mac run
-// whose scene left the select after Enter hung in teardown, also with an Escape pressed from a section link; the two runs
-// that came back to the select, clicked it again and pressed Escape there quit at once (the first Mac runs, whose second
-// pass did so), and that Escape closes the dialog too. So the scene ends on those steps. The native paths, a choice made
-// in the menu itself and closing it without one (by Esc or by Return on the current item), are U14's hand check
-// (docs/tech-debt-tracker.md, U14).
+// Settings dialog, and the click is one on a section link of its index, which moves the view.
+// Not run on macOS. There a select's popup is a native menu: the gate's keys reach the page and not the menu, and every
+// form of this scene tried on a Mac ran into its 60 s limit and then hung the app's quit (the choosing pass alone; ended
+// by an Escape from a section link; ended back at the select with a click and an Escape). Where it stalls is not known:
+// those runs kept no step record. So nothing in the gate proves a select's popup inside the Settings dialog on macOS;
+// U14's hand check holds it (docs/tech-debt-tracker.md, U14): a choice made in the menu, closing it without one, and the
+// next click navigating. The scene stays for a platform whose popup is the page's own.
 test('WR #57: the first click after choosing from the design-system popup navigates', async () => {
+  test.skip(process.platform === 'darwin', 'a native select menu cannot be driven from the gate on macOS; U14 checks it by hand');
   const maws = await launchMaws();
   try {
     const { app, page } = maws;
@@ -313,11 +312,7 @@ test('WR #57: the first click after choosing from the design-system popup naviga
     await link('Keyboard').click();
     await expect(link('Keyboard')).toHaveAttribute('aria-current', 'true');
     await expect(panel(page).getByRole('heading', { name: 'Keyboard', exact: true })).toBeInViewport();
-    // So the app can quit: back at the select, a click on it and an Escape there leave no native menu drawn. Where the
-    // popup is the page's own, that Escape may close only the popup, so a dialog still open takes a second.
-    await link('Artifacts').click();
-    await expect(link('Artifacts')).toHaveAttribute('aria-current', 'true');
-    await select.click();
+    // Where the popup is the page's own, an Escape may close only the popup, so a dialog still open takes a second.
     await page.keyboard.press('Escape');
     try {
       await expect(settingsDialog(page)).toHaveCount(0, { timeout: 2_000 });
