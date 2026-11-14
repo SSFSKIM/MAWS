@@ -9,6 +9,7 @@
 //    with no credential-looking part, four of the person's own that look like credentials, and well-known ones.
 //    Every name holds an invented value in the engine's environment (NO_PROXY covers loopback, since HTTPS_PROXY is
 //    one of them).
+// Also: a name set only in the user settings file's `env` (QUAY_FROM_SETTINGS), in an HTTP and a stdio entry.
 // C. add-json of a stdio entry with no env key, and of one with `args: []` and no env; every add-json's file entry
 //    compared with the JSON given (the A entries hold `${…}` unexpanded).
 // The HTTP stub records, per request, the path and query and the probe's headers; the stdio stub records its argv,
@@ -45,6 +46,8 @@ const NAMES=[...OWN,...OWN_CRED,...KNOWN];
 const VAL=Object.fromEntries(NAMES.map(n=>[n,n==='HTTPS_PROXY'?'http://127.0.0.1:9':'inv-'+n.toLowerCase().replace(/_/g,'-')]));
 VAL.QUAY_SEG='inv-seg';VAL.QUAY_NODE_DIR=NODE_DIR;
 const ENV={...VAL,NO_PROXY:'127.0.0.1,localhost',no_proxy:'127.0.0.1,localhost'};
+// QUAY_FROM_SETTINGS is set only in the user settings file's `env`, never in the engine's environment.
+VAL.QUAY_FROM_SETTINGS='inv-quay-from-settings';
 const classOf=(v,name)=>v===undefined||v===null?'absent':v===VAL[name]?'set':v===''?'empty':v==='fallback'?'fallback':/\$\{/.test(v)?'literal':'other';
 const H=n=>'x-v-'+n.toLowerCase().replace(/_/g,'-');
 
@@ -81,15 +84,17 @@ function httpStub(){
 // The entries. Remote: the URL carries ${QUAY_SEG} in the path and ${QUAY_REGION}, ${QUAY_TICKETS_TOKEN} and the
 // fallback in the query; one header per name of B, and one with the fallback. Stdio: command ${QUAY_NODE_DIR}/node;
 // args carry QUAY_REGION, QUAY_TICKETS_TOKEN, GITHUB_TOKEN and the fallback; one env value per name, and the fallback.
-const remote=(type,name)=>({type,url:`${BASE}/${type==='sse'?'x3s':'x3'}/${name}/\${QUAY_SEG}?region=\${QUAY_REGION}&tickets=\${QUAY_TICKETS_TOKEN}&fb=\${QUAY_UNSET:-fallback}`,
+const remote=(type,name)=>({type,url:`${BASE}/${type==='sse'?'x3s':'x3'}/${name}/\${QUAY_SEG}?region=\${QUAY_REGION}&tickets=\${QUAY_TICKETS_TOKEN}&npm=\${NPM_TOKEN}&otel=\${OTEL_EXPORTER_OTLP_HEADERS}&fb=\${QUAY_UNSET:-fallback}`,
  headers:{...Object.fromEntries(NAMES.map(n=>[H(n),'${'+n+'}'])),'x-fallback':'${QUAY_UNSET:-fallback}'}});
-const stdio=name=>({type:'stdio',command:'${QUAY_NODE_DIR}/node',args:[SERVER,name,'region=${QUAY_REGION}','tickets=${QUAY_TICKETS_TOKEN}','gh=${GITHUB_TOKEN}','fb=${QUAY_UNSET:-fallback}'],
+const stdio=name=>({type:'stdio',command:'${QUAY_NODE_DIR}/node',args:[SERVER,name,'region=${QUAY_REGION}','tickets=${QUAY_TICKETS_TOKEN}','gh=${GITHUB_TOKEN}','npm=${NPM_TOKEN}','otel=${OTEL_EXPORTER_OTLP_HEADERS}','fb=${QUAY_UNSET:-fallback}'],
  env:{...Object.fromEntries(NAMES.map(n=>['V_'+n,'${'+n+'}'])),V_FALLBACK:'${QUAY_UNSET:-fallback}'}});
 const unsetRemote=(type,name)=>({type,url:`${BASE}/${type==='sse'?'x3s':'x3'}/${name}/u?unset=\${QUAY_UNSET}`,headers:{'x-unset':'${QUAY_UNSET}'}});
 const unsetStdio=name=>({type:'stdio',command:'node',args:[SERVER,name,'unset=${QUAY_UNSET}'],env:{V_UNSET:'${QUAY_UNSET}'}});
 const SCOPES=['project','user','local'];
 const ENTRIES=()=>SCOPES.flatMap(s=>[[`x3-http-${s}`,s,remote('http',`x3-http-${s}`)],[`x3-sse-${s}`,s,remote('sse',`x3-sse-${s}`)],[`x3-stdio-${s}`,s,stdio(`x3-stdio-${s}`)],
  [`x3-unset-http-${s}`,s,unsetRemote('http',`x3-unset-http-${s}`)],[`x3-unset-sse-${s}`,s,unsetRemote('sse',`x3-unset-sse-${s}`)],[`x3-unset-stdio-${s}`,s,unsetStdio(`x3-unset-stdio-${s}`)]])
+ .concat([['x3-settings-http','user',{type:'http',url:`${BASE}/x3/x3-settings-http/s?fs=\${QUAY_FROM_SETTINGS}`,headers:{'x-from-settings':'${QUAY_FROM_SETTINGS}'}}],
+  ['x3-settings-stdio','user',{type:'stdio',command:'node',args:[SERVER,'x3-settings-stdio','fs=${QUAY_FROM_SETTINGS}'],env:{V_FROM_SETTINGS:'${QUAY_FROM_SETTINGS}'}}]])
  .concat([['x3-noenv','user',{type:'stdio',command:'node',args:[SERVER,'x3-noenv']}],['x3-noargs','user',{type:'stdio',command:NOARGS,args:[]}]]);
 const writtenAt=(name,scope)=>scope==='user'?readJson(GLOBAL)?.mcpServers?.[name]:scope==='local'?readJson(GLOBAL)?.projects?.[REPO]?.mcpServers?.[name]:readJson(MCPJSON)?.mcpServers?.[name];
 
@@ -116,7 +121,7 @@ export default async()=>{
  const journal=FIXTURES+TAG+'-session.jsonl';
  try{
   writeFileSync(SERVER,SERVER_JS);writeFileSync(NOARGS,SERVER_JS);chmodSync(NOARGS,0o755);
-  const us=readJson(USER_SETTINGS)??{};writeJson(USER_SETTINGS,{...us,enableAllProjectMcpServers:true});
+  const us=readJson(USER_SETTINGS)??{};writeJson(USER_SETTINGS,{...us,enableAllProjectMcpServers:true,env:{...us.env,QUAY_FROM_SETTINGS:VAL.QUAY_FROM_SETTINGS}});
   // C, and the writing of every A entry: add-json, then the file's entry compared with the JSON given.
   const adds=ENTRIES().map(([name,scope,json])=>{const r=cli(['mcp','add-json',name,JSON.stringify(json),'--scope',scope]);const w=writtenAt(name,scope);
    return {name,scope,given:json,answer:r,writtenEqualsGiven:JSON.stringify(w)===JSON.stringify(json),written:JSON.stringify(w)===JSON.stringify(json)?'(as given)':w??null};});
@@ -136,8 +141,9 @@ export default async()=>{
    if(!first){row.remote[name]={requests:0};continue;}
    const pathSeg=first.path.split('/').slice(3).join('/');
    const v={requests:rs.length,methods:[...new Set(rs.map(r=>`${r.method}${r.rpc?' '+r.rpc:''}`))]};
-   if(/unset/.test(name)){v.path=pathSeg;v.query=first.query;v.xUnset=first.headers['x-unset']===undefined?'absent':first.headers['x-unset']===''?'empty':/\$\{/.test(first.headers['x-unset'])?'literal':'other';}
-   else{v.pathSegment=classOf(pathSeg,'QUAY_SEG');v.query={region:classOf(first.query.region,'QUAY_REGION'),tickets:classOf(first.query.tickets,'QUAY_TICKETS_TOKEN'),fb:classOf(first.query.fb)};
+   if(name==='x3-settings-http'){v.query={fs:classOf(first.query.fs,'QUAY_FROM_SETTINGS')};v.header=classOf(first.headers['x-from-settings'],'QUAY_FROM_SETTINGS');}
+   else if(/unset/.test(name)){v.path=pathSeg;v.query=first.query;v.xUnset=first.headers['x-unset']===undefined?'absent':first.headers['x-unset']===''?'empty':/\$\{/.test(first.headers['x-unset'])?'literal':'other';}
+   else{v.pathSegment=classOf(pathSeg,'QUAY_SEG');v.query={region:classOf(first.query.region,'QUAY_REGION'),tickets:classOf(first.query.tickets,'QUAY_TICKETS_TOKEN'),npm:classOf(first.query.npm,'NPM_TOKEN'),otel:classOf(first.query.otel,'OTEL_EXPORTER_OTLP_HEADERS'),fb:classOf(first.query.fb)};
     v.headers=Object.fromEntries(NAMES.map(n=>[n,classOf(first.headers[H(n)],n)]));v.headers.fallback=classOf(first.headers['x-fallback']);
     v.sameOnEveryRequest=rs.every(r=>JSON.stringify(Object.fromEntries(NAMES.map(n=>[n,r.headers[H(n)]])))===JSON.stringify(Object.fromEntries(NAMES.map(n=>[n,first.headers[H(n)]]))));}
    row.remote[name]=v;
@@ -146,21 +152,24 @@ export default async()=>{
   const log=existsSync(STDIO_LOG)?readFileSync(STDIO_LOG,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)):[];
   row.stdio={};
   for(const e of log){
-   const a=e.argv, kv=Object.fromEntries(a.slice(2).map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)];}));
+   const a=e.argv, kv=Object.fromEntries(a.slice(1).map(x=>{const i=x.indexOf('=');return [x.slice(0,i),x.slice(i+1)];}));
    const v={starts:log.filter(x=>x.name===e.name).length,command:e.execPath===join(NODE_DIR,'node')||e.execPath===process.execPath?'set (ran as <node-dir>/node)':anon(e.execPath)};
-   if(/unset/.test(e.name)){v.argUnset=kv.unset===undefined?'absent':kv.unset===''?'empty':/\$\{/.test(kv.unset)?'literal':'other';v.envUnset=e.env.V_UNSET===undefined?'absent':e.env.V_UNSET===''?'empty':/\$\{/.test(e.env.V_UNSET)?'literal':'other';}
-   else if(e.name.startsWith('x3-stdio')){v.args={region:classOf(kv.region,'QUAY_REGION'),tickets:classOf(kv.tickets,'QUAY_TICKETS_TOKEN'),gh:classOf(kv.gh,'GITHUB_TOKEN'),fb:classOf(kv.fb)};
+   if(e.name==='x3-settings-stdio'){v.arg=classOf(kv.fs,'QUAY_FROM_SETTINGS');v.envField=classOf(e.env.V_FROM_SETTINGS,'QUAY_FROM_SETTINGS');v.inheritedFromSettings=classOf(e.env.QUAY_FROM_SETTINGS,'QUAY_FROM_SETTINGS');}
+   else if(/unset/.test(e.name)){v.argUnset=kv.unset===undefined?'absent':kv.unset===''?'empty':/\$\{/.test(kv.unset)?'literal':'other';v.envUnset=e.env.V_UNSET===undefined?'absent':e.env.V_UNSET===''?'empty':/\$\{/.test(e.env.V_UNSET)?'literal':'other';}
+   else if(e.name.startsWith('x3-stdio')){v.args={region:classOf(kv.region,'QUAY_REGION'),tickets:classOf(kv.tickets,'QUAY_TICKETS_TOKEN'),gh:classOf(kv.gh,'GITHUB_TOKEN'),npm:classOf(kv.npm,'NPM_TOKEN'),otel:classOf(kv.otel,'OTEL_EXPORTER_OTLP_HEADERS'),fb:classOf(kv.fb)};
     v.envField=Object.fromEntries(NAMES.map(n=>[n,classOf(e.env['V_'+n],n)]));v.envField.fallback=classOf(e.env.V_FALLBACK);}
    v.inherited=Object.fromEntries(NAMES.map(n=>[n,classOf(e.env[n],n)]));
    row.stdio[e.name]=v;
   }
   // Where a person could be told: the wire, stderr and the debug file.
   const J=readFileSync(journal,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l));
-  const tell=/credential variable|never expanded|read as empty|QUAY_UNSET|environment variable|Missing environment|not set/i;
-  row.wire=J.filter(r=>r.direction==='in'&&tell.test(JSON.stringify(r.frame))).map(r=>({seq:r.seq,type:r.frame.type,subtype:r.frame.subtype??r.frame.response?.subtype,text:scrubValues(anon(JSON.stringify(r.frame))).match(/.{0,120}(credential variable|never expanded|read as empty|QUAY_UNSET|environment variable|Missing environment|not set).{0,160}/i)?.[0]}));
+  const tell=/credential variable|never expanded|read as empty|unset environment|Missing environment|missing variable/i;
+  const noConfig=f=>JSON.stringify(f,(k,v)=>k==='config'?undefined:v);
+  row.wire=J.filter(r=>r.direction==='in'&&tell.test(noConfig(r.frame))).map(r=>({seq:r.seq,type:r.frame.type,subtype:r.frame.subtype??r.frame.response?.subtype,text:scrubValues(anon(noConfig(r.frame))).match(/.{0,120}(credential variable|never expanded|read as empty|unset environment|Missing environment|missing variable).{0,160}/i)?.[0]}));
+  row.wireSearched='every frame from the engine, its servers\' config (as written) left out, for: '+tell.source;
   row.stderr=J.filter(r=>r.direction==='stderr').map(r=>scrubValues(anon(r.frame?.text??'')).slice(0,400));
   const D=existsSync(dbg)?readFileSync(dbg,'utf8').split('\n'):[];
-  row.debug={lines:D.length,matched:[...new Set(D.filter(l=>tell.test(l)&&!/CA certs/.test(l)).map(l=>scrubValues(anon(l.replace(/^\S+\s+/,''))).slice(0,500)))].slice(0,60)};
+  row.debug={lines:D.length,searched:tell.source,matched:[...new Set(D.filter(l=>tell.test(l)&&!/CA certs/.test(l)).map(l=>scrubValues(anon(l.replace(/^\S+\s+/,''))).slice(0,500)))].slice(0,60)};
   if(existsSync(dbg))rmSync(dbg);
   keep(row);
  }finally{
