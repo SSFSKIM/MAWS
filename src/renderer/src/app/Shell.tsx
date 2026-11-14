@@ -46,7 +46,10 @@ export function Shell() {
   useEffect(() => cardsCover ? holdCover() : undefined, [cardsCover]);
   // UX wave U7b: an in-app browser's native views yield for as long as a page covers the panes that place them.
   useEffect(() => page ? holdCover() : undefined, [page]);
-  useEffect(() => { useShellView.setState({ sidebarOverlay: false }); }, [active]);
+  // The sidebar drawn over a narrow window goes with what it opened: a tab, a page (which changes no tab) or Settings.
+  const destination = useLayout((s) => s.destination);
+  const settingsOpen = useLayout((s) => s.settings !== null);
+  useEffect(() => { useShellView.setState({ sidebarOverlay: false }); }, [active, destination, settingsOpen]);
   return (
     <div data-shell className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: geometry.columns }}>
       <Toolbar />

@@ -14,6 +14,7 @@ import { at } from '../../../../test/support/machine';
 import { useShellView } from './shell-view';
 import { registerSlot, resetSlots } from './slots';
 import { registerSessionAction } from './session-actions';
+import { registerAction } from '../keymap/actions-runtime';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -216,6 +217,40 @@ it('with a page open and the keyboard in the sidebar drawn over the window, Esc 
   await userEvent.keyboard('{Escape}');
   expect(useShellView.getState().sidebarOverlay).toBe(false);
   expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+});
+
+// UX wave U7b (the branch review): a page or Settings opened from the sidebar drawn over a narrow window leaves that
+// overlay, so neither it nor its scrim stays above what was opened.
+it('in a narrow window, a page and Settings each dismiss the sidebar drawn over the window, with its scrim', async () => {
+  setWidth(620);
+  renderShell();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  expect(screen.getByRole('button', { name: 'Close sidebar overlay' })).toBeTruthy();
+  await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Projects' }));
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Close sidebar overlay' })).toBeNull();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  act(() => useLayout.getState().openSettings());
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Close sidebar overlay' })).toBeNull();
+});
+
+// The overlay goes with Settings opened from its gear, so the gear is folded away when Settings closes: the keyboard
+// lands in what is on screen, not on the folded gear and not nowhere.
+it('Settings opened from the gear of the sidebar drawn over the window gives the keyboard, at its close, to what is on screen', async () => {
+  offs.push(registerAction('settings.open', () => useLayout.getState().openSettings()));
+  setWidth(620);
+  renderShell();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Workspace settings' }));
+  expect(useLayout.getState().settings).toEqual({ section: null });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  await userEvent.keyboard('{Escape}');
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  expect(useLayout.getState().settings).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(document.activeElement?.closest('[inert]')).toBeNull();
 });
 
 it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {

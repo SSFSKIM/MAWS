@@ -13,8 +13,10 @@ import { useDialogFocus } from '../app/dialog-focus';
 import { Icon } from '../app/IconButton';
 import { useSlot } from '../app/slots';
 import { WIDGET_DIALOG_BOX } from '../composer/WidgetDialog';
+import { focusPaneElement } from '../main/pane-dom';
 import { Backdrop } from '../sessions/scrim';
 import { useLayout } from '../stores/layout';
+import { currentSet } from '../stores/layout-model';
 import { DESTINATION } from './copy';
 import { escapeTaker, leaveField } from './escape';
 
@@ -23,6 +25,16 @@ export function SettingsDialog() {
   const focus = useDialogFocus();
   const content = useRef<HTMLDivElement>(null);
   const View = useSlot('settingsTab');
+  // The keyboard returns where it was; where that cannot take it (an opener folded away meanwhile, such as the gear of the
+  // sidebar drawn over a narrow window, which goes when Settings opens), to the page, else to the focused pane.
+  const onCloseAutoFocus = (event: Event) => {
+    focus.onCloseAutoFocus(event);
+    const now = document.activeElement;
+    if (now !== null && now !== document.body && now.closest('[inert]') === null) return;
+    const page = document.querySelector<HTMLElement>('[data-region="page"]');
+    if (page !== null) page.focus({ preventScroll: true });
+    else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
+  };
   const onEscapeKeyDown = (event: KeyboardEvent) => {
     if (event.isComposing) return event.preventDefault(); // an input method's Esc ends its composition, nothing else
     const taker = escapeTaker(event.target);
@@ -41,7 +53,7 @@ export function SettingsDialog() {
           aria-describedby={undefined}
           data-settings-dialog=""
           onOpenAutoFocus={focus.onOpenAutoFocus}
-          onCloseAutoFocus={focus.onCloseAutoFocus}
+          onCloseAutoFocus={onCloseAutoFocus}
           onEscapeKeyDown={onEscapeKeyDown}
           className={`fixed top-1/2 left-1/2 z-50 flex ${WIDGET_DIALOG_BOX.library} -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-ui text-fg shadow-composer outline-none [&_[data-settings-body]]:pr-7.5`}
         >
