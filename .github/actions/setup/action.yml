@@ -80,9 +80,17 @@ runs:
         echo "hosted git: /usr/bin/git ($(xcode-select -p 2>&1)) first call $first s, second $second s"
     # ci-kit's own Macs (the mini's host and its guest): their display mode is ci-kit's job-started line (`ci-kit desktop
     # (job-started): … display=…`); beside it, the Dock and the visible frame, read from the job, never set.
+    # In the guest, overlay scroll bars, as on the host and the hosted Macs: its virtual mouse makes Automatic choose
+    # legacy 15 px bars, which the layout specs measure (guest runs 43413169788, layout-transfer 593 against 608, and
+    # 43593448839, settings 745 against 760). Every guest job, written in its disposable clone; never on the host.
     - if: runner.environment == 'self-hosted' && runner.os == 'macOS'
       shell: bash
       run: |
+        if [[ ${CI_KIT_VM_GUEST:-} == 1 ]]; then
+          echo "AppleShowScrollBars before: $(defaults read -g AppleShowScrollBars 2>/dev/null || echo Automatic)"
+          defaults write -g AppleShowScrollBars -string WhenScrolling
+          echo "AppleShowScrollBars after: $(defaults read -g AppleShowScrollBars)"
+        fi
         echo "MAWS desktop: $(.github/scripts/desktop-dock.sh)"
     - if: runner.environment != 'self-hosted' && runner.os != 'macOS'
       uses: pnpm/action-setup@v6
