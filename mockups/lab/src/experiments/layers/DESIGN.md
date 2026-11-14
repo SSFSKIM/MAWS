@@ -436,8 +436,8 @@ it is the weak scene (12.7). Nothing in the picture moves.
 **Dark is the same room with the lamp low, not the light picture recoloured.** The ground is a warm near-black
 (`#181614`); one low lamp at the left leaves a pool of light on the floor (`rgb(255 224 188)` at 15 %, centred
 under the arch); the room falls off to black at 30 % toward the far corner. The paper is still ivory, so its top
-surface is the brightest broad thing in the room (`rgb(104 95 84)`), its edge is the brightest line
-(`rgb(196 184 168)`), and its underside sinks below the floor's own level (`rgb(52 47 42)` to `rgb(18 16 14)`).
+surface is the brightest broad thing in the room (`rgb(104 95 84)`; since section 15.2, `rgb(67 60 51)`), its
+edge is the brightest line (`rgb(196 184 168)`; since 15.2, `rgb(154 143 128)`), and its underside sinks below the floor's own level (`rgb(52 47 42)` to `rgb(18 16 14)`).
 The glass has almost no body left (a veil of 4.5 %); it is rim (62 %), a reflection (7.5 %) and the light it lays
 on the floor (20 %). Rejected for dark: inverting the picture (black paper, which is a recolouring); moonlight (a
 blue, which is a hue this colouring does not have); glass that glows (it would be the brightest thing behind dark
@@ -954,13 +954,12 @@ Four facts from sections 7 and 12 decide the values, and one found here.
   for 49). The turn itself could not be observed here: at this depth no dark body drew more than 0.012 of chroma
   (over a field of 0.02 to 0.03 under its footprint), which is under what the script reads a hue from. At night,
   too, the warmth is in the room and at the foot of the glass, not in its body.
-- **Found here: Paper's own night picture puts a caption under its floor at one scroll position.** Section 12
+- **Found here: Paper's own night picture put a caption under its floor at one scroll position.** Section 12
   measured the session at rest, from the top, and with things open, never mid-scroll. At `x=mid` in dark the
-  caption "Key migration check and Load profile started working" lies across the sheet's lit face (0.49) and its
-  icon across the bright edge (0.79): 3.87:1 and 3.47:1 at default strength with the form everywhere, 2.78 for the
-  icon at Vivid. The four warm Papers set those two values at 0.36 and 0.66 at night, the only places they leave
-  Paper's lightness, and hold their floors there. Paper was to stay as it is, so it still has the failure; the
-  readings are in 15.3 and the mend is two numbers.
+  caption "Key migration check and Load profile started working" lay across the sheet's lit face (0.49) and its
+  icon across the bright edge (0.79): 3.87:1 and 3.47:1 at default strength with the form everywhere. The four
+  warm Papers were built with those two night values at 0.36 and 0.66, and Paper has since been given the same
+  two (15.2), so at night all five share them and none leaves Paper's lightness anywhere.
 
 ### 14.2 The positions
 
@@ -1080,23 +1079,36 @@ showed this combination. One thing had been fitted to Figtree's widths, and it b
 Nothing else moved: rows are 34 px, prose 15/24, the settings column 620, and the system face's own weight steps
 (400, 500, 600; section 6) were already designed for.
 
-### 15.2 A line under its floor in Paper's night picture
+### 15.2 A line under its floor in Paper's night picture, and its mend
 
-Measuring at a scroll position section 12 never used (`x=mid`) found it, and it is in the design at rest. In dark,
-the caption "Key migration check and Load profile started working" crosses the sheet's lit face:
+Measuring at a scroll position section 12 never used (`x=mid`) found it, in the design at rest. In dark, the
+caption "Key migration check and Load profile started working" crossed the sheet's lit face, which was 0.49 in
+lightness where the quietest text needs 0.38 or darker behind it (14.1), and its icon crossed the sheet's bright
+edge. It was Paper's, not the new defaults'. The four warmer Papers were built with the night face at 0.36 and the
+edge at 0.66; on the owner's side the ruling was that a line under its floor in the default design is a defect
+and that "Paper stays as it is" meant its character, so Paper's night light now carries the same two values
+(`paper.ts`, `NIGHT`: face `rgb(67 60 51)` where it was `rgb(104 95 84)`, edge `rgb(154 143 128)` where it was
+`rgb(196 184 168)`). The sheet's face is still the lightest broad thing in the night room, at 0.36 on a
+floor of 0.20; it is a step dimmer than section 12.2 describes.
 
-| Paper, dark, mid-scroll | caption (floor 4.5) | its icon (floor 3) |
+| Paper, dark, mid-scroll: the caption (floor 4.5), its icon (floor 3) | before | after |
 |---|---|---|
-| form everywhere, default strength | 3.87 | 3.47 |
-| form everywhere, Vivid | 3.69 | 2.78 to 3.39 over three runs |
-| form out of focus (the default now), default strength | 4.16 | 3.96 |
-| form out of focus, Vivid | 3.92 | 3.57 |
-| plain ground, Vivid | 5.32 lowest line of the route | 4.17 |
+| form out of focus (the default), default strength | 4.16, 3.96 | 5.27 or better, 4.10 or better |
+| form out of focus, Vivid | 3.92, 3.57 | 4.97, 4.06 or better |
+| form everywhere, default strength | 3.87, 3.47 | 5.22, 4.09 or better |
+| form everywhere, Vivid | 3.69, 2.78 to 3.39 over three runs | 4.92, 4.06 or better |
 
-It is Paper's, not the new defaults': the lit face is 0.49 in lightness and the quietest text needs 0.38 or
-darker behind it (14.1). The four warmer Papers set the night face at 0.36 and its edge at 0.66 and hold their
-floors at the same position. Paper was to stay as the owner chose it until they pick a colour, so the two values
-were not changed there; if Paper is kept, they should be.
+("Or better" where the line is no longer the lowest of its route and the route's lowest is given.) After the mend
+Paper's dark routes were measured again: the session at default strength and at Vivid, each at rest and
+mid-scroll, with the form out of focus and everywhere; at Vivid with the waiting list open, from the top with a
+tool run open, and receded; Settings with the form both ways; New chat. Fifteen routes, 1,675 gated readings, none
+under its floor. The lowest line is the mid-scroll caption at Vivid with the form everywhere, 4.92; at rest the
+running command's tail gained as well (5.24 where it was 5.08), since its block stands over the same face.
+
+The dark captures of record that show Paper's form were taken again with the knob positions each was first taken
+with: section 12's nine (`…-scheme-dark-colour-paper…`), section 13's (`…-scheme-dark-form-recede`, `-line-…`,
+`-mark-…`, `-align-…`, `-side-…` and the five picks), and this section's `…-scheme-dark-defaults`; 34 in all.
+Captures of the plain ground and of the other colourings do not show Paper's sheet and were left.
 
 ### 15.3 Readings under the new defaults
 
@@ -1108,7 +1120,7 @@ everywhere; and the plain ground of section 16 on the session mid-scroll, Settin
 | colouring | scheme | lowest text at the defaults | mid-scroll | mid-scroll, form everywhere | plain ground | lowest icon | bodies | least apart from the field: defaults / plain | under its floor |
 |---|---|---|---|---|---|---|---|---|---|
 | Paper | light | 4.95 (removed count) | 5.37 | 5.37 | 5.00 | 3.20 | 0.90 to 0.99 | 0.039 / 0.052 | 0 of 1083 |
-| Paper | dark | 3.92 (caption on the field) | 3.92 | 3.69 | 5.32 | 3.39 | 0.15 to 0.31 | 0.025 / 0.092 | 2 of 1083 |
+| Paper | dark | 4.97 (caption on the field) | 4.97 | 4.92 | 5.32 | 4.06 | 0.15 to 0.31 | 0.034 / 0.092 | 0 of 1083 |
 | Warm paper | light | 4.94 (removed count) | 5.42 | 5.42 | 5.04 | 3.20 | 0.90 to 0.99 | 0.045 / 0.052 | 0 of 1083 |
 | Warm paper | dark | 5.04 (caption on the field) | 5.04 | 5.01 | 5.30 | 4.07 | 0.15 to 0.31 | 0.040 / 0.092 | 0 of 1083 |
 | Orange light | light | 4.83 (removed count) | 5.35 | 5.35 | 5.07 | 3.20 | 0.90 to 0.99 | 0.041 / 0.051 | 0 of 1083 |
@@ -1118,9 +1130,10 @@ everywhere; and the plain ground of section 16 on the session mid-scroll, Settin
 | Clay paper | light | 4.91 (removed count) | 5.40 | 5.40 | 5.02 | 3.20 | 0.90 to 0.99 | 0.044 / 0.053 | 0 of 1083 |
 | Clay paper | dark | 5.06 (caption on the field) | 5.06 | 5.03 | 5.27 | 4.08 | 0.15 to 0.31 | 0.041 / 0.094 | 0 of 1083 |
 
-110 routes, 10,830 gated readings; two are under their floor, and both are the one caption of 15.2. Every light
-row's lowest line is the removed count on the side card in a receded window, as in 13.5; every warm dark row's is
-a caption on the field mid-scroll, which is the line the corrected night values were set for. "Bodies" is the
+110 routes, 10,830 gated readings, none under its floor (Paper's dark row is as measured after the mend of 15.2;
+before it, two readings were under, both the one caption). Every light row's lowest line is the removed count on
+the side card in a receded window, as in 13.5; every dark row's is a caption on the field mid-scroll, which is the
+line the night values were set for. "Bodies" is the
 drawn level of every glass body in an active window (the ink's dead band is 0.39 to 0.49; nothing is near it).
 "Least apart" is the smallest distance in OKLab between a body and the field painted under it, in an active
 window: the measure of how well glass stands off its ground.
@@ -1192,8 +1205,8 @@ Costs:
 
 Gains:
 
-- **Nothing behind a word, anywhere.** No line and no tone of a drawing under prose or a settings row; the
-  failure of 15.2 cannot occur, in any colouring.
+- **Nothing behind a word, anywhere.** No line and no tone of a drawing under prose or a settings row; a failure
+  of 15.2's kind cannot occur, in any colouring.
 - **No composition to keep.** 12.7 item 7 (a picture has a composition, and the layout can move under it) is gone
   entirely: a gathering is wherever its glass is, at any window size, with either pane away.
 - **Glass stands further from its ground where it matters most**: the pane, the card and the composer over their
@@ -1211,7 +1224,7 @@ How far glass stands from the field under it (least distance in OKLab over all b
 | | the drawing out of focus | the plain ground |
 |---|---|---|
 | Paper, day: session / Settings / New chat | 0.040 / 0.039 / 0.049 | 0.052 / 0.069 / 0.089 |
-| Paper, night | 0.025 to 0.068 | 0.092 to 0.094 |
+| Paper, night | 0.034 to 0.088 | 0.092 to 0.094 |
 | warmer Papers, day | 0.039 to 0.052 | 0.050 to 0.091 |
 | warmer Papers, night | 0.037 to 0.084 | 0.092 to 0.104 |
 
@@ -1293,6 +1306,6 @@ What the real renderer would need, against "The app today" in the brief.
   as a second shadow. At night the pools are kept out from under the glass.
 - **A warmer Paper, if one is chosen** (section 14). It is a light record beside the colouring (the values the
   painter reads) and, for two of them, a pigment for the mark; the night values of the sheet's face and edge
-  (0.36, 0.66) belong in Paper too if Paper is kept.
+  (0.36, 0.66) are Paper's as well.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

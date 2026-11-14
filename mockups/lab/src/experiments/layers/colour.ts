@@ -145,9 +145,8 @@ const paper: Colouring = {
 // The owner's answer to Paper: "I'd make color more warmer perhaps by mixing older orange". Four positions that put
 // the warmth in different places. Each keeps Paper's picture and Paper's lightness, value for value, and changes
 // what has a hue: the readings of every line of text are then Paper's own, and the room is the same room.
-// Two values depart from Paper on purpose, in all four, at night: the sheet's lit face is 0.36 in lightness where
-// Paper's is 0.49, and its edge 0.66 where Paper's is 0.79. A grey caption that scrolls across Paper's face reads
-// 3.87:1 and its icon, crossed by the edge, under 3:1; across these they hold their floors.
+// At night the sheet's lit face is 0.36 in lightness and its edge 0.66, in all four as in Paper since DESIGN.md §15.2:
+// a grey caption that scrolled across a face of 0.49 read 3.87:1, and its icon, crossed by an edge of 0.79, under 3:1.
 
 const PAPER_INK = { light: '33 30 27', dark: '232 225 219' } as const;
 const inkTokens = (ink: string, shade: string, onInk: string) => ({ ink, shade, accent: `rgb(${ink})`, onAccent: onInk, mark: `rgb(${ink})`, focus: `rgb(${ink})` });

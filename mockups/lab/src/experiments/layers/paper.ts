@@ -119,8 +119,10 @@ const DAY: PaperLight = {
 const NIGHT: PaperLight = {
   pool: { at: [0.3, 0.95], r: 0.52, rgb: [255, 224, 188], a: 0.15 },
   fall: { rgb: [0, 0, 0], a: 0.3 },
-  top: [104, 95, 84],
-  edge: [196, 184, 168],
+  // The lit face and its edge are 0.36 and 0.66 in lightness. They were 0.49 and 0.79 (`104 95 84`, `196 184 168`),
+  // and a grey caption scrolling across that face read under its floor (DESIGN.md §15.2).
+  top: [67, 60, 51],
+  edge: [154, 143, 128],
   under: [[52, 47, 42], [18, 16, 14]],
   far: 0.5,
   shadow: [0, 0, 0],
