@@ -12,7 +12,7 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
-import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS } from './remote-drafts';
+import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, unsavedRemoteDraft } from './remote-drafts';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { useNotices } from '../stores/notices';
 import { useMachines } from '../stores/machines';
@@ -485,5 +485,55 @@ describe('a take-back’s save among the session’s ordinary saves', () => {
     expect(sent(fake)).toEqual(['typed', 'claim staged']);
     await fake.reply('session.drafts.set', undefined);
     expect(await claim).toBe(true);
+  });
+});
+
+// the branch panel's finding 2: a take-back's save that is taken supersedes this window's older save still pending, and
+// its sending again, so the older one never lands over the message it put there
+describe('a take-back’s save taken over an older save past main’s bound', () => {
+  it('retires the older save and its retry: the settled message stays', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // the fake client's settling, on real time
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fake = fakeClient({ 'session.drafts.get': null });
+      const port = rememberingRemoteDrafts(local(), REMOTE, () => true, fake.client);
+      port.save(null); // the emptied box
+      await flush();
+      await fake.fail('session.drafts.set', 'mini took the request but hasn’t confirmed it', 'timeout');
+      await flush();
+      const stage = draft('the message');
+      const claim = port.save(stage, 'claim:no-document');
+      await flush();
+      await fake.reply('session.drafts.set', undefined);
+      expect(await claim).toBe(true);
+      const settled = draft('the message');
+      const settle = port.save(settled, `settle:${stage.updatedAt}`);
+      await flush();
+      await fake.reply('session.drafts.set', undefined);
+      expect(await settle).toBe(true);
+      const sent = fake.invoked('session.drafts.set').length;
+      await vi.advanceTimersByTimeAsync(2 * REMOTE_DRAFT_RETRY_MS);
+      expect(fake.invoked('session.drafts.set')).toHaveLength(sent); // the older null is not sent again
+      expect(unsavedRemoteDraft(REMOTE)).not.toBeNull(); // no older save stands for this session's draft
+      warn.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a save handed after it: that one is newer', async () => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = rememberingRemoteDrafts(local(), REMOTE, () => true, fake.client);
+    port.save(draft('typed'));
+    await flush();
+    const claim = port.save(draft('staged'), 'claim:no-document');
+    port.save(draft('typed after'));
+    await flush();
+    await fake.reply('session.drafts.set', undefined); // 'typed'
+    await flush();
+    await fake.reply('session.drafts.set', undefined); // the claim
+    expect(await claim).toBe(true);
+    await flush();
+    expect((fake.invoked('session.drafts.set') as Saved[]).map((input) => textOf(input.draft))).toEqual(['typed', 'staged', 'typed after']);
   });
 });
