@@ -20,8 +20,6 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
 import { project, remoteRow } from '../../../../test/support/builders'; // P5 O7 M2; M4: project
 import { PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, REATTACHING_STOP_REMOTE, TERMINAL_KEEPS_NO_QUEUE } from './submit/submit-state'; // P5 O16 M3b fix wave 2; UX wave U4a: the placeholders and the terminal's refusal
-import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // UX wave U4a
-import { laneAState } from '../lane-a/test-support/lane-a-state'; // UX wave U4a
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
@@ -58,8 +56,8 @@ import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { resetStops } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
-import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop
-import { laneAState } from '../lane-a/test-support/lane-a-state';
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop; UX wave U4a
+import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
 import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
