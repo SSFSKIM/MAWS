@@ -2862,10 +2862,16 @@ test('(moved, from this build) a session moved the tool’s way here is listed b
     await expect.poll(processOf, { timeout: 60_000 }).not.toBe('ready');
     appendTurn(transcript, s.engineId, worktree, 'worktree-w1', 'A row while the peer runs');
     await expect.poll(() => indexed(s, `select transcript_size from sessions where app_id = '${id}'`), { timeout: 30_000, message: `${peer.label} files the row` }).toBe(statSync(transcript).size);
+    // Decision 7's own path is staged here (Decision Log 22): a session whose search text is behind its stored stamp is
+    // summarised again at this build's next start, which writes the facts at once. The peer re-indexes a transcript's
+    // text no sooner than 30 s after its last pass (SEARCH_REINDEX_DEBOUNCE_MS), so it quits only once its index holds
+    // the text at the stamp it filed; then nothing is read again, and the record stays as the peer filed it.
+    const textStamped = `select count(*) from session_text_state st join sessions s on s.app_id = st.app_id where st.app_id = '${id}' and st.status = 'ready' and st.size = s.transcript_size and st.mtime_ms = s.transcript_mtime_ms`;
+    await expect.poll(() => indexed(s, textStamped), { timeout: 60_000, message: `${peer.label}'s search text for the session at the stamp it filed (its 30 s re-index debounce)` }).toBe(1);
     expect(theirs.maws.consoleErrors()).toEqual([]);
     await s.quit(theirs);
     await endProfileProcesses(s.userData);
-    said.push(`  ${peer.label}: listed with its mark, resumed with the recorded state none, the next row filed (${statSync(transcript).size} bytes)`);
+    said.push(`  ${peer.label}: listed with its mark, resumed with the recorded state none, the next row filed (${statSync(transcript).size} bytes), its search text at that stamp before it quits`);
 
     // this build again: what the peer filed, then the facts after one more row
     const again = await s.launch();
