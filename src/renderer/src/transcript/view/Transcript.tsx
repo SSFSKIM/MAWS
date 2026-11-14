@@ -649,7 +649,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   return (
     <TranscriptProvider value={context}>
-      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
+      {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
+      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
         {reach !== null ? (
           // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
