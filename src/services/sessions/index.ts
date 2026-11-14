@@ -17,7 +17,7 @@ import { isAppSynthesised } from '@shared/sessions/app-events';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { isSideThreadEvent } from '../side/side-threads'; // E3
 import { SessionReadModel, type RestoredCostReader, type SessionSource } from './read-model';
-import { launchMode, scenarioClock, scenarioPath, type LaunchMode } from '@shared/sessions/select-source';
+import { launchMode, scenarioClock, scenarioPath, stubLongHistory, type LaunchMode } from '@shared/sessions/select-source';
 import { stubSource } from './stub-source';
 import { FoldFilter, launchOf, resyncDigests } from './resync'; // E10; P5 O3-D M2: launchOf
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -277,7 +277,8 @@ export function startSessions({ env, packaged, appRoot, hosts, bus, indexSource,
       const path = scenarioPath(env, { packaged, appRoot });
       const clock = scenarioClock(env);
       const relay = <N extends EventName>(name: N, payload: EventPayload<N>) => bus.emit(name, payload);
-      stops.push(model.registerScenario(stubSource(path, clock, { emit: relay, intercept: bus.intercept })));
+      const longHistory = stubLongHistory(env) as AppSessionId | null; // UX wave U7b
+      stops.push(model.registerScenario(stubSource(path, clock, { emit: relay, intercept: bus.intercept }, longHistory ? { longHistory } : {})));
       console.log(`[sessions] launch mode scenario: ${path} on the ${clock.kind} clock`);
     } catch (error) {
       console.error('[sessions] the scenario could not be played; no sessions will show', error);

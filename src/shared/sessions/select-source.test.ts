@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { launchMode, scenarioClock, scenarioPath } from './select-source';
+import { launchMode, scenarioClock, scenarioPath, stubLongHistory } from './select-source';
 
 describe('launch mode', () => {
   it('is scenario only for a stub source in dev or under the e2e switch', () => {
@@ -22,5 +22,12 @@ describe('launch mode', () => {
     expect(scenarioClock({ MAWS_SCENARIO_CLOCK: 'manual', MAWS_E2E: '1' })).toEqual({ kind: 'manual' });
     expect(scenarioClock({ MAWS_SCENARIO_CLOCK: 'manual' })).toEqual({ kind: 'wall' });
     expect(scenarioClock({})).toEqual({ kind: 'wall' });
+  });
+
+  it('gives one session a long history only when a scene asks for it under the e2e switch', () => {
+    expect(stubLongHistory({ MAWS_STUB_LONG_HISTORY: 'app-9a1d4262', MAWS_E2E: '1' })).toBe('app-9a1d4262');
+    expect(stubLongHistory({ MAWS_STUB_LONG_HISTORY: 'app-9a1d4262' })).toBeNull();
+    expect(stubLongHistory({ MAWS_STUB_LONG_HISTORY: '', MAWS_E2E: '1' })).toBeNull();
+    expect(stubLongHistory({ MAWS_E2E: '1' })).toBeNull();
   });
 });

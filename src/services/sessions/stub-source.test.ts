@@ -7,7 +7,9 @@ import { TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import type { ServicesBus } from '@shared/spine/bus';
 import { emittedAttentionSource } from '.';
 import { SessionReadModel } from './read-model';
-import { stubSource, type StubSourceDeps } from './stub-source';
+import { stubSource, type StubSourceDeps, type StubSourceOptions } from './stub-source';
+import { EventsSnapshotSchema, type EventsSnapshot } from '@shared/ipc/schema/session';
+import { LONG_HISTORY_TURNS } from './stub-history';
 import { loadScenario, type Scenario } from '../../../test/support/scenario';
 
 const NINE = join(TEST_FIXTURE_DIR, 'shell/nine-sessions.json');
@@ -15,7 +17,7 @@ const CHARTER = 'app-9a1d4262' as AppSessionId;
 const FIX = 'app-3eb04b84' as AppSessionId;
 const USAGE = 'app-59505fdc' as AppSessionId;
 
-function harness(scenario: string | Scenario = NINE /* C12 */) {
+function harness(scenario: string | Scenario = NINE /* C12 */, options?: StubSourceOptions) {
   const handlers = new Map<CommandName, (input: unknown) => unknown>();
   const emitted: { name: EventName; payload: unknown }[] = [];
   // the bus's emit and its taps, as sessions/index.ts wires them: the read model hears attention only as emitted.
@@ -38,7 +40,7 @@ function harness(scenario: string | Scenario = NINE /* C12 */) {
   };
   const model = new SessionReadModel('scenario');
   const stopTap = model.registerScenario(emittedAttentionSource(tap));
-  const source = stubSource(scenario, { kind: 'manual' }, deps); // C12: the scenario given
+  const source = stubSource(scenario, { kind: 'manual' }, deps, options); // C12: the scenario given
   const stopSource = model.registerScenario(source);
   const stop = () => {
     stopSource();
@@ -116,7 +118,10 @@ describe('stub source plays a timeline', () => {
 
   // C6: a stub session's transcript hydrates to an empty history instead of the load-failure banner.
   it('answers session.events for its sessions with an empty history, and refuses an id it does not hold', () => {
-    expect(h.call('session.events', { appSessionId: FIX, afterSeq: null, limit: null })).toEqual({ events: [], lastSeq: 0, complete: true });
+    // byte for byte the answer every scene over a stub scenario has had: the long history is off unless a scene asks
+    for (const { appId } of loadScenario(NINE, 0).sessions) {
+      expect(JSON.stringify(h.call('session.events', { appSessionId: appId, afterSeq: null, limit: null })), appId).toBe('{"events":[],"lastSeq":0,"complete":true}');
+    }
     expect(() => h.call('session.events', { appSessionId: 'nope', afterSeq: null, limit: null })).toThrow('unknown app session: nope');
   });
   // end C6
@@ -209,6 +214,37 @@ describe('stub source plays a timeline', () => {
 // C12 start: a scenario that scripts the memory budget (C12 execution document, Acceptance item 2's replay): the
 // budget's states go out as the engine host's engine.budget would, the command answers the last one, and a release's
 // exited status reaches the read model, which marks the session released
+// UX wave U7b: a scene that needs a transcript to scroll asks the stub for one session's long history
+describe('stub source with one session’s long history', () => {
+  let h: ReturnType<typeof harness>;
+  beforeEach(() => {
+    h = harness(NINE, { longHistory: CHARTER });
+  });
+  afterEach(() => h.stop());
+  const events = (input: Record<string, unknown>) => h.call<EventsSnapshot>('session.events', { afterSeq: null, limit: null, ...input });
+
+  it('answers that session with a fixed invented transcript the snapshot schema accepts, under its engine session id', () => {
+    const page = events({ appSessionId: CHARTER });
+    expect(EventsSnapshotSchema.parse(page)).toEqual(page);
+    expect(page.complete).toBe(true);
+    expect(page.events.filter((e) => e.kind === 'user.message')).toHaveLength(LONG_HISTORY_TURNS);
+    expect(page.events.filter((e) => e.kind === 'assistant.block.complete')).toHaveLength(LONG_HISTORY_TURNS);
+    expect(page.events.map((e) => e.seq)).toEqual(page.events.map((_, i) => i + 1));
+    expect(page.lastSeq).toBe(page.events.length);
+    expect(new Set(page.events.map((e) => e.sessionId))).toEqual(new Set(['9a1d4262-0b43-46ad-acb9-5982f31d209c']));
+    expect(events({ appSessionId: CHARTER }), 'the same every time').toEqual(page);
+  });
+
+  it('answers only what follows afterSeq, nothing for a child agent, and every other session as before', () => {
+    const page = events({ appSessionId: CHARTER });
+    expect(events({ appSessionId: CHARTER, afterSeq: page.lastSeq })).toEqual({ events: [], lastSeq: page.lastSeq, complete: true });
+    expect(events({ appSessionId: CHARTER, afterSeq: page.lastSeq - 2 }).events).toEqual(page.events.slice(-2));
+    expect(events({ appSessionId: CHARTER, agentId: 'agent-x' })).toEqual({ events: [], lastSeq: page.lastSeq, complete: true });
+    expect(JSON.stringify(events({ appSessionId: FIX }))).toBe('{"events":[],"lastSeq":0,"complete":true}');
+    expect(() => events({ appSessionId: 'nope' })).toThrow('unknown app session: nope');
+  });
+});
+
 describe('stub source plays the memory budget', () => {
   const BUDGET = join(TEST_FIXTURE_DIR, 'shell/c12-budget.json');
   const RELEASED = 'app-c12a0001' as AppSessionId;

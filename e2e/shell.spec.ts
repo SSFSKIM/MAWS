@@ -758,7 +758,10 @@ test('Settings is a dialog', async () => {
 test('a page beside the sidebar', async () => {
   test.setTimeout(150_000);
   const DRAFT = 'A draft that waits behind the page';
-  const first = await launchMaws({ env: SHELL_ENV });
+  // the stub gives Charter + research a long invented history, so its transcript has something to scroll (a stub
+  // session has none; second Mac run)
+  const env = { ...SHELL_ENV, MAWS_STUB_LONG_HISTORY: CHARTER };
+  const first = await launchMaws({ env });
   try {
     const { app, page, userData } = first;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
@@ -783,6 +786,9 @@ test('a page beside the sidebar', async () => {
     await composer.click();
     await page.keyboard.type(DRAFT);
     await expect(composer).toHaveText(DRAFT);
+    // the transcript drawn and taller than its pane before the wheel
+    await expect(scroller.locator('[data-row-id]').first(), 'the transcript’s rows are drawn').toBeVisible();
+    await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), { message: 'the transcript overflows its pane' }).toBeGreaterThan(0);
     const scrollBox = (await scroller.boundingBox())!;
     await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2);
     await page.mouse.wheel(0, -600);
@@ -874,7 +880,7 @@ test('a page beside the sidebar', async () => {
     await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     expect(first.consoleErrors(), 'the console stays free of errors').toEqual([]);
     await first.app.close();
-    const second = await launchMaws({ env: SHELL_ENV, userData });
+    const second = await launchMaws({ env, userData });
     try {
       await expect(pageRegion(second.page), 'the page comes back').toHaveAttribute('data-destination', 'customize', { timeout: 20_000 });
       await expect(pageTitle(second.page).getByRole('heading', { level: 1, name: 'Customize', exact: true })).toBeVisible();
@@ -884,7 +890,7 @@ test('a page beside the sidebar', async () => {
     } finally {
       await second.cleanup();
     }
-    const third = await launchMaws({ env: SHELL_ENV, userData });
+    const third = await launchMaws({ env, userData });
     try {
       await expect(pageRegion(third.page), 'the page, without the dialog').toHaveAttribute('data-destination', 'customize', { timeout: 20_000 });
       await expect(settingsDialog(third.page)).toHaveCount(0);
