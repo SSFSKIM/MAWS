@@ -2,11 +2,15 @@
 // draws. Where a thought goes (decision 19: a thought after a run's last call is that run's; the single call's unwrap
 // keeps event order), the run's id (decision 4: its first call's), a textless thought's travel (ticket 479), the opened run's
 // segments (`runSegments`: thoughts merged, then tested on the engine's recorded time, ten seconds and more), and what
-// its one line reads (`runLine`, `heldByPermission`: decision 21). Every word and every number is invented.
+// its one line reads (`runLine`, `heldByPermission`: decision 21), and a call the engine moved, in its run (the chain merge
+// with U4a). Every word and every number is invented, but the composer landing's probe recording.
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, ToolUseId } from '@shared/graph/ids';
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../dev/journal';
+import { dividerCopy } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
 import { heldByPermission, runLine, runSegments, THOUGHT_LINE_MS } from './groups';
 import { rowId } from './keys';
@@ -200,5 +204,57 @@ describe('heldByPermission', () => {
     expect(heldByPermission(new Map([entry('t2', 'permission', null)]), calls), 'a call of the turn').toBe(false);
     expect(heldByPermission(new Map([entry('req-9', 'question', null)]), calls), 'not a permission').toBe(false);
     expect(heldByPermission(new Map(), calls)).toBe(false);
+  });
+});
+
+// The chain merge with the composer landing (U4a, decision 33): a call the engine moved to the background, so a message
+// sent now could be read, is a call of its run like any other. It is in the background (decision 20), so it never takes
+// the run's line; it is a step whose outcome waits while it runs, so the caption marks nothing for it, and once its
+// process exits it is a stopped step. Opened, its row reads the model's moved label. The turn's line is U4a's verb with
+// U2a's caption after it.
+describe('a call the engine moved, in its run', () => {
+  const A_BASH = 'toolu_01UK719ATPuRjLtWeTEn9rZ1'; // u4p1-a-seeded-1: `node wait.cjs a1 40`, moved at 45
+  const MOVED = /^Moved `node wait\.cjs w1 40` to the background after [\dhms ]+$/;
+  const lineOf = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'divider' ? [dividerCopy({ ...row, durationMs: row.summary.durationMs ?? 0 })] : []));
+  const movedInRun = () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('r1', 'Read', { file_path: 'notes/plan.md' }, 'm1', 0);
+    b.result('r1', 'The plan, in three steps.');
+    b.toolUse('t1', 'Bash', { command: 'node wait.cjs w1 40', description: 'Wait for the sample job' }, 'm2', 0);
+    b.result('t1', 'Command was moved to the background', { structured: { ...BASH_RESULT(''), backgroundedToDeliverMessage: true } });
+    b.end(['u1'], { result: 'success', terminalReason: 'aborted_tools', endedForMessage: true });
+    return b;
+  };
+
+  it('u4p1-a-seeded-1 at the move (45), its turn still open: the run of one holds the moved call, in the background and running, and its line is the caption', () => {
+    const [run] = runs(drawn(journalToEvents(loadUxwaveJournal('u4p1-a-seeded-1').filter((row) => row.seq <= 45))));
+    expect(run.cells.map((cell) => cell.toolUseId)).toEqual([A_BASH]);
+    expect(run.cells[0]).toMatchObject({ moved: true, status: 'running', background: true });
+    expect(run.cells[0].label).toMatch(/^Moved `node wait\.cjs a1 40` to the background after [\dhms ]+$/);
+    expect(runLine(run.cells, new Map(), false)).toEqual({ kind: 'caption' });
+    expect(run.summary).toBe('Ran a command');
+  });
+
+  it('a run of two whose turn a message sent now ended: the moved call runs on with no mark in the caption, its row reads its moved label, and the turn reads “Ended for your message after …” and what it did', () => {
+    const rows = drawn(movedInRun().events);
+    const [run] = runs(rows);
+    expect(run.cells.map((cell) => cell.toolUseId)).toEqual(['r1', 't1']);
+    expect(run.cells[1]).toMatchObject({ moved: true, status: 'running', background: true });
+    expect(run.cells[1].label).toMatch(MOVED);
+    expect(runLine(run.cells, new Map(), false)).toEqual({ kind: 'caption' });
+    expect(run.summary).toBe('Read a file, ran a command');
+    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read a file, ran a command$/)]);
+  });
+
+  it('once its process exits before its task’s end: the moved call is a stopped step under the same words, on the run’s line and the turn’s', () => {
+    const b = movedInRun();
+    b.emit('process.exited', { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null }, { atMs: Date.parse(b.events.at(-1)!.at) });
+    const rows = drawn(b.events.map((event) => (event.kind === 'process.exited' ? { ...event, seq: null } : event)));
+    const [run] = runs(rows);
+    expect(run.cells[1]).toMatchObject({ moved: true, status: 'stopped', background: false });
+    expect(run.cells[1].label).toMatch(MOVED);
+    expect(run.summary).toBe('Read a file, ran a command (1 stopped)');
+    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read a file, ran a command \(1 stopped\)$/)]);
   });
 });

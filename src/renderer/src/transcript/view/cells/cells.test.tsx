@@ -75,6 +75,13 @@ describe('a call the engine moved to the background', () => {
     }
   });
 
+  // the chain merge with U2a: opened, the run that holds it while its turn still runs (45) draws the same line
+  it('inside its run, opened, while the turn still runs (u4p1-a-seeded-1 at 45): the moved label, before the description', async () => {
+    const line = await lineAt('u4p1-a-seeded-1', 45, 'toolu_01UK719ATPuRjLtWeTEn9rZ1');
+    expect(line.closest('.transcript-group')).not.toBeNull();
+    expect(line.textContent).toMatch(/^Moved node wait\.cjs a1 40 to the background after [\dhms ]+$/);
+  });
+
   it('a moved MCP call (u4p2-k-mcp-1) reads its moved label', async () => {
     const line = await lineAt('u4p2-k-mcp-1', 55, 'toolu_01UFS9wFBAFW85EKmXuDepTL');
     expect(line.textContent).toMatch(/^Moved slow · slow_wait to the background after [\dhms ]+$/);
