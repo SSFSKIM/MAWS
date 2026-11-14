@@ -15,7 +15,7 @@ import { addressOf, bareOf } from '@shared/machine/address';
 import type { SideExchange } from '@shared/side/question';
 import { digest, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { heardRefusal, resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { resetLaneAWatches } from '../lane-a/watches';
@@ -368,7 +368,7 @@ describe('the /btw card for a session on another machine', () => {
 });
 
 describe('the /btw card for a terminal session', () => {
-  const L = 'app-side-l' as AppSessionId;
+  const L = at('app-side-l' as AppSessionId); // the page's ids are addresses (P5 O6 M2)
   beforeEach(() => {
     resetLaneAStore();
     resetLaneAWatches();
@@ -381,7 +381,6 @@ describe('the /btw card for a terminal session', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     await act(async () => void (await applyBtw(L, 'why?')));
     render(<BtwCard appSessionId={L} />);
-    console.log('DEBUG-L', card()!.textContent, JSON.stringify(sidePaneOf(useSidePane.getState(), L).exchanges));
     expect(within(card()!).getByText('why?')).toBeTruthy();
     expect(waiting(card()!)).toHaveLength(1);
     await settle();
