@@ -8,6 +8,13 @@ colouring. Variant names live in `parts.ts`, the frame in `board.tsx` and `Choic
 
 ## 0. What this is
 
+**After the owner's answer (2026-11-14).** The owner took the suggested set whole ("Apply the suggested set"), and
+agreed that a session waiting for an approval should carry Approve in its own composer as well as in the capsule's
+card. Those forms are Layers now; what happened where they met is in `../layers/DESIGN.md`, section 17. This board
+is kept, working, as the record of the alternatives. Read "today" below as "Layers before that answer": A is still
+drawn from the rules Layers had then (they are kept in its sheet for this), each tag says "as it was" or "in Layers
+now", and Together's switch reads Yours, Before, In Layers.
+
 Not a design. After two rounds the owner chose Layers as the style and Paper as its colouring, and judged the large
 parts: the pane, the tabs, the composer as a whole, the tool-run summary, the approval, settings. The smaller parts
 of the session view were never put in front of them ("sessions just have so many components that I may not have

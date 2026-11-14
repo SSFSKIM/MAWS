@@ -5,7 +5,7 @@ import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState
 import { useGlassUnder, useKick } from '../layers/glass';
 import { cx, usePresence } from '../layers/parts';
 import type { Scheme } from '../../lab/types';
-import { LETTERS, type PartDef } from './parts';
+import { LETTERS, SUGGESTED, type PartDef } from './parts';
 
 export interface Board {
   part: PartDef;
@@ -30,13 +30,15 @@ export function Variant({ n, children, className, style }: { n: number; children
   const { part, picks, pick } = useBoard();
   const letter = LETTERS[n]!;
   const picked = picks[part.id] === letter;
+  // The owner took the suggested set (2026-11-14): that form is Layers now, and A is the part as Layers had it.
+  const now = SUGGESTED[part.id] === letter;
   return (
     <section className={cx('xc-variant', className)} aria-label={`${letter}: ${part.variants[n]}`} style={style}>
       <button type="button" className="xc-tag" aria-pressed={picked} onClick={() => pick(part.id, letter)} title={picked ? 'Your pick' : 'Pick this one'}>
         <b>{letter}</b>
         <span className="xc-tag-name">
           {part.variants[n]}
-          {(n === 0 || part.notes?.[n]) && <small>{n === 0 ? 'today' : part.notes?.[n]}</small>}
+          {(n === 0 || now || part.notes?.[n]) && <small>{now ? 'in Layers now' : n === 0 ? 'as it was' : part.notes?.[n]}</small>}
         </span>
       </button>
       <div className="xc-thing">{children}</div>

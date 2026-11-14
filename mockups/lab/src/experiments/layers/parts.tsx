@@ -57,6 +57,21 @@ export function Ring({ value, inner, size = 18 }: { value: number; inner?: numbe
   );
 }
 
+/** A share of something, as a level in a small round glass: one round thing that fills as a limit nears. */
+export function Drop({ value, size = 18 }: { value: number; size?: number }) {
+  const id = `xl-drop-${Math.round(value * 1000)}-${size}`;
+  const top = 18.5 - 13 * value;
+  return (
+    <svg className="xl-ring" width={size} height={size} viewBox="0 0 24 24" aria-hidden>
+      <clipPath id={id}>
+        <circle cx="12" cy="12" r="6.5" />
+      </clipPath>
+      <circle cx="12" cy="12" r="9.75" fill="none" stroke="currentColor" strokeOpacity="0.38" strokeWidth="1.75" />
+      <rect x="0" y={top} width="24" height={24 - top} fill="currentColor" clipPath={`url(#${id})`} />
+    </svg>
+  );
+}
+
 /** Height that opens and closes without knowing its size. Closed content is inert, so focus cannot land in it. */
 export function Fold({ open, children, className, clipRef }: { open: boolean; children: ReactNode; className?: string; clipRef?: (el: HTMLDivElement | null) => void }) {
   return (

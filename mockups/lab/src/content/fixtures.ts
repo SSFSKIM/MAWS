@@ -342,3 +342,144 @@ export const plan = {
   /** What a person might write when sending it back. */
   comment: 'Leave collisions for a second pass. Ship the queue first.',
 };
+
+// ---- The three sessions that wait, as they read when opened -----------------------------------------------------
+// Invented. Each holds enough of its own transcript for what it waits on to stand where it would really stand; what
+// it waits on is `approval`, `question` and `plan` above.
+
+export const sessionTranscripts: Record<string, TranscriptItem[]> = {
+  // "Fix flaky upload test": wants to push.
+  s2: [
+    { kind: 'user', text: 'The upload test fails about one run in twenty on CI and never on my machine. Find out why and fix it.' },
+    { kind: 'thought', seconds: 6, summary: 'Looked for what differs between a slow runner and a fast one' },
+    {
+      kind: 'tools',
+      summary: 'Read 4 files, ran the test 20 times',
+      seconds: 96,
+      calls: [
+        { tool: 'Read', target: 'test/upload/large-file.test.ts' },
+        { tool: 'Read', target: 'src/upload/client.ts' },
+        { tool: 'Grep', target: 'waitForConfirm', detail: 'no matches' },
+        { tool: 'Bash', target: 'pnpm vitest run test/upload --repeat 20', detail: '1 of 20 failed' },
+      ],
+    },
+    {
+      kind: 'assistant',
+      paragraphs: [
+        'The test uploads a 5 MB file and asserts as soon as the request returns, but the storage client confirms the write a moment later. On a slow runner the assertion wins that race.',
+        'The client now waits for the confirmation and tries once more if it times out. The same test ran 200 times without a failure.',
+      ],
+    },
+    {
+      kind: 'edit',
+      file: 'src/upload/client.ts',
+      added: 6,
+      removed: 2,
+      lines: [
+        { sign: ' ', text: 'export async function upload(file: Blob, to: string) {' },
+        { sign: '-', text: '  const res = await put(to, file);' },
+        { sign: '-', text: '  return res.id;' },
+        { sign: '+', text: '  const res = await put(to, file);' },
+        { sign: '+', text: '  const done = await confirmed(res.id, { within: 4000 });' },
+        { sign: '+', text: '  if (!done) return upload(file, to);' },
+        { sign: '+', text: '  return res.id;' },
+        { sign: ' ', text: '}' },
+      ],
+    },
+    {
+      kind: 'tools',
+      summary: 'Ran 2 commands',
+      seconds: 212,
+      calls: [
+        { tool: 'Bash', target: 'pnpm vitest run test/upload --repeat 200', detail: '200 passed' },
+        { tool: 'Bash', target: 'git commit -am "Wait for the storage confirmation"', detail: '2 commits ahead' },
+      ],
+    },
+    { kind: 'assistant', paragraphs: ['Both commits are local. Pushing the branch opens it for review.'] },
+  ],
+  // "Billing webhook audit": asked a question.
+  s3: [
+    { kind: 'user', text: 'Audit the billing webhooks. Which events do we handle, and what happens when a handler fails?' },
+    {
+      kind: 'tools',
+      summary: 'Read 9 files, searched 5 times',
+      seconds: 74,
+      calls: [
+        { tool: 'Grep', target: 'on("invoice.', detail: '4 matches in 2 files' },
+        { tool: 'Read', target: 'src/billing/webhooks.ts' },
+        { tool: 'Read', target: 'src/billing/handlers/refund.ts' },
+        { tool: 'Grep', target: 'catch (', detail: '11 matches in 6 files' },
+      ],
+    },
+    {
+      kind: 'assistant',
+      paragraphs: [
+        'Seven events are handled. None of them is retried: a handler that throws is logged and the event is gone, although the payment provider would send it again if we answered with an error.',
+        'Retrying is only safe where a handler can run twice without harm, so before I add it I need two decisions from you.',
+      ],
+    },
+  ],
+  // "Offline sync design": a plan waits. The plan itself is `plan`; the transcript ends with it.
+  s5: [
+    { kind: 'user', text: 'Design offline sync for notes. Give me a plan first; do not write code yet.' },
+    { kind: 'thought', seconds: 14, summary: 'Weighed merging text against keeping both edits' },
+    {
+      kind: 'tools',
+      summary: 'Read 12 files, searched 4 times',
+      seconds: 118,
+      calls: [
+        { tool: 'Read', target: 'app/notes/store.ts' },
+        { tool: 'Read', target: 'app/notes/editor.tsx' },
+        { tool: 'Grep', target: 'updatedAt', detail: '23 matches in 8 files' },
+        { tool: 'Read', target: 'server/notes/routes.ts' },
+      ],
+    },
+  ],
+};
+
+/** The side column of each waiting session: only what that session has. */
+export const sessionOverviews: Record<string, Pick<typeof overview, 'branch' | 'added' | 'removed' | 'files' | 'agents' | 'background' | 'todos'>> = {
+  s2: {
+    branch: 'fix/upload-retry',
+    added: 15,
+    removed: 3,
+    files: [
+      { path: 'src/upload/client.ts', added: 6, removed: 2 },
+      { path: 'test/upload/large-file.test.ts', added: 9, removed: 1 },
+    ],
+    agents: [],
+    background: [],
+    todos: [
+      { text: 'Find why the upload test fails on CI', done: true },
+      { text: 'Wait for the storage confirmation', done: true },
+      { text: 'Push the branch', done: false, current: true },
+    ],
+  },
+  s3: {
+    branch: '',
+    added: 0,
+    removed: 0,
+    files: [],
+    agents: [],
+    background: [],
+    todos: [
+      { text: 'List the events that are handled', done: true },
+      { text: 'Find what happens when a handler fails', done: true },
+      { text: 'Add retries where they are safe', done: false },
+    ],
+  },
+  s5: {
+    branch: '',
+    added: 0,
+    removed: 0,
+    files: [],
+    agents: [],
+    background: [],
+    // Until the plan is approved its steps are not a to-do list; what the session has done so far is.
+    todos: [
+      { text: 'Read how notes are stored and edited', done: true },
+      { text: 'Decide what happens when two edits meet', done: true },
+      { text: 'Agree the plan', done: false, current: true },
+    ],
+  },
+};

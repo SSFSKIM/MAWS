@@ -1,26 +1,27 @@
 // The pane's content: Quiet's sidebar (a row is a title and one trailing slot; the second line, branch, machine and
-// age wait in a card beside the row; the approval is answered from that card), standing on Field's pane.
+// age wait in a card beside the row; a session that waits is answered from that card, as from the capsule's list),
+// standing on Field's pane.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, ChevronRight, Ellipsis, GitBranch, LayoutGrid, Monitor, Pencil, Pin, Settings as Gear, Shapes, SlidersHorizontal, SquarePen } from 'lucide-react';
 import { destinations, pinned, projects, settingsNav, settingsSections, usage, type Session } from '../../content/fixtures';
 import type { SceneId } from '../../lab/types';
-import type { Answer } from './Layers';
-import { Fold, Pop, Ring, StateGlyph } from './parts';
-import { Ask } from './Session';
+import { Remote, useNeeds } from './needs';
+import { Drop, Fold, isYours, Pop, StateGlyph } from './parts';
 
 const destIcon = { compose: SquarePen, grid: LayoutGrid, shapes: Shapes, sliders: SlidersHorizontal } as const;
 
 interface Props {
   scene: SceneId;
   live: (s: Session) => Session;
-  onAnswer: (a: Answer) => void;
+  /** The session on screen. */
+  at: string;
   section: string;
   go: (scene: SceneId) => void;
-  /** Capture aid: open the waiting row's card at once. */
-  card?: boolean;
+  /** Capture aid: the row whose card is open at once. */
+  card?: string;
 }
 
-export function Sidebar({ scene, live, onAnswer, section, go, card }: Props) {
+export function Sidebar({ scene, live, at, section, go, card }: Props) {
   const inSettings = scene === 'settings';
   return (
     <div className="xl-pane-in">
@@ -48,7 +49,7 @@ export function Sidebar({ scene, live, onAnswer, section, go, card }: Props) {
           })}
         </div>
       ) : (
-        <Sessions scene={scene} live={live} onAnswer={onAnswer} go={go} card={card} />
+        <Sessions scene={scene} live={live} at={at} go={go} card={card} />
       )}
       <div className="xl-pane-foot">
         <button type="button" className="xl-icon" aria-label="Settings" aria-pressed={inSettings} data-tip="Settings" data-tip-at="above-start" onClick={() => go(inSettings ? 'session' : 'settings')}>
@@ -60,7 +61,7 @@ export function Sidebar({ scene, live, onAnswer, section, go, card }: Props) {
   );
 }
 
-/** Two nested rings in the foot; the numbers are one click away. */
+/** One drop in the foot: the limit that will bite first, as a level. Both limits are one click away. */
 function Usage() {
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -78,16 +79,16 @@ function Usage() {
         data-tip-at="above-end"
         onClick={() => setOpen((v) => !v)}
       >
-        <Ring value={usage.week} inner={usage.fiveHour} />
+        <Drop value={Math.max(usage.week, usage.fiveHour)} />
       </button>
       <Pop open={open} anchor={el} place="above-end" onClose={close} className="xl-usage" label="Usage">
         <div className="xl-usage-row">
-          <Ring value={usage.fiveHour} size={16} />
+          <Drop value={usage.fiveHour} size={16} />
           <span>5 hours</span>
           <span className="xl-num">{pct(usage.fiveHour)}</span>
         </div>
         <div className="xl-usage-row">
-          <Ring value={usage.week} size={16} />
+          <Drop value={usage.week} size={16} />
           <span>Week</span>
           <span className="xl-num">{pct(usage.week)}</span>
         </div>
@@ -97,7 +98,8 @@ function Usage() {
   );
 }
 
-function Sessions({ scene, live, onAnswer, go, card: cardAtOnce }: Pick<Props, 'scene' | 'live' | 'onAnswer' | 'go' | 'card'>) {
+function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene' | 'live' | 'at' | 'go' | 'card'>) {
+  const needs = useNeeds();
   const [openIds, setOpenIds] = useState(() => new Set(projects.filter((p) => p.open).map((p) => p.id)));
   const [menu, setMenu] = useState<{ id: string; el: HTMLElement } | null>(null);
   const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
@@ -128,9 +130,9 @@ function Sessions({ scene, live, onAnswer, go, card: cardAtOnce }: Pick<Props, '
   const stay = () => window.clearTimeout(timer.current);
   useEffect(() => () => window.clearTimeout(timer.current), []);
   useEffect(() => {
-    const el = rows.current.get('s2');
+    const el = cardAtOnce ? rows.current.get(cardAtOnce) : undefined;
     if (cardAtOnce && el) {
-      setCard({ id: 's2', el });
+      setCard({ id: cardAtOnce, el });
       setCardEl(el);
     }
   }, [cardAtOnce]);
@@ -153,13 +155,13 @@ function Sessions({ scene, live, onAnswer, go, card: cardAtOnce }: Pick<Props, '
           if (el) rows.current.set(s.id, el);
         }}
         className="xl-row"
-        data-selected={scene === 'session' && s.id === 's1'}
+        data-selected={scene === 'session' && s.id === at}
         data-weight={weight}
         data-held={menu?.id === s.id || card?.id === s.id}
         onPointerEnter={(e) => enter(s.id, e.currentTarget)}
         onPointerLeave={leave}
       >
-        <button type="button" className="xl-row-main" aria-current={scene === 'session' && s.id === 's1' ? 'page' : undefined} onClick={() => go('session')}>
+        <button type="button" className="xl-row-main" aria-current={scene === 'session' && s.id === at ? 'page' : undefined} onClick={() => (needs.open(s.id), setCard(null))}>
           <span className="xl-fade">{s.title}</span>
         </button>
         <span className="xl-slot">
@@ -253,7 +255,8 @@ function Sessions({ scene, live, onAnswer, go, card: cardAtOnce }: Pick<Props, '
         {inCard && (
           <>
             <div className="xl-card-title">{inCard.title}</div>
-            <div className="xl-card-line">{inCard.line}</div>
+            {/* A question or a plan shows itself below; an approval keeps the line that says what it is for. */}
+            {(inCard.state === 'approval' || !isYours(inCard.state)) && <div className="xl-card-line">{inCard.line}</div>}
             <div className="xl-card-meta">
               {inCard.branch && (
                 <span>
@@ -269,7 +272,7 @@ function Sessions({ scene, live, onAnswer, go, card: cardAtOnce }: Pick<Props, '
               )}
               <span>{inCard.age}</span>
             </div>
-            {inCard.state === 'approval' && <Ask onAnswer={onAnswer} />}
+            {isYours(inCard.state) && <Remote session={inCard} />}
           </>
         )}
       </Pop>

@@ -8,8 +8,10 @@ happened where two parts met, what the idea breaks and what that costs.
 The owner chose this synthesis as the style of the redesign and, in the same message, dropped its colour. Colour is
 now a switch, and its record is section 12. Five calls about the result were still the owner's, and each of them is
 a switch too: section 13. Four of them are answered and their answers are the design at rest, in the system face:
-section 15. Paper has four warmer neighbours for the owner to choose among (section 14), and the painted form has a
-fourth position with no drawing at all, Open's plain ground (section 16). Sections 0 to 11 are the experiment as it was built, under what is now
+section 15. Paper has four warmer neighbours (section 14), of which the owner chose Warm paper, and the painted form
+has a fourth position with no drawing at all, Open's plain ground (section 16). Then the smaller parts of the
+session went to a board of alternatives (`../choices/`), the owner took its suggested set, and those forms are the
+design now: section 17, which is read over sections 2, 3 and 5. Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -318,7 +320,9 @@ the sans, Alignment on the column, Right column growing from its button, and Typ
 
 Address aids for captures, never design states: `x=tools,top,mid,card,waiting,nopane,noside,field` (the last
 shows the field alone), `pose=inactive`,
-`tier=css`, `rt=1`, `dev=1` (the runtime's checks and what each group resolved, in the console).
+`tier=css`, `rt=1`, `dev=1` (the runtime's checks and what each group resolved, in the console). Section 17 adds
+`at=s2|s3|s5` (the session on screen), `did=s2-approved` (also `-denied`, `s3-chose`, `s5-said`: an answer already
+given), `card=<id>` (that row's card) and `wait=<id>` (the list's open item).
 
 ## 11. Rejected
 
@@ -1247,6 +1251,167 @@ and with the pane away; at 1280 by 800 under Paper.
   when a bar changes size; `data-ground='plain'` and the two `--xl-gather` variables on the root.
 - `layers.css`: the travelling pool under a block.
 - `meta.ts`: the fourth chip of Painted form.
+
+## 17. The suggested set, folded in
+
+Added 2026-11-14. The Choices board (`../choices/`, its DESIGN.md section 2) put fifteen smaller parts of the
+session up in several forms each. The owner's answer was "Apply the suggested set": the suggested form of every part
+goes into Layers and they say only what looks wrong; and, asked whether a session that waits for an approval should
+show Approve in its own message box as well, "Yes, both places". So these are not switches. They are the design at
+rest, and sections 2, 3 and 5 above are read with this one over them.
+
+### 17.1 What is in
+
+| part | the form it has now | what it replaced |
+|---|---|---|
+| The person's message | a wash of the ink on the field (6 % light, 8 % dark), flush right, as wide as its words | a glass bubble |
+| Thinking | no line of its own: the first row of the run it led to, with its duration where a result would be. A thought that led to no run keeps one line, what it was | "Thought for 9s", opening to a summary |
+| An edit | its file is a caption on the field, in the grammar every caption uses; the glass holds code and nothing else; a run of added or removed lines is one bar of its colour | a card with a head row, an icon, a hairline and a sign per line |
+| A running command | one capsule (dot, command, clock) that opens into its output between two measured widths | a card that always showed three lines of output |
+| Agents started | a chip per agent with its own state; what it is doing waits for the pointer | a sentence |
+| A queued message | above the composer, where it will be sent from, in a message's shape with a dashed outline in place of a fill | a chip inside the composer |
+| The model | its chip is there while the pointer is over the composer or the caret is in it | always there |
+| The context mark | a row of the model's menu; it returns to the composer by itself from 80 % | a ring, always |
+| Send and stop | two things: the round button sends, and while a turn runs a small quiet square beside it stops | one button that was stop until there was text |
+| Usage | one drop in the pane's foot, the limit that will bite first, as a level; both limits in its popover | two nested rings |
+| The pane's collapse, a menu's opening, Paper's dark ground | unchanged: it slides, it grows from its corner, `#181614` | the same |
+| A question | answered in the session's composer, one question at a time, its options as chips; and from the card | not drawn |
+| A plan | the agent's prose on the field, and the composer's one action decides it; and from the card | not drawn |
+| An approval | the composer of its own session carries the command, Deny and Approve; and from the card, as before | the card only |
+
+Glass in the transcript now means one thing: something the agent made that can be opened. A session at rest has two
+block surfaces where it had five, and a session that is only words has none.
+
+### 17.2 Four sessions
+
+The scene drew one session, the one that runs, so nothing that waits could be seen in place. Four can now be opened:
+that one, and the three that wait ("Fix flaky upload test" for an approval, "Billing webhook audit" with a question,
+"Offline sync design" with a plan). Each is reached the way a person reaches it: its tab, its row in the pane, or the
+arrow in the waiting list (a session opened from its row gets a tab). Each has an invented transcript of its own in
+the fixtures, long enough for what it waits on to stand where it would, and its own side column (only the sections
+it has something in). The first tab and row are selected from what is on screen, no longer from a constant.
+
+### 17.3 One rule for what waits
+
+What a session waits on is answered in its composer, and the card answers the same thing from elsewhere.
+
+- **The composer.** What waits rides over the field it is answered in. An approval: its command in a well, one line
+  of why, and Deny and Approve where the round button stands. A question: one question at a time, its options as
+  chips, dots for how many; the round button goes to the next question and then sends. A plan: nothing over the
+  field at all (the plan is in the transcript); the one button is Approve. Typing is always the other answer: it
+  refuses an approval with what to do instead, answers a question freely, and turns Approve into Send back. Return
+  sends what was typed or chosen; an empty Return never approves anything.
+- **The card.** The list the capsule opens and the card beside a waiting row hold the same answer (`needs.tsx`,
+  `Remote`): the approval's two buttons as before, the question's chips with a field and Send, the plan's steps
+  with Send back and Approve. Both write to one place, so an answer given in either is the answer, and a question's
+  half-made choice is the same in both.
+- **The list has three answerable things now,** so one item is open at a time (the first that waits, or the one
+  pressed). An item's head opens it; the arrow that takes the age's place under the pointer opens the session.
+
+### 17.4 What the transcript keeps
+
+The board named this as undesigned. A record stands where the person's own messages stand, because an answer is
+the person's turn.
+
+- **Words they wrote** (a plan sent back with a reason, an approval refused with what to do instead, a question
+  answered freely) are a message like any other.
+- **Choices they made** are a message too, each choice under the question it answers in the quiet ink. The question
+  lived in the composer and would otherwise be gone from the session.
+- **A decision with no words** (approved, denied) is not a message, since the person wrote nothing: it is one mark
+  and one word at a caption's size, in the message's own wash, on the person's side of the column.
+- **What follows is ordinary.** An approved command runs as any command does, in the capsule, with its clock. An
+  approved plan's steps become the To do section of the side column, which they were not before (two lists of the
+  same five lines, one of them not yet true; until then that section holds what the session has done so far). The session's mark in the pane, its tab and the capsule goes back to
+  the breathing dot, and its composer back to a field, a stop and a send.
+
+### 17.5 Where parts met
+
+1. **A short transcript against "read from its end".** The waiting sessions are a screen long or less. Set from
+   the top, the agent's last words stood under the tabs and what it waited on stood in the composer, a window
+   apart. A transcript shorter than the window now stands on the composer. It is the same rule the long one
+   already followed.
+2. **A message waiting above the composer against the scroll rule.** The queued message stands outside the
+   composer's glass, so the composer's measured inset does not include it and content ran under it. It is the bar's
+   part: the scroller's lower edge and the column's foot are both lengthened by its height while it is there
+   (`--xl-above`), and `measure.mjs` learned the same number, so what it gates is still what can be read.
+3. **The edit's caption against the caption that opens things.** A caption that is open reads as pressed (ink, its
+   chevron shown). An edit is open at rest, so every edit read as pressed. Its caption keeps the resting ink while
+   open and shows its chevron under the pointer only.
+4. **A count on the field against a green chosen for glass.** The edit's count moved from the card's head to the
+   field. Layers' green and red were measured on glass; on the field, where the picture's paper is in shadow, the
+   green read 3.71. Counts on the field take a deeper step in light (`#135a36`, `#92281a`).
+5. **Three kinds in a list built for one.** Section 17.3. The item's line is dropped where the open item says the
+   same thing itself (a question's first line is its first question), in the list and in the row's card.
+6. **A plan's steps against the To do section.** Section 17.4.
+7. **Approve in the composer against the composer's own button.** Under Paper both are ink. They never stand
+   together: a worded decision takes the round button's place, and typing gives the place back.
+8. **The model's chip against a composer that is being answered.** It is still there on approach and nowhere else,
+   so a waiting composer at rest is the thing it waits on, a field and its answers.
+9. **Fewer blocks against the second glass root.** The root attached to the transcript is mounted for every
+   session and holds what that session has: two surfaces for the running one, none for one that is only words.
+   It reports the same one diagnostic as before, by design (`backdrop-root-at-container`), and nothing else.
+10. **Quiet words against Paper's night picture.** Standing on the composer, a short transcript puts captions
+    where the night picture keeps its one bright thing, the paper's lit top (level 0.30 to 0.34). Prose holds there
+    (5.6); a caption in the quiet ink read 3.64 and an agent's chip 3.87. Raising the quiet ink far enough would
+    have made it the prose's ink. So under Paper at night a caption carries a soft shade of the ground around its
+    letters (not a shape: over the plain ground it is the ground's colour and unseen), and a chip and a decision's
+    mark, which are shapes already, take the same shade under their fill. Lowest after: 4.6 and up. It is scoped to
+    Paper's night because the cause is that picture; a colouring whose field is graded has no need of it.
+11. **The earlier forms against the board.** The board draws each part "as it was" from this sheet. The rules
+    for the replaced forms are therefore kept, unused by Layers, and the new forms have names of their own
+    (`.xl-said`, `.xl-code`, `.xl-run`, `.xl-agent`, `.xl-waits`, `.xl-strip`, `.xl-opt`, `.xl-verdict`).
+
+### 17.6 Readings
+
+`measure.mjs`, the floors of section 7 (4.5 for text, 3 for icons), 1440 by 900 at 2x, WebGPU, Paper at Field
+strength Full unless said. 38 routes: the four sessions at rest; each answered state (approved, denied, chosen,
+said); the waiting list open on each of its three items; the row's card on the question and on the plan; a tool run
+open from the top; mid-scroll; New chat; Settings; and two sessions at Vivid; each in both schemes. 3,255 gated
+readings, none under its floor.
+
+| | light | dark |
+|---|---|---|
+| lowest text | 4.86: a removed count in the Changes module with the list open over it (section 12.6's lowest line, unchanged) | 4.66: an idle row in the pane (unchanged) |
+| lowest text among the new parts | 5.3: a caption on the field | 4.96: the capsule's clock; captions over the lit paper 4.6 and up with their shade |
+| lowest icon | 3.25: a caret in the pane | 3.88: the same |
+| glass bodies, drawn level | 0.77 to 0.99 | 0.11 to 0.31 |
+
+No body is in the band where neither ink holds (0.39 to 0.49). The 0.77 is the composer of a session at rest after
+a refusal: at its shortest it stands lowest, over the shaded underside of the picture's paper.
+
+Met on the way: the two night readings of 17.5 item 10; a decision's check mark at 1.56 where the glass leaf's rim
+passes behind it (the mark became a small chip); and fields of a closed list item read as text (a closed item now
+holds nothing).
+
+### 17.7 Not made good
+
+- **Motion was not watched.** The strip arriving in a composer, the capsule opening, the list's items folding, a
+  record appearing: built, and seen as stills only.
+- **A waiting composer under Veil and Opaque, the CSS tier, the receded pose, forced colours:** not looked at for
+  the new parts.
+- **One size of content.** Two questions of at most three options; a plan that fits a window; one queued message
+  of one line. A sixth option, a plan longer than the window (its Approve is then far from its first line, which
+  is the right place for it and was not drawn), two queued messages.
+- **Deny leaves the session idle** with one word in the transcript and nothing after it. Whether a refusal should
+  ask what to do instead was not designed; typing in the same composer is how that is said.
+- **A session opened from its row keeps its tab** for the visit; tabs do not close.
+- **The side column of a waiting session** is invented content, as the rest of that column is plain content.
+
+### 17.8 What changed in the code
+
+- `needs.tsx` (new): the reply to a waiting session and its draft, shared through a context; `Remote` (what a card
+  holds for each kind), `Chips`, `Steps`, and `Kept` (the record in the transcript).
+- `Transcript.tsx` (new): the transcript's items in their new forms, a session's own items, the plan as prose, the
+  record, and the approved command's capsule. `Composer.tsx` (new): the composer at rest and as the answer.
+- `Session.tsx`: the old transcript and composer are gone; `Tabs` is given its list and its current tab; `Waiting`
+  opens one item at a time and holds `Remote`; `Modules` is given the session's own sections.
+- `Sidebar.tsx`: the row on screen is the one selected; a row opens its session; the card holds `Remote`; usage is
+  a drop. `parts.tsx`: `Drop`.
+- `Layers.tsx`: which session is on screen, its tab, the replies and the draft; `at=`, `did=`, `card=<id>`,
+  `wait=<id>` as address aids.
+- `layers.css`: one new section at the end; nothing above it was changed.
+- `measure.mjs`: the faded band's depth includes a waiting message.
+- `src/content/fixtures.ts`: `sessionTranscripts`, `sessionOverviews` (additions).
 
 ## To ship this in the app
 

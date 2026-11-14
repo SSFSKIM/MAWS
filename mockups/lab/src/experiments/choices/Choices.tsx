@@ -138,8 +138,8 @@ function Scroller({ children, part }: { children: React.ReactNode; part: string 
 
 const SETS = [
   ['yours', 'Yours'],
-  ['today', 'Today'],
-  ['suggested', 'Suggested'],
+  ['today', 'Before'],
+  ['suggested', 'In Layers'],
 ] as const;
 
 const SEND_STATES = [

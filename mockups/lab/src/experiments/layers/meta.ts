@@ -6,7 +6,7 @@ export const experiment: Experiment = {
   order: 0,
   name: 'Layers',
   thesis:
-    'Glass taken all the way into the transcript: the colour field runs under the whole window, prose is read directly on it, and every block (a tool run, a diff, a running command, your own message) is a piece of glass standing over it.',
+    'Glass taken into the transcript: the colour field runs under the whole window, prose is read directly on it, and what the agent made that can be opened (a tool run, an edit, a running command) is a piece of glass standing over it.',
   notes: [
     'Your four answers are now the design at rest: the drawing out of focus behind text, everything lined up on the reading column, the right column as a button that opens, and Quiet\'s face (the system face) for the whole interface, the New chat line included. Each is still a switch below, so the earlier positions are one chip away.',
     'Colour, on your word that Paper should be warmer ("perhaps by mixing older orange"): four warmer Papers beside Paper. They put the warmth in different places. Warm paper: the paper itself (ground, shade, shadow) carries the orange at low strength, and the orange comes back once, as the mark. Orange light: the paper as it is, with the orange as light (inside the glass leaf, on the floor under the composer, the lamp at night). Orange underside: the sheet\'s reverse is the orange, a second material. Clay paper: Warm paper with the warmth from today\'s terracotta instead, in case that is the orange you meant.',

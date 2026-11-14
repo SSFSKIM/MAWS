@@ -1,22 +1,27 @@
-// The session: Instrument's tab capsule, Quiet's transcript with its blocks standing on glass, the glass composer,
-// Quiet's waiting capsule and approval, and the side column as separate modules.
+// The session's furniture: Instrument's tab capsule, Quiet's waiting capsule with the list it opens, New chat, and
+// the side column. The transcript and the composer are files of their own (Transcript.tsx, Composer.tsx).
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { GlassGroup, GlassSurface } from '@vitreajs/vitrea-react';
-import {
-  ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleCheck, CornerDownRight, FileCode, Folder, GitBranch, LoaderCircle, PanelRight, Plus, SlidersHorizontal, Square, Terminal, X,
-} from 'lucide-react';
-import { approval, composer, overview, projects, tabs, transcript, type Session, type TranscriptItem } from '../../content/fixtures';
+import { ArrowUpRight, Check, ChevronDown, Circle, CircleCheck, FileCode, Folder, GitBranch, LoaderCircle, PanelRight, Plus, SlidersHorizontal, Terminal, X } from 'lucide-react';
+import { approval, composer, overview, projects, type Session } from '../../content/fixtures';
 import type { SceneId } from '../../lab/types';
+import { Composer } from './Composer';
 import { PLANE, THICKNESS, useGlassUnder, useKick } from './glass';
-import type { Answer, SideForm } from './Layers';
-import { clock, cx, Fold, GBtn, Pop, Ring, split, StateGlyph, stateWord } from './parts';
+import type { SideForm } from './Layers';
+import { Remote, useNeeds } from './needs';
+import { cx, Fold, GBtn, Pop, split, StateGlyph, stateWord } from './parts';
 
 // ---- Tabs: Instrument's capsule, with the marks the sidebar uses -------------------------------------------------
 
-export function Tabs({ settings, live, go }: { settings: boolean; live: (s: Session) => Session; go: (scene: SceneId) => void }) {
+export interface TabItem {
+  id: string;
+  title: string;
+  kind: string;
+}
+
+/** The tabs are the window's: which is current, and what a press on one opens, are decided above. */
+export function Tabs({ list, current, onPick, live }: { list: TabItem[]; current: string; onPick: (id: string) => void; live: (s: Session) => Session }) {
   const all = projects.flatMap((p) => p.sessions);
-  const list = settings ? [...tabs, { id: 'settings', title: 'Settings', kind: 'settings' as const }] : tabs;
-  const [current, setCurrent] = useState(settings ? 'settings' : tabs.find((t) => 'active' in t && t.active)?.id ?? tabs[0]!.id);
   return (
     <>
       {list.map((tab) => {
@@ -24,16 +29,7 @@ export function Tabs({ settings, live, go }: { settings: boolean; live: (s: Sess
         const state = session ? live(session).state : undefined;
         return (
           <div key={tab.id} className="xl-tab" data-current={tab.id === current}>
-            <button
-              type="button"
-              className="xl-tab-main"
-              aria-current={tab.id === current ? 'page' : undefined}
-              title={state ? stateWord[state] || undefined : undefined}
-              onClick={() => {
-                setCurrent(tab.id);
-                if (settings && tab.id !== 'settings') go('session');
-              }}
-            >
+            <button type="button" className="xl-tab-main" aria-current={tab.id === current ? 'page' : undefined} title={state ? stateWord[state] || undefined : undefined} onClick={() => onPick(tab.id)}>
               <span className="xl-tab-mark">
                 {tab.kind === 'file' ? <FileCode size={14} strokeWidth={1.75} /> : tab.kind === 'settings' ? <SlidersHorizontal size={14} strokeWidth={1.75} /> : state ? <StateGlyph state={state} size={14} /> : null}
               </span>
@@ -52,38 +48,25 @@ export function Tabs({ settings, live, go }: { settings: boolean; live: (s: Sess
   );
 }
 
-// ---- The approval, Quiet's way ---------------------------------------------------------------------------------
-
-/** The approval, wherever it is answered: the command, one sentence of why, two answers. */
-export function Ask({ onAnswer }: { onAnswer: (a: Answer) => void }) {
-  return (
-    <div className="xl-ask">
-      <div className="xl-ask-cmd">{approval.command}</div>
-      <p className="xl-ask-why">{approval.why}</p>
-      <div className="xl-ask-acts">
-        <button type="button" className="xl-btn" onClick={() => onAnswer('denied')}>
-          Deny
-        </button>
-        <button type="button" className="xl-btn" data-kind="go" onClick={() => onAnswer('approved')}>
-          Approve
-        </button>
-      </div>
-    </div>
-  );
-}
+// ---- What waits for you ----------------------------------------------------------------------------------------------
 
 /**
  * What waits for you, as the glyphs the sidebar uses: no count, no word. It is the page's one tinted piece of glass.
- * It opens the list, with the approval answerable in place. With no `tint` it is clear glass, and the marks in it
- * are the discs the rows carry (DESIGN.md §13.3).
+ * It opens the list, in which each waiting session is answered in place: one item is open at a time, and holds what
+ * that session's own composer holds (needs.tsx). The arrow in an item's head opens the session itself. With no
+ * `tint` the capsule is clear glass, and the marks in it are the discs the rows carry (DESIGN.md §13.3).
  */
-export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { waiting: Session[]; tint?: string; onAnswer: (a: Answer) => void; open?: boolean; alone?: boolean }) {
+export function Waiting({ waiting, tint, open: openAtOnce, first, alone }: { waiting: Session[]; tint?: string; open?: boolean; first?: string; alone?: boolean }) {
+  const needs = useNeeds();
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [picked, setPicked] = useState<string | null>(first ?? null);
   const close = useCallback(() => setOpen(false), []);
   useEffect(() => {
     if (openAtOnce && el) setOpen(true);
   }, [openAtOnce, el]);
+  // The item that is open: the one pressed, or the first that still waits.
+  const which = waiting.some((s) => s.id === picked) ? picked : waiting[0]?.id;
   return (
     <>
       <GlassSurface asChild capsule thickness={THICKNESS} tint={tint} foreground={tint ? undefined : 'vibrant'} interactive>
@@ -106,256 +89,41 @@ export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { 
         </button>
       </GlassSurface>
       <Pop open={open} anchor={el} place="below-end" onClose={close} className="xl-wait-list" label="Waiting for you">
-        {waiting.map((s) => (
-          <div key={s.id} className="xl-wait-item" data-open={s.state === 'approval'}>
-            <div className="xl-wait-head">
-              <StateGlyph state={s.state} />
-              <div className="xl-wait-text">
-                <div className="xl-card-title">{s.title}</div>
-                <div className="xl-card-line">{s.state === 'approval' ? approval.title : s.line}</div>
+        {waiting.map((s) => {
+          const isOpen = s.id === which;
+          return (
+            <div key={s.id} className="xl-wait-item" data-open={isOpen}>
+              <div className="xl-wait-head">
+                <button type="button" className="xl-wait-main" aria-expanded={isOpen} onClick={() => setPicked(s.id)}>
+                  <StateGlyph state={s.state} />
+                  <span className="xl-wait-text">
+                    <span className="xl-card-title">{s.title}</span>
+                    {/* Open, a question or a plan shows itself; an approval keeps the line that says what it is for. */}
+                    {(!isOpen || s.state === 'approval') && <span className="xl-card-line">{s.state === 'approval' ? approval.title : s.line}</span>}
+                  </span>
+                </button>
+                <span className="xl-wait-slot">
+                  <span className="xl-wait-age">{s.age}</span>
+                  <button
+                    type="button"
+                    className="xl-wait-go"
+                    aria-label={`Open ${s.title}`}
+                    data-tip="Open"
+                    data-tip-at="end"
+                    onClick={() => {
+                      needs.open(s.id);
+                      close();
+                    }}
+                  >
+                    <ArrowUpRight size={15} strokeWidth={1.9} />
+                  </button>
+                </span>
               </div>
-              <span className="xl-wait-age">{s.age}</span>
+              {/* Only the open item holds its answer: a closed one keeps no fields waiting out of sight. */}
+              <Fold open={isOpen}>{isOpen && <Remote session={s} />}</Fold>
             </div>
-            {s.state === 'approval' && <Ask onAnswer={onAnswer} />}
-          </div>
-        ))}
-      </Pop>
-    </>
-  );
-}
-
-// ---- The transcript ----------------------------------------------------------------------------------------------
-
-/** A transcript block that stands on glass (or on the veil, or on an opaque card, as the Blocks knob says). */
-function Block({ className, radius = 18, clip, on = true, children }: { className?: string; radius?: number; clip?: HTMLElement | null; on?: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLDivElement>(null);
-  useGlassUnder(ref, { radius, clip, on });
-  return (
-    <div ref={ref} className={cx('xl-block', className)}>
-      {children}
-    </div>
-  );
-}
-
-/** One grey caption for a run of work: Quiet's pill, with its chevron and duration under the pointer. It opens in place. */
-function Folded({ caption, time, startOpen, children }: { caption: string; time?: string; startOpen?: boolean; children: (clip: HTMLElement | null, shown: boolean) => ReactNode }) {
-  const [open, setOpen] = useState(!!startOpen);
-  // The card's glass exists while it is open and for the length of its closing.
-  const [shown, setShown] = useState(!!startOpen);
-  const [clip, setClip] = useState<HTMLDivElement | null>(null);
-  const kick = useKick();
-  useEffect(() => {
-    if (open) {
-      setShown(true);
-      return;
-    }
-    const t = window.setTimeout(() => setShown(false), 320);
-    return () => window.clearTimeout(t);
-  }, [open]);
-  return (
-    <div className="xl-folded">
-      <button
-        type="button"
-        className="xl-cap"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen((v) => !v);
-          kick(520);
-        }}
-      >
-        {caption}
-        <ChevronRight className="xl-cap-chev" size={13} strokeWidth={2} />
-        {time && <span className="xl-cap-time">{time}</span>}
-      </button>
-      <Fold open={open} clipRef={setClip}>
-        {children(clip, shown)}
-      </Fold>
-    </div>
-  );
-}
-
-function Edit({ item }: { item: Extract<TranscriptItem, { kind: 'edit' }> }) {
-  const [open, setOpen] = useState(true);
-  const kick = useKick();
-  const [dir, name] = split(item.file);
-  return (
-    <Block className="xl-edit">
-      <button
-        type="button"
-        className="xl-edit-head"
-        aria-expanded={open}
-        onClick={() => {
-          setOpen((v) => !v);
-          kick(520);
-        }}
-      >
-        <FileCode size={15} strokeWidth={1.75} />
-        <span className="xl-edit-file">
-          {name} <span className="xl-edit-dir">{dir.replace(/\/$/, '')}</span>
-        </span>
-        <span className="xl-stat">
-          <span className="xl-add">+{item.added}</span>
-          {item.removed > 0 && <span className="xl-del"> −{item.removed}</span>}
-        </span>
-      </button>
-      <Fold open={open}>
-        <pre className="xl-diff">
-          {item.lines.map((l, i) => (
-            <div key={i} className="xl-diff-line" data-sign={l.sign}>
-              <i>{l.sign}</i>
-              {l.text}
-            </div>
-          ))}
-        </pre>
-      </Fold>
-    </Block>
-  );
-}
-
-function Item({ item, open }: { item: TranscriptItem; open: boolean }) {
-  switch (item.kind) {
-    case 'user':
-      return (
-        <div className="xl-user">
-          <Block className="xl-bubble" radius={22}>
-            {item.text}
-          </Block>
-        </div>
-      );
-    case 'assistant':
-      return (
-        <div className="xl-prose">
-          {item.paragraphs.map((p, i) => (
-            <p key={i}>{p}</p>
-          ))}
-        </div>
-      );
-    case 'thought':
-      return (
-        <Folded caption={`Thought for ${clock(item.seconds)}`}>{() => <p className="xl-thought">{item.summary}</p>}</Folded>
-      );
-    case 'tools':
-      return (
-        <Folded caption={item.summary} time={clock(item.seconds)} startOpen={open}>
-          {(clip, shown) => (
-            <div className="xl-calls-wrap">
-              <Block className="xl-calls" clip={clip} on={shown}>
-                {item.calls.map((c, i) => (
-                  <div key={i} className="xl-call">
-                    <span className="xl-call-verb">{c.tool}</span>
-                    <span className="xl-call-target">{c.target}</span>
-                    {c.detail && <span className="xl-call-detail">{c.detail}</span>}
-                  </div>
-                ))}
-              </Block>
-            </div>
-          )}
-        </Folded>
-      );
-    case 'edit':
-      return <Edit item={item} />;
-    case 'agents':
-      return (
-        <div className="xl-folded">
-          <span className="xl-cap">
-            <Bot size={14} strokeWidth={1.75} />
-            {item.names.join(' and ')} {item.line}
-          </span>
-        </div>
-      );
-    case 'running':
-      return (
-        <Block className="xl-live">
-          <div className="xl-live-head">
-            <i className="xl-dot" data-run="" />
-            <span className="xl-live-cmd">{item.command}</span>
-            <span className="xl-live-time">{clock(item.seconds)}</span>
-          </div>
-          <div className="xl-tail">
-            {item.tail.map((l, i) => (
-              <div key={i}>{l}</div>
-            ))}
-          </div>
-        </Block>
-      );
-  }
-}
-
-export function Transcript({ open }: { open: boolean }) {
-  return (
-    <div className="xl-items">
-      {transcript.map((item, i) => (
-        <Item key={i} item={item} open={open && i === 2} />
-      ))}
-    </div>
-  );
-}
-
-// ---- The composer: Quiet's content on glass ----------------------------------------------------------------------
-
-export function Composer({ running, queued, fresh }: { running: boolean; queued?: boolean; fresh?: boolean }) {
-  const [text, setText] = useState('');
-  const [held, setHeld] = useState(!!queued);
-  const [el, setEl] = useState<HTMLButtonElement | null>(null);
-  const [open, setOpen] = useState(false);
-  const close = useCallback(() => setOpen(false), []);
-  const typed = text.trim().length > 0;
-  const kind = typed ? 'go' : running ? 'stop' : 'idle';
-  return (
-    <>
-      {queued && (
-        <Fold open={held}>
-          <div className="xl-queued" title="Sends when this turn ends">
-            <CornerDownRight size={13} strokeWidth={1.75} />
-            <span className="xl-fade">{composer.queued}</span>
-            <button type="button" className="xl-queued-x" aria-label="Remove the queued message" onClick={() => setHeld(false)}>
-              <X size={12} strokeWidth={2} />
-            </button>
-          </div>
-        </Fold>
-      )}
-      <textarea className="xl-field" rows={1} placeholder={fresh ? undefined : composer.placeholder} aria-label="Message" value={text} onChange={(e) => setText(e.target.value)} />
-      <div className="xl-tools">
-        <GBtn label="Attach" tip="Attach" data-tip-at="above-start">
-          <Plus size={17} strokeWidth={1.75} />
-        </GBtn>
-        <span className="xl-grow" />
-        <button type="button" ref={setEl} className="xl-chip" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
-          {composer.model}
-          <ChevronDown size={13} strokeWidth={2} />
-        </button>
-        {!fresh && (
-          <GBtn label={`${Math.round(composer.context * 100)}% of the context window is in use`} tip={`${Math.round(composer.context * 100)}% of context used`} data-tip-at="above">
-            <Ring value={composer.context} size={17} />
-          </GBtn>
-        )}
-        <button type="submit" className="xl-send" data-kind={kind} aria-label={kind === 'stop' ? 'Stop' : 'Send'} disabled={kind === 'idle'}>
-          {kind === 'stop' ? <Square key="stop" size={11} strokeWidth={0} fill="currentColor" /> : <ArrowUp key="go" size={17} strokeWidth={2.25} />}
-        </button>
-      </div>
-      <Pop open={open} anchor={el} place="above-end" onClose={close} label="Model and mode">
-        {(
-          [
-            ['Model', composer.model],
-            ['Effort', composer.effort],
-            ['Mode', composer.mode],
-          ] as const
-        ).map(([label, value]) => (
-          <button type="button" key={label} className="xl-item" onClick={close}>
-            <span>{label}</span>
-            <span className="xl-item-value">{value}</span>
-            <ChevronRight size={13} strokeWidth={2} />
-          </button>
-        ))}
-        <div className="xl-sep" />
-        <div className="xl-item">
-          <Folder size={15} strokeWidth={1.75} />
-          <span>{composer.folder}</span>
-        </div>
-        <div className="xl-item">
-          <GitBranch size={15} strokeWidth={1.75} />
-          <span>{composer.branch}</span>
-        </div>
+          );
+        })}
       </Pop>
     </>
   );
@@ -384,7 +152,7 @@ export function Home() {
       <GlassGroup id="xl-composer" backdrop={PLANE}>
         <GlassSurface asChild radius={26} thickness={THICKNESS} foreground="vibrant">
           <form className="xl-host xl-composer" data-home="" aria-label="Message" data-glass-role="control" onSubmit={(e) => e.preventDefault()}>
-            <Composer running={false} fresh />
+            <Composer fresh />
           </form>
         </GlassSurface>
       </GlassGroup>
@@ -521,28 +289,34 @@ function useRoomForSide() {
   return wide;
 }
 
+/** What the side column lists: the session's own. */
+export type SideData = Pick<typeof overview, 'branch' | 'added' | 'removed' | 'files' | 'agents' | 'background' | 'todos'>;
+
 /**
  * The side column. Its content is plain (the real app will supply it); what is judged is its container, so that is
  * a prop: four modules (as it was, and the default), one card, or a card that grows out of a button.
  */
-export function Modules({ open: asked, form = 'modules', onToggle }: { open: boolean; form?: SideForm; onToggle?: () => void }) {
+export function Modules({ open: asked, form = 'modules', onToggle, data = overview }: { open: boolean; form?: SideForm; onToggle?: () => void; data?: SideData }) {
   const wide = useRoomForSide();
   const open = wide && asked;
-  const parts: { title: string; meta?: ReactNode; body: ReactNode }[] = [
+  const every: { title: string; has: boolean; meta?: ReactNode; body: ReactNode }[] = [
     {
       title: 'Changes',
+      has: data.files.length > 0,
       meta: (
         <span className="xl-stat">
-          <span className="xl-add">+{overview.added}</span> <span className="xl-del">−{overview.removed}</span>
+          <span className="xl-add">+{data.added}</span> <span className="xl-del">−{data.removed}</span>
         </span>
       ),
       body: (
         <>
-          <div className="xl-line">
-            <GitBranch size={14} strokeWidth={1.75} />
-            <span className="xl-line-text xl-mono">{overview.branch}</span>
-          </div>
-          {overview.files.map((f) => {
+          {data.branch && (
+            <div className="xl-line">
+              <GitBranch size={14} strokeWidth={1.75} />
+              <span className="xl-line-text xl-mono">{data.branch}</span>
+            </div>
+          )}
+          {data.files.map((f) => {
             const [dir, name] = split(f.path);
             return (
               <div key={f.path} className="xl-line">
@@ -561,7 +335,8 @@ export function Modules({ open: asked, form = 'modules', onToggle }: { open: boo
     },
     {
       title: 'Agents',
-      body: overview.agents.map((a) => (
+      has: data.agents.length > 0,
+      body: data.agents.map((a) => (
         <div key={a.name} className="xl-line" data-top="">
           {a.state === 'running' ? (
             <span className="xl-line-mark">
@@ -579,7 +354,8 @@ export function Modules({ open: asked, form = 'modules', onToggle }: { open: boo
     },
     {
       title: 'To do',
-      body: overview.todos.map((todo) => {
+      has: data.todos.length > 0,
+      body: data.todos.map((todo) => {
         const current = 'current' in todo && todo.current;
         return (
           <div key={todo.text} className="xl-line" data-top="">
@@ -591,7 +367,8 @@ export function Modules({ open: asked, form = 'modules', onToggle }: { open: boo
     },
     {
       title: 'Background',
-      body: overview.background.map((b) => (
+      has: data.background.length > 0,
+      body: data.background.map((b) => (
         <div key={b.label} className="xl-line">
           <Terminal size={14} strokeWidth={1.75} />
           <span className="xl-line-text xl-mono">{b.label}</span>
@@ -600,6 +377,9 @@ export function Modules({ open: asked, form = 'modules', onToggle }: { open: boo
       )),
     },
   ];
+  // A session shows the sections it has something in.
+  const parts = every.filter((p) => p.has);
+  if (parts.length === 0) return null;
   const asParts = parts.map((p) => (
     <Part key={p.title} title={p.title} meta={p.meta}>
       {p.body}

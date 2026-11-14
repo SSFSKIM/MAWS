@@ -691,3 +691,162 @@
   .x-layers :is(.xl-row[data-selected='true'], .xl-tab[data-current='true'], .xl-pill[aria-pressed='true']) { outline: 2px solid Highlight; outline-offset: -2px; }
   .x-layers :is(.xl-switch[aria-checked='true'], .xl-send, .xl-btn[data-kind='go']) { background: Highlight; color: HighlightText; }
 }
+
+/* ==== 17. The suggested set, folded in (DESIGN.md section 17) =====================================================
+   The Choices board put each smaller part of the session up in several forms; the owner took the suggested one of
+   each, and those forms are the design from here on. They are written below under names of their own, and the
+   rules above for the forms they replace (.xl-bubble, .xl-edit-head, .xl-queued and the rest) are kept as they
+   were, because the board still draws those earlier forms from this sheet as its record of the alternatives. */
+
+.x-layers {
+  /* A count that stands on the field, not on glass, takes a deeper step of its hue in light: the field is a shade
+     darker than a glass body, and darker again where the picture's paper is in shadow. */
+  --xl-add-field: #135a36; --xl-del-field: #92281a;
+}
+.x-layers[data-scheme='dark'] { --xl-add-field: var(--xl-add); --xl-del-field: var(--xl-del); }
+
+/* ---- the scroll rule, with a message waiting above the composer -------------------------------------------------
+   A queued message stands over the composer's top right, outside it. It is the bar's, so content thins out before
+   it reaches the message, as it does before the composer. */
+.x-layers:has(.xl-waits) { --xl-above: 52px; }
+.x-layers .xl-scroll { --xl-edge-b: calc(var(--vitrea-bar-inset-bottom, 150px) + 4px + var(--xl-above, 0px)); }
+.x-layers .xl-column { padding-bottom: calc(var(--vitrea-bar-inset-bottom, 150px) + 44px + var(--xl-above, 0px)); }
+/* A session is read from its end, so a transcript shorter than the window stands on the composer, not under the
+   tabs: what a session waits on is then beside the words that led to it. */
+.x-layers .xl-column { min-height: 100%; display: flex; flex-direction: column; justify-content: flex-end; }
+
+/* ---- the transcript ------------------------------------------------------------------------------------------- */
+
+/* The person's own message: a wash of the ink on the field, as wide as its words. No material, no shadow. */
+.x-layers .xl-said { max-width: 84%; padding: 10px 16px; border-radius: 20px; background: var(--xl-well); font-size: 15px; line-height: 22px; text-wrap: pretty; }
+
+/* Thinking: the first row of the run it led to; alone, one line. */
+.x-layers .xl-call[data-thought] .xl-call-verb { align-self: center; }
+.x-layers .xl-call-said { flex: 1; min-width: 0; color: var(--xl-fg); }
+.x-layers .xl-cap-lone { cursor: default; }
+.x-layers .xl-cap-lone:is(:hover, :focus-visible) { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-cap-lone:focus-visible .xl-cap-time { opacity: 1; }
+
+/* An edit: the file is a caption, the glass holds code, a run of changed lines is one bar of its colour. */
+.x-layers .xl-cap .xl-cap-name { color: var(--xl-ink); }
+.x-layers .xl-cap .xl-stat { margin-left: 2px; }
+.x-layers .xl-cap .xl-add { color: var(--xl-add-field); }
+.x-layers .xl-cap .xl-del { color: var(--xl-del-field); }
+/* Open is this caption's resting state, so it does not read as pressed. */
+.x-layers button.xl-cap-file[aria-expanded='true']:not(:hover) { color: var(--xl-ink-3); }
+.x-layers .xl-cap-file[aria-expanded='true']:not(:hover, :focus-visible) .xl-cap-chev { opacity: 0; }
+.x-layers .xl-code-wrap { padding-top: 4px; }
+.x-layers .xl-code { overflow: hidden; }
+.x-layers .xl-code .xl-diff { border-top: 0; padding: 10px 0; }
+.x-layers .xl-code .xl-diff-line i { position: relative; width: 28px; }
+.x-layers .xl-code .xl-diff-line:is([data-sign='+'], [data-sign='-']) i::before { content: ''; position: absolute; left: 13px; top: 0; bottom: 0; width: 3px; background: var(--xl-add); }
+.x-layers .xl-code .xl-diff-line[data-sign='-'] i::before { background: var(--xl-del); }
+.x-layers .xl-code .xl-diff-line[data-first] i::before { top: 2px; border-top-left-radius: 2px; border-top-right-radius: 2px; }
+.x-layers .xl-code .xl-diff-line[data-last] i::before { bottom: 2px; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; }
+
+/* What is running: a capsule while it is one row; it opens into its output. */
+.x-layers .xl-run { width: fit-content; max-width: 100%; overflow: hidden; transition: width var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-run .xl-live-head { width: 100%; height: 36px; padding: 0 15px 0 14px; gap: 9px; white-space: nowrap; transition: background-color var(--xl-t-hover); }
+.x-layers .xl-run .xl-live-head:not(:disabled):hover { background: var(--xl-hover); }
+.x-layers .xl-run .xl-live-cmd { overflow: visible; mask-image: none; }
+.x-layers .xl-run .xl-live-time { margin-left: 18px; }
+.x-layers .xl-run .xl-tail { padding: 4px 18px 12px 30px; white-space: nowrap; }
+
+/* Agents that were started: a chip each, with its own state; what it is doing waits for the pointer. */
+.x-layers .xl-agents { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-layers .xl-agent { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px 0 10px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; user-select: none; transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers .xl-agent:is(:hover, :focus-visible) { background: var(--xl-selected); color: var(--xl-ink); }
+.x-layers .xl-agent-line { max-width: 0; overflow: hidden; white-space: nowrap; color: var(--xl-ink-3); opacity: 0; transition: max-width 320ms var(--xl-ease-open), opacity 200ms ease; }
+.x-layers .xl-agent:is(:hover, :focus-visible) .xl-agent-line { max-width: 220px; opacity: 1; }
+
+/* A plan is prose: a heading line, paragraphs, numbered steps. */
+.x-layers .xl-plan { margin-top: 18px; }
+.x-layers .xl-plan-title { font-weight: var(--xl-w-strong); }
+.x-layers .xl-plan p + p { margin-top: 8px; }
+.x-layers .xl-steps { margin: 0; padding: 0; list-style: none; counter-reset: xl-step; }
+.x-layers .xl-steps li { position: relative; padding: 3px 0 3px 26px; counter-increment: xl-step; }
+.x-layers .xl-steps li::before { content: counter(xl-step); position: absolute; left: 0; width: 16px; text-align: right; color: var(--xl-fg3); font-variant-numeric: tabular-nums; }
+.x-layers .xl-plan .xl-steps { margin-top: 10px; }
+.x-layers .xl-steps-card { margin: 0 2px; color: var(--xl-fg); font-size: 13px; line-height: 18px; }
+.x-layers .xl-steps-card li { padding: 2px 0 2px 24px; }
+
+/* What the transcript keeps of an answer. Choices are a message, each under its question; a decision with no words
+   is one mark and one word in the message's own wash, at a caption's size, on the person's side. */
+.x-layers .xl-answer { display: flex; flex-direction: column; gap: 8px; }
+.x-layers .xl-answer-q { color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-verdict { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 9px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-user:has(.xl-verdict) { margin-top: 12px; }
+.x-layers .xl-user:has(.xl-verdict) + .xl-run { margin-top: 8px; }
+
+/* ---- the composer ---------------------------------------------------------------------------------------------- */
+
+/* A message that waits for its turn: where it will be sent from, in a message's shape, not yet filled. */
+.x-layers .xl-waits { position: absolute; right: 0; bottom: calc(100% + 12px); display: flex; align-items: center; gap: 6px; max-width: 84%; padding: 8px 9px 8px 16px; border-radius: 20px; border: 1px dashed rgb(var(--xl-ink-rgb) / 0.3); color: var(--xl-ink-2); font-size: 15px; line-height: 22px; }
+.x-layers .xl-waits .xl-fade { flex: 0 1 auto; }
+.x-layers .xl-waits .xl-queued-x { flex: none; }
+.x-layers .xl-waits:is(:hover, :focus-within) .xl-queued-x { opacity: 1; }
+/* The model's chip is there while the pointer or the caret is. */
+.x-layers .xl-chip[data-approach] { opacity: 0; transition: opacity 200ms ease, background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press); }
+.x-layers .xl-composer:is(:hover, :focus-within) .xl-chip[data-approach], .x-layers .xl-chip[data-approach][aria-expanded='true'] { opacity: 1; }
+.x-layers .xl-item .xl-ring { color: var(--xl-fg2); }
+/* Stop is its own quiet square beside send, while a turn runs. */
+.x-layers .xl-stop { color: var(--xl-fg2); }
+/* A decision is a worded button where the round one stands. */
+.x-layers .xl-act { height: 32px; margin-left: 4px; padding: 0 15px; border-radius: 16px; }
+.x-layers .xl-btn:disabled { color: var(--xl-fg3); background: var(--xl-well); box-shadow: none; }
+
+/* What the session waits on rides over the field it is answered in. */
+.x-layers .xl-strip { padding: 12px 12px 0; animation: xl-strip-in 300ms var(--xl-ease-open); }
+@keyframes xl-strip-in { from { opacity: 0; transform: translateY(4px); } }
+.x-layers .xl-strip .xl-ask-why { margin: 7px 8px 0; }
+.x-layers .xl-strip[data-kind='question'] { padding: 0; }
+.x-layers .xl-q-bar { display: flex; align-items: center; gap: 10px; padding: 13px 16px 0 20px; }
+.x-layers .xl-q-ask { margin: 0 2px 7px; color: var(--xl-fg); font-size: 13px; line-height: 18px; font-weight: 540; }
+.x-layers .xl-q-bar .xl-q-ask { flex: 1; margin: 0; font-size: 14px; line-height: 20px; }
+.x-layers .xl-q-dots { display: inline-flex; gap: 2px; }
+.x-layers .xl-q-dots button { position: relative; width: 14px; height: 20px; }
+.x-layers .xl-q-dots button::after { content: ''; position: absolute; left: 4px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--xl-fg) 26%, transparent); transition: background-color var(--xl-t-pop), transform var(--xl-t-pop) var(--xl-spring); }
+.x-layers .xl-q-dots button[aria-current]::after { background: var(--xl-fg); transform: scale(1.15); }
+.x-layers .xl-q-chips { padding: 9px 14px 0 17px; animation: xl-strip-in 280ms var(--xl-ease-open); }
+/* An option: a label; its sentence is a hover away. Chosen, it takes a ring of the ink and keeps its width, so a row
+   never re-wraps under the pointer. Squarer is "any of these", round is "one of these". */
+.x-layers .xl-opts { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-layers .xl-opt {
+  position: relative; display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; color: var(--xl-fg2); white-space: nowrap;
+  box-shadow: inset 0 0 0 1px var(--xl-line-2); transition: background-color var(--xl-t-hover), color var(--xl-t-hover), box-shadow var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring);
+}
+.x-layers .xl-opt[data-multi] { border-radius: 10px; }
+.x-layers .xl-opt:hover { color: var(--xl-fg); background: var(--xl-hover); }
+.x-layers .xl-opt:active { transform: scale(0.96); }
+/* An option's sentence appears above the question it belongs to, never over it. */
+.x-layers .xl-opt[data-tip]::after { bottom: calc(100% + 34px); }
+.x-layers .xl-composer .xl-opt[data-tip]::after { bottom: calc(100% + 46px); }
+.x-layers .xl-opt[aria-pressed='true'] { color: var(--xl-fg); background: color-mix(in srgb, var(--xl-fg) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--xl-fg); }
+
+/* ---- the card: the same answer from the capsule's list and from the row ------------------------------------------ */
+
+.x-layers .xl-ask-q .xl-q + .xl-q { margin-top: 12px; }
+.x-layers .xl-q-other { display: block; flex: none; width: 100%; margin-top: 12px; }
+/* One item of the list is open at a time; its head opens it, and the arrow that takes the age's place under the
+   pointer opens the session itself. */
+.x-layers .xl-wait-main { flex: 1; min-width: 0; display: flex; align-items: flex-start; gap: 10px; border-radius: 10px; }
+.x-layers .xl-wait-main .xl-wait-text > span { display: block; }
+.x-layers .xl-wait-slot { position: relative; flex: none; display: grid; place-items: start end; min-width: 28px; height: 22px; }
+.x-layers .xl-wait-age { transition: opacity var(--xl-t-hover); }
+.x-layers .xl-wait-go { position: absolute; right: -4px; top: -4px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 9px; color: var(--xl-fg2); opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover); }
+.x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-age { opacity: 0; }
+.x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-go { opacity: 1; transform: none; }
+.x-layers .xl-wait-go:hover { background: var(--xl-selected); color: var(--xl-fg); }
+
+/* ---- quiet words on the field, at night, under Paper --------------------------------------------------------------
+   Paper's night picture has one bright thing in it, the paper's lit top, and it runs through the foot of the reading
+   column. Prose holds over it; the quiet ink of a caption does not (3.6 where it crosses). So at night the quiet
+   words on the field carry a little of the ground with them, as a soft shade around the letters and not as a
+   shape: over the plain ground it is the ground's own colour and is not seen, and over the lit paper the words
+   keep their floor. A message, a chip and a decision's mark are shapes already, and take the same shade under
+   their fill. */
+.x-layers[data-colour='paper'][data-scheme='dark'] .xl-cap { text-shadow: 0 0 3px var(--xl-ground), 0 0 6px var(--xl-ground), 0 0 10px var(--xl-ground), 0 0 14px var(--xl-ground), 0 0 18px var(--xl-ground); }
+.x-layers[data-colour='paper'][data-scheme='dark'] .xl-cap svg { filter: drop-shadow(0 0 3px var(--xl-ground)) drop-shadow(0 0 6px var(--xl-ground)); }
+.x-layers[data-colour='paper'][data-scheme='dark'] :is(.xl-verdict, .xl-said) { background: linear-gradient(var(--xl-well), var(--xl-well)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }
+.x-layers[data-colour='paper'][data-scheme='dark'] .xl-agent { background: linear-gradient(var(--xl-well), var(--xl-well)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }
+.x-layers[data-colour='paper'][data-scheme='dark'] .xl-agent:is(:hover, :focus-visible) { background: linear-gradient(var(--xl-selected), var(--xl-selected)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }

@@ -12,16 +12,19 @@ import {
   type VitreaDiagnosticSink,
 } from '@vitreajs/vitrea-react';
 import { PanelLeft, PanelRight } from 'lucide-react';
-import { approval, projects, type Session } from '../../content/fixtures';
+import { overview, plan, projects, sessionOverviews, tabs as fixedTabs, type Session } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
 import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
 import { paintField, type Strength } from './paint';
 import { FULL, type Presence } from './paper';
 import { gatherOf, type Gather } from './plain';
+import { Composer } from './Composer';
+import { after, emptyDraft, NeedsCtx, nextDraft, type Needs, type Reply } from './needs';
 import { GBtn, isYours, RootCtx } from './parts';
 import { Sidebar } from './Sidebar';
-import { Composer, Home, Modules, SIDE_ROOM_MS, Tabs, Transcript, Waiting } from './Session';
+import { Home, Modules, SIDE_ROOM_MS, Tabs, Waiting, type SideData, type TabItem } from './Session';
+import { itemsOf, Transcript } from './Transcript';
 import { Settings } from './Settings';
 import './layers.css';
 
@@ -33,7 +36,6 @@ const GROUNDS: Record<string, Record<Scheme, string>> = {
   pure: { light: '#ffffff', dark: '#000000' },
 };
 
-export type Answer = null | 'approved' | 'denied';
 export type Material = 'glass' | 'veil' | 'opaque';
 /** The right column's container: four modules, one card as tall as the window's content, or a card that grows out of a round button. */
 export type SideForm = 'modules' | 'card' | 'button';
@@ -306,7 +308,6 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const [field, setField] = useState<HTMLCanvasElement | null>(null);
   const [paneOpen, setPaneOpen] = useState(!x.includes('nopane'));
   const [sideOpen, setSideOpen] = useState(!x.includes('noside'));
-  const [answer, setAnswer] = useState<Answer>(null);
   const [section, setSection] = useState('Engine');
   const [stamp, setStamp] = useState(0);
   const onPaint = useCallback((c: HTMLCanvasElement) => {
@@ -341,15 +342,57 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const align = knobs.align === 'layers' ? undefined : 'column';
   const sideForm: SideForm = knobs.side === 'card' || knobs.side === 'modules' ? knobs.side : 'button';
 
-  // Answering the approval is real in the lab: the session goes back to work and its orange leaves the window.
-  const live = useCallback(
-    (s: Session): Session => {
-      if (s.id !== 's2' || answer === null) return s;
-      return answer === 'approved' ? { ...s, state: 'running', line: approval.command, age: 'now' } : { ...s, state: 'idle' };
+  // ---- Which session is on screen, and what has been answered ---------------------------------------------------
+  // Four sessions can be opened: the one that runs, and the three that wait. A session is reached the way a person
+  // reaches it: its tab, its row in the pane, or the arrow in the waiting list. `at=s3` opens one for a capture.
+  const all = useMemo(() => projects.flatMap((p) => p.sessions), []);
+  const asked = flags.get('at');
+  const [at, setAt] = useState(() => (asked && itemsOf(asked).length > 0 ? asked : 's1'));
+  const [tab, setTab] = useState(at);
+  // A session opened from its row gets a tab, as it would in the app.
+  const [extra, setExtra] = useState<string[]>(() => (fixedTabs.some((t) => t.id === at) ? [] : [at]));
+  // An answer is real in the lab: the session goes back to work and its mark leaves the window. `did=s2-approved`
+  // (also `denied`, `chose`, `said`) starts with one given, so an answered state can be captured and measured.
+  const [replies, setReplies] = useState<Record<string, Reply | undefined>>(() => {
+    const out: Record<string, Reply | undefined> = {};
+    for (const pair of (flags.get('did') ?? '').split(',')) {
+      const [id, kind] = pair.split('-');
+      if (!id || !kind) continue;
+      if (kind === 'approved' || kind === 'denied') out[id] = { kind };
+      else if (kind === 'chose') out[id] = { kind, picked: [[0, 1], [1]] };
+      else if (kind === 'said') out[id] = { kind, text: 'Leave collisions for a second pass. Ship the queue first.' };
+    }
+    return out;
+  });
+  const [draft, setDraft] = useState(emptyDraft);
+  const live = useCallback((s: Session): Session => after(s, replies[s.id]), [replies]);
+  const waiting = all.map(live).filter((s) => isYours(s.state));
+  const openSession = useCallback(
+    (id: string) => {
+      if (itemsOf(id).length === 0) return;
+      setAt(id);
+      setTab(id);
+      setExtra((list) => (fixedTabs.some((t) => t.id === id) || list.includes(id) ? list : [...list, id]));
+      const raw = window.location.hash.replace(/^#\/?/, '');
+      const [path = '', query = ''] = raw.split('?');
+      if (!path.endsWith('/session')) window.location.hash = `#/layers/session${query ? `?${query}` : ''}`;
     },
-    [answer],
+    [],
   );
-  const waiting = projects.flatMap((p) => p.sessions).map(live).filter((s) => isYours(s.state));
+  const waits = useMemo<Needs>(
+    () => ({
+      replies,
+      reply: (id, r) => setReplies((prev) => ({ ...prev, [id]: r })),
+      draft,
+      toggle: (q, o) => setDraft((d) => nextDraft(d, q, o)),
+      open: openSession,
+    }),
+    [replies, draft, openSession],
+  );
+  // A plan's steps are not a to-do list until the plan is approved; then they are.
+  const sideData: SideData =
+    at === 's1' ? overview : at === 's5' && replies.s5?.kind === 'approved' ? { ...sessionOverviews.s5!, todos: plan.steps.map((text, i) => ({ text, done: false, current: i === 0 })) } : sessionOverviews[at] ?? overview;
+  const tabList: TabItem[] = [...fixedTabs, ...extra.map((id) => ({ id, title: all.find((s) => s.id === id)?.title ?? id, kind: 'session' }))];
 
   const go = useCallback((to: SceneId) => {
     const raw = window.location.hash.replace(/^#\/?/, '');
@@ -368,7 +411,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     return () => window.clearTimeout(t);
   }, [sideOpen]);
   const side = scene === 'session' && sideLaid;
-  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}`;
+  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${at}`;
   const pose = flags.get('pose') === 'inactive' ? 'inactive' : flags.get('pose') === 'active' ? 'active' : 'auto';
   const tier = flags.get('tier') === 'css' ? 'css' : 'webgpu';
   const dev = flags.has('dev');
@@ -380,6 +423,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
 
   return (
     <RootCtx.Provider value={el}>
+      <NeedsCtx.Provider value={waits}>
       <FieldCtx.Provider value={field}>
         <GlassRoot asChild renderer={tier} colorScheme={scheme} windowActivation={pose} reducedTransparency={rt} devMode={dev} onDiagnostic={sink} materialProfile={NO_OUTER_SHADOW}>
           <div
@@ -452,8 +496,18 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               setSideOpen={setSideOpen}
               live={live}
               waiting={waiting}
-              answer={answer}
-              setAnswer={setAnswer}
+              at={live(all.find((s) => s.id === at)!)}
+              side={sideData}
+              tab={scene === 'settings' ? 'settings' : tab}
+              tabList={scene === 'settings' ? [...tabList, { id: 'settings', title: 'Settings', kind: 'settings' }] : tabList}
+              onTab={(id) => {
+                if (id === 'settings') return;
+                setTab(id);
+                if (itemsOf(id).length > 0) openSession(id);
+                else if (scene !== 'session') go('session');
+              }}
+              card={flags.get('card') ?? (x.includes('card') ? 's2' : undefined)}
+              waitFirst={flags.get('wait') ?? undefined}
               section={section}
               setSection={setSection}
               go={go}
@@ -461,6 +515,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
           </div>
         </GlassRoot>
       </FieldCtx.Provider>
+      </NeedsCtx.Provider>
     </RootCtx.Provider>
   );
 }
@@ -489,8 +544,16 @@ interface ShellProps {
   setSideOpen: (v: boolean | ((v: boolean) => boolean)) => void;
   live: (s: Session) => Session;
   waiting: Session[];
-  answer: Answer;
-  setAnswer: (a: Answer) => void;
+  /** The session on screen, as it stands now. */
+  at: Session;
+  /** What its side column lists. */
+  side: SideData;
+  tab: string;
+  tabList: TabItem[];
+  onTab: (id: string) => void;
+  /** Capture aids: the row whose card is open at once, and the item of the waiting list that is open at first. */
+  card: string | undefined;
+  waitFirst: string | undefined;
   section: string;
   setSection: (s: string) => void;
   go: (scene: SceneId) => void;
@@ -516,12 +579,12 @@ function Shell(p: ShellProps) {
     const t = [setTimeout(toEnd, 80), setTimeout(toEnd, 420)];
     void document.fonts?.ready.then(toEnd);
     return () => t.forEach(clearTimeout);
-  }, [scene, refs.scroller, material]);
+  }, [scene, refs.scroller, material, p.at.id, p.at.state]);
 
-  const transcript = <Transcript open={p.flags.includes('tools')} />;
+  const transcript = <Transcript session={p.at} open={p.flags.includes('tools')} />;
 
   const capsule = scene !== 'settings' && p.waiting.length > 0 && (
-    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} onAnswer={p.setAnswer} open={p.flags.includes('waiting')} alone={scene !== 'session'} />
+    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} open={p.flags.includes('waiting')} first={p.waitFirst} alone={scene !== 'session'} />
   );
   // Under the column rule the capsule is the tabs' neighbour on the reading column, not the side column's: it
   // leaves the side group, so the two capsules owe each other a small control's room and not a pane's.
@@ -583,7 +646,7 @@ function Shell(p: ShellProps) {
       {scene === 'session' ? (
         <GlassLayer group="xl-side" space="viewport" layout={layout}>
           {trail}
-          <Modules open={p.sideOpen} form={p.sideForm} onToggle={toggle} />
+          <Modules key={p.at.id} open={p.sideOpen} form={p.sideForm} onToggle={toggle} data={p.side} />
         </GlassLayer>
       ) : (
         <GlassGroup id="xl-side" backdrop={PLANE}>
@@ -601,7 +664,7 @@ function Shell(p: ShellProps) {
       <GlassGroup id="xl-pane" backdrop={PLANE}>
         <GlassSurface asChild radius={20} thickness={THICKNESS} foreground="vibrant">
           <nav aria-label={scene === 'settings' ? 'Settings sections' : 'Sessions'} data-glass-role="window" className="xl-host xl-pane" inert={!p.paneOpen}>
-            <Sidebar scene={scene} live={p.live} onAnswer={p.setAnswer} section={p.section} go={p.go} card={p.flags.includes('card')} />
+            <Sidebar scene={scene} live={p.live} at={p.at.id} section={p.section} go={p.go} card={p.card} />
           </nav>
         </GlassSurface>
       </GlassGroup>
@@ -627,7 +690,7 @@ function Shell(p: ShellProps) {
         <GlassGroup id="xl-tabs" backdrop={PLANE}>
           <GlassSurface asChild capsule thickness={THICKNESS} foreground="vibrant">
             <nav className="xl-host xl-tabs" ref={refs.tabBar} aria-label="Tabs" data-glass-role="control">
-              <Tabs settings={scene === 'settings'} live={p.live} go={p.go} />
+              <Tabs list={p.tabList} current={p.tab} onPick={p.onTab} live={p.live} />
             </nav>
           </GlassSurface>
         </GlassGroup>
@@ -637,7 +700,7 @@ function Shell(p: ShellProps) {
         <GlassGroup id="xl-composer" backdrop={PLANE}>
           <GlassSurface asChild radius={26} thickness={THICKNESS} foreground="vibrant">
             <form className="xl-host xl-composer" ref={refs.composerBar} aria-label="Message" data-glass-role="control" onSubmit={(e) => e.preventDefault()}>
-              <Composer running queued />
+              <Composer key={p.at.id} session={p.at} />
             </form>
           </GlassSurface>
         </GlassGroup>
