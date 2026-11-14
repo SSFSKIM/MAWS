@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,7 +8,7 @@ import type { SetupIntent } from '@shared/sessions/intent';
 import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
-import { runGit } from '../../../test/support/git-fixture';
+import { GitFixture, runGit } from '../../../test/support/git-fixture';
 import { admittedFolder, allowlistOf, rootsOf, under } from './allowlist';
 
 describe('files allowlist', () => {
@@ -148,6 +148,30 @@ describe('the admission of a fact’s folder (§G), read from git’s own files'
       }
     } finally {
       rmSync(nested, { recursive: true, force: true });
+    }
+  });
+
+  // The branch review (P1), this reader's side: membership is realpath equality with the path git lists, so where the
+  // filesystem keeps `café` composed and decomposed apart (ext4) the registered worktree is admitted and a sibling spelled
+  // in the other form, holding a copy of its pointer, is not (test/endpoint/checkout-rule.test.ts, the endpoint's side).
+  // Where the forms fold (APFS) the two names are one folder.
+  it('admits a worktree named in one Unicode form and not a sibling named in the other that copies its pointer', async (ctx) => {
+    const one = await GitFixture.create();
+    try {
+      const decomposed = one.path('.claude/worktrees/cafe\u0301');
+      const composed = one.path('.claude/worktrees/caf\u00e9');
+      await one.git('worktree', 'add', '-q', '-b', 'cafe', decomposed);
+      try {
+        mkdirSync(composed);
+      } catch {
+        ctx.skip(); // the forms fold (APFS): one directory
+      }
+      copyFileSync(join(decomposed, '.git'), join(composed, '.git'));
+      const at = (folder: string) => ({ directory: one.root, additionalDirectories: [], worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: null, linked: true } });
+      expect(await admittedFolder(at(decomposed), 'path')).toEqual({ folder: decomposed, checked: true });
+      expect(await admittedFolder(at(composed), 'path')).toBeNull();
+    } finally {
+      one.dispose();
     }
   });
 

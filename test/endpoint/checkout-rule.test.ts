@@ -4,7 +4,7 @@
 // the path must lie in one of the session's roots or the repository a root belongs to, so the boundary a reader gets is
 // the repository with its worktrees; what a worktree read names beyond that the service bounds itself. A spawn's args
 // hold to the registry's schema (step 2), then to the machine's policy (step 6's guard, as `sminos.spawn`'s).
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -561,6 +561,40 @@ describe('the checkout bounds and the folders a record’s facts name', () => {
     } finally {
       renameSync(away, join(p.main, '.git/worktrees/beside'));
     }
+  });
+
+  // The branch review (P1): where the filesystem keeps `café` composed and decomposed apart (ext4, the Linux lane), a folder
+  // beside a registered worktree, spelled in the other form and holding a copy of its `.git` pointer, is another directory,
+  // which git nonetheless takes as that worktree. Membership is the registered directory's identity, never its folded
+  // spelling, as the files reader's realpath equality has it; the folded spelling only finds the candidate. Where the forms
+  // fold (APFS) the two names are one folder, and there is nothing to tell apart.
+  it('does not take a sibling spelled in the other Unicode form for the registered worktree whose pointer it copies', async (ctx) => {
+    const one = await repo();
+    const decomposed = one.path('.claude/worktrees/cafe\u0301');
+    const composed = one.path('.claude/worktrees/caf\u00e9');
+    await one.git('worktree', 'add', '-q', '-b', 'cafe', decomposed);
+    try {
+      mkdirSync(composed);
+    } catch {
+      ctx.skip(); // the forms fold (APFS): one directory
+    }
+    copyFileSync(join(decomposed, '.git'), join(composed, '.git'));
+    const f = await machine(one.serviceEnv());
+    const dispatch: Parameters<CheckoutBounds['of']>[1] = (owner, name, input) => f.services.dispatch(owner, name, input);
+    const listedPaths = async () => {
+      const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: one.root });
+      return listed.ok ? (listed.value as { worktrees: { path: string }[] }).worktrees.map((entry) => entry.path) : listed.error;
+    };
+    const forged = { directory: one.root, additionalDirectories: [], worktree: null, agentFolder: { checkout: composed, cwd: composed, branch: null, linked: true } };
+    expect(await listedPaths(), 'the machine lists the worktree as git spells it').toEqual([one.root, decomposed]);
+    expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
+    moved(f, 'app-forged', forged);
+    const a = await openRemote(f, org.a1, org.A);
+    expect(code(await call(a, 'git.status', { directory: composed }, B('app-forged')))).toBe('no-target');
+    // and once the registered folder is gone, its registration kept: the sibling is still not it
+    rmSync(decomposed, { recursive: true, force: true });
+    expect(await listedPaths()).toEqual([one.root, decomposed]);
+    expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
   });
 });
 
