@@ -2,15 +2,15 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (four of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 150 to build (142 of them in children now), 1 that still waits for the owner to answer (two of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Built and on master, as the state column says: 81 items whole and 17 in part, from pull requests #604, #618, #623, #626, #631, #632, #634, #635, #637, #642, #643, #650, #651, #652, #655, #656 and #657 and the working-folder selector's landing (U8a, which has no pull request). Of an item built in part, the rest is owed by a later landing or a hands-on check, or the child's spec dropped it.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
-## The owner's answers of 2026-11-12 and 2026-11-13
+## The owner's answers of 2026-11-12 to 2026-11-14
 
-Verbatim, as chosen on the question cards; a note is the owner's own text.
+Verbatim, as chosen on the question cards; a note is the owner's own text. An answer marked (typed) was typed in the chat with no card; its note quotes it.
 
 | question | the owner's answer | the owner's note |
 |---|---|---|
@@ -82,6 +82,8 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | Working folder landing, on a drawn example with invented names: the Environment card's folder row has room for about 28 characters and today cuts a longer path at its end, so after the agent moves into a worktree under the launch folder the row reads almost as before and the worktree's own name is not visible. Which end should a long path lose? (The answer also changes the row of a session that never moved, when its launch path is long.) | Cut at the start (Recommended) |  |
 | Working folder landing, on the same drawn example: after the agent moves into a worktree the Environment card gains one muted line naming the folder the session was launched in ("moved from <name>"). Where should it sit? | Under the folder row (Recommended) |  |
 | Working folder landing, on the same drawn example: an agent often steps into a sub-folder of its checkout and back. How should the Environment card show the sub-folder? | In the folder row (Recommended) |  |
+| Do you want files the agent writes to open inside MAWS? | Not PDF alone (typed) | typed, not on a card, in reply to a list of the four questions still open: "MAWS preview shouldn't be limited to PDF, and agent's artifact mention opens in the side panel. for the rest, need more detail." |
+| What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | In the side panel (typed) | the same typed message as the answer above |
 
 ## Questions still open
 
@@ -89,8 +91,6 @@ A question is put to the owner when its child starts, unless the last column say
 
 | items | question | recommended answer | when |
 |---|---|---|---|
-| l6-artifacts-01 | Do you want files the agent writes to open inside MAWS? | PDF only, now. | when its child starts |
-| O-44 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | Keep opening it in the session's side panel. | when its child starts |
 | l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. | when its child starts |
 | #476, l8-settings-05 | Where should a per-chat connector switch sit, and does the Settings connector list go once "Add custom connector" moves to Customize? | Put to you with the result of the hands-on check of #476, which shows which switches can act on a running session. | after the hands-on check of #476 |
 
@@ -280,6 +280,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l5-code-10 | mark | build | "Open in" for VS Code, Cursor, Zed, Xcode, Terminal and Finder, where installed. |
 | l9-browser-delivery-08 | mark | build | The same "Open in" on a session's menu and its sidebar row. |
 | O-37 | observation | built in part, on master (#642) | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Your answers of 11-13: on this Mac a file outside the session's folders opens read-only when that session's transcript writes its path as a link or a file chip ('Files the transcript names'); the machine's daemon, which reads files, checks the path against the transcript before it reads, which stops a direct request for another path but not someone who can also send a message into that session; a session on another machine keeps the refusal. It is built now as a small landing of its own, U6c, after the tab strip landing ('Own small landing, now'); the rest of this item follows in U6b, on top of it. |
+| O-44 | observation | build | The inline link exists already, drawn as a boxed chip that does not read as a link; it will look like a link. The agent's ability to open artifacts by itself is removed. You answered on 11-14: a click on the link opens the artifact in the session's side panel. |
+| l6-artifacts-01 | mark | build | You answered on 11-14: files the agent writes open inside MAWS, and not PDF alone. PDF is the clear first step. Claude Desktop converts DOCX and PPTX in its cloud, which MAWS cannot copy, so how Word, PowerPoint and Excel files are drawn on the Mac is chosen after a probe of the local routes. |
 | l9-browser-delivery-03 | mark | build | A local session's localhost links open in the in-app browser, as a remote session's already do; ⌘-click sends one to the system browser. |
 | l5-code-08 | mark | built in part, on master (#604) | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
 | l7-shell-06 | mark | build | ⌘K opens on your recent sessions and artifacts and can find artifacts. |
@@ -287,8 +289,6 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l7-shell-08 | mark | build | Zoom in and out; Actual Size has no chord because ⌘0 is the Overview. |
 | l7-shell-09 | mark | build | Back and Forward across tabs, by chord and the Go menu. |
 | l7-shell-13 | mark | build | A key jumps between regions; ⇧Tab's mode change is announced. |
-| O-44 | observation | question to the owner | The inline link exists already, drawn as a boxed chip that does not read as a link; it will look like a link. The agent's ability to open artifacts by itself is removed. One thing is unclear. |
-| l6-artifacts-01 | mark | question to the owner | You left this one unmarked. Claude Desktop previews DOCX and PPTX through its cloud; only PDF is a clear step for MAWS. |
 | l5-code-07 | mark | hands-on check (U14) | Cannot be confirmed from code: MAWS adds no handling of its own, and your own typing was recorded as correct on 10-12. The corruption was only seen with cua's synthetic typing. Fixed only on a failing trace; the check is written out. |
 | l5-code-13 | mark | already built | Settled by the 10-24 layout. One small piece remains and rides with l5-code-11. |
 
