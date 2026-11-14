@@ -5,7 +5,8 @@
 // no harness API, so its cases read what they assert from the DOM and drive it with the clicks a reader makes; a line
 // is reached through Review's `Open file ↗` on a hunk at that line (the product's own path to a line), and a diff tab
 // is opened by writing it into layout.json and reloading (C5's restore path).
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { slugOf } from '../src/engine-host/fs/paths';
@@ -777,6 +778,8 @@ test.describe('the product over a session discovered from its transcript', () =>
   test('the card and the code surfaces follow the agent', async () => {
     const repo = await ScratchRepo.create({ sentinels: false });
     const store = await StoreFixture.create();
+    const answers = mkdtempSync(join(tmpdir(), 'maws-u8c2-shell-')); // the terminals' answers, outside both checkouts
+    let asked = 0;
     let maws: MawsLaunch | null = null;
     try {
       const sid = '5e551011-0000-4000-8000-0000000000d1';
@@ -852,6 +855,21 @@ test.describe('the product over a session discovered from its transcript', () =>
         await expect(shownTab()).toHaveAttribute('data-tab-id', tabId);
         return surface(page, 'terminal').getByRole('status', { name: 'worktree warning' });
       };
+      // The shown terminal's own shell asked where it runs: an invented marker and `pwd -P` typed into it, its answer
+      // written to a file outside both checkouts (the terminal draws on a canvas). A tab whose shell never starts, or
+      // whose spawn stays pending, never answers. A keystroke lost to a focus the click had not yet given is typed again.
+      const shellAnswer = async () => {
+        const file = join(answers, `answer-${++asked}.txt`);
+        const marker = `U8C2-SHELL-${asked}`;
+        const said = () => (existsSync(file) ? readFileSync(file, 'utf8').trim() : '');
+        await expect(surface(page, 'terminal').getByText('Starting shell…', { exact: true }), 'the shell has started').toHaveCount(0, { timeout: 20_000 });
+        await expect(async () => {
+          await surface(page, 'terminal').locator('[data-testid="terminal-surface"]').filter({ visible: true }).click();
+          await page.keyboard.type(`printf '%s:%s\\n' ${marker} "$(pwd -P)" > '${file}'\n`);
+          await expect.poll(said, { timeout: 5_000 }).toMatch(new RegExp(`^${marker}:`));
+        }).toPass({ timeout: 30_000 });
+        return said().slice(marker.length + 1);
+      };
       const append = (rows: object[]) => appendFileSync(transcript, lines(rows));
 
       // At the launch folder: the card names the repository, nothing says moved, no mark; Files' root and Review are the
@@ -864,6 +882,7 @@ test.describe('the product over a session discovered from its transcript', () =>
       await openSurface(page, 'Terminal');
       await expect(shownTab()).toHaveCount(1);
       const before = (await shownTab().getAttribute('data-tab-id'))!;
+      expect(await shellAnswer(), 'the first terminal’s shell runs in the repository').toBe(repo.root);
       await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' })).toHaveCount(0);
 
       // `cd` into the worktree.
@@ -885,12 +904,13 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(scmActs(scm), 'no Push, no Open PR, no button on a row or a group').toHaveCount(0);
       await expect(scm.getByRole('textbox', { name: 'Commit message' }), 'no commit form').toHaveCount(0);
       await expect(await showTerminal(before), 'the terminal opened before stays in the repository').toContainText(`This terminal is in ${repo.root}; the session now runs in ${worktree}.`);
+      expect(await shellAnswer(), 'and its shell is still there').toBe(repo.root);
       await sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip]').getByRole('button', { name: 'Add a tool', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
       await expect(shownTab()).not.toHaveAttribute('data-tab-id', before);
       const after = (await shownTab().getAttribute('data-tab-id'))!;
-      await expect(surface(page, 'terminal').locator('[data-testid="terminal-surface"]')).toBeVisible();
-      await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' }), 'a new terminal starts in the worktree').toHaveCount(0);
+      expect(await shellAnswer(), 'a new terminal’s shell starts in the worktree').toBe(worktree);
+      await expect(surface(page, 'terminal').getByRole('status', { name: 'worktree warning' }), 'and warns of nothing').toHaveCount(0);
       await expect(await mark(), 'the sidebar row carries the worktree mark').toBeVisible({ timeout: 20_000 });
       await expect(await hoverPlace()).toContainText('worktree w1');
       await page.mouse.move(700, 20);
@@ -927,6 +947,7 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(scm.getByRole('textbox', { name: 'Commit message' })).toBeVisible();
       await expect(await showTerminal(before), 'the first terminal is where the session is again').toHaveCount(0);
       await expect(await showTerminal(after), 'the second says it is in the worktree').toContainText(`This terminal is in ${worktree}; the session now runs in ${repo.root}.`);
+      expect(await shellAnswer(), 'where its shell still is').toBe(worktree);
       await expect(await mark()).toHaveCount(0, { timeout: 20_000 });
 
       // The tool's way: the transcript and its folder renamed into the worktree's project folder, a `relocated` row and a
@@ -960,6 +981,7 @@ test.describe('the product over a session discovered from its transcript', () =>
       await maws?.cleanup();
       repo.dispose();
       await store.dispose();
+      rmSync(answers, { recursive: true, force: true });
     }
   });
 });

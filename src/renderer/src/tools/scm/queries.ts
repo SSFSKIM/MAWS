@@ -10,7 +10,7 @@
 import { useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
-import type { MawsBridge } from '@shared/ipc/schema';
+import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { queryClient, useCommand } from '../../ipc/query';
 
@@ -63,24 +63,29 @@ export function refreshPublishedPrState(appSessionId: AppSessionId, published: E
   const lookup = (lookups.get(appSessionId) ?? 0) + 1;
   lookups.set(appSessionId, lookup);
   void client.invoke('scm.pr.state', { appSessionId, refresh: true }).then((result) => {
-    if (lookups.get(appSessionId) !== lookup) return;
-    if (!result.ok) return void queryClient.invalidateQueries({ queryKey: key });
-    void queryClient.cancelQueries({ queryKey: key }); // reverts the read at once, before the answer is written
-    queryClient.setQueryData(key, result.value);
+    if (lookups.get(appSessionId) === lookup) writeLookup(key, result);
   });
 }
 
+// A lookup past main's kept answer, written: an ordinary read still out is cancelled, keeping the data it would have
+// replaced, so the lookup's answer is the last written; a failed lookup asks the query again.
+function writeLookup(key: readonly unknown[], result: CommandResult<'scm.pr.state'>): Promise<void> {
+  if (!result.ok) return queryClient.invalidateQueries({ queryKey: key });
+  void queryClient.cancelQueries({ queryKey: key }); // reverts the read at once, before the answer is written
+  queryClient.setQueryData(key, result.value);
+  return Promise.resolve();
+}
+
 // The summary's Refresh (UX wave U8c-2, M6): gh asked again past main's kept answer, which is written only while no move
-// reset the PR state and no later lookup began meanwhile, under the generation the published lookup and the reset share.
-// A failed ask asks the query again, as before.
+// reset the PR state and no later lookup began meanwhile, under the generation the published lookup and the reset share,
+// and written as that lookup writes it (fix wave 1): an ordinary read begun before it is cancelled. A failed ask asks
+// the query again, as before.
 export async function refreshPrState(appSessionId: AppSessionId, client: MawsBridge): Promise<void> {
   const key = prStateKey(appSessionId);
   const lookup = (lookups.get(appSessionId) ?? 0) + 1;
   lookups.set(appSessionId, lookup);
   const result = await client.invoke('scm.pr.state', { appSessionId, refresh: true });
-  if (lookups.get(appSessionId) !== lookup) return;
-  if (result.ok) queryClient.setQueryData(key, result.value);
-  else await queryClient.invalidateQueries({ queryKey: key });
+  if (lookups.get(appSessionId) === lookup) await writeLookup(key, result);
 }
 
 // The checkout's `scm.status`. Read again when its repository's head or refs move (`git remote add`, a remote's URL or an
