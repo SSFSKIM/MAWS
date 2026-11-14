@@ -8,14 +8,13 @@ export const experiment: Experiment = {
   thesis:
     'Glass taken into the transcript: the colour field runs under the whole window, prose is read directly on it, and what the agent made that can be opened (a tool run, an edit, a running command) is a piece of glass standing over it.',
   notes: [
-    'Your four answers are now the design at rest: the drawing out of focus behind text, everything lined up on the reading column, the right column as a button that opens, and Quiet\'s face (the system face) for the whole interface, the New chat line included. Each is still a switch below, so the earlier positions are one chip away.',
-    'Colour, on your word that Paper should be warmer ("perhaps by mixing older orange"): four warmer Papers beside Paper. They put the warmth in different places. Warm paper: the paper itself (ground, shade, shadow) carries the orange at low strength, and the orange comes back once, as the mark. Orange light: the paper as it is, with the orange as light (inside the glass leaf, on the floor under the composer, the lamp at night). Orange underside: the sheet\'s reverse is the orange, a second material. Clay paper: Warm paper with the warmth from today\'s terracotta instead, in case that is the orange you meant.',
-    'Look at each on New chat first (the drawing is whole there), then a session and Settings, in both schemes. Set Painted form to Everywhere to see the whole drawing on every page. Paper itself is unchanged and still the default.',
-    'Painted form has a new last chip, None: plain ground. It is Open\'s ground inside Layers: no drawing on any page, and light and shade gather only under the glass. Flip between it and the default on a session, on Settings and on New chat to choose the ground; try it under the warm colourings too, where the gathered light is where the warmth sits.',
-    '"Needs you" mark is the one call still open, and it waits for the colour: Ink badge, Soft disc, One gold under Paper, Orange light and Orange underside; Warm paper and Clay paper bring their own mark (the orange, the terracotta), so the switch does not apply to them.',
-    'Corrected in Paper at night: one grey caption crossed the sheet\'s lit face when the transcript was scrolled half way and read under its contrast floor there, so the sheet\'s face and edge are a step dimmer at night, as in the warmer Papers. Paper is otherwise as you chose it.',
-    'The other colourings (Peach to Orange) are the earlier comparison set; the switches marked Paper do nothing under them.',
-    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 16.',
+    'This is the design as you have answered it so far: Warm paper, the orange disc for "waiting on you", the drawing blurred behind text, everything lined up on the reading column, the right column as a button that opens, the system face. Every earlier position is still one chip away below.',
+    'New, and first: the suggested set from the Choices board is in. Your own message is a wash, not glass; thinking is the first row of the run it led to; an edit is a caption and a sheet of code; what runs is a capsule; agents are chips; the queued message waits above the composer; the model appears as you approach the composer; stop and send are two things; usage is one drop. Tell me what looks wrong.',
+    'The three sessions that wait can be opened now. Press "Fix flaky upload test", "Billing webhook audit" or "Offline sync design" in the pane (or their tabs, or the arrow in the list the orange capsule opens). Each is answered in its own composer: Approve or Deny, the question\'s chips one question at a time, Approve for the plan. Typing is always the other answer.',
+    'The same answers from elsewhere: open the capsule (one item opens at a time), or rest on a waiting row for its card. Answer in either place and watch the other: the session goes back to work, its orange disc leaves the pane, the tab and the capsule, and the transcript keeps a record on your side of the column (your choices under each question; one mark and a word for a decision; an approved command starts running; an approved plan becomes the To do list).',
+    'Look at the joins: a short transcript stands on the composer, so what a session waits on is beside the words that led to it; the queued message is outside the composer and the transcript thins out before it. Orange is spent on the disc only: Approve and Send are ink.',
+    'Colour: Warm paper is the default now. Paper, the three other warm Papers and the earlier comparison set (Peach to Orange) are still on the switch. Painted form: the blurred drawing is the default; Everywhere shows the whole drawing, None is Open\'s plain ground.',
+    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 17.',
     'Cost: content on glass breaks the glass guideline on purpose; a second glass root runs inside the transcript; legibility depends on the field staying graded.',
   ],
   scenes: ['session', 'settings', 'home'],
@@ -23,7 +22,7 @@ export const experiment: Experiment = {
     {
       id: 'colour',
       label: 'Colour',
-      default: 'paper',
+      default: 'warmpaper',
       options: [
         { value: 'paper', label: 'Paper' },
         { value: 'warmpaper', label: 'Warm paper' },

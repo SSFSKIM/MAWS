@@ -1260,6 +1260,14 @@ goes into Layers and they say only what looks wrong; and, asked whether a sessio
 show Approve in its own message box as well, "Yes, both places". So these are not switches. They are the design at
 rest, and sections 2, 3 and 5 above are read with this one over them.
 
+It was built on Paper under section 13's first positions and then rebased over sections 14 to 16. Three more
+answers arrived with the rebase: the colour is **Warm paper**, the mark for "waiting on you" is the **orange disc**
+(`#fd780f` with `#2a1300` on it, which Warm paper carries as its own mark, 14.2), and the ground stays the
+**blurred drawing**. So Warm paper is the Colour switch's default and what a missing knob means (`DEFAULT_COLOUR`
+in `colour.ts`), every other colouring is still on the switch, and everything below was looked at and measured
+again under Warm paper with section 15's defaults, in both schemes. With this, section 15's one open call (the
+mark) is answered.
+
 ### 17.1 What is in
 
 | part | the form it has now | what it replaced |
@@ -1274,7 +1282,7 @@ rest, and sections 2, 3 and 5 above are read with this one over them.
 | The context mark | a row of the model's menu; it returns to the composer by itself from 80 % | a ring, always |
 | Send and stop | two things: the round button sends, and while a turn runs a small quiet square beside it stops | one button that was stop until there was text |
 | Usage | one drop in the pane's foot, the limit that will bite first, as a level; both limits in its popover | two nested rings |
-| The pane's collapse, a menu's opening, Paper's dark ground | unchanged: it slides, it grows from its corner, `#181614` | the same |
+| The pane's collapse, a menu's opening, the dark ground | unchanged: it slides, it grows from its corner, the colouring's own ground (Warm paper's `#1c150f`; on the board it was Paper's `#181614` against the four candidates) | the same |
 | A question | answered in the session's composer, one question at a time, its options as chips; and from the card | not drawn |
 | A plan | the agent's prose on the field, and the composer's one action decides it; and from the card | not drawn |
 | An approval | the composer of its own session carries the command, Deny and Approve; and from the card, as before | the card only |
@@ -1350,38 +1358,49 @@ the person's turn.
 9. **Fewer blocks against the second glass root.** The root attached to the transcript is mounted for every
    session and holds what that session has: two surfaces for the running one, none for one that is only words.
    It reports the same one diagnostic as before, by design (`backdrop-root-at-container`), and nothing else.
-10. **Quiet words against Paper's night picture.** Standing on the composer, a short transcript puts captions
-    where the night picture keeps its one bright thing, the paper's lit top (level 0.30 to 0.34). Prose holds there
-    (5.6); a caption in the quiet ink read 3.64 and an agent's chip 3.87. Raising the quiet ink far enough would
-    have made it the prose's ink. So under Paper at night a caption carries a soft shade of the ground around its
-    letters (not a shape: over the plain ground it is the ground's colour and unseen), and a chip and a decision's
-    mark, which are shapes already, take the same shade under their fill. Lowest after: 4.6 and up. It is scoped to
-    Paper's night because the cause is that picture; a colouring whose field is graded has no need of it.
-11. **The earlier forms against the board.** The board draws each part "as it was" from this sheet. The rules
+10. **Quiet words against the night picture.** Standing on the composer, a short transcript puts captions where
+    the night picture keeps its one bright thing, the sheet's lit face. As first built (on Paper, the form
+    everywhere, before 15.2) a caption there read 3.64 and an agent's chip 3.87, and the quiet words were given a
+    soft shade of the ground around their letters. Section 15.2 then dimmed the sheet itself for the same reason,
+    found from the other side. After the rebase the same states read 4.9 and up without the shade, in Warm paper
+    and in Paper, with the form blurred and with it everywhere, at Vivid too; the shade was taken out again. One
+    mend in one place.
+11. **The mark against the parts that wait.** The orange disc is the row's, the tab's and the capsule's, and the
+    cards carry it in their heads because they carry the same glyph. A composer that is being answered carries no
+    mark: its tab and its row are selected beside it with the disc on them, and it is itself the thing that waits.
+    Approve and Send stay ink, in the composer and in the cards. Orange is then spent on one thing, "a session
+    waits on you", and never on "press here".
+12. **The fold against section 15's layout.** With the capsule on the reading column's right edge its list opens
+    over the column, not over the side card; with the right column as one card grown from a button, a session
+    lists its own sections in that card (a waiting session has one or two). A session opened from its row adds a
+    fifth tab, and the row's titles shorten to make room, as 15.1's padding lets them; no finding at rest.
+13. **The earlier forms against the board.** The board draws each part "as it was" from this sheet. The rules
     for the replaced forms are therefore kept, unused by Layers, and the new forms have names of their own
     (`.xl-said`, `.xl-code`, `.xl-run`, `.xl-agent`, `.xl-waits`, `.xl-strip`, `.xl-opt`, `.xl-verdict`).
 
 ### 17.6 Readings
 
-`measure.mjs`, the floors of section 7 (4.5 for text, 3 for icons), 1440 by 900 at 2x, WebGPU, Paper at Field
-strength Full unless said. 38 routes: the four sessions at rest; each answered state (approved, denied, chosen,
-said); the waiting list open on each of its three items; the row's card on the question and on the plan; a tool run
-open from the top; mid-scroll; New chat; Settings; and two sessions at Vivid; each in both schemes. 3,255 gated
-readings, none under its floor.
+`measure.mjs`, the floors of section 7 (4.5 for text, 3 for icons), 1440 by 900 at 2x, WebGPU, Warm paper under
+section 15's defaults at Field strength Full unless said. 46 routes: the four sessions at rest; each answered state
+(approved, denied, chosen, said); the waiting list open on each of its three items; the row's card on the question
+and on the plan; a tool run open from the top; mid-scroll; New chat; Settings; each of those in both schemes; then
+four at Vivid, two with the form everywhere, and four under Paper. 4,054 gated readings, none under its floor.
 
 | | light | dark |
 |---|---|---|
-| lowest text | 4.86: a removed count in the Changes module with the list open over it (section 12.6's lowest line, unchanged) | 4.66: an idle row in the pane (unchanged) |
-| lowest text among the new parts | 5.3: a caption on the field | 4.96: the capsule's clock; captions over the lit paper 4.6 and up with their shade |
-| lowest icon | 3.25: a caret in the pane | 3.88: the same |
-| glass bodies, drawn level | 0.77 to 0.99 | 0.11 to 0.31 |
+| lowest text | 5.08: a placeholder on Settings | 4.64: an idle row in the pane, at Vivid (4.68 at Full; Layers' own line) |
+| lowest text among the new parts | 5.3: a caption on the field | 4.94: the capsule's clock |
+| lowest icon | 3.25: a caret in the pane | 4.07: the same |
+| glass bodies, drawn level | 0.79 to 0.99 | 0.11 to 0.31 |
 
-No body is in the band where neither ink holds (0.39 to 0.49). The 0.77 is the composer of a session at rest after
+No body is in the band where neither ink holds (0.39 to 0.49). The 0.79 is the composer of a session at rest after
 a refusal: at its shortest it stands lowest, over the shaded underside of the picture's paper.
 
-Met on the way: the two night readings of 17.5 item 10; a decision's check mark at 1.56 where the glass leaf's rim
-passes behind it (the mark became a small chip); and fields of a closed list item read as text (a closed item now
-holds nothing).
+Met on the way, before the rebase: the two night readings of 17.5 item 10; a decision's check mark at 1.56 where
+the glass leaf's rim passed behind it (the mark became a small chip in the message's wash); and fields of a closed
+list item read as text (a closed item now holds nothing). Diagnostics under the defaults: the one by design
+(`backdrop-root-at-container`, on sessions that have a block) and nothing else, at rest in all four sessions, with
+the list open, and answered.
 
 ### 17.7 Not made good
 
@@ -1394,7 +1413,13 @@ holds nothing).
   is the right place for it and was not drawn), two queued messages.
 - **Deny leaves the session idle** with one word in the transcript and nothing after it. Whether a refusal should
   ask what to do instead was not designed; typing in the same composer is how that is said.
-- **A session opened from its row keeps its tab** for the visit; tabs do not close.
+- **A session opened from its row keeps its tab** for the visit; tabs do not close. With that fifth tab at 1280 by
+  800 the titles shorten to two or three letters, and the file tab to one: the tab row has no rule yet for more
+  tabs than fit (it would scroll, or fold the rest into the plus).
+- **Seen under Warm paper and Paper only.** The other colourings were not opened with the new parts. Their quiet
+  words on the field (the captions, the chips, a decision's mark) are the lines to measure first.
+- **The board follows these defaults now** (Warm paper, the blurred form, the system face), so its "as it was" is
+  the earlier form in today's colour and face, not a picture of Layers on the day it was judged.
 - **The side column of a waiting session** is invented content, as the rest of that column is plain content.
 
 ### 17.8 What changed in the code
@@ -1410,6 +1435,7 @@ holds nothing).
 - `Layers.tsx`: which session is on screen, its tab, the replies and the draft; `at=`, `did=`, `card=<id>`,
   `wait=<id>` as address aids.
 - `layers.css`: one new section at the end; nothing above it was changed.
+- `colour.ts`: `DEFAULT_COLOUR` is `warmpaper`. `meta.ts`: the Colour knob's default, and the notes.
 - `measure.mjs`: the faded band's depth includes a waiting message.
 - `src/content/fixtures.ts`: `sessionTranscripts`, `sessionOverviews` (additions).
 

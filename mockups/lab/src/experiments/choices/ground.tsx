@@ -1,9 +1,18 @@
 // The ground. Paper brings its own (a warm near-black at night, an ivory by day); the owner's candidates are painted
 // beside it in one window, as bands of the same picture, so the same prose and the same glass can be read on each.
 import { transcript } from '../../content/fixtures';
-import { paintPaper } from '../layers/paper';
+import { colouringOf } from '../layers/colour';
+import { paintPaper, type Presence } from '../layers/paper';
+import type { Scheme } from '../../lab/types';
 import { Block, useBoard } from './board';
 import { GROUNDS, LETTERS } from './parts';
+
+/** The drawing out of focus behind what is read: Layers' default position of the painted form. */
+export const RECEDE: Presence = { sharp: 0, soft: 0.85 };
+const HERE = colouringOf(undefined);
+
+/** The grounds on show: the colouring's own first, then the owner's candidates. */
+export const groundsOf = (scheme: Scheme) => GROUNDS[scheme].map((g) => (g.id === 'own' && HERE.ground ? { ...g, hex: HERE.ground[scheme] } : g));
 
 const rgbOf = (hex: string): [number, number, number] => {
   const n = parseInt(hex.slice(1), 16);
@@ -19,6 +28,7 @@ const CUT = 0.36;
  * same picture, so the grounds differ and nothing else does.
  */
 export function paintBands(canvas: HTMLCanvasElement, night: boolean, grounds: readonly string[]) {
+  const light = HERE.field[night ? 'dark' : 'light'].light;
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -36,7 +46,7 @@ export function paintBands(canvas: HTMLCanvasElement, night: boolean, grounds: r
     wg.scale(dpr, dpr);
     wg.fillStyle = hex;
     wg.fillRect(0, 0, w, h);
-    paintPaper(wg, w, h, night, 1, rgbOf(hex));
+    paintPaper(wg, w, h, night, 1, rgbOf(hex), RECEDE, light);
     wg.restore();
     wg.filter = 'none';
     wg.globalAlpha = 1;
@@ -51,7 +61,7 @@ const said = transcript.filter((t) => t.kind === 'user')[1];
 
 export function GroundPage() {
   const { scheme, picks, pick } = useBoard();
-  const grounds = GROUNDS[scheme];
+  const grounds = groundsOf(scheme);
   // The two schemes have different candidates, so each keeps its own letter.
   const key = scheme === 'dark' ? 'ground' : 'ground-light';
   return (

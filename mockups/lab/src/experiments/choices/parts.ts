@@ -56,17 +56,17 @@ export const SUGGESTED: Record<string, string> = {
 export const partOf = (id: string | undefined): PartDef => PARTS.find((p) => p.id === id) ?? PARTS[0]!;
 export const LETTERS = 'ABCDE';
 
-/** The dark ground: Paper's own, then the owner's four candidates. The light scheme has its own three. */
+/** The dark ground: the colouring's own (the hex here is Paper's; `groundsOf` in ground.tsx puts the default colouring's in its place), then the owner's four candidates. The light scheme has its own three. */
 export const GROUNDS = {
   dark: [
-    { id: 'own', hex: '#181614', name: "Paper's own" },
+    { id: 'own', hex: '#181614', name: "The colouring's own" },
     { id: '191919', hex: '#191919', name: 'Neutral' },
     { id: '191c19', hex: '#191c19', name: 'Green cast' },
     { id: '1f1f1f', hex: '#1f1f1f', name: 'Lifted' },
     { id: '000000', hex: '#000000', name: 'Black' },
   ],
   light: [
-    { id: 'own', hex: '#e8e1db', name: "Paper's own" },
+    { id: 'own', hex: '#e8e1db', name: "The colouring's own" },
     { id: 'faf9f5', hex: '#faf9f5', name: 'Warm white' },
     { id: 'ffffff', hex: '#ffffff', name: 'White' },
   ],

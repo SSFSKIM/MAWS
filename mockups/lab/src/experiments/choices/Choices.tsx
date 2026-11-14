@@ -14,10 +14,10 @@ import '../layers/layers.css';
 import './choices.css';
 import { BoardCtx, ClipCtx, type Board } from './board';
 import { ComposerPage } from './composer';
-import { GroundPage, paintBands } from './ground';
+import { GroundPage, groundsOf, paintBands, RECEDE } from './ground';
 import { MenuPage, PanePage, UsagePage, type PaneMotion } from './motion';
 import { PlanPage, QuestionPage } from './needs';
-import { GROUNDS, JUDGED, PARTS, partOf, SUGGESTED, type PartDef } from './parts';
+import { JUDGED, PARTS, partOf, SUGGESTED, type PartDef } from './parts';
 import { Together } from './together';
 import { AgentsPage, CommandPage, DiffPage, MessagePage, ThoughtPage } from './transcript';
 
@@ -30,7 +30,10 @@ const NO_OUTER_SHADOW = {
   outerShadow: { thinOcclusionDark: 0, thinOcclusionMid: 0, thinOcclusionBright: 0, thickOcclusionAt96: 0, thickOcclusionAt128: 0, thickOcclusionAt160: 0 },
 } as const;
 
-const PAPER = colouringOf('paper');
+// The board stands in Layers as it is at rest: its default colouring (Warm paper), the drawing out of focus behind
+// what is read, and the system face. `PAPER` is that colouring, whatever its name.
+const PAPER = colouringOf(undefined);
+const PIN = PAPER.pin;
 const STORE = 'maws-design-lab:choices:picks';
 
 function flagsOf(): URLSearchParams {
@@ -59,7 +62,7 @@ function Plane({ scheme, ground, bands }: { scheme: Scheme; ground: string; band
     if (!c) return;
     const draw = () => {
       if (bands) paintBands(c, scheme === 'dark', bands);
-      else paintField(c, PAPER.field[scheme], 'warm', ground);
+      else paintField(c, PAPER.field[scheme], 'warm', ground, RECEDE);
       // The field is still: it is read once per painting, not on every frame.
       root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
     };
@@ -191,7 +194,7 @@ export default function Choices({ scheme, knobs }: ExperimentProps) {
   }, []);
 
   // ---- the ground ---------------------------------------------------------------------------------------------------
-  const grounds = GROUNDS[scheme];
+  const grounds = groundsOf(scheme);
   const ground = (scheme === 'dark' ? grounds.find((g) => g.id === knobs.ground) : undefined) ?? grounds[0]!;
   const bands = part.id === 'ground' ? grounds.map((g) => g.hex) : null;
   const tokens = PAPER.tokens[scheme];
@@ -267,9 +270,11 @@ export default function Choices({ scheme, knobs }: ExperimentProps) {
           data-melted={melted}
           data-side="closed"
           data-material="glass"
-          data-face="figtree"
-          data-colour="paper"
-          data-mark="badge"
+          data-face="system"
+          data-colour={PAPER.id}
+          data-paper=""
+          data-mark={PAPER.mark}
+          data-needs={PIN ? 'accent' : undefined}
           data-part={part.id}
           data-layout={part.layout}
           style={
@@ -281,6 +286,7 @@ export default function Choices({ scheme, knobs }: ExperimentProps) {
               '--xl-on-accent': tokens.onAccent,
               '--xl-accent-mark': tokens.mark,
               '--xl-focus': tokens.focus,
+              ...(PIN ? { '--xl-pin': PIN[scheme].disc, '--xl-on-pin': PIN[scheme].glyph, '--xl-pin-ring': 'transparent' } : null),
               colorScheme: scheme,
             } as CSSProperties
           }

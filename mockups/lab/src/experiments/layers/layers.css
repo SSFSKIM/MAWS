@@ -837,16 +837,3 @@
 .x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-age { opacity: 0; }
 .x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-go { opacity: 1; transform: none; }
 .x-layers .xl-wait-go:hover { background: var(--xl-selected); color: var(--xl-fg); }
-
-/* ---- quiet words on the field, at night, under Paper --------------------------------------------------------------
-   Paper's night picture has one bright thing in it, the paper's lit top, and it runs through the foot of the reading
-   column. Prose holds over it; the quiet ink of a caption does not (3.6 where it crosses). So at night the quiet
-   words on the field carry a little of the ground with them, as a soft shade around the letters and not as a
-   shape: over the plain ground it is the ground's own colour and is not seen, and over the lit paper the words
-   keep their floor. A message, a chip and a decision's mark are shapes already, and take the same shade under
-   their fill. */
-.x-layers[data-colour='paper'][data-scheme='dark'] .xl-cap { text-shadow: 0 0 3px var(--xl-ground), 0 0 6px var(--xl-ground), 0 0 10px var(--xl-ground), 0 0 14px var(--xl-ground), 0 0 18px var(--xl-ground); }
-.x-layers[data-colour='paper'][data-scheme='dark'] .xl-cap svg { filter: drop-shadow(0 0 3px var(--xl-ground)) drop-shadow(0 0 6px var(--xl-ground)); }
-.x-layers[data-colour='paper'][data-scheme='dark'] :is(.xl-verdict, .xl-said) { background: linear-gradient(var(--xl-well), var(--xl-well)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }
-.x-layers[data-colour='paper'][data-scheme='dark'] .xl-agent { background: linear-gradient(var(--xl-well), var(--xl-well)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }
-.x-layers[data-colour='paper'][data-scheme='dark'] .xl-agent:is(:hover, :focus-visible) { background: linear-gradient(var(--xl-selected), var(--xl-selected)), color-mix(in srgb, var(--xl-ground) 58%, transparent); }

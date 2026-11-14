@@ -21,7 +21,7 @@ export const experiment: Experiment = {
   scenes: ['session'],
   knobs: [
     { id: 'part', label: 'Part', default: PARTS[0]!.id, options: PARTS.map((p) => ({ value: p.id, label: p.name })) },
-    { id: 'ground', label: 'Dark ground', default: 'own', options: GROUNDS.dark.map((g) => ({ value: g.id, label: g.id === 'own' ? `${g.hex} (Paper)` : g.hex })) },
+    { id: 'ground', label: 'Dark ground', default: 'own', options: GROUNDS.dark.map((g) => ({ value: g.id, label: g.id === 'own' ? "The colouring's own" : g.hex })) },
   ],
   Component: lazy(() => import('./Choices')),
 };

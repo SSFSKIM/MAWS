@@ -545,5 +545,6 @@ const cobalt: Colouring = {
 };
 
 export const COLOURINGS: Record<string, Colouring> = { paper, warmpaper, orangelight, underside, claypaper, peach, honey, rose, bluehour, opal, cobalt, orange };
-export const DEFAULT_COLOUR = 'paper';
+// The owner's choice among the Papers (2026-11-14): Warm paper. It is what a missing knob means.
+export const DEFAULT_COLOUR = 'warmpaper';
 export const colouringOf = (id: string | undefined): Colouring => COLOURINGS[id ?? ''] ?? COLOURINGS[DEFAULT_COLOUR]!;
