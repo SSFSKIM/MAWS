@@ -440,7 +440,7 @@ test.describe('interactive', () => {
     await expect(mcp.locator('header h3')).toHaveText('Connectors');
     await expect(mcp.locator('[data-widget-subtitle]')).toHaveText('MCP servers');
     const reach = mcp.locator('[data-widget-note]');
-    await expect(reach).toHaveText(/^Off here is off for every session in .+\.$/);
+    await expect(reach).toHaveText(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
     await expect(reach).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
     const list = mcp.getByRole('list', { name: 'Connectors' });
     const servers = list.getByRole('listitem');
@@ -738,7 +738,7 @@ test.describe('interactive', () => {
     const mcpReads = async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
 
     // Toggle off: what the switch reaches said once, in the head (U11a), one read after the outcome, the switch from that read
-    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in /);
+    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^A switch here is for this chat, and every session started in /);
     await expect(docs).not.toContainText('~/.claude.json');
     await holdOperations(backend, true);
     await docs.getByRole('switch').click();
