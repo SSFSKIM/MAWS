@@ -17,6 +17,7 @@ import { checkoutKey } from '../../ipc/machine';
 import { queryClient } from '../../ipc/query';
 import { A, probeTool, resetPanelStores } from '../../test-support/panel';
 import { useGit } from '../../stores/git';
+import { resetScmQueries } from '../../tools/scm/queries';
 import { connectScmRunEnds } from '../../tools/scm/store';
 import { panelHost, registerPanelTool } from '../host';
 import { PushState } from './PushState';
@@ -110,6 +111,31 @@ describe('push state row shows PR state, install and sign-in states and opens th
     await lineReads('PR #12 Open · 3 passed');
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: MAIN_A, refresh: false }, { appSessionId: MAIN_A, refresh: true }]);
     await waitFor(() => expect(fake.invoked('scm.status')).toEqual([{ appSessionId: MAIN_A }, { appSessionId: MAIN_A }]));
+  });
+
+  // UX wave U8c-2 (M6; M4's re-review): a Refresh still out when the agent moves was asked of the checkout it left. The
+  // move resets the PR state (ipc/events.ts, `resetScmQueries`); the held answer, landing after it, is not written over
+  // the new checkout's.
+  it('writes no Refresh answer that lands after a move reset the PR state', async () => {
+    const user = userEvent.setup();
+    let moved = false;
+    bridge({ 'scm.pr.state': () => (moved ? { ...PR, pr: null } : PR) });
+    let held!: (answer: ScmPrState) => void;
+    const invoke = fake.client.invoke;
+    fake.client.invoke = ((command: CommandName, input: never, opts: never) =>
+      command === 'scm.pr.state' && (input as ScmPrStateInput).refresh
+        ? (void invoke(command, input, opts), new Promise((resolve) => (held = (value) => resolve({ ok: true, value })))) // recorded, then held
+        : invoke(command, input, opts)) as never;
+    await mount();
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    await user.click(within(push()).getByRole('button', { name: 'Refresh PR state' }));
+    await waitFor(() => expect(fake.invoked('scm.pr.state')).toContainEqual({ appSessionId: MAIN_A, refresh: true }));
+    moved = true;
+    act(() => resetScmQueries((appSessionId) => appSessionId === A));
+    await lineReads('No PR for feature'); // the new checkout's answer
+    held(PASSED); // the old checkout's Refresh lands
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()?.textContent).toBe('No PR for feature');
   });
 
   it('says No PR for the branch, and why the PR state is unavailable', async () => {

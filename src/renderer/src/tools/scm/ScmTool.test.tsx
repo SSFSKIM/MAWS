@@ -9,8 +9,9 @@ import { panelHost } from '../../panel/host';
 import { SurfaceRow } from '../../panel/SurfaceRow';
 import { useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
+import { deferred, ok } from '../../test-support/code';
 import { panelOf, resetPanelStores, TestHost } from '../../test-support/panel';
-import { A, B, DIR, scmMain, stubCanvas } from '../../test-support/scm';
+import { A, B, DIR, scmMain, stubCanvas, TOKEN } from '../../test-support/scm';
 import { at } from '../../../../../test/support/machine'; // P5 O6 M2: the page's ids; scm's A and B are main's
 import { useViewer } from '../code/viewer/viewer-store';
 import { registerScmTool, SCM_TOOL_ID, type ScmParams } from './index';
@@ -139,5 +140,74 @@ describe('the agent away from the launch folder', () => {
     await waitFor(() => expect(draft()).toBeTruthy());
     expect(document.querySelector('[data-scm-sheet]')).toBeNull(); // the sheet is not opened again on return
     expect(selectedRow()).toBeNull();
+  });
+
+  // Held open (M6; M4's re-review): a confirm still out at a move. Its sheet closed with the move; its answer, landing
+  // after the agent came back to the launch folder or while it is away, closes no sheet opened since and seeds no run on
+  // another folder's page.
+  const sheet = (kind: string) => document.querySelector<HTMLElement>(`[data-scm-sheet="${kind}"]`);
+  const awayAndBack = async () => {
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.watch')).toContainEqual({ directory: WT }));
+    await waitFor(() => expect(sheet('discard') ?? sheet('push')).toBeNull());
+    moveTo(null);
+    await waitFor(() => expect(draft()).toBeTruthy());
+  };
+  const openPush = async () => {
+    await waitFor(() => expect(document.querySelector<HTMLButtonElement>('[data-scm-remote-action="push"]')?.disabled).toBe(false));
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-scm-remote-action="push"]')!);
+    await waitFor(() => expect(sheet('push')?.querySelector('[data-scm-plan-command]')).toBeTruthy());
+    return sheet('push')!;
+  };
+
+  it('closes no Discard sheet opened after the return with the answer of one confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.discard'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    const openDiscard = async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Discard changes to src/app.ts' }));
+      await waitFor(() => expect(sheet('discard')).not.toBeNull());
+      return sheet('discard')!;
+    };
+    const first = await openDiscard();
+    fireEvent.click(within(first).getByRole('checkbox'));
+    fireEvent.click(within(first).getByRole('button', { name: 'Discard' }));
+    await waitFor(() => expect(main.callsOf('scm.discard')).toHaveLength(1));
+    await awayAndBack();
+    await openDiscard();
+    await act(async () => answer.resolve(ok({ ok: true, status: main.state.status, output: '' })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sheet('discard')).not.toBeNull();
+  });
+
+  it('closes no Push sheet opened after the return with the answer of one confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.push'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    fireEvent.click(within(await openPush()).getByRole('button', { name: 'Push' }));
+    await waitFor(() => expect(main.callsOf('scm.push')).toHaveLength(1));
+    await awayAndBack();
+    await openPush();
+    await act(async () => answer.resolve(ok({ started: true, token: TOKEN })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(sheet('push')).not.toBeNull();
+  });
+
+  it('seeds no run on the page of the folder the agent moved to with the answer of a push confirmed before the move', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    main.state.answers['scm.push'] = () => answer.promise;
+    openScm();
+    render(<TestHost />);
+    fireEvent.click(within(await openPush()).getByRole('button', { name: 'Push' }));
+    await waitFor(() => expect(main.callsOf('scm.push')).toHaveLength(1));
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(2)); // the worktree's page asked for its own run
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    await act(async () => answer.resolve(ok({ started: true, token: TOKEN })));
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
+    expect(useScm.getState().runs.get(at(A))).toBeNull();
   });
 });
