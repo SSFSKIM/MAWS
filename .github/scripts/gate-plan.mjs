@@ -458,8 +458,10 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   // asked for whose specs reach a path under e2e/ the change edits (its spec-import graph, ci-gate-e2e-coverage.mjs), or
   // `MiniCopy: none (<reason>)` under --no-mini-copy. Scenes went green on GitHub's hosted Macs and red on the mini, so a
   // group this run puts off the mini, hosted or on EC2, runs once more on it: in the guest when it is guest-eligible
-  // (MAC_VM_E2E, never a peer group), else on the exclusive host, `RUNNERS.macos`, unless it is LAUNCHD_E2E, which never
-  // runs in the home account. A group already on the mini, or never on a Mac (POOL_E2E, a Linux lane), gets none; a
+  // (MAC_VM_E2E, never a peer group) and its bound fits a guest job (below), else on the mini's exclusive instance,
+  // `RUNNERS.macHome` (today's three labels alone also match the EC2 Mac, where a copy would prove nothing), unless it is
+  // LAUNCHD_E2E, which never runs in the home account. A group already on the mini, or never on a Mac (POOL_E2E, a Linux
+  // lane), gets none; a
   // reserved final ref hosts nothing, so it copies nothing. A copy is the group's entry on that runner with `copy: true`,
   // slug `<slug>-mini` (its artifacts beside the original's), no retry (as the group runs on the mini when nothing hosts
   // it) and its runner's timeout. Host copies join e2e_host, named `e2e:<group> (mini copy)`. Guest copies share guest
@@ -469,6 +471,17 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   const optOut = miniCopyLines.map((value) => /^none(?:\s+\((.*)\))?$/i.exec(value)).find(Boolean);
   const candidates = optOut ? [] : miniCopyLines.map((value) => /^([A-Za-z0-9._:-]+)\s*(.*)$/.exec(value)).filter(Boolean).map(([, group, paths]) => ({ group, paths }));
   const onTheMini = [RUNNERS.macos, RUNNERS.macHome, RUNNERS.macShared, ...GUEST].map((runner) => JSON.stringify(runner));
+  // The guest copies' jobs. ci-kit's VM lane ends a guest job 100 minutes after it took it (CI_KIT_VM_JOB_BOUND on the
+  // mini), and its own rule for that bound is a job's longest timeout plus 10, so a copy job's timeout stays within 90:
+  // the uplink's margin once (checkout, setup and the out/ downloads), then each group's step in turn. A step is bounded
+  // by its group's E2E_MINUTES, else COPY_STEP_MINUTES: the slowest hosted-eligible guest groups' test steps took 7
+  // minutes on a hosted Mac and 5 in the guest (120 runs to 2026-11-13), and a group's class minutes, 30, would leave
+  // one group to a job. A job holds at most COPY_STEPS groups, gate.yml's step slots. A group whose own step alone
+  // would pass the 90 takes the home host instead, or no copy when it is LAUNCHD_E2E.
+  const COPY_JOB_MINUTES = 90;
+  const COPY_STEP_MINUTES = 15;
+  const COPY_STEPS = 3;
+  const copyStepMinutes = (group) => ownMinutes.get(group) ?? COPY_STEP_MINUTES;
   const copies = [];
   const copiesKept = [];
   for (const { group, paths } of candidates) {
@@ -476,25 +489,18 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     if (!original || copies.some((copy) => copy.group === group) || copiesKept.some((kept) => kept.group === group)) continue;
     const offMini = original.hosted || original.runner === JSON.stringify(RUNNERS.macEc2);
     const why = onTheMini.includes(original.runner) ? 'already on the mini' : !offMini ? 'never on a Mac' : '';
-    const guestCopy = !why && macVm.has(group) && !peerGroups.has(group);
+    const guestEligible = !why && macVm.has(group) && !peerGroups.has(group);
+    const tooLong = guestEligible && UPLINK_MARGIN_MINUTES + copyStepMinutes(group) > COPY_JOB_MINUTES ? `its ${copyStepMinutes(group)} minutes pass a guest job's ${COPY_JOB_MINUTES}` : '';
+    const guestCopy = guestEligible && !tooLong;
     if (why || (!guestCopy && launchd.has(group))) {
-      copiesKept.push({ group, paths, why: why || 'LAUNCHD_E2E and not guest-eligible, so never in the home account' });
+      copiesKept.push({ group, paths, why: why || (tooLong ? `${tooLong}, and LAUNCHD_E2E never runs in the home account` : 'LAUNCHD_E2E and not guest-eligible, so never in the home account') });
       continue;
     }
-    copies.push({ ...entryOf(group, guestCopy ? RUNNERS.macVm : RUNNERS.macos), slug: `${original.slug}-mini`, copy: true, paths });
+    copies.push({ ...entryOf(group, guestCopy ? RUNNERS.macVm : RUNNERS.macHome), slug: `${original.slug}-mini`, copy: true, paths, ...(tooLong && { tooLong }) });
   }
-  // The guest copies' jobs. ci-kit's VM lane ends a guest job 100 minutes after it took it (CI_KIT_VM_JOB_BOUND on the
-  // mini), and its own rule for that bound is a job's longest timeout plus 10, so a copy job's timeout stays within 90:
-  // the uplink's margin once (checkout, setup and the out/ downloads), then each group's step in turn. A step is bounded
-  // by its group's E2E_MINUTES, else COPY_STEP_MINUTES: the slowest hosted-eligible guest groups' test steps took 7
-  // minutes on a hosted Mac and 5 in the guest (120 runs to 2026-11-13), and a group's class minutes, 30, would leave
-  // one group to a job. A job holds at most COPY_STEPS groups, gate.yml's step slots.
-  const COPY_JOB_MINUTES = 90;
-  const COPY_STEP_MINUTES = 15;
-  const COPY_STEPS = 3;
   const e2eCopy = [];
   for (const copy of copies.filter((entry) => entry.variant !== undefined)) {
-    const minutes = ownMinutes.get(copy.group) ?? COPY_STEP_MINUTES;
+    const minutes = copyStepMinutes(copy.group);
     const step = { group: copy.group, script: copy.script, slug: copy.slug, minutes, ...(copy.launchd && { launchd: true }) };
     const job = e2eCopy.find((held) => held.copies.length < COPY_STEPS && held.timeout + minutes <= COPY_JOB_MINUTES);
     if (job) {
@@ -512,7 +518,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     for (const step of job.copies) Object.assign(copies.find((copy) => copy.group === step.group), { timeout: job.timeout, test_timeout: step.minutes });
   }
   // The copies' matrix entries, without the paths the summary names.
-  const planned = [...e2e, ...copies.map((copy) => Object.fromEntries(Object.entries(copy).filter(([key]) => key !== 'paths')))];
+  const planned = [...e2e, ...copies.map((copy) => Object.fromEntries(Object.entries(copy).filter(([key]) => key !== 'paths' && key !== 'tooLong')))];
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
   const e2eHost = planned.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
   const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
@@ -611,7 +617,7 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   const copyLines = optOut
     ? [`Mini copies: none (${optOut[1]?.trim() || 'no reason given'}).`]
     : [
-      ...copies.map((copy) => `Mini copy: e2e:${copy.group} ${copy.variant === undefined ? 'on the exclusive host, [self-hosted, macOS, ARM64]' : `in the guest, [ci-kit-mac-vm], as e2e: mini copy (${e2eCopy.find((job) => job.copies.some((step) => step.group === copy.group)).groups})`}${pathsOf(copy)}.`),
+      ...copies.map((copy) => `Mini copy: e2e:${copy.group} ${copy.variant === undefined ? `on the home host, [self-hosted, macOS, ARM64, ci-kit-mac-home]${copy.tooLong ? ` (${copy.tooLong})` : ''}` : `in the guest, [ci-kit-mac-vm], as e2e: mini copy (${e2eCopy.find((job) => job.copies.some((step) => step.group === copy.group)).groups})`}${pathsOf(copy)}.`),
       ...copiesKept.map((kept) => `Mini copy kept off: e2e:${kept.group}, ${kept.why}${pathsOf(kept)}.`),
     ];
   for (const line of copyLines) {

@@ -624,3 +624,14 @@ test('--no-mini-copy writes MiniCopy: none with its reason, computes nothing, an
     assert.deepEqual(refused.refs, [], reason);
   }
 });
+
+test("the alert refusal's push-anyway line quotes each argument, so a reason's spaces and its # survive a paste", () => {
+  const result = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd'], { alerts: true });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  const line = /^ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts\/ci-gate\.sh (.*)$/m.exec(result.stderr)?.[1];
+  assert.ok(line, result.stderr);
+  // The line's words, as a shell reads them back: the call's own arguments, then the peer as resolved.
+  const words = execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\n' "$@"`], { encoding: 'utf8' }).trimEnd().split('\n');
+  assert.deepEqual(words.slice(1, 9), ['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd']);
+  assert.deepEqual(words.slice(-2), ['--peer', 'none']);
+});

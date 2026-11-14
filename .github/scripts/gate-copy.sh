@@ -3,31 +3,64 @@
 # guest job, each group in a slot of its own.
 #
 #   gate-copy.sh run <slot>   one group: SCRIPT, its package script, run as the e2e job runs a guest entry's, its out/
-#                             restored from the variants the job downloaded and never built (MAWS_E2E_BUILD_REQUIRE=1).
-#                             The last group's reports are cleared first (its own upload has taken them), and with
-#                             LAUNCHD=true the e2e LaunchAgents a group before it left are swept. The slot's start and end
-#                             go under $RUNNER_TEMP/maws-copy for the verdict, with its log
+#                             restored from the variants the job downloaded and never built (MAWS_E2E_BUILD_REQUIRE=1),
+#                             in a process group of its own: Actions' step timeout ends the step's shell alone, and the
+#                             orphans' cleanup comes at the job's end, so a group cut at its bound would go on running
+#                             (pnpm, Playwright, Electron) beside the next. Each later slot, and the verdict, first stops
+#                             whatever group a slot before it left (TERM, then KILL after REAP_GRACE seconds, 10), and
+#                             with LAUNCHD=true sweeps the e2e LaunchAgents, as the e2e job does after a group. Then the
+#                             last group's reports are cleared (its own upload has taken them). The slot's start, end,
+#                             status, process group and log go under $RUNNER_TEMP/maws-copy for the verdict
 #   gate-copy.sh verdict      one line per group, its slot's outcome and minutes, to the log and the step summary, then
 #                             each group not green with its log's last lines (a slot that continues on error is not
 #                             among the failed steps whose logs ci-gate.sh prints, this step is); exit 1 when any group
-#                             is not green. COPY_GROUPS the job's groups (`a, b`), OUTCOMES its slots'
-#                             outcomes in order, space-separated
+#                             is not green. A slot with no status was cut at its bound, which its line says, with
+#                             whether its processes had to be stopped. COPY_GROUPS the job's groups (`a, b`), OUTCOMES
+#                             its slots' outcomes in order, space-separated
 set -uo pipefail
 dir=${RUNNER_TEMP:?}/maws-copy
+
+# Stops every recorded slot's process group still alive. A slot that left one without a status was cut at its bound.
+reap() {
+  local file slot pgid i
+  for file in "$dir"/*.pgid; do
+    [[ -f $file ]] || continue
+    pgid=$(<"$file")
+    slot=$(basename "$file" .pgid)
+    if [[ $pgid =~ ^[0-9]+$ ]] && kill -0 -- "-$pgid" 2>/dev/null; then
+      [[ -f $dir/$slot.status ]] || touch "$dir/$slot.killed"
+      kill -TERM -- "-$pgid" 2>/dev/null
+      for ((i = 0; i < ${REAP_GRACE:-10}; i++)); do kill -0 -- "-$pgid" 2>/dev/null || break; sleep 1; done
+      kill -KILL -- "-$pgid" 2>/dev/null
+      echo "gate-copy: stopped what slot $slot left running (process group $pgid)"
+    fi
+    rm -f "$file"
+  done
+  if [[ ${LAUNCHD:-} == true ]]; then .github/scripts/launchd-sweep.sh; fi
+}
 
 case ${1:-} in
   run)
     slot=${2:?gate-copy.sh run <slot>}
     mkdir -p "$dir"
+    reap || exit 1
     date +%s >"$dir/$slot.start"
-    trap 'date +%s >"$dir/$slot.end"' EXIT
     rm -rf playwright-report test-results
-    if [[ ${LAUNCHD:-} == true ]]; then .github/scripts/launchd-sweep.sh || exit 1; fi
     export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=${GITHUB_SHA:?} MAWS_E2E_BUILD_REQUIRE=1
-    .github/scripts/gate-run.sh '^flaky: |^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' pnpm "${SCRIPT:?}" 2>&1 | tee "$dir/$slot.log"
-    exit "${PIPESTATUS[0]}"
+    # Backgrounded without job control, the child shares this shell's group, so setsid() makes it a group's leader.
+    # shellcheck disable=SC2016 # the inner script's own arguments
+    perl -MPOSIX -e 'POSIX::setsid() or die "setsid: $!\n"; open(my $f, ">", shift) or die "pgid: $!\n"; print $f "$$\n"; close $f; exec @ARGV or die "exec: $!\n"' \
+      "$dir/$slot.pgid" bash -c '.github/scripts/gate-run.sh "$1" pnpm "$SCRIPT" 2>&1 | tee "$2"; exit "${PIPESTATUS[0]}"' _ \
+      '^flaky: |^ +[0-9]+ (passed|failed|flaky|skipped|interrupted|did not run)|^e2e-build: ' "$dir/$slot.log" &
+    wait "$!"
+    status=$?
+    echo "$status" >"$dir/$slot.status"
+    date +%s >"$dir/$slot.end"
+    exit "$status"
     ;;
   verdict)
+    mkdir -p "$dir"
+    reap
     IFS=, read -ra groups <<<"${COPY_GROUPS:?}"
     read -ra outcomes <<<"${OUTCOMES:-}"
     now=$(date +%s)
@@ -47,6 +80,9 @@ case ${1:-} in
         minutes=$(((end - start + 30) / 60))
       fi
       [[ $outcome == success ]] || red=1
+      if [[ -f $dir/$slot.start && ! -f $dir/$slot.status ]]; then
+        outcome+=", cut at its bound$(if [[ -f $dir/$slot.killed ]]; then echo ', its processes stopped'; fi)"
+      fi
       lines+=("e2e:$group	$outcome	${minutes:-not started}")
       echo "mini copy: e2e:$group $outcome${minutes:+ in $minutes min}"
     done

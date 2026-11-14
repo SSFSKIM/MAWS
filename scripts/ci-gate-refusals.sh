@@ -16,9 +16,11 @@
 # among them: the relaunch's plan normalises them exactly as this run's plan did.
 # A job's name is its gate's, but for unit's pool shards and packaged's hosted shards, `<gate> <k>/<n>`: the
 # relaunch names that gate once, the plan sharding it again. Names are whole, spaces included: the refused, one a line.
-# A mini copy (gate-plan.mjs) is relaunched on the mini alone, on a line of its own under the label's `-mini` (a ref of
-# its own): a host copy, `e2e:<group> (mini copy)`, with --lane no-hosted, and the groups of a guest copy job,
-# `e2e: mini copy (<group>, …)`, with --lane vm. There each group is already on the mini, so the relaunch copies none.
+# A mini copy (gate-plan.mjs) is relaunched as its plain group. A guest copy job's groups, `e2e: mini copy (<group>, …)`,
+# go on a line of their own under the label's `-mini` (a ref of its own) with --lane vm, the guest alone, where each is
+# already on the mini, so that relaunch copies none. A host copy, `e2e:<group> (mini copy)`, joins the main relaunch,
+# with this run's lane: no flag reaches the home label it took (--lane no-hosted leaves an unlisted group on today's
+# three labels, which the EC2 Mac carries too), and its original, off the mini again there, is copied to it again.
 refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
   local refused beside lead="scripts/ci-gate.sh $sha" relaunch rest=''
   refused=$(printf '%s\n' "$2" | perl -ne 'print "$1\n" if /^([^\t]+)\t[^\t]*\t\S+ ci-kit: .*rerun\s*$/' | sort -u)
@@ -46,11 +48,7 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
     # A red build skips the guest matrix before expansion, losing its group names. It is a prerequisite, not a gate:
     # relaunch the requested set, as for a refused plan, rather than omit the unnamed guest groups.
     function relaunched(job,   list, parts, n, i) {
-      if (job ~ / \(mini copy\)$/) {
-        sub(/ \(mini copy\)$/, "", job)
-        if (!(job in host)) { host[job] = 1; hosts = hosts " " job }
-        return
-      }
+      sub(/ \(mini copy\)$/, "", job)
       if (job ~ /^e2e: mini copy \(.+\)$/) {
         list = substr(job, 17, length(job) - 17)
         n = split(list, parts, ", ")
@@ -90,8 +88,6 @@ refusals() { # <the jobs, "conclusion<TAB>name" lines> <the failed jobs' logs>
         relaunch, substr(gates, 2), (beside != "" && index(gates ",", ",e2e:default,") ? " --default-beside " beside : ""), label
       else printf "the refused and the red are mini copies alone\n"
       guests = uncovered(guests)
-      hosts = uncovered(hosts)
       if (guests != "") printf "ci-gate: relaunch the mini copies in the guest: %s --lane vm%s --gates %s --label %s-mini --evidence\n", copies, rest, guests, label
-      if (hosts != "") printf "ci-gate: relaunch the mini copies on the exclusive host: %s --lane no-hosted%s --gates %s --label %s-mini-host --evidence\n", copies, rest, hosts, label
     }'
 }

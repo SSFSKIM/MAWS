@@ -102,7 +102,7 @@
 #                      tested commit's CLASS1_E2E) whose specs reach a path under e2e/ that the change edits (a spec or
 #                      e2e/support; the spec-import graph from the merge base with origin/master, fetched first) gets a
 #                      `MiniCopy: <group> <paths>` trailer, and where the run puts that group off the mini, on a hosted
-#                      Mac or EC2, the plan runs it once more on the mini, in the guest or on the exclusive host, as a
+#                      Mac or EC2, the plan runs it once more on the mini, in the guest or on its home host, as a
 #                      `(mini copy)` job (gate-plan.mjs): scenes went green on the hosted Macs and red on the mini. A
 #                      graph that cannot be read (no merge base, no TypeScript) gives no copy, and an E2E-Coverage note
 #                      that says so
@@ -397,7 +397,8 @@ else
     0) ;;
     2)
       printf '%s\n' "$alert_check" >&2
-      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]} $relaunch_peer_flag $relaunch_peer" >&2
+      # Shell-quoted, so a reason's spaces or its `#` stay one argument when the line is pasted.
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh $(printf '%q ' "${args[@]}")$relaunch_peer_flag $relaunch_peer" >&2
       exit 2 ;;
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac

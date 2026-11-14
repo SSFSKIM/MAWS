@@ -1068,8 +1068,9 @@ jobs:
   # 13-18 minutes before its first test, so one job runs several groups one after another, each in a slot of its own: the
   # slot's step has the group's own bound and continue-on-error, so a red or a hung group leaves the next its run, and its
   # reports go up under that group's `<slug>-mini`. The out/ variants the job's groups need are downloaded once; each
-  # group's script restores its own (scripts/e2e-build.sh under MAWS_E2E_BUILD_REQUIRE=1). The verdict fails the job when
-  # any group is not green and writes one line per group. The slots are COPY_STEPS (gate-plan.mjs), one step pair each.
+  # group's script restores its own (scripts/e2e-build.sh under MAWS_E2E_BUILD_REQUIRE=1). Each group runs in a process
+  # group of its own, which the next slot and the verdict stop if a cut step left it running (gate-copy.sh). The verdict
+  # fails the job when any group is not green and writes one line per group. The slots are COPY_STEPS (gate-plan.mjs), one step pair each.
   e2e-copy:
     needs: [plan, e2e-build]
     if: needs.plan.outputs.e2e_copy != '[]'
@@ -1159,6 +1160,7 @@ jobs:
         env:
           COPY_GROUPS: ${{ matrix.groups }}
           OUTCOMES: ${{ steps.copy1.outcome }} ${{ steps.copy2.outcome }} ${{ steps.copy3.outcome }}
+          LAUNCHD: ${{ matrix.launchd }}
         run: .github/scripts/gate-copy.sh verdict
       - if: always() && matrix.launchd && steps.checkout.outcome == 'success'
         run: .github/scripts/launchd-sweep.sh
