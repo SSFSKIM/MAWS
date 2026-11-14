@@ -13,6 +13,7 @@ import { toast, useNotices } from '../../stores/notices';
 import { runBash } from '../modes/bash';
 import { appendMemory } from '../modes/memory';
 import { dispatchHumanPrompt } from '../submit/send-human-prompt';
+import { TERMINAL_KEEPS_NO_QUEUE } from '../submit/submit-state'; // UX wave U4a
 import type { SessionControls } from '../../session/controls/types'; // P5 O9 M4
 import { startNoticeId } from '../../sessions/store'; // P2-A
 import { acquireSession, acquisitionWords } from '../../sessions/acquire'; // P2-A
@@ -102,12 +103,14 @@ export function appendHistory(client: MawsBridge, appSessionId: AppSessionId, s:
 // Board 525: another machine's terminal session has no record, and its refusal is said all the same (never nothing); one
 // at the member's grade there offers no Retry, which the same grade would refuse. (A prompt the host took is kept as the
 // member's own at the port, controls-for.ts.)
+// UX wave U4a (l3-input-03): `when` is ⌘Enter's keep-for-after, passed to the port; a terminal session's refusal of it
+// during a turn offers no Retry (sending the words then would do the opposite of what was asked).
 interface RemoteExtras {
   uploads: readonly SendUpload[];
   failed(error: unknown): void;
 }
 
-export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void, remote?: RemoteExtras): Promise<boolean> {
+export async function submitHumanSerialized(controls: SessionControls, client: MawsBridge, appSessionId: AppSessionId, s: Serialized, retry?: () => void, remote?: RemoteExtras, when?: 'after'): Promise<boolean> {
   if (s.empty) return false;
   let tooLarge = false;
   const fits = () => {
@@ -122,11 +125,13 @@ export async function submitHumanSerialized(controls: SessionControls, client: M
       precheck: fits,
       ...(s.attachmentNames !== undefined && { attachmentNames: s.attachmentNames }),
       ...(remote !== undefined && remote.uploads.length > 0 && { uploads: remote.uploads }),
+      ...(when !== undefined && { when }),
     });
     if (result.disposition === 'held') return false;
     if (result.disposition === 'refused') {
       if (tooLarge) return false; // the pre-check said why
-      if (useSessions.getState().records.has(appSessionId) || isRemoteLaneA(appSessionId)) warn(result.reason ?? 'The message was not sent', readerGradeOf(appSessionId) === null ? retry : undefined, startNoticeId(appSessionId), retryLabel(appSessionId));
+      const retryable = readerGradeOf(appSessionId) === null && result.reason !== TERMINAL_KEEPS_NO_QUEUE;
+      if (useSessions.getState().records.has(appSessionId) || isRemoteLaneA(appSessionId)) warn(result.reason ?? 'The message was not sent', retryable ? retry : undefined, startNoticeId(appSessionId), retryLabel(appSessionId));
       return false;
     }
   } catch (error) {
@@ -159,9 +164,10 @@ export async function submitRemoteSerialized(
   attachments: readonly Attachment[],
   cwd: string,
   retry?: () => void,
+  when?: 'after', // UX wave U4a
 ): Promise<boolean> {
   const { upload } = planRemoteSend(s.text, attachments);
-  if (s.empty || upload.length === 0 || !controls.capability('send').available) return submitHumanSerialized(controls, client, appSessionId, s, retry);
+  if (s.empty || upload.length === 0 || !controls.capability('send').available) return submitHumanSerialized(controls, client, appSessionId, s, retry, undefined, when);
   const sending = beginRemoteSend(appSessionId);
   let message: Serialized;
   let uploads: readonly SendUpload[];
@@ -177,12 +183,20 @@ export async function submitRemoteSerialized(
   } finally {
     sending();
   }
-  return submitHumanSerialized(controls, client, appSessionId, message, retry, {
-    uploads,
-    failed: (error) => {
-      if (refusedForUploads(error)) forgetUploads(appSessionId, attachments);
+  return submitHumanSerialized(
+    controls,
+    client,
+    appSessionId,
+    message,
+    retry,
+    {
+      uploads,
+      failed: (error) => {
+        if (refusedForUploads(error)) forgetUploads(appSessionId, attachments);
+      },
     },
-  });
+    when,
+  );
 }
 
 // P2-A: a `!` or `#` submission on a record with no ready process acquires the session first. Whether it may go on: a

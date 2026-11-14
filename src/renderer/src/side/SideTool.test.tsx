@@ -2,9 +2,9 @@
 // the panel rule (a thread opened while its parent is not shown is added without activation and a toast says where);
 // the chip strip of the session's threads, newest first; the thread view yielding to a main tab of the same thread
 // and publishing the child it draws for the unread rule.
-import { act, cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import { promotionMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -12,7 +12,7 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { SideExchange } from '@shared/side/question';
-import { digest, record, status } from '../../../../test/support/builders';
+import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { rowsOf } from '../transcript/model/derive';
@@ -27,8 +27,10 @@ import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { openSideThread, revealNewThread, SIDE_TOOL_ID } from './actions';
+import { applyBtw } from './btw'; // UX wave U4a
+import { BtwWidget } from './BtwWidget'; // UX wave U4a
 import { registerSidePane } from './register';
-import { resetSideQuestions, setInlineQuestions, setSideView, sideChildrenShown, sidePaneOf, useSidePane } from './store';
+import { btwCardOf, resetSideQuestions, setInlineQuestions, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane } from './store';
 import { sideThreadsOf, sideTool } from './SideTool';
 import { promotionQuestionOf, ThreadView } from './ThreadView';
 // E4d start
@@ -117,7 +119,7 @@ describe('the Side pane', () => {
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'), thread(TWO, '2026-10-06T02:00:00.000Z', { anchor: undefined, openedBy: 'btw' }), fork, other);
     expect(sideThreadsOf(useSessions.getState().records, A).map((r) => r.appId)).toEqual([TWO, ONE]);
     mount();
-    const chips = [...document.querySelectorAll('[data-side-chip]:not([data-side-chip="btw"])')];
+    const chips = [...document.querySelectorAll('[data-side-chip]')]; // UX wave U4a: no question chip leads them
     expect(chips.map((chip) => chip.textContent?.replace(/^\W+/, ''))).toEqual(['Side question', 'x.ts:42']);
     expect(chips[0].getAttribute('aria-current')).toBe('true'); // no view chosen: the newest
   });
@@ -376,8 +378,9 @@ describe('the Side pane', () => {
   });
 });
 
-// E3 (M4): the question view (Design §7) and a promoted thread's header (M3's review)
-describe('the Side pane’s question view', () => {
+// E3 (M4): side questions, under a thread in the pane since UX wave U4a moved a session's own to its card (Design §7),
+// and a promoted thread's header (M3's review)
+describe('the Side pane and side questions', () => {
   const exchange = (over: Partial<SideExchange>): SideExchange => ({ id: 'op-1', question: 'What word?', state: 'answered', response: 'ZEBRA', synthetic: false, error: null, askedAt: '2026-10-06T10:00:00.000Z', answeredAt: '2026-10-06T10:00:02.000Z', ...over });
   let fake: FakeClient;
   const listing = (exchanges: SideExchange[]) => {
@@ -386,103 +389,18 @@ describe('the Side pane’s question view', () => {
   };
   beforeEach(() => resetSideQuestions());
 
-  it('leads the strip with its chip; choosing it lists the host’s log, an answer, a substituted one with its notice, a pending and a failed one', async () => {
+  // UX wave U4a (M7; O-20): a `/btw` answers in the session's card; the pane keeps the side threads alone
+  it('has no question chip and no question view: the strip lists the side threads only, and a /btw opens none of it', async () => {
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
-    listing([
-      exchange({}),
-      exchange({ id: 'op-2', question: 'Why?', response: 'I can only answer from the conversation.', synthetic: true }),
-      exchange({ id: 'op-3', question: 'And?', state: 'pending', response: null, answeredAt: null }),
-      exchange({ id: 'op-4', question: 'Again?', state: 'failed', response: null, error: 'Side question cancelled' }),
-    ]);
-    mount();
-    const chips = [...document.querySelectorAll('[data-side-chip]')];
-    expect(chips.map((chip) => chip.getAttribute('data-side-chip'))).toEqual(['btw', ONE]);
-    await userEvent.click(chips[0] as HTMLElement);
-    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
-    await screen.findByText('ZEBRA');
-    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A_ID }]);
-    expect([...document.querySelectorAll('[data-side-exchange]')].map((el) => el.getAttribute('data-side-exchange'))).toEqual(['answered', 'answered', 'pending', 'failed']);
-    expect(document.querySelectorAll('[data-side-synthetic]')).toHaveLength(1);
-    expect(screen.getByText('The engine substituted this answer')).toBeTruthy();
-    expect(screen.getByText('Answering…')).toBeTruthy();
-    expect(screen.getByRole('alert').textContent).toContain('Side question cancelled');
-  });
-
-  // P5 O9: a terminal session's question whose acknowledgement was unknown stays pending with its doubt, Retry offered
-  it('draws a pending question with a doubt as answering still, the doubt said beside a Retry', async () => {
-    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
-    listing([exchange({ id: 'op-5', question: 'Still?', state: 'pending', response: null, answeredAt: null, error: 'It may have been asked: its answer shows here if it was' })]);
-    act(() => setSideView(A, { kind: 'btw' }));
-    mount();
-    await screen.findByText('Still?');
-    expect(screen.getByText('Answering…')).toBeTruthy();
-    const doubt = document.querySelector<HTMLElement>('[data-side-uncertain]')!;
-    expect(doubt.textContent).toContain('It may have been asked: its answer shows here if it was');
-    expect(within(doubt).getByRole('button', { name: 'Retry' })).toBeTruthy();
-    expect(screen.queryByRole('alert')).toBeNull();
-  });
-
-  // P2-A (2026-10-09; the execution document §5.6): Ask and Retry on an exited session start it (side), then ask
-  it('on an exited session, Ask starts the session first and then asks once; nothing is acquired by opening the view', async () => {
     listing([exchange({})]);
-    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]) });
-    act(() => setSideView(A, { kind: 'btw' }));
-    mount();
-    await screen.findByText('ZEBRA');
-    expect(fake.invoked('session.acquire')).toEqual([]);
-    expect(screen.getByText('Starts this session')).toBeTruthy();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?{Enter}');
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
-    expect(screen.getByText('Starting…')).toBeTruthy();
-    expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(fake.invoked('session.sideQuestion')).toEqual([]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
-    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
-    expect(fake.invoked('session.acquire')).toHaveLength(1);
-  });
-
-  it('on an exited session, Retry starts it first; a refused start says why and asks nothing, the question kept', async () => {
-    listing([exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
-    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' } as never)]]) });
-    act(() => setSideView(A, { kind: 'btw' }));
-    mount();
-    await userEvent.click(await screen.findByRole('button', { name: 'Retry' }));
-    expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
-    await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word?', retryOf: 'op-2' }]);
-    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'Again?{Enter}');
-    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/gone' }));
-    expect(screen.getByText('Directory not found: /gone')).toBeTruthy();
-    expect(fake.invoked('session.sideQuestion')).toHaveLength(1);
-    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('Again?');
-  });
-
-  it('a session a terminal holds: Ask and Retry are disabled with the holder named; continuing as a thread stays possible', async () => {
-    listing([exchange({}), exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
-    useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...record(A), holder: { kind: 'terminal', pid: 42 } }), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) }));
-    act(() => setSideView(A, { kind: 'btw' }));
-    mount();
-    await screen.findByText('ZEBRA');
-    expect(screen.getByText('Held by terminal · 42')).toBeTruthy();
-    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'More?');
-    expect((screen.getByRole('button', { name: 'Ask' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Retry' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(false);
-    expect(fake.invoked('session.acquire')).toEqual([]);
-  });
-
-  it('with a ready process, Enter asks the field’s question; with nothing answered, continuing is disabled', async () => {
-    listing([]);
     useSessions.setState({ engine: new Map([[A, status(A, { process: 'ready' } as never)]]) });
-    act(() => setSideView(A, { kind: 'btw' }));
     mount();
-    await screen.findByText(/Ask about the conversation without adding to it/);
-    expect((screen.getByRole('button', { name: 'Continue as a side thread' }) as HTMLButtonElement).disabled).toBe(true);
-    await userEvent.type(screen.getByRole('textbox', { name: 'Ask a side question' }), 'What word?{Enter}');
-    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word?' }]);
-    expect((screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement).value).toBe('');
-    expect(screen.getByText('What word?')).toBeTruthy(); // pending at once
+    expect([...document.querySelectorAll('[data-side-chip]')].map((chip) => chip.getAttribute('data-side-chip'))).toEqual([ONE]);
+    expect(screen.queryByRole('button', { name: '/btw' })).toBeNull();
+    await act(async () => void (await applyBtw(A, 'What word?')));
+    expect(document.querySelector('[data-side-btw-view]')).toBeNull();
+    expect(sidePaneOf(useSidePane.getState(), A).view).toBeNull();
+    expect([...document.querySelectorAll('[data-side-chip]')].map((chip) => chip.getAttribute('data-side-chip'))).toEqual([ONE]);
   });
 
   // the architect's ruling (b): a thread's own side questions answer under its thread view, in the pane hosting it
@@ -505,6 +423,25 @@ describe('the Side pane’s question view', () => {
     expect(screen.getByRole('button', { name: '/btw side questions' }).getAttribute('aria-pressed')).toBe('false'); // still offered: it has exchanges
     await userEvent.click(screen.getByRole('button', { name: '/btw side questions' }));
     expect(document.querySelector(`[data-side-btw-view="${ONE}"]`)).not.toBeNull();
+  });
+
+  // M7's review, 2: a pick of /btw (or a bare /btw) in a thread hosted in its parent's pane answers where a typed question
+  // does, under the thread, with its field focused; no card opens in the thread's pane
+  it('a pick of /btw in a hosted thread opens the questions under its thread view, focused, and no card', async () => {
+    withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
+    listing([]);
+    useSessions.setState((s) => ({ engine: new Map(s.engine).set(ONE, status(ONE, { process: 'ready' } as never)) }));
+    act(() => openSideThread(A, ONE));
+    mount();
+    expect(sideChildrenShown().get(A)).toBe(ONE); // hosted: the pane draws it
+    const close = vi.fn();
+    render(<BtwWidget appSessionId={ONE} args="" close={close} />);
+    expect(close).toHaveBeenCalledTimes(1);
+    const view = document.querySelector<HTMLElement>(`[data-side-thread-view="${ONE}"] [data-side-btw-view="${ONE}"]`);
+    expect(view).not.toBeNull();
+    expect(document.activeElement).toBe(view!.querySelector('textarea'));
+    expect(document.querySelector('[data-btw-card]')).toBeNull();
+    expect(btwCardOf(useBtwCards.getState(), ONE).view).toBe('closed');
   });
 
   it('a promoted thread’s header shows its opening question, read from the thread’s first prompt', () => {

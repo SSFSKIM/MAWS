@@ -9,7 +9,7 @@
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import { modelName } from '@shared/sessions/model-label';
 import type { WorkingFolder } from '@shared/sessions/working-folder';
 import { useMachineMark } from '../../app/machine-mark';
 import { catalogueRoute } from '../../gateway/observed-route'; // P5 O7 M9
@@ -17,6 +17,7 @@ import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useCommand } from '../../ipc/query';
 import { NOT_A_REPOSITORY } from '../../sessions/branch-label'; // C4's message (W9: one constant for every reader)
 import { useGit, type GitEntry } from '../../stores/git';
+import { useSessions } from '../../stores/sessions';
 import { SUMMARY_COPY } from '../copy';
 import { changeLine } from './derive';
 import { FloatingCard, type CardFold } from './FloatingCard';
@@ -63,16 +64,20 @@ export function Environment({ appSessionId, record, folder, fold }: { appSession
   );
 }
 
-// W9 (H4): the model as the composer's chip names it, `<alias> <effort>` over the route's catalogue (the same
-// `engine.models` read the chip makes), with the exact id the engine reported in the tooltip; Session info has the rest.
+// W9 (H4): the model as the composer's chip names it over the route's catalogue (the same `engine.models` read the chip
+// makes), with the exact id the engine reported in the tooltip; Session info has the rest. UX wave U4a (decision 19): in
+// `modelName`'s words, "Opus 5.5 High", and "Fast" while a live process's status says fast mode is on (the record holds
+// no fast-mode state, so a session with no live process says none).
 function ModelLine({ record, directory }: { record: SessionRecord; directory: string }) {
+  const status = useSessions((s) => s.engine.get(record.appId) ?? null);
+  const fast = status !== null && status.process !== 'exited' && status.fastMode.state === 'on';
   const route = catalogueRoute(null, record); // P5 O7 M9: the catalogue of what the session was observed reaching
   const catalogue = useCommand('engine.models', route === null ? { refresh: false } : { refresh: false, gateway: route, cwd: directory }, { staleTime: 60_000 }, { machine: machineFor(record.appId) });
   const id = record.model.resolved ?? record.model.requested;
-  const alias = aliasOf(id, catalogue.data?.models ?? []);
+  const named = modelName(id, catalogue.data?.models ?? [], { effort: EffortSchema.safeParse(record.effort).data ?? null, fast });
   return (
     <span className="block truncate text-fg-muted" title={id ?? undefined}>
-      {alias === null ? SUMMARY_COPY.modelUnknown : chipLabel(alias, EffortSchema.safeParse(record.effort).data ?? null)}
+      {named?.text ?? SUMMARY_COPY.modelUnknown}
     </span>
   );
 }

@@ -1,10 +1,11 @@
 // `/btw` (E3 execution document, Design §7): a side question to the engine beside the running turn, never a prompt.
 // C11's widget registration is the only place `btw` is registered (`widgets/index.ts`); this is what it applies. A typed
-// `/btw <question>` asks at once when the session has a ready process: the pane's question view opens (on screen when
-// the session is the shown one, the panel rule), the question is asked without waiting for its receipt, and the answer
-// resolves true at once, so the editor's decision bound never opens the widget for it. A session that cannot take a
-// question at all answers false and the widget opens, saying so. A side thread drawn in its parent's pane asks from the pane's
-// composer, so its questions answer there, under its thread view (the architect's ruling), not in its own panel.
+// `/btw <question>` asks at once when the session has a ready process: the session's `/btw` card opens (UX wave U4a, O-20:
+// in place of the Side pane's question view; asked from a session that is not the shown one, its card waits for its tab
+// and a toast says where), the question is asked without waiting for its receipt, and the answer resolves true at once,
+// so the editor's decision bound never opens the widget for it. A session that cannot take a question at all answers
+// false and the widget opens, saying so. A side thread drawn in its parent's pane asks from the pane's composer, so its
+// questions answer there, under its thread view (the architect's ruling), not in a card of its own.
 // P2-A (2026-10-09; the execution document §5.6): on a session with a record and no ready process, Ask, Retry and a
 // typed `/btw <question>` (its Enter is the gesture) start the session first (`acquireSession(id, 'side')`) and then
 // ask; only a terminal or job holding it, an archive, or no record at all keeps the question from being asked.
@@ -15,11 +16,12 @@ import { sessionControls, useSessionControls } from '../session/controls/control
 import type { Capability, SessionControls } from '../session/controls/types'; // P5 O9 M5
 import { acquireSession, refusalWords } from '../sessions/acquire';
 import { availabilityIn, availabilityRefusal } from '../sessions/availability';
+import { shownSession } from '../panel/host';
+import { titleOf } from '../sessions/record-ops';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { revealSideQuestions } from './actions';
 import { SIDE_COPY } from './copy';
-import { askSide, hostedInSidePane, setInlineQuestions } from './store';
+import { askSide, hostedInSidePane, openBtwCard, requestSideFocus, setInlineQuestions } from './store';
 
 // P5 O9 M5 start: a terminal session driven through its bridge (its port names a turn) is asked through its port, so it
 // can take a question when its `btw` control can, and says why not otherwise; null for any other session.
@@ -30,10 +32,23 @@ export const useDrivenAsk = (appSessionId: AppSessionId): Capability | null => d
 export const canAskSide = (appSessionId: AppSessionId): boolean =>
   useSessions.getState().engine.get(appSessionId)?.process === 'ready' || drivenAsk(sessionControls(appSessionId))?.available === true;
 
-// The question's view revealed: under the thread in its parent's pane, else the session's own Side pane.
+// The session's side questions opened where they are drawn: under the thread in its parent's pane, else the session's own
+// card (UX wave U4a); `focus`, the field takes the keyboard there (a pick of `/btw` from the palette, a bare `/btw`).
+export function openSideQuestions(appSessionId: AppSessionId, options: { focus?: boolean } = {}): void {
+  if (hostedInSidePane(appSessionId)) {
+    setInlineQuestions(appSessionId, true);
+    if (options.focus) requestSideFocus(appSessionId);
+    return;
+  }
+  openBtwCard(appSessionId, options);
+}
+
+// The question's view revealed as a question is asked, with a toast saying where when its card belongs to a session that
+// is not the one shown.
 function revealQuestions(appSessionId: AppSessionId): void {
-  if (hostedInSidePane(appSessionId)) setInlineQuestions(appSessionId, true);
-  else revealSideQuestions(appSessionId);
+  const hosted = hostedInSidePane(appSessionId);
+  openSideQuestions(appSessionId);
+  if (!hosted && shownSession() !== appSessionId) toast({ level: 'info', text: SIDE_COPY.btw.askedElsewhere(titleOf(appSessionId)), actions: [], dismissible: true });
 }
 
 // The question asked and its view revealed (the widget's Ask and the typed path alike).

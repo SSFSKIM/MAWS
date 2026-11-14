@@ -104,14 +104,31 @@ export const ACTIONS = {
   // default; the pane scope and the composer scope never meet on one target (decision 8's sharing rule)
   'request.allowOnce':    { title: 'Allow once',                  chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'pane' },
   'request.allowLasting': { title: 'Allow with the lasting scope the prompt names', chord: 'Cmd+Shift+Enter', sink: 'renderer', menu: null, scope: 'pane' },
-  'composer.send':        { title: 'Send (multi-line editor)',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  // UX wave U4a (UC-6; its Interfaces H): the composer's own keys, which its editor handles (fixed: listed, never
+  // dispatched or rebound): Enter always sends, Shift+Enter and ⌥Enter break the line. ⌘Enter in the main editor is
+  // composer.queue, which keeps the message for after the running turn; composer.send keeps the chord for the reply
+  // fields (the peer reply and the two subagent relays), where Enter breaks the line. The dispatcher tries the two in
+  // this order and delivers each only to a binding whose element holds the focus.
+  'composer.submit':      { title: 'Send',                        chord: 'Enter',        sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.newLine':     { title: 'New line',                    chord: 'Shift+Enter',  sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.newLineOption': { title: 'New line',                  chord: 'Alt+Enter',    sink: 'renderer', menu: null, scope: 'composer', fixed: true },
+  'composer.queue':       { title: 'Queue for after the turn',    chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },
+  'composer.send':        { title: 'Send (reply fields)',         chord: 'Cmd+Enter',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  'composer.takeBack':    { title: 'Take back the newest waiting message', chord: 'Up', sink: 'renderer', menu: null, scope: 'composer', fixed: true }, // UX wave U4a M3: the editor's ↑ in an empty box
+  'composer.sendNowOrStop': { title: 'Send the first waiting message now, or stop', chord: 'Escape', sink: 'renderer', menu: null, scope: 'composer', fixed: true }, // UX wave U4a M3: the editor's Esc while a turn runs
   'composer.cycleMode':   { title: 'Cycle permission mode',       chord: 'Shift+Tab',    sink: 'renderer', menu: null, scope: 'composer' },  // C7 consumes
+  'composer.historySearch': { title: 'Search prompt history',     chord: 'Ctrl+R',       sink: 'renderer', menu: null, scope: 'composer' }, // UX wave U4a M6: the focused composer's search of the history ↑ walks
   // C7 start: the composer's own actions (C7 execution document, Keymap additions). Stop and Focus are app-scoped
   // because ⌘. is pressed while typing, where C5's dispatcher refuses every pane-scoped action, and are registered once
   // (ComposerAppKeys), resolving the focused pane. W10 (charter §4.2 as amended 2026-10-01): `composer.steer` (⌥Enter,
   // W1's hold until the turn ends) is gone with the hold; a saved override of it is dropped on read (RETIRED_ACTION_IDS).
   'composer.stop':        { title: 'Stop, holding waiting messages', chord: 'Cmd+.',     sink: 'renderer', menu: null, scope: 'app' }, // W1: nothing runs after it
   'composer.focus':       { title: 'Focus the composer',          chord: 'Cmd+L',        sink: 'renderer', menu: null, scope: 'app' },
+  // UX wave U4a M5 (Interfaces H; decision 21): the composer chips' menus of the focused pane's session, registered once
+  // beside Stop and Focus (ComposerAppKeys); ⇧⌘E's effort view puts the keyboard on the slider
+  'composer.modelMenu':   { title: 'Model menu',                  chord: 'Cmd+Shift+I',  sink: 'renderer', menu: null, scope: 'app' },
+  'composer.effortMenu':  { title: 'Effort',                      chord: 'Cmd+Shift+E',  sink: 'renderer', menu: null, scope: 'app' },
+  'composer.modeMenu':    { title: 'Permission mode menu',        chord: 'Cmd+Shift+M',  sink: 'renderer', menu: null, scope: 'app' },
   // C7 end
   // C11 start: the Settings tab and the ClaudeUsage hand-off (C11 execution document, Keymap and action entries).
   // settings.open's arg, when given, is the index of a Settings section; the relay card runs the hand-off. W6: the

@@ -290,6 +290,7 @@
   "session.status",
   "session.steer",
   "session.steer.cancel",
+  "session.steer.sendNow",
   "session.stop",
   "session.stopTask",
   "session.takeOver",

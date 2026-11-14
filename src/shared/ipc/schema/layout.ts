@@ -4,7 +4,7 @@
 // and hydrates from the snapshot. `window.main` and `library.exportFolder` are main's own keys and never cross IPC.
 import * as z from 'zod';
 import { AgentIdSchema, AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
-import { ACTION_IDS } from '../../keymap/actions';
+import { ACTION_IDS, type ActionId } from '../../keymap/actions';
 import type { CommandSpec } from './common';
 import { CaptureAnswerSchema, CaptureRectSchema } from '../../markup/image'; // P3-G
 // E4a start
@@ -14,6 +14,14 @@ import { BrowserTabIdSchema } from '../../browser/tab';
 import { addressOf, isAddress } from '../../machine/address';
 import { MachineRefSchema, type MachineRef } from '../../machine/ref';
 import { OrgKeySchema } from '../../machine/org-key'; // P5 O6 M5
+
+// UX wave U4a M3: the action ids' enum typed by a named interface. Inferred, each use printed every id twice into
+// `REGISTRY`'s declaration (src/shared/ipc/registry.ts), which sits near what the compiler serializes; the wave's growing
+// action table pushed it past (TS7056). An interface is printed by its name (a union or a type alias over one is not), so
+// the table's size no longer reaches that declaration. The schema itself is the same.
+// eslint-disable-next-line @typescript-eslint/no-empty-object-type -- the interface is the point: it is printed by name
+export interface ActionIdSchemaType extends z.ZodType<ActionId, ActionId> {}
+const ActionIdSchema: ActionIdSchemaType = z.enum(ACTION_IDS);
 
 // W5 (§5.2 as amended 2026-10-01): the Overview is no longer a tab; it floats over the main area (`regions.overview`).
 // A stored `main.tabs` that still holds its tab is read through `StoredMainSchema`, which drops it. W6 (E1): the
@@ -772,7 +780,7 @@ export const commands = {
   'layout.openExternal': { input: z.strictObject({ url: z.string().url() }), output: z.void(), owner: 'main' },   // openExternalUrl (src/main/open-external.ts): http, https, mailto only
   // The actions the page has a handler for (the whole set, replace): the application menu enables exactly these, so an
   // action whose child has not landed renders disabled in the menu as it does in the page (src/main/menu.ts).
-  'layout.setEnabledActions': { input: z.strictObject({ actions: z.array(z.enum(ACTION_IDS)) }), output: z.void(), owner: 'main' },
+  'layout.setEnabledActions': { input: z.strictObject({ actions: z.array(ActionIdSchema) }), output: z.void(), owner: 'main' },
   ...c7Commands, // C7
   ...c11Commands, // C11
   ...c12Commands, // C12
@@ -782,7 +790,7 @@ export const commands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {
-  'layout.action': z.strictObject({ action: z.enum(ACTION_IDS), arg: z.number().int().nullable() }),   // an application-menu click or accelerator; the renderer runs the action
+  'layout.action': z.strictObject({ action: ActionIdSchema, arg: z.number().int().nullable() }),   // an application-menu click or accelerator; the renderer runs the action
   'layout.quitWait': QuitWaitSchema, // C12: the report main waits on to quit, or null
   // Edit ▸ Select All, the menu's own item (src/main/menu.ts; sitting finding, 2026-09-30): main has run the editor
   // command in the focused page, and the terminal holding focus, if any, selects its buffer, which that command misses

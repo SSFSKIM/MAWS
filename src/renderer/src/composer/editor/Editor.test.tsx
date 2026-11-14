@@ -1,21 +1,25 @@
-import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { closeWidgetDialog, useWidgetDialog } from '../WidgetDialog'; // W3 (C6)
 import type { Transaction } from '@tiptap/pm/state';
 import { EditorView } from '@tiptap/pm/view';
-import { createRef } from 'react';
+import { createRef, type RefObject } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
+import { useSettings } from '../../stores/settings';
 import { useNotices } from '../../stores/notices'; // E3
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
+import { DRAFT_DELAY_MS } from './drafts';
 import { Editor, type DraftPort, type EditorHandle } from './Editor';
+import { UNAVAILABLE_TITLE } from './nodes/Pasted';
 import type { Serialized } from './serialize';
 
 const APP = at('app-1' as AppSessionId); // P5 O6 M2: the page's id; `client` is the page's client
@@ -29,7 +33,7 @@ const client = {
 
 function drafts(initial: Draft | null) {
   const saved: (Draft | null)[] = [];
-  const port: DraftPort = { load: async () => initial, save: (d) => void saved.push(d) };
+  const port: DraftPort = { load: async () => initial, save: async (d) => (saved.push(d), true) };
   return { port, saved };
 }
 
@@ -71,8 +75,8 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     expect(saved).toEqual([]); // the write waits for the pause
   });
 
-  it('sends on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
-    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+  it('submits on ⌘Enter from the editor through C5’s dispatcher, then clears and drops the draft', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => true);
     const { port, saved } = drafts({ doc: docOf([paragraph(textNode('hello'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
     const content = contentOf(container);
@@ -83,6 +87,7 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     });
     await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
     expect(onSubmit.mock.calls[0][0]).toMatchObject({ mode: 'send', content: 'hello', display: 'hello' });
+    expect(onSubmit.mock.calls[0][1]).toBe('after'); // UX wave U4a: ⌘Enter keeps it for after a running turn
     await waitFor(() => expect(content.textContent).toBe(''));
     expect(saved).toEqual([null]);
   });
@@ -245,43 +250,80 @@ describe('the editor mounts over its draft, takes prefills and submits through t
     await act(async () => {
       content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true }));
     });
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' })));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'keep me' }), 'after'));
     expect(content.textContent).toBe('keep me');
     expect(saved).toEqual([]);
   });
 
-  it('sends nothing on ⌥Enter: the hold chord is gone (W10)', async () => {
-    const onSubmit = vi.fn(async () => true);
-    const { port } = drafts({ doc: docOf([paragraph(textNode('not yet'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
-    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} />);
-    const content = contentOf(container);
-    await waitFor(() => expect(content.textContent).toBe('not yet'));
-    content.focus();
-    await act(async () => {
-      content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', altKey: true, bubbles: true, cancelable: true }));
-    });
-    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
-    expect(onSubmit).not.toHaveBeenCalled();
-    expect(content.textContent).toBe('not yet');
-  });
-
-  it('sends on a plain Enter in a one-line document, and breaks the line with it once the document has more lines', async () => {
-    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => false);
-    const multiline = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'))]);
-    const { port } = drafts({ doc: multiline, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+  // UX wave U4a (l3-input-08): Enter sends whatever the line count; Shift+Enter and ⌥Enter break the line
+  it('sends a three-line draft on a plain Enter; Shift+Enter and ⌥Enter each break the line and send nothing; a composing Enter sends nothing', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => false);
+    const threeLines = docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))]);
+    const { port } = drafts({ doc: threeLines, attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
     const handle = createRef<EditorHandle>();
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
     const content = contentOf(container);
-    await waitFor(() => expect(handle.current?.serialize().display).toBe('one\ntwo'));
+    await waitFor(() => expect(handle.current?.serialize().display).toBe('one\ntwo\nthree'));
     content.focus();
-    const enter = () => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
-    await enter();
+    const press = (init: KeyboardEventInit) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init })));
+    await press({ shiftKey: true });
+    await press({ altKey: true });
+    const breaks = () => (handle.current?.doc().content?.[0]?.content ?? []).filter((node) => node.type === 'hardBreak').length;
+    expect(breaks()).toBe(4); // two line breaks added, in the one paragraph
+    expect(handle.current?.doc().content).toHaveLength(1);
+    await press({ isComposing: true });
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(handle.current?.doc().content).toHaveLength(2); // a new line, not a send
-    act(() => handle.current?.clear());
-    act(() => handle.current?.insertText('single'));
-    await enter();
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ content: 'single' })));
+    await press({});
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]).toEqual([expect.objectContaining({ mode: 'send' })]); // Enter names no `when`
+    expect(onSubmit.mock.calls[0]![0].display).toMatch(/one[\s\S]*two[\s\S]*three/);
+  });
+
+  // UX wave U4a (l3-input-03): ⌘Enter is `composer.queue`, which submits as Enter does with `when: 'after'`
+  it('submits on ⌘Enter with when: after, and the handle’s submit as Enter does', async () => {
+    const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => false);
+    const { port } = drafts({ doc: docOf([paragraph(textNode('later'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(content.textContent).toBe('later'));
+    content.focus();
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    expect(onSubmit.mock.calls[0]).toEqual([expect.objectContaining({ content: 'later' }), 'after']);
+    expect(content.textContent).toBe('later'); // refused: kept
+    act(() => handle.current?.submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(2));
+    expect(onSubmit.mock.calls[1]).toEqual([expect.objectContaining({ content: 'later' })]);
+    act(() => handle.current?.submit('after'));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(3));
+    expect(onSubmit.mock.calls[2]![1]).toBe('after');
+  });
+
+  // UX wave U4a (review): a stored binding takes ⌘Enter from `composer.queue` and the holder has no key in this editor
+  it('does nothing on a ⌘Enter the queue row yielded: no send, no line break', async () => {
+    act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.cycleMode': 'Cmd+Enter' } }, resolvedTheme: 'light' } }));
+    try {
+      const onSubmit = vi.fn<(s: Serialized, when?: 'after') => Promise<boolean>>(async () => true);
+      const { port } = drafts({ doc: docOf([paragraph(textNode('kept'))]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+      const handle = createRef<EditorHandle>();
+      const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} onSubmit={onSubmit} handle={handle} />);
+      const content = contentOf(container);
+      await waitFor(() => expect(content.textContent).toBe('kept'));
+      content.focus();
+      // ProseMirror reads Mod as ⌘ only where navigator.platform names a Mac, which jsdom's does not: both chords are
+      // pressed, so the case holds wherever it runs
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })));
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })));
+      await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 20))));
+      expect(onSubmit).not.toHaveBeenCalled();
+      expect(handle.current?.doc().content?.[0]?.content?.some((node) => node.type === 'hardBreak')).toBe(false);
+      await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', shiftKey: true, bubbles: true, cancelable: true })));
+      expect(handle.current?.doc().content?.[0]?.content?.some((node) => node.type === 'hardBreak')).toBe(true); // Shift+Enter still breaks
+    } finally {
+      useSettings.setState({ state: null });
+    }
   });
 
   it('treats an open @ popup with no rows as no popup: Enter sends', async () => {
@@ -534,7 +576,7 @@ describe('a registered widget named at Enter opens with its argument', () => {
 describe('draft and submission races', () => {
   it.each(['clear', 'send'])('does not restore an old draft after the user chose to %s while loading', async (action) => {
     let loaded!: (draft: Draft | null) => void;
-    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
     const handle = createRef<EditorHandle>();
     render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={async () => true} />);
     act(() => handle.current!.insertText('new thought'));
@@ -562,7 +604,7 @@ describe('draft and submission races', () => {
     let answer!: (accepted: boolean) => void;
     const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
     let stored: Draft | null = { doc: docOf([paragraph(textNode('send once'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' };
-    const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+    const port: DraftPort = { load: async () => stored, save: async (draft) => { stored = draft; return true; } };
     const handle = createRef<EditorHandle>();
     const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />;
     const first = render(view());
@@ -631,7 +673,7 @@ describe('insertText separated', () => {
 describe('no-op Enter retains pending draft work', () => {
   it('restores a stored draft after empty Enter during loading', async () => {
     let loaded!: (draft: Draft | null) => void;
-    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+    const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
     const handle = createRef<EditorHandle>();
     const onSubmit = vi.fn(async () => true);
     const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
@@ -666,7 +708,7 @@ it.each([
   const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => { answer = resolve; }));
   const onPrefill = vi.fn();
   let stored: Draft | null = null;
-  const port: DraftPort = { load: async () => stored, save: (draft) => { stored = draft; } };
+  const port: DraftPort = { load: async () => stored, save: async (draft) => { stored = draft; return true; } };
   const handle = createRef<EditorHandle>();
   const view = () => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} onPrefill={onPrefill} />;
   let mounted = render(view());
@@ -730,7 +772,7 @@ it.each(['replace', 'append', 'insert'] as const)('refuses a plugin %s during su
 
 it('treats a plugin fill to empty as an edit that invalidates pending restoration', async () => {
   let loaded!: (draft: Draft | null) => void;
-  const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() };
+  const port: DraftPort = { load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) };
   const handle = createRef<EditorHandle>();
   render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} />);
   act(() => handle.current!.fill('', 'replace'));
@@ -777,6 +819,25 @@ describe('the editor answers a plugin’s prompt read, fill and suggestion (R2)'
     await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
     expect(content.textContent).toBe('MODS_PROBE_SUGGEST');
     expect(taken).toHaveBeenCalledTimes(1);
+  });
+
+  // UX wave U4a (Interfaces F): the composer's words for the empty box while a turn runs; a plugin's suggestion still wins
+  it('shows the placeholder it is given in place of its own, and a suggestion over it', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(handle.current).not.toBeNull());
+    const shown = () => contentOf(view.container).querySelector('[data-placeholder]')?.getAttribute('data-placeholder');
+    await waitFor(() => expect(shown()).toBe('Do anything'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('Enter to send'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder="Enter to send" suggestion="MODS_PROBE_SUGGEST" />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('MODS_PROBE_SUGGEST'));
+    view.rerender(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} placeholder={null} />);
+    act(() => handle.current!.refreshPlaceholder());
+    await waitFor(() => expect(shown()).toBe('Do anything'));
   });
 });
 
@@ -974,5 +1035,374 @@ describe('a drop on a session on another machine', () => {
     expect(sent).toEqual([]); // waits for the read
     await act(async () => release());
     await waitFor(() => expect(sent).toEqual([{ text: '', files: ['notes.txt'] }]));
+  });
+});
+
+// UX wave U4a M3 (Interfaces F; decision 14): ↑ asks the composer to take a waiting message back before history walks,
+// Esc acts on a fresh press only, and `load` fills an empty box
+describe('the editor’s take-back, Esc and load', () => {
+  const history = [{ display: 'older prompt', at: '2026-09-29T09:00:00.000Z', source: 'maws', sessionId: null, pastedContents: {} }];
+  const recalling = {
+    ...client,
+    invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries: history } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+  } as unknown as MawsBridge;
+  const pressOn = (content: HTMLElement) => (key: string, init: KeyboardEventInit = {}) => act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init })));
+
+  it('asks onTakeBack on ↑ in an empty box, walks history when it answers false, and never asks with text or while recalling', async () => {
+    let takes = true;
+    const onTakeBack = vi.fn(() => takes);
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={recalling} handle={handle} onTakeBack={onTakeBack} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(recalling.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
+    content.focus();
+    const press = pressOn(content);
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(1);
+    expect(handle.current?.serialize().display).toBe(''); // the composer took the key
+    takes = false;
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+    expect(handle.current?.serialize().display).toBe('older prompt'); // none waits: history
+    await press('ArrowUp'); // recalling: history's
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+    await press('ArrowDown');
+    act(() => handle.current?.insertText('typed'));
+    await press('ArrowUp');
+    expect(onTakeBack).toHaveBeenCalledTimes(2);
+  });
+
+  it('hands a fresh Esc to onEscape and answers its repeats as that press was answered, without asking again', async () => {
+    let answer = true;
+    const onEscape = vi.fn(() => answer);
+    const { port } = drafts(null);
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} onEscape={onEscape} />);
+    const content = contentOf(container);
+    content.focus();
+    const event = (repeat: boolean) => new KeyboardEvent('keydown', { key: 'Escape', repeat, bubbles: true, cancelable: true });
+    const first = event(false);
+    await act(async () => void content.dispatchEvent(first));
+    expect(first.defaultPrevented).toBe(true);
+    answer = false;
+    const repeat = event(true);
+    await act(async () => void content.dispatchEvent(repeat));
+    expect(onEscape).toHaveBeenCalledTimes(1);
+    expect(repeat.defaultPrevented).toBe(true); // consumed: the press was the composer's
+    const fresh = event(false);
+    await act(async () => void content.dispatchEvent(fresh));
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    const unclaimed = event(true);
+    await act(async () => void content.dispatchEvent(unclaimed));
+    expect(onEscape).toHaveBeenCalledTimes(2);
+    expect(unclaimed.defaultPrevented).toBe(false); // left alone: that press was not the composer's
+  });
+
+  it('loads a document into an empty box with the caret at its end, and refuses one while the box holds text or a submission is in flight', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    let answer!: (accepted: boolean) => void;
+    const onSubmit = vi.fn(() => new Promise<boolean>((resolve) => (answer = resolve)));
+    render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} onSubmit={onSubmit} />);
+    await act(async () => handle.current?.restored());
+    let loaded = false;
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('taken back'))]))));
+    expect(loaded).toBe(true);
+    expect(handle.current?.serialize().display).toBe('taken back');
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('another'))]))));
+    expect(loaded).toBe(false);
+    expect(handle.current?.serialize().display).toBe('taken back');
+    act(() => handle.current?.submit());
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+    act(() => handle.current?.clear());
+    act(() => void (loaded = handle.current!.load(docOf([paragraph(textNode('while sending'))]))));
+    expect(loaded).toBe(false);
+    await act(async () => answer(true));
+  });
+});
+
+// UX wave U4a, the branch panel's findings 1 and 5: a take-back's load supersedes what this mount had pending, and the
+// focus it asked for while the box was held reaches the box when the hold ends
+describe('a take-back’s load and what this mount had pending', () => {
+  const taken = () => docOf([paragraph(textNode('taken back'))]);
+  async function emptiedPending() {
+    const { port, saved } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} />);
+    await act(async () => handle.current?.restored());
+    act(() => handle.current?.insertText('x'));
+    act(() => void handle.current?.fill('', 'replace')); // typed and deleted: an empty box's write is pending
+    return { saved, handle, view };
+  }
+
+  it('the pending write’s timer saves nothing over the loaded message', async () => {
+    const { saved, handle } = await emptiedPending();
+    act(() => void handle.current!.load(taken()));
+    await act(() => new Promise((resolve) => setTimeout(resolve, DRAFT_DELAY_MS + 250)));
+    expect(saved).toEqual([]);
+    expect(handle.current?.serialize().display).toBe('taken back');
+  });
+
+  it('the unmount flush saves nothing over the loaded message', async () => {
+    const { saved, handle, view } = await emptiedPending();
+    act(() => void handle.current!.load(taken()));
+    view.unmount();
+    expect(saved).toEqual([]);
+  });
+
+  it('a load made while the box was held gets its focus when the hold ends, unless the focus has gone elsewhere since', async () => {
+    const { port } = drafts(null);
+    const handle = createRef<EditorHandle>();
+    const outside = document.createElement('button');
+    const field = document.createElement('input');
+    document.body.append(outside, field);
+    onTestFinished(() => {
+      outside.remove();
+      field.remove();
+    });
+    const held = (disabled: string | null) => <Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={port} client={client} handle={handle} disabled={disabled} />;
+    const { container, rerender } = render(held('Taking the message back…'));
+    await act(async () => handle.current?.restored());
+    const content = contentOf(container);
+    outside.focus(); // Edit was pressed on the row: the focus is on its control
+    act(() => void handle.current!.load(taken()));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50))); // the hold outlasts the frame Tiptap's focus waits
+    expect(document.activeElement).toBe(outside); // a held box takes no focus
+    rerender(held(null));
+    await waitFor(() => expect(document.activeElement).toBe(content));
+    act(() => handle.current?.insertText('!'));
+    expect(handle.current?.serialize().display).toBe('taken back!'); // typing reaches the message, at its end
+    // once more, the focus moving to another field before the hold ends
+    act(() => handle.current?.clear());
+    rerender(held('Taking the message back…'));
+    outside.focus();
+    act(() => void handle.current!.load(taken()));
+    field.focus();
+    rerender(held(null));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(document.activeElement).toBe(field);
+  });
+});
+
+// UX wave U4a M6 (l3-input-12, l3-input-09; decisions 22 and 23): the line under the text while recalling or searching,
+// Ctrl+R's search of the prompt history, and the paste that stays text with a chip that opens.
+describe('the box’s helpers: the history line, its search and the paste', () => {
+  const listing = (displays: string[]) => {
+    const entries = displays.map((display, i) => ({ display, at: new Date(Date.UTC(2026, 8, 29, 9, i)).toISOString(), source: 'maws', sessionId: null, pastedContents: {} }));
+    return {
+      ...client,
+      invoke: vi.fn(async (name: string) => (name === 'session.history.list' ? { ok: true, value: { entries } } : { ok: false, error: { code: 'internal', message: 'no session' } })),
+    } as unknown as MawsBridge;
+  };
+  const line = () => document.querySelector('[role="status"][aria-label="Prompt history"]')?.textContent ?? null;
+  const shown = (handle: RefObject<EditorHandle | null>) => handle.current?.serialize().display;
+  async function mounted(displays: string[], props: { onSubmit?(s: Serialized): Promise<boolean>; onEscape?(): boolean } = {}) {
+    const bridge = listing(displays);
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts(null).port} client={bridge} handle={handle} {...props} />);
+    const content = contentOf(container);
+    await waitFor(() => expect(bridge.invoke).toHaveBeenCalledWith('session.history.list', expect.anything()));
+    await act(async () => handle.current?.restored());
+    content.focus();
+    const press = async (key: string, init: KeyboardEventInit = {}) => {
+      const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true, ...init });
+      await act(async () => void content.dispatchEvent(event));
+      return event;
+    };
+    const type = async (text: string) => {
+      for (const key of text) await press(key);
+    };
+    const search = () => press('r', { code: 'KeyR', ctrlKey: true });
+    return { handle, content, press, type, search };
+  }
+  // oldest first: newest first the search reads "notes on deploy", "read the build log", "deploy the docs", "fix the build"
+  const PROMPTS = ['fix the build', 'deploy the docs', 'read the build log', 'notes on deploy'];
+
+  it('says the recalled entry’s place under the text at the newest, a middle and the oldest entry, and nothing once the draft is back or an edit ends it', async () => {
+    const { handle, press } = await mounted(Array.from({ length: 12 }, (_, i) => `prompt ${i + 1}`));
+    expect(line()).toBeNull();
+    await press('ArrowUp');
+    expect(shown(handle)).toBe('prompt 12');
+    expect(line()).toBe('History 1/12 · ↓ to restore your draft');
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(line()).toBe('History 3/12 · ↓ to restore your draft');
+    for (let i = 0; i < 9; i++) await press('ArrowUp');
+    expect(shown(handle)).toBe('prompt 1');
+    expect(line()).toBe('History 12/12 · ↓ to restore your draft');
+    for (let i = 0; i < 12; i++) await press('ArrowDown');
+    expect(shown(handle)).toBe('');
+    expect(line()).toBeNull();
+    await press('ArrowUp');
+    act(() => handle.current?.insertText('!'));
+    expect(line()).toBeNull(); // the edit ended the recall
+  });
+
+  it('searches with Ctrl+R: typing narrows, Ctrl+R and ↑ go older, ↓ newer, the line counts the matches, and Esc puts the draft back without a stop', async () => {
+    const onEscape = vi.fn(() => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onEscape });
+    act(() => handle.current?.insertText('my draft'));
+    await search();
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('my draft');
+    await type('build');
+    expect(shown(handle)).toBe('read the build log');
+    expect(line()).toBe('Search history: build — match 1 of 2');
+    await search();
+    expect(shown(handle)).toBe('fix the build');
+    expect(line()).toBe('Search history: build — match 2 of 2');
+    await press('ArrowUp'); // nothing older holds it: the match stays
+    expect(line()).toBe('Search history: build — match 2 of 2');
+    await press('ArrowDown');
+    expect(shown(handle)).toBe('read the build log');
+    await type('z');
+    expect(line()).toBe('Search history: buildz — no match');
+    expect(shown(handle)).toBe('read the build log');
+    await press('Backspace');
+    expect(line()).toBe('Search history: build — match 1 of 2');
+    const esc = await press('Escape');
+    expect(esc.defaultPrevented).toBe(true);
+    expect(shown(handle)).toBe('my draft');
+    expect(line()).toBeNull();
+    await press('Escape', { repeat: true }); // the press's repeat is the search's too
+    expect(onEscape).not.toHaveBeenCalled();
+  });
+
+  // the branch panel's finding 6: a held Enter's repeats never send
+  it('a held Enter that took the match sends nothing at its repeats; a fresh Enter sends', async () => {
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onSubmit });
+    await search();
+    await type('docs');
+    await press('Enter');
+    const repeat = await press('Enter', { repeat: true });
+    await press('Enter', { repeat: true });
+    expect(repeat.defaultPrevented).toBe(true); // the repeat is consumed, not typed as a line break
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(shown(handle)).toBe('deploy the docs');
+    await press('Enter');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledTimes(1));
+  });
+
+  it('takes the match into the box with Enter, without sending; the next Enter sends it', async () => {
+    const onSubmit = vi.fn<(s: Serialized) => Promise<boolean>>(async () => true);
+    const { handle, search, type, press } = await mounted(PROMPTS, { onSubmit });
+    await search();
+    await type('docs');
+    await press('Enter');
+    expect(shown(handle)).toBe('deploy the docs');
+    expect(line()).toBeNull();
+    expect(onSubmit).not.toHaveBeenCalled();
+    await press('Enter');
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ display: 'deploy the docs' })));
+  });
+
+  it('leaves the draft when nothing matches, and Backspace on an empty search puts it back', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    act(() => handle.current?.insertText('kept'));
+    await search();
+    await type('q');
+    expect(line()).toBe('Search history: q — no match');
+    expect(shown(handle)).toBe('kept');
+    await press('Backspace');
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('kept');
+    await press('Backspace');
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('kept');
+  });
+
+  it('ends the search at a composing key with the match in the box, and leaves the key to the editor', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    await search();
+    await type('notes');
+    expect(shown(handle)).toBe('notes on deploy');
+    const composing = await press('ㄱ', { isComposing: true });
+    expect(composing.defaultPrevented).toBe(false);
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('notes on deploy');
+  });
+
+  it('ends a search the keyboard leaves, the match kept', async () => {
+    const { handle, content, search, type } = await mounted(PROMPTS);
+    await search();
+    await type('fix');
+    expect(shown(handle)).toBe('fix the build');
+    act(() => content.blur());
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('fix the build');
+  });
+
+  it('starts a search from the recalled entry’s place, and its Esc puts back the draft the recall began from', async () => {
+    const { handle, search, type, press } = await mounted(PROMPTS);
+    await press('ArrowUp');
+    await press('ArrowUp');
+    expect(line()).toBe('History 2/4 · ↓ to restore your draft');
+    await search();
+    expect(line()).toBe('Search history:');
+    expect(shown(handle)).toBe('read the build log');
+    await type('deploy');
+    expect(shown(handle)).toBe('deploy the docs'); // older than the place it started from
+    expect(line()).toBe('Search history: deploy — match 2 of 2');
+    await press('Escape');
+    expect(shown(handle)).toBe('');
+    expect(line()).toBeNull();
+  });
+
+  // A paste as the system delivers it, carrying text only.
+  const paste = (content: HTMLElement, text: string) =>
+    act(async () => {
+      const event = new Event('paste', { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? text : ''), files: [], items: [], types: ['text/plain'] } });
+      content.dispatchEvent(event);
+    });
+
+  it('lands a 5,000-character paste over 200 lines as text, and makes a chip of 20,001 characters', async () => {
+    const { handle, content } = await mounted([]);
+    const text = `${Array.from({ length: 200 }, (_, i) => `pasted line ${String(i).padStart(3, '0')} `.padEnd(24, 'x')).join('\n')}x`;
+    expect(text.length).toBe(5000);
+    await paste(content, text);
+    expect(content.querySelector('[data-pasted]')).toBeNull();
+    expect(shown(handle)).toBe(text);
+    act(() => handle.current?.clear());
+    await paste(content, 'y'.repeat(20_001));
+    expect(content.querySelectorAll('[data-pasted="text"]')).toHaveLength(1);
+    expect(shown(handle)).toBe('[Pasted text #1 +1 lines]');
+  });
+
+  it('opens a chip to its text, and "Show in text field" turns it into text as one undoable step', async () => {
+    const { handle, content } = await mounted([]);
+    const body = 'z'.repeat(20_001);
+    await paste(content, body);
+    fireEvent.click(within(content.querySelector('[data-pasted]') as HTMLElement).getByRole('button'));
+    const popover = await screen.findByRole('dialog', { name: 'Pasted text #1' });
+    expect(popover.textContent).toContain(body);
+    fireEvent.click(within(popover).getByRole('button', { name: 'Show in text field' }));
+    expect(content.querySelector('[data-pasted]')).toBeNull();
+    expect(shown(handle)).toBe(body);
+    expect(screen.queryByRole('dialog', { name: 'Pasted text #1' })).toBeNull();
+    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', ctrlKey: true, bubbles: true, cancelable: true })));
+    expect(shown(handle)).toBe('[Pasted text #1 +1 lines]'); // one undo brings the chip back whole
+  });
+
+  it('loads a stored draft’s old chip as that chip, which opens; a chip whose text was not kept says so and offers nothing', async () => {
+    const chip = pastedNode({ id: 'p-1', kind: 'text', name: 'Pasted text #1', lines: 3, text: 'one\ntwo\nthree' });
+    const lost = pastedNode({ id: 'p-2', kind: 'text', name: 'Pasted text #2', lines: 40, text: null });
+    const { port } = drafts({ doc: docOf([paragraph(chip, textNode(' and '), lost)]), attachments: [], updatedAt: '2026-09-29T00:00:00.000Z' });
+    const handle = createRef<EditorHandle>();
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={handle} />);
+    await waitFor(() => expect(container.querySelectorAll('[data-pasted]')).toHaveLength(2));
+    const [kept, unkept] = [...container.querySelectorAll<HTMLElement>('[data-pasted]')];
+    fireEvent.click(within(unkept).getByRole('button'));
+    const sorry = await screen.findByRole('dialog', { name: 'Pasted text #2' });
+    expect(sorry.textContent).toContain(UNAVAILABLE_TITLE);
+    expect(within(sorry).queryByRole('button', { name: 'Show in text field' })).toBeNull();
+    fireEvent.keyDown(sorry, { key: 'Escape' });
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Pasted text #2' })).toBeNull());
+    fireEvent.click(within(kept).getByRole('button'));
+    const open = await screen.findByRole('dialog', { name: 'Pasted text #1' });
+    expect(open.textContent).toContain('one\ntwo\nthree');
+    fireEvent.click(within(open).getByRole('button', { name: 'Show in text field' }));
+    expect(handle.current?.serialize().display).toBe('one\ntwo\nthree and [Pasted text #1 +40 lines]');
   });
 });

@@ -3,7 +3,7 @@
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, TaskId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -28,6 +28,8 @@ import { humanTurn, record, status } from '../../../../../test/support/builders'
 import { remoteSessionState } from '../../lane-b/test-support/remote-session'; // P5 O15 M2b
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session'; // P5 O15 M2b
 import type { RemoteAnswer, RemoteSession } from '@shared/ipc/schema/remote'; // P5 O15 M2b
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures'; // UX wave U4a
+import { journalToEvents } from '../dev/journal'; // UX wave U4a
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -2112,6 +2114,48 @@ describe('rewind adapter', () => {
     const undo = rewind.undo(u1);
     fake.calls[3].answer({ ok: true, value: { ...OUTCOME, ok: false, message: 'Rewind failed: file changed on disk' } });
     await expect(undo).rejects.toThrow('Rewind failed: file changed on disk');
+  });
+
+  // UX wave U4a (the architect's ruling 3 of 2026-11-13; decision 32): the messages the engine joins are one user
+  // message in its file, under the last one's uuid, standing where the first stood; the turn it opens rewinds by that
+  // uuid, the one the file holds. A turn with no join, and an engine turn, answer as before.
+  describe('after the engine joined waiting messages', () => {
+    const prompts = (name: string) => loadUxwaveJournal(name).flatMap((row) => (row.direction === 'out' && (row.frame as { type?: string }).type === 'user' ? [(row.frame as { uuid: MessageUuid }).uuid] : []));
+    const stateThrough = (name: string, seq: number) => applyEvents(createState(null, null), journalToEvents(loadUxwaveJournal(name).filter((row) => row.seq <= seq)));
+
+    for (const [name, joinedAt] of [['u4p2-two-1-1', 60], ['u4p2-two-2-1', 87]] as const) {
+      it(`${name}: the joined turn's dry run and its undo name the joined message's uuid; the turn before it, its own prompt`, async () => {
+        const [ran, first, second] = prompts(name) as [MessageUuid, MessageUuid, MessageUuid];
+        const state = stateThrough(name, joinedAt);
+        const joined = state.turns.get(turnId.ofMessage(first))!.events.find((event) => event.kind === 'user.message' && event.joined !== undefined);
+        expect(joined).toMatchObject({ messageUuid: second, joined: [first] }); // the reducer did join them
+        const fake = fakeClient();
+        const rewind = ipcRewindOver(fake.client, APP, () => state);
+
+        const check = rewind.canUndo(turnId.ofMessage(first));
+        expect(fake.calls[0].input).toEqual({ appSessionId: APP, userMessageUuid: second, dryRun: true });
+        fake.calls[0].answer({ ok: true, value: OUTCOME });
+        await expect(check).resolves.toEqual({ ok: true, reason: null, files: OUTCOME.changedFiles });
+        const undo = rewind.undo(turnId.ofMessage(first));
+        expect(fake.calls[1].input).toEqual({ appSessionId: APP, userMessageUuid: second, dryRun: false });
+        fake.calls[1].answer({ ok: true, value: OUTCOME });
+        await expect(undo).resolves.toBeUndefined();
+
+        void rewind.canUndo(turnId.ofMessage(ran)); // no join: its own prompt, as before
+        expect(fake.calls[2].input).toEqual({ appSessionId: APP, userMessageUuid: ran, dryRun: true });
+      });
+    }
+
+    it('before the join the first message’s turn answers its own uuid; an engine-initiated turn still has no prompt', async () => {
+      const [, first] = prompts('u4p2-two-1-1') as [MessageUuid, MessageUuid];
+      const before = stateThrough('u4p2-two-1-1', 55);
+      const fake = fakeClient();
+      void ipcRewindOver(fake.client, APP, () => before).canUndo(turnId.ofMessage(first));
+      expect(fake.calls[0].input).toEqual({ appSessionId: APP, userMessageUuid: first, dryRun: true });
+      const engine = turns();
+      await expect(ipcRewindOver(fake.client, APP, () => engine).canUndo(engine.order[1]!)).resolves.toEqual({ ok: false, reason: 'This turn has no prompt to rewind to' });
+      expect(fake.calls).toHaveLength(1);
+    });
   });
 });
 

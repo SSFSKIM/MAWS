@@ -24,6 +24,11 @@ export interface ToolRecord {
   humanDecision: boolean;
   backgroundTaskId: TaskId | null;
   backgroundDone: boolean;
+  // UX wave U4a (decision 33): the engine moved the call to the background so a message sent now could be read
+  // (`movedToBackground`), and the process that ran it exited before its task's end was heard (TurnState.agentsEndedAt).
+  // Optional: a record made elsewhere (the surface's adapters) is never a moved call.
+  moved?: boolean;
+  exited?: boolean;
 }
 
 export interface TurnContext {
@@ -52,6 +57,14 @@ export function partsTruncationOf(sizes: readonly number[]): { head: number; tai
 }
 
 const record = (value: unknown): Record<string, unknown> => (typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : {});
+
+// UX wave U4a (decision 33): whether the engine moved a call to the background, read when its result arrives. A shell
+// call says so in its structured result; any other call by a task that names it and had not ended by then (an MCP call
+// carries no flag). A foreground shell command gets a task too before its result, so a shell call is read by its flag
+// alone. The result's text is never read.
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'BashOutput', 'KillShell', 'Monitor']);
+export const movedToBackground = (rec: ToolRecord, result: Event<'tool.result'>): boolean =>
+  SHELL_TOOLS.has(rec.use.toolName) ? record(result.structured).backgroundedToDeliverMessage === true : rec.backgroundTaskId !== null && !rec.backgroundDone;
 const str = (value: unknown, fallback = ''): string => (typeof value === 'string' ? value : fallback);
 const num = (value: unknown): number | null => (typeof value === 'number' ? value : null);
 
@@ -186,7 +199,7 @@ function detailOf(rec: ToolRecord, status: Cell['status']): CellDetail {
   const mcp = MCP_TOOL.exec(use.toolName);
   if (mcp) return { kind: 'mcp', server: mcp[1], tool: mcp[2], input: use.input, result: result?.content ?? '', structured, spill: spillOf(result) };
   switch (use.toolName) {
-    case 'Bash': case 'PowerShell': case 'BashOutput': case 'KillShell': case 'Monitor': {
+    case 'Bash': case 'PowerShell': case 'BashOutput': case 'KillShell': case 'Monitor': { // SHELL_TOOLS
       const stdout = typeof s.stdout === 'string' ? s.stdout : text;
       const stderr = str(s.stderr);
       const parsed = EXIT_CODE.exec(text);
@@ -216,6 +229,7 @@ function statusOf(rec: ToolRecord, turn: TurnContext, disposition: 'denied' | 'a
   if (disposition === 'stopped') return 'stopped';
   if (disposition !== null) return 'denied';
   if (!rec.result) return turn.closed ? 'stopped' : 'running';
+  if (rec.moved === true && !rec.backgroundDone) return rec.exited === true ? 'stopped' : 'running'; // UX wave U4a: across its turn's close
   if (rec.backgroundTaskId !== null && !rec.backgroundDone && !turn.closed) return 'running';
   return rec.result.isError ? 'error' : 'done';
 }
@@ -228,6 +242,11 @@ function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], ca
   if (classification.denial) {
     const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
     return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
+  }
+  if (rec.moved === true) { // UX wave U4a (decision 33): the same words while it runs, once its task ends and once its process exits
+    const mcp = MCP_TOOL.exec(rec.use.toolName);
+    const name = detail.kind === 'shell' ? detail.command : mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName;
+    return cellLabel({ kind: 'moved', name, durationMs: elapsedMs(rec, turn) });
   }
   if (rec.use.toolName === MAWS_TOOL_USE.show_pane) return paneLabel(rec); // E1
   if (rec.use.toolName === MAWS_TOOL_USE.artifact_list) return artifactListLabel(rec); // E2
@@ -308,7 +327,7 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   const paths = detail.kind === 'read' ? detail.files.map((file) => file.path) : detail.kind === 'edit' ? [detail.filePath] : [];
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label: labelOf(rec, detail, status, category, labelClassification, turn), ...(rec.summary ? { summary: rec.summary } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label: labelOf(rec, detail, status, category, labelClassification, turn), ...(rec.summary ? { summary: rec.summary } : {}), ...(rec.moved === true ? { moved: true } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
   };
 }
 

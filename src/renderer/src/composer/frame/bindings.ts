@@ -25,7 +25,7 @@ import { acquireSession, refusalWords } from '../../sessions/acquire'; // P2-A
 import { availabilityRefusal } from '../../sessions/availability'; // P2-A
 import { locationPath, type HookResult, type ModelInfo, type SetupIntentHook, type SetupProject } from '../setup-intent';
 import { ENDED, MESSAGE_HELD, STARTING } from '../submit/submit-state';
-import { aliasOf, chipLabel, DEFAULT_ROW, modelAsk, type HeldAsk } from '@shared/sessions/model-label';
+import { DEFAULT_ROW, modelAsk, modelName, NO_MODEL, type HeldAsk, type ModelName } from '@shared/sessions/model-label';
 
 export interface ChipBinding<V, O = never> {
   value: V;
@@ -42,11 +42,16 @@ export interface ModelChoice {
   effort: Effort | null;
 }
 
-// W3: the model chip's binding carries its words, `<alias> <effort>` (@shared/sessions/model-label.ts), worked out here from the
-// session's source: the intent with the user's own settings while unstarted, the engine's status and effective effort once live.
+// W3: the model chip's binding carries its words, worked out here from the session's source: the intent with the user's
+// own settings while unstarted, the engine's status and effective effort once live. UX wave U4a (decision 19): `label` is
+// the whole text of `modelName` (@shared/sessions/model-label.ts), "Opus 5.5 Fast High", or "Model" while nothing names a
+// model; `name` its parts, which the chip draws (the name, then Fast and the effort muted) and its tooltip reads.
 // `requested` (P2-F wave S, the sitting's A1.6): the words name a model the session asked for and the engine has not
 // reported running yet (its last init frame named another); the chip marks it as the selector marks its row.
-export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string; requested?: boolean };
+export type ModelBinding = ChipBinding<ModelChoice, ModelInfo> & { label: string; name: ModelName | null; requested?: boolean };
+
+// The chip's words for a model's name: its whole text, or "Model" while nothing names one.
+const modelWords = (name: ModelName | null): Pick<ModelBinding, 'label' | 'name'> => ({ label: name?.text ?? NO_MODEL, name });
 
 // The toolbar's location chip (W2), read-only: where a started session runs, its branch, and why it cannot move.
 export interface LocationView {
@@ -77,9 +82,10 @@ export const modelMatches = (option: ModelInfo, model: string | null): boolean =
 // ---- unstarted: C10's setup intent ------------------------------------------------------------------------------
 
 // What an unstarted tab's chip names (W3): what the engine will use, the intent's own choice first, then the user's
-// settings (`model`, `effortLevel`; read only), then the catalogue's `default` row resolved to its model.
-export function intentModelLabel(intent: Pick<SetupIntentHook['intent'], 'model' | 'effort'>, models: readonly ModelInfo[], defaults: UserEngineDefaults | null): string {
-  return chipLabel(aliasOf(intent.model ?? defaults?.model ?? DEFAULT_ROW, models), intent.effort ?? defaults?.effortLevel ?? null);
+// settings (`model`, `effortLevel`; read only), then the catalogue's `default` row resolved to its model. No status, so
+// never Fast.
+export function intentModelName(intent: Pick<SetupIntentHook['intent'], 'model' | 'effort'>, models: readonly ModelInfo[], defaults: UserEngineDefaults | null): ModelName | null {
+  return modelName(intent.model ?? defaults?.model ?? DEFAULT_ROW, models, { effort: intent.effort ?? defaults?.effortLevel ?? null });
 }
 
 export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean }, defaults: UserEngineDefaults | null = null): FrameBindings {
@@ -103,7 +109,7 @@ export function intentBindings(hook: SetupIntentHook, gate: { starting: boolean 
           },
     model: {
       value: { model: intent.model, effort: intent.effort },
-      label: intentModelLabel(intent, options.models, defaults),
+      ...modelWords(intentModelName(intent, options.models, defaults)),
       options: options.models,
       disabled: gated,
       set: through((m: ModelChoice) => ({ model: m.model, effort: m.effort })),
@@ -180,11 +186,9 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
   const ask = modelAsk(reads.asked ?? undefined, facts, names);
   const unconfirmed = ask.pending;
   const current: ModelChoice = { model: ask.explicit ? ask.asked : resolved, effort: status?.effort ?? null };
-  const named = (id: string | null) => {
-    const alias = aliasOf(id, names);
-    return alias === DEFAULT_ROW ? null : alias;
-  };
   const shownEffort = reads.effort !== undefined ? reads.effort : status ? status.effort : (EffortSchema.safeParse(record?.effort).data ?? null);
+  // UX wave U4a (decision 19): Fast while the engine's status says fast mode is on; a record alone says none
+  const named = (id: string | null) => modelName(id, names, { effort: shownEffort, fast: status?.fastMode.state === 'on' });
   const directories = [...(reads.directories ?? record?.additionalDirectories ?? [])];
   return {
     // W9 (H2): the recorded branch only until git has answered; then git's, "detached", or none for a non-repository.
@@ -194,7 +198,7 @@ export function liveBindings(status: EngineSessionStatus | null, record: Session
     project: null,
     model: {
       value: current,
-      label: chipLabel(unconfirmed ? named(ask.asked ?? DEFAULT_ROW) : named(resolved ?? ask.asked), shownEffort),
+      ...modelWords(unconfirmed ? named(ask.asked ?? DEFAULT_ROW) : named(resolved ?? ask.asked)),
       requested: unconfirmed,
       options: [...(reads.models ?? [])],
       disabled: writable,
@@ -246,7 +250,7 @@ export function endedBindings(reason: string = ENDED): FrameBindings {
   return {
     location: { path: '', branch: null, note: reason },
     project: null,
-    model: { value: { model: null, effort: null }, label: chipLabel(null, null), options: [], disabled: reason, set: none },
+    model: { value: { model: null, effort: null }, ...modelWords(null), options: [], disabled: reason, set: none },
     mode: { value: null, options: MODE_OPTIONS.map((o) => o.mode), disabled: reason, refusal: null, autoUnavailable: null, set: none },
     directories: { value: [], options: [], disabled: reason, set: none },
   };

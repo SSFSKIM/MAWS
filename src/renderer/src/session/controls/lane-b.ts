@@ -15,6 +15,10 @@
 // and implement in the earlier mode, and a session on another machine is never sent one (its endpoint refuses it, and a
 // machine on an older build would refuse the whole answer). Closed in `answerCapability`, and refused again in `answer`; the services refuse it once more where
 // they forward it to the engine host (src/services/sessions/index.ts), for a caller that does not come through this port.
+// UX wave U4a (decision 30; Interfaces D): the stack's Send now on a next-step row (`session.steer.sendNow`) goes only to an
+// engine host of this build's wire, by the same reading of `host.status`; under another build's host the port answers the
+// sentence and invokes nothing (that host does not know the command). A session on another machine is never gated here:
+// its host is that machine's, and the command is declared not offered there.
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
@@ -32,6 +36,8 @@ import { READER } from '../../sessions/share/copy'; // board 525
 import { learnReaderGrade, whomToAsk } from '../../sessions/share/reader'; // board 525
 import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@shared/sessions/plan-next-mode';
 import { useHosts } from '../../stores/hosts';
+import { hostHasThisWire } from '@shared/sessions/host-wire';
+import { HOST_UPDATING } from '../../composer/queue/host-wire';
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -194,6 +200,11 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
       remove: (args) => client.invoke('session.queue.remove', { appSessionId, ...args }),
       edit: (args) => client.invoke('session.queue.edit', { appSessionId, ...args }),
       setPaused: (args) => client.invoke('session.queue.setPaused', { appSessionId, ...args }),
+      cancelSteer: (args) => client.invoke('session.steer.cancel', { appSessionId, ...args }),
+      sendNow: (args) =>
+        !remote && !hostHasThisWire(useHosts.getState().supervisor)
+          ? Promise.resolve({ ok: false as const, error: ipcError('invalid_input', HOST_UPDATING) })
+          : client.invoke('session.steer.sendNow', { appSessionId, ...args }),
     }),
     btw: (question, options) => client.invoke('session.sideQuestion', { appSessionId, question, ...(options?.retryOf !== undefined && { retryOf: options.retryOf }) }),
     command: () => refusedHere('command'),

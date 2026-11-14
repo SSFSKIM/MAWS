@@ -2,7 +2,7 @@
 // mockup's actions, and the safeguard verdict, which appears in detail only (§19), never on the line.
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadJournal } from '../../../../../../test/support/fixtures';
+import { loadJournal, loadUxwaveJournal } from '../../../../../../test/support/fixtures';
 import { reviewsOf } from '../../../tools/session-info/lane';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
@@ -51,6 +51,37 @@ describe('cell line', () => {
     view.rerenderRow(store.rows().find((r) => r.kind === 'cell')!);
     expect(screen.getByRole('button', { expanded: true })).toBe(line);
     expect(view.container.querySelector('[data-cell-id][data-expanded]')).not.toBeNull();
+  });
+});
+
+// UX wave U4a (decision 33; Interfaces C): the line of a call the engine moved to the background reads the model's
+// "Moved …" label, a shell call's description notwithstanding; one that was not moved still reads its description.
+describe('a call the engine moved to the background', () => {
+  async function lineAt(name: string, seq: number, toolUseId: string) {
+    const store = await storeWith(journalToEvents(loadUxwaveJournal(name).filter((row) => row.seq <= seq)));
+    useTranscriptStore.getState().expandAll(store.key);
+    const id = cellId.tool(tool(toolUseId));
+    const view = renderRow(rowHolding(store.rows(), id), { storeKey: store.key });
+    return view.container.querySelector<HTMLElement>(`[data-cell-id="${id}"] > .transcript-cell-line`)!;
+  }
+
+  it('a moved shell call (u4p1-a-seeded-1) reads “Moved `<command>` to the background after …” while it runs (50) and once its task ends (204)', async () => {
+    for (const seq of [50, 204]) {
+      const line = await lineAt('u4p1-a-seeded-1', seq, 'toolu_01UK719ATPuRjLtWeTEn9rZ1');
+      expect(line.textContent).toMatch(/^Moved node wait\.cjs a1 40 to the background after [\dhms ]+$/);
+      expect(line.querySelector('code')?.textContent).toBe('node wait.cjs a1 40');
+      cleanup();
+    }
+  });
+
+  it('a moved MCP call (u4p2-k-mcp-1) reads its moved label', async () => {
+    const line = await lineAt('u4p2-k-mcp-1', 55, 'toolu_01UFS9wFBAFW85EKmXuDepTL');
+    expect(line.textContent).toMatch(/^Moved slow · slow_wait to the background after [\dhms ]+$/);
+  });
+
+  it('a foreground shell call that was not moved (u4p2-n-never-1) still reads its description', async () => {
+    const line = await lineAt('u4p2-n-never-1', 50, 'toolu_01NSPqqrTjEJuLAnyjw1eDhR');
+    expect(line.textContent).toBe('Ran wait.cjs with arguments nnever1 and 30');
   });
 });
 

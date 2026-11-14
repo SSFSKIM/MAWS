@@ -34,6 +34,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   export: 'Export',
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
+  fork: 'Fork', // UX wave U4a (decision 18)
   btw: 'Side question', // E3
   'reload-plugins': 'Reload plugins', // E11 §2.2: the engine's terminal-only command as MAWS's action
 };
@@ -312,6 +313,7 @@ export const MODEL = {
   effort: 'Effort',
   unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
+  fastState: { on: 'On', off: 'Off' } as const, // UX wave U4a (decision 20): the fast-mode row's line with nothing else to say
   fastForOpus: 'Fast mode is for Opus',
   cooldown: 'on · cooling down',
   fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',

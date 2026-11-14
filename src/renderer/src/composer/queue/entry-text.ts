@@ -1,5 +1,5 @@
 // A queued entry's content read back for the queue list (C7 execution document, "Submit control and queue"): C3's entry
-// carries what went on the wire and no display, so the row's one line and the inline editor's document are derived
+// carries what went on the wire and no display, so the row's text and the document a take-back loads are derived
 // from it. The terminal's pasted blocks become `[Pasted text #n +L lines]` placeholders (their bodies kept for the
 // editor), the neutralised `<\pasted_content` is restored to what was typed, and images and PDFs are named `[Image #n]`
 // and `[PDF #n]` before the text, as they ride before it. Pure.
@@ -40,13 +40,14 @@ function partsOf(content: string | readonly ContentBlock[]) {
   };
 }
 
-// One line for the row: attachments named, pasted blocks as placeholders, line breaks as spaces.
+// The row's text (UX wave U4a: two lines in the stack, opened in place to the whole): attachments named, pasted blocks as
+// placeholders, line breaks kept, a run of blank lines as one.
 export function entryDisplay(content: string | readonly ContentBlock[]): string {
   const { text, images, documents } = partsOf(content);
   const named = [...images.map((_, i) => `[Image #${i + 1}]`), ...documents.map((_, i) => `[PDF #${i + 1}]`)];
   return [...named, extractPasted(text).text]
     .join(' ')
-    .replace(/\s*\n\s*/g, ' ')
+    .replace(/[ \t]*\n\s*/g, '\n')
     .trim();
 }
 

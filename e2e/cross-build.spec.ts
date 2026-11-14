@@ -117,6 +117,8 @@
 // builds in both directions; its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
 // UX wave U7b: (destinations, both ways), the pages' key and the four retired tab kinds, the same way; its block follows
 // (sidebar, both ways), and its rows are in the same table.
+// UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
+// U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
@@ -128,6 +130,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { DRAFT_CLAIM, type Draft, type TakeBackMark } from '@shared/ipc/schema/session'; // UX wave U4a: a take-back's stage
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
@@ -155,7 +158,7 @@ import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a:
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -1746,6 +1749,10 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | the index: `sessions.launch_folder`,          | (moved, from this build): F shows the session where   | (moved, from this build): this build shows what F  |
 //   | `sessions.agent_folder` (UX wave U8c-2)       | its directory says, finds its transcript there (its   | shows for a session F filed last, and the facts    |
 //   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
+//   | a take-back's stage (U4a): the session's      | (stage, its message waiting), (stage, its message     | the return of each: the stage carried forward      |
+//   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
+//   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
+//   |                                               | build finds                                           | standing beside the message, each said             |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -2945,5 +2952,223 @@ test('(build F’s app, unit mawsd) a session whose agent moved: the peer’s So
       await s.quit(run);
       record(said);
     });
+  });
+});
+// ---- UX wave U4a: a take-back's stage, the one stored value build F can meet (UC-14) ---------------------------------
+// U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, decision 13 and Interfaces §J and §K): ↑ or Edit on a
+// waiting message saves the whole message as the session's stored draft before it withdraws it, a document that carries
+// `attrs.takeBack` (the stage), under the claim (`replaces: DRAFT_CLAIM`); for the seconds a take-back lasts that draft
+// is what another build can find. Both scenes write that stage through the page's own `session.drafts.set` as the
+// take-back saves it, and quit: the state a window lost between the save and the withdrawal leaves. The session is
+// kept across the quits (its engine, the stub under a session host, outlives each app), and its turn runs. Each runs
+// only with a peer older than this landing (its src/shared/ipc/schema/session.ts names no `DRAFT_CLAIM`), whose
+// composer knows no stage; the run of record is the one whose peer is F (`--peer-exact f1852de3a`). Neither the peer's
+// composer nor its store fences the stage (Interfaces §J: F's services open the profile here), so what F's unmount
+// leaves is read on F and is what this build finds; each scene says which of its two states it met and fails on any
+// third.
+//   (stage, its message waiting)  the turn paced slowly enough that its request is not reached while the scene looks
+//                                 (a request's card holds the box in both builds; a scene whose turn reaches it
+//                                 skips, its premise gone): a message waits for after the turn and its stage is
+//                                 kept. The peer shows the stage in its box as an ordinary draft and still lists the
+//                                 message. This build again: where the stored draft is still the stage, the composer
+//                                 carries it forward (the message withdrawn, in the box, the stage settled as an
+//                                 ordinary draft); where the peer wrote the draft on, an ordinary draft stands beside
+//                                 the message still listed.
+//   (stage, its message taken)    the same stage, then the request answered: the turn ends and the queue releases
+//                                 the message to the engine, whose own turn is answered to its end, so the session
+//                                 idles. The peer shows as a draft a message its transcript holds.
+//                                 This build again: where the stage is still stored, the record says the agent has
+//                                 the message, the stage is cleared and the stack's line says so; where the peer wrote
+//                                 the draft on, that draft stands, a message that sending the box would send again.
+const knowsStages = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/session.ts'), 'utf8').includes('DRAFT_CLAIM');
+const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names DRAFT_CLAIM in its src/shared/ipc/schema/session.ts: a build from U4a on, whose composer carries a stage as this one does; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+// the waiting scene's pace: the fixture's request is its 45th row after the prompt, so about 270 s at this pace, past
+// what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
+const STAGE_ROW_MS = 6_000;
+const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
+const STAGE_TAKEN = 'Rename the second fixture once the review is done';
+const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
+const storedDraft = async (page: Page, id: AppSessionId): Promise<Draft | null> => value(await invoke(page, 'session.drafts.get', { appSessionId: id }));
+const stageOf = (draft: Draft | null): TakeBackMark | null => (draft?.doc as { attrs?: { takeBack?: TakeBackMark } } | null | undefined)?.attrs?.takeBack ?? null;
+const holdsText = (draft: Draft | null, text: string) => draft !== null && JSON.stringify(draft.doc).includes(text);
+const queuedIn = async (page: Page, id: AppSessionId, queueId: string) =>
+  value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries.some((entry) => entry.queueId === queueId && entry.state === 'queued');
+const composerBox = (page: Page) => page.locator('[data-region="main"] [data-composer] [contenteditable="true"]');
+const transcriptHolds = (page: Page, text: string) => page.locator('[data-region="main"] [data-transcript-scroller]').getByText(text).first();
+const hasRequest = async (page: Page, id: AppSessionId) => (await pendingPermissions(page, id)).length > 0;
+
+// The kept session's turn, open: the stub plays the permission round trip, its request ahead
+async function openStageTurn(page: Page, s: Scratch, id: AppSessionId): Promise<number> {
+  await s.launchSession(page, id, PERMISSION, { cwd: s.repo });
+  value(await invoke(page, 'session.send', { appSessionId: id, content: PROMPT }));
+  await expect.poll(async () => (await statusOf(page, id)).turn !== null, { timeout: 60_000, message: 'the turn is open' }).toBe(true);
+  const engine = (await statusOf(page, id)).pid;
+  expect(engine, 'the session runs a process (the stub, under a session host)').not.toBeNull();
+  return engine!;
+}
+
+// A message sent while the turn runs, which the queue holds for after it, and its stage saved under the claim as the
+// take-back saves it (composer/queue/take-back.ts: the entry's document with `attrs.takeBack`, every byte kept)
+async function stageWaiting(page: Page, id: AppSessionId, text: string): Promise<{ queueId: string; mark: TakeBackMark }> {
+  const sent = value(await invoke(page, 'session.send', { appSessionId: id, content: text }));
+  expect(sent.disposition, 'the message waits for after the turn: the queue holds it').toBe('queued');
+  let createdAt: string | undefined;
+  await expect
+    .poll(async () => (createdAt = value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries.find((entry) => entry.queueId === sent.queueId && entry.state === 'queued')?.createdAt), { message: 'the queue lists the message' })
+    .toBeDefined();
+  const mark: TakeBackMark = { ref: sent.queueId, kind: 'entry', since: createdAt! };
+  const doc = { type: 'doc', attrs: { attachments: [], takeBack: mark }, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
+  value(await invoke(page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() }, replaces: DRAFT_CLAIM }));
+  expect(stageOf(await storedDraft(page, id)), 'the stage is kept, taken under the claim').toEqual(mark);
+  return { queueId: sent.queueId, mark };
+}
+
+// A launch of either build on the profile, served, with the kept session's process ready in it (adopted at a handover,
+// or served by the kept engine host of the other build)
+async function launchServed(s: Scratch, id: AppSessionId, root?: string): Promise<Run> {
+  const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, root);
+  await s.ready(run.page, () => true, 90_000);
+  await expect
+    .poll(async () => {
+      const answer = await invoke(run.page, 'session.status', { appSessionId: id });
+      return answer.ok ? answer.value.process : null;
+    }, { timeout: 90_000, message: 'the kept session is served' })
+    .toBe('ready');
+  return run;
+}
+
+// The peer's look: the session's tab from its sidebar row, the message in its box as a draft; then the tab closed (its
+// composer's unmount writes a pending change), and what is stored read on the peer and the peer quit
+async function peerShowsDraft(s: Scratch, old: Run, id: AppSessionId, text: string): Promise<Draft | null> {
+  const session = `session:${await addressed(old.page, id)}`;
+  await showSession(old.page, id, session);
+  await expect(composerBox(old.page), 'the peer’s box holds the message as an ordinary draft').toContainText(text, { timeout: 20_000 });
+  await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+  await expect(mainTabById(old.page, session), 'the session’s tab closed').toHaveCount(0);
+  await old.page.waitForTimeout(1_000); // past the draft writer's 750 ms: whatever the unmount writes is written
+  const left = await storedDraft(old.page, id);
+  expect(old.maws.consoleErrors()).toEqual([]);
+  await s.quit(old);
+  return left;
+}
+
+test('(stage, its message waiting) a take-back’s stage this build kept for a message that waits after the turn shows in the peer’s box as an ordinary draft beside the message still listed; back here the stage is carried forward, or the peer’s draft stands beside the message, and which is said', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(knowsStages(peer), knowsStagesWhy(peer));
+  await withScratch('xb-stage-waiting', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) keeps a take-back's stage for a waiting message and its window is lost; ${peer.label} (wire ${wireOf(peer)}) opens the session; ${here.label} opens it again`];
+    s.useStub({ rowMs: STAGE_ROW_MS });
+    // this build: the turn open, a message waiting for after it, its stage kept; the app quits, the session kept
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const engine = await openStageTurn(run.page, s, id);
+    const { queueId, mark } = await stageWaiting(run.page, id, STAGE_WAITING);
+    expect(await hasRequest(run.page, id), 'the turn runs, its request ahead').toBe(false);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    expect(isAlive(engine), 'the session’s engine outlives the app, mid-turn').toBe(true);
+    said.push(`  ${here.label}: entry ${queueId} waits after the turn; the stage kept (since ${mark.since})`);
+
+    // the peer: the stage in its box as an ordinary draft, the message still listed
+    const old = await launchServed(s, id, peer.root);
+    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
+    const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
+    said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
+
+    // this build again: the state the peer left, carried forward or standing
+    const back = await launchServed(s, id);
+    const found = await storedDraft(back.page, id);
+    expect(found, 'this build finds what the peer left').toEqual(left);
+    const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
+    expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
+    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
+    if (stageOf(found) !== null) {
+      await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
+      await expect(composerBox(back.page), 'and in the box').toContainText(STAGE_WAITING, { timeout: 20_000 });
+      await expect
+        .poll(async () => {
+          const kept = await storedDraft(back.page, id);
+          return [stageOf(kept), holdsText(kept, STAGE_WAITING)];
+        }, { timeout: 30_000, message: 'the stage settled as the box’s ordinary draft' })
+        .toEqual([null, true]);
+    } else {
+      await expect(composerBox(back.page), 'the peer’s draft in the box').toContainText(STAGE_WAITING, { timeout: 20_000 });
+      expect(await queuedIn(back.page, id, queueId), 'beside the message, still listed').toBe(true);
+      expect(stageOf(await storedDraft(back.page, id)), 'no stage to carry').toBeNull();
+    }
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${outcome}`);
+    record(said);
+  });
+});
+
+test('(stage, its message taken) a take-back’s stage this build kept for a message the queue then released shows in the peer’s box as a draft while its transcript holds the message; back here the record says the agent has it and the stage is cleared, or the peer’s draft stands, and which is said', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(knowsStages(peer), knowsStagesWhy(peer));
+  await withScratch('xb-stage-taken', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) keeps a take-back's stage and the queue then releases the message; ${peer.label} (wire ${wireOf(peer)}) opens the session; ${here.label} opens it again`];
+    s.useStub({ rowMs: Number(ROW_MS) });
+    // this build: the stage kept for a waiting message; then the request answered, the turn's end, the release
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const engine = await openStageTurn(run.page, s, id);
+    const { queueId, mark } = await stageWaiting(run.page, id, STAGE_TAKEN);
+    const requested = await untilRequested(run.page, id);
+    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+    await expect
+      .poll(() => s.journal(id).some((r) => r.direction === 'out' && r.frame.type === 'user' && JSON.stringify(r.frame).includes(STAGE_TAKEN)), { timeout: 60_000, message: 'the turn ended and the queue released the message to the engine' })
+      .toBe(true);
+    expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
+    // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
+    // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
+    // the next prompt and no request's card holds either build's box
+    type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
+    let next: Requested | undefined;
+    await expect
+      .poll(async () => (next = (await eventsOf(run.page, id)).find((e): e is Requested => e.kind === 'permission.requested' && e.requestId !== requested.requestId)), { timeout: 60_000, message: 'the message’s own turn reaches its request' })
+      .toBeDefined();
+    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: next!.requestId, answer: { kind: 'permission', decision: 'deny' } }));
+    await expect.poll(async () => (await statusOf(run.page, id)).turn === null, { timeout: 60_000, message: 'the message’s own turn ended' }).toBe(true);
+    expect(stageOf(await storedDraft(run.page, id)), 'the stage still kept: nothing settled it').toEqual(mark);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    expect(isAlive(engine), 'the session’s engine outlives the app').toBe(true);
+    said.push(`  ${here.label}: entry ${queueId} released to the engine after its stage was kept (since ${mark.since})`);
+
+    // the peer: the message in its transcript, and as a draft in its box
+    const old = await launchServed(s, id, peer.root);
+    await showSession(old.page, id, `session:${await addressed(old.page, id)}`);
+    await expect(transcriptHolds(old.page, STAGE_TAKEN), 'the peer’s transcript holds the message').toBeVisible({ timeout: 20_000 });
+    const left = await peerShowsDraft(s, old, id, STAGE_TAKEN);
+    said.push(`  ${peer.label}: the transcript and the box both showed the message; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
+
+    // this build again: the record read, or the peer's draft standing
+    const back = await launchServed(s, id);
+    const found = await storedDraft(back.page, id);
+    expect(found, 'this build finds what the peer left').toEqual(left);
+    const outcome = stageOf(found) !== null ? 'the record said the agent has it; the stage cleared' : holdsText(found, STAGE_TAKEN) ? 'the peer’s draft stands, a message the agent already has' : null;
+    expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
+    await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
+    if (stageOf(found) !== null) {
+      await expect(back.page.locator('[data-region="main"]').getByRole('status', { name: 'Stack notice' }), 'the stack’s line').toHaveText(READ_ALREADY, { timeout: 30_000 });
+      await expect.poll(() => storedDraft(back.page, id), { timeout: 30_000, message: 'the stage cleared' }).toBeNull();
+      await expect(composerBox(back.page), 'nothing loaded into the box').not.toContainText(STAGE_TAKEN);
+    } else {
+      await expect(composerBox(back.page), 'the peer’s draft in the box').toContainText(STAGE_TAKEN, { timeout: 20_000 });
+      expect(stageOf(await storedDraft(back.page, id)), 'no stage to carry').toBeNull();
+    }
+    await expect(transcriptHolds(back.page, STAGE_TAKEN), 'the transcript holds the message').toBeVisible({ timeout: 20_000 });
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${outcome}`);
+    record(said);
   });
 });

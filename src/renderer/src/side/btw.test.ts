@@ -1,6 +1,6 @@
 // E3 (M4): `/btw` (E3 execution document, Design §7, M4's proofs): the widget's typed apply answers false without a
-// ready process (so the widget opens and says why) and true at once with one, having opened the question view and
-// asked the host; the pane's side-question store draws a question pending at once, takes the host's entry for it on
+// ready process (so the widget opens and says why) and true at once with one, having opened the session's card (UX wave
+// U4a; the question view before) and asked the host; the pane's side-question store draws a question pending at once, takes the host's entry for it on
 // the listing after its receipt, settles it from `session.operation` (answered, synthetic, failed, late), and Clear,
 // Retry and "Continue as a side thread" ask the host what they say.
 import { act } from '@testing-library/react';
@@ -19,7 +19,7 @@ import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
 import { promoteSide, SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
 import { connectSide, registerSidePane } from './register';
-import { askSide, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, showSideChild, sidePaneOf, useSidePane } from './store';
+import { askSide, btwCardOf, clearSide, onSideOperation, refreshSide, resetSideQuestions, retrySide, showSideChild, sidePaneOf, useBtwCards, useSidePane } from './store';
 
 // P5 O6 M2: the fake is main: asked and answering with bare ids
 const A_ID = bareOf(A);
@@ -51,14 +51,14 @@ afterEach(() => {
 
 describe('the btw widget’s typed apply', () => {
   // P2-A (2026-10-09; the execution document §5.6): the typed question's Enter is the gesture that starts the session
-  it('answers true at once on an exited session: the view opens, the session is acquired (side), then the question is asked once', async () => {
+  it('answers true at once on an exited session: the card opens, the session is acquired (side), then the question is asked once', async () => {
     withProcess(A, 'exited');
     let answer: boolean | undefined;
     await act(async () => void applyBtw(A, ' why? ').then((a) => (answer = a)));
     expect(answer).toBe(true);
     expect(fake.invoked('session.acquire')).toEqual([{ appSessionId: A_ID, reason: 'side' }]);
     expect(fake.invoked('session.sideQuestion')).toEqual([]); // not before the engine is ready
-    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
+    expect(btwCardOf(useBtwCards.getState(), A).view).toBe('open'); // UX wave U4a: the session's card, not the Side pane
     await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'why?' }]);
     expect(fake.invoked('session.acquire')).toHaveLength(1);
@@ -82,25 +82,26 @@ describe('the btw widget’s typed apply', () => {
     expect(fake.invoked('session.sideQuestion')).toEqual([]);
   });
 
-  it('answers true at once with one: the question view opens on the shown session and the question is asked', async () => {
+  it('answers true at once with one: the shown session’s card opens and the question is asked; no Side pane is added', async () => {
     withProcess(A, 'ready');
     let answer: boolean | undefined;
     await act(async () => void applyBtw(A, '  What word did I ask you to remember?  ').then((a) => (answer = a)));
     expect(answer).toBe(true); // before any receipt: the host has not answered `session.sideQuestion`
     expect(fake.pending('session.sideQuestion')).toBe(1);
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'What word did I ask you to remember?' }]);
-    expect(sidePaneOf(useSidePane.getState(), A).view).toEqual({ kind: 'btw' });
-    const side = panelOf(A)!.tabs.find((t) => t.toolId === SIDE_TOOL_ID)!;
-    expect(panelOf(A)!.activeTabId).toBe(side.id);
+    expect(btwCardOf(useBtwCards.getState(), A).view).toBe('open');
+    expect(sidePaneOf(useSidePane.getState(), A).view).toBeNull();
+    expect(panelOf(A)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID) ?? false).toBe(false);
+    expect(useNotices.getState().notices).toEqual([]);
     expect(exchanges()).toEqual([expect.objectContaining({ id: 'local:1', question: 'What word did I ask you to remember?', state: 'pending' })]);
   });
 
-  it('asked from a session that is not the shown one and no pane draws: its panel takes it inactive, a toast says where', async () => {
+  it('asked from a session that is not the shown one: that session’s card opens, no panel takes it, a toast says where', async () => {
     withProcess(B, 'ready');
     await act(async () => void applyBtw(B, 'why?'));
-    const side = panelOf(B)!.tabs.find((t) => t.toolId === SIDE_TOOL_ID)!;
-    expect(panelOf(B)!.activeTabId).not.toBe(side.id);
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual([expect.stringMatching(/^Side question asked in the panel of /)]);
+    expect(btwCardOf(useBtwCards.getState(), B).view).toBe('open');
+    expect(panelOf(B)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID) ?? false).toBe(false);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual([expect.stringMatching(/^Side question asked in the side chat of /)]);
   });
 });
 
@@ -113,6 +114,7 @@ describe('a `/btw` typed in a side thread drawn in its parent’s pane', () => {
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: B_ID, question: 'why?' }]);
     expect(sidePaneOf(useSidePane.getState(), B).inlineQuestions).toBe(true);
     expect(sidePaneOf(useSidePane.getState(), B).view).toBeNull();
+    expect(btwCardOf(useBtwCards.getState(), B).view).toBe('closed'); // UX wave U4a: no card of its own either
     expect(panelOf(B)?.tabs.some((t) => t.toolId === SIDE_TOOL_ID) ?? false).toBe(false);
     expect(useNotices.getState().notices).toEqual([]);
     expect(sidePaneOf(useSidePane.getState(), B).exchanges).toEqual([expect.objectContaining({ question: 'why?', state: 'pending' })]);
@@ -244,7 +246,7 @@ describe('the side-question store', () => {
   it('"Continue as a side thread" opens a thread from the answered exchanges and the text typed beside them, and the pane turns to it', async () => {
     const CHILD = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
     useSidePane.setState({
-      panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
+      panes: new Map([[A, { view: null /* UX wave U4a: asked in the session's card */, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
     });
     fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD }, 'session.intent.get': null });
     window.maws = fake.client as unknown as PreloadBridge;

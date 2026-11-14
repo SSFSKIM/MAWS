@@ -138,7 +138,7 @@ describe('the keymap table', () => {
     const rows = groups.flatMap((g) => g.rows);
     for (const id of SAMPLE_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(false);
     for (const id of ACTION_IDS) expect(rows.find((r) => r.id === id)!.rebindable, id).toBe(isRebindable(id)); // today's rows keep their control; a row build F does not know takes none (U11a M5's channel.open, U1a's two)
-    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'request.allowOnce', 'request.allowLasting']);
+    expect(ACTION_IDS.filter((id) => !isRebindable(id))).toEqual(['channel.open', 'request.allowOnce', 'request.allowLasting', 'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue', 'composer.takeBack', 'composer.sendNowOrStop', 'composer.historySearch', 'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu']); // U11a M5's one; U1a's two; U4a's four (M2), two (M3), three (M5) and one (M6)
   });
 
   it('shows a row that yields its default to a stored rebinding as unbound, and an override it cannot take as no override', () => {
@@ -152,8 +152,35 @@ describe('the keymap table', () => {
 
 // U6a (the U6a execution document, Interfaces D; decisions 7 and 10): what the capture counts as holding a chord
 describe('the capture’s conflicts', () => {
-  it('never counts a fixed row as a holder', () => {
-    expect(captureChord(key('Enter', 'Enter', { shiftKey: true }), 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Shift+Enter' });
+  // UX wave U4a (its decision 11, which U6a's decision 7 left to the landing with the first fixed row): a fixed row holds
+  // its key against every row that could take it from the fixed row's surface (its own scope, an app-wide row, a menu
+  // row), in words of its own, since a fixed key cannot be unbound; a pane row is never delivered from a text field
+  const enter = key('Enter', 'Enter');
+  const shiftEnter = key('Enter', 'Enter', { shiftKey: true });
+  const optionEnter = key('Enter', 'Enter', { altKey: true });
+
+  it('refuses a composer row the composer’s fixed keys, saying which key keeps it', () => {
+    expect(captureChord(enter, 'composer.cycleMode', {})).toEqual({ kind: 'refused', message: 'Send keeps this key' });
+    expect(captureChord(shiftEnter, 'composer.cycleMode', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(optionEnter, 'composer.cycleMode', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(shiftEnter, sample('sample.shared'), {}, EXTENDED_TABLE)).toEqual({ kind: 'refused', message: 'New line keeps this key' }); // a sibling's composer row alike
+  });
+
+  it('refuses an app-wide or a menu row a fixed key it could take, and leaves a pane row free to take it', () => {
+    expect(captureChord(optionEnter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(optionEnter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    // a bare key too: the fixed key's sentence, not the modifier rule's
+    expect(captureChord(enter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'Send keeps this key' });
+    expect(captureChord(enter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'Send keeps this key' });
+    expect(captureChord(shiftEnter, 'composer.stop', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(shiftEnter, 'attention.next', {})).toEqual({ kind: 'refused', message: 'New line keeps this key' });
+    expect(captureChord(key('KeyU', 'u'), 'attention.next', {})).toEqual({ kind: 'refused', message: 'A menu shortcut needs ⌘, ⌃ or ⌥' }); // any other bare key as before
+    expect(captureChord(shiftEnter, 'request.accept', {}, EXTENDED_TABLE)).toEqual({ kind: 'chord', chord: 'Shift+Enter' });
+    expect(captureChord(optionEnter, 'request.decline', {})).toEqual({ kind: 'chord', chord: 'Alt+Enter' });
+  });
+
+  it('gives request.accept its Enter back after it was moved', () => {
+    expect(captureChord(enter, 'request.accept', { 'request.accept': 'Y' })).toEqual({ kind: 'chord', chord: 'Enter' });
   });
 
   it('accepts an action’s own default where another row shares it by default, and refuses that chord for any other action', () => {

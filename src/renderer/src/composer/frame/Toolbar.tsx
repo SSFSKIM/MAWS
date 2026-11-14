@@ -36,7 +36,7 @@ export function Toolbar({ appSessionId, bindings, cwd, dirty, editor, onOpen, ri
       <PlusMenu appSessionId={appSessionId} cwd={cwd} editor={editor} directories={bindings.directories} />
       {/* New chat: an unstarted tab's project row above the box stands for the location until the session starts */}
       {bindings.project === null && <LocationChip location={bindings.location} directories={bindings.directories.value} dirty={dirty} onOpen={() => onOpen?.('rules')} />}
-      <ModeChip binding={bindings.mode} onOpen={() => onOpen?.('models')} />
+      <ModeChip appSessionId={appSessionId} binding={bindings.mode} onOpen={() => onOpen?.('models')} />
       {/* R2: a plugin's mode slot after the permission mode, only while a plugin draws one */}
       <PluginModeSlot appSessionId={appSessionId} />
       {/* E9: the microphone, its capture state and notice */}

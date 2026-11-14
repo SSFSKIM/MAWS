@@ -26,6 +26,8 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   // U4
   'composer.queue': 'Cmd+Enter', 'composer.send': 'Cmd+Enter', 'composer.modelMenu': 'Cmd+Shift+I',
   'composer.effortMenu': 'Cmd+Shift+E', 'composer.modeMenu': 'Cmd+Shift+M', 'composer.historySearch': 'Ctrl+R',
+  'composer.submit': 'Enter', 'composer.newLine': 'Shift+Enter', 'composer.newLineOption': 'Alt+Enter',
+  'composer.takeBack': 'Up', 'composer.sendNowOrStop': 'Escape',
   // U1
   'request.allowOnce': 'Cmd+Enter', 'request.allowLasting': 'Cmd+Shift+Enter', 'request.decline': 'Escape', 'request.accept': 'Enter',
   // U11
@@ -35,7 +37,17 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
 };
 // The rows of landed children: each must exist (U6b adds its seven; U11a its one).
-const LANDED = ['surface.terminal', 'surface.review', 'surface.files', 'channel.open'];
+const LANDED = [
+  'surface.terminal', 'surface.review', 'surface.files', 'channel.open',
+  // U4a: M2's rows
+  'composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue',
+  // U4a: M3's rows
+  'composer.takeBack', 'composer.sendNowOrStop',
+  // U4a: M5's rows
+  'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu',
+  // U4a: M6's row
+  'composer.historySearch',
+];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
 // of them has scope `app`. Every chord a row holds counts, the nine of Select tab included.
@@ -124,6 +136,44 @@ describe('keymap: the table', () => {
     expect(Object.values(ACTIONS as ActionTable).filter((spec) => !spec.fixed).map((spec) => spec.chord)).not.toContain('Alt+Enter');
     expect(ACTIONS['composer.stop']).toMatchObject({ chord: 'Cmd+.', sink: 'renderer', menu: null, scope: 'app' });
     expect(ACTIONS['composer.focus']).toMatchObject({ chord: 'Cmd+L', sink: 'renderer', menu: null, scope: 'app' });
+  });
+
+  // UX wave U4a (Interfaces H): the editor's own keys are fixed rows; ⌘Enter is composer.queue in the main editor, tried
+  // before composer.send, which keeps the chord for the reply fields
+  it('carries the composer’s fixed keys, and composer.queue ahead of composer.send on ⌘Enter', () => {
+    const fixed = (['composer.submit', 'composer.newLine', 'composer.newLineOption'] as const).map((id) => [id, ACTIONS[id].title, ACTIONS[id].chord, (ACTIONS[id] as ActionSpec).fixed]);
+    expect(fixed).toEqual([
+      ['composer.submit', 'Send', 'Enter', true],
+      ['composer.newLine', 'New line', 'Shift+Enter', true],
+      ['composer.newLineOption', 'New line', 'Alt+Enter', true],
+    ]);
+    for (const [id] of fixed) expect(ACTIONS[id as ActionId]).toMatchObject({ sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTIONS['composer.queue']).toEqual({ title: 'Queue for after the turn', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTIONS['composer.send']).toEqual({ title: 'Send (reply fields)', chord: 'Cmd+Enter', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(ACTION_IDS.indexOf('composer.queue')).toBe(ACTION_IDS.indexOf('composer.send') - 1);
+    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption', 'composer.queue'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
+  });
+
+  // UX wave U4a M3 (Interfaces H): ↑ and Esc are the editor's own keys in the composer, listed as fixed rows
+  it('carries ↑ and Esc as the composer’s fixed keys for the stack', () => {
+    expect(ACTIONS['composer.takeBack']).toEqual({ title: 'Take back the newest waiting message', chord: 'Up', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
+    expect(ACTIONS['composer.sendNowOrStop']).toEqual({ title: 'Send the first waiting message now, or stop', chord: 'Escape', sink: 'renderer', menu: null, scope: 'composer', fixed: true });
+    for (const id of ['composer.takeBack', 'composer.sendNowOrStop'] as const) expect(isRebindable(id), id).toBe(false);
+  });
+
+  // UX wave U4a M5 (Interfaces H; decision 21): the three menu chords, app-scoped like ⌘. and ⌘L and registered once
+  // (ComposerAppKeys), acting on the focused pane's session; none takes a menu role's chord
+  it('carries the model, effort and mode menus’ chords, app-scoped and out of the menu', () => {
+    expect(ACTIONS['composer.modelMenu']).toEqual({ title: 'Model menu', chord: 'Cmd+Shift+I', sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTIONS['composer.effortMenu']).toEqual({ title: 'Effort', chord: 'Cmd+Shift+E', sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTIONS['composer.modeMenu']).toEqual({ title: 'Permission mode menu', chord: 'Cmd+Shift+M', sink: 'renderer', menu: null, scope: 'app' });
+    for (const id of ['composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu'] as const) expect(isRebindable(id), id).toBe(false); // build F knows none
+  });
+
+  // UX wave U4a M6 (Interfaces H; decision 22): Ctrl+R searches the prompt history, dispatched to the focused composer
+  it('carries the history search on Ctrl+R, composer-scoped and out of the menu', () => {
+    expect(ACTIONS['composer.historySearch']).toEqual({ title: 'Search prompt history', chord: 'Ctrl+R', sink: 'renderer', menu: null, scope: 'composer' });
+    expect(isRebindable('composer.historySearch')).toBe(false); // build F knows it not
   });
   // C7 end
 

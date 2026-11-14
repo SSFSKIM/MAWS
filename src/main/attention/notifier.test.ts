@@ -45,6 +45,9 @@ import type { RemoteAttentionChange } from '../lane-b/remote-attention';
 import { notificationActions, type NotificationActions } from './actions';
 import type { HostDispatch } from '../ipc/router';
 import { startNotifier } from './notifier';
+import { costLedger, emptyDigest, foldEvents } from '../../services/sessions/digest'; // UX wave U4a
+import { Normalizer } from '../../engine-host/normalizer'; // UX wave U4a
+import { loadUxwaveJournal } from '../../../test/support/fixtures'; // UX wave U4a
 
 const CHARTER = 'app-charter' as AppSessionId;
 const LOOSE = 'app-loose' as AppSessionId;
@@ -323,6 +326,26 @@ describe('dock badge', () => {
     h.view.putDigest(done);
     expect(posted()).toHaveLength(1);
     expect(posted()[0].options.body).toBe('All tests pass.');
+  });
+  // UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, decision 6): the notifier is fed the digests of
+  // a recorded session in which a waiting message was sent now (u4p2-a-1): the cut turn's end (47) leaves lastTurnEndedAt
+  // where it was, so it posts nothing; the message's own end (191) posts once. The notifier's source is not edited.
+  it('UX wave U4a: posts nothing for the turn a sent-now message ended, and once for the message’s own turn', () => {
+    const h = harness();
+    const normalizer = new Normalizer({ appSessionId: CHARTER, launchId: 'L1', sessionId: null });
+    const seen = new Set<string>();
+    let current = emptyDigest(CHARTER);
+    const ledger = costLedger(current);
+    const postedAfter = new Map<number, number>();
+    for (const row of loadUxwaveJournal('u4p2-a-1')) {
+      if (row.seq > 191) break;
+      current = foldEvents(current, seen, normalizer.push(row), ledger);
+      h.view.putDigest(current);
+      postedAfter.set(row.seq, posted().length);
+    }
+    expect(postedAfter.get(46)).toBe(0);
+    expect(postedAfter.get(190)).toBe(0);
+    expect(postedAfter.get(191)).toBe(1);
   });
   it('hands a failed reply to the ready-page relay rather than emitting it to a just-created window', async () => {
     const actions = { reply: vi.fn().mockRejectedValue(new Error('Session unavailable')), offer: vi.fn(), allow: vi.fn(), deny: vi.fn() };

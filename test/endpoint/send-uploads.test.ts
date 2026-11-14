@@ -236,7 +236,7 @@ describe('a send’s uploads', () => {
       // the engine host's own queue, over its state file, with a turn running: the send waits there
       const userData = join(dirname(t.dir), 'engine-host');
       const queueOf = (store: FileSessionStateStore) =>
-        new MessageQueue({ appSessionId: APP as AppSessionId, store, write: async () => {}, meta: () => {}, turnOpen: () => true, canWrite: () => true, cancel: async () => false, onChange: () => {}, log: () => {} });
+        new MessageQueue({ appSessionId: APP as AppSessionId, store, write: async () => {}, meta: () => {}, turnOpen: () => true, canWrite: () => true, cancel: async () => false, sendNow: async () => undefined, onChange: () => {}, log: () => {} });
       const before = queueOf(new FileSessionStateStore(userData));
       await before.recover();
       expect((await before.send(content)).disposition).toBe('queued');

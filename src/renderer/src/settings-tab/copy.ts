@@ -219,6 +219,7 @@ export const KEYBOARD = {
   was: (display: string) => `Was ${display}`,
   unbound: 'Unbound',
   conflict: (title: string) => `Already bound to ${title} · unbind it first`,
+  fixedKey: (title: string) => `${title} keeps this key`, // UX wave U4a: a key an editor handles itself, which cannot be unbound
   menuNeedsModifier: 'A menu shortcut needs ⌘, ⌃ or ⌥',
   appNeedsModifier: 'An app-wide shortcut needs ⌘, ⌃ or ⌥',
   reserved: (item: string) => `Reserved by macOS · ${item}`,

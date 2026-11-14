@@ -256,6 +256,7 @@
 "commands.session.status.output":[".appSessionId AppSessionId"],
 "commands.session.steer.cancel.input":[".appSessionId AppSessionId"],
 "commands.session.steer.input":[".appSessionId AppSessionId"],
+"commands.session.steer.sendNow.input":[".appSessionId AppSessionId"],
 "commands.session.stop.input":[".appSessionId AppSessionId"],
 "commands.session.stopTask.input":[".appSessionId AppSessionId"],
 "commands.session.takeOver.input":[".appSessionId AppSessionId",".paneId PtyId"],

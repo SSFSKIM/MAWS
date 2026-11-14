@@ -297,6 +297,16 @@ export type Draft = z.infer<typeof DraftSchema>;
 // later, and acts are decided concurrently, so an older save could otherwise land over a newer one. Each `updatedAt` is
 // compared for identity only, never ordered, so two devices' clocks never meet. A save naming none writes as before.
 export const STALE_DRAFT_WORDS = 'session.drafts.set: the draft it replaces is no longer the one kept';
+// UX wave U4a (decision 13; Interfaces D): a take-back's stage is saved and settled through two more values of `replaces`,
+// so the command's schema does not change. The claim writes only where no draft with a document is kept (never written,
+// or cleared); a settle form is the one save a stage kept at that revision lets through, and while a stage is kept every
+// other save is refused (the fence). A store of an earlier build reads both as revisions it does not hold: stale.
+export const DRAFT_CLAIM = 'claim:no-document';
+export const settles = (updatedAt: string): string => `settle:${updatedAt}`;
+export const DRAFT_KEPT_WORDS = 'session.drafts.set: a draft with a document is kept';
+export const STAGED_DRAFT_WORDS = 'session.drafts.set: a message being taken back is kept';
+/** `attrs.takeBack` of a stage's document: the message's name in the queue, which kind of name it is, and its row's time. */
+export interface TakeBackMark { ref: string; kind: 'steer' | 'entry'; since: string }
 
 // A replay fixture the index lists (M5 seeds and plays them).
 export const ReplayFixtureSchema = z.strictObject({
@@ -860,6 +870,17 @@ const o7m8Commands = {
 } as const;
 export const O7M8_SESSION_COMMANDS = Object.keys(o7m8Commands) as (keyof typeof o7m8Commands)[];
 // P5 O7 M8 end ----------------------------------------------------------------------------------------------------------
+// UX wave U4a start (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, Interfaces A) -----------------------------
+// Owner engine-host. `session.steer.sendNow` sends now a message that waits at the next step (a pending `next` steer of the
+// session's own) through the engine's send-now request, which moves a running call to the background rather than
+// killing it; the engine delivers with it every message waiting at the next step (decision 32). `nothing_waiting` when
+// it is not a pending steer, and without asking; refused while a hold, a Stop or a cancel withdraws it. One round trip,
+// bounded as `session.steer.cancel` is.
+const u4aCommands = {
+  'session.steer.sendNow': host(input({ messageUuid: MessageUuidSchema }), z.strictObject({ outcome: z.enum(['delivering', 'stopped', 'nothing_waiting']) })),
+} as const;
+export const U4A_SESSION_COMMANDS = Object.keys(u4aCommands) as (keyof typeof u4aCommands)[];
+// UX wave U4a end -------------------------------------------------------------------------------------------------------
 
 export const commands = {
   ...c3Commands, // C3
@@ -879,6 +900,7 @@ export const commands = {
   ...o5Commands, // P5 O5 M5
   ...o7Commands, // P5 O7 M4
   ...o7m8Commands, // P5 O7 M8
+  ...u4aCommands, // UX wave U4a
 } as const satisfies Record<`session.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

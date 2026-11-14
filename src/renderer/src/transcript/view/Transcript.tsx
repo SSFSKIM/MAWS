@@ -482,6 +482,9 @@ export interface TranscriptProps {
   placed?: readonly Row[];
   // board 525, additive: who wrote a prompt, as the reader names them (null: theirs); absent, every prompt is theirs
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
+  // UX wave U4a (decision 12), additive: the mount has a stack that draws a waiting message while it is unread, so the
+  // transcript draws no row marked unread (`withQueueTail`); absent, every row as before
+  waiting?: 'stacked';
 }
 
 const NO_ROWS: Row[] = [];
@@ -512,7 +515,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -526,7 +529,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
-  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail, waiting), [derived, activity, withdrawn, tail, waiting]);
   // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane, when the mount knows it,
   // told to the store (a marked commentary then stays in view when its turn folds), and while the lane is on and the
   // reader has not chosen the transcript, the report projection of the rows: a marked turn's work in one working record

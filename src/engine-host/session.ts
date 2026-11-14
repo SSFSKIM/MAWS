@@ -481,6 +481,7 @@ export class EngineSession {
       turnOpen: () => this.processState !== 'exited' && (this.normalizer.state.currentTurn !== null || this.normalizer.state.unstartedPrompts.size > 0 || this.clearAndImplement.holding),
       canWrite: () => this.processState === 'ready',
       cancel: async (messageUuid) => (await cancelAsyncMessage(this.readyClient(), { message_uuid: messageUuid })).cancelled === true, // W1
+      sendNow: async (messageUuid) => (await interrupt(this.readyClient(), { send_now: true, message_uuid: messageUuid })).send_now, // UX wave U4a (decision 3)
       unsettled: opts.unsettledPrompts, // P2-C
       onPauseChange: (paused) => this.clearAndImplement.setPaused(paused),
       onChange: (queue) => {
@@ -564,6 +565,18 @@ export class EngineSession {
     }
     settleOwed();
     return { stillQueued: [...response.still_queued], cancelled: [...(response.cancelled ?? [])] };
+  }
+
+  // UX wave U4a (the U4a document, Interfaces A): Send now on a message that waits at the next step, the engine's own
+  // request. Unlike `interrupt` it pauses nothing, holds nothing and owes nothing: a send-now that is lost leaves the
+  // message waiting, which is the safe side, so no mark survives a crash for it (D12's is a Stop's).
+  async sendNow(messageUuid: MessageUuid): Promise<{ outcome: 'delivering' | 'stopped' | 'nothing_waiting' }> {
+    this.markUsed();
+    try {
+      return await this.queue.sendNow(messageUuid);
+    } finally {
+      this.touch();
+    }
   }
 
   // `!`: answered at the `bash_command` write; the echo and its receipt follow as events.

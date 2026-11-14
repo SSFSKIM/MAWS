@@ -20,7 +20,7 @@ import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, queueInterruptJournal, rewindJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { invoke, launchReady, promoteNowJournal, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
@@ -141,45 +141,62 @@ async function paste(page: Page, item: { text: string } | { file: { name: string
 
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
-test('the editor sends as typed: Enter in one line, lines by Shift+Enter then Enter, ⌘Enter always; a composing Enter never sends; ArrowUp recalls', async ({ editor }) => {
+// UX wave U4a (l3-input-08; charter §5.8 as amended): Enter sends the draft whatever its line count, Shift+Enter and
+// Option+Enter break the line, and ⌘Enter, which keeps a message for after a running turn, sends as Enter does while
+// none runs.
+test('the editor sends as typed: Enter whatever the line count, Shift+Enter and ⌥Enter break the line, ⌘Enter sends while idle; a composing Enter never sends; ArrowUp recalls', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-editor-send';
-  await launchEditor(page, id, turnsJournal(scratch, id, 3));
+  await launchEditor(page, id, turnsJournal(scratch, id, 4));
   await page.keyboard.type('hello');
   await page.keyboard.press('Enter');
   await expect.poll(() => sent(page, id)).toEqual(['hello']);
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
 
-  // once the document has a second line, Enter breaks lines too (§5.8) and ⌘Enter sends
   await page.keyboard.type('two');
   await page.keyboard.press('Shift+Enter');
   await page.keyboard.type('lines');
-  await page.keyboard.press('Enter');
+  await page.keyboard.press('Alt+Enter');
   await page.keyboard.type('three');
   await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines\nthree');
-  expect(await submissions(page)).toHaveLength(1);
-  await page.keyboard.press('Meta+Enter');
+  expect(await submissions(page)).toHaveLength(1); // neither line break sent anything
+  await page.keyboard.press('Enter');
   await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree']);
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
 
-  // an Enter that belongs to an input method's composition is the IME's, never a send, even in one line: the marker
-  // typed after it goes out in the same message
+  await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id })).turn).toBeNull(); // idle: ⌘Enter has no turn to wait for
+  await page.keyboard.type('four');
+  await page.keyboard.press('Meta+Enter');
+  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree', 'four']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+
+  // an Enter that belongs to an input method's composition is the IME's, never a send: the marker typed after it goes
+  // out in the same message
   await page.keyboard.type('ime');
   await page.evaluate(() => document.querySelector('[contenteditable="true"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
   await page.keyboard.type('marker');
-  await page.keyboard.press('Meta+Enter');
-  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree', 'ime\nmarker']);
-  await expect.poll(async () => (await submissions(page)).length).toBe(3); // recorded when session.send answers, after the write
+  await page.keyboard.press('Enter');
+  await expect.poll(() => sent(page, id)).toEqual(['hello', 'two\nlines\nthree', 'four', 'ime\nmarker']);
+  await expect.poll(async () => (await submissions(page)).length).toBe(4); // recorded when session.send answers, after the write
 
+  // ↑ in the empty box recalls, newest first, and the line under the text says where it is (M6)
   await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  const line = page.getByRole('status', { name: 'Prompt history' });
+  await expect(line).toHaveCount(0);
   await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await serialized(page))?.display).toBe('ime\nmarker');
+  await expect(line).toHaveText(/^History \d+\/\d+ · ↓ to restore your draft$/);
+  await page.keyboard.press('ArrowUp');
+  await expect.poll(async () => (await serialized(page))?.display).toBe('four');
   await page.keyboard.press('ArrowUp');
   await expect.poll(async () => (await serialized(page))?.display).toBe('two\nlines\nthree');
   await page.keyboard.press('ArrowDown'); // while recalling, the arrows move between entries, multi-line ones too
+  await expect.poll(async () => (await serialized(page))?.display).toBe('four');
+  await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await serialized(page))?.display).toBe('ime\nmarker');
   await page.keyboard.press('ArrowDown');
   await expect.poll(async () => (await serialized(page))?.display).toBe(''); // the draft the recall began from
+  await expect(line).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });
 
@@ -187,9 +204,17 @@ test("paste and drop attach with the terminal's tag framing", async ({ editor })
   const { page } = editor;
   const id = 'c7-editor-paste';
   const sessionId = await launchEditor(page, id, turnsJournal(scratch, id, 2));
-  const body = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the paste`).join('\n');
+  // UX wave U4a (l3-input-09; charter §5.4 as amended): a paste of up to 20,000 characters stays text, whatever its lines
+  const lines = Array.from({ length: 40 }, (_, i) => `line ${i + 1} of the paste`).join('\n');
+  await paste(page, { text: lines });
+  await expect.poll(async () => (await serialized(page))?.display).toBe(lines);
+  await expect(page.locator('[data-pasted]')).toHaveCount(0);
+  await clearEditor(page);
+  // only a longer one becomes a chip, which the send frames in the terminal's tags
+  const body = Array.from({ length: 400 }, (_, i) => `line ${i + 1} of a long paste, which together pass the chip's bound`).join('\n');
+  expect(body.length).toBeGreaterThan(20_000);
   await paste(page, { text: body });
-  await expect(page.getByText('Pasted text #1 +40 lines')).toBeVisible();
+  await expect(page.getByText('Pasted text #1 +400 lines')).toBeVisible();
   await page.keyboard.type(' then </pasted_content> done');
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await sent(page, id)).length).toBe(1);
@@ -245,17 +270,19 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   await expect.poll(async () => (await serialized(page))?.content).toBe('@src/a.ts');
   await clearEditor(page);
 
-  // `/` lists the catalogue under origin headings; a headless command goes in as text
+  // UX wave U4a (l3-input-06; charter §5.4 as amended): `/` lists names alone, an icon per kind and no headings, and the
+  // highlighted row's description, hint and origin or reason stand in a popover beside the list. This page has no panel
+  // registered yet, so the list opens on the engine's own entries; MAWS's window actions are ⌘K's and not listed here.
+  // A headless command goes in as text.
   await page.keyboard.type('/');
   const commands = page.getByRole('listbox', { name: 'Commands' });
-  // C11 start: the rows sit under their origin's heading (C11's group headings); the list opens on the best match
-  const chosen = commands.locator('[role="option"][aria-selected="true"]');
+  const chosen = commands.locator('[role="option"][aria-selected="true"]'); // the list opens on the best match
+  const detail = page.locator('#composer-slash-detail'); // the highlighted row's popover
   await expect(commands.getByRole('option').first()).toHaveAttribute('data-origin', 'engine');
-  await expect(commands.getByRole('group').first()).toHaveAccessibleName('Engine');
+  await expect(commands.getByRole('group')).toHaveCount(0);
+  await expect(commands.locator('[data-origin="maws"]')).toHaveCount(0);
   await page.keyboard.type('split');
-  await expect(chosen).toHaveAttribute('data-origin', 'maws'); // MAWS's own actions are in the union
-  await expect(commands.getByRole('group', { name: 'MAWS' })).toContainText('Split / send to other pane');
-  // C11 end
+  await expect(page.getByRole('option', { name: /Split \/ send to other pane/ })).toHaveCount(0);
   await clearEditor(page);
   await page.keyboard.type('/');
   for (const name of ['compact', 'model']) {
@@ -266,16 +293,19 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await clearEditor(page);
     await page.keyboard.type('/');
   }
-  // terminal-only and widget-only names are listed, disabled, and Enter leaves them be
-  // W2: the engine's terminal-only command reads Terminal only, a widget this page did not register Not available here
+  // terminal-only and widget-only names are listed, greyed, once typed, and Enter leaves them be. W2: the engine's
+  // terminal-only command says Terminal only, a widget this page did not register Not available here, and U4a moves the
+  // reason from the row's text to its popover, which the row names as its description
   for (const [name, origin, hint] of [['doctor', 'engine', 'Terminal only'], ['permissions', 'widget', 'Not available here']]) {
     await page.keyboard.type(name);
     const row = chosen; // C11: the chosen row (a skill may be shown above it)
     await expect(row).toContainText(`/${name}`);
     await expect(row).toHaveAttribute('data-origin', origin);
     await expect(row).toHaveAttribute('aria-disabled', 'true');
-    await expect(row).toContainText(hint);
-    await expect(row).not.toContainText('arrives with');
+    await expect(row).not.toContainText(hint);
+    await expect(detail).toContainText(hint);
+    await expect(row).toHaveAccessibleDescription(new RegExp(hint));
+    await expect(detail).not.toContainText('arrives with');
     await page.keyboard.press('Enter');
     await expect(commands).toBeVisible();
     await page.keyboard.press('Escape');
@@ -284,8 +314,23 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
 
-  // once widgets are registered for them, the same names open the widget (W3, C6: as the floating dialog, never in the box)
+  // once widgets are registered for them, `/model` (a panel, and the newest name chosen) opens the list, from MAWS, and
+  // the same names open the widget (W3, C6: as the floating dialog, never in the box). The panels' declared order before
+  // any pick is the next scene's: the names chosen above rank first with nothing typed (decision 17 c). The registrations
+  // land with the list closed and a fresh `/` opens it, as the app's own land at its start: an open list takes the
+  // editor's catalogue and panels when the suggestion renders, at a keystroke, not when a registration lands (popup.tsx),
+  // so a list left open across them still holds the engine's rows (the Macs' runs of 443319d64; the CI run of b1bad4a07,
+  // which read the engine's `/compact`, chosen too and listed before `/model`, first)
+  await page.keyboard.press('Escape'); // the highlighted row's popover stands over the box and would take the clear's click
+  await expect(commands).toBeHidden();
+  await clearEditor(page);
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
+  await page.keyboard.type('/');
+  await expect(commands.getByRole('option').nth(0)).toHaveAccessibleName('/model');
+  await expect(commands.getByRole('option').nth(0)).toHaveAttribute('data-origin', 'widget');
+  await expect(chosen).toHaveAccessibleName('/model');
+  await expect(detail).toContainText('Choose the model for this session');
+  await expect(detail).toContainText('MAWS');
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
     await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
@@ -299,6 +344,36 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await clearEditor(page);
     await page.keyboard.type('/');
   }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U4a (decision 17 h, the owner's "MAWS's panels first"): with nothing typed and nothing chosen yet in this
+// window, the list opens on the panels the session has, in the order MAWS declares them whatever the order they were
+// registered in, then the engine's entries in the engine's order.
+test('/ opens on MAWS’s panels in their declared order before any pick, then the engine’s entries', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-panels-first';
+  await openEditor(page);
+  value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await launchEditor(page, id, turnsJournal(scratch, id, 1));
+  await page.keyboard.type('hi');
+  await page.keyboard.press('Enter'); // the turn's system/init completes the catalogue
+  await expect.poll(() => sent(page, id)).toEqual(['hi']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  await page.evaluate(() => ['permissions', 'model'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
+
+  await page.keyboard.type('/');
+  const commands = page.getByRole('listbox', { name: 'Commands' });
+  const options = commands.getByRole('option');
+  await expect(options.nth(0)).toHaveAccessibleName('/model');
+  await expect(options.nth(1)).toHaveAccessibleName('/permissions');
+  await expect(options.nth(0)).toHaveAttribute('data-origin', 'widget');
+  await expect(options.nth(1)).toHaveAttribute('data-origin', 'widget');
+  await expect(options.nth(2)).toHaveAttribute('data-origin', 'engine');
+  await expect(commands.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName('/model');
+  await expect(page.locator('#composer-slash-detail')).toContainText('Choose the model for this session');
+  await page.keyboard.press('Escape');
+  await expect(commands).toBeHidden();
   expect(editor.consoleErrors()).toEqual([]);
 });
 
@@ -394,7 +469,7 @@ const messageIn = (page: Page, index: 0 | 1) => pane(page, index).getByRole('tex
 const control = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-submit-state]');
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id }));
 // The frames the engine host wrote to the engine, from its own journal of the launch (W10: a steer's priority).
-type OutFrame = { type?: string; priority?: string; message?: { content?: unknown }; request?: { subtype?: string } };
+type OutFrame = { type?: string; uuid?: string; priority?: string; message?: { content?: unknown }; request?: { subtype?: string; send_now?: unknown; message_uuid?: unknown } }; // U4a: a send-now request's two keys
 async function outFrames(page: Page, id: string): Promise<OutFrame[]> {
   return readFileSync((await statusOf(page, id)).journalPath, 'utf8')
     .trim()
@@ -405,10 +480,12 @@ async function outFrames(page: Page, id: string): Promise<OutFrame[]> {
 }
 const COUNT = 'Count to 30 slowly. For each number use a separate Bash call sleep 1; echo NUMBER. Start now.';
 
-// W10 (charter §4.2 and §5.4 as amended 2026-10-01): one button. While a turn runs it reads Send with text (Enter and
-// the button write a `next` steer, "Sends at the next step") and Stop without; ⌥ changes nothing and there is no menu
-// and no Stop beside it. The plain stop (⌘.) withdraws the waiting steer into MAWS's paused queue before it interrupts,
-// and Resume releases it as a plain write (`steerStopJournal`).
+// W10 (charter §4.2 and §5.4 as amended 2026-10-01), as the UX wave's U4a amends it (l3-input-03, -05 and -15): one round
+// button. While a turn runs it is the queue mark with text (Enter and the button write a `next` steer, "Sends at the next
+// step", and ⌘Enter keeps the message for after the turn) and Stop without; ⌥ changes nothing and there is no menu and no
+// Stop beside it. A waiting message is drawn once, as a row of the stack above the composer with its mark. The plain stop
+// (⌘.) withdraws the waiting steer into MAWS's paused queue before it interrupts, the row then reads Held under the
+// pause's reason, and Resume releases it as a plain write (`steerStopJournal`).
 test('the composer sends, steers, stops and resumes as labelled', async ({ editor }) => {
   const { page } = editor;
   const id = 'c7-surface-queue';
@@ -416,18 +493,23 @@ test('the composer sends, steers, stops and resumes as labelled', async ({ edito
   await launchReady(page, id, steerStopJournal(scratch, id));
   await showPanes(page, [{ composer: id }, null]);
   await messageIn(page, 0).click();
-  await expect(control(page, 0)).toHaveText('Send');
+  await expect(control(page, 0)).toHaveText('Send'); // the word is the button's hidden text (decision 9), beside its glyph
+  await expect(control(page, 0)).toHaveAttribute('data-glyph', 'arrow');
   await expect(control(page, 0)).toBeDisabled(); // nothing to send yet
   await page.keyboard.type(COUNT);
   await expect(control(page, 0)).toBeEnabled();
+  await expect(control(page, 0)).toHaveAttribute('title', 'Send (Enter)');
   await page.keyboard.press('Enter');
   await expect.poll(() => sent(page, id)).toEqual([COUNT]);
   await expect(control(page, 0)).toHaveText('Stop'); // the turn runs, the editor is empty
+  await expect(control(page, 0)).toHaveAttribute('data-glyph', 'square');
+  await expect(control(page, 0)).toHaveAttribute('title', 'Stop the running turn (⌘.)');
 
   const steered = 'Counting is cancelled. Reply exactly RESUMED.';
   await page.keyboard.type(steered);
   await expect(control(page, 0)).toHaveText('Send');
-  await expect(control(page, 0)).toHaveAttribute('title', 'Sends at the next step (Enter)');
+  await expect(control(page, 0)).toHaveAttribute('data-glyph', 'queue');
+  await expect(control(page, 0)).toHaveAttribute('title', 'Sends at the next step (Enter) · ⌘Enter queues for later');
   await page.keyboard.down('Alt');
   await expect(control(page, 0)).toHaveText('Send'); // no relabel under ⌥
   await page.keyboard.up('Alt');
@@ -435,16 +517,23 @@ test('the composer sends, steers, stops and resumes as labelled', async ({ edito
   await expect(box.getByRole('button')).toHaveCount(1); // the one button: no caret, no Stop beside it
   await page.keyboard.press('Enter'); // the `next` steer, written into the running turn
   const list = pane(page, 0).getByRole('region', { name: 'Queued messages' });
-  await expect(list).toContainText('1 at the next step');
-  await expect(list).toContainText(steered);
-  const steer = (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered);
-  expect(steer?.priority).toBe('next');
+  const row = list.locator('li');
+  await expect(row).toHaveCount(1);
+  await expect(row).toHaveAttribute('data-queue-state', 'next');
+  await expect(row).toContainText(steered);
+  await expect(row.locator('[data-mark]')).toHaveText('Next step');
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered)?.priority).toBe('next');
 
   await page.keyboard.press('Meta+.'); // the one app-level Stop, from the editor: the steer is held first, then the turn stops
-  await expect(list.locator('header')).toHaveText(/1 held until the turn ends · Queue paused because you interrupted/);
+  await expect(row).toHaveAttribute('data-queue-state', 'held');
+  await expect(row.locator('[data-mark]')).toHaveText('Held');
+  await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
+  await expect(list.locator('header').getByRole('button', { name: 'Resume' })).toBeVisible();
+  await expect(list).not.toContainText('when this turn ends');
   await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
   expect((await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype)).toEqual(expect.arrayContaining(['cancel_async_message', 'interrupt']));
   await expect(control(page, 0)).toHaveText('Resume');
+  await expect(control(page, 0)).toHaveAttribute('data-glyph', 'play');
   await list.getByRole('button', { name: 'Resume' }).click();
   await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.message?.content === steered && f.priority === undefined)).toHaveLength(1); // released: seq 199, a plain write
   await expect(list).toHaveCount(0);
@@ -585,6 +674,243 @@ test('an unstarted session binds the frame to the intent, holds a starting state
   await cards(page, 'undockStub');
   await expect(messageIn(page, 0)).toBeFocused();
   await expect(messageIn(page, 0)).toHaveText('next');
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U4a: the stack, Send now, taking a message back, Stop ---------------------------------------------------
+// (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M8's new scenes; C4: each runs alone on a Mac before its
+// group.) Each draws its session's transcript above the composer as the session's pane does (`transcript` with
+// `stacked`: the slot's `waiting="stacked"`), so a message that waits is drawn in the stack alone (decision 12). Not the
+// `shell` pane, the real SessionPane: a replayed launch writes no index record, and that pane shows a session with none
+// as unstarted (the CI and Mac runs of b1bad4a07).
+
+const stackOf = (page: Page, index: 0 | 1) => pane(page, index).getByRole('region', { name: 'Queued messages' });
+const transcriptOf = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-transcript-scroller]');
+const queueOf = async (page: Page, id: string) => value(await invoke(page, 'session.queue.list', { appSessionId: id }));
+
+// A turn running behind the count (`queue-and-interrupt`, held at its next `user` write), its prompt drawn. `indexed`:
+// the replay is launched under the scratch config home's indexed session, for an act that needs the session's record,
+// as a take-back's save to the session's draft store does (the store refuses a session it does not hold; a replayed
+// launch writes no record); the id launched is answered.
+async function countRunning(page: Page, id: string, journal: string, options: { indexed?: true } = {}): Promise<string> {
+  await openComposerPage(page);
+  if (options.indexed) await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
+  await launchReady(page, id, journal);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(COUNT);
+  await page.keyboard.press('Enter');
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  await expect(transcriptOf(page, 0)).toContainText('Count to 30 slowly');
+  return id;
+}
+
+test('U4a, the stack: Enter adds a Next step row and ⌘Enter an After the turn row, each drawn once; three fold to one line that opens on a click', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4a-stack';
+  await countRunning(page, id, steerStopJournal(scratch, id));
+  const [steered, later, last] = ['Use one Bash call for the rest.', 'Then sum the numbers.', 'And name the largest.'];
+  const list = stackOf(page, 0);
+  const transcript = transcriptOf(page, 0);
+
+  await page.keyboard.type(steered);
+  await page.keyboard.press('Enter'); // the `next` steer, written into the running turn (seq 146)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  const next = list.locator('li[data-queue-state="next"]');
+  await expect(next).toContainText(steered);
+  await expect(next.locator('[data-mark]')).toHaveText('Next step');
+  await page.keyboard.type(later);
+  await page.keyboard.press('Meta+Enter'); // for after the turn: MAWS's queue holds it
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  const after = list.locator('li[data-queue-state="after"]');
+  await expect(after).toContainText(later);
+  await expect(after.locator('[data-mark]')).toHaveText('After the turn');
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered)?.priority).toBe('next');
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'a message kept for after the turn is not written while it runs').toBe(false);
+  expect((await queueOf(page, id)).entries.filter((e) => e.state === 'queued')).toHaveLength(1);
+  for (const text of [steered, later]) await expect(transcript.getByText(text), 'no dimmed bubble at the transcript’s tail').toHaveCount(0);
+
+  await page.keyboard.type(last);
+  await page.keyboard.press('Meta+Enter');
+  const fold = list.getByRole('button', { name: `3 queued · Next: ${steered}` });
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(list.locator('li')).toHaveCount(0);
+  await fold.click();
+  await expect(fold).toHaveAttribute('aria-expanded', 'true');
+  await expect(list.locator('li [data-mark]')).toHaveText(['Next step', 'After the turn', 'After the turn']);
+  await expect(list.locator('li [data-row-text]')).toHaveText([steered, later, last]);
+  await expect(transcript.getByText(last)).toHaveCount(0);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// Send now behind a running command, over the engine's own answers to it (`sendNowJournal`, `uxwave/u4p2-a-1`): the
+// replay holds at the recorded request until the host writes it, and holds that write to the recorded one exactly.
+test('U4a, Send now: on a next-step row it writes the engine’s send-now request for the row’s message and pauses nothing; the turn ends for the message and the command reads moved', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4a-send-now';
+  await openComposerPage(page);
+  await launchReady(page, id, sendNowJournal(scratch, id));
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('Run the long command in the foreground.');
+  await page.keyboard.press('Enter'); // seq 12; its Bash call then runs (32)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  const message = 'Reply with one word, then carry on.';
+  await page.keyboard.type(message);
+  await page.keyboard.press('Enter'); // at the next step, behind the running command (seq 37)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  const list = stackOf(page, 0);
+  const row = list.locator('li[data-queue-state="next"]');
+  await expect(row).toContainText(message);
+  const sendNow = row.getByRole('button', { name: 'Send now' });
+  await expect(sendNow, 'this build’s engine host serves the session (decision 30)').toBeEnabled();
+  await expect(sendNow).toHaveAttribute('title', 'Sends this now; what the agent is running keeps running');
+  await clickRevealed(row, sendNow);
+
+  // decision 3: the request as the probe wrote it, naming the row's message; nothing held, nothing paused
+  const interrupts = async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+  await expect.poll(async () => (await interrupts()).length).toBe(1);
+  const steer = (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === message);
+  expect(steer?.priority).toBe('next');
+  expect((await interrupts())[0]!.request).toEqual({ subtype: 'interrupt', send_now: true, message_uuid: steer?.uuid });
+  expect((await outFrames(page, id)).some((f) => f.request?.subtype === 'cancel_async_message'), 'Send now holds nothing').toBe(false);
+  expect((await queueOf(page, id)).paused).toBe(false);
+
+  // the engine answered `delivering` (41), moved the command (43 to 46), ended the turn (`aborted_tools`, 47) and ran the
+  // message as its own turn (49): the turn's line reads "Ended for your message", and the command's row reads moved
+  const transcript = transcriptOf(page, 0);
+  await expect(transcript).toContainText('Ended for your message after');
+  await expect(transcript).not.toContainText('You stopped after');
+  const toggle = transcript.locator('button[aria-expanded]').filter({ hasText: 'Ended for your message after' });
+  if ((await toggle.count()) > 0 && (await toggle.first().getAttribute('aria-expanded')) === 'false') await toggle.first().click();
+  await expect(transcript).toContainText(/Moved\s*`?node wait\.cjs a1 30`?\s*to the background after/);
+  await expect(transcript).toContainText(message); // drawn once the engine started it
+  await expect(list).toHaveCount(0);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// Send now on a row that waits after the turn (⌘Enter during a turn) is the queue's promote at `now` (decision 15), over
+// the engine's own answers to it (`promoteNowJournal`, `uxwave/u4p3-promote-late-1`): the replay holds at the recorded
+// `now` frame until the host writes it.
+test('U4a, Send now: on an after-the-turn row it promotes the message at priority now and pauses nothing; the turn ends for the message', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4a-send-now-after';
+  await openComposerPage(page);
+  await launchReady(page, id, promoteNowJournal(scratch, id));
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('Run the long command in the foreground.');
+  await page.keyboard.press('Enter'); // seq 12; its Bash call then runs, a task from 37
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  const steered = 'Reply with one word at the next step.';
+  await page.keyboard.type(steered);
+  await page.keyboard.press('Enter'); // at the next step (39)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  const later = 'Reply with another word now.';
+  await page.keyboard.type(later);
+  await page.keyboard.press('Meta+Enter'); // after the turn: MAWS's queue holds it, nothing is written
+  const list = stackOf(page, 0);
+  const after = list.locator('li[data-queue-state="after"]');
+  await expect(after).toContainText(later);
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered)?.priority).toBe('next');
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written').toBe(false);
+  const queued = (await queueOf(page, id)).entries.filter((e) => e.state === 'queued');
+  expect(queued).toHaveLength(1);
+  const sendNow = after.getByRole('button', { name: 'Send now' });
+  await expect(sendNow).toBeEnabled();
+  await expect(sendNow).toHaveAttribute('title', 'Sends this now; what the agent is running keeps running');
+  await clickRevealed(after, sendNow);
+
+  // the queue's promote at `now` (42): the message written at priority now, no send-now request, nothing held or paused
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === later)?.priority).toBe('now');
+  const frames = await outFrames(page, id);
+  expect(frames.some((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt'), 'a promote, not the send-now request').toBe(false);
+  expect(frames.some((f) => f.request?.subtype === 'cancel_async_message'), 'Send now holds nothing').toBe(false);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect((await queueOf(page, id)).entries.some((e) => e.queueId === queued[0]!.queueId && e.state === 'queued'), 'the entry left the queue').toBe(false);
+
+  // the command moved (46) and the turn cut (`aborted_tools`, 49): its line reads "Ended for your message"; the promoted
+  // message runs as its own turn
+  const transcript = transcriptOf(page, 0);
+  await expect(transcript).toContainText('Ended for your message after');
+  await expect(transcript).not.toContainText('You stopped after');
+  await expect(transcript).toContainText(later);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('U4a, take back: ↑ in the empty box returns the newest waiting message to the box and removes its row', async ({ editor }) => {
+  const { page } = editor;
+  const id = await countRunning(page, 'u4a-take-back', steerStopJournal(scratch, 'u4a-take-back'), { indexed: true });
+  const [steered, later] = ['Count only to ten.', 'Then say the total.'];
+  const list = stackOf(page, 0);
+  await page.keyboard.type(steered);
+  await page.keyboard.press('Enter'); // at the next step (seq 146)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await page.keyboard.type(later);
+  await page.keyboard.press('Meta+Enter'); // after the turn, the newer
+  await expect(list.locator('li')).toHaveCount(2);
+  await expect(messageIn(page, 0)).toHaveText('');
+
+  // the newest is the one kept for after the turn: removed from MAWS's queue, and nothing is written to the engine
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0)).toHaveText(later);
+  await expect(messageIn(page, 0), 'the box is the editor’s again once the take-back has settled').toHaveAttribute('contenteditable', 'true');
+  await expect(list.locator('li')).toHaveCount(1);
+  await expect(list.locator('li[data-queue-state="next"]')).toContainText(steered);
+  expect((await queueOf(page, id)).entries.filter((e) => e.state === 'queued')).toEqual([]);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype)).not.toContain('cancel_async_message');
+
+  // with the box emptied, ↑ takes the one at the next step: withdrawn from the engine (the recorded `cancel_async_message`)
+  await messageIn(page, 0).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await expect(messageIn(page, 0)).toHaveText('');
+  // the emptied box reaches the draft store (750 ms after the change) before ↑: a take-back stages only where no draft
+  // with a document is kept, and the first message, loaded and settled, was one (decision 13, the claim)
+  await expect.poll(async () => value(await invoke(page, 'session.drafts.get', { appSessionId: id as never })), { timeout: 10_000 }).toBeNull();
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0)).toHaveText(steered);
+  await expect(list).toHaveCount(0);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype)).toContain('cancel_async_message');
+  expect((await queueOf(page, id)).steers ?? []).toEqual([]);
+  expect((await statusOf(page, id)).turn, 'taking a message back stops nothing').not.toBeNull();
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+test('U4a, Stop: the square holds both waiting messages, the stack reads Held under the pause, and Resume sends the oldest, then the next', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4a-stop';
+  await countRunning(page, id, steerStopJournal(scratch, id, 2));
+  const [first, second] = ['First, list the numbers so far.', 'Second, reply exactly RESUMED.'];
+  const list = stackOf(page, 0);
+  await page.keyboard.type(first);
+  await page.keyboard.press('Meta+Enter'); // after the turn
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
+  await page.keyboard.type(second);
+  await page.keyboard.press('Enter'); // at the next step (seq 146)
+  await expect(list.locator('li')).toHaveCount(2);
+  await expect(control(page, 0)).toHaveAttribute('data-submit-state', 'stop');
+  await control(page, 0).click(); // the square: what waits is held first, then the turn stops
+
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  await expect(list.locator('li [data-mark]')).toHaveText(['Held', 'Held']);
+  await expect(list.locator('li [data-row-text]')).toHaveText([first, second]);
+  await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
+  await expect(list).not.toContainText('when this turn ends');
+  const controls = (await outFrames(page, id)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype);
+  expect(controls.indexOf('cancel_async_message'), 'the steer is withdrawn before the interrupt').toBeGreaterThan(-1);
+  expect(controls.indexOf('interrupt')).toBeGreaterThan(controls.indexOf('cancel_async_message'));
+  expect((await queueOf(page, id)).paused).toBe(true);
+
+  await list.locator('header').getByRole('button', { name: 'Resume' }).click();
+  const released = async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === undefined && (f.message?.content === first || f.message?.content === second)).map((f) => f.message?.content);
+  await expect.poll(released).toEqual([first, second]); // the oldest at once (seq 199), the next when its turn ends
+  await expect(list).toHaveCount(0);
   expect(editor.consoleErrors()).toEqual([]);
 });
 
@@ -870,6 +1196,47 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// UX wave U4a, decision 31: while a turn runs the empty box says which key does what, on one line. In a box too narrow
+// for the words (240px here) they are cut with an ellipsis, and never wrap or grow the box. The words are the empty
+// paragraph's `::before`, a float one line tall, so the cut is read from its style and from the words' own width.
+test('W2: the turn’s placeholder stays on one line, cut with an ellipsis in a box 240px wide', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'w2-placeholder';
+  await openComposerPage(page);
+  await launchReady(page, id, steerStopJournal(scratch, id));
+  await showPanes(page, [{ composer: id }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(COUNT);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  const p = pane(page, 0);
+  const box = p.locator('[data-composer-box]');
+  const empty = messageIn(page, 0).locator('[data-placeholder]');
+  await expect(empty).toHaveAttribute('data-placeholder', 'Enter to send, ⌘Enter to queue for later');
+  const placeholder = () =>
+    empty.evaluate((el) => {
+      const style = getComputedStyle(el, '::before');
+      const context = document.createElement('canvas').getContext('2d')!;
+      context.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      return { height: style.height, whiteSpace: style.whiteSpace, overflow: style.overflowX, textOverflow: style.textOverflow, words: context.measureText(el.getAttribute('data-placeholder') ?? '').width, room: el.getBoundingClientRect().width };
+    });
+  const roomy = await placeholder();
+  expect(roomy).toMatchObject({ height: '20px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+  expect(roomy.room, 'the pane at rest holds the words whole').toBeGreaterThan(roomy.words);
+
+  // the pane narrowed until its box is 240px wide
+  const [paneWidth, boxWidth] = [(await p.boundingBox())!.width, (await box.boundingBox())!.width];
+  await p.evaluate((el, width) => {
+    (el as HTMLElement).style.maxWidth = `${width}px`;
+  }, paneWidth - boxWidth + 240);
+  await expect.poll(async () => (await box.boundingBox())!.width).toBeCloseTo(240, 0);
+  const narrow = await placeholder();
+  expect(narrow).toMatchObject({ height: '20px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' });
+  expect(narrow.words, 'the words are wider than the line, so the ellipsis cuts them').toBeGreaterThan(narrow.room);
+  expect((await box.boundingBox())!.height).toBe(44); // one line: the box keeps its height at rest
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
 // board 505 (UX wave U11a M3; the execution document's Interfaces §E): C5's own session pane reserves its transcript's
 // scrollbar gutter, and the same under its composer, so under classic scrollbars the composer's column is a transcript
 // row's; with overlay scrollbars nothing moves. The indexed session of the scratch config home, in the page's `shell` pane;
@@ -956,7 +1323,7 @@ for (const { width, height } of ACCEPTANCE_SIZES) {
     await launchReady(page, id, turnsJournal(scratch, id, 2), { cwd: repo });
     await showPanes(page, [{ composer: id, transcript: true }, null]);
     await messageIn(page, 0).click();
-    // Multiline Enter inserts a line; Cmd+Enter sends. Enough old work to scroll even at 982px high.
+    // ⌘Enter sends with no turn running (U4a: Enter would too). Enough old work to scroll even at 982px high.
     await page.keyboard.insertText(Array.from({ length: 80 }, (_, i) => `Earlier instruction ${i + 1}`).join('\n'));
     await messageIn(page, 0).press('Meta+Enter');
     await expect.poll(() => sent(page, id)).toHaveLength(1);

@@ -831,6 +831,31 @@ describe('the exit a gone terminal leaves (X-168)', () => {
     expectWellFormed(out.events());
   });
 
+  // UX wave U4a (the architect's ruling on M8's first concern, 2026-11-13): the same exit reaches a call a Send now
+  // moved to the background (its result's flag, as u4p1-a-seeded-1.jsonl seq 45 carries it), so neither row kind reads
+  // running in a holder-less read of a chain whose last turn ended.
+  it('a holder-less chain whose last turn ended with a moved shell call and a background agent: the exit, and the model reads both stopped; held, both run', async () => {
+    const MOVED = [
+      ...TURN_ONE.slice(0, 4),
+      record({ type: 'assistant', uuid: 'b1', parentUuid: 't1', timestamp: at(4), message: { id: 'm1c', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-moved', name: 'Bash', input: { command: 'node wait.cjs w1 40' } }] } }),
+      record({ type: 'user', uuid: 'c1', parentUuid: 'b1', timestamp: at(5), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-moved', content: 'Command was moved to the background' }] }, toolUseResult: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundedToDeliverMessage: true } }),
+      record({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'c1', durationMs: 40, timestamp: at(6) }),
+    ];
+    const movedCall = (events: SessionEvent[]) => {
+      const rows = rowsOf(withAllExpanded(applyEvents(createState(TERM, null), events)));
+      const cells = rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+      return cells.find((cell) => cell.toolUseId === 'toolu-moved');
+    };
+    const gone = await terminal({ n: 0 }, new MemoryFileReader(joined(MOVED)));
+    expect(exits(gone.out)).toEqual([[EXIT, at(6), 'unknown', null, null]]);
+    expect(movedCall(gone.out.events())).toMatchObject({ label: expect.stringMatching(/^Moved `node wait\.cjs w1 40` to the background after /), status: 'stopped' });
+    expect(agentsInView(gone.out.events())).toEqual([[false, 'stopped']]);
+    const held = await terminal({ n: 1 }, new MemoryFileReader(joined(MOVED)));
+    expect(exits(held.out)).toEqual([]);
+    expect(movedCall(held.out.events())).toMatchObject({ status: 'running' });
+    expect(agentsInView(held.out.events())).toEqual([[true, 'started']]);
+  });
+
   it('a holder that returns arms the exit again, though it wrote nothing', async () => {
     const live = { n: 1 };
     const { out, follower } = await terminal(live);

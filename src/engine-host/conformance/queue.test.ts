@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import type { QueueEntry, QueueState } from '@shared/engine/session-state-store';
+import { QueueStateSchema, type QueueEntry, type QueueState } from '@shared/engine/session-state-store';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadJournal } from '../../../test/support/fixtures';
 import { listPermissionRules } from '../controls';
@@ -430,5 +430,114 @@ describe('grant snapshot re-applies through apply_flag_settings', () => {
     await flush();
     expect((await store.loadQueue(id)).entries).toEqual([]); // named by the seq 43 result
     expect(resumed.rebuilt()).toEqual(resumed.events);
+  });
+});
+
+// UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M1; Interfaces A and B; decisions 3 and 34): Send
+// now through a whole session over a scripted engine. The request is the probe's (u4p1-a-seeded-1 seq 39) exactly; it
+// pauses nothing and marks no interrupt as owed; the end it causes is marked, and a Stop that withdraws the message makes
+// the end a stop again.
+describe('Send now through a whole session (UX wave U4a)', () => {
+  const HOLDER = { pid: 77, holderId: 'L-host', fence: 1 };
+  type Scripted = ReturnType<typeof scriptedSession>;
+  const lifecycleOf = (s: Scripted) => (uuid: string, state: string) => s.transport.push({ type: 'command_lifecycle', command_uuid: uuid, state, uuid: `lc-${uuid}-${state}`, session_id: 's' });
+  const resultOf = (s: Scripted) => (uuids: string[], extra: Record<string, unknown> = {}) =>
+    s.transport.push({ type: 'result', subtype: 'success', session_id: 's', is_error: false, duration_ms: 1, num_turns: 1, total_cost_usd: 0, usage: {}, permission_denials: [], terminal_reason: 'completed', origin: { kind: 'human' }, user_message_uuids: uuids, ...extra });
+  const SENT = (uuid: string) => ({ still_queued: [uuid], send_now: 'delivering' });
+  const ends = (s: Scripted) => ofKind(s.events, 'turn.ended').filter((e) => !e.isEchoReceipt);
+
+  // A turn running the first prompt, a message waiting at its next step, and (optionally) an entry after the turn.
+  async function running(opts: Parameters<typeof scriptedSession>[0] = {}) {
+    const s = scriptedSession(opts);
+    await s.session.start();
+    const lifecycle = lifecycleOf(s);
+    const first = (await s.session.send('Run the long command.')).messageUuid!;
+    lifecycle(first, 'queued');
+    lifecycle(first, 'started');
+    await flush();
+    const { messageUuid } = await s.session.steer('Reply with the single word PINEAPPLE.', { priority: 'next' });
+    lifecycle(messageUuid, 'queued');
+    await flush();
+    return { s, first, message: messageUuid, lifecycle, result: resultOf(s) };
+  }
+
+  it('writes exactly the probe’s request, answers the engine’s word, pauses nothing and marks no owed interrupt, under a session host', async () => {
+    const store = new MemorySessionStateStore();
+    const marks: boolean[] = [];
+    store.saveOwedInterrupt = async (_id, owed) => void marks.push(owed);
+    const { s, message } = await running({ transport: { holder: HOLDER }, session: { store }, responder: handshakeResponder({ interrupt: (r) => ({ response: SENT(String(r.message_uuid)) }) }) });
+    await expect(s.session.sendNow(message)).resolves.toEqual({ outcome: 'delivering' });
+    expect(s.transport.requestsOf('interrupt').map((r) => r.request)).toEqual([{ subtype: 'interrupt', send_now: true, message_uuid: message }]);
+    expect(s.session.queue.isPaused).toBe(false);
+    expect(metaRows(s.journal.rows, 'queue').filter((row) => row.action === 'pause' || row.action === 'hold')).toEqual([]);
+    expect(marks).toEqual([]);
+    expect(s.session.queue.state.steers?.map((steer) => steer.messageUuid)).toEqual([message]); // the engine's `started` retires it
+  });
+
+  it('the cut turn’s end is marked and releases nothing; the message’s own end releases the head', async () => {
+    const { s, first, message, lifecycle, result } = await running({ responder: handshakeResponder({ interrupt: (r) => ({ response: SENT(String(r.message_uuid)) }) }) });
+    expect((await s.session.send('Then reply AFTER.')).disposition).toBe('queued');
+    await s.session.sendNow(message);
+    result([first], { terminal_reason: 'aborted_tools' }); // u4p1-a-seeded-1 seq 46
+    await flush();
+    expect(ends(s).at(-1)).toMatchObject({ terminalReason: 'aborted_tools', endedForMessage: true });
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Run the long command.', 'Reply with the single word PINEAPPLE.']); // held: the sent message has not started
+    lifecycle(first, 'cancelled'); // seq 47
+    lifecycle(message, 'started'); // seq 48
+    await flush();
+    expect(userOuts(s.journal.rows)).toHaveLength(2);
+    result([message]);
+    await flush();
+    await flush();
+    expect(ends(s).at(-1)).not.toHaveProperty('endedForMessage');
+    expect(userOuts(s.journal.rows).map((f) => f.message.content)).toEqual(['Run the long command.', 'Reply with the single word PINEAPPLE.', 'Then reply AFTER.']);
+  });
+
+  it('a Stop while the send-now’s answer is withheld: the queue pauses, the steer is held, the plain interrupt follows the request, and the end carries no mark', async () => {
+    const { s, first, message, lifecycle, result } = await running({
+      responder: handshakeResponder({ interrupt: (r) => (r.send_now === true ? null : { response: { still_queued: [] } }), cancel_async_message: () => ({ response: { cancelled: true } }) }),
+    });
+    const sending = s.session.sendNow(message);
+    for (let i = 0; i < 50 && s.transport.requestsOf('interrupt').length === 0; i += 1) await flush();
+    await s.session.interrupt({ cancelEngineQueued: false, holdEngineQueued: true });
+    lifecycle(message, 'cancelled'); // the hold's withdrawal (u4p2-stop-inflight-hold-1 seq 44)
+    const [request, stop] = s.transport.requestsOf('interrupt');
+    expect([request!.request, stop!.request]).toEqual([{ subtype: 'interrupt', send_now: true, message_uuid: message }, { subtype: 'interrupt', reason: 'user-cancel', cancel_queued: false }]);
+    expect(s.session.queue.isPaused).toBe(true);
+    expect(s.session.queue.state.entries.filter((e) => e.state === 'queued').map((e) => e.content)).toEqual(['Reply with the single word PINEAPPLE.']);
+    s.transport.push({ type: 'control_response', response: { subtype: 'success', request_id: request!.request_id, response: SENT(message) } });
+    await expect(sending).resolves.toEqual({ outcome: 'delivering' });
+    result([first], { subtype: 'error_during_execution', terminal_reason: 'aborted_tools' }); // seq 51
+    await flush();
+    expect(ends(s).at(-1)).not.toHaveProperty('endedForMessage');
+  });
+
+  it('the same without the hold, after the move: a plain interrupt that holds nothing leaves the end the Send now’s (u4p2-stop-moved-1)', async () => {
+    const { s, first, message, result } = await running({ responder: handshakeResponder({ interrupt: (r) => ({ response: r.send_now === true ? SENT(String(r.message_uuid)) : { still_queued: [String(message)] } }) }) });
+    await s.session.sendNow(message);
+    await s.session.interrupt({ cancelEngineQueued: false });
+    result([first], { terminal_reason: 'aborted_tools' }); // seq 52: success, aborted_tools
+    await flush();
+    expect(ends(s).at(-1)).toMatchObject({ endedForMessage: true });
+  });
+
+  it('two send-nows of one message are both written and neither pauses; one while a hold of it is withheld is refused, writing nothing', async () => {
+    const { s, message } = await running({ responder: handshakeResponder({ interrupt: (r) => ({ response: SENT(String(r.message_uuid)) }), cancel_async_message: () => null }) });
+    await s.session.sendNow(message);
+    await s.session.sendNow(message);
+    expect(s.transport.requestsOf('interrupt')).toHaveLength(2);
+    expect(s.session.queue.isPaused).toBe(false);
+    const holding = s.session.queue.hold(message).catch((error: unknown) => error);
+    for (let i = 0; i < 50 && s.transport.requestsOf('cancel_async_message').length === 0; i += 1) await flush();
+    await expect(s.session.sendNow(message)).rejects.toThrow('This message is already being withdrawn');
+    expect(s.transport.requestsOf('interrupt')).toHaveLength(2);
+    s.transport.answer('cancel_async_message', { cancelled: true });
+    await holding;
+  });
+
+  it('the queue’s state after a send-now holds no key build F does not know', async () => {
+    const { s, message } = await running({ responder: handshakeResponder({ interrupt: (r) => ({ response: SENT(String(r.message_uuid)) }) }) });
+    await s.session.sendNow(message);
+    expect(QueueStateSchema.parse(s.session.queue.state)).toEqual(s.session.queue.state); // strict, and unchanged since F
   });
 });

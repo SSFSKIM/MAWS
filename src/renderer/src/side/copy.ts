@@ -99,17 +99,26 @@ export const SIDE_COPY = {
     shownInCard: 'Shown in the card under the page',
     showHere: 'Show here',
     openFile: (label: string) => `Open ${label}`,
-    questions: '/btw', // the question view's chip: the command that asks there (a promoted thread is titled "Side question")
+    questions: '/btw', // a thread's toggle for its questions under its view: the command that asks there (a promoted thread is titled "Side question")
     questionsTitle: 'Side questions',
     questionsLabel: '/btw side questions', // the thread header's toggle: its name begins with its visible text (scale-review C scalpel-5#4, WCAG 2.5.3)
   },
-  // `/btw`: the widget and the pane's question view (the composer's refusals are its own copy, `editor/controller.ts`)
+  // `/btw`: the widget, the session's card (UX wave U4a) and a thread's questions under its thread view (the composer's
+  // refusals are its own copy, `editor/controller.ts`)
   btw: {
     field: 'Ask a side question',
     placeholder: 'Asked beside the running turn; nothing is added to the conversation',
     ask: 'Ask',
     notRunning: 'Start the session to ask a side question',
-    askedElsewhere: (parentTitle: string) => `Side question asked in the panel of ${parentTitle}`,
+    askedElsewhere: (parentTitle: string) => `Side question asked in the side chat of ${parentTitle}`, // UX wave U4a: its card, no longer its panel
+    // UX wave U4a (O-20; Interfaces I): the card
+    card: 'Side chat', // its header, and the folded chip's word
+    askFirst: 'Ask a quick question…',
+    followUp: 'Follow up…',
+    fold: 'Fold side chat',
+    close: 'Close side chat',
+    unfold: 'Open side chat', // the folded chip's title (its name is its word, "Side chat")
+    unseen: 'New answer', // the chip's dot
     empty: 'Ask about the conversation without adding to it. The model answers beside the running turn, with no tools.',
     answering: 'Answering…',
     synthetic: 'The engine substituted this answer',

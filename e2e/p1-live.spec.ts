@@ -8,7 +8,7 @@
 //                          page's) and artifact_publish (P3-A M6: E2's artifact_update retired into it); the row, the Artifacts tool (P3-L M6b), v2 with its version switch, the
 //                          record. 2 a comment picked through the pick overlay goes to a Side thread, which answers in the
 //                          Side pane and sums itself up in the parent. 3 Send to main steers the parent mid-turn.
-//                          4 `/btw` answers in the Side pane. One app and one parent across the four (serial).
+//                          4 `/btw` answers in the session’s side chat card. One app and one parent across the four (serial).
 //   S4 (item 7)          retired on 2026-10-08 with the browser tools it drove (P1 A-54; the cases ran green in E11,
 //                          evidence/p1-e11/live-s4.txt); cua_repl's route is proven by the in-app browser spec's M5.
 //                          Its budget still carries the A-47 case.
@@ -732,7 +732,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     note('case 3: PASS');
   });
 
-  test('4 /btw in the parent’s composer answers in the Side pane; the parent’s transcript unchanged', async () => {
+  test('4 /btw in the parent’s composer answers in the side chat card; the parent’s transcript unchanged', async () => {
     const l = live!;
     refuseOverCap(note, 'S3 case 4', 's3', { usd: BTW_RESERVATION_USD, for: 'the side question’s reservation' });
     const turnsBefore = mainTurnsEnded(await events(l, parent)).length;
@@ -740,7 +740,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     // charged before it is asked: its answer comes as a control response, with no result frame to receipt it
     charge(note, { key: 's3-btw', case: 's3', label: 'the /btw side question (reserved: answered with no result frame)', usd: BTW_RESERVATION_USD, sideQuestionOf: parent });
     await sendFromComposer(l, parent, `/btw ${PROMPTS.btw}`, { typed: true });
-    const view = l.panel.locator(`[data-side-btw-view="${await addressed(l.page, parent)}"]`);
+    const view = l.pane.locator('[data-btw-card]'); // UX wave U4a (O-20): the session's card at the pane's corner, not the Side pane
     await expect(view).toBeVisible({ timeout: 30_000 });
     const answered = view.locator('[data-side-exchange="answered"]').first();
     await expect(answered).toBeVisible({ timeout: 120_000 });
@@ -748,7 +748,7 @@ test.describe.serial('S3: deliverables, a side thread, Send to main and /btw thr
     const asked = sessionRows(l, parent).filter((r) => r.direction === 'out' && (r.frame as { request?: { subtype?: string } }).request?.subtype === 'side_question');
     const turnsAfter = mainTurnsEnded(await events(l, parent)).length;
     const usersAfter = outUsers(sessionRows(l, parent)).length;
-    note(`case 4: side_question controls written ${asked.length}; the Side pane's exchange ${JSON.stringify(answer)}; the parent's turns ${turnsBefore} → ${turnsAfter}, written prompts ${usersBefore} → ${usersAfter}`);
+    note(`case 4: side_question controls written ${asked.length}; the side chat card's exchange ${JSON.stringify(answer)}; the parent's turns ${turnsBefore} → ${turnsAfter}, written prompts ${usersBefore} → ${usersAfter}`);
     expect(asked.map((r) => (r.frame as { request: { question: string } }).request.question)).toEqual([PROMPTS.btw]);
     expect(turnsAfter, 'no turn in the main conversation').toBe(turnsBefore);
     expect(usersAfter, 'nothing written to the main conversation').toBe(usersBefore);

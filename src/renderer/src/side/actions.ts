@@ -1,6 +1,6 @@
 // What opens the Side pane and what the comment composer sends (E3 execution document, Design §1, §6, §7, §8 and §9).
-// The pane never switches the main view (the panel rule): a thread opened from the composer, or the question view a
-// `/btw` opens, is shown at once only when its session is the one the window shows, and otherwise added to that
+// The pane never switches the main view (the panel rule): a thread opened from the composer is shown at once only when
+// its session is the one the window shows, and otherwise added to that
 // session's panel without activation, with a toast saying where it is; a summary row's Open follows the same rule (the
 // transcript it sits in may be a thread's own, drawn in its parent's pane). `side.thread.open` forks the parent with the
 // anchored first message (or the promoted side questions). UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-
@@ -57,19 +57,13 @@ export function revealNewThread(parent: AppSessionId, child: AppSessionId): void
   revealPane(parent, { kind: 'thread', childAppSessionId: child }, SIDE_COPY.composer.openedElsewhere);
 }
 
-// The question view, where a `/btw` just asked shows its answer (typed in a composer whose session is not the shown one,
-// it waits in that session's panel; a side thread's own in its parent's pane answers under the thread instead, btw.ts).
-export function revealSideQuestions(parent: AppSessionId): void {
-  revealPane(parent, { kind: 'btw' }, SIDE_COPY.btw.askedElsewhere);
-}
-
 // The first message `side.thread.open` has main send the thread, as its intent retains it (`display`, the text whole),
 // for C10's card to hand back to the editor if the setup is declined, as `forkSession` docks its own. Main builds the
 // same text from the same input; the screenshot's image block is main's alone, and a prefill could not take it back.
 const threadMessage = (text: string): FirstMessage => ({ content: text, display: text });
 
 // "Continue as a side thread": the answered exchanges (and what the person typed beside them) open a side thread of the
-// parent, adopted as C10's fork is, and the parent's pane turns to it: on screen from the parent's question view, and
+// parent, adopted as C10's fork is, and the parent's pane turns to it: on screen from the parent's `/btw` card, and
 // from a thread's questions under its thread view (the parent there is the thread, not the shown session) waiting in
 // the thread's own panel, with a toast saying where.
 export async function promoteSide(parent: AppSessionId, text: string | null, client: MawsBridge = ipc): Promise<{ ok: true } | { ok: false; error: string }> {

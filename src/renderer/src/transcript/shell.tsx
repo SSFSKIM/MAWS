@@ -32,14 +32,14 @@ const useLive = (appSessionId: AppSessionId) => useSessions((state) => LIVE_PHAS
 
 // The slot's props onto TranscriptSlot's (C5 passes `agentId: null` for a session tab), with the session's liveness
 // told to the store under the source's key; a child agent runs in its parent's process.
-export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId }) => {
+export const ShellTranscript: Slots['transcript'] = ({ appSessionId, agentId, waiting }) => {
   const key = ipcSource(appSessionId, agentId ?? undefined).key!;
   const live = useLive(appSessionId);
   useEffect(() => {
     useTranscriptStore.getState().setLive(key, live);
     return () => useTranscriptStore.getState().setLive(key, null); // a closed tab says nothing more about the key
   }, [key, live]);
-  return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" />;
+  return <TranscriptSlot appSessionId={appSessionId} agentId={agentId ?? undefined} className="h-full" waiting={waiting} />; // UX wave U4a: `waiting`
 };
 
 // A path chip: C5's file tab at that line. A file tab's identity is its path and machine (C5's `tabId`; P5 O6 M2), so the

@@ -162,6 +162,9 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     origin: nullableString(), // `result.origin.kind`: 'human' for a turn we started, 'task-notification' for an engine-initiated turn
     resultIndex: z.number().nullable(),
     isEchoReceipt: z.boolean(), // true for the empty result (num_turns 0, null terminal_reason) that follows a shouldQuery:false frame; not a turn
+    // UX wave U4a (the charter's X1, amended; the U4a document, Interfaces B): the turn was ended by a message sent now
+    // and no stop took effect; absent otherwise. A build that does not know it reads the end as a stop, as before
+    endedForMessage: z.literal(true).optional(),
   }),
   event('command.lifecycle', { commandUuid: MessageUuidSchema, state: z.enum(COMMAND_LIFECYCLE_STATES) }),
   event('assistant.block.delta', {
@@ -192,6 +195,10 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     // a later one is another form of it, an empty list withdraws it, the next carrier then places it anew, and a list of
     // unknown entries alone does neither
     arrival: z.array(ArrivalEntrySchema).optional(),
+    // UX wave U4a (the U4a document, decision 32): on the engine's replay of several waiting prompts written as one message
+    // under the last one's uuid, the other prompts it holds, in their order; absent otherwise. A reader that does not know
+    // it adds nothing, since the prompt is already placed
+    joined: z.array(MessageUuidSchema).optional(),
   }),
   // UX wave U8c-2 (M5, §K): `cwd` is the folder the call's row records, set by a producer that reads rows for a shell
   // tool's call only; absent on the live route (the engine's wire names no folder per call) and from an older producer

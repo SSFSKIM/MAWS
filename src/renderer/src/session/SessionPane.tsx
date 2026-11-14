@@ -44,6 +44,7 @@ import { READER } from '../sessions/share/copy'; // board 525
 import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 525
 import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
 import { ComputerUseStrip } from '../computer-use/Strip'; // UX wave U12a
+import { BtwCard } from '../side/BtwCard'; // UX wave U4a
 
 type PaneIndex = 0 | 1;
 
@@ -127,23 +128,30 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
   // are not requests.
   const waiting = waitingItem(pending);
   const docked = useSettling(!readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null); // C7: a registered composer is the one docked swap (it docks the request itself)
+  const noticed = readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job'); // the holder notice stands in the composer's place
 
   return (
     <div className="flex h-full flex-col">
       {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
       {!compact && <ReportBar appSessionId={id} />}
       {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
-      {!compact && <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
-        {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-        <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} />
+      {/* UX wave U4a (M7): a positioned box around the transcript's scroller, so the session's `/btw` card is a layer of the
+          pane over the transcript's bottom right corner and not of the scroller */}
+      {!compact && <div className="relative flex min-h-0 flex-1 flex-col">
+        <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
+          {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
+          <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} waiting={noticed ? undefined : 'stacked'} /* UX wave U4a: the composer's stack draws a waiting message */ />
+        </div>
+        <BtwCard appSessionId={id} />
       </div>}
       <div className={`shrink-0 ${compact ? "py-2" : "scroll-gutter-under pt-4 pb-4"}`}>
         <ComposerColumn>
+          {compact && <BtwCard appSessionId={id} placement="flow" /* UX wave U4a: no transcript here, so directly above the frame */ />}
           {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
-          {readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? (
+          {noticed ? (
             // C10: the notice carries the session's id for its actions
             <HolderNotice appSessionId={id} holder={holder} reason={bridgeReason} />
           ) : (

@@ -360,7 +360,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(writtenControls(maws, child, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
     expect(writtenControls(maws, parent, 'side_question')).toEqual([]);
     expect(writtenUsers(maws, child), 'no user frame for the question').toHaveLength(2);
-    await expect(page.getByText('Side question asked in the panel of', { exact: false })).toHaveCount(0);
+    await expect(page.getByText('Side question asked in the side chat of', { exact: false })).toHaveCount(0);
+    await expect(page.locator('[data-btw-card]'), 'UX wave U4a: a question asked under a hosted thread opens no card').toHaveCount(0);
     await expect(mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`), 'the main view still shows the parent').toBeVisible();
     await threadPane.getByRole('button', { name: 'Side questions' }).click();
     await expect(inline).toHaveCount(0);
@@ -384,9 +385,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const panel = panelRegion(page);
     const thread = panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
 
-    // away to the question view, then back through the parent's row
-    await panel.locator('[data-side-chip="btw"]').click();
-    await expect(panel.locator(`[data-side-btw-view="${await addressed(page, parent)}"]`)).toBeVisible();
+    // away to another surface, then back through the parent's row (UX wave U4a, O-20: the Side pane has no question view
+    // to leave to; Files comes into view in its place, one tab in view per group)
+    await openSurface(page, 'Files');
     await expect(thread).toHaveCount(0);
     await mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`).getByRole('button', { name: 'Open' }).click();
     await expect(thread).toBeVisible();
@@ -505,7 +506,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  test('5. /btw: the side question goes to the engine beside the conversation and answers in the Side pane, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
+  test('5. /btw: the side question goes to the engine beside the conversation and answers in the session’s side chat card, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
     test.setTimeout(120_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
@@ -522,24 +523,39 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type('/bt');
     const commands = page.getByRole('listbox', { name: 'Commands' });
     await expect(commands.getByRole('option').filter({ hasText: '/btw' })).toBeVisible();
-    await page.keyboard.press('Escape');
+    // UX wave U4a (M7's fix; `openSideQuestions`): a bare `/btw` picked from the palette opens the session's side chat
+    // card with its field focused, before any question (the widgets harness mounts no card: `e2e/widgets.spec.ts`
+    // proves the hand-off there)
+    await page.keyboard.type('w');
+    await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
+    await page.keyboard.press('Enter');
+    const picked = main.locator('[data-btw-card="corner"]');
+    await expect(picked).toBeVisible();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toBeFocused();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toHaveAttribute('placeholder', 'Ask a quick question…');
+    await expect(page.locator('[data-widget-dialog="btw"]'), 'no dialog: the card took the pick').toHaveCount(0);
+    expect(writtenControls(maws, parent, 'side_question'), 'nothing asked yet').toEqual([]);
     await composer.click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('Backspace');
     await expect(composer).toHaveText('');
 
-    // typed: asked, the composer cleared, the question view shows it answered
+    // typed: asked, the composer cleared, the session's card shows it answered (UX wave U4a, O-20: the card at the pane's
+    // corner, not the Side pane)
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     await expect(composer).toHaveText('');
-    const view = panelRegion(page).locator(`[data-side-btw-view="${await addressed(page, parent)}"]`);
+    const view = main.locator('[data-btw-card="corner"]');
     await expect(view).toBeVisible();
+    await expect(view.getByRole('heading', { name: 'Side chat' })).toBeVisible();
+    await expect(panelRegion(page).locator('[data-side-btw-view]'), 'no question view in the Side pane').toHaveCount(0);
     await expect(view.locator('[data-side-exchange]').first()).toContainText(SIDE_QUESTION);
     await expect(view.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
     expect(writtenControls(maws, parent, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
     expect(writtenUsers(maws, parent), 'no user frame').toHaveLength(1);
     await expect(main.locator('[data-bubble]'), 'the main transcript gained no row').toHaveCount(1);
-    await expect(main.getByText('ZEBRA', { exact: true })).toHaveCount(0);
+    // the card is in the main region and holds the answer: the transcript is what must not
+    await expect(main.locator('[data-transcript-scroller]').getByText('ZEBRA', { exact: true })).toHaveCount(0);
 
     // a second question carries the first exchange as history
     await view.getByRole('textbox', { name: 'Ask a side question' }).fill(SIDE_FOLLOW_UP);
@@ -686,7 +702,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(second.consoleErrors()).toEqual([]);
   });
 
-  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting, the question view and the comment card (composing, and its thread with the request card and the needs-you strip) use tokens only', async () => {
+  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting, the side chat card and the comment card (composing, and its thread with the request card and the needs-you strip) use tokens only', async () => {
     test.setTimeout(180_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
@@ -716,7 +732,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     const panel = panelRegion(page);
-    await expect(panel.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
+    const sideChat = main.locator('[data-btw-card="corner"]'); // UX wave U4a (O-20): the session's card, not the Side pane
+    await expect(sideChat.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
 
     for (const theme of ['light', 'dark'] as const) {
       await menu(maws, `theme.${theme}`);
@@ -737,16 +754,15 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       await open.getByRole('button', { name: 'Cancel' }).click();
       await expect(open).toHaveCount(0);
 
-      // the parent: its transcript, the pane on its thread, the question view, the sidebar
+      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar
       await showSession(page, parent);
       await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
       await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');
       await main.locator(`[data-side-thread="${await addressed(page, child)}"]`).scrollIntoViewIfNeeded();
       await shoot(main, 'parent-transcript');
-      await panel.locator('[data-side-chip="btw"]').click();
-      await expect(panel.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
-      await shoot(panel, 'side-questions');
+      await expect(sideChat.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
+      await shoot(sideChat, 'side-chat');
       await (await sidebarRow(page, { appSessionId: child })).scrollIntoViewIfNeeded();
       await shoot(sidebarOf(page), 'sidebar-nesting');
     }

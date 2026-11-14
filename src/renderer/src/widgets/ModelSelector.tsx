@@ -2,14 +2,17 @@
 // 05 and 06), replacing C11's inline model widget: one 254px menu the composer's model chip anchors above itself (the
 // `modelChip` placement), with two views on a sliding track. The effort view names the effort in the accent colour over
 // the model's name (a row with a chevron into the model view), a stepped slider over the levels the engine lists for
-// that model, Codex's lightning for fast mode (its auto-lane warning first, inline) and a reset that clears the effort
-// override. The model view reads "Select model": a Default entry (Recommended set of models, no badge), then the catalogue with the current
+// that model and a reset that clears the effort override; UX wave U4a (O-32, decision 20): the slider's whole 28 px
+// track takes a press and a drag, and fast mode is a row at the view's foot with a switch (its auto-lane warning first,
+// inline), drawn only where the model offers it or it is on; (decision 21) in the model view a digit 1 to 9 picks the
+// row drawn at that place, and ⇧⌘E's request puts the keyboard on the slider. The model view reads "Select model": a
+// Default entry (Recommended set of models, no badge), then the catalogue with the current
 // row checked, gateway aliases with their "From gateway" description. A choice applies at once and returns to the
 // effort view; the engine's answer (C3's status, the next init frame) is what shows afterwards. A live session is C3's
 // (`list_models`, `set_model`, `apply_flag_settings`), always for this session only; an unstarted one writes its setup
 // intent through C7's seam and keeps D-19's Route segment at the top of the model view. The palette's argument proposes
 // (`/model haiku`), sets the view (`/effort`), or opens the fast warning (`/fast on`).
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent, type ReactNode } from 'react';
 import type { Effort } from '@shared/engine/launch-spec';
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { PermissionMode } from '@shared/graph/enums';
@@ -33,7 +36,8 @@ import { availabilityRefusal, useAvailability } from '../sessions/availability';
 import { FRESHNESS, useObservedFacts } from '../sessions/observed'; // P2-A
 import { NOT_YET } from '../composer/submit/submit-state'; // P2-A
 import { routeOf, useModelCatalogue } from '../composer/list-models'; // P2-A
-import { isStarting, listedModelsOf, rememberListedModels, useComposerStore } from '../stores/composer';
+import { isStarting, listedModelsOf, rememberListedModels, setChipView, useComposerStore } from '../stores/composer';
+import { digitOf } from '../statusline/ModeMenu'; // UX wave U4a M5: the menus' one digit rule
 import { useSessions } from '../stores/sessions';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
@@ -80,7 +84,8 @@ interface Binding {
   disabled: string | null;
   setModel(model: string | null): Promise<ControlAnswer>;
   setEffort(effort: Effort | null): Promise<ControlAnswer>;
-  fast: { view: FastView; pending: boolean; set(on: boolean): Promise<ControlAnswer> } | null;
+  // UX wave U4a (decision 20): `offered`, the model has fast mode; `closed`, why the switch is not offered on this route
+  fast: { view: FastView; pending: boolean; offered: boolean; closed: string | null; set(on: boolean): Promise<ControlAnswer> } | null;
   unstarted: boolean;
   // P5 O7 M9: the machine's own route beside Gateway and Direct, written as the intent's `route`; `machineRefusal`: why the
   // machine's own can't be chosen (its daemon predates it), else null
@@ -116,6 +121,8 @@ function useLiveBinding(appSessionId: AppSessionId, models: readonly ModelRow[])
       fast: {
         view: fastGreyed === null ? fastView(status.fastMode, shownRow) : { ...fastView(status.fastMode, shownRow), disabled: fastGreyed },
         pending: fastPending(requests, appSessionId, status),
+        offered: shownRow?.supportsFastMode === true,
+        closed: fastGreyed,
         set: (on) => applyFlagSettings({ appSessionId, settings: { fastMode: on } }),
       },
       unstarted: false,
@@ -276,12 +283,19 @@ function useRoutingAccount(appSessionId: AppSessionId): string {
 
 const EFFORT_NAMES: readonly string[] = EffortSchema.options;
 const ICON_BUTTON = 'flex size-8 shrink-0 items-center justify-center rounded-md text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
+// the fast-mode row's switch (UX wave U4a, decision 20), the widgets' own (McpWidget, plugins/manage)
+const SWITCH = 'relative inline-flex h-4 w-7 shrink-0 items-center rounded-full border border-border outline-accent focus-visible:outline-2 disabled:opacity-50';
 const ROW = 'flex w-full min-w-0 cursor-default items-start gap-2 rounded-md px-2 py-1.5 text-left outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
 
 // The stepped slider over the levels the model admits (Claude Desktop's "Faster … Smarter"); the arrows, Home and End
-// move it, a click on a stop picks that level. Nothing on it while the effort is unknown.
-function EffortSlider({ levels, value, disabled, onChange }: { levels: readonly Effort[]; value: Effort | null; disabled: boolean; onChange(level: Effort): void }) {
-  const at = value === null ? -1 : levels.indexOf(value);
+// move it. UX wave U4a (O-32, decision 20): the whole 28 px track is the target: a press picks the nearest level and a
+// drag follows the pointer, committing once where it is released; the dots stay marks. Nothing on it while the effort
+// is unknown. `focusOnMount`: ⇧⌘E's request, which puts the keyboard here when the slider first draws.
+function EffortSlider({ levels, value, disabled, focusOnMount, onChange }: { levels: readonly Effort[]; value: Effort | null; disabled: boolean; focusOnMount: boolean; onChange(level: Effort): void }) {
+  const [dragged, setDragged] = useState<Effort | null>(null); // the level under a held press, until its release
+  const shown = dragged ?? value;
+  const at = shown === null ? -1 : levels.indexOf(shown);
+  const focus = useRef(focusOnMount);
   const step = (to: number) => {
     const next = levels[Math.max(0, Math.min(levels.length - 1, to))];
     if (next !== undefined && next !== value && !disabled) onChange(next);
@@ -293,9 +307,35 @@ function EffortSlider({ levels, value, disabled, onChange }: { levels: readonly 
     step(at === -1 && (event.key === 'ArrowLeft' || event.key === 'ArrowDown') ? 0 : moves[event.key]);
   };
   const percent = (i: number) => (levels.length === 1 ? 50 : (i / (levels.length - 1)) * 100);
+  // the level nearest the pointer along the track
+  const nearest = (track: HTMLElement, clientX: number): Effort => {
+    const { left, width } = track.getBoundingClientRect();
+    const share = width <= 0 ? 0 : Math.max(0, Math.min(1, (clientX - left) / width));
+    return levels[levels.length === 1 ? 0 : Math.round(share * (levels.length - 1))];
+  };
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (disabled || event.button !== 0) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDragged(nearest(event.currentTarget, event.clientX));
+  };
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragged !== null) setDragged(nearest(event.currentTarget, event.clientX));
+  };
+  const onPointerUp = (event: PointerEvent<HTMLDivElement>) => {
+    if (dragged === null) return;
+    const level = nearest(event.currentTarget, event.clientX);
+    setDragged(null);
+    step(levels.indexOf(level));
+  };
   return (
     <div className="flex flex-col gap-1 px-4 pb-1">
       <div
+        ref={(element) => {
+          if (element && focus.current) {
+            focus.current = false;
+            element.focus();
+          }
+        }}
         role="slider"
         tabIndex={disabled ? -1 : 0}
         aria-label={SELECTOR.effort}
@@ -305,7 +345,11 @@ function EffortSlider({ levels, value, disabled, onChange }: { levels: readonly 
         aria-valuetext={at === -1 ? SELECTOR.effortUnknown : SELECTOR.position(EFFORT_WORDS[levels[at]], at + 1, levels.length)}
         aria-disabled={disabled || undefined}
         onKeyDown={onKeyDown}
-        className="relative h-6 rounded-sm outline-accent focus-visible:outline-2"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => setDragged(null)}
+        className={`relative h-7 touch-none rounded-sm outline-accent select-none focus-visible:outline-2 ${disabled ? '' : 'cursor-pointer'}`}
       >
         <span aria-hidden className="absolute inset-x-0 top-1/2 h-0.5 -translate-y-1/2 rounded-full bg-bg-active" />
         {at > 0 && <span aria-hidden className="absolute top-1/2 left-0 h-0.5 -translate-y-1/2 rounded-full bg-accent" style={{ width: `${percent(at)}%` }} />}
@@ -314,8 +358,7 @@ function EffortSlider({ levels, value, disabled, onChange }: { levels: readonly 
             key={level}
             data-level={level}
             title={EFFORT_WORDS[level]}
-            onClick={() => step(i)}
-            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${i === at ? 'size-3.5 bg-accent ring-2 ring-bg-overlay' : `size-1.5 ${i < at ? 'bg-accent' : 'bg-fg-faint'}`} ${disabled ? '' : 'cursor-pointer'}`}
+            className={`absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full ${i === at ? 'size-3.5 bg-accent ring-2 ring-bg-overlay' : `size-1.5 ${i < at ? 'bg-accent' : 'bg-fg-faint'}`}`}
             style={{ left: `${percent(i)}%` }}
           />
         ))}
@@ -387,9 +430,10 @@ function Track({ view, effort, model }: { view: View; effort: ReactNode; model: 
   );
 }
 
-function SelectorBody({ name, args, binding, state, error, appSessionId }: { name: Name; args: string; binding: Binding; state: string; error: string | null; appSessionId: AppSessionId }) {
+function SelectorBody({ name, args, binding, state, error, appSessionId, focusSlider }: { name: Name; args: string; binding: Binding; state: string; error: string | null; appSessionId: AppSessionId; focusSlider: boolean }) {
   const account = useRoutingAccount(appSessionId);
   const [view, setView] = useState<View>(name === 'model' ? 'model' : 'effort');
+  useEffect(() => setChipView(appSessionId, view), [appSessionId, view]); // UX wave U4a M5: the menu chords read the view on screen
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<{ error: string; caption: string | null } | null>(null);
   const [fastAsk, setFastAsk] = useState<'on' | null>(null);
@@ -427,6 +471,15 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
   const shownRow = rowFor(binding.models, binding.shown) ?? rowOf(binding.models, binding.shown);
   const levels = effortLevelsOf(shownRow);
   const modelName = shownRow?.displayName ?? aliasOf(binding.shown, binding.models) ?? SELECTOR.model;
+
+  // UX wave U4a (decision 20): the fast-mode row, where the model offers it, it is on or a change is on its way; its line
+  // the pending word, then why this route has no switch (before the engine's own reason, which can say "turned on here"),
+  // today's reason or cooling down, else On or Off
+  const fast = binding.fast;
+  const fastRow =
+    fast && (fast.offered || fast.view.checked || fast.pending)
+      ? { view: fast.view, line: fast.pending ? MODEL.pending : (fast.closed ?? fast.view.caption ?? (fast.view.checked ? MODEL.fastState.on : MODEL.fastState.off)) }
+      : null;
 
   const choose = async (model: string | null) => {
     setProposed(null);
@@ -479,22 +532,7 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
   const effortView = (
     <div role="group" aria-label={SELECTOR.effortView} className="flex flex-col gap-2 p-1.5">
       <div className="flex min-h-9 items-center gap-1">
-        {binding.fast ? (
-          <button
-            type="button"
-            role="switch"
-            aria-checked={binding.fast.view.checked}
-            aria-label={MODEL.fast}
-            title={binding.fast.view.disabled ?? MODEL.fast}
-            disabled={locked || binding.fast.view.disabled !== null}
-            onClick={() => (binding.fast!.view.checked ? setFast(false) : setFastAsk('on'))}
-            className={`${ICON_BUTTON} ${binding.fast.view.checked ? 'text-accent' : ''}`}
-          >
-            <span aria-hidden>⚡</span>
-          </button>
-        ) : (
-          <span className="size-8 shrink-0" />
-        )}
+        <span className="size-8 shrink-0" />
         <button type="button" aria-label={SELECTOR.openModels(modelName)} onClick={() => setView('model')} className="flex min-w-0 flex-1 flex-col items-center rounded-md px-1 py-0.5 outline-accent hover:bg-bg-hover focus-visible:outline-2">
           <span data-effort-title className={`text-ui font-medium ${binding.effort ? 'text-accent' : 'text-fg-muted'}`}>
             {levels.length === 0 ? SELECTOR.noEffort : binding.effort ? EFFORT_WORDS[binding.effort] : SELECTOR.effort}
@@ -508,9 +546,18 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
           <span aria-hidden>↺</span>
         </button>
       </div>
-      {levels.length > 0 && <EffortSlider levels={levels} value={binding.effort !== null && levels.includes(binding.effort) ? binding.effort : null} disabled={locked} onChange={(level) => void run(() => binding.setEffort(level))} />}
+      {levels.length > 0 && <EffortSlider levels={levels} value={binding.effort !== null && levels.includes(binding.effort) ? binding.effort : null} disabled={locked} focusOnMount={focusSlider} onChange={(level) => void run(() => binding.setEffort(level))} />}
       {unknown && view === 'effort' && <p className="m-0 px-2 text-ui-sm text-warning">{unknown}</p>}
-      {binding.fast && fastAsk === 'on' && (
+      {binding.pending && <p className="m-0 px-2 text-ui-sm text-fg-muted">{MODEL.pending}</p>}
+      {binding.observed && observedName && !binding.pending && (
+        <p data-model-observed className="m-0 px-2 text-ui-sm text-fg-muted">
+          {observedName} · {FRESHNESS.lastObserved(binding.observed.at)}
+        </p>
+      )}
+      {view === 'effort' && gatewayNote}
+      {status && <p className="m-0 px-2 text-ui-sm text-fg-muted">{status}</p>}
+      {view === 'effort' && alert}
+      {fastRow && fastAsk === 'on' && (
         <div role="group" aria-label={MODEL.fast} className="flex flex-col gap-1 border-l-2 border-warning px-2 text-ui-sm">
           <p className="m-0">{MODEL.fastWarning}</p>
           <span className="flex gap-2">
@@ -523,20 +570,26 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
           </span>
         </div>
       )}
-      {binding.fast && (binding.fast.pending || binding.fast.view.caption) && (
-        <p className="m-0 px-2 text-ui-sm text-fg-muted">
-          {MODEL.fast} · {binding.fast.pending ? MODEL.pending : binding.fast.view.caption}
-        </p>
+      {fastRow && (
+        <div data-fast-row className="flex min-w-0 items-center gap-2 border-t border-border px-2 pt-1.5">
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span>{MODEL.fast}</span>
+            <span className="truncate text-ui-sm text-fg-muted">{fastRow.line}</span>
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={fastRow.view.checked}
+            aria-label={MODEL.fast}
+            title={fastRow.view.disabled ?? MODEL.fast}
+            disabled={locked || fastRow.view.disabled !== null}
+            onClick={() => (fastRow.view.checked ? setFast(false) : setFastAsk('on'))}
+            className={`${SWITCH} ${fastRow.view.checked ? 'bg-accent' : 'bg-bg-active'}`}
+          >
+            <span aria-hidden className={`absolute size-3 rounded-full bg-bg-raised ${fastRow.view.checked ? 'right-0.5' : 'left-0.5'}`} />
+          </button>
+        </div>
       )}
-      {binding.pending && <p className="m-0 px-2 text-ui-sm text-fg-muted">{MODEL.pending}</p>}
-      {binding.observed && observedName && !binding.pending && (
-        <p data-model-observed className="m-0 px-2 text-ui-sm text-fg-muted">
-          {observedName} · {FRESHNESS.lastObserved(binding.observed.at)}
-        </p>
-      )}
-      {view === 'effort' && gatewayNote}
-      {status && <p className="m-0 px-2 text-ui-sm text-fg-muted">{status}</p>}
-      {view === 'effort' && alert}
     </div>
   );
 
@@ -617,9 +670,23 @@ function SelectorBody({ name, args, binding, state, error, appSessionId }: { nam
     </div>
   );
 
+  // UX wave U4a (decision 21): in the model view a digit picks the row drawn at that place, Default first, as a click on
+  // it does; nothing while the rows are disabled
+  const drawn: (ModelEntryView | null)[] = [null, ...claude, ...gateway];
+  const onDigit = (event: KeyboardEvent<HTMLDivElement>) => {
+    const place = view === 'model' ? digitOf(event) : null;
+    if (place === null) return;
+    event.preventDefault();
+    if (locked || place > drawn.length) return;
+    const entry = drawn[place - 1];
+    if (entry === null) void choose(null);
+    else if (direct && gateway.includes(entry)) setRelayAsk(entry);
+    else void choose(entry.value);
+  };
+
   // Esc closes the whole menu (the chip's popover), as Codex's does
   return (
-    <div data-widget={name} data-model-selector={view} className="w-[254px] text-ui">
+    <div data-widget={name} data-model-selector={view} onKeyDown={onDigit} className="w-[254px] text-ui">
       <Track view={view} effort={effortView} model={modelView} />
     </div>
   );
@@ -640,9 +707,10 @@ function ModelSelector({ name, appSessionId, args }: { name: Name; appSessionId:
   const dormant = useDormantBinding(appSessionId);
   const ready = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
   const binding = intent ?? driven ?? (dormant && (!ready || dormant.choosing) ? dormant : ready ? live : null);
+  const focusSlider = useComposerStore((s) => s.chipWidgets.get(appSessionId)?.focus === 'slider'); // ⇧⌘E's request
   if (!binding) return <p className="m-0 w-[254px] p-3 text-ui-sm text-fg-muted">{NOT_YET}</p>;
   const state = intent || binding === driven ? 'ready' : binding === dormant ? (read.state === 'unavailable' || read.state === 'starting' ? read.state : 'ready') : read.state;
-  return <SelectorBody name={name} args={args} binding={binding} state={state} error={intent || binding === driven ? null : read.error} appSessionId={appSessionId} />;
+  return <SelectorBody name={name} args={args} binding={binding} state={state} error={intent || binding === driven ? null : read.error} appSessionId={appSessionId} focusSlider={focusSlider} />;
 }
 
 // The three palette names, one selector opened at its view.

@@ -53,6 +53,10 @@ export interface TranscriptSlotProps {
   startAt?: (rows: readonly Row[], loaded: boolean) => number | null; // P2-E1: the first row shown; null: none yet
   presentation?: 'local'; // P2-E1: the owner channel through MAWS's presenter, whatever the surface's attachment
   actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
+  // UX wave U4a (decision 12): the mount has a stack (the session's pane, where it mounts the composer), which draws the
+  // held messages and a message while it is unread: no held rows at the tail, and no row marked unread. Absent (the
+  // side thread's card, which mounts no composer), the held bubble is its only drawing of a reply that waits.
+  waiting?: 'stacked';
 }
 
 export function TranscriptSlot(props: TranscriptSlotProps) {
@@ -82,7 +86,7 @@ function RemoteAgentSlot({ appSessionId, agentId, className, actions: overrides 
   );
 }
 
-function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides, waiting }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
@@ -122,7 +126,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   );
   // P5 O9 M5: a terminal session driven through its bridge draws its reply as it is written, after the rows on disk
   const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
-  const tail = useMemo(() => [...streaming.tail, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming.tail, held, answered]);
+  const tail = useMemo(() => [...streaming.tail, ...(waiting === 'stacked' ? [] : held.filter((_, i) => !answered[i]).map(heldRow))], [streaming.tail, held, answered, waiting]); // UX wave U4a: a stack draws the held ones
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
@@ -146,6 +150,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       atRest={atRest}
       placed={streaming.kept}
       promptAuthor={promptAuthor}
+      waiting={waiting}
     />
   );
 }

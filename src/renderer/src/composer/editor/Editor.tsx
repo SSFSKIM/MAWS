@@ -1,17 +1,21 @@
 // The composer's editor (C7 execution document, M3): the Tiptap instance with its keys, draft, history, paste and drop,
 // the `@` menu and `/` palette, the `!` and `#` decoration and the prefill intake (the behaviour is `controller.ts`'s).
 // The root is the one element that carries `data-key-sink="composer"` (with the popups it portals), so C5's dispatcher
-// delivers the composer's chords here (⌘Enter sends; W10: no ⌥Enter) and never a pane's Enter or Esc. Enter sends a
-// one-line document and breaks the line once there are more (§5.8), Shift+Enter breaks the line, a composing IME key
-// never sends; ArrowUp on an empty editor (or while recalling) walks
-// history. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
-// submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The frame around it, the
-// attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.
+// delivers the composer's chords here and never a pane's Enter or Esc. UX wave U4a (l3-input-08, l3-input-03): Enter
+// sends whatever the line count, Shift+Enter and ⌥Enter break the line (the action table's fixed rows), ⌘Enter
+// (`composer.queue`) sends with `when: 'after'`, which keeps the message for after a running turn; a composing IME key
+// never sends; ArrowUp on an empty editor (or while recalling) walks history. UX wave U4a M6 (l3-input-12): while
+// recalling or searching, one muted line under the text says where (`setHistory`), and Ctrl+R (`composer.historySearch`)
+// searches the history ↑ walks. Mount one Editor per session (key it by the session): its draft and history are that
+// session's. What a submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The
+// frame around it, the attachment strip and the submit control are the Composer's (M4), which drives the editor through
+// its handle.
 import type { EditorView } from '@tiptap/pm/view';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
+import type { Draft } from '@shared/ipc/schema/session';
 import { ipc } from '../../ipc/client';
 import { useKeyChord } from '../../keymap/useKeyChord';
 import { useSessionCatalog } from '../../stores/catalog';
@@ -39,13 +43,16 @@ export interface EditorProps {
   // What a submission does, and whether it was accepted (the editor then clears and drops the draft). Given, the
   // editor dispatches nothing itself, so the Composer decides through its submit state (W10: while a turn runs a Send
   // is a `next` steer); absent, the default (`submitSerialized`) sends.
-  onSubmit?(s: Serialized): Promise<boolean>;
+  onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>; // UX wave U4a: `when` names ⌘Enter's keep-for-after
   onPrefill?(prefill: Prefill): void; // a prefill the editor took (the Composer keeps its `editing`)
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a stored draft was restored
+  onTakeBack?(): boolean; // UX wave U4a M3: ↑ in an empty box, not recalling; true when the composer took it
+  onStage?(draft: Draft): void; // UX wave U4a M3: a restored draft that is a take-back's stage
   suggestion?: string | null; // R2: a plugin's suggested prompt, shown as the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  placeholder?: string | null; // UX wave U4a: the composer's words for the empty box while a turn runs; a suggestion wins
   searchesFiles?: boolean; // P5 O7 M4 (fix wave 1): false, the @-menu offers no files of this Mac
   uploadsTo?: string | null; // P5 O7 M4: the machine (by name) a lane B session on another machine runs on: its files go up there
   handle?: Ref<EditorHandle>;
@@ -53,10 +60,16 @@ export interface EditorProps {
 }
 
 const NO_DIRECTORIES: readonly string[] = [];
+// The empty box's words, drawn over its first line. UX wave U4a (its decision 31): on one line, cut with an ellipsis
+// where the box is too narrow for them; a float one line tall whose margin box is no height, so the caret's line sits
+// beside it as before.
 const PLACEHOLDER = [
   '[&_.is-editor-empty:first-child]:before:pointer-events-none',
   '[&_.is-editor-empty:first-child]:before:float-left',
-  '[&_.is-editor-empty:first-child]:before:h-0',
+  '[&_.is-editor-empty:first-child]:before:h-5',
+  '[&_.is-editor-empty:first-child]:before:-mb-5',
+  '[&_.is-editor-empty:first-child]:before:w-full',
+  '[&_.is-editor-empty:first-child]:before:truncate',
   '[&_.is-editor-empty:first-child]:before:text-fg-faint',
   '[&_.is-editor-empty:first-child]:before:content-[attr(data-placeholder)]',
 ].join(' ');
@@ -80,6 +93,7 @@ export function Editor(props: EditorProps) {
   const [mode, setMode] = useState<Serialized['mode']>('send');
   const [commandEmpty, setCommandEmpty] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [historyLine, setHistory] = useState<string | null>(null); // UX wave U4a M6
   const [dragging, setDragging] = useState(0);
 
   const inputs: ControllerInputs = {
@@ -96,12 +110,15 @@ export function Editor(props: EditorProps) {
     onDocChange: props.onDocChange,
     onEscape: props.onEscape,
     onRestore: props.onRestore,
+    onTakeBack: props.onTakeBack, // UX wave U4a M3
+    onStage: props.onStage, // UX wave U4a M3
     suggestion: props.suggestion ?? null, // R2
     onSuggestionTaken: props.onSuggestionTaken,
+    placeholder: props.placeholder ?? null, // UX wave U4a
     uploadsTo: props.uploadsTo ?? null, // P5 O7 M4
     searchesFiles: props.searchesFiles ?? true, // P5 O7 M4 (fix wave 1)
   };
-  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy }, inputs));
+  const [controller] = useState(() => new EditorController(client, props.drafts ?? ipcDrafts(client, appSessionId), { setMode, setCommandEmpty, setBusy, setHistory }, inputs));
   useLayoutEffect(() => controller.update(inputs));
 
   // Options that never change, so Tiptap's per-render comparison leaves the instance alone (a fresh extension list or
@@ -125,7 +142,8 @@ export function Editor(props: EditorProps) {
     if (prefill) controller.takePrefill();
   }, [controller, editor, prefill]);
 
-  useKeyChord('composer.send', () => void controller.submit(), { within: rootRef });
+  useKeyChord('composer.queue', () => void controller.submit('after'), { within: rootRef }); // UX wave U4a: ⌘Enter
+  useKeyChord('composer.historySearch', () => controller.searchHistory(), { within: rootRef }); // UX wave U4a M6: Ctrl+R
   useImperativeHandle(props.handle, () => controller.handle(), [controller]);
 
   // W3 (C6): a widget the palette opens is the app's floating dialog (`WidgetDialog.tsx`), never in the box
@@ -154,6 +172,11 @@ export function Editor(props: EditorProps) {
         <ModeChrome appSessionId={appSessionId} mode={mode} empty={commandEmpty} />
         {/* W2 (C1, Codex's): the prose's size on a 20px line, growing to a quarter of the window before it scrolls */}
         <EditorContent editor={editor} className={`max-h-[25vh] overflow-y-auto text-prose leading-5 text-fg ${mode === 'bash' ? 'font-mono' : ''} ${PLACEHOLDER}`} />
+        {historyLine !== null && (
+          <p role="status" aria-label="Prompt history" className="m-0 truncate px-1 text-ui-sm text-fg-muted">
+            {historyLine}
+          </p>
+        )}
       </div>
     </>
   );

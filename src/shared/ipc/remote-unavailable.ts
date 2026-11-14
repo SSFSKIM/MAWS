@@ -51,6 +51,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.applyFlagSettings': notYet('changing the session’s settings flags'),
   'session.setCwd': notYet('changing the working directory'),
   'session.history.append': notYet('adding to the prompt history'),
+  'session.steer.sendNow': notYet('sending a waiting message now while the agent works'), // UX wave U4a; U4b offers it
   'session.reloadSkills': notYet('reloading skills'),
   // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),

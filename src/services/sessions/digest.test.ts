@@ -9,7 +9,7 @@ import { createBackfillContext, recordToEvents } from '../../engine-host/fs/back
 import { applyStatusToDigest, bridgedDigest, costLedger, costOf, emptyDigest, foldDigest, foldEvents, restoreCost, type MessageCalls } from './digest';
 import { status } from '../../../test/support/builders'; // C12
 import { ev } from '../../../test/support/events';
-import { FIXTURE_DIR, framesOf, loadJournal } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, framesOf, loadJournal, loadUxwaveJournal } from '../../../test/support/fixtures';
 import { Normalizer } from '../../engine-host/normalizer'; // C12
 
 const APP = 'app-1' as AppSessionId;
@@ -468,5 +468,28 @@ describe('a bridged foreign session’s phase', () => {
   it('reads its activity from the running tool as the fold does, Working once its result came', () => {
     expect(bridgedDigest({ running: true, pending: 0, tool: { tool: 'Read', input: { file_path: '/a/b.ts' }, running: true } }).activity).toBe('Reading b.ts');
     expect(bridgedDigest({ running: true, pending: 0, tool: { tool: 'Read', input: { file_path: '/a/b.ts' }, running: false } }).activity).toBe('Working');
+  });
+});
+
+// UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, decision 6; Interfaces B): the turn a sent-now
+// message ended goes idle and leaves `lastTurnEndedAt` where it was, so neither "Turn finished" nor the unread mark fires
+// for the cut turn; both fire once, when the message's own turn ends. u4p2-a-1: the cut turn ends at 47 and the message's
+// own turn at 191; no state frame comes between them (seq 47 to 49).
+describe('the end a sent-now message caused (UX wave U4a)', () => {
+  const rows = loadUxwaveJournal('u4p2-a-1');
+  const through = (seq: number) => {
+    const normalizer = new Normalizer({ appSessionId: APP, launchId: 'LAUNCH01', sessionId: null });
+    return run(rows.filter((row) => row.seq <= seq).flatMap((row) => normalizer.push(row)));
+  };
+
+  it('at the marked end the phase is idle and lastTurnEndedAt does not move; at the message’s own end it does', () => {
+    const before = through(46);
+    expect(before.phase).toBe('working');
+    const cut = through(47);
+    expect(cut).toMatchObject({ phase: 'idle', lastTurnEndedAt: before.lastTurnEndedAt });
+    const own = through(191);
+    expect(own.phase).toBe('idle');
+    expect(own.lastTurnEndedAt).not.toBe(before.lastTurnEndedAt);
+    expect(own.lastTurnEndedAt).toBe((rows.find((row) => row.seq === 191)!.frame as { timestamp?: string }).timestamp ?? rows.find((row) => row.seq === 191)!.at);
   });
 });

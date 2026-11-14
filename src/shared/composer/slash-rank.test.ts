@@ -27,4 +27,19 @@ describe('shared slash ranking', () => {
     desk.rememberChosen('twentieth-other');
     expect(desk.rankItems('mo', items)[1].name).toBe('model');
   });
+  // UX wave U4a (decision 17 e): the composer's palette breaks ties by the order its items came in; desk web keeps the default
+  it('breaks ties in list order when asked, the tiers and the boost unchanged', () => {
+    const listed = createSlashRanker(origins, { ties: 'list' });
+    const reversed = [...items].reverse(); // mo (custom), model, memory, mango, settings
+    expect(listed.rankItems('', reversed).map((i) => i.name)).toEqual(['mo', 'model', 'memory', 'mango', 'settings']);
+    expect(listed.rankItems('', items).map((i) => i.name)).toEqual(['settings', 'mango', 'memory', 'model', 'mo']);
+    // four prefix matches in the order given, then `settings` by a word of its description
+    expect(listed.rankItems('m', reversed).map((i) => i.name)).toEqual(['mo', 'model', 'memory', 'mango', 'settings']);
+    expect(listed.rankItems('mo', reversed).map((i) => i.name)).toEqual(['mo', 'model', 'memory', 'mango', 'settings']); // the tiers decide first
+    listed.rememberChosen('memory');
+    expect(listed.rankItems('', reversed).map((i) => i.name)).toEqual(['memory', 'mo', 'model', 'mango', 'settings']);
+    // the default for the same items: origin, then name
+    expect(rankSlashItems('', reversed, origins).map((i) => i.name)).toEqual(['mango', 'memory', 'model', 'settings', 'mo']);
+    expect(rankSlashItems('m', reversed, origins).map((i) => i.name)).toEqual(['mango', 'memory', 'model', 'mo', 'settings']);
+  });
 });

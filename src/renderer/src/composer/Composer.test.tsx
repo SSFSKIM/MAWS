@@ -19,7 +19,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
 import { project, remoteRow } from '../../../../test/support/builders'; // P5 O7 M2; M4: project
-import { REATTACHING_STOP_REMOTE } from './submit/submit-state'; // P5 O16 M3b fix wave 2
+import { PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, REATTACHING_STOP_REMOTE, TERMINAL_KEEPS_NO_QUEUE } from './submit/submit-state'; // P5 O16 M3b fix wave 2; UX wave U4a: the placeholders and the terminal's refusal
 import { useMachines } from '../stores/machines'; // P5 O7 M2
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session'; // P5 O7 M2
@@ -30,7 +30,7 @@ import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
-import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
+import { DRAFT_CLAIM, HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf, useKeyChord } from '../keymap/useKeyChord';
@@ -38,6 +38,11 @@ import { itemFor, permission } from '../request-card/test-requests';
 import { useAttention } from '../stores/attention';
 import { insertComposerText, isStarting, prefillComposer, queueComposerAttachment, requestChipWidget, resetComposerStore, useComposerStore } from '../stores/composer';
 import type { Draft } from '@shared/ipc/schema/session'; // P3-G
+import { useHosts } from '../stores/hosts'; // UX wave U4a M3
+import { hostStatus, supervisorStatus } from '../test-support/host-status'; // UX wave U4a M3
+import { HOST_UPDATING } from './queue/host-wire'; // UX wave U4a M3
+import { STACK_WORDS } from './queue/stack'; // UX wave U4a M3
+import { resetTakeBack } from './queue/take-back'; // UX wave U4a M3
 import { addMarkupToChat, MARKUP_COPY, resetMarkup, startMarkup, useMarkup } from '../markup/session'; // P3-G
 import { registerMarkupSurface, resetMarkupSurfaces } from '../markup/surface'; // P3-G
 import { MarkupLayer } from '../markup/MarkupLayer'; // P3-G
@@ -51,11 +56,11 @@ import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
 import { resetStops } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
-import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop
-import { laneAState } from '../lane-a/test-support/lane-a-state';
+import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop; UX wave U4a
+import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
 import { DockedCardFrame } from './docked/DockedCardFrame';
 import { dockCard, resetDockedCards } from './docked/registry';
-import { docOf, mentionNode, paragraph, textNode } from './editor/doc';
+import { docOf, hardBreak, mentionNode, paragraph, textNode } from './editor/doc';
 import { ON_THIS_MAC, STALE_UPLOADS } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1); M8: STALE_UPLOADS
 import { UPLOAD_KEPT_MS } from '@shared/ipc/schema/files'; // P5 O7 M8
 import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote'; // P5 O7 M8
@@ -97,6 +102,7 @@ beforeEach(() => {
   resetCatalogStore();
   resetDockedCards();
   useNotices.setState({ notices: [] });
+  useHosts.setState({ supervisor: hostStatus() }); // UX wave U4a M3: an engine host of this build serves (decision 30)
   fake = fakeClient({
     'session.queue.list': { entries: [], paused: false, pauseReason: null },
     'session.history.list': { entries: [] },
@@ -115,11 +121,11 @@ beforeEach(() => {
     },
     'session.listPermissionRules': rules,
     // C10's catalogue per route (`engine.models`): an entry names a resolved id through `resolvedModel`, as initialize's do
-    // (W3: the chip names the row's value, so the two routes' rows differ by value); Haiku's row says what `haiku` runs, so
+    // (UX wave U4a, decision 19: the chip names the row's display name, so the two routes' rows differ by it); Haiku's row says what `haiku` runs, so
     // the chip can tell a request for it from the model reported (exact ids, the review of S-chip)
     'engine.models': (input: { gateway?: string }) => ({
       models: [
-        { value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: 'Sonnet' },
+        { value: input.gateway === 'direct' ? 'sonnet' : 'claude/sonnet-relay', resolvedModel: 'claude-sonnet', displayName: input.gateway === 'direct' ? 'Sonnet' : 'Sonnet relay' },
         { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku' },
       ],
       source: 'cached',
@@ -137,6 +143,7 @@ beforeEach(() => {
 afterEach(() => {
   disconnect();
   cleanup();
+  resetTakeBack(); // a take-back left in hand holds the next test's box
   registerSetupIntentHook(() => null);
   delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
@@ -222,7 +229,8 @@ describe("composer DOM under C5's dispatcher", () => {
     await type('fold this in');
     act(() => editorOf().focus());
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter)');
+    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
+    expect(primary().dataset.glyph).toBe('queue'); // UX wave U4a: the queue mark
     expect(primary().getAttribute('aria-description')).toBe('Sends at the next step');
     // ⌥ held changes nothing, and nothing sits beside the button
     await act(async () => void editorOf().dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true })));
@@ -251,7 +259,9 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
   });
 
-  it('Esc while a turn runs interrupts and sends the held head now, or stops when nothing is held; it leaves Esc alone when idle (W1)', async () => {
+  // UX wave U4a (decision 14; l3-input-01): Esc while a turn runs is Send now on the stack's first row, and the square's
+  // stop when nothing waits; idle it is not the composer's
+  it('Esc while a turn runs sends the first waiting message now, or stops holding what waits; it leaves Esc alone when idle', async () => {
     live(A);
     mount([{ index: 0, id: A }]);
     await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
@@ -260,13 +270,86 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('session.interrupt')).toEqual([]); // idle: not the composer's
     busy(A);
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false }])); // Esc holds nothing back: a waiting steer runs now
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }])); // nothing waits: the square's stop
     const uncertain: QueueEntry = { queueId: 'q-0', appSessionId: A_ID, content: 'maybe sent', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: true, steer: false };
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [uncertain, held], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'Escape' });
     await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'look at b too', createdAt: '2026-09-29T09:59:00.000Z' };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [held], paused: false, pauseReason: null, steers: [steer] }));
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: steer.messageUuid }])); // the next step's row comes first
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     expect(invoked('session.interrupt')).toHaveLength(1);
+  });
+
+  // UX wave U4a (decision 14): one press held down acts once; its repeats, arriving as the row leaves and the message's
+  // turn starts, stop nothing; a fresh press with nothing waiting stops
+  it('acts on a fresh Esc only: a held one sends once and its repeats stop nothing', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'now', createdAt: '2026-09-29T09:59:00.000Z' };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [steer] }));
+    await key(editorOf(), { key: 'Escape' });
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [] })); // the row leaves
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    busy(A); // the message's own turn
+    await key(editorOf(), { key: 'Escape', repeat: true });
+    expect(invoked('session.steer.sendNow')).toHaveLength(1);
+    expect(invoked('session.interrupt')).toEqual([]);
+    await key(editorOf(), { key: 'Escape' });
+    await waitFor(() => expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]));
+  });
+
+  // decision 30: under an engine host of another build Esc on a next-step first row says the line and stops nothing
+  it('says the updating sentence on Esc over a next-step row an engine host of another build cannot send now', async () => {
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    try {
+      busy(A);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+      act(() => editorOf().focus());
+      const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'now', createdAt: '2026-09-29T09:59:00.000Z' };
+      act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [], paused: false, pauseReason: null, steers: [steer] }));
+      await key(editorOf(), { key: 'Escape' });
+      expect(screen.getByRole('status', { name: 'Stack notice' }).textContent).toBe(HOST_UPDATING);
+      expect(invoked('session.steer.sendNow')).toEqual([]);
+      expect(invoked('session.interrupt')).toEqual([]);
+    } finally {
+      useHosts.setState({ supervisor: hostStatus() });
+    }
+  });
+
+  // UX wave U4a (l3-input-04): ↑ in an empty box takes back the newest waiting message; with none, it walks history
+  it('↑ in an empty box asks for the newest waiting message’s take-back, and walks history when none waits', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    const later: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [later], paused: false, pauseReason: null }));
+    await key(editorOf(), { key: 'ArrowUp' });
+    await waitFor(() => expect(invoked('session.drafts.set')).toEqual([expect.objectContaining({ appSessionId: A_ID, replaces: DRAFT_CLAIM })])); // the stage, under the claim
+  });
+
+  it('Edit with text in the box says the box holds a draft and takes nothing back', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    const later: QueueEntry = { queueId: 'q-1', appSessionId: A_ID, content: 'later', createdAt: '2026-09-29T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false };
+    act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [later], paused: false, pauseReason: null }));
+    await type('a draft');
+    const user = userEvent.setup();
+    await user.click(within(composerOf(0)).getByRole('button', { name: 'More' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Edit' }));
+    expect(screen.getByRole('status', { name: 'Stack notice' }).textContent).toBe(STACK_WORDS.boxHoldsDraft);
+    expect(invoked('session.drafts.set').filter((input) => (input as { replaces?: string }).replaces === DRAFT_CLAIM)).toEqual([]);
+    expect(invoked('session.queue.remove')).toEqual([]);
   });
 
   // W3 (B7, charter §5.4 as amended 2026-10-01): the terminal's Esc Esc, with no turn running, on an empty editor
@@ -307,7 +390,7 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     await type('second');
     await waitFor(() => expect(primary().textContent).toBe('Send'));
-    expect(primary().title).toBe('Sends at the next step (Enter)');
+    expect(primary().title).toBe('Sends at the next step (Enter) · ⌘Enter queues for later'); // UX wave U4a
     expect(within(composerOf(0)).queryByRole('button', { name: 'Stop' })).toBeNull(); // W10: nothing beside it
   });
 
@@ -552,14 +635,14 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } });
     const view = mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: '/work/app-a' }); // the session's own route and directory
     expect(invoked('session.listModels')).toEqual([]); // the engine is not asked on mount
     view.unmount();
     // an exited session names it from the route its record kept
     useSessions.setState({ engine: new Map(), records: new Map([[A, pageRecord(A, { model: { requested: null, resolved: 'claude-sonnet' } })]]) });
     mount([{ index: 0, id: A }]);
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay'));
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay'));
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
@@ -582,11 +665,11 @@ describe("composer DOM under C5's dispatcher", () => {
     live(A, { status: { model: { requested: 'haiku', resolved: 'claude-sonnet' }, gateway: direct } });
     mount([{ index: 0, id: A }]);
     const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
-    expect(chip().textContent).toBe('haikusetting…⌄');
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
+    expect(chip().textContent).toBe('Haikusetting…⌄');
     live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the next turn's init frame
-    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
-    expect(chip().textContent).toBe('haiku⌄');
+    await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
+    expect(chip().textContent).toBe('Haiku⌄');
   });
 
   // The review of S-chip: the chip and the selector hold one rule on every path, through the request the selector holds
@@ -614,29 +697,29 @@ describe("composer DOM under C5's dispatcher", () => {
     it('a choice on a session with no ready process is named, marked, while the session starts for it', async () => {
       live(A, { status: { process: 'exited', model: { requested: 'sonnet', resolved: 'claude-sonnet' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
       await choose(/^Haiku/);
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       await act(() => fake.reply('session.acquire', { status: 'failed', appSessionId: A_ID, message: 'The session did not become ready.', resources: { worktree: null, record: 'kept', transcript: 'kept' } }));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet')); // nothing applied: the request is gone
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet')); // nothing applied: the request is gone
     });
 
     // S-R2-r2-i1: the report the session last made predates the choice, so it acknowledges nothing until set_model is accepted
     it('choosing the model the session last reported is marked while the session starts for it, until set_model is accepted', async () => {
       live(A, { status: { process: 'exited', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
       await choose(/^Haiku/);
       await waitFor(() => expect(fake.pending('session.acquire')).toBe(1)); // the start is held
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       live(A, { status: { process: 'ready', model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } });
       await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: A_ID, launched: true, joined: false }));
       await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
-      expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'); // acquired, set_model in flight
+      expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'); // acquired, set_model in flight
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host's status after the answer
       await act(() => fake.reply('session.setModel', SET));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
     });
 
     it('a model chosen before the engine has reported any is marked until it does', async () => {
@@ -646,28 +729,28 @@ describe("composer DOM under C5's dispatcher", () => {
       await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
       await act(() => fake.reply('session.setModel', SET));
       live(A, { status: { model: { requested: 'haiku', resolved: null }, gateway: direct } }); // the host's status after the answer
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku, setting…'));
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the first init frame
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
     });
 
     it('Default chosen over another model names what Default runs, marked until the engine runs it', async () => {
       live(A, { status: { model: { requested: 'haiku', resolved: 'claude-haiku-5-5' }, gateway: direct } });
       mount([{ index: 0, id: A }]);
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model haiku'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Haiku'));
       await choose(/^Default/);
       await waitFor(() => expect(invoked('session.setModel')).toEqual([{ appSessionId: A_ID, model: null }]));
       await act(() => fake.reply('session.setModel', SET));
       live(A, { status: { model: { requested: null, resolved: 'claude-haiku-5-5' }, gateway: direct } }); // the host records the null request
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet, setting…'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet, setting…'));
       live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' }, gateway: direct } }); // the next turn's init frame
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet'));
     });
   });
 
   // W3 (C4): the chip names the effort get_settings applied, and opens the selector C11 registers in its own menu, as
   // `/model` from the editor does
-  it('the model chip reads `<alias> <effort>` and opens the registered selector, from the chip and from `/model`', async () => {
+  it('the model chip reads the model’s name and effort and opens the registered selector, from the chip and from `/model`', async () => {
     live(A, { status: { model: { requested: null, resolved: 'claude-sonnet' } } });
     const off = registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: ({ args }) => <p>selector {args || '(none)'}</p> });
     const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
@@ -675,9 +758,13 @@ describe("composer DOM under C5's dispatcher", () => {
       mount([{ index: 0, id: A }]);
       const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
       await waitFor(() => expect(fake.pending('session.getSettings')).toBe(1));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay')); // the relay's row names it (the stub catalogue); the effort is not known yet
       await act(() => fake.reply('session.getSettings', { effective: {}, sources: [], applied: { model: 'claude-sonnet', effort: 'high', advisor: null, ultracode: false } }));
-      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model sonnet-relay high'));
+      await waitFor(() => expect(chip().getAttribute('aria-label')).toBe('Model Sonnet relay High'));
+      // UX wave U4a (decision 19): the name, the effort drawn muted, the whole display name and the alias as the tooltip
+      expect(within(chip()).getByText('Sonnet relay').className).not.toContain('text-fg-muted');
+      expect(within(chip()).getByText('High').className).toContain('text-fg-muted');
+      expect(chip().title).toBe('Sonnet relay · sonnet-relay');
       expect(invoked('session.getSettings')).toEqual([{ appSessionId: A_ID }]); // once, at ready
       await userEvent.click(chip());
       expect(await screen.findByText('effort view')).toBeTruthy(); // the chip opens on the effort view (Codex's)
@@ -804,6 +891,112 @@ describe("composer DOM under C5's dispatcher", () => {
   });
 });
 
+// UX wave U4a (l3-input-08, l3-input-03): Enter always sends, ⌘Enter keeps a message for after the running turn, and
+// the empty box says which key does what while a turn runs
+describe('sending from the box', () => {
+  const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
+  const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
+
+  it('⌘Enter during a turn sends for after it and clears the draft; idle, ⌘Enter and Enter send alike', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => editorOf().focus());
+    await type('idle one');
+    await cmdEnter();
+    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'idle one' }]));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    await type('idle two');
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(2));
+    expect(invoked('session.send')[1]).toEqual({ appSessionId: A_ID, content: 'idle two' });
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+
+    busy(A);
+    await type('after the turn');
+    await cmdEnter();
+    await waitFor(() => expect(invoked('session.send')).toHaveLength(3));
+    expect(invoked('session.send')[2]).toEqual({ appSessionId: A_ID, content: 'after the turn' });
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    expect(invoked('session.steer')).toEqual([]);
+    expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['idle one', 'idle two', 'after the turn']);
+  });
+
+  it('sends a draft of several lines on Enter, during a turn as at the next step', async () => {
+    busy(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))])));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    await waitFor(() => expect(invoked('session.steer')).toEqual([{ appSessionId: A_ID, content: 'one\ntwo\nthree', priority: 'next' }]));
+  });
+
+  it('the empty box reads both keys while a turn runs, and its own words otherwise', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(placeholder()).not.toBeNull());
+    expect(placeholder()).not.toBe(PLACEHOLDER_BOTH);
+    busy(A);
+    await waitFor(() => expect(placeholder()).toBe(PLACEHOLDER_BOTH));
+    expect(PLACEHOLDER_BOTH).toBe('Enter to send, ⌘Enter to queue for later');
+    live(A);
+    await waitFor(() => expect(placeholder()).not.toBe(PLACEHOLDER_BOTH));
+  });
+
+  it('an unstarted New chat starts on Enter whatever the line count, and on ⌘Enter as on Enter', async () => {
+    const stub = stubIntent();
+    mount([{ index: 0, id: A }]);
+    act(() => void editorOf().editor.commands.setContent(docOf([paragraph(textNode('one'), hardBreak(), textNode('two'), hardBreak(), textNode('three'))])));
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Enter' });
+    expect(stub.start).toHaveBeenCalledWith({ content: 'one\ntwo\nthree', display: 'one\ntwo\nthree' });
+    await stub.answer({ ok: false, error: 'refused for the test' });
+    await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
+    await cmdEnter();
+    await waitFor(() => expect(stub.start).toHaveBeenCalledTimes(2));
+    await stub.answer({ ok: false, error: 'refused for the test' }); // settled: no submission of A outlives the test
+    await waitFor(() => expect(isStarting(useComposerStore.getState(), A)).toBe(false));
+  });
+
+  describe('a terminal session', () => {
+    const terminalTurn = (running: boolean) => {
+      live(A, { status: { process: 'exited' }, record: { holder: { kind: 'terminal', pid: 4242 } } });
+      act(() => applyLaneAState(A, laneAState(A, { turn: { running, unknown: false } })));
+    };
+    afterEach(() => resetLaneAStore());
+
+    it('reads Enter alone while its turn runs, and refuses ⌘Enter there with the sentence, the draft kept and nothing sent', async () => {
+      terminalTurn(true);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(placeholder()).toBe(PLACEHOLDER_ENTER));
+      act(() => editorOf().focus());
+      await type('for later');
+      await cmdEnter();
+      await waitFor(() => expect(useNotices.getState().notices.map((n) => [n.text, n.actions.map((a) => a.label)])).toEqual([[TERMINAL_KEEPS_NO_QUEUE, []]]));
+      expect(fake.invoked('laneA.send')).toEqual([]);
+      expect(editorOf().editor.getText()).toBe('for later');
+      await key(editorOf(), { key: 'Enter' });
+      await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'for later' }]));
+      await act(() => fake.reply('laneA.send', { key: { writer: 'maws/m', seq: 1 }, state: 'entered', uuid: 'row-1' })); // settled: no submission of A outlives the test
+      await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    });
+
+    it('sends ⌘Enter with no turn running', async () => {
+      terminalTurn(false);
+      mount([{ index: 0, id: A }]);
+      await waitFor(() => expect(editorOf()).toBeTruthy());
+      expect(placeholder()).not.toBe(PLACEHOLDER_ENTER);
+      act(() => editorOf().focus());
+      await type('now');
+      await cmdEnter();
+      await waitFor(() => expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: A_ID, text: 'now' }]));
+      await act(() => fake.reply('laneA.send', { key: { writer: 'maws/m', seq: 2 }, state: 'entered', uuid: 'row-2' }));
+      await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
+    });
+  });
+});
+
 describe('one Stop handler for every pane', () => {
   const tabs = (focusedPane: 0 | 1) =>
     useLayout.setState((s) => ({
@@ -879,6 +1072,138 @@ describe('one Stop handler for every pane', () => {
     expect(invoked('session.interrupt')).toEqual([]);
     await key(document.body, { key: 'l', code: 'KeyL', metaKey: true });
     await waitFor(() => expect(editorOf(0).editor.isFocused).toBe(true));
+  });
+});
+
+// UX wave U4a M5 (decision 21; Acceptance 13): ⇧⌘I, ⇧⌘E and ⇧⌘M, registered once beside ⌘. and ⌘L, ask for the model
+// list, the effort view and the mode menu of the focused pane's session; a chord pressed while its menu is open closes
+// it; nothing for a pane that shows no session, or while a card holds the composer's place.
+describe('the three menu chords', () => {
+  const tabs = (focusedPane: 0 | 1) =>
+    useLayout.setState((s) => ({
+      main: {
+        ...s.main,
+        panes: [
+          { tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` },
+          { tabs: [{ id: `session:${B}`, kind: 'session', appSessionId: B, pinned: false }], activeTabId: `session:${B}` },
+        ],
+        focusedPane,
+        splitRatio: 0.5,
+      },
+    }));
+  const chord = (code: string, keyName: string) => key((document.activeElement as HTMLElement | null) ?? document.body, { key: keyName, code, metaKey: true, shiftKey: true });
+  const MODEL = ['KeyI', 'I'] as const;
+  const EFFORT = ['KeyE', 'E'] as const;
+  const MODE = ['KeyM', 'M'] as const;
+  let offs: (() => void)[] = [];
+  beforeEach(() => {
+    offs = [
+      registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: () => <p>model list</p> }),
+      registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> }),
+    ];
+  });
+  afterEach(() => offs.forEach((off) => off()));
+
+  it('each chord asks for its menu on the focused pane’s session, and a second press closes it', async () => {
+    live(A);
+    live(B);
+    tabs(1);
+    mount([{ index: 0, id: A }, { index: 1, id: B }], <ComposerAppKeys />);
+    expect(bindingsOf('composer.modelMenu')).toHaveLength(1);
+    act(() => editorOf(1).focus());
+    await chord(...MODEL);
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'model', args: '' });
+    expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+    expect(await screen.findByText('model list')).toBeTruthy();
+    await chord(...EFFORT); // another menu of the chip: it moves there, with the keyboard asked for on the slider
+    expect(useComposerStore.getState().chipWidgets.get(B)).toMatchObject({ name: 'effort', focus: 'slider' });
+    await chord(...EFFORT); // pressed while its menu is open: closed
+    expect(useComposerStore.getState().chipWidgets.has(B)).toBe(false);
+    await waitFor(() => expect(screen.queryByText('effort view')).toBeNull());
+    act(() => editorOf(1).focus());
+    await chord(...MODE);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(true);
+    expect(await within(document.body).findByRole('menu', { name: 'Permission mode' })).toBeTruthy();
+    await chord(...MODE);
+    expect(useComposerStore.getState().modeMenus.has(B)).toBe(false);
+    await waitFor(() => expect(screen.queryByRole('menu', { name: 'Permission mode' })).toBeNull());
+  });
+
+  // the selector moves between its views itself (its model row, its Back button, a pick): the chord follows the view on
+  // screen, not the request that opened the menu
+  describe('beside the real selector', () => {
+    let real: (() => void)[] = [];
+    beforeEach(() => {
+      real = [
+        registerSlashWidget('model', { title: 'Model', placement: 'modelChip', component: modelSelector('model') }),
+        registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: modelSelector('effort') }),
+      ];
+    });
+    afterEach(() => {
+      real.forEach((off) => off());
+      resetModelRequests();
+    });
+    const shownView = () => document.querySelector('[data-model-selector]')?.getAttribute('data-model-selector') ?? null;
+    const chip = () => within(composerOf(0)).getByRole('button', { name: /^Model / });
+
+    it('after a pointer goes to the model list, ⇧⌘E opens effort with the slider focused and ⇧⌘I closes the list', async () => {
+      live(A);
+      tabs(0);
+      mount([{ index: 0, id: A }], <ComposerAppKeys />);
+      await userEvent.click(chip()); // the chip opens on the effort view
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      await userEvent.click(screen.getByRole('button', { name: /· Select model$/ })); // into the model list by pointer
+      await waitFor(() => expect(useComposerStore.getState().chipViews.get(A)).toBe('model'));
+      await chord(...EFFORT);
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      expect(useComposerStore.getState().chipWidgets.get(A)).toMatchObject({ name: 'effort', focus: 'slider' });
+      await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('slider', { name: 'Effort' })));
+      await userEvent.click(screen.getByRole('button', { name: /· Select model$/ }));
+      await waitFor(() => expect(shownView()).toBe('model'));
+      await chord(...MODEL); // the list on screen: closed, not reopened
+      expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+      await waitFor(() => expect(shownView()).toBeNull());
+    });
+
+    it('after a model is chosen the effort view is on screen: ⇧⌘I opens the list again, and ⇧⌘E closes the menu', async () => {
+      live(A);
+      tabs(0);
+      mount([{ index: 0, id: A }], <ComposerAppKeys />);
+      act(() => editorOf(0).focus());
+      await chord(...MODEL);
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Haiku/ }));
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      await act(() => fake.reply('session.setModel', { ok: true, error: null, code: null }));
+      await waitFor(() => expect(shownView()).toBe('effort')); // a pick returns to the effort view
+      await chord(...MODEL);
+      await waitFor(() => expect(shownView()).toBe('model'));
+      expect(useComposerStore.getState().chipWidgets.get(A)).toMatchObject({ name: 'model' });
+      fireEvent.click(await screen.findByRole('menuitemradio', { name: /^Sonnet/ }));
+      await waitFor(() => expect(fake.pending('session.setModel')).toBe(1));
+      await act(() => fake.reply('session.setModel', { ok: true, error: null, code: null }));
+      await waitFor(() => expect(shownView()).toBe('effort'));
+      await chord(...EFFORT); // the effort view on screen: closed
+      expect(useComposerStore.getState().chipWidgets.has(A)).toBe(false);
+      await waitFor(() => expect(shownView()).toBeNull());
+    });
+  });
+
+  it('asks for nothing when the focused pane shows no session, or a card holds the composer’s place', async () => {
+    live(A);
+    useLayout.setState((s) => ({ main: { ...s.main, panes: [{ tabs: [{ id: 'overview', kind: 'overview', pinned: false }], activeTabId: 'overview' }], focusedPane: 0, splitRatio: 0.5 } }) as never);
+    const view = mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    for (const pressed of [MODEL, EFFORT, MODE]) await key(document.body, { key: pressed[1], code: pressed[0], metaKey: true, shiftKey: true });
+    expect(useComposerStore.getState().chipWidgets.size).toBe(0);
+    expect(useComposerStore.getState().modeMenus.size).toBe(0);
+    view.unmount();
+    tabs(0);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame> });
+    await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
+    for (const pressed of [MODEL, EFFORT, MODE]) await key(document.body, { key: pressed[1], code: pressed[0], metaKey: true, shiftKey: true });
+    expect(useComposerStore.getState().chipWidgets.size).toBe(0);
+    expect(useComposerStore.getState().modeMenus.size).toBe(0);
+    act(() => undock());
   });
 });
 

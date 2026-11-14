@@ -43,6 +43,10 @@ export interface HumanPromptOptions {
   // message as document blocks (its mentions are in `content` already); read by the remote send alone, which then sends
   // rather than steers, since a steer carries no uploads
   uploads?: readonly SendUpload[];
+  // UX wave U4a (l3-input-03, ⌘Enter): keep it for after the running turn. While a turn runs the prompt is
+  // `session.send`, never a steer, and the host's queue holds it; with no turn running it changes nothing. Lane A, which
+  // keeps no queue, refuses it during a turn (`TERMINAL_KEEPS_NO_QUEUE`).
+  when?: 'after';
 }
 export interface HumanPromptResult {
   // P5 O9 M5: 'unconfirmed', lane A's alone: the bridge took the words and had not said whether they entered when it
@@ -85,7 +89,7 @@ export async function sendHumanPrompt(appSessionId: AppSessionId, content: SendC
   if (status.process !== 'ready') return hasRecord() ? sendAcquiring(appSessionId, content, options, client) : notReady(status.process);
   const refusal = declined(options);
   if (refusal !== null) return refusal;
-  const how = isBusy(status, queue.entries) ? 'steer' : 'send';
+  const how = options.when !== 'after' && isBusy(status, queue.entries) ? 'steer' : 'send';
   const result = await dispatchHumanPrompt(client, appSessionId, content, how);
   if (!result.ok) throw new Error(result.error.message); // the composer shows the host error with its existing Retry
   return hostAnswer(result.value, how, false);
@@ -101,8 +105,9 @@ export async function sendWithoutAcquiring(appSessionId: AppSessionId, content: 
   const status = useSessions.getState().engine.get(appSessionId) ?? null;
   const entries = useQueueStore.getState().bySession.get(appSessionId)?.entries ?? [];
   const uploads = options.uploads ?? [];
-  // P5 O7 M8: a message naming uploads is sent (the host queues it behind a running turn): a steer carries none
-  const how = uploads.length === 0 && status?.process === 'ready' && isBusy(status, entries) ? 'steer' : 'send';
+  // P5 O7 M8: a message naming uploads is sent (the host queues it behind a running turn): a steer carries none; UX wave
+  // U4a: so is one kept for after the turn
+  const how = uploads.length === 0 && options.when !== 'after' && status?.process === 'ready' && isBusy(status, entries) ? 'steer' : 'send';
   const result = await dispatchHumanPrompt(client, appSessionId, content, how, uploads);
   // main's words (A4's, the pending bound's), shown with Send again; P5 O7 M8: the refusal itself kept as the cause, so a
   // caller can tell a send refused for its uploads (`issues.uploads`)

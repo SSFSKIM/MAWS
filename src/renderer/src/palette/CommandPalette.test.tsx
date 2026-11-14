@@ -78,7 +78,9 @@ describe('command palette', () => {
     const newSession = actions.find((o) => o.dataset.value === 'action:session.new')!;
     expect(newSession.getAttribute('aria-disabled')).toBe('true');
     expect(newSession.textContent).toContain('Not available here');
-    expect(actions.find((o) => o.dataset.value === 'action:composer.send')!.textContent).toContain('Keyboard only, in the composer');
+    // UX wave U4a: ⌘Enter's two composer rows and Ctrl+R's search wait for the composer's focus; its fixed keys are not listed
+    for (const id of ['composer.queue', 'composer.send', 'composer.historySearch']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in the composer');
+    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption']) expect(actions.find((o) => o.dataset.value === `action:${id}`), id).toBeUndefined();
     // UX wave U1a (§D): a permission prompt's two allow keys wait for a focused request, as Enter and Esc do
     for (const id of ['request.allowOnce', 'request.allowLasting']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in a focused request');
     expect(actions.find((o) => o.dataset.value === 'action:tab.close')!.getAttribute('aria-disabled')).toBe('false');

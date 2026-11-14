@@ -158,12 +158,26 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(mode).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
     await expect(mode).toHaveText(/^Mode/);
     await editor(page).click();
+    // UX wave U4a (decision 17 f): a row that cannot run from here is listed, greyed, once the typed text matches its
+    // name, and its reason is in the popover beside the highlighted row
     await editor(page).pressSequentially('/doc');
-    await expect(page.getByRole('option', { name: /doctor/ }), 'a command only the terminal runs, listed with why').toContainText(/runs only in the terminal/i);
+    const doctor = page.getByRole('option', { name: /doctor/ });
+    await expect(doctor, 'a command only the terminal runs, greyed').toHaveAttribute('aria-disabled', 'true');
+    await doctor.hover();
+    await expect(doctor).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tooltip'), 'listed with why').toContainText(/runs only in the terminal/i);
+    // the list and its popover close before the box is cleared: the popover stands over the box and takes its click
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await editor(page).pressSequentially('/rewind');
-    await expect(page.getByRole('option', { name: /rewind/ }).first(), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
+    const rewind = page.getByRole('option', { name: /rewind/ }).first();
+    await expect(rewind, 'rewind, a terminal panel, greyed').toHaveAttribute('aria-disabled', 'true');
+    await rewind.hover();
+    await expect(rewind).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tooltip'), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await main(page).getByRole('button', { name: 'Turn summary' }).last().click();
     const restore = page.getByRole('button', { name: 'Restore files to before this turn' });

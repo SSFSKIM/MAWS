@@ -71,6 +71,9 @@ export interface TurnState {
   // made from the events before it ended with the process, though no finish of theirs came (derive.ts); ordered by
   // arrival, never by time, since a synthesised exit and the engine's events carry different clocks.
   agentsEndedAt?: number;
+  // UX wave U4a (decision 12): its prompt was written while another turn ran or an earlier prompt had not started;
+  // derive.ts marks the prompt's row unread while the turn is open, not accepted and not dropped.
+  waited?: true;
 }
 
 export interface TranscriptUi {
@@ -426,6 +429,34 @@ class Batch {
     if (this.state.current === id) this.state.current = this.state.order.slice(Math.max(at, 0)).find((next) => this.state.turns.get(next)!.state === 'open' && this.state.turns.get(next)!.accepted) ?? null;
   }
 
+  // UX wave U4a (decision 32 c): the one message the engine wrote from several waiting prompts (`joined`, the first of
+  // them first) takes the first one's place, the opening row of its turn, under its own uuid; the others' bubbles leave
+  // their turns, and a pending turn of their own left empty goes. False when the first is not placed here.
+  join(message: Event<'user.message'>, joined: readonly MessageUuid[]): boolean {
+    const { messages } = this.state.index;
+    const into = messages.get(joined[0]!);
+    const promptAt = (turn: TurnState, uuid: MessageUuid) => turn.events.findIndex((event) => event.kind === 'user.message' && event.messageUuid === uuid && !event.isSynthetic && event.id !== message.id);
+    if (into === undefined || !this.state.turns.has(into)) return false;
+    const first = promptAt(this.state.turns.get(into)!, joined[0]!);
+    if (first < 0) return false;
+    const target = this.touch(into);
+    target.events[first] = message;
+    target.version += 1;
+    for (const uuid of [...joined.slice(1), message.messageUuid!]) {
+      const where = messages.get(uuid);
+      messages.set(uuid, into);
+      if (where === undefined || !this.state.turns.has(where)) continue;
+      const at = promptAt(this.state.turns.get(where)!, uuid);
+      if (at < 0) continue;
+      const turn = this.touch(where);
+      turn.events.splice(at, 1);
+      if (turn.agentsEndedAt !== undefined && at < turn.agentsEndedAt) turn.agentsEndedAt -= 1;
+      turn.version += 1;
+      if (where !== into && turn.events.length === 0 && !turn.accepted) this.discard(where);
+    }
+    return true;
+  }
+
   // UX wave U3 (decision 8): the arrival-bearing synthetic message placed under `uuid` leaves the turn holding it, which
   // derives again, or the loose events; one kept under the same uuid that drew nothing (decision 20) stays. A count of
   // the turn's events taken at the process's exit keeps its meaning.
@@ -666,6 +697,7 @@ function apply(batch: Batch, event: SessionEvent): void {
         return;
       }
       recordAskSteer(batch, event); // E1
+      if (event.joined !== undefined && event.joined.length > 0 && event.messageUuid !== null && batch.join(event, event.joined)) return; // UX wave U4a
       // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
       if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
       const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
@@ -679,7 +711,9 @@ function apply(batch: Batch, event: SessionEvent): void {
       // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
       // disk turn that never carries a `turn.started` still gathers its answer.
       const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
+      const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
       const turn = batch.open(id, 'human', event.at, false);
+      if (waited) turn.waited = true; // UX wave U4a
       if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
       batch.push(turn, event);
       return;
@@ -845,11 +879,12 @@ function apply(batch: Batch, event: SessionEvent): void {
     case 'session.reconnect':
     case 'process.exited': {
       // P5 O9: the process's exit ends the agents every agents row names, each turn's own up to now, a turn a rewind hid
-      // among them (its branch draws when revealed), a child's nested agents too; the rows derive again
+      // among them (its branch draws when revealed), a child's nested agents too; the rows derive again. UX wave U4a
+      // (decision 33): and the calls it had moved to the background, whose task's end will not be heard
       const endAgents = () => {
         if (event.kind !== 'process.exited') return;
         for (const id of [...state.order, ...(state.hidden?.turns ?? [])]) {
-          if (!state.turns.get(id)?.events.some(makesAgentsRow)) continue;
+          if (!state.turns.get(id)?.events.some((held) => makesAgentsRow(held) || mayBeMovedCall(held))) continue;
           const turn = batch.touch(id);
           turn.agentsEndedAt = turn.events.length;
           turn.version += 1;
@@ -1050,6 +1085,12 @@ const makesAgentsRow = (event: SessionEvent) =>
   (event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent') ||
   event.kind === 'subagent.started' ||
   (event.kind === 'task.started' && (event.taskType === 'local_agent' || event.taskType === 'local_workflow'));
+
+// UX wave U4a (decision 33): what can make a call the engine moved (cells.ts, movedToBackground): a shell call's flag,
+// or a task that names a call and runs no agent.
+const mayBeMovedCall = (event: SessionEvent) =>
+  (event.kind === 'tool.result' && typeof event.structured === 'object' && event.structured !== null && (event.structured as Record<string, unknown>).backgroundedToDeliverMessage === true) ||
+  (event.kind === 'task.started' && event.toolUseId !== null && event.taskType !== 'local_agent' && event.taskType !== 'local_workflow');
 
 // Interrupt evidence a turn retains: the engine's interrupt marker, or a call the human rejected.
 const wasInterrupted = (turn: TurnState) =>

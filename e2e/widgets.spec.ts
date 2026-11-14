@@ -359,6 +359,17 @@ test.describe('interactive', () => {
         await expect(widget(page, name)).toBeHidden();
         continue;
       }
+      if (name === 'btw') {
+        // UX wave U4a (M7's decisions; `openSideQuestions` in side/btw.ts): on a session that can take a question now
+        // (`canAskSide`), a pick of `/btw` hands itself to the session's side chat card and closes before its dialog is
+        // drawn. This harness mounts the composer alone and no card, so what this scene proves here is the hand-off: the
+        // pick is taken and no dialog stays. The card itself is proven where the app mounts it, `e2e/side.spec.ts` scene 5
+        // (a bare `/btw` picked from the palette opens the card with its field focused).
+        await expect(page.locator('[data-widget-dialog="btw"]')).toHaveCount(0);
+        await expect(widget(page, name)).toHaveCount(0);
+        await expect.poll(async () => (await message.textContent()) ?? '').toBe('');
+        continue;
+      }
       if (name === 'rename') {
         // no title: C10's rename dialog (the session action C10 registers), not a widget of C11's
         const dialog = page.getByRole('dialog', { name: 'Rename' });
@@ -520,13 +531,15 @@ test.describe('interactive', () => {
 
   // ---- M3: the mutating half ----------------------------------------------------------------------------------------
 
-  // W3 (C4, charter §5.4 as amended 2026-10-01): the chip reads `<alias> <effort>` with the effort get_settings applied
-  // (pass2/dialogs seq 58: high), and opens Codex's selector above itself: the effort view first, then the model list
-  test('the model chip says sonnet high and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
+  // W3 (C4, charter §5.4 as amended 2026-10-01 and by the UX wave's U4, l3-input-14): the chip reads the model's display
+  // name and the effort in words, with the effort get_settings applied (pass2/dialogs seq 58: high), its tooltip the whole
+  // display name and the alias, and opens Codex's selector above itself: the effort view first, then the model list
+  test('the model chip says Sonnet 5 High and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const chip = page.getByRole('button', { name: /^Model / });
-    await expect(chip).toHaveAttribute('aria-label', 'Model sonnet high');
+    await expect(chip).toHaveAttribute('aria-label', 'Model Sonnet 5 High'); // named from the route's catalogue (`engine.models`)
+    await expect(chip).toHaveAttribute('title', 'Sonnet 5 · sonnet');
     await chip.click();
     const menu = page.getByRole('dialog', { name: 'Model and effort' });
     const selector = menu.locator('[data-model-selector]');
@@ -553,8 +566,11 @@ test.describe('interactive', () => {
     await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'set_model')).toEqual([{ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } }]);
     // P2-F wave S (S-chip; the sitting's A1.6): the chip names the model asked for at once, marked as the list marks its
     // checked row, while the engine's last init frame still names Sonnet
-    await expect(chip).toHaveAttribute('aria-label', 'Model opus high, setting…');
-    const fast = selector.getByRole('switch', { name: 'Fast mode' });
+    await expect(chip).toHaveAttribute('aria-label', 'Model Opus 5.5 High, setting…');
+    // UX wave U4a (decision 20): no lightning; fast mode is a row with its switch and a muted line, where the model offers it
+    const fastRow = selector.locator('[data-fast-row]');
+    await expect(fastRow).toContainText('Fast mode');
+    const fast = fastRow.getByRole('switch', { name: 'Fast mode' });
     await expect(fast).toBeEnabled(); // opus has fast mode
     await fast.click();
     await expect(selector).toContainText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage');
@@ -972,8 +988,9 @@ test.describe('replay conformance', () => {
     await control('setPermissionMode', { mode: 'default' }); // seq 167
     await control('setModel', { model: 'opus' }); // seq 171
     await control('applyFlagSettings', { settings: { fastMode: true } }); // seq 175
-    await expect(effort.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
-    await expect(effort.getByText('Fast mode · set · the next init frame confirms it', { exact: true })).toBeVisible();
+    const fastRow = effort.locator('[data-fast-row]'); // UX wave U4a (decision 20): fast mode's row, its line the pending word
+    await expect(fastRow.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
+    await expect(fastRow.getByText('set · the next init frame confirms it', { exact: true })).toBeVisible();
     await read('session.getStatus'); // seq 177
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
     await control('setPermissionMode', { mode: 'auto' }); // seq 179

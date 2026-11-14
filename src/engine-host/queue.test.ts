@@ -35,7 +35,8 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
   const cancels: MessageUuid[] = [];
   const prefaces: (Record<string, unknown>[] | undefined)[] = []; // E1: each write's preface rows, as the writer was handed them
   const timeline: ({ row: Record<string, unknown> } | { change: QueueState })[] = []; // P2-C: rows and published changes, in the order they happened
-  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, prefaces, timeline, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null };
+  const sendNows: MessageUuid[] = []; // UX wave U4a: each `interrupt { send_now }` the queue asked the engine for
+  const h = { turn: false, ready: true, cancelled: true, store, writes, rows, changes, held, cancels, prefaces, timeline, sendNows, storeAtWrite: [] as QueueState[], onWrite: null as ((frame: UserInputFrame) => void) | null, cancelAnswer: null as Promise<void> | null, cancelFor: null as ((uuid: MessageUuid) => boolean | Promise<boolean>) | null, sendNowAnswer: 'delivering' as string | undefined, sendNowFor: null as ((uuid: MessageUuid) => Promise<string | undefined>) | null };
   const queue = new MessageQueue({
     appSessionId: ID,
     store,
@@ -58,6 +59,10 @@ async function harness(opts: { store?: MemorySessionStateStore; failWrite?: (fra
       cancels.push(uuid); // W1: `cancel_async_message`
       await h.cancelAnswer;
       return h.cancelFor ? h.cancelFor(uuid) : h.cancelled;
+    },
+    sendNow: async (uuid) => {
+      sendNows.push(uuid); // UX wave U4a: the engine's answer's `send_now`, undefined where it has none
+      return h.sendNowFor ? h.sendNowFor(uuid) : h.sendNowAnswer;
     },
     onChange: (q) => {
       changes.push(q);
@@ -1688,5 +1693,83 @@ describe('a prepared submission', () => {
     await queue.steer('now this', { priority: 'next' });
     expect(p.settled).toEqual([]);
     expect(writes.map((w) => w.message.content)).toEqual(['now this']);
+  });
+});
+
+// UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M1; Interfaces A): Send now on a message that
+// waits at the next step is the engine's own request for it. The queue writes it only for one of its own pending steers,
+// pauses nothing, holds nothing and removes nothing: the engine's `started` for the message retires it, as today.
+describe('sendNow (UX wave U4a)', () => {
+  const pending = async () => {
+    const t = await harness();
+    t.h.turn = true;
+    const { messageUuid } = await t.queue.steer('the answer', { priority: 'next' });
+    return { ...t, messageUuid };
+  };
+
+  it('a pending steer: the engine is asked, and its word answers; an answer with no `send_now` reads stopped, any other word delivering', async () => {
+    const t = await pending();
+    for (const [word, outcome] of [['delivering', 'delivering'], ['stopped', 'stopped'], ['nothing_waiting', 'nothing_waiting'], [undefined, 'stopped'], ['delivered_later', 'delivering']] as const) {
+      t.h.sendNowAnswer = word;
+      await expect(t.queue.sendNow(t.messageUuid)).resolves.toEqual({ outcome });
+    }
+    expect(t.sendNows).toEqual(Array(5).fill(t.messageUuid));
+  });
+
+  it('not a pending steer (never one, or the engine started it): nothing_waiting, and nothing is asked', async () => {
+    const t = await pending();
+    await expect(t.queue.sendNow('77777777-7777-4777-8777-777777777777' as MessageUuid)).resolves.toEqual({ outcome: 'nothing_waiting' });
+    t.queue.onLifecycle(lifecycle(t.messageUuid, 'started'));
+    await expect(t.queue.sendNow(t.messageUuid)).resolves.toEqual({ outcome: 'nothing_waiting' });
+    const queued = await t.queue.send('after the turn'); // an entry that waits after the turn is no pending steer either
+    expect(queued.disposition).toBe('queued');
+    expect(t.sendNows).toEqual([]);
+  });
+
+  it('is refused while a hold or a cancel withdraws the message, and while the process is not ready; nothing is asked', async () => {
+    const t = await pending();
+    let answer!: () => void;
+    t.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const holding = t.queue.hold(t.messageUuid);
+    await flush();
+    await expect(t.queue.sendNow(t.messageUuid)).rejects.toThrow('This message is already being withdrawn');
+    answer();
+    await holding;
+    const u = await pending();
+    u.h.cancelAnswer = new Promise<void>((resolve) => (answer = resolve));
+    const cancelling = u.queue.cancelSteer(u.messageUuid);
+    await flush();
+    await expect(u.queue.sendNow(u.messageUuid)).rejects.toThrow('This message is already being withdrawn');
+    answer();
+    await cancelling;
+    const v = await pending();
+    v.h.ready = false;
+    await expect(v.queue.sendNow(v.messageUuid)).rejects.toThrow('the session is not ready');
+    expect([...t.sendNows, ...u.sendNows, ...v.sendNows]).toEqual([]);
+  });
+
+  it('pauses nothing, holds nothing and removes nothing: the steer stays pending until the engine starts it; a second send-now is asked again', async () => {
+    const t = await pending();
+    await t.queue.send('after the turn');
+    const before = t.queue.state;
+    const rowsBefore = t.rows.length;
+    await expect(t.queue.sendNow(t.messageUuid)).resolves.toEqual({ outcome: 'delivering' });
+    await expect(t.queue.sendNow(t.messageUuid)).resolves.toEqual({ outcome: 'delivering' });
+    expect(t.sendNows).toEqual([t.messageUuid, t.messageUuid]);
+    expect(t.queue.state).toEqual(before);
+    expect(t.queue.isPaused).toBe(false);
+    expect(t.rows.slice(rowsBefore)).toEqual([]); // no row: the journal's `out` row of the request is the record (decision 2)
+    t.queue.onLifecycle(lifecycle(t.messageUuid, 'started'));
+    expect(t.queue.state.steers).toBeUndefined();
+  });
+
+  it('a send-now that fails (a timeout) rejects and leaves everything as it was', async () => {
+    const t = await pending();
+    const before = t.queue.state;
+    t.h.sendNowFor = () => Promise.reject(new Error('interrupt unanswered after 8 s'));
+    await expect(t.queue.sendNow(t.messageUuid)).rejects.toThrow('unanswered');
+    expect(t.queue.state).toEqual(before);
+    t.h.sendNowFor = null;
+    await expect(t.queue.sendNow(t.messageUuid)).resolves.toEqual({ outcome: 'delivering' });
   });
 });

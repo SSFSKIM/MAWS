@@ -54,6 +54,12 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   // the composer's extras, behind the composer's own reads of the helper
   'composer/modes/bash.ts': { commands: ['session.bash'], guard: 'only through composer/editor/submit.ts’ dispatchByMode, behind composer/Composer.tsx’s read of the helper (button and Enter)' },
   'composer/modes/memory.ts': { commands: ['session.memoryAppend'], guard: 'as composer/modes/bash.ts' },
+  // UX wave U4a: a waiting message's Send now, behind the stack's own read of the helper
+  'session/controls/types.ts': { commands: ['session.steer.sendNow'], guard: 'the port’s type (QueueControls.sendNow); its one caller is as session/controls/lane-b.ts’ entry says' },
+  'session/controls/lane-b.ts': {
+    commands: ['session.steer.sendNow'],
+    guard: 'QueueControls.sendNow, called only by composer/queue/stack-acts.ts’ sendNow, which composer/queue/QueueList.tsx’s Send now and composer/Composer.tsx’s Esc reach only past the stack’s refusals (useRefusals, refusalsNow), which read the helper',
+  },
   'composer/frame/bindings.ts': { commands: ['session.applyFlagSettings'], guard: 'liveBindings serve this Mac’s sessions; a session on another machine takes remoteBindings or lane A’s controls, which refuse the added directories (session/controls/lane-b.ts, lane-a.ts)' },
   'customize/connectors/sign-in.ts': {
     commands: ['connectors.signInDynamicServer'],

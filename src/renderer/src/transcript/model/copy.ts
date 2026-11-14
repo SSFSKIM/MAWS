@@ -32,7 +32,7 @@ const list = (names: string[]) => (names.length <= 1 ? (names[0] ?? '') : `${nam
 
 export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
-  cause?: 'crash' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"
+  cause?: 'crash' | 'message' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"; UX wave U4a: one a message sent now ended reads so
   origin: 'human' | 'engine' | 'peer';
   durationMs: number;
   toolCalls: number;
@@ -49,7 +49,7 @@ function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin
   switch (state) {
     case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
     case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
-    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : `You stopped after ${t}`;
+    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : cause === 'message' ? `Ended for your message after ${t}` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
 }
@@ -160,7 +160,8 @@ export type CellLabelInput =
   | { kind: 'edit'; path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number }
   | { kind: 'read'; paths: string[] }
   | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null }
-  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null };
+  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null }
+  | { kind: 'moved'; name: string; durationMs: number }; // UX wave U4a (decision 33): a call the engine moved to the background so a message sent now could be read
 
 export function cellLabel(input: CellLabelInput): string {
   switch (input.kind) {
@@ -190,6 +191,8 @@ export function cellLabel(input: CellLabelInput): string {
       }
       break;
     }
+    case 'moved':
+      return `Moved \`${input.name}\` to the background after ${duration(input.durationMs)}`;
     case 'generic': {
       if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
       const mcp = MCP_TOOL.exec(input.toolName);

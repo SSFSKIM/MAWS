@@ -125,7 +125,8 @@ function Surfaces({ appSessionId }: { appSessionId: AppSessionId }): ReactNode {
   const ctx = ctxOf(appSessionId);
   return (
     <>
-      {WIDGET_COMMANDS.map(({ name }) => {
+      {/* UX wave U4a: `/fork` is a gesture, not a surface: its mount forks (widgets/ForkWidget.test.tsx) */}
+      {WIDGET_COMMANDS.filter(({ name }) => name !== 'fork').map(({ name }) => {
         const Widget = slashWidget(name)!.component;
         return <Widget key={name} appSessionId={appSessionId} args="" close={() => {}} />;
       })}

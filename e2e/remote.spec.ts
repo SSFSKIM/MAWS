@@ -2133,8 +2133,8 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await composerOf(page).click();
       await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
       await page.keyboard.press('Enter');
-      const view = page.locator(`[data-side-btw-view="${address}"]`);
-      await expect(view, 'the side question’s view').toBeVisible({ timeout: 30_000 });
+      const view = main(page).locator('[data-btw-card]'); // UX wave U4a (O-20): the session's side chat card, not the Side pane
+      await expect(view, 'the side chat card').toBeVisible({ timeout: 30_000 });
       await expect(view.locator('[data-side-exchange="pending"]'), 'asked, pending').toContainText(SIDE_QUESTION, { timeout: 30_000 });
       await expect.poll(onB, { timeout: 30_000, message: `B took it (its receipt)\n${await bSaid()}` }).toEqual([[SIDE_QUESTION, 'pending', null]]);
       const opId = (await exchangesOnB())[0]!.id; // the exchange's id is its operation's
@@ -2160,6 +2160,11 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       await expect(view.locator('[data-side-exchange="answered"]'), 'the answer in A’s view').toContainText(M8_SIDE_ANSWER, { timeout: 60_000 });
       await expect(view.locator('[data-side-exchange="pending"]'), 'nothing left pending').toHaveCount(0);
       expect(await completions(), 'its completion came once').toHaveLength(1);
+      // on another machine the card's "Continue as a side thread" is closed with the declared words; Clear is offered
+      const promote = view.getByRole('button', { name: 'Continue as a side thread', exact: true });
+      await expect(promote, 'no side thread over the link yet').toBeDisabled();
+      await expect(promote).toHaveAttribute('title', REMOTE_UNAVAILABLE['side.thread.open']!);
+      await expect(view.getByRole('button', { name: 'Clear', exact: true }), 'Clear, by the helper').toBeEnabled();
     });
 
     await test.step('follow ownership: A and A2 each follow an agent of the session on B; A’s unfollow, then A quitting, lets go of A’s hold alone, and B keeps A2’s follow', async () => {

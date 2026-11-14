@@ -50,7 +50,7 @@ it('keeps the stored close guard after empty Enter while the draft is loading', 
   const draft: Draft = { doc: docOf([paragraph(textNode('stored thought'))]), attachments: [], updatedAt: '2026-10-02T00:00:00.000Z' };
   putIntent(intent({ appSessionId: APP, draft }));
   let loaded!: (draft: Draft | null) => void;
-  const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} client={fake.client} drafts={{ load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn() }} />);
+  const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} client={fake.client} drafts={{ load: () => new Promise((resolve) => { loaded = resolve; }), save: vi.fn(async () => true) }} />);
   fireEvent.keyDown(container.querySelector('[contenteditable]')!, { key: 'Enter' });
   const closing = beforeCloseUnstarted(APP);
   const dialog = useDialogs.getState().open?.kind;

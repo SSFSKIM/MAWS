@@ -71,7 +71,7 @@ describe('a side thread whose setup waits on a card', () => {
   });
 
   it('a promotion’s card docks the promotion message', async () => {
-    useSidePane.setState({ panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [answered('Word?', 'ZEBRA')] }]]) });
+    useSidePane.setState({ panes: new Map([[A, { view: null, shownChild: null, inlineQuestions: false, exchanges: [answered('Word?', 'ZEBRA')] }]]) }); // UX wave U4a: asked in the session's card, no pane view
     fake = needsTrust();
     window.maws = fake.client as unknown as PreloadBridge;
     await expect(promoteSide(A, 'Now fix it.')).resolves.toEqual({ ok: true });
