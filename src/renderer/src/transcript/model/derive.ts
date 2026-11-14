@@ -999,9 +999,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       if (result.denial !== null) return stoppedMember({ kind: result.denial, ...denialDisposition(result.denial, context, context.continued.has(use.toolUseId)) }) ? 'stopped' : null;
       return sendMessageOutcome(result).ok ? 'succeeded' : 'failed';
     };
-    // the turn's own launching calls: an agent is a step of the turn that holds its call (the architect's ruling on M5)
-    const launched = new Set(turn.events.flatMap((event) => (event.kind === 'tool.use' && presentationOf(event.toolName) === 'subagent' ? [event.toolUseId as string] : [])));
-    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, launched, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started', sent)));
+    // the turn's own calls that launch nothing: an agent started again under one of them is no step (the architect's
+    // ruling on M5, (G) narrowed)
+    const restarts = new Set(turn.events.flatMap((event) => (event.kind === 'tool.use' && presentationOf(event.toolName) !== 'subagent' ? [event.toolUseId as string] : [])));
+    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, restarts, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started', sent)));
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && turn.closedCause !== null && { cause: turn.closedCause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
