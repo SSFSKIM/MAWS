@@ -121,7 +121,8 @@ export function checkCustom(fields: CustomFields, servers: readonly Customizatio
   const rows: RowCheck[] = pairs.map((pair) => {
     const emptied = remote(type) ? remoteEmptiedNamesIn(pair.value) : [];
     if (isEmptyRow(pair)) return { problem: null, emptied };
-    const problem = problems[at++];
+    const problem = problems[at];
+    at += 1;
     return { problem: problem ? rowWords(rowsField, pair, problem) : null, emptied };
   });
 

@@ -6,7 +6,7 @@
 // gives it, `configured`). Behind Details, closed at every opening: the command with `•••` in every value slot (the
 // shown line, from the structure) and the file it changes. The value fields are plain text fields, drawn by one
 // component (`ValueField`), the one place a masked field with a reveal control would be made ("The owner's look").
-import { Fragment, useRef, useState, type ReactNode } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { MCP_MASK, type McpEntryAdd, type McpPair, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
@@ -23,14 +23,17 @@ type Fields = Omit<CustomFields, 'headers' | 'env'> & { headers: Row[]; env: Row
 type Field = 'name' | 'url' | 'command'; // the fields whose emptiness is said once they were typed in
 
 const TYPES: readonly CustomType[] = ['http', 'sse', 'stdio'];
+let rows = 0; // the window's row keys
+const rowOf = (pair: McpPair): Row => {
+  rows += 1;
+  return { ...pair, id: rows };
+};
 const MUTED = 'm-0 text-ui-sm text-fg-muted';
 
 export function CustomConnectorSheet({ request, env, onConfirm, onClose }: { request: PluginsRequest; env: ConnectorSheetEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
-  const ids = useRef(0);
   const [fields, setFields] = useState<Fields>(() => {
     const opened = customFieldsOf(request.input as McpEntryAdd);
-    const row = (pair: McpPair): Row => ({ ...pair, id: ids.current++ });
-    return { ...opened, headers: opened.headers.map(row), env: opened.env.map(row) };
+    return { ...opened, headers: opened.headers.map(rowOf), env: opened.env.map(rowOf) };
   });
   const [typed, setTyped] = useState<ReadonlySet<Field>>(new Set());
   const set = (patch: Partial<Fields>) => setFields((prior) => ({ ...prior, ...patch }));
@@ -94,7 +97,7 @@ export function CustomConnectorSheet({ request, env, onConfirm, onClose }: { req
             rows={remote ? fields.headers : fields.env}
             check={check}
             onChange={(rows) => set(remote ? { headers: rows } : { env: rows })}
-            onAdd={() => set(remote ? { headers: [...fields.headers, { name: '', value: '', id: ids.current++ }] } : { env: [...fields.env, { name: '', value: '', id: ids.current++ }] })}
+            onAdd={() => set(remote ? { headers: [...fields.headers, rowOf({ name: '', value: '' })] } : { env: [...fields.env, rowOf({ name: '', value: '' })] })}
           />
           <AddTo scopes={addToScopes(env.cwd)} scope={fields.scope} place={place} onChange={(scope) => set({ scope })} />
           {check.sharedWarning && (
