@@ -3532,9 +3532,12 @@ test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the wo
     const status = () => page.evaluate(([directory, machine, session]) => window.maws.invoke('git.status', { directory }, { machine, session } as never), [worktree, b.ref, app] as const);
     const admitted = await status();
     expect(admitted.ok, `the read passes while registered: ${JSON.stringify(admitted)}`).toBe(true);
-    // and refuses it once the registration is gone (the folder left as it is), asked again at this request
+    // and refuses it once the registration is gone (the folder left as it is), asked again at this request: the
+    // endpoint's `no-target` (src/endpoint/authorize.ts, withinCheckout), which A's main hands on as the refusal
+    // (src/main/machines/remote/dispatch.ts, refusalError), not git's own failure at a folder it no longer knows
     rmSync(join(checkout, '.git', 'worktrees', 'b-worktree'), { recursive: true, force: true });
-    await expect.poll(async () => (await status()).ok, { timeout: 30_000, message: 'the read is refused once the worktree is not registered' }).toBe(false);
+    const refusalOf = async () => { const answer = await status(); return answer.ok ? 'admitted' : ((answer.error.issues as { refusal?: unknown } | undefined)?.refusal ?? answer.error.message); }; // prettier-ignore
+    await expect.poll(refusalOf, { timeout: 30_000, message: 'the read is refused at B’s endpoint once the worktree is not registered' }).toBe('no-target');
     expect((await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout, 'B’s record still names it: the refusal is the admission’s, at the act').toBe(worktree);
   } finally {
     await held.a?.cleanup();
