@@ -333,6 +333,45 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
     expect(lineOf(b).caption).toBe('Ran an agent, messaged a subagent, messaged 2 other sessions');
   });
 
+  // The architect's ruling on M5 (G): an agent is a step of the turn that holds its launching call. Live, an agent the
+  // turn messaged starts again in that turn under the sending call's id; that start launched nothing here, so the turn
+  // reads its message only, as the file and another machine's rows read it (u3-tasks-r1's turn be122771)
+  describe('an agent is a step of the turn that launched it', () => {
+    const lines = (b: Builder) => drawn(b.events).filter((row): row is RowOf<'divider'> => row.kind === 'divider').map((row) => row.caption);
+
+    it('a turn that messages a subagent another turn launched, its start seen again, reads the message only', () => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'p' });
+      b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      b.result('a1', 'Async agent launched.');
+      b.end(['u1']);
+      b.turn('u2');
+      b.toolUse('m1', 'SendMessage', { to: 'k1', message: 'one more thing' });
+      b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('m1'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      b.result('m1', 'sent');
+      b.end(['u2']);
+      expect(lines(b)).toEqual(['Ran an agent', 'Messaged a subagent']);
+    });
+
+    it('a workflow launched by its call in the turn still counts', () => {
+      const b = turnOf((t) => {
+        t.toolUse('w1', 'Workflow', { workflow: 'maws-probe' });
+        t.emit('task.started', { taskId: task('wf1'), toolUseId: tool('w1'), taskType: 'local_workflow', description: 'Two echo agents in one phase', isBackground: true, workflowName: 'maws-probe' });
+        t.result('w1', JSON.stringify({ status: 'async_launched', taskId: 'wf1', taskType: 'local_workflow', workflowName: 'maws-probe' }));
+      });
+      expect(lines(b)).toEqual(['Ran an agent']);
+    });
+
+    it('an agent whose start names no call of the turn is no step', () => {
+      const b = turnOf((t) => {
+        t.emit('subagent.started', { taskId: task('k2'), toolUseId: null, description: 'Orphan', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+        run(t, 't1', 'pnpm test');
+      });
+      expect(lines(b)).toEqual(['Ran a command']);
+    });
+  });
+
   // The M2 review: a sent message's step reads its call's own result, as a call's does: a failed send is marked failed,
   // one with no result in a closed turn stopped, a refusal that stands alone is no step, a stopped refusal a stopped one
   describe('a sent message’s step, by its call’s own result', () => {
