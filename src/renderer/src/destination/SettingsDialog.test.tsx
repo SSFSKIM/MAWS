@@ -10,6 +10,7 @@ import { settingsBridge } from '../test-support/settings-bridge';
 import { registerSlot, resetSlots } from '../app/slots';
 import { Sheet } from '../sessions/Sheet';
 import { useLayout } from '../stores/layout';
+import { installResizeObserver } from '../test-support/resize';
 import { resetShellStores } from '../test-support/shell-stores';
 import { SettingsDialog } from './SettingsDialog';
 
@@ -44,6 +45,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   resetSlots();
+  vi.unstubAllGlobals();
 });
 
 describe('the Settings dialog', () => {
@@ -56,19 +58,37 @@ describe('the Settings dialog', () => {
     expect(dialog()!.textContent).toContain('section engine');
   });
 
-  it('has the library dialogs’ box and no padding of its own; the body’s right inset is 30 px and Close lies wholly inside it', () => {
+  it('has the library dialogs’ box and no padding of its own; the body’s right inset is 30 px with its scroll bar, and Close lies wholly inside it', () => {
     render(<SettingsDialog />);
     open();
     const content = dialog()!;
     expect(content.className).toContain('w-[min(960px,calc(100vw-48px))]');
     expect(content.className).toContain('h-[min(85vh,800px)]');
     expect(content.className).not.toMatch(/(?:^|\s)p[xytrbl]?-/);
-    const inset = px(content.className, '[&_[data-settings-body]]:pr');
+    expect(content.className).toContain('[&_[data-settings-body]]:pr-[calc(30px_-_var(--settings-bar,0px))]'); // less the body's own bar
+    const inset = 30;
     const close = screen.getByRole('button', { name: 'Close' });
-    expect(inset).toBe(30);
     expect(px(close.className, 'right') + px(close.className, 'size')).toBeLessThanOrEqual(inset); // 6 px in, 22 px wide
     expect(px(close.className, 'size')).toBe(22);
     expect(content.contains(close) && !close.closest('[data-settings-body]')).toBe(true);
+  });
+
+  it('takes the body’s own scroll bar out of the inset: the bar’s width, read again as the body resizes, at most the 30 px', () => {
+    const observer = installResizeObserver();
+    render(<SettingsDialog />);
+    open();
+    const content = dialog()!;
+    const body = content.querySelector<HTMLElement>('[data-settings-body]')!;
+    const bar = (width: number) => {
+      Object.defineProperty(body, 'offsetWidth', { configurable: true, value: 810 });
+      Object.defineProperty(body, 'clientWidth', { configurable: true, value: 810 - width });
+      observer.resize(body, { width: 810 - width - 50, height: 600 });
+      return content.style.getPropertyValue('--settings-bar');
+    };
+    expect(bar(15), 'a classic bar').toBe('15px');
+    expect(bar(0), 'an overlay bar').toBe('0px');
+    expect(bar(15), 'the mode changed while open').toBe('15px');
+    expect(bar(40), 'never more than the inset').toBe('30px');
   });
 
   it('Close closes it, and the strip is not touched', async () => {
