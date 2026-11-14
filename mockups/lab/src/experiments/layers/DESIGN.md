@@ -1,6 +1,6 @@
 # Layers
 
-Design record for the round 2 synthesis `layers` (order 3). The contract is `mockups/lab/BRIEF.md` and
+Design record for the round 2 synthesis `layers` (order 0, first in the gallery). The contract is `mockups/lab/BRIEF.md` and
 `mockups/lab/ROUND2.md`. Values live in `layers.css` (tokens at the top), `colour.ts` (everything a colouring
 settles), `paint.ts` and `paper.ts` (the two field painters); this file says what each part was lifted from, what
 happened where two parts met, what the idea breaks and what that costs.

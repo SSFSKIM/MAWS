@@ -1,6 +1,6 @@
 # Choices
 
-Record for `choices` (order 3.5, directly after Layers). The contract is `mockups/lab/BRIEF.md` and
+Record for `choices` (order 0.5, directly after Layers). The contract is `mockups/lab/BRIEF.md` and
 `mockups/lab/ROUND2.md`; the style it stands in is `../layers/DESIGN.md`, sections 0 to 12, under the Paper
 colouring. Variant names live in `parts.ts`, the frame in `board.tsx` and `Choices.tsx`, the variants in
 `transcript.tsx`, `composer.tsx`, `motion.tsx`, `ground.tsx` and `together.tsx`, their styles in `choices.css`.
