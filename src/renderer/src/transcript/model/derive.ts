@@ -483,7 +483,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       // UX wave U2 (X1, decision 2): the engine's recorded duration when one came; else, for a block that streamed, the
       // time MAWS measured from its first delta to its completion
       const recordedMs = block.recordedMs ?? null;
-      // A completed thinking block with no text (a signature-only block) has nothing to disclose (W1). UX wave U2 (#479):
+      // A completed thinking block with no text (a signature-only block) has nothing to disclose (W1). UX wave U2 (ticket 479):
       // one with a recorded duration still travels, so inside a run it is merged and tested on its time; where it leaves
       // the group machine as a row it is dropped there (groups.ts), so outside a run it has no row, as before.
       if (!live && block.buffer.trim() === '' && recordedMs === null) return null;

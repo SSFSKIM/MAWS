@@ -31,7 +31,7 @@ describe('a thinking block’s duration on a session MAWS runs (claude-opus-5-5)
     expect(drawn(journal('p4-r7-loss-stages'))).toEqual(['Thought']);
   });
 
-  // UX wave U2 (decision 19, #479): the block follows a call, so it is that call's run's last cell while it streams; once
+  // UX wave U2 (decision 19, ticket 479): the block follows a call, so it is that call's run's last cell while it streams; once
   // it closes it travels on with its recorded number and has no row of its own, and at the run's close it leaves none
   it('a block with no text yet is drawn live from its start inside the run it follows, and has no row once it closes (W1)', () => {
     const rows = journal('p4-r7-loss-stages');

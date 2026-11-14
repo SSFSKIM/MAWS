@@ -1,6 +1,6 @@
-// UX wave U2 (O-29, O-27, #479; the U2a execution document, M4 and Interfaces §C): what a run hands on and what it
+// UX wave U2 (O-29, O-27, ticket 479; the U2a execution document, M4 and Interfaces §C): what a run hands on and what it
 // draws. Where a thought goes (decision 19: a thought after a run's last call is that run's; the single call's unwrap
-// keeps event order), the run's id (decision 4: its first call's), a textless thought's travel (#479), the opened run's
+// keeps event order), the run's id (decision 4: its first call's), a textless thought's travel (ticket 479), the opened run's
 // segments (`runSegments`: thoughts merged, then tested on the engine's recorded time, ten seconds and more), and what
 // its one line reads (`runLine`, `heldByPermission`: decision 21). Every word and every number is invented.
 import { describe, expect, it } from 'vitest';

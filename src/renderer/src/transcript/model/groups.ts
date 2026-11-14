@@ -2,7 +2,7 @@
 // thinking cells inside groups, single-cell unwrap, an active group never unwraps; Copy "group"): the work-area items
 // of one turn, in event order, folded into group rows, standalone cell rows and the rows between them. derive.ts
 // walks a turn's events into these items and hands them here. UX wave U2 (O-29; the U2a document, decision 18):
-// a run's caption is caption.ts's, and a waiting request's slot is no boundary of a run. UX wave U2 (O-27, #479;
+// a run's caption is caption.ts's, and a waiting request's slot is no boundary of a run. UX wave U2 (O-27, ticket 479;
 // decisions 4 and 19, Interfaces §C): a run's row id is made from its first call, every thought enters the machine,
 // and what an opened run draws (`runSegments`) and what its one line reads (`runLine`) are read from its cells here.
 import type { AttentionItem } from '@shared/graph/attention';
@@ -34,7 +34,7 @@ export function groupItems(items: WorkItem[], turn: TurnState, ui: TranscriptUi 
   // never gets a tool cell or unwraps.
   const thinkingRows = new Map<string, RowOf<'thinking'>>();
   // A thought that leaves the machine as a row (a group with no call; the single-call unwrap) is dropped there when it
-  // finished with no text (W1: nothing to disclose), so a textless thought has a line only inside a run (#479)
+  // finished with no text (W1: nothing to disclose), so a textless thought has a line only inside a run (ticket 479)
   const thoughtRow = (cell: Cell): Row[] => {
     const row = thinkingRows.get(cell.id)!;
     return row.live || row.text.trim() !== '' ? [row] : [];
@@ -112,7 +112,7 @@ export const iconOf = (cells: Cell[]): ToolCategory => {
 
 export const collectCells = (rows: Row[]): Cell[] => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
 
-// UX wave U2 start (O-27, #479, O-29; the U2a document, Interfaces §C)
+// UX wave U2 start (O-27, ticket 479, O-29; the U2a document, Interfaces §C)
 // What an opened run draws: blocks of calls, and between them, or under the last, a thought of ten seconds or more by
 // the engine's recorded duration (the owner's rule; a measured duration is never read here) or the thought streaming now.
 export const THOUGHT_LINE_MS = 10_000;

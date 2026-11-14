@@ -1,4 +1,4 @@
-// UX wave U2 (O-29, O-27, #479; the U2a execution document, M4 and acceptance 1, 3, 4, 5 and 6): a run's row in the
+// UX wave U2 (O-29, O-27, ticket 479; the U2a execution document, M4 and acceptance 1, 3, 4, 5 and 6): a run's row in the
 // window. Each sequence is driven through the reducer (the store's own source, one batch per step) and read in the
 // rendered rows after every step: one line, folded, reading the running call, the waiting call or the caption; a request
 // that neither opens nor closes it; the live thought under it and the thought lines of an opened run at their places.
