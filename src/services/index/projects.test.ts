@@ -1,4 +1,5 @@
-import { copyFileSync, mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { copyFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -420,6 +421,37 @@ describe("a folder's repository, from git's files", () => {
     expect(checkoutIn(at('repo'), `${w1}/src`)).toEqual({ checkout: w1, cwd: `${w1}/src`, workTree: w1, linked: true });
     expect(checkoutIn(at('repo/src'), at('side'))).toEqual({ checkout: at('side'), cwd: at('side'), workTree: at('side'), linked: true });
     expect(checkoutIn(w1, at('repo/src'))).toEqual({ checkout: at('repo'), cwd: at('repo/src'), workTree: at('repo'), linked: false }); // the main checkout, from a worktree
+  });
+
+  // The branch review (P2): the index reads these files synchronously, inside its transaction, so a FIFO among them (a
+  // `commondir`, a worktree's `gitdir`, a `HEAD`) would block it for ever at the open. Only a regular file is read; any
+  // other is unreadable metadata, which answers null. Each FIFO here has a writer waiting, so a read that does open it
+  // takes the file's own content and returns, and the case fails rather than hangs; the writer still waiting after the
+  // call shows that nothing opened it.
+  it('reads no metadata file that is not a regular file (a FIFO), and answers it as unreadable', async () => {
+    const wt = await gitWorktree(at('repo'), at('fifo-wt'), 'fifo-wt');
+    const gitDir = at('repo/.git/worktrees/fifo-wt');
+    const asFifo = async (file: string, read: () => unknown) => {
+      const content = readFileSync(file, 'utf8');
+      renameSync(file, `${file}.kept`);
+      execFileSync('mkfifo', [file]);
+      const writer = spawn('sh', ['-c', 'printf "%s" "$0" > "$1"', content, file], { stdio: 'ignore' });
+      const exited = new Promise<void>((resolve) => writer.once('exit', () => resolve()));
+      try {
+        const answer = read();
+        await new Promise((resolve) => setTimeout(resolve, 200)); // a writer whose FIFO was opened has exited by now
+        return { answer, writerWaiting: writer.exitCode === null && writer.signalCode === null };
+      } finally {
+        writer.kill('SIGKILL');
+        await exited;
+        renameSync(`${file}.kept`, file);
+      }
+    };
+    expect.soft(await asFifo(join(gitDir, 'commondir'), () => repositoryAt(wt)), 'commondir').toEqual({ answer: null, writerWaiting: true });
+    expect.soft(await asFifo(join(gitDir, 'gitdir'), () => repositoryAt(wt)), 'gitdir').toEqual({ answer: null, writerWaiting: true });
+    expect.soft(await asFifo(join(gitDir, 'HEAD'), () => headBranch(wt)), 'HEAD').toEqual({ answer: null, writerWaiting: true });
+    expect(repositoryAt(wt)).toEqual({ commonDir: common(), workTree: wt, linked: true }); // each file back, it reads again
+    expect(headBranch(wt)).toBe('fifo-wt');
   });
 
   it('judges a link where it lands, and "at or under" at a segment boundary', () => {
