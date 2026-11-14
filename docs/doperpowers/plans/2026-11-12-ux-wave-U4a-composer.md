@@ -1166,6 +1166,17 @@ Found at the branch's base (2026-11-13), on the merged tree:
   - The script tests: 587 of 587.
   Rationale: the chain-merge brief. Every both-sides hunk added rows or entries, and the merge left nothing in which one side had to give.
   Date/Author: 2026-11-14, the merge worker (its report, task 14); folded in by the controller.
+- Decision: the chain merge of `ux-wave/U8c-2` at `d429f0f34` (`6d137ac42`, over `06d40e138`), which brings master's stub relay repair, the destinations landing's popup scene skipped on macOS, one tracker row rewritten and two documents. The merge had no conflict. The files both sides changed are `docs/tech-debt-tracker.md` and `transcript/view/Transcript.tsx`. In `Transcript.tsx`, master's `data-hydration` attribute sits on the root element and this landing's `waiting` prop and the working-folder landing's `sessionCwd` sit on other lines. With the relay repaired, a session of the nine-sessions stub hydrates to an empty transcript instead of staying on "Loading…". No scene of this landing reads that state:
+  - The composer scenes run over replay.
+  - cross-build's stub is the engine stub under a session host.
+  - widgets.spec's interactive scenes, which do run over the nine-sessions stub, read the `/btw` hand-off and the model chip. `canAskSide` reads the session's process and its drive, not the transcript. The two composer reads of the transcript store (the stack's `readOf`, the editor's follow-up placeholder) find no user row in either state.
+  The wire stays at 45: the manifest regenerated on the VM is byte-identical, fingerprint `9067289f901752d5`. Proof on the VM at `6d137ac42`:
+  - `pnpm typecheck`: exit 0.
+  - eslint on `Transcript.tsx`: clean.
+  - vitest over `src/renderer/src/transcript/view`, `src/mawsd`, `src/renderer/src/app`, `src/renderer/src/composer` and the two wire tests: 221 of 221 files, 3329 tests passed.
+  - The script tests: 587 of 587.
+  Rationale: the chain-merge brief.
+  Date/Author: 2026-11-14, the controller.
 
 ## Outcomes & Retrospective
 
