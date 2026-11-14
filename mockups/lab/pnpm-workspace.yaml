@@ -1,0 +1,4 @@
+minimumReleaseAgeExclude:
+  - '@vitreajs/vitrea-react@0.29.0'
+  - '@vitreajs/vitrea-web@0.29.0'
+  - '@vitreajs/vitrea@0.29.0'
