@@ -623,4 +623,27 @@ describe('the thread’s artifact row', () => {
     fireEvent.click(await chip('the plan'));
     expect(registered).toHaveBeenLastCalledWith(expect.any(String), OTHER, undefined, { block: 'b7' });
   });
+  // UX wave U6d (decision 7): with the artifact also open as a main tab, a mention of the card's own artifact keeps
+  // opening in the card's viewer, so the person stays on the page they comment on; any other artifact follows the
+  // registered rule, which shows its open main tab
+  it('a link to the card’s own artifact opens in the card’s viewer even when a main tab shows it; another shows its main tab', async () => {
+    const registered = vi.fn();
+    const showOpenArtifactTab = vi.fn(() => true);
+    const OTHER = '00000000-0000-4000-8000-0000000000e3';
+    offs.push(registerTranscriptActions({ openArtifact: registered, openArtifactTab: vi.fn(), showOpenArtifactTab }));
+    const b = builder();
+    b.turn('t1', anchoredMessage({ anchor: ANCHOR, text: COMMENT, destination: 'thread', screenshot: false }));
+    b.text('m1', 0, `Compare [the draft](maws-artifact:${RECORD}) and [the plan](maws-artifact:${OTHER}#block=b7).`);
+    b.end(['t1']);
+    snapshot = b.events;
+    await intoThread();
+    withRecord();
+    const chip = async (name: string) => within(card()!).findByRole('button', { name });
+    fireEvent.click(await chip('the draft'));
+    expect(showVersion).toHaveBeenLastCalledWith('latest');
+    expect(showOpenArtifactTab).not.toHaveBeenCalled();
+    fireEvent.click(await chip('the plan'));
+    expect(showOpenArtifactTab).toHaveBeenLastCalledWith(expect.any(String), OTHER, { block: 'b7' });
+    expect(registered).not.toHaveBeenCalled();
+  });
 });
