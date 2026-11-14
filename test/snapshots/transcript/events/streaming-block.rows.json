@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T12:00:02.600Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:u-stream-1",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T12:00:00.000Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-stream-1",
+    "recordedMs": null,
     "text": "The reader asked about anchoring. Keep it to three sentences.",
     "turnId": "turn:u-stream-1"
   },

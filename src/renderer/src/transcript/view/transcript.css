@@ -168,6 +168,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 
 /* Thinking */
 .transcript-thinking { padding: 2px 0 8px; }
+/* UX wave U2 (decision 12): inside a run a thought line has the run's own 6 px above and below */
+.transcript-group .transcript-thinking { padding: 6px 0; }
 .transcript-thinking-text {
   max-height: 140px;
   margin: 6px 0 0 19px;
@@ -255,7 +257,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-tooltip { max-width: 280px; padding: 6px 9px; font-size: var(--text-ui-sm); }
 @keyframes transcript-spin { to { transform: rotate(360deg); } }
 
-/* Tool summaries share a block; only internal activity has a second fold. */
+/* Tool summaries share a block; a run's thought line stands between two blocks (UX wave U2). */
 .transcript-tool-block, .transcript-standalone .transcript-cell { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
 .transcript-tool-block:empty { display: none; }
 .transcript-tool-block > * + * { border-top: 1px solid var(--border); }
@@ -264,25 +266,20 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-tool-block .transcript-chevron, .transcript-standalone .transcript-chevron { opacity: 1; }
 .transcript-cell-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: var(--radius-sm); }
 .transcript-group { padding: 1px 0 6px; }
-.transcript-group-header { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; }
-.transcript-group-header:hover { color: var(--fg); }
-.transcript-group-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-.transcript-group-header > .transcript-chevron { opacity: 0; }
-.transcript-group-header:hover > .transcript-chevron, .transcript-group-header:focus-visible > .transcript-chevron, .transcript-group-header[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
-.transcript-group[data-state="active"] .transcript-group-label { color: var(--fg); }
-.transcript-group-cells {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  max-height: 224px;
-  margin-top: 4px;
-  padding: 0 10px 5px 20px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  outline: none;
-}
-.transcript-group-cells:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
+/* UX wave U2 (O-29; the U2a document, M4 "The row"): a run is one line, its chevron trailing its text as the old
+   header's did; it reads a running call beside the running ring a call's row draws, and a waiting one in the tone of
+   the attention glyph it leads with (ATTENTION_HEADINGS: a permission's is the warning tone, the only kind that takes
+   the line). */
+.transcript-run-line { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-width: 0; color: var(--fg-muted); font-size: var(--text-ui); line-height: 24px; text-align: left; }
+.transcript-run-line:hover { color: var(--fg); }
+.transcript-run-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-run-line > .transcript-counts { flex: none; }
+.transcript-run-line > .transcript-chevron { opacity: 0; }
+.transcript-run-line:hover > .transcript-chevron, .transcript-run-line:focus-visible > .transcript-chevron, .transcript-run-line[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
+.transcript-run-line[data-line="running"] { color: var(--fg); }
+.transcript-run-line[data-line="running"]::before { flex: none; }
+.transcript-run-line[data-tone="warning"], .transcript-run-line[data-tone="warning"]:hover { color: var(--warning); }
+.transcript-run-glyph { flex: none; }
 .transcript :where(code) { font-family: var(--font-mono); font-size: 0.92em; }
 
 /* Cell: the one line, then its detail */
@@ -293,14 +290,17 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-cell-line > .transcript-chevron { margin-left: auto; opacity: 0; }
 .transcript-cell-line:hover > .transcript-chevron, .transcript-cell-line:focus-visible > .transcript-chevron, .transcript-cell-line[aria-expanded="true"] > .transcript-chevron { opacity: 1; }
 .transcript-cell-label { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* UX wave U2 (decision 13): a failed call's reason, muted after its label and cut by the label's own ellipsis. */
+.transcript-cell-reason { margin-left: 3px; color: var(--fg-faint); }
 .transcript-file-verb { color: var(--fg-muted); }
 .transcript-file-target { color: var(--fg); }
-.transcript-cell[data-bookkeeping] .transcript-cell-line { opacity: 0.75; }
 /* The status mark is drawn here, so the line's text is its label alone. */
 .transcript-cell-line::before { flex: none; width: 12px; text-align: center; }
-/* The running ring, shared with E4c's browser row (its own rule below adds the row's flex and margin). */
+/* The running ring, shared with E4c's browser row (its own rule below adds the row's flex and margin) and a run's line
+   while it reads a running call (UX wave U2). */
 .transcript-cell[data-status="running"] > .transcript-cell-line::before,
-.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before {
+.transcript-browser-action[data-state="running"] .transcript-browser-action-line::before,
+.transcript-run-line[data-line="running"]::before {
   content: '';
   width: 9px;
   height: 9px;
@@ -619,7 +619,6 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 /* E4c end */
 
 /* Code-mode transcript: factual summaries occupy one quiet line; details earn space only when opened. */
-.transcript-group-summary { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-thinking .transcript-disclosure { max-width: 100%; }
 .transcript-thinking-summary { display: inline-block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: bottom; }
 .transcript-restore-dialog { position: fixed; top: 18%; left: 50%; transform: translateX(-50%); z-index: 50; width: min(480px, 90vw); padding: 16px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-overlay); color: var(--fg); font-size: var(--text-ui); }

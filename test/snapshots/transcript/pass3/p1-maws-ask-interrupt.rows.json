@@ -23,6 +23,11 @@
   {
     "at": "2026-10-08T03:13:11.044Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-08T03:13:13.300Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:b1449a29-518c-40d9-87f6-3951da4e857c",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-08T03:13:11.071Z",
     "state": "stopped",
     "summary": {
@@ -70,12 +78,12 @@
   {
     "agent": null,
     "at": "2026-10-08T03:13:12.347Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -123,7 +131,7 @@
     "blocking": true,
     "cancelReason": "withdrawn",
     "context": null,
-    "error": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
+    "error": null,
     "id": "ask:toolu_01Rh1TG1yT1nQyYUri1vSxEC",
     "kind": "ask",
     "questions": [

@@ -32,6 +32,11 @@
   {
     "at": "2026-09-28T10:50:00.045Z",
     "autoDenied": 0,
+    "caption": "Read shot.png",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:50:00.603Z",
     "expanded": true,
@@ -40,6 +45,9 @@
     "id": "divider:turn:u-attachments-and-images-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read shot.png"
+    ],
     "startedAt": "2026-09-28T10:50:00.100Z",
     "state": "completed",
     "summary": {
@@ -83,18 +91,19 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-attachments-and-images-013",
+    "recordedMs": null,
     "text": "Compare the attached image with the one on disk.",
     "turnId": "turn:u-attachments-and-images-002"
   },
   {
     "agent": null,
     "at": "2026-09-28T10:50:00.247Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": false,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

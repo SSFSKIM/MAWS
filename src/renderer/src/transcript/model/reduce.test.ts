@@ -639,9 +639,8 @@ describe('turn origin', () => {
     const state = reduce(b.events);
     expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['engine', 'human', 'engine']);
     const list = rows(b.events);
-    // Engine turns: no user row, and a divider even without a work area, so the reader sees whose turn it was.
-    expect(kinds(list)).toEqual(['time', 'divider', 'assistant_text', 'user', 'assistant_text', 'divider', 'assistant_text']);
-    expect(list.filter((row) => row.kind === 'divider').map((row) => { const d = row as Extract<Row, { kind: 'divider' }>; return dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }); })).toEqual(['Continued for 1s', 'Continued for 1s']);
+    // Engine turns: no user row. UX wave U2 (O-15): a turn with nothing done under it has no divider, whoever started it
+    expect(kinds(list)).toEqual(['time', 'assistant_text', 'user', 'assistant_text', 'assistant_text']);
   });
 
   // Final rebase: C4's backfill gives a disk `<task-notification>` user record its own turn.started and user.message,
@@ -657,7 +656,8 @@ describe('turn origin', () => {
     b.end(['n1'], { origin: null });
     const list = rows(b.events);
     expect(list.filter((row) => row.kind === 'user').map((row) => (row as Extract<Row, { kind: 'user' }>).text)).toEqual(['prompt u1']);
-    expect(find(list.filter((row) => row.turnId === turnId.ofMessage(uuid('n1'))), 'divider')).toMatchObject({ origin: 'engine' });
+    expect(reduce(b.events).turns.get(turnId.ofMessage(uuid('n1')))!.origin).toBe('engine');
+    expect(find(list, 'divider')).toBeUndefined(); // UX wave U2 (O-15): it only answered
   });
 
   it('null on both events is human (C4 backfill), and a missing user message is not evidence', () => {
@@ -691,8 +691,8 @@ describe('turn origin', () => {
     expect(state.order.map((id) => state.turns.get(id)!.origin)).toEqual(['peer', 'peer']);
     const list = rows(b.events);
     const dividers = list.filter((row): row is Extract<Row, { kind: 'divider' }> => row.kind === 'divider');
-    expect(dividers.map((d) => d.origin)).toEqual(['peer', 'peer']); // a peer turn without work keeps its divider too
-    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session worked for 1s · 1 tool call', 'Peer session worked for 1s']);
+    expect(dividers.map((d) => d.origin)).toEqual(['peer']); // UX wave U2 (O-15): the peer turn without work has none
+    expect(dividers.map((d) => dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 }))).toEqual(['Peer session worked for 1s · Ran a command']);
     expect(find(list, 'user')).toMatchObject({ text: 'From the peer session' });
     expect(turnActivity(state).map((turn) => turn.origin)).toEqual(['peer', 'peer']);
   });
@@ -945,7 +945,8 @@ describe('requests', () => {
     expect(state.pending.size).toBe(0);
   });
 
-  it('a permission resolved by the human marks the tool standalone; abort and exit leave no row', () => {
+  // UX wave U2 (O-29): who allowed a call is a fact of its classification and no longer takes it out of its run
+  it('a permission resolved by the human is a fact of the call, which still joins its run; abort and exit leave no row', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' });
@@ -957,8 +958,10 @@ describe('requests', () => {
     b.emit('permission.resolved', { requestId: request('r2'), toolUseId: tool('t2'), behavior: 'deny', message: null, updatedInput: null, updatedPermissions: [], resolvedBy: 'abort' });
     b.end(['u1'], { terminalReason: 'aborted_streaming' });
     const list = rows(b.events);
-    const cells = list.filter((row) => row.kind === 'cell') as Extract<Row, { kind: 'cell' }>[];
-    expect(cells[0]).toMatchObject({ toolUseId: 't1', classification: { humanDecision: true, groupable: false } });
+    expect(list.some((row) => row.kind === 'cell')).toBe(false);
+    const cells = find(list, 'group').cells;
+    expect(cells.map((cell) => cell.toolUseId)).toEqual(['t1', 't2']);
+    expect(cells[0]).toMatchObject({ classification: { humanDecision: true, groupable: true } });
     expect(list.some((row) => row.kind === 'request_slot')).toBe(false);
   });
 
@@ -974,14 +977,18 @@ describe('requests', () => {
 });
 
 describe('denial disposition', () => {
-  it('pairs a user-rejected denial with an aborted turn as an interruption when the turn closes', () => {
+  // UX wave U2 (decision 23, the architect's ruling R1): a rejected call reads stopped from its result on, not only once
+  // its turn closes aborted; it was denied until the close before
+  it('a user-rejected denial reads as an interruption from its result on, and still when its turn closes aborted', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 9' });
     b.result('t1', 'User rejected tool use', { isError: true, denial: 'user-rejected' });
     let state = reduce(b.events);
-    let cell = find(rowsOf(withAllExpanded(state)), 'cell');
-    expect(cell.classification.denial).toMatchObject({ disposition: 'denied', interruption: false });
+    // UX wave U2 (decision 23): a stopped call is a member of its run, here a run of one, active while the turn runs
+    let cell = find(rowsOf(withAllExpanded(state)), 'group').cells[0];
+    expect(cell.classification.denial).toMatchObject({ disposition: 'stopped', interruption: true });
+    expect(cell.classification.groupable).toBe(true);
     b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_streaming' });
     state = applyEvents(state, [b.events.at(-1)!]);
     const list = rowsOf(withAllExpanded(state));

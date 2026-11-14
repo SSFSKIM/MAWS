@@ -33,30 +33,47 @@ describe('group row', () => {
     return b.events;
   }
 
-  it('shows both call rows directly, with their input and output folded', async () => {
+  // UX wave U2 (O-29, acceptance 1): one line, folded; a click opens it onto the calls' rows, a click on a row opens its
+  // input and output, and a click on the line closes it
+  it('is one folded line that opens onto both call rows, with their input and output folded, and closes again', async () => {
     const store = await storeWith(twoCommands());
     useTranscriptStore.getState().toggleTurn(store.key, useTranscriptStore.getState().entries[store.key].state.order[0]);
     const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
+    const line = () => screen.getByRole('button', { name: 'Ran 2 commands' });
+    expect(line().getAttribute('aria-expanded')).toBe('false');
+    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(0);
+    fireEvent.click(line());
+    view.rerenderRow(rowOf(store.rows(), 'group'));
+    expect(line().getAttribute('aria-expanded')).toBe('true');
+    expect(line().getAttribute('aria-controls')).toBe(view.container.querySelector('.transcript-group > div[id]')?.id);
+    expect(screen.getAllByRole('button', { name: /^Ran pnpm (test|lint)$/, expanded: false }).map((button) => button.textContent)).toEqual(['Ran pnpm test', 'Ran pnpm lint']);
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    expect(view.container.textContent).not.toContain('pnpm test');
-    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
+    expect(view.container.textContent).not.toContain('$ pnpm test'); // the input stays folded; the row reads its short form
+    fireEvent.click(screen.getByRole('button', { name: 'Ran pnpm test' }));
+    view.rerenderRow(rowOf(store.rows(), 'group'));
+    expect(view.container.textContent).toContain('$ pnpm test');
+    fireEvent.click(line());
+    view.rerenderRow(rowOf(store.rows(), 'group'));
+    expect(line().getAttribute('aria-expanded')).toBe('false');
   });
 
   describe('while the turn works', () => {
     beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-09-28T10:00:05.000Z'), toFake: ['Date', 'setInterval', 'clearInterval'] }));
     afterEach(() => vi.useRealTimers());
 
-    it('keeps the running call visible with its description and status', async () => {
+    it('reads the running call on its line, by the words its row reads, and opens onto the running row', async () => {
       const b = builder(); b.turn('u1');
       b.toolUse('t1', 'Bash', { command: 'sleep 30', description: 'Wait for the server' });
       const store = await storeWith(b.events);
       const group = rowOf(store.rows(), 'group');
       expect(group.state).toBe('active');
       const view = renderRow(group, { storeKey: store.key });
-      expect(screen.getByRole('button', { name: 'Wait for the server', expanded: false })).toBeTruthy();
-      expect(view.container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe('running');
+      const line = screen.getByRole('button', { name: 'Wait for the server', expanded: false });
+      expect(line.dataset.line).toBe('running');
       expect(view.container.textContent).not.toContain('sleep 30');
+      fireEvent.click(line);
+      view.rerenderRow(rowOf(store.rows(), 'group'));
+      expect(view.container.querySelector('[data-cell-id]')?.getAttribute('data-status')).toBe('running');
     });
   });
 });
@@ -72,7 +89,7 @@ describe('standalone cell row', () => {
     expect(ofKind(store.rows(), 'group')).toHaveLength(0);
     const view = renderRow(rowOf(store.rows(), 'cell'), { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')).toBeNull();
-    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran Bash');
+    expect(view.container.querySelector('[data-cell-id="cell:t1"] > button')?.textContent).toBe('Ran git status…');
   });
 
   it('pass1/permission-roundtrip: the denied call is a standalone, focusable cell row, never inside a group', async () => {

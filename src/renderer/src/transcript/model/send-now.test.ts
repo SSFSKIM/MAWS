@@ -37,7 +37,9 @@ const MCP_CALL = 'toolu_01UFS9wFBAFW85EKmXuDepTL'; // u4p2-k-mcp-1: `slow_wait`,
 describe('the turn a sent-now message ended (Interfaces B, the turn’s line)', () => {
   it('u4p1-a-seeded-1: the cut turn reads “Ended for your message after …”, and its own prompt is no “Not sent” though the engine cancelled it after it started (47)', () => {
     const rows = rowsAt('u4p1-a-seeded-1', 50);
-    expect(dividers(rows)[0]).toMatch(/^Ended for your message after [\dhms ]+ · 1 tool call$/);
+    // UX wave U2 (O-15; the U2a document, decision 9), at the chain merge: the turn's line says what the turn did in place
+    // of "N tool calls", after U4a's verb; the moved command, still running, is a step with no mark
+    expect(dividers(rows)[0]).toMatch(/^Ended for your message after [\dhms ]+ · Ran a command$/);
     expect(dividers(rows).some((line) => line.startsWith('You stopped'))).toBe(false);
     const prompt = users(rows).find((row) => row.messageUuid === uuidAt('u4p1-a-seeded-1', 12));
     expect(prompt).toMatchObject({ dropped: false });

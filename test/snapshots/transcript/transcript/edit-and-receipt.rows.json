@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:00:00.045Z",
     "autoDenied": 0,
+    "caption": "Edited 2 files, created a file, read a file, ran a command",
+    "counts": {
+      "added": 7,
+      "removed": 4
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:00:05.932Z",
     "expanded": true,
@@ -53,6 +58,12 @@
     "id": "divider:turn:u-edit-and-receipt-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "edited 2 files",
+      "created a file",
+      "read a file",
+      "ran a command"
+    ],
     "startedAt": "2026-09-28T10:00:00.100Z",
     "state": "completed",
     "summary": {
@@ -90,17 +101,16 @@
     "turnId": "turn:u-edit-and-receipt-002"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-28T10:00:00.153Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -109,6 +119,7 @@
         "detail": {
           "durationMs": 56,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "Two files reference measure. Read app.ts first to see the export, then edit both, add the helper, and run the tests."
         },
         "endedAt": "2026-09-28T10:00:00.153Z",
@@ -123,12 +134,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "exploration",
         "classification": {
           "category": "exploration",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -159,12 +170,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -207,12 +218,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -256,12 +267,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "files",
         "classification": {
           "category": "files",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -300,12 +311,16 @@
         "toolUseId": "toolu_synth_edit_write1"
       }
     ],
+    "counts": {
+      "added": 7,
+      "removed": 4
+    },
     "expanded": true,
     "icon": "files",
-    "id": "group:cell:think:msg_editandreceipt_007:0",
+    "id": "group:cell:toolu_synth_edit_read1",
     "kind": "group",
     "state": "completed",
-    "summary": "Edited 2 files, created 1 file, read 1 file",
+    "summary": "Read a file, edited 2 files, created a file",
     "turnId": "turn:u-edit-and-receipt-002"
   },
   {
@@ -323,12 +338,12 @@
   {
     "agent": null,
     "at": "2026-09-28T10:00:01.573Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

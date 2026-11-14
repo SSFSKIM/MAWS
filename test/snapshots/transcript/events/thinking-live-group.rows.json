@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T12:00:00.010Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": null,
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:u-think-2",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-10-01T12:00:00.000Z",
     "state": "working",
     "summary": {
@@ -63,61 +69,112 @@
   },
   {
     "at": "2026-10-01T12:00:01.000Z",
-    "durationMs": 1000,
-    "id": "think:msg_group_1:0",
-    "kind": "thinking",
-    "live": false,
-    "messageUuid": "a-group-1",
-    "text": "Run the test first.",
-    "turnId": "turn:u-think-2"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-01T12:00:02.510Z",
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 1000,
+          "kind": "thinking",
+          "recordedMs": null,
+          "text": "Run the test first."
+        },
+        "endedAt": "2026-10-01T12:00:01.000Z",
+        "expanded": true,
+        "id": "cell:think:msg_group_1:0",
+        "label": "Thought for 1s",
+        "paths": [],
+        "startedAt": "2026-10-01T12:00:01.000Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "pnpm test anchoring",
+          "cwd": null,
+          "description": null,
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "1 passed",
+          "truncated": null
+        },
+        "endedAt": "2026-10-01T12:00:04.500Z",
+        "expanded": true,
+        "id": "cell:toolu_group_1",
+        "label": "Ran `pnpm test anchoring` in 1s",
+        "paths": [],
+        "startedAt": "2026-10-01T12:00:02.510Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_group_1"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": null,
+          "kind": "thinking",
+          "recordedMs": null,
+          "text": "It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following."
+        },
+        "endedAt": null,
+        "expanded": true,
+        "id": "cell:think:msg_group_2:0",
+        "label": "Thinking",
+        "paths": [],
+        "startedAt": "2026-10-01T12:00:05.000Z",
+        "status": "running",
+        "toolName": "thinking",
+        "toolUseId": null
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "pnpm test anchoring",
-      "cwd": null,
-      "description": null,
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "1 passed",
-      "truncated": null
-    },
-    "endedAt": "2026-10-01T12:00:04.500Z",
     "expanded": true,
-    "id": "cell:toolu_group_1",
-    "kind": "cell",
-    "label": "Ran `pnpm test anchoring` in 1s",
-    "paths": [],
-    "startedAt": "2026-10-01T12:00:02.510Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_group_1",
-    "turnId": "turn:u-think-2"
-  },
-  {
-    "at": "2026-10-01T12:00:05.000Z",
-    "durationMs": null,
-    "id": "think:msg_group_2:0",
-    "kind": "thinking",
-    "live": true,
-    "messageUuid": null,
-    "text": "It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.",
+    "icon": "commands",
+    "id": "group:cell:toolu_group_1",
+    "kind": "group",
+    "state": "active",
+    "summary": "Ran a command",
     "turnId": "turn:u-think-2"
   }
 ]

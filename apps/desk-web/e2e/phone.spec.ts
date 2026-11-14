@@ -312,7 +312,7 @@ const endOf = (recording: Recording) => recording.steps.findIndex((s) => s.k ===
 const scroller = (view: Locator) => view.locator('[data-transcript-scroller]');
 const toBottom = (view: Locator) => scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
 
-test("@layout a session's channel on the phone is its session view: its working record unfolds in place, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
+test("@layout a session's channel on the phone is its session view: its working record unfolds in place onto a folded run that opens on a tap, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
   const { fm, view } = await openReplay(page, hub, withLongInputs(loadRecording(SESSION_VIEW)));
   fm.step(endOf(fm.recording)); // every row in, the session idle and still running
   const answer = view.locator('.owner-message-ink').filter({ hasText: LONG_ANSWER });
@@ -348,17 +348,24 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(view).not.toContainText('Ran the phone layout cases in WebKit');
   await fitsTheWidth(page);
 
-  // One record disclosure unfolds directly to the tool summaries; each call's detail stays one tap away.
+  // One record disclosure unfolds to the turn's work: UX wave U2 (O-29, O-15), its line says what the turn did, and its
+  // three calls are one run, folded until a tap opens it onto their rows; each call's detail stays one tap away.
   const disclosure = record.locator('button.transcript-disclosure');
   await disclosure.click();
   await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
   await expect(disclosure).toContainText('Worked for');
-  await expect(disclosure).toContainText('3 tool calls');
+  await expect(disclosure).toContainText('Ran a command');
+  await expect(disclosure).toContainText('searched code');
+  await expect(disclosure).not.toContainText('tool call');
   await expect(view.locator(`[data-row-id="divider:${turn}"]`)).toHaveCount(0);
-  // UX1-C exposes tool summaries directly; there is no second group disclosure.
-  await expect(view.locator(`[data-turn-id="${turn}"] .transcript-tool-block`)).toBeVisible();
-  await expect(view.locator(`[data-turn-id="${turn}"] .transcript-group-header`)).toHaveCount(0);
+  const run = view.locator(`[data-turn-id="${turn}"] .transcript-run-line`);
+  await expect(run).toHaveCount(1);
+  await expect(run).toHaveAttribute('aria-expanded', 'false');
   const lines = view.locator(`[data-turn-id="${turn}"] .transcript-cell-line`);
+  await expect(lines).toHaveCount(0);
+  await run.click();
+  await expect(run).toHaveAttribute('aria-expanded', 'true');
+  await expect(view.locator(`[data-turn-id="${turn}"] .transcript-tool-block`)).toBeVisible();
   await expect(lines).toHaveCount(3);
   const bash = lines.filter({ hasText: 'Ran the phone layout cases in WebKit' });
   for (const width of [390, 320]) {

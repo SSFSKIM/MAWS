@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -105,6 +106,35 @@ async function openTurn(page: Page) {
   return turnIdOf(page, TURN);
 }
 
+// UX wave U2 (O-29): a run of calls is one folded line until the reader opens it. Opens, in the turn, the first run whose
+// body draws at least `calls` calls (folding again each one it opened that draws fewer), lets its motion end, and
+// returns its row id; null when the turn has none.
+async function openRunOf(page: Page, turnId: string, calls = 2): Promise<string | null> {
+  const runs = page.locator(`[data-kind="group"][data-turn-id="${turnId}"]`);
+  const count = await runs.count();
+  for (let i = 0; i < count; i += 1) {
+    const run = runs.nth(i);
+    if (Number(await run.locator('.transcript-group').getAttribute('data-cell-count')) < calls) continue;
+    const line = run.locator('.transcript-run-line');
+    await line.click();
+    await expect(line).toHaveAttribute('aria-expanded', 'true');
+    if ((await run.locator('.transcript-tool-block [data-cell-id]').count()) >= calls) {
+      await settle(page, 500);
+      return run.evaluate((element) => element.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null);
+    }
+    await line.click();
+    await expect(line).toHaveAttribute('aria-expanded', 'false');
+  }
+  return null;
+}
+
+// Opens every folded run drawn in `scope`.
+async function openEveryRun(scope: Page | Locator) {
+  const folded = scope.locator('.transcript-run-line[aria-expanded="false"]');
+  for (let guard = 0; guard < 20 && (await folded.count()) > 0; guard += 1) await folded.first().click();
+  await expect(folded).toHaveCount(0);
+}
+
 const p95 = (values: number[]) => [...values].sort((a, b) => a - b)[Math.max(0, Math.ceil(values.length * 0.95) - 1)] ?? 0;
 const round = (value: number) => Math.round(value * 10) / 10;
 
@@ -123,13 +153,10 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   expect((await metrics(page)).following, 'following while the stream is in view').toBe(true);
   const turnId = await openTurn(page);
 
-  // One group of turn 120 with at least two cells, and two of its cell details.
-  const groupRowId = await page.evaluate((id) => {
-    const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
-    const group = groups.find((element) => element.querySelectorAll('.transcript-tool-block [data-cell-id]').length >= 2);
-    return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
-  }, turnId);
-  expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
+  // One run of turn 120 with at least two calls, opened (UX wave U2: a run is folded until the reader opens it), and two
+  // of its call details.
+  const groupRowId = await openRunOf(page, turnId);
+  expect(groupRowId, `turn ${TURN} shows a run of at least two calls`).not.toBeNull();
   const group = page.locator(rowSelector(groupRowId!));
   const cellButtons = group.locator('.transcript-tool-block [data-cell-id] > button');
   await cellButtons.nth(0).click();
@@ -458,12 +485,8 @@ test('a tool detail moves through its disclosure rather than jumping, and the ro
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await load(page, 'synthetic/500');
   const turnId = await openTurn(page);
-  const groupRowId = await page.evaluate((id) => {
-    const groups = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${id}"]`));
-    const group = groups.find((element) => element.querySelectorAll('.transcript-tool-block [data-cell-id]').length >= 2);
-    return group?.closest('[data-row-id]')?.getAttribute('data-row-id') ?? null;
-  }, turnId);
-  expect(groupRowId, `turn ${TURN} shows a group of at least two cells`).not.toBeNull();
+  const groupRowId = await openRunOf(page, turnId); // UX wave U2: the run opened first, its calls' rows drawn
+  expect(groupRowId, `turn ${TURN} shows a run of at least two calls`).not.toBeNull();
   // Clicks a visible call's summary and samples, every frame for 600 ms, the row's height and the next row's top.
   const sample = () =>
     page.evaluate(async (id) => {
@@ -505,6 +528,145 @@ test('a tool detail moves through its disclosure rather than jumping, and the ro
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const jumped = await sample();
   expect(jumped.heights[0]).toBeCloseTo(open, 0);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2 (O-29; the U2a document, M4 "The row"): a run of calls is one line, folded while the turn runs and after
+// it. While the turn runs the line reads the call running now (or the run's caption between calls) and mounts none of
+// its calls; once the turn has closed and is opened, the run's line reads what it did, a click opens it onto its calls'
+// rows in order, a call's detail opens as before, and another click folds the run and unmounts its calls.
+test('a run folds while its turn runs, opens onto its calls’ rows, and folds again', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  const loaded = await load(page, 'p4/p4-tool-summaries-live'); // turn 1 reads three files, one call after another
+  // Every event released one at a time, the first turn's runs read after each paints, until the second turn starts.
+  const seen = await page.evaluate(async (events) => {
+    const api = (window as unknown as HarnessWindow).__maws_harness;
+    const frame = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const turnOf = (n: number) => { try { return api.turnId(n); } catch { return null; } };
+    const steps: { runs: number; mounted: number; lines: string[]; running: string[] }[] = [];
+    for (let i = 0; i < events && turnOf(2) === null; i += 1) {
+      api.step();
+      await frame();
+      const turn = turnOf(1);
+      if (turn === null) continue;
+      const runs = Array.from(document.querySelectorAll(`[data-kind="group"][data-turn-id="${turn}"] .transcript-group`));
+      steps.push({
+        runs: runs.length,
+        mounted: runs.reduce((n, run) => n + run.querySelectorAll('.transcript-cell').length, 0),
+        lines: runs.map((run) => { const line = run.querySelector('.transcript-run-line')!; return `${line.getAttribute('data-line')} ${line.getAttribute('aria-expanded')}`; }),
+        running: runs.map((run) => run.querySelector('.transcript-run-line[data-line="running"] .transcript-run-label')?.textContent ?? '').filter((label) => label !== ''),
+      });
+    }
+    return steps;
+  }, loaded.events);
+  console.log(`a run while its turn runs: ${JSON.stringify(seen)}`);
+  expect(seen.some((step) => step.runs === 1), 'the turn draws its run while it runs').toBe(true);
+  expect(seen.every((step) => step.runs <= 1), 'one run for the turn’s three calls').toBe(true);
+  expect(seen.every((step) => step.mounted === 0), 'a folded run mounts none of its calls').toBe(true);
+  const lines = new Set(seen.flatMap((step) => step.lines));
+  expect(lines.has('running false'), 'the line reads the call running now').toBe(true);
+  expect([...lines].every((line) => line === 'running false' || line === 'caption false'), `folded throughout: ${[...lines].join(', ')}`).toBe(true);
+  const running = [...new Set(seen.flatMap((step) => step.running))];
+  expect(running.length, 'each call in turn').toBeGreaterThan(1);
+  for (const label of running) expect(label).toMatch(/^Read (first|second|third)\.txt$/);
+
+  // The turn closed: opened, its run reads what it did, folded, until a click opens it onto the three calls in order.
+  await play(page, 0);
+  const turn = await turnIdOf(page, 1);
+  await expect(page.locator(`${rowSelector(`divider:${turn}`)} button.transcript-disclosure`)).toHaveText(/^Worked for /);
+  await settle(page, 300);
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandTurn(1));
+  const run = page.locator(`[data-kind="group"][data-turn-id="${turn}"]`);
+  await expect(run).toHaveCount(1);
+  const line = run.locator('.transcript-run-line');
+  await expect(line).toHaveAttribute('data-line', 'caption');
+  await expect(line).toHaveText('Read 3 files');
+  await expect(line).toHaveAttribute('aria-expanded', 'false');
+  await expect(run.locator('.transcript-cell')).toHaveCount(0);
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'true');
+  const calls = run.locator('.transcript-tool-block .transcript-cell-line');
+  await expect(calls).toHaveText([/^Read first\.txt/, /^Read second\.txt/, /^Read third\.txt/]);
+  await calls.nth(1).click();
+  await expect(run.locator('.transcript-cell[data-expanded]')).toHaveCount(1);
+  await expect(run.locator('.transcript-cell-detail')).toHaveCount(1);
+  await line.click();
+  await expect(line).toHaveAttribute('aria-expanded', 'false');
+  await expect(run.locator('.transcript-cell'), 'its calls unmounted once it has folded').toHaveCount(0);
+  await expect(line).toHaveText('Read 3 files');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2 (O-27; the U2a document, M4 "One component, two identities", decision 12): an opened run draws a thought
+// of ten seconds or more at its place, between the blocks of calls it parts or under the last, in the words a thinking
+// row reads; a shorter one is not drawn; a thought with no text has nothing to open, and its label starts where a
+// line with a chevron starts its label.
+test('an opened run draws each thought of ten seconds or more at its place', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, 'events/run-thoughts');
+  const turn = await turnIdOf(page, 1);
+  await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.expandTurn(1));
+  const run = page.locator(`[data-kind="group"][data-turn-id="${turn}"]`);
+  await expect(run).toHaveCount(1);
+  await run.locator('.transcript-run-line').click();
+  await expect(run.locator('.transcript-run-line')).toHaveAttribute('aria-expanded', 'true');
+  await settle(page, 500);
+  const blocks = await run.evaluate((element) => Array.from(element.querySelectorAll('.transcript-tool-block, .transcript-thinking'), (block) =>
+    block.classList.contains('transcript-tool-block')
+      ? `calls ${Array.from(block.querySelectorAll('[data-cell-id]'), (cell) => cell.getAttribute('data-cell-id')).join(',')}`
+      : `thought ${block.querySelector('.transcript-disclosure')!.textContent!.trim()}${block.querySelector('button.transcript-disclosure') ? ', opens' : ''}`));
+  expect(blocks).toEqual([
+    'calls cell:toolu_rt_read,cell:toolu_rt_edit', // the 4 s thought between them is not drawn
+    'thought Thought for 12s, opens',
+    'calls cell:toolu_rt_test',
+    'thought Thought for 12s', // no text: nothing to open
+    'calls cell:toolu_rt_grep',
+    'thought Thought for 12s, opens', // under the last call
+  ]);
+  await expect(page.getByText('The test reads', { exact: false })).toHaveCount(0);
+  // Where each thought's label starts, measured on its text: the one with no text where the others do.
+  const starts = await run.evaluate((element) => Array.from(element.querySelectorAll('.transcript-thinking .transcript-disclosure'), (line) => {
+    const walker = document.createTreeWalker(line, NodeFilter.SHOW_TEXT, { acceptNode: (node) => (node.textContent!.includes('Thought for') ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_SKIP) });
+    const range = document.createRange();
+    range.selectNodeContents(walker.nextNode()!);
+    return Math.round(range.getBoundingClientRect().left * 10) / 10;
+  }));
+  expect(starts).toHaveLength(3);
+  expect(Math.max(...starts) - Math.min(...starts), `label starts ${starts.join(', ')}`).toBeLessThanOrEqual(0.5);
+  // A thought opens onto its text.
+  const first = run.locator('.transcript-thinking > button.transcript-disclosure').first();
+  await first.click();
+  await expect(first).toHaveAttribute('aria-expanded', 'true');
+  await expect(run.locator('.transcript-thinking-text').first()).toHaveText('Run the parser tests before touching the callers, so a failure there is the fix and not a caller.');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2 (O-15; the U2a document, M3): a turn's line reads its verb and the lines its finished edits changed while
+// it runs, and once it has closed what it did, its caption's parts in the turn summary; a turn with no work draws no
+// line. No line counts tool calls.
+test('a closed turn’s line says what the turn did, and a turn with no work has none', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'events/run-thoughts');
+  // Through the edit's result: the turn runs, its line reads its verb and the edit's lines.
+  for (let i = 0; i < 9; i += 1) await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.step());
+  const divider = page.locator('[data-kind="divider"] button.transcript-disclosure').first();
+  await expect(divider).toHaveText(/^Working(?: for \d+s)?\s*\+2\s*−1$/);
+  await play(page, 0);
+  await expect(divider).toHaveText(/^Worked for 45s · Read and edited parser\.ts, ran a command, searched code\s*\+2\s*−1$/);
+  await expect(divider).toHaveAttribute('aria-expanded', 'false');
+  await page.getByRole('button', { name: 'Turn summary' }).click();
+  const summary = page.locator('.transcript-popover');
+  await expect(summary).toContainText('Read and edited parser.ts, ran a command, searched code');
+  await expect(summary).not.toContainText('tool call');
+  await expect(page.locator('[data-kind="divider"]'), 'the turn that only answers has no line').toHaveCount(1);
+  await expect(page.locator('[data-kind="assistant_text"]').last()).toContainText('No, that was the only failing test.');
+  await expect(page.locator('[data-transcript-scroller]')).not.toContainText('tool call');
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -614,22 +776,27 @@ test('an answered question reads as one compact receipt that stays in view when 
 });
 
 // W8 (T1): a streaming thinking block's label in the CLI's words (tier, effort, time) and colour (the warning colour
-// from 20 s), under Codex's shimmer, static under reduced motion. With MAWS_W8_SHOTS=1 it also writes the screenshots
-// the wave hands back (docs/doperpowers/plans/shots/w8-thinking-*.png), in both themes.
-test('a streaming reasoning summary stays under the shimmer, warm from 20 s', async ({ harness }) => {
+// from 20 s), under Codex's shimmer, static under reduced motion. UX wave U2 (O-27; the owner's answer "The label
+// only"): the label reads nothing else while the thought runs, and its summary is read by opening the line; a thought
+// streaming in a folded run has its line under the run's. With MAWS_W8_SHOTS=1 it also writes the screenshots the wave
+// hands back (docs/doperpowers/plans/shots/w8-thinking-*.png), in both themes.
+test('a streaming thought reads its label under the shimmer, warm from 20 s, and opens onto its summary', async ({ harness }) => {
   const { page } = harness;
   await harnessReady(page);
   await blockHumanInput(page);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
   const cases = [
-    { fixture: 'events/thinking-live', shot: 'deep', text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true }, // 50 s in at load
-    { fixture: 'events/thinking-live-group', shot: 'still', text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false }, // 12 s in
+    // 50 s in at load, a thinking row of its own
+    { fixture: 'events/thinking-live', shot: 'deep', thought: '[data-kind="thinking"] .transcript-thinking', tier: thinkingTier(50_000), text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true },
+    // 12 s in, the last member of a folded run: its line under the run's
+    { fixture: 'events/thinking-live-group', shot: 'still', thought: '[data-kind="group"] .transcript-group > .transcript-thinking', tier: thinkingTier(12_000), text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false },
   ];
-  for (const { fixture, shot, text, warm } of cases) {
+  for (const { fixture, shot, thought, tier, text, warm } of cases) {
     await loadAll(page, fixture);
-    const label = page.locator('[data-kind="thinking"] [data-shimmer]');
-    await expect(label).toHaveText(text);
+    const label = page.locator(`${thought} [data-shimmer]`);
+    await expect(label).toHaveText(new RegExp(`^${tier} with xhigh effort · [^·]+$`));
+    await expect(label, 'the label reads nothing of the summary').not.toContainText(text.slice(0, 24));
     for (const theme of ['light', 'dark'] as const) {
       await page.evaluate((value) => (document.documentElement.dataset.theme = value), theme);
       const style = await label.evaluate((element) => {
@@ -657,7 +824,7 @@ test('a streaming reasoning summary stays under the shimmer, warm from 20 s', as
           sweep.pause();
           sweep.currentTime = 1000;
         });
-        const turn = page.locator('[data-kind="user"], [data-kind="divider"], [data-kind="cell"], [data-kind="thinking"]');
+        const turn = page.locator('[data-kind="user"], [data-kind="divider"], [data-kind="cell"], [data-kind="thinking"], [data-kind="group"]');
         const boxes = (await turn.evaluateAll((elements) => elements.map((element) => element.getBoundingClientRect().toJSON() as DOMRect))).filter((box) => box.height > 0);
         const top = Math.min(...boxes.map((box) => box.top)) - 12;
         const bottom = Math.max(...boxes.map((box) => box.bottom)) + 12;
@@ -668,10 +835,16 @@ test('a streaming reasoning summary stays under the shimmer, warm from 20 s', as
       }
     }
     await page.evaluate(() => (document.documentElement.dataset.theme = 'light'));
+    // Opening the line reads the summary streamed so far, while the label goes on reading only the label.
+    const opener = page.locator(`${thought} > button.transcript-disclosure`);
+    await opener.click();
+    await expect(opener).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator(`${thought} .transcript-thinking-text`)).toContainText(text);
+    await expect(label).toHaveText(new RegExp(`^${tier} with xhigh effort · [^·]+$`));
   }
   // Reduced motion: the same words and colour, no sweep.
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  const still = await page.locator('[data-kind="thinking"] [data-shimmer]').evaluate((element) => [getComputedStyle(element).animationName, getComputedStyle(element).backgroundImage]);
+  const still = await page.locator('.transcript-thinking [data-shimmer]').evaluate((element) => [getComputedStyle(element).animationName, getComputedStyle(element).backgroundImage]);
   expect(still).toEqual(['none', 'none']);
   expect(harness.consoleErrors()).toEqual([]);
 });
@@ -687,7 +860,10 @@ test('the denied count jumps to the standalone denied cell', async ({ harness })
   const divider = page.locator(rowSelector(`divider:${turnId}`));
   const toggle = divider.locator('button[aria-expanded]').first();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(toggle).toHaveText(/^Worked for .+ · 1 tool call$/);
+  // UX wave U2 (O-15): the line names what the turn did, never a count of tool calls; a refused call is no work done,
+  // so a turn whose one call was refused reads its time and its denied count only
+  await expect(toggle).toHaveText(/^Worked for [^·]+$/);
+  await expect(toggle).not.toContainText('tool call');
   const count = divider.getByRole('link', { name: '1 denied' });
   const cellId = await count.evaluate((link) => link.getAttribute('href')!.slice(1));
   expect(cellId).toBe('cell:toolu_01WfZTvMV6147Psn1MBSesXw');
@@ -1190,14 +1366,22 @@ for (const { site, component, outcome } of r3DomCases) {
         await expect(pane.getByText('R3 command', { exact: true })).not.toBeVisible();
       } else if (component === 'ToolUse') {
         const group = pane.locator('[data-kind="group"]').first();
+        // UX wave U2 (O-29): a folded run mounts no call and asks no ToolUse site; opening it asks the call's
+        await expect(group.locator('[data-surface-row="ToolUse"]')).toHaveCount(0);
+        await group.locator('.transcript-run-line').click();
         await expect(group.locator('[data-surface-row="ToolUse"]')).toHaveCount(1);
         await expect(group.locator('.transcript-cell-line')).not.toBeVisible();
         await expect(group.locator('[data-cell-count]')).toHaveAttribute('data-cell-count', '1');
       } else if (component === 'ToolGroup') {
         const group = pane.locator('[data-kind="group"]').first();
         await expect(group.getByText('R3 slot', { exact: true })).toBeVisible();
+        // the mod's rewrite says isExpanded, which opens the run (Rows.tsx, SurfaceGroupRow) onto its call's row
+        await expect(group.locator('.transcript-run-line')).toHaveAttribute('aria-expanded', 'true');
         await expect(group.locator('.transcript-cell-line')).toBeVisible();
-        await expect(group.locator('.transcript-cell-line')).toContainText('Bash');
+        // the call's row in MAWS's words, drawn beside the mod's drawing (whose engine slot a drawing-only site leaves
+        // empty): UX wave U2 (M3) reads a shell call with no description by its short command, and `printf` is no
+        // command that rule knows, so `Ran a command` where the tool's name stood
+        await expect(group.locator('.transcript-cell-line')).toHaveText('Ran a command');
       } else if (component === 'ToolResult') {
         // X3 renders a completed one-tool run as a standalone cell, so opening it mounts ToolResult.
         const cell = pane.locator('[data-kind="cell"] .transcript-cell');
@@ -1426,7 +1610,8 @@ test('the report folds work while marked text retains its authored flow and geom
     await record.click();
     await expect(record).toHaveAttribute('aria-expanded', 'true');
     await expect(record).toContainText('Worked for');
-    await expect(record).toContainText('1 tool call');
+    await expect(record).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
+    await expect(record).not.toContainText('tool call');
     await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
     // The tool summary appears immediately; the command remains on demand inside its own detail.
@@ -1583,6 +1768,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   };
   await loadAll(page, 'transcript/edit-and-receipt');
   await page.locator('[data-kind="divider"] button[aria-expanded]').first().click();
+  await openEveryRun(page); // UX wave U2 (O-29): each run opened onto its calls' rows
   await expect(page.locator('[data-kind="receipt"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Read app.ts', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Ran the unit tests', exact: true })).toBeVisible();
@@ -1607,7 +1793,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(edit.locator('.transcript-file-verb')).toHaveCSS('color', colours.muted);
   const group = page.locator('[data-kind="group"]').filter({ has: edit });
   await frame(group);
-  await expect(group.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(group.locator('.transcript-run-line')).toBeInViewport({ ratio: 1 });
   await expect(group.locator('.transcript-tool-block .transcript-cell-line')).toHaveCount(4);
   await page.screenshot({ path: testInfo.outputPath('transcript-rows-1280x820.png'), animations: 'disabled' });
   await testInfo.attach('Transcript tool rows', { path: testInfo.outputPath('transcript-rows-1280x820.png'), contentType: 'image/png' });
@@ -1615,7 +1801,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(group.getByRole('button', { name: '/tmp/maws-synth-edit-and-receipt/src/app.ts', exact: true })).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
   await expect(group.locator('.transcript-diff-line[data-diff="add"]').first()).toBeVisible();
   await frame(group);
-  await expect(group.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(group.locator('.transcript-run-line')).toBeInViewport({ ratio: 1 });
   await expect(group.locator('.transcript-diff-line').first()).toBeInViewport({ ratio: 1 });
   await expect(group.locator('.transcript-diff-line').last()).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: testInfo.outputPath('transcript-inline-diff-1280x820.png'), animations: 'disabled' });
@@ -1623,6 +1809,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await loadAll(page, 'p4/p4-tool-summaries-thinking-edits');
   const divider = page.locator('[data-kind="divider"] button[aria-expanded]').first();
   if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
+  await openEveryRun(page);
   const create = page.getByRole('button', { name: /^Created.*notes\.txt.*\+1$/ });
   await expect(create.locator('.transcript-file-target')).toHaveText('notes.txt');
   await expect(create.locator('.transcript-counts')).toHaveText('+1');
@@ -1631,7 +1818,7 @@ test('Code-mode transcript rows keep labels, counts and inline diffs without a f
   await expect(page.locator('.transcript-diff-line[data-diff="add"]')).toContainText('Ready for review.');
   const createdGroup = page.locator('[data-kind="group"]').filter({ has: create });
   await frame(divider); // keep the read, commentary and grouped changes together in their authored order
-  await expect(createdGroup.locator('.transcript-group-summary')).toBeInViewport({ ratio: 1 });
+  await expect(createdGroup.locator('.transcript-run-line')).toBeInViewport({ ratio: 1 });
   await expect(createdGroup.locator('.transcript-diff-line[data-diff="add"]')).toBeInViewport({ ratio: 1 });
   await page.screenshot({ path: testInfo.outputPath('transcript-create-diff-1280x820.png'), animations: 'disabled' });
   await testInfo.attach('Recorded create diff', { path: testInfo.outputPath('transcript-create-diff-1280x820.png'), contentType: 'image/png' });

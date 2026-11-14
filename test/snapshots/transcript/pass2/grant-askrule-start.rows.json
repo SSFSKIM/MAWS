@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:06:29.390Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 1,
     "endedAt": "2026-09-28T10:06:32.146Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:02f54aad-c819-4a38-b64b-592aa665e631",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-09-28T10:06:29.445Z",
     "state": "completed",
     "summary": {
@@ -77,12 +85,12 @@
   {
     "agent": null,
     "at": "2026-09-28T10:06:30.735Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
-      "groupable": false,
-      "hidden": false,
+      "groupable": true,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -116,6 +124,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:06:31.259Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -126,7 +135,6 @@
         "reason": "Probe denial: do not retry."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,

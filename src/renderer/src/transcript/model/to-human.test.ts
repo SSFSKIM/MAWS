@@ -14,7 +14,7 @@ import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
-import { isPersistentRow, rowsOf, turnPhrases, turnSummary, withAllExpanded } from './derive';
+import { isPersistentRow, rowsOf, turnSummary, withAllExpanded } from './derive';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState, withUi, type TranscriptState } from './reduce';
 import type { Row } from './rows';
@@ -89,7 +89,7 @@ describe('a message tool’s call', () => {
     expect(cellsOf((b) => {
       b.toolUse('m1', MAWS, { text: 'Stage 1 is done.' });
       b.result('m1', "The user doesn't want to proceed with this tool use.", { isError: true, denial: 'user-rejected' });
-    })).toEqual([['m1', MAWS, 'denied']]);
+    })).toEqual([['m1', MAWS, 'stopped']]); // UX wave U2 (decision 23): a rejected call nothing followed reads stopped
     expect(cellsOf((b) => b.toolUse('m1', MAWS, { text: '  \n' }))).toEqual([['m1', MAWS, 'running']]);
     expect(cellsOf((b) => {
       b.toolUse('m1', MAWS, {});
@@ -176,7 +176,7 @@ describe('a message tool’s call', () => {
 // P4-R7z (the P4 spec's Decision Log 92): the to-human plugin's tool is the one a MAWS session messages through; its
 // calls draw as MAWS's former tool's did, and a recorded session's calls of that tool still do.
 describe('a call of the to-human plugin’s message tool', () => {
-  it('draws as MAWS’s former tool’s did: the message where the call sits, its turn’s summary and phrases without it', () => {
+  it('draws as MAWS’s former tool’s did: the message where the call sits, its turn’s summary and caption without it', () => {
     const plugin = reduce(stagesTurn(PLUGIN).events);
     const maws = reduce(stagesTurn(MAWS).events);
     const read = (state: TranscriptState) => expanded(state).map((row) => (row.kind === 'cell' ? `${row.kind}:${row.toolName}` : row.kind === 'to_human' ? `to_human:${row.text}` : row.kind));
@@ -184,7 +184,8 @@ describe('a call of the to-human plugin’s message tool', () => {
     expect(ofKind(expanded(plugin), 'to_human')).toMatchObject([{ toolUseId: 'm1', pending: false }]);
     expect(allCells(expanded(plugin)).map((cell) => cell.toolName)).toEqual(['Bash', 'Bash']);
     expect(turnSummary(plugin.turns.get(T1)!)).toEqual(turnSummary(maws.turns.get(T1)!));
-    expect(turnPhrases(plugin.turns.get(T1)!)).toBe(turnPhrases(maws.turns.get(T1)!));
+    const line = (state: TranscriptState) => ofKind(expanded(state), 'divider').map((row) => [row.caption, row.parts, row.counts]); // UX wave U2: the turn's caption
+    expect(line(plugin)).toEqual(line(maws));
   });
 
   it('waiting for its result in an open turn, is the message about to be sent', () => {

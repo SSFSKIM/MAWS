@@ -81,7 +81,8 @@ describe('hook notice row (W1)', () => {
 });
 
 describe('thinking row', () => {
-  it('reads the latest live reasoning from its buffer, then Thought for {t}, and discloses its text', async () => {
+  // UX wave U2 (O-27; the owner's answer "The label only"): the live label reads the tier, never the summary's text
+  it('reads the live label while it streams and its buffer behind the chevron, then Thought for {t}, and discloses its text', async () => {
     const b = builder();
     b.turn('u1');
     const delta = (text: string) =>
@@ -90,10 +91,11 @@ describe('thinking row', () => {
     const store = await storeWith(b.events);
     const live = rowOf(store.rows(), 'thinking');
     const view = renderRow(live, { storeKey: store.key });
-    const toggle = screen.getByRole('button', { name: 'Checking' });
+    const toggle = screen.getByRole('button', { name: /^Thinking · \d+s$/ });
+    expect(toggle.textContent).not.toContain('Checking');
     fireEvent.click(toggle);
     act(() => store.push([delta(' the path')]));
-    expect(screen.getByRole('button', { name: 'Checking the path', expanded: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^Thinking · \d+s$/, expanded: true })).toBeTruthy();
     expect(view.container.querySelector('.transcript-thinking-text')?.textContent).toBe('Checking the path');
     b.tick(8000);
     b.thinking('m1', 0, 'Checking the path.');
@@ -156,7 +158,8 @@ describe('live thinking label', () => {
     expect(shimmer()).toBeNull();
   });
 
-  it('an active group without internal activity keeps its completed call visible, without a thinking header', async () => {
+  // UX wave U2 (O-29): an active run of one is one line; with no thought streaming it has no live label
+  it('an active run whose call is done and with no thought streaming reads its caption, without a live label', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' });
@@ -165,9 +168,9 @@ describe('live thinking label', () => {
     const group = rowOf(store.rows(), 'group');
     expect(group.state).toBe('active');
     expect(rowOf(store.rows(), 'divider').state).toBe('working');
-    const { container } = renderRow(group, { storeKey: store.key, effort: 'high' });
-    expect(screen.getByRole('button', { name: 'Ran Bash', expanded: false })).toBeTruthy();
-    expect(container.querySelector('.transcript-group-header')).toBeNull();
+    renderRow(group, { storeKey: store.key, effort: 'high' });
+    expect(screen.getByRole('button', { name: 'Ran a command', expanded: false })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Ran ls' })).toBeNull(); // folded: the call's row is not mounted
     expect(shimmer()).toBeNull();
   });
 });
@@ -186,7 +189,8 @@ describe('local command row', () => {
 });
 
 describe('group and cell disclosure', () => {
-  it('shows individual calls without a group fold and discloses only the chosen cell through the store', async () => {
+  // UX wave U2 (O-29): the run folds; opened, each call is its own row and discloses only itself
+  it('folds the run onto one line, opens it onto each call’s row, and discloses only the chosen cell through the store', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 0);
@@ -197,8 +201,11 @@ describe('group and cell disclosure', () => {
     const group = rowOf(store.rows(), 'group');
     const view = renderRow(group, { storeKey: store.key });
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
-    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
-    expect(screen.getAllByRole('button', { name: 'Ran Bash', expanded: false })).toHaveLength(2);
+    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Ran 2 commands', expanded: false }));
+    view.rerenderRow(rowOf(store.rows(), 'group'));
+    expect(screen.getByRole('button', { name: 'Ran 2 commands', expanded: true })).toBeTruthy();
+    expect(screen.getAllByRole('button', { name: /^Ran (ls|pwd)$/, expanded: false }).map((button) => button.textContent)).toEqual(['Ran ls', 'Ran pwd']);
     const cells = view.container.querySelectorAll('[data-cell-id]');
     expect(Array.from(cells, (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
     expect(view.container.textContent).not.toContain('a.txt');

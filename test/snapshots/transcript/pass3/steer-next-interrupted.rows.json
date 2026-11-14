@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T09:18:36.594Z",
     "autoDenied": 0,
+    "caption": "Ran a command (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-01T09:18:41.138Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:a2117799-2d10-4049-bf10-f697f2634278",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command (1 stopped)"
+    ],
     "startedAt": "2026-10-01T09:18:36.633Z",
     "state": "stopped",
     "summary": {
@@ -77,6 +85,7 @@
   {
     "agent": null,
     "at": "2026-10-01T09:18:38.874Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -86,8 +95,7 @@
         "kind": "user-rejected",
         "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
       },
-      "groupable": false,
-      "hidden": false,
+      "groupable": true,
       "humanDecision": false,
       "safeguard": "not_flagged",
       "startsGroup": false,
@@ -106,11 +114,12 @@
       "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
       "truncated": null
     },
+    "doneLabel": "Ran `sleep 6 && echo 1` in 2s",
     "endedAt": "2026-10-01T09:18:41.135Z",
     "expanded": true,
     "id": "cell:toolu_018A2pQ8opsSUGLt6bscFJ4R",
     "kind": "cell",
-    "label": "Stopped: `sleep 6 && echo 1`",
+    "label": "Stopped a command",
     "paths": [],
     "startedAt": "2026-10-01T09:18:38.874Z",
     "status": "stopped",

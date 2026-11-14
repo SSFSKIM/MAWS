@@ -401,6 +401,11 @@ export class Normalizer {
     // The engine's API error envelope: the live wire spells the flag `is_api_error_message` (SPEC 45's
     // SDKAssistantMessage; pass2/auto-unrouted seq 11), the transcript record `isApiErrorMessage`.
     const apiError = frame.is_api_error_message === true || frame.isApiErrorMessage === true;
+    // UX wave U2 (X1): the engine's recorded duration of the frame's thinking block (`thinking_duration_ms`), carried on
+    // that block's event when the frame holds exactly one thinking block and the value is a duration; a subagent's
+    // forwarded thought has none
+    const recordedMs = (frame as { thinking_duration_ms?: unknown }).thinking_duration_ms;
+    const thinkingDurationMs = typeof recordedMs === 'number' && Number.isFinite(recordedMs) && recordedMs >= 0 && frame.message.content.filter((block) => block.type === 'thinking').length === 1 ? recordedMs : undefined;
     for (const block of frame.message.content) {
       let blockIndex: number;
       const streamed = lane && lane.apiMessageId === apiMessageId ? lane.started.shift() : undefined;
@@ -417,7 +422,7 @@ export class Normalizer {
       // frame of the replacement only; `cli.pretty.js` `H0e`), empty when the frame has none. No fixture records a
       // refusal fallback yet (debt wave 4, a synthetic pin). The engine's `model_refusal_fallback` frame still yields
       // `boundary.retraction`.
-      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids, ...(apiError && { isApiErrorMessage: true }), ...(typeof frame.error === 'string' && { error: frame.error }) }, attribution);
+      out.emit({ kind: 'assistant.block.complete', messageUuid, apiMessageId, blockIndex, block, model: frame.message.model, supersedes, aborted: (frame as { aborted?: unknown }).aborted === true, userMessageUuids, ...(apiError && { isApiErrorMessage: true }), ...(typeof frame.error === 'string' && { error: frame.error }), ...(block.type === 'thinking' && thinkingDurationMs !== undefined && { thinkingDurationMs }) }, attribution);
       if (block.type === 'tool_use') {
         out.emit({ kind: 'tool.use', toolUseId: String(block.id) as ToolUseId, toolName: String(block.name), input: block.input, apiMessageId, messageUuid }, attribution);
         if (attribution.parentToolUseId !== null && String(block.name).startsWith(MAWS_TOOL_PREFIX)) this.state.subagentMawsUses.add(String(block.id) as ToolUseId); // P2-C3

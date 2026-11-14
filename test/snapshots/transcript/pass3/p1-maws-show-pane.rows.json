@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T06:35:48.334Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, opened Terminal, could not open pane: the deliverable pane is not available in this build of MAWS (1 failed), could not open pane: unknown pane \"nope\"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control (1 failed)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T06:35:54.128Z",
     "expanded": true,
@@ -31,6 +36,12 @@
     "id": "divider:turn:2c7ef609-c2de-423f-a626-bc9ab37d3f8d",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "opened Terminal",
+      "could not open pane: the deliverable pane is not available in this build of MAWS (1 failed)",
+      "could not open pane: unknown pane \"nope\"; known panes: diff, file, terminal, tasks, deliverable, browser, source-control (1 failed)"
+    ],
     "startedAt": "2026-10-06T06:35:48.375Z",
     "state": "completed",
     "summary": {
@@ -70,12 +81,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:50.425Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -118,12 +129,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:51.980Z",
+    "background": false,
     "category": "other",
     "classification": {
       "category": "other",
       "denial": null,
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -165,12 +176,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:52.302Z",
+    "background": false,
     "category": "other",
     "classification": {
       "category": "other",
       "denial": null,
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -203,12 +214,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:52.595Z",
+    "background": false,
     "category": "other",
     "classification": {
       "category": "other",
       "denial": null,
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,

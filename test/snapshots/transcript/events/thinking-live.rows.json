@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T12:00:00.010Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": null,
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:u-think-1",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-10-01T12:00:00.000Z",
     "state": "working",
     "summary": {
@@ -68,6 +74,7 @@
     "kind": "thinking",
     "live": true,
     "messageUuid": null,
+    "recordedMs": null,
     "text": "Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.",
     "turnId": "turn:u-think-1"
   }

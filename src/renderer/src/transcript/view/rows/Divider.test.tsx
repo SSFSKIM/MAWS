@@ -22,12 +22,12 @@ function deniedTurn(close = true) {
 }
 
 describe('divider row', () => {
-  it('reads the completed copy with the tool calls, and a denied count linking to the denied cell', async () => {
+  it('reads the completed copy with the turn’s caption, and a denied count linking to the denied cell', async () => {
     const store = await storeWith(deniedTurn().events);
     const divider = rowOf(store.rows(), 'divider');
     const jumpTo = vi.spyOn(useTranscriptStore.getState(), 'jumpTo');
     renderRow(divider, { storeKey: store.key });
-    const toggle = screen.getByRole('button', { name: /Worked for 2m 14s · 2 tool calls/ });
+    const toggle = screen.getByRole('button', { name: /Worked for 2m 14s · Ran a command/ }); // UX wave U2 (O-15): the denied call is no part
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     fireEvent.click(screen.getByRole('link', { name: '1 denied' }));
     expect(jumpTo).toHaveBeenCalledWith(store.key, cellId.tool(tool('t1')), { turnId: divider.turnId });
@@ -92,7 +92,7 @@ describe('divider row', () => {
     const store = await storeWith(deniedTurn().events);
     renderRow(rowOf(store.rows(), 'divider'), { storeKey: store.key });
     fireEvent.click(screen.getByRole('button', { name: 'Turn summary' }));
-    expect(await screen.findByText(/Worked for 2m 14s on claude-test · 2 tool calls: Ran 1 command · 1 denied \(permission-rule\)/)).toBeDefined();
+    expect(await screen.findByText(/Worked for 2m 14s on claude-test · Ran a command · 1 denied \(permission-rule\)/)).toBeDefined(); // UX wave U2: every part
     expect(screen.queryByRole('button', { name: 'Review changes' })).toBeNull();
   });
 

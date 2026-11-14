@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T11:16:56.038Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used CronList",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T11:17:02.990Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:7a30e587-493f-47fc-a592-2397d7fe9938",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used CronList"
+    ],
     "startedAt": "2026-10-06T11:16:56.059Z",
     "state": "completed",
     "summary": {
@@ -68,17 +77,45 @@
     "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
   },
   {
-    "activeLabel": null,
-    "at": "2026-10-06T11:16:59.033Z",
+    "at": "2026-10-06T11:16:58.271Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 562,
+          "kind": "thinking",
+          "recordedMs": 562,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:16:58.271Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktYiDKJC2MdfJzCbRiA:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:58.271Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -118,12 +155,41 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": false,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 413,
+          "kind": "thinking",
+          "recordedMs": 413,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:17:00.140Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktYvhQEh6VpAi3FCnMR:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:17:00.140Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -165,14 +231,47 @@
         "status": "done",
         "toolName": "CronList",
         "toolUseId": "toolu_019bfsoJm7MwnLf8fE8DcYdw"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 862,
+          "kind": "thinking",
+          "recordedMs": 862,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:17:02.095Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktZ3G3efS6dW3WALNVx:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:17:02.095Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "skills",
     "id": "group:cell:toolu_01GkV4kpFesa5bppWSWaHvUa",
     "kind": "group",
     "state": "completed",
-    "summary": "Loaded 1 tool",
+    "summary": "Loaded 1 tool, used CronList",
     "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
   },
   {

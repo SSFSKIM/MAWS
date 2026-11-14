@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T10:54:18.109Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:21.281Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:0b4385a8-900b-4da0-8e62-59fe1aff7066",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-10-06T10:54:18.114Z",
     "state": "completed",
     "summary": {
@@ -110,6 +116,11 @@
   {
     "at": "2026-10-06T10:54:24.940Z",
     "autoDenied": 0,
+    "caption": "Messaged another session, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:31.815Z",
     "expanded": true,
@@ -122,6 +133,10 @@
       "line": "Message from @repo-b-gen1il-79: E7 probe: hello from B"
     },
     "origin": "peer",
+    "parts": [
+      "messaged another session",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T10:54:24.940Z",
     "state": "completed",
     "summary": {
@@ -188,12 +203,12 @@
   {
     "agent": null,
     "at": "2026-10-06T10:54:27.507Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -287,6 +302,11 @@
   {
     "at": "2026-10-06T10:54:47.822Z",
     "autoDenied": 0,
+    "caption": "Messaged another session",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:54:51.291Z",
     "expanded": true,
@@ -295,6 +315,9 @@
     "id": "divider:turn:fab15aee-8755-4d22-be95-fe6a693bb43e",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "messaged another session"
+    ],
     "startedAt": "2026-10-06T10:54:47.823Z",
     "state": "completed",
     "summary": {
@@ -385,6 +408,11 @@
   {
     "at": "2026-10-06T10:55:07.297Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:55:41.426Z",
     "expanded": true,
@@ -393,6 +421,9 @@
     "id": "divider:turn:d6dcf359-401e-4c0c-b982-082a8b388515",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-10-06T10:55:07.298Z",
     "state": "completed",
     "summary": {
@@ -432,12 +463,12 @@
   {
     "agent": null,
     "at": "2026-10-06T10:55:08.874Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -524,6 +555,11 @@
   {
     "at": "2026-10-06T10:55:57.432Z",
     "autoDenied": 0,
+    "caption": "Messaged another session (1 failed)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T10:56:00.075Z",
     "expanded": true,
@@ -532,6 +568,9 @@
     "id": "divider:turn:c762441a-e67e-4d7d-bf40-f40a32c465ec",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "messaged another session (1 failed)"
+    ],
     "startedAt": "2026-10-06T10:55:57.434Z",
     "state": "completed",
     "summary": {

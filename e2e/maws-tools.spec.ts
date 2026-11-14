@@ -645,12 +645,14 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
       ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
 
-    // the cells: what opened, and why nothing did twice
+    // the cells: what opened, and why nothing did twice. Read on the cells' own labels: the turn's line says what the
+    // turn did in its rows' words (UX wave U2, O-15: `Worked for … · Loaded 1 tool, opened Terminal, could not open …`)
     await unfoldWork(s.pane);
-    await expect(s.pane.getByText('Opened Terminal')).toBeVisible();
+    const cell = (text: RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
+    await expect(cell(/^Opened Terminal$/)).toBeVisible();
     // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not available")
-    await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
-    await expect(s.pane.getByText(/Could not open pane: unknown pane "nope"/)).toBeVisible();
+    await expect(cell(/^Could not open pane: the artifact pane is not available in this build of MAWS$/)).toBeVisible();
+    await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible(); // the host's words go on to list the known panes
     await shoot(s, 'pane');
   });
 });

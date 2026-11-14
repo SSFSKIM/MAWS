@@ -16,7 +16,7 @@ const category = z.enum(TOOL_CATEGORIES);
 const disposition = z.enum(['denied', 'auto_denied', 'stopped']);
 
 export const ToolClassificationSchema = z.strictObject({
-  groupable: z.boolean(), hidden: z.boolean(), category,
+  groupable: z.boolean(), category,
   denial: nullable(z.strictObject({ kind: z.enum(DENIAL_KINDS), disposition, interruption: z.boolean(), reason: nullable(z.string()) })),
   subagentLifecycle: nullable(z.enum(['start', 'progress', 'finish', 'message'])), startsGroup: z.boolean(), safeguard: z.enum(SAFEGUARD_VERDICTS), humanDecision: z.boolean(),
 });
@@ -38,7 +38,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('web'), url: nullable(z.string()), query: nullable(z.string()), output: z.string(), truncated: nullable(TruncationSchema) }),
   z.strictObject({ kind: z.literal('mcp'), server: z.string(), tool: z.string(), input: z.unknown(), result, structured: z.unknown(), spill: nullable(SpillSchema) }),
   z.strictObject({ kind: z.literal('image'), images: z.array(z.strictObject({ dataUrl: z.string(), mediaType: z.string(), alt: nullable(z.string()) })), caption: nullable(z.string()) }),
-  z.strictObject({ kind: z.literal('thinking'), text: z.string(), durationMs: nullable(z.number()) }),
+  z.strictObject({ kind: z.literal('thinking'), text: z.string(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()) }),
   z.strictObject({ kind: z.literal('generic'), input: z.unknown(), result, structured: z.unknown(), isError: z.boolean(), spill: nullable(SpillSchema), truncated: nullable(TruncationSchema) }),
 ]);
 
@@ -51,6 +51,7 @@ const cellShape = {
   id: z.string(), toolUseId: nullable(z.string()), toolName: z.string(), category, classification: ToolClassificationSchema,
   status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), moved: z.literal(true).optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
+  background: z.boolean(), doneLabel: z.string().optional(), error: z.string().optional(), // UX wave U2
 };
 export const CellSchema = z.strictObject(cellShape);
 
@@ -62,6 +63,7 @@ export const TurnSummarySchema = z.strictObject({
 });
 
 const base = { id: z.string(), turnId: nullable(z.string()), at: z.string() };
+const LineCountsSchema = z.strictObject({ added: z.number().int().nonnegative(), removed: z.number().int().nonnegative() }); // UX wave U2
 const ARRIVAL_CLASSES = ['peer', 'subagent', 'task', 'schedule', 'answer', 'command', 'own', 'wake', 'consent'] as const; // U3: `Arrival['class']`
 // E7 start: a message between sessions (rows.ts's PeerMessage)
 const PeerMessageSchema = z.strictObject({
@@ -80,8 +82,9 @@ export const RowSchema = z.discriminatedUnion('kind', [
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
     files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
     opener: z.strictObject({ class: z.enum(ARRIVAL_CLASSES), line: z.string() }).optional(), // U3
+    caption: z.string(), parts: z.array(z.string()), counts: LineCountsSchema, // UX wave U2
   }),
-  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), activeLabel: nullable(z.string()), icon: category, expanded: z.boolean() }),
+  z.strictObject({ ...base, kind: z.literal('group'), state: z.enum(['active', 'completed']), cells: z.array(CellSchema), summary: z.string(), counts: LineCountsSchema, icon: category, expanded: z.boolean() }),
   z.strictObject({ ...base, kind: z.literal('cell'), ...cellShape }),
   z.strictObject({
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
@@ -92,7 +95,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
     ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
   }),
-  z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), clock: z.literal('wall').optional() }),
+  z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()), clock: z.literal('wall').optional() }),
   z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),
   z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */ }),
   z.strictObject({

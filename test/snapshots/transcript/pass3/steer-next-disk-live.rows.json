@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T09:22:14.762Z",
     "autoDenied": 0,
+    "caption": "Ran 8 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-01T09:22:44.675Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:c5a00b5f-6169-4758-8b72-14e69f739b44",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 8 commands"
+    ],
     "startedAt": "2026-10-01T09:22:14.805Z",
     "state": "completed",
     "summary": {
@@ -68,17 +76,16 @@
     "turnId": "turn:c5a00b5f-6169-4758-8b72-14e69f739b44"
   },
   {
-    "activeLabel": null,
     "at": "2026-10-01T09:22:17.217Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": true,
@@ -109,12 +116,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -144,6 +151,10 @@
         "toolUseId": "toolu_01T7kV1uAR2q8FoFvriB74gF"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_018wPbEvHps74KKa3zdX8Xif",
@@ -179,17 +190,16 @@
     "turnId": "turn:c5a00b5f-6169-4758-8b72-14e69f739b44"
   },
   {
-    "activeLabel": null,
     "at": "2026-10-01T09:22:25.882Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": true,
@@ -220,12 +230,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -256,12 +266,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -292,12 +302,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -328,12 +338,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -364,12 +374,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_flagged",
           "startsGroup": false,
@@ -399,6 +409,10 @@
         "toolUseId": "toolu_01Lzv48nPknFxNJzJrsd4Jw2"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
     "id": "group:cell:toolu_014hnRaXA9yScDYaCDnr1hPT",

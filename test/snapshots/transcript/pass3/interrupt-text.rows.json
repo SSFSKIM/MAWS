@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T19:09:49.894Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:09:51.645Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:7a273738-bfa2-41ce-92ea-9f576294a851",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T19:09:49.912Z",
     "state": "stopped",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "4a17bff0-7986-451e-8129-5f87d834fad0",
+    "recordedMs": null,
     "text": "The user is asking me to write a 500-word essay on the history of tea without using any tools. This is a straightforward writing task that doesn't require me to interact with files, run commands, or use any of the available tools. I should just write the essay directly as plain prose in my response.\n\nLet me write a comprehensive essay on the history of tea covering its origins, spread, and evolution.",
     "turnId": "turn:7a273738-bfa2-41ce-92ea-9f576294a851"
   },
@@ -106,6 +113,11 @@
   {
     "at": "2026-09-29T19:09:51.646Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:09:52.532Z",
     "expanded": true,
@@ -114,6 +126,7 @@
     "id": "divider:turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T19:09:51.647Z",
     "state": "completed",
     "summary": {
@@ -157,6 +170,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "1bb6832c-8844-41fc-9623-8a1e1f40bd96",
+    "recordedMs": null,
     "text": "The user interrupted my essay and is asking me to reply with exactly \"OK\". I should do that.",
     "turnId": "turn:56d2908c-c8c7-4cbe-bdde-000d0da6fdf9"
   },

@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:22:34.610Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:35.545Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T09:22:34.613Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "f00041c9-0c99-4c22-aa40-fef4f03aec64",
+    "recordedMs": null,
     "text": "The user is asking me again what word they asked me to remember. I should check my memory to confirm. Looking at the memory I just saved, the word is ZEBRA. I should reply with just that word.",
     "turnId": "turn:1ac41aac-0ebe-496e-999e-b5cd2873aa65"
   },

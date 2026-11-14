@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { editCounts } from '../../model/cells';
@@ -25,7 +25,7 @@ it('keeps factual edit titles, counts and inline content when a batch summary ar
   const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
   expect(store.rows().some((row) => row.kind === 'receipt')).toBe(false);
   const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-  expect(view.container.textContent).toContain('Edited 1 file, created 1 file');
+  expect(view.container.textContent).toContain('Edited a file, created a file'); // UX wave U2: Desktop's caption
   expect(view.container.textContent).not.toContain('Opaque batch summary');
   const create = screen.getByRole('button', { name: /^Created notes\.txt.*\+1$/ });
   expect(create.querySelector('.transcript-counts')?.textContent).toBe('+1');
@@ -104,16 +104,17 @@ it.each([
   const store = await storeWith(b.events); useTranscriptStore.getState().expandAll(store.key);
   const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
   expect([...view.container.querySelectorAll('.transcript-cell-line')].map((line) => line.querySelector('.transcript-counts')?.textContent ?? null)).toEqual([cellCounts, cellCounts]);
-  expect(view.container.querySelector('.transcript-group-summary .transcript-counts')?.textContent ?? null).toBe(groupCounts);
+  expect(view.container.querySelector('.transcript-run-line .transcript-counts')?.textContent ?? null).toBe(groupCounts); // UX wave U2: the run's line
 });
 
-it('shows the latest readable thinking line while retaining the full disclosure', async () => {
+// UX wave U2 (O-27; the owner's answer "The label only"): the live line reads its label, and the text is read by opening it
+it('reads the live label, not the reasoning, while retaining the full disclosure', async () => {
   const b = builder(); b.turn('u'); b.thinking('a', 0, 'First consideration\nLatest consideration');
   const store = await storeWith(b.events);
   const row = { ...rowOf(store.rows(), 'thinking'), live: true };
   const view = renderRow(row, { storeKey: store.key });
-  const button = screen.getByRole('button', { name: /Latest consideration/ });
-  expect(button.textContent).not.toContain('First consideration');
+  const button = screen.getByRole('button', { name: /^Thinking · \d+s$/ });
+  expect(button.textContent).not.toContain('consideration');
   fireEvent.click(button);
   expect(view.container.querySelector('.transcript-thinking-text')?.textContent).toBe('First consideration\nLatest consideration');
 });
@@ -162,19 +163,23 @@ it('replays empty signed thinking without inventing readable reasoning', async (
   expect(store.rows().filter((row) => row.kind === 'thinking')).toEqual([]);
 });
 
+// UX wave U2 (O-27): inside a run a streaming thought is the run's thought line, whose opened text follows its deltas
 it('updates a grouped thinking line from deltas without waiting for a structural row update', async () => {
   const b = builder(); b.turn('u');
   b.toolUse('read', 'Read', { file_path: '/p/memo' }); b.result('read', 'memo');
-  // A pending tool keeps the thinking block inside its group, rather than the standalone after-work line.
   const delta = (text: string) => b.emit('assistant.block.delta', { apiMessageId: api('thinking'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: text, inputJsonDelta: null, userMessageUuid: uuid('u') });
   delta('First thought');
   b.toolUse('pending', 'Read', { file_path: '/p/next' }); b.result('pending', 'next');
   const store = await storeWith([...b.events]);
-  renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
-  expect(screen.getByRole('button', { name: 'First thought' })).toBeTruthy();
+  const group = rowOf(store.rows(), 'group');
+  useTranscriptStore.getState().toggleGroup(store.key, group.id);
+  const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+  fireEvent.click(screen.getByRole('button', { name: /^Thinking · \d+s$/ }));
+  const text = () => view.container.querySelector('.transcript-thinking-text')?.textContent;
+  expect(text()).toBe('First thought');
   const next = delta('\nNew consideration');
-  store.push([next]);
-  await screen.findByRole('button', { name: 'New consideration' });
+  act(() => store.push([next]));
+  expect(text()).toBe('First thought\nNew consideration');
 });
 
 it('does not restore when the dry run refuses, or when confirmation is cancelled', async () => {

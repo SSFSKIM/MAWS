@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:21:49.996Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": null,
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:6ffe2781-e332-43ac-b218-09fb29e670de",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T09:21:50.042Z",
     "state": "working",
     "summary": {
@@ -62,17 +68,16 @@
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   },
   {
-    "activeLabel": "Running `git log --oneline` for 0s",
     "at": "2026-09-28T09:21:50.808Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -81,6 +86,7 @@
         "detail": {
           "durationMs": 463,
           "kind": "thinking",
+          "recordedMs": null,
           "text": "The user wants me to run `git log --oneline` and then say DONE. This is straightforward."
         },
         "endedAt": "2026-09-28T09:21:50.808Z",
@@ -95,12 +101,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "commands",
         "classification": {
           "category": "commands",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -130,12 +136,16 @@
         "toolUseId": "toolu_01RWDevVWYVi2Tn3y58pxRS3"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "commands",
-    "id": "group:cell:think:msg_011CfVbJKTBQYfwR82Y76xFE:0",
+    "id": "group:cell:toolu_01RWDevVWYVi2Tn3y58pxRS3",
     "kind": "group",
     "state": "active",
-    "summary": "Ran 1 command",
+    "summary": "Ran a command",
     "turnId": "turn:6ffe2781-e332-43ac-b218-09fb29e670de"
   }
 ]

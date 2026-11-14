@@ -23,6 +23,11 @@
   {
     "at": "2026-10-01T18:05:00.716Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-01T18:05:05.644Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:78e671fe-59de-4ec0-8105-fdac0e486d77",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-10-01T18:05:00.748Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "11ae790d-e0f3-44e7-80b0-1ae9ea65ffc6",
+    "recordedMs": null,
     "text": "The user is asking me to call the AskUserQuestion tool with two specific questions:\n1. \"Which color do you prefer?\" with header \"Color\", options Red and Blue, single choice\n2. \"Which fruits do you like?\" with header \"Fruits\", options Apple and Pear, multiSelect true\n\nThen I need to reply with one line per question in the format \"<header>: <answer>\", using \"NOT ANSWERED\" if no answer was provided.\n\nLet me construct this call carefully with the exact parameters requested.",
     "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
   },
@@ -131,6 +138,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "684bb694-a2db-409c-bf68-9edbc75579e8",
+    "recordedMs": null,
     "text": "The user answered the first question with \"Red\" but didn't answer the second question about fruits. The system result shows that only the first question was answered. I need to format my response as one line per question:\n\nColor: Red\nFruits: NOT ANSWERED",
     "turnId": "turn:78e671fe-59de-4ec0-8105-fdac0e486d77"
   },

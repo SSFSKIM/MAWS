@@ -14,13 +14,15 @@ import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
-import { cellOf, editCounts, engineRefusalOf, filePathOf, movedToBackground, resultJson, resultText, toolErrorText, type ToolRecord, type TurnContext } from './cells';
+import { cellOf, editCounts, engineRefusalOf, filePathOf, movedToBackground, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
+import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
 import { hookNotice, type HookRecord } from './hooks';
-import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, groupSummary, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
+import { agentMessageCopy, baseName, boundaryCopy, BRANCH_HISTORY_DETAIL, PLUGIN, processExitCopy, reconnectCopy, retryCopy, subagentSentence } from './copy';
 import { HANDOVER_REINIT_COPY /* P5 O16 M3b */, RESUMED_COPY, RESUMING_COPY } from './copy'; // C12
 import { glyphFor } from './glyphs';
-import { collectCells, groupItems, phrasesOf, type WorkItem } from './groups';
+import { collectCells, groupItems, type WorkItem } from './groups';
+import { captionParts, captionText, finishedLines, stepsOfTurn, turnOrder, type SentOutcome } from './caption'; // UX wave U2
 import { cellId, rowId, turnId as turnIdOf } from './keys';
 import type { LiveBlock, TranscriptState, TranscriptUi, TurnState, TurnWork } from './reduce';
 import { isEngineOrigin, originOf, runningTurn, taskEndArrived, type ReceiptUndo } from './reduce';
@@ -40,7 +42,7 @@ import { peerMessageCopy } from './copy'; // E7
 // E4c start
 import { BROWSER_TOOL_NAMES, browserCallOf, browserToolResultSchemaOf, type BrowserCallSummary, type BrowserToolName } from '@shared/maws/browser';
 import type { ContentBlock } from '@shared/graph/events';
-import { denialDisposition } from './classify';
+import { denialDisposition, stoppedMember } from './classify';
 import { marksOfText } from './owner-marks'; // P2-C (2026-10-09)
 import { messageOfCall } from '@shared/owner/to-human-items'; // P4-R7; P5 O8 M7b: the one extraction, the channel's too
 import { isHistoryGap } from './gap'; // P5 O7 M2
@@ -229,12 +231,6 @@ export function turnSummary(turn: TurnState): TurnSummary {
   return deriveTurn(turn, null).summary;
 }
 
-// The group phrases of a whole turn ("Edited 3 files, ran 2 commands"): the turn summary popover's category segment.
-// Denied and stopped calls did not run, so they are counted as tool calls but phrase nothing.
-export function turnPhrases(turn: TurnState): string {
-  return groupSummary(phrasesOf(deriveTurn(turn, null).cells.filter((cell) => cell.classification.denial === null)));
-}
-
 // Stable per-turn selector for consumers that must not follow unrelated streaming batches.
 export function turnRows(state: TranscriptState, id: TurnId): Row[] | undefined {
   const turn = state.turns.get(id);
@@ -316,6 +312,7 @@ interface AskRecord {
   answers: AskAnswer[] | null; // from `maws.ask.answered`, else an answered result
   asked: boolean; // acknowledged without answers: an async ask
   cancelled: AskCancelReason | null; // from `maws.ask.cancelled`: why
+  stopped: boolean; // UX wave U2: its result is a refusal that reads stopped (the person's Stop), on every route
   resulted: boolean;
   error: string | null;
 }
@@ -376,7 +373,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   turnDerivations.count += 1;
   const ui = state?.ui;
   const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
-  const context: TurnContext = { closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt };
+  const context: TurnContext = turnContextOf(turn); // UX wave U2: shared with the mods' asks
   const items: Item[] = [];
   const tools = new Map<ToolUseId, ToolRecord>();
   const hooks = new Map<string, HookRecord>();
@@ -388,6 +385,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const deliveries = new Map<ToolUseId, DeliveryRecord>(); // E1
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   const results = new Map<ToolUseId, Event<'tool.result'>>(); // E7: a SendMessage's or ListAgents' result, for its row
+  const sentCalls = new Map<RowId, Event<'tool.use'>>(); // UX wave U2: a SendMessage's call, by the row it draws
   const peerOwners = new Map<MessageUuid, string[]>(); // P5 O15 M2b: the owners a peer envelope's sminos frame named, for its peer.message's row
   const artifacts = new Map<ToolUseId, ArtifactRecord>(); // E2
   const browserActions = new Map<ToolUseId, BrowserActionRecord>(); // E4c
@@ -425,6 +423,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     const looked = state.agents?.get(key);
     return looked?.kind === 'agent' ? looked : null;
   };
+  const titleOf = artifactTitlesIn(state, turn); // UX wave U2 (l6-artifacts-12)
 
   // *Turn boundaries on this engine*: the reducer retains a `command.lifecycle` on a turn only when it dropped that
   // turn's pending prompt, so its presence is the dropped mark. A prompt the engine folded into this turn
@@ -487,10 +486,16 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (block.blockType === 'text' && !live && block.buffer.trim() === '') return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
-      // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
-      if (!live && block.buffer.trim() === '') return null;
-      const durationMs = block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null;
-      return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs } };
+      // UX wave U2 (X1, decision 2): the engine's recorded duration when one came; else, for a block that streamed, the
+      // time MAWS measured from its first delta to its completion
+      const recordedMs = block.recordedMs ?? null;
+      // A completed thinking block with no text (a signature-only block) has nothing to disclose (W1). UX wave U2 (ticket 479):
+      // inside an opened run, a textless thought of ten seconds or more is a `Thought for Ns` line; elsewhere W1 holds. So
+      // one with a recorded duration still travels, to be merged inside a run and tested on its time; where it leaves the
+      // group machine as a row it is dropped there (groups.ts), so outside a run it has no row, as before.
+      if (!live && block.buffer.trim() === '' && recordedMs === null) return null;
+      const durationMs = recordedMs ?? (block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null);
+      return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs, recordedMs } };
     }
     return null;
   };
@@ -587,10 +592,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
             kind: event.toolName === 'Workflow' ? 'workflow' : 'agent', subagentType: typeof input.subagent_type === 'string' ? input.subagent_type : null,
           });
         } else if (presentation === 'agent_message') {
+          sentCalls.set(rowId.agentMessage(event.id), event); // UX wave U2: the call its caption step reads
           items.push({ kind: 'later', row: () => sendMessageRow(event, results.get(event.toolUseId), turn.id, known(), agentOf, context) }); // E7: `to` classified against what the transcript knows; the result refines it
         } else if (presentation === 'ask') { // E1
           const input = AskInputSchema.safeParse(event.input);
-          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, resulted: false, error: null });
+          asks.set(event.toolUseId, { use: event, input: input.success ? input.data : null, opened: null, askId: null, answers: null, asked: false, cancelled: null, stopped: false, resulted: false, error: null });
           items.push({ kind: 'ask', toolUseId: event.toolUseId });
         } else if (presentation === 'delivery') { // E1
           const input = SendFileInputSchema.safeParse(event.input);
@@ -640,7 +646,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         // denial or a plain error text, never wrapped in `<tool_use_error>` (DC9: but the ask mod's is, and answered above).
         if (pending?.kind === 'question' && event.isError && event.denial === null && !(askMod && pending.answers !== null)) pending.error = engineRefusalOf(resultText(event.content));
         const ask = asks.get(event.toolUseId); // E1
-        if (ask) resultOfAsk(ask, event);
+        // UX wave U2 (the architect's ruling on the stopped ask): a refusal that reads stopped withdraws the ask, as the
+        // host's own cancellation does live, so a file and another machine's rows read it the same
+        if (ask) resultOfAsk(ask, event, event.denial !== null && denialDisposition(event.denial, context, context.continued.has(event.toolUseId)).disposition === 'stopped');
         const delivery = deliveries.get(event.toolUseId); // E1
         if (delivery) resultOfDelivery(delivery, event);
         if (group && ref?.kind === 'workflow') nameWorkflowRun(group, ref, event.structured, byTask); // E7
@@ -861,7 +869,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     switch (item.kind) {
       case 'tool': {
         const rec = tools.get(item.toolUseId)!;
-        resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
+        resolved.push({ kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false, undefined, titleOf) });
         break;
       }
       case 'hook': {
@@ -901,7 +909,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'message': { // P4-R7
         const rec = messageCalls.get(item.toolUseId)!;
         const row = toHumanRow(rec, turn.id, context);
-        resolved.push(row !== null ? { kind: 'row', row } : { kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false) });
+        resolved.push(row !== null ? { kind: 'row', row } : { kind: 'cell', cell: cellOf(rec, context, ui?.expandedCells.has(cellId.tool(rec.use.toolUseId)) ?? false, undefined, titleOf) });
         break;
       }
       case 'subagents': {
@@ -939,13 +947,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
   // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
   // command's output) go through the group machine as rows, so a steer splits the work around it; everything else is
-  // the work area.
+  // the work area. UX wave U2 (decision 19): a thought is always handed to the machine, the one after the last work
+  // included, so a thought that follows a run's last call is that run's; the machine gives it back as a row where no run
+  // holds it.
   const ordered: WorkItem[] = [];
   stream.forEach((item, i) => {
     if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });
     else if (item.kind === 'text' && i > lastWork) ordered.push({ kind: 'row', row: { ...item.row, phase: 'answer' } });
     else if (item.kind === 'text') ordered.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
-    else if (item.kind === 'thinking' && i > lastWork) ordered.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
     else ordered.push(item);
   });
 
@@ -954,10 +963,21 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const forHuman = (row: Extract<Row, { kind: 'assistant_text' }>) => ui?.assistantInk.has(row.id) || (ui?.ownerLane === true && marksOfText(row.markdown, row.live).marked);
   // P4-R7: a message tool's message needs no such flag: it is addressed to the human whatever the lane, as a span the
   // presenter draws with the lane off is (inked, so kept), and `isPersistentRow` keeps every one
-  const allRows = groupItems(ordered, turn, ui, tools).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
+  const allRows = groupItems(ordered, turn, ui).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
   const workRows = allRows.filter((row) => !isPersistentRow(row));
   const cells = collectCells(workRows);
-  const summary = summaryOf(turn, cells, subagents, model);
+  // The architect's ruling (2026-11-13, "A refused sent message and the turn's denied count"): a fold never hides a
+  // denial. A refused send is drawn as its message row, no cell, and that row folds with its turn (O-12, `staysInView`),
+  // so its refusal is one of the turn's denials, in row order with the calls'
+  const sentRefusal = (row: Row): TurnSummary['denials'] => {
+    const use = row.kind === 'agent_message' && !staysInView(row) ? sentCalls.get(row.id) : undefined;
+    const kind = use === undefined ? null : (results.get(use.toolUseId)?.denial ?? null);
+    if (use === undefined || kind === null) return [];
+    return [{ kind, cellId: row.id, ...denialDisposition(kind, context, context.continued.has(use.toolUseId)) }];
+  };
+  const denialsInOrder = workRows.flatMap((row): TurnSummary['denials'] =>
+    row.kind === 'group' || row.kind === 'cell' ? collectCells([row]).flatMap((cell) => denialOfCell(cell)) : sentRefusal(row));
+  const summary = summaryOf(turn, cells, subagents, model, denialsInOrder);
   const denials = summary.denials;
   // The owner's ruling (2026-10-30): a turn that ended on an API error (its last assistant message the engine's API error
   // envelope, what the engine's own `api_error` reason means) shows that error as its row, where it happened; its divider
@@ -969,17 +989,34 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const cause = turn.closedCause ?? (turn.ended?.endedForMessage === true ? 'message' : null);
   const rows: Row[] = [...above];
   if (user) rows.push(user);
-  // The divider summarises a work area. A turn the owner did not start (engine, peer) always has one, because it is
-  // what tells the reader whose turn it was ("Continued for …"; pass2/workflow's engine turn is a single answer); a
-  // turn the engine accepted keeps one when stopped, even with only partial text or no output. A pending prompt
-  // has none until it starts.
-  if (workRows.length > 0 || turn.origin !== 'human' || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
+  // The divider summarises a work area. UX wave U2 (O-15, l2-transcript-04): a turn in which nothing was done has no
+  // line, whoever started it (an arrival's line already names a turn the person did not start); a turn the engine
+  // accepted keeps one while it runs and when stopped, even with only partial text or no output. A pending prompt has
+  // none until it starts.
+  if (workRows.length > 0 || (turn.accepted && (turn.state === 'open' || dividerState === 'stopped'))) {
     const denied = denials.filter((d) => d.disposition === 'denied');
     const firstDenied = denials.find((d) => d.disposition !== 'stopped')?.cellId ?? null;
+    // UX wave U2 (O-15; decision 9): what the turn did, once, here: the caption of every step of the turn for a turn
+    // that is not running, and the lines its finished edits changed for every turn
+    // a sent message's step reads its call's own result: none yet is running, or stopped once the turn closed; a refusal
+    // that stands alone is no step, a stopped one a stopped step; a failed send failed
+    const sent: SentOutcome = (row) => {
+      const use = sentCalls.get(row.id);
+      if (use === undefined) return 'succeeded';
+      const result = results.get(use.toolUseId);
+      if (result === undefined) return context.closed ? 'stopped' : 'running';
+      if (result.denial !== null) return stoppedMember({ kind: result.denial, ...denialDisposition(result.denial, context, context.continued.has(use.toolUseId)) }) ? 'stopped' : null;
+      return sendMessageOutcome(result).ok ? 'succeeded' : 'failed';
+    };
+    // the turn's own calls that launch nothing: an agent started again under one of them is no step (the architect's
+    // ruling on M5, (G) narrowed)
+    const restarts = new Set(turn.events.flatMap((event) => (event.kind === 'tool.use' && presentationOf(event.toolName) !== 'subagent' ? [event.toolUseId as string] : [])));
+    const parts = dividerState === 'working' ? [] : turnOrder(captionParts(stepsOfTurn(workRows, restarts, (ref) => byTask.get(ref.taskId)?.statuses.get(ref.taskId) ?? 'started', sent)));
     rows.push({
       id: rowId.divider(turn.id), turnId: turn.id, at: user?.at ?? turn.startedAt, kind: 'divider', state: dividerState, ...(dividerState === 'stopped' && cause !== null && { cause }), origin: turn.origin, startedAt: turn.startedAt, endedAt: turn.endedAt,
       toolCalls: summary.toolCalls, denied: denied.length, autoDenied: summary.autoDenied, firstDeniedCell: firstDenied, expanded, summary, files: changedFiles(cells, turn),
       ...(opener !== undefined && { opener }), // UX wave U3
+      caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
@@ -1148,9 +1185,13 @@ function byPath(files: ChangedFile[]): ChangedFile[] {
   return [...merged.values()];
 }
 
-function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], model: string | null): TurnSummary {
+const denialOfCell = (cell: Cell): TurnSummary['denials'] =>
+  cell.classification.denial ? [{ kind: cell.classification.denial.kind, cellId: cell.id, disposition: cell.classification.denial.disposition, interruption: cell.classification.denial.interruption }] : [];
+
+// `denials` are the turn's refusals in row order: its calls' and its refused sent messages' (the architect's ruling of
+// 2026-11-13)
+function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], model: string | null, denials: TurnSummary['denials']): TurnSummary {
   const byCategory = Object.fromEntries(TOOL_CATEGORIES.map((category) => [category, 0])) as Record<ToolCategory, number>;
-  const denials: TurnSummary['denials'] = [];
   const safeguard = { reviewed: 0, flagged: 0, notEvaluated: 0 };
   let toolCalls = 0;
   for (const cell of cells) {
@@ -1158,7 +1199,6 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
     const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
     toolCalls += count;
     byCategory[cell.category] += count;
-    if (cell.classification.denial) denials.push({ kind: cell.classification.denial.kind, cellId: cell.id, disposition: cell.classification.denial.disposition, interruption: cell.classification.denial.interruption });
     if (cell.classification.safeguard === 'not_evaluated' || cell.classification.safeguard === 'skipped') safeguard.notEvaluated += 1;
     else {
       safeguard.reviewed += 1;
@@ -1212,8 +1252,12 @@ function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: Transcr
 }
 
 // E1 start: the capsule and the delivery row from their records.
-function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>): void {
+function resultOfAsk(ask: AskRecord, result: Event<'tool.result'>, stopped: boolean): void {
   ask.resulted = true;
+  if (stopped) {
+    ask.stopped = true;
+    return;
+  }
   if (result.isError) {
     ask.error = toolErrorText(resultText(result.content));
     return;
@@ -1246,12 +1290,12 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   const blocking = opened?.blocking ?? input?.blocking ?? true;
   const answers = ask.answers ?? steers?.get(askId) ?? null;
   const asked = ask.asked || opened?.blocking === false;
-  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
+  const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null || ask.stopped ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
   return {
     id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
     questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
-    cancelReason: state === 'cancelled' ? ask.cancelled : null,
+    cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
   };
 }
 
@@ -1351,6 +1395,24 @@ function agentNamed(known: KnownAgents[], key: string): SubagentRef | null {
 }
 
 const peerNamed = (known: KnownAgents[], address: string): string | null => known.find(({ peers }) => peers.has(address))?.peers.get(address) ?? null;
+
+// UX wave U2 (l6-artifacts-12): the titles one turn's results gave its artifacts, kept per turn object as its agents are
+// (`knownOfTurn`), and made again when the turn has changed
+const titlesByTurn = new WeakMap<TurnState, { version: number; events: number; titles: ReadonlyMap<string, string> }>();
+function titlesOfTurn(turn: TurnState): ReadonlyMap<string, string> {
+  const kept = titlesByTurn.get(turn);
+  if (kept && kept.version === turn.version && kept.events === turn.events.length) return kept.titles;
+  const titles = artifactTitlesOf(turn.events);
+  titlesByTurn.set(turn, { version: turn.version, events: turn.events.length, titles });
+  return titles;
+}
+// An artifact by the title the transcript's results gave it, this turn's then the earlier turns' (latest first), the
+// earlier turns read once a call asks; the derivation's lookup, and the mods' asks' (surface/adapters.ts)
+export function artifactTitlesIn(state: TranscriptState | null, turn: TurnState): ArtifactTitles {
+  let earlier: ReadonlyMap<string, string>[] | null = null;
+  return (ref) =>
+    titlesOfTurn(turn).get(ref) ?? (earlier ??= state === null ? [] : earlierTurns(state, turn).map(titlesOfTurn)).find((titles) => titles.has(ref))?.get(ref) ?? null;
+}
 
 
 // UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome, a
@@ -1574,7 +1636,7 @@ function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: Tur
   let stopped = false;
   let error: string | null = null;
   if (result) {
-    if (result.denial !== null && denialDisposition(result.denial, context.terminalReason, context.closed).disposition === 'stopped') stopped = true;
+    if (result.denial !== null && denialDisposition(result.denial, context, context.continued.has(use.toolUseId)).disposition === 'stopped') stopped = true;
     else if (result.isError) error = toolErrorText(resultText(result.content));
     else {
       const read = browserToolResultSchemaOf(tool).safeParse(firstJsonBlock(result.content));

@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T19:40:19.467Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T19:40:20.392Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:749c3b48-a14b-4202-bef8-367df45c4fa3",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T19:40:19.469Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "01fbdb2a-add8-444f-adcd-ecdd81a4a360",
+    "recordedMs": null,
     "text": "The user is asking me to reply with exactly \"OK\". This is straightforward.",
     "turnId": "turn:749c3b48-a14b-4202-bef8-367df45c4fa3"
   },

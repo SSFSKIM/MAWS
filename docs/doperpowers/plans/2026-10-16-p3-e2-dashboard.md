@@ -132,7 +132,7 @@ After the master merge, final gate runs and whole-branch high review, route all 
 ## Shared-file touches by ledger row
 
 - **X23/X24:** `src/artifacts/host.ts`; renderer host and typed fakes; IPC names/schema, wire fingerprint; engine-host dashboard reads and wiring. Store amendment only after the architect records any new public method.
-- **X25:** shared tools/classification and tool registration; B `documents.ts` and `kinds/document.ts` kind-aware selection; A `artifact-publish.ts` refusal and create schema; guides.
+- **X25:** shared tools/classification and tool registration; B `documents.ts` and `kinds/document.ts` kind-aware selection; A `artifact-publish.ts` refusal and create schema; guides. **Amended 2026-11-13 (UX wave, U2a; l6-artifacts-12; the U2 child's "Rulings reversed", `docs/doperpowers/specs/2026-11-12-ux-wave/U2-transcript-structure.md`):** The artifact namespace's plain calls join runs and are named by the artifact's title.
 - **X26/XE5:** B editor node views/extensions/DocumentEditor props, thread model/comments and preview plumbing; exporter source/options and chart arms; dashboard model/parser/spec/render/states. Every B change P3-E-marked, its tests unchanged.
 - **X28:** D's existing governing hooks and export helpers consumed, no new medium or system redesign.
 - **X31:** `src/main/dashboard/export.ts`, B export context and D generic wrapper typing, main wiring and its two mock suites.

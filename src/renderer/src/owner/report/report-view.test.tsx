@@ -123,7 +123,7 @@ describe('the report view', () => {
     // One disclosure opens the work; the unmarked turn keeps its own divider.
     fireEvent.click(record()!);
     await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
-    expect(record()?.textContent).toMatch(/Worked for .*1 tool call/);
+    expect(record()?.textContent).toMatch(/Worked for .* · Ran a command/); // UX wave U2 (O-15): the turn's line
     expect(document.querySelector('[data-kind="owner_record"] [aria-label="Turn summary"]')).not.toBeNull();
     expect(dividers()).toHaveLength(1);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();

@@ -89,7 +89,7 @@ describe('a message tool’s call in a mounted transcript', () => {
     fireEvent.click(record);
     await waitFor(() => expect(cells()).toEqual(['cell:t1']));
     expect(record.getAttribute('aria-expanded')).toBe('true');
-    expect(record.textContent).toMatch(/^Worked for .* · 1 tool call$/);
+    expect(record.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15): the turn's line
     expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
     expect(document.querySelector('[data-kind="divider"]')).toBeNull();
     expect(cards()).toEqual(['Stage 1 is done.']);

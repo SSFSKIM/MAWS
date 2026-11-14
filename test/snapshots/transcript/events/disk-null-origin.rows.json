@@ -23,6 +23,11 @@
   {
     "at": "2026-09-27T09:00:00.000Z",
     "autoDenied": 0,
+    "caption": "Ran an agent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-27T09:00:10.500Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:u-disk-1",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent"
+    ],
     "startedAt": "2026-09-27T09:00:00.000Z",
     "state": "completed",
     "summary": {
@@ -74,6 +82,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-disk-1",
+    "recordedMs": null,
     "text": "One agent, one file.",
     "turnId": "turn:u-disk-1"
   },

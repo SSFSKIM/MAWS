@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:04:32.984Z",
     "autoDenied": 0,
+    "caption": "Ran an agent, ran a command (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:04:42.955Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent",
+      "ran a command (1 stopped)"
+    ],
     "startedAt": "2026-09-28T10:04:33.030Z",
     "state": "stopped",
     "summary": {
@@ -98,6 +107,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:04:40.755Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -107,8 +117,7 @@
         "kind": "user-rejected",
         "reason": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed."
       },
-      "groupable": false,
-      "hidden": false,
+      "groupable": true,
       "humanDecision": false,
       "safeguard": "not_flagged",
       "startsGroup": false,
@@ -127,6 +136,7 @@
       "stdout": "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.",
       "truncated": null
     },
+    "doneLabel": "Ran `sleep 20` in 2s",
     "endedAt": "2026-09-28T10:04:42.952Z",
     "expanded": true,
     "id": "cell:toolu_013CsJz1vgmcK71LCJ4GoqAu",
@@ -138,53 +148,6 @@
     "toolName": "Bash",
     "toolUseId": "toolu_013CsJz1vgmcK71LCJ4GoqAu",
     "turnId": "turn:69cb2b41-4f82-4845-95a0-9a4235cf57fe"
-  },
-  {
-    "at": "2026-09-28T10:04:48.239Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-28T10:04:50.606Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:95:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-28T10:04:48.239Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.1459536,
-      "denials": [],
-      "durationMs": 2369,
-      "model": "claude-sonnet-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 1131,
-        "cacheReadInputTokens": 30047,
-        "inputTokens": 2,
-        "outputTokens": 112,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:95:1"
   },
   {
     "at": "2026-09-28T10:04:49.548Z",

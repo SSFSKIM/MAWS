@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T06:35:09.786Z",
     "autoDenied": 0,
+    "caption": "Created hello.txt, loaded 1 tool",
+    "counts": {
+      "added": 1,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T06:35:16.338Z",
     "expanded": true,
@@ -39,6 +44,10 @@
     "id": "divider:turn:77b1efd4-ce84-4368-b4ec-767350ff2d60",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "created hello.txt",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T06:35:09.796Z",
     "state": "completed",
     "summary": {
@@ -88,98 +97,137 @@
     "turnId": "turn:77b1efd4-ce84-4368-b4ec-767350ff2d60"
   },
   {
-    "agent": null,
     "at": "2026-10-06T06:35:12.948Z",
-    "category": "files",
-    "classification": {
-      "category": "files",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "added": 1,
-      "change": "create",
-      "filePath": "/private/tmp/maws-e1-repo-G8SYJD/hello.txt",
-      "hunks": [
-        {
-          "lines": [
-            "+HELLO_E1"
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "files",
+        "classification": {
+          "category": "files",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": true,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "added": 1,
+          "change": "create",
+          "filePath": "/private/tmp/maws-e1-repo-G8SYJD/hello.txt",
+          "hunks": [
+            {
+              "lines": [
+                "+HELLO_E1"
+              ],
+              "newLines": 1,
+              "newStart": 1,
+              "oldLines": 0,
+              "oldStart": 0
+            }
           ],
-          "newLines": 1,
-          "newStart": 1,
-          "oldLines": 0,
-          "oldStart": 0
-        }
-      ],
-      "kind": "edit",
+          "kind": "edit",
+          "removed": 0
+        },
+        "endedAt": "2026-10-06T06:35:13.022Z",
+        "expanded": true,
+        "id": "cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
+        "label": "Created /private/tmp/maws-e1-repo-G8SYJD/hello.txt +1 −0",
+        "paths": [
+          "/private/tmp/maws-e1-repo-G8SYJD/hello.txt"
+        ],
+        "startedAt": "2026-10-06T06:35:12.948Z",
+        "status": "done",
+        "toolName": "Write",
+        "toolUseId": "toolu_016SPZGMptYwjDFRxxrnhdA6"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:mcp__maws__send_file"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "mcp__maws__send_file",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "mcp__maws__send_file"
+            ],
+            "query": "select:mcp__maws__send_file",
+            "total_deferred_tools": 20
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T06:35:13.403Z",
+        "expanded": true,
+        "id": "cell:toolu_01UEb15DRsLERfYfZ3UuVjGk",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T06:35:13.400Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_01UEb15DRsLERfYfZ3UuVjGk"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 569,
+          "kind": "thinking",
+          "recordedMs": 569,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T06:35:14.019Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkX4k1FPKF1nVZE31Hdp:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T06:35:14.019Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      }
+    ],
+    "counts": {
+      "added": 1,
       "removed": 0
     },
-    "endedAt": "2026-10-06T06:35:13.022Z",
     "expanded": true,
-    "id": "cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
-    "kind": "cell",
-    "label": "Created /private/tmp/maws-e1-repo-G8SYJD/hello.txt +1 −0",
-    "paths": [
-      "/private/tmp/maws-e1-repo-G8SYJD/hello.txt"
-    ],
-    "startedAt": "2026-10-06T06:35:12.948Z",
-    "status": "done",
-    "toolName": "Write",
-    "toolUseId": "toolu_016SPZGMptYwjDFRxxrnhdA6",
-    "turnId": "turn:77b1efd4-ce84-4368-b4ec-767350ff2d60"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-06T06:35:13.400Z",
-    "category": "skills",
-    "classification": {
-      "category": "skills",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "max_results": 1,
-        "query": "select:mcp__maws__send_file"
-      },
-      "isError": false,
-      "kind": "generic",
-      "result": [
-        {
-          "tool_name": "mcp__maws__send_file",
-          "type": "tool_reference"
-        }
-      ],
-      "spill": null,
-      "structured": {
-        "matches": [
-          "mcp__maws__send_file"
-        ],
-        "query": "select:mcp__maws__send_file",
-        "total_deferred_tools": 20
-      },
-      "truncated": null
-    },
-    "endedAt": "2026-10-06T06:35:13.403Z",
-    "expanded": true,
-    "id": "cell:toolu_01UEb15DRsLERfYfZ3UuVjGk",
-    "kind": "cell",
-    "label": "Loaded 1 tool",
-    "paths": [],
-    "startedAt": "2026-10-06T06:35:13.400Z",
-    "status": "done",
-    "toolName": "ToolSearch",
-    "toolUseId": "toolu_01UEb15DRsLERfYfZ3UuVjGk",
+    "icon": "skills",
+    "id": "group:cell:toolu_016SPZGMptYwjDFRxxrnhdA6",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Created hello.txt, loaded 1 tool",
     "turnId": "turn:77b1efd4-ce84-4368-b4ec-767350ff2d60"
   },
   {

@@ -2,10 +2,11 @@
 // model lives here so it can be reviewed in one place; the count semantics are what §5.3 binds.
 import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
-import { TOOL_CATEGORIES, type SubagentStatus, type ToolCategory } from './rows';
+import type { Cell, SubagentStatus, ToolCategory } from './rows';
 import { isCuaJsTool, MCP_TOOL } from './classify';
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
+import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U2
 
 export const plural = (n: number, noun: string, nouns = `${noun}s`) => `${n} ${n === 1 ? noun : nouns}`;
 const capitalise = (text: string) => (text.length === 0 ? text : text[0].toUpperCase() + text.slice(1));
@@ -34,8 +35,10 @@ export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
   cause?: 'crash' | 'message' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"; UX wave U4a: one a message sent now ended reads so
   origin: 'human' | 'engine' | 'peer';
+  opener?: { class: Arrival['class'] }; // UX wave U2 (l2-transcript-04): what opened a turn the person did not start
   durationMs: number;
-  toolCalls: number;
+  caption: string; // UX wave U2 (O-15): what the turn did (caption.ts), '' while it runs
+  counts: { added: number; removed: number }; // the lines its finished edits added and removed
   denied: number;
   autoDenied: number;
 }
@@ -44,7 +47,11 @@ export interface DividerCopyInput {
 // thinking block's Thought; P5 O7 M10's follow-up)
 const SHORTEST_FIGURE_MS = 1000;
 
-function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin'], durationMs: number, cause: DividerCopyInput['cause'] = null): string {
+// UX wave U2 (l2-transcript-04): the verb follows the turn's origin, but a turn the answer to an asynchronous question
+// opened is the person's (U3's class `answer`), whatever origin the engine gave it.
+function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause'>): string {
+  const { state, durationMs, cause = null } = input;
+  const origin = input.opener?.class === 'answer' ? 'human' : input.origin;
   const t = duration(durationMs);
   switch (state) {
     case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
@@ -54,102 +61,46 @@ function verb(state: DividerCopyInput['state'], origin: DividerCopyInput['origin
   }
 }
 
+// The turn's line (UX wave U2, O-15): `{verb and duration} · {caption} {+N −N} · N denied · N auto-denied`. While the
+// turn runs it reads its verb and then its counts so far, with no caption (its runs carry theirs); a part is left out
+// when it is empty. `dividerHead` is the line up to its counts, which a view draws in the diff colours.
+export function dividerHead(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'durationMs' | 'cause' | 'caption'>): string {
+  const head = verb(input);
+  return input.state !== 'working' && input.caption !== '' ? `${head} · ${input.caption}` : head;
+}
+
+// A run's or a turn's lines as a caption trails them: `+33 −5`, a side left out when it is zero, '' for none.
+export const lineCountsCopy = (counts: { added: number; removed: number }) =>
+  [counts.added > 0 ? `+${counts.added}` : null, counts.removed > 0 ? `−${counts.removed}` : null].filter((part) => part !== null).join(' ');
+
 export function dividerCopy(input: DividerCopyInput): string {
-  const parts = [verb(input.state, input.origin, input.durationMs, input.cause)];
-  if (input.state !== 'working' && input.toolCalls > 0) parts.push(plural(input.toolCalls, 'tool call'));
+  const counts = lineCountsCopy(input.counts);
+  const parts = [counts === '' ? dividerHead(input) : `${dividerHead(input)} ${counts}`];
   if (input.denied > 0) parts.push(`${input.denied} denied`);
   if (input.autoDenied > 0) parts.push(`${input.autoDenied} auto-denied`);
   return parts.join(' · ');
 }
 
-export interface TurnSummaryCopyInput extends Omit<DividerCopyInput, 'denied' | 'autoDenied'> {
+export interface TurnSummaryCopyInput extends Pick<DividerCopyInput, 'state' | 'cause' | 'origin' | 'opener' | 'durationMs'> {
   model: string | null;
-  phrases: string; // the group phrases of the whole turn
+  parts: readonly string[]; // UX wave U2 (O-15): every part of the turn's caption, ordered and uncapped
   denied: { kind: DenialKind }[];
   safeguard: { reviewed: number; flagged: number; notEvaluated: number };
   costUsd: number | null;
   tokens: number | null;
-  childAgents: number;
 }
 
+// The turn summary popover: the verb on its model, every part of what the turn did, the denied kinds, the auto mode
+// line, the cost and the tokens.
 export function turnSummaryCopy(input: TurnSummaryCopyInput): string {
-  const head = verb(input.state, input.origin, input.durationMs, input.cause) + (input.model ? ` on ${input.model}` : '');
+  const head = verb(input) + (input.model ? ` on ${input.model}` : '');
   const parts = [head];
-  if (input.toolCalls > 0) parts.push(`${plural(input.toolCalls, 'tool call')}${input.phrases ? `: ${input.phrases}` : ''}`);
+  if (input.parts.length > 0) parts.push(capitalise(input.parts.join(', ')));
   if (input.denied.length > 0) parts.push(`${input.denied.length} denied (${[...new Set(input.denied.map((d) => d.kind))].join(', ')})`);
   if (input.safeguard.reviewed > 0) parts.push(`Auto mode reviewed ${plural(input.safeguard.reviewed, 'action')}, ${input.safeguard.flagged} flagged`);
   if (input.costUsd !== null && input.costUsd > 0) parts.push(`$${input.costUsd.toFixed(2)}`);
   if (input.tokens !== null && input.tokens > 0) parts.push(`${input.tokens.toLocaleString('en-US')} tokens`);
-  if (input.childAgents > 0) parts.push(plural(input.childAgents, 'subagent'));
   return parts.join(' · ');
-}
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Groups
-
-export interface GroupPhraseInput {
-  mcpServers: string[];
-  skills: string[];
-  toolsLoaded: number;
-  editedFiles: string[];
-  createdFiles?: string[];
-  readFiles: string[];
-  searches: string[];
-  commands: string[];
-  webQueries: string[];
-  fetchedHosts: string[];
-  other: number;
-}
-
-// Phrases in category order, joined by `, `, first letter capitalised; `other` only when it is the sole category.
-export function groupSummary(input: GroupPhraseInput): string {
-  const byCategory: Record<ToolCategory, string[]> = { mcp: [], skills: [], files: [], exploration: [], commands: [], web: [], other: [] };
-  const servers = [...new Set(input.mcpServers)];
-  if (servers.length > 0) byCategory.mcp.push(servers.length <= 3 ? `used ${list(servers)}` : `used ${plural(servers.length, 'source')}`);
-  const skills = [...new Set(input.skills)];
-  if (skills.length === 1) byCategory.skills.push(`loaded ${skills[0]} skill`);
-  else if (skills.length > 1) byCategory.skills.push(`loaded ${plural(skills.length, 'skill')}`);
-  if (input.toolsLoaded > 0) byCategory.skills.push(`loaded ${plural(input.toolsLoaded, 'tool')}`);
-  const edited = [...new Set(input.editedFiles)];
-  if (edited.length > 0) byCategory.files.push(`edited ${plural(edited.length, 'file')}`);
-  const created = new Set(input.createdFiles ?? []);
-  if (created.size > 0) byCategory.files.push(`created ${plural(created.size, 'file')}`);
-  const read = [...new Set(input.readFiles)];
-  if (read.length > 0) byCategory.exploration.push(`read ${plural(read.length, 'file')}`);
-  for (const pattern of [...new Set(input.searches)]) byCategory.exploration.push(`searched for \`${pattern}\``);
-  if (input.commands.length > 0) byCategory.commands.push(`ran ${plural(input.commands.length, 'command')}`);
-  for (const query of input.webQueries) byCategory.web.push(`searched the web for ${query}`);
-  const hosts = [...new Set(input.fetchedHosts)];
-  if (hosts.length === 1) byCategory.web.push(`fetched ${hosts[0]}`);
-  else if (hosts.length > 1) byCategory.web.push(`fetched ${plural(hosts.length, 'page')}`);
-  const phrases = TOOL_CATEGORIES.filter((category) => category !== 'other').flatMap((category) => byCategory[category]);
-  if (phrases.length === 0 && input.other > 0) phrases.push(`used ${plural(input.other, 'tool')}`);
-  return phrases.length === 0 ? 'Worked' : capitalise(phrases.join(', '));
-}
-
-export interface RunningTool { toolName: string; input: unknown; elapsedMs: number }
-
-const inputString = (input: unknown, key: string): string | null => {
-  if (typeof input !== 'object' || input === null) return null;
-  const value = (input as Record<string, unknown>)[key];
-  return typeof value === 'string' ? value : null;
-};
-
-export function activeGroupLabel(running: RunningTool | null): string {
-  if (!running) return 'Thinking';
-  const { toolName, input, elapsedMs } = running;
-  const mcp = MCP_TOOL.exec(toolName);
-  if (mcp) return `Using ${mcp[1]}`;
-  switch (toolName) {
-    case 'Bash': return `Running \`${inputString(input, 'command') ?? toolName}\` for ${duration(elapsedMs)}`;
-    case 'Read': case 'NotebookRead': return `Reading ${baseName(inputString(input, 'file_path') ?? inputString(input, 'notebook_path') ?? '')}`;
-    case 'Edit': case 'MultiEdit': case 'Write': case 'NotebookEdit': return `Editing ${baseName(inputString(input, 'file_path') ?? inputString(input, 'notebook_path') ?? '')}`;
-    case 'Grep': case 'Glob': return `Searching for \`${inputString(input, 'pattern') ?? ''}\``;
-    case 'WebFetch': return `Fetching ${hostOf(inputString(input, 'url') ?? '')}`;
-    case 'WebSearch': return `Searching the web for ${inputString(input, 'query') ?? ''}`;
-    case 'Skill': return `Loading ${inputString(input, 'skill') ?? 'skill'}`;
-    default: return `Using ${toolName}`;
-  }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -187,7 +138,7 @@ export function cellLabel(input: CellLabelInput): string {
       switch (input.disposition) {
         case 'denied': return `Denied: \`${input.subject}\`${reason}`;
         case 'auto_denied': return `Auto mode blocked: \`${input.subject}\`${input.denialKind === 'automode-parsing-error' ? ' · review unreadable' : reason}`;
-        case 'stopped': return `Stopped: \`${input.subject}\`${input.denialKind === 'automode-unavailable' ? ' · auto mode unavailable' : ''}`;
+        case 'stopped': return `${stoppedLabel(input.subject, true)}${input.denialKind === 'automode-unavailable' ? ' · auto mode unavailable' : ''}`;
       }
       break;
     }
@@ -199,7 +150,7 @@ export function cellLabel(input: CellLabelInput): string {
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
       const detail = input.detail ?? null;
       switch (input.toolName) {
-        case 'Skill': return `Loaded ${detail ?? 'a'} skill`;
+        case 'Skill': return detail === null ? 'Ran a skill' : `Ran /${detail.replace(/^\//, '')}`; // UX wave U2 (decision 5): the row's words, once the view's
         case 'ToolSearch': return `Loaded ${plural(Number(detail ?? 0), 'tool')}`;
         case 'Grep': case 'Glob': return `Searched for \`${detail ?? ''}\`${input.scope ? ` in ${input.scope}` : ''}`;
         case 'WebFetch': return `Fetched ${detail ?? ''}`;
@@ -213,6 +164,21 @@ export function cellLabel(input: CellLabelInput): string {
   }
   return '';
 }
+
+// UX wave U2 (decision 23, R2): one form for every stopped call, a member of its run or a call with no result in a closed
+// turn: `Stopped: ` and the call's subject, in code marks but for a shell call's description, with no duration.
+export const stoppedLabel = (subject: string, code: boolean) => (code ? `Stopped: \`${subject}\`` : `Stopped: ${subject}`);
+
+// UX wave U2 (O-49; the U2a document, Interfaces §D): a shell call with no description reads the verb and the short form
+// of its command in code marks (`shortCommand`), and where Desktop's rule refuses the command, the verb and `a command`:
+// Desktop's shell row's three forms (`web/app/v1/c52b02f3f-C1Vcib4H.js:9084-9124` and `:10941-10954` of app 5.1231.2)
+// and MAWS's stopped one. A shell tool that runs no command line of its own (its output, kill and monitor calls) reads
+// the verb and the tool's name, as before.
+export const SHELL_CELL = {
+  command: (status: 'running' | 'done' | 'error', short: string) => `${status === 'running' ? 'Running' : status === 'error' ? 'Failed' : 'Ran'} \`${short}\``,
+  aCommand: { running: 'Running a command', done: 'Ran a command', error: 'Failed to run a command', stopped: 'Stopped a command' },
+  tool: (status: 'running' | 'done' | 'error', toolName: string) => `${status === 'running' ? 'Running' : status === 'error' ? 'Failed' : 'Ran'} ${toolName}`,
+} as const;
 
 export const shellFooter = (status: 'done' | 'error' | 'stopped', exitCode: number | null, durationMs: number) => {
   const t = duration(durationMs);
@@ -236,6 +202,17 @@ export const liveThinkingLabel = (elapsedMs: number, effort: string | null) => `
 // thinking intensity, `Tn` at :521172-521179, which colours its thinking text toward the theme's warning by `pC`'s
 // eighths, :655065-655068, through `Do` at :521347 and the colour at :521357).
 export const thinkingWarmth = (elapsedMs: number) => Math.round(Math.min(Math.max((elapsedMs - 10_000) / 10_000, 0), 1) * 8) / 8;
+
+// UX wave U2 (O-29; the U2a document, Interfaces §E and Reported 2; l4-approvals-04's words, which U1b's row reads from
+// here): what a call reads while it waits for the person's permission. A shell call, its command's first line in code
+// marks; a file change, the file's name; any other call, its tool's name (an MCP tool's `{server} · {tool}`).
+export function waitingLabel(cell: Cell): string {
+  const head = 'Waiting for approval: ';
+  if (cell.detail.kind === 'shell') return `${head}\`${cell.detail.command.trim().split(/\r?\n/, 1)[0]}\``;
+  if (cell.detail.kind === 'edit') return head + baseName(cell.detail.filePath);
+  const mcp = MCP_TOOL.exec(cell.toolName);
+  return head + (mcp ? `${mcp[1]} · ${mcp[2]}` : cell.toolName);
+}
 
 export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
 
@@ -574,14 +551,44 @@ export function artifactHeading(row: { action: 'create' | 'update'; artifactId: 
   return (row.action === 'create' ? ARTIFACT.created : ARTIFACT.updated)(name, row.version);
 }
 
+// UX wave U2 (l6-artifacts-12; the U2a document, Interfaces §D, Reported 4, 5 and 11): an artifact call names what it
+// did to which artifact, the artifact by the title a result in the loaded transcript gave it, else by the id or handle
+// the call gave, between these marks. A failed call reads `Could not …`; why it failed is the row's reason, after it.
+export const ARTIFACT_TITLE = (title: string) => `‹${title}›`;
+
+export interface ArtifactCallWords { done: (subject: string, input: Record<string, unknown>) => string; running: (subject: string) => string; failed: (subject: string) => string }
+const artifactWords = (done: string, running: string, failed: string): ArtifactCallWords => ({
+  done: (subject) => `${done} ${subject}`, running: (subject) => `${running} ${subject}`, failed: (subject) => `Could not ${failed} ${subject}`,
+});
+
+// The other plain calls, by tool; the subject is the artifact's title in its marks, the kind a description names, or
+// none
+const ARTIFACT_CALL_WORDS = {
+  artifact_read: artifactWords('Read', 'Reading', 'read'),
+  artifact_edit: artifactWords('Edited', 'Editing', 'edit'),
+  artifact_comments: artifactWords('Listed comments on', 'Listing comments on', 'list comments on'),
+  artifact_reply: artifactWords('Replied on', 'Replying on', 'reply on'),
+  artifact_resolve: {
+    done: (subject, input) => `${input.reopen === true ? 'Reopened' : 'Resolved'} a comment on ${subject}`,
+    running: (subject) => `Resolving a comment on ${subject}`, failed: (subject) => `Could not resolve a comment on ${subject}`,
+  },
+  artifact_export: artifactWords('Exported', 'Exporting', 'export'),
+  artifact_upload_asset: artifactWords('Uploaded an asset to', 'Uploading an asset to', 'upload an asset to'),
+  artifact_list_assets: artifactWords('Listed assets of', 'Listing assets of', 'list assets of'),
+  artifact_dataset: artifactWords('Bound a dataset to', 'Binding a dataset to', 'bind a dataset to'),
+  artifact_describe_type: { done: (kind) => `Described the ${kind} kind`, running: (kind) => `Describing the ${kind} kind`, failed: (kind) => `Could not describe the ${kind} kind` },
+  artifact_search: { done: () => 'Searched artifacts', running: () => 'Searching artifacts', failed: () => 'Could not search artifacts' },
+} satisfies Record<string, ArtifactCallWords>;
+
 export const ARTIFACT_CELL = {
   listing: 'Listing artifacts',
   listed: (n: number | null) => (n === null ? 'Listed artifacts' : n === 0 ? 'Listed no artifacts' : `Listed ${plural(n, 'artifact')}`),
-  listFailed: (error: string) => `Could not list artifacts: ${error}`,
+  listFailed: 'Could not list artifacts', // UX wave U2: the reason is the row's
   screenshotting: (id: string) => `Taking a screenshot of ${id}`,
   screenshot: (shot: { title: string; version?: number; revision?: number; width: number; height: number } | null, id: string) =>
     shot === null ? `Screenshot of ${id}` : `Screenshot of ${shot.title}${shot.version === undefined ? ` · revision ${shot.revision ?? 0}` : ` v${shot.version}`} (${shot.width} × ${shot.height})`,
-  screenshotFailed: (error: string) => `Could not screenshot: ${error}`,
+  screenshotFailed: (title: string) => `Could not screenshot ${title}`, // UX wave U2: the artifact's title in its marks; the reason is the row's
+  calls: ARTIFACT_CALL_WORDS, // UX wave U2
 } as const;
 // E2 end
 

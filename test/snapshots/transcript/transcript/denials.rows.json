@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:40:00.045Z",
     "autoDenied": 2,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 1,
     "endedAt": "2026-09-28T10:40:03.729Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:u-denials-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:40:00.100Z",
     "state": "completed",
     "summary": {
@@ -93,12 +99,14 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-denials-013",
+    "recordedMs": null,
     "text": "Three risky commands; each may be refused.",
     "turnId": "turn:u-denials-002"
   },
   {
     "agent": null,
     "at": "2026-09-28T10:40:00.247Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -109,7 +117,6 @@
         "reason": "Never force-push main."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": true,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -143,6 +150,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:40:03.063Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -153,7 +161,6 @@
         "reason": "Auto mode blocked this command: destructive deletion outside the workspace allowlist."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -187,6 +194,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:40:03.357Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -197,7 +205,6 @@
         "reason": "Auto mode could not parse the classifier response."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -257,6 +264,11 @@
   {
     "at": "2026-09-28T10:40:03.759Z",
     "autoDenied": 0,
+    "caption": "Ran a command (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:40:04.010Z",
     "expanded": true,
@@ -265,6 +277,9 @@
     "id": "divider:turn:u-denials-059",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command (1 stopped)"
+    ],
     "startedAt": "2026-09-28T10:40:03.814Z",
     "state": "stopped",
     "summary": {
@@ -311,6 +326,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:40:03.891Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -320,8 +336,7 @@
         "kind": "user-rejected",
         "reason": "User rejected tool use"
       },
-      "groupable": false,
-      "hidden": false,
+      "groupable": true,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -340,11 +355,12 @@
       "stdout": "User rejected tool use",
       "truncated": null
     },
+    "doneLabel": "Ran `sleep 1; echo 1` in 0s",
     "endedAt": "2026-09-28T10:40:03.975Z",
     "expanded": true,
     "id": "cell:toolu_synth_deny_4",
     "kind": "cell",
-    "label": "Stopped: `sleep 1; echo 1`",
+    "label": "Stopped: Count 1",
     "paths": [],
     "startedAt": "2026-09-28T10:40:03.891Z",
     "status": "stopped",
@@ -369,6 +385,11 @@
   {
     "at": "2026-09-28T10:40:04.040Z",
     "autoDenied": 0,
+    "caption": "Ran 2 commands (2 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:40:05.084Z",
     "expanded": true,
@@ -377,6 +398,9 @@
     "id": "divider:turn:u-denials-077",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 commands (2 stopped)"
+    ],
     "startedAt": "2026-09-28T10:40:04.095Z",
     "state": "completed",
     "summary": {
@@ -435,6 +459,7 @@
   {
     "agent": null,
     "at": "2026-09-28T10:40:04.172Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
@@ -445,7 +470,6 @@
         "reason": "Auto mode is unavailable for this session."
       },
       "groupable": false,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -464,6 +488,7 @@
       "stdout": "Auto mode is unavailable for this session.",
       "truncated": null
     },
+    "doneLabel": "Ran `./deploy.sh stage` in 0s",
     "endedAt": "2026-09-28T10:40:04.226Z",
     "expanded": true,
     "id": "cell:toolu_synth_deny_5",
@@ -477,91 +502,103 @@
     "turnId": "turn:u-denials-077"
   },
   {
-    "agent": null,
     "at": "2026-09-28T10:40:04.458Z",
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": {
-        "disposition": "stopped",
-        "interruption": false,
-        "kind": "interrupted",
-        "reason": "Tool execution interrupted."
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": {
+            "disposition": "stopped",
+            "interruption": false,
+            "kind": "interrupted",
+            "reason": "Tool execution interrupted."
+          },
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "./deploy.sh prod",
+          "cwd": null,
+          "description": "Deploy to production",
+          "exitCode": null,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "Tool execution interrupted.",
+          "truncated": null
+        },
+        "doneLabel": "Ran `./deploy.sh prod` in 0s",
+        "endedAt": "2026-09-28T10:40:04.512Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_deny_6",
+        "label": "Stopped: Deploy to production",
+        "paths": [],
+        "startedAt": "2026-09-28T10:40:04.458Z",
+        "status": "stopped",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_deny_6"
       },
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
+      {
+        "agent": null,
+        "background": false,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": {
+            "disposition": "stopped",
+            "interruption": false,
+            "kind": "cancelled",
+            "reason": "Tool call cancelled."
+          },
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "./deploy.sh verify",
+          "cwd": null,
+          "description": "Verify the deploy",
+          "exitCode": null,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "Tool call cancelled.",
+          "truncated": null
+        },
+        "doneLabel": "Ran `./deploy.sh verify` in 0s",
+        "endedAt": "2026-09-28T10:40:04.798Z",
+        "expanded": true,
+        "id": "cell:toolu_synth_deny_7",
+        "label": "Stopped: Verify the deploy",
+        "paths": [],
+        "startedAt": "2026-09-28T10:40:04.744Z",
+        "status": "stopped",
+        "toolName": "Bash",
+        "toolUseId": "toolu_synth_deny_7"
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "./deploy.sh prod",
-      "cwd": null,
-      "description": "Deploy to production",
-      "exitCode": null,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "Tool execution interrupted.",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:40:04.512Z",
     "expanded": true,
-    "id": "cell:toolu_synth_deny_6",
-    "kind": "cell",
-    "label": "Stopped: `./deploy.sh prod`",
-    "paths": [],
-    "startedAt": "2026-09-28T10:40:04.458Z",
-    "status": "stopped",
-    "toolName": "Bash",
-    "toolUseId": "toolu_synth_deny_6",
-    "turnId": "turn:u-denials-077"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T10:40:04.744Z",
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": {
-        "disposition": "stopped",
-        "interruption": false,
-        "kind": "cancelled",
-        "reason": "Tool call cancelled."
-      },
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "./deploy.sh verify",
-      "cwd": null,
-      "description": "Verify the deploy",
-      "exitCode": null,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "Tool call cancelled.",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:40:04.798Z",
-    "expanded": true,
-    "id": "cell:toolu_synth_deny_7",
-    "kind": "cell",
-    "label": "Stopped: `./deploy.sh verify`",
-    "paths": [],
-    "startedAt": "2026-09-28T10:40:04.744Z",
-    "status": "stopped",
-    "toolName": "Bash",
-    "toolUseId": "toolu_synth_deny_7",
+    "icon": "commands",
+    "id": "group:cell:toolu_synth_deny_6",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran 2 commands (2 stopped)",
     "turnId": "turn:u-denials-077"
   },
   {

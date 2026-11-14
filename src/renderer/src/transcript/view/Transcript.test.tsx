@@ -450,8 +450,9 @@ describe('Transcript', () => {
     expect(place()).toEqual(before);
   });
 
-  // A turn the owner did not start opens with its divider (no user row), a peer turn as much as an engine turn.
-  it('a revealed peer turn without a user row says Not in context on its divider', async () => {
+  // A turn the owner did not start has no user row, a peer turn as much as an engine turn. UX wave U2 (O-15): one that only
+  // answers has no divider either, so the mark goes on the turn's first drawn row, here its answer.
+  it('a revealed peer turn without a user row says Not in context on its first drawn row', async () => {
     const b = builder();
     b.turn('u1');
     b.text('m1', 0, 'One');
@@ -468,7 +469,7 @@ describe('Transcript', () => {
     fireEvent.click(within(document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!).getByRole('button', { name: 'Show' }));
     await waitFor(() => expect(document.querySelectorAll('[data-muted]').length).toBeGreaterThan(0));
     const labelled = [...document.querySelectorAll<HTMLElement>('[data-muted]')].filter((row) => row.textContent?.includes('Not in context')).map((row) => row.dataset.kind);
-    expect(labelled).toEqual(['user', 'divider']);
+    expect(labelled).toEqual(['user', 'assistant_text']);
   });
 });
 

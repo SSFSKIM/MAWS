@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T19:40:17.222Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T19:40:18.549Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:1884e142-0cfb-41d1-ab66-0a92c8421d13",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T19:40:17.228Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "0ea9ca74-d046-4125-856c-6d3990a8142a",
+    "recordedMs": null,
     "text": "The user asked me to remember the word \"MANGO\" at the start of our conversation. Now they're asking me to recall it and reply with just that word.\n\nThis is a straightforward test of whether I retained the information from earlier in the conversation.\n\nThe answer is: MANGO",
     "turnId": "turn:1884e142-0cfb-41d1-ab66-0a92c8421d13"
   },

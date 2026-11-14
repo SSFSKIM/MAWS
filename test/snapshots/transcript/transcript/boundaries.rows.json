@@ -56,6 +56,11 @@
   {
     "at": "2026-09-28T10:00:00.253Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:00:02.080Z",
     "expanded": true,
@@ -64,6 +69,7 @@
     "id": "divider:turn:u-boundaries-016",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:00:00.308Z",
     "state": "completed",
     "summary": {

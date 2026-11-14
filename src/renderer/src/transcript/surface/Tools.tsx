@@ -11,7 +11,7 @@ export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = 
   const { appSessionId, state, turn } = useTranscriptSurface({ turnId });
   const attached = useSurfaceAttached(appSessionId);
   const hooked = useSurfaceHooked(appSessionId, 'ToolUse');
-  const inputs = toolInputs(cell, turn, state?.ui.revealed);
+  const inputs = toolInputs(cell, turn, state?.ui.revealed, state);
   // A merged read remains MAWS's one merged row unless a ToolUse hook owns the calls. When hook knowledge is not
   // available, ask each call but give only the first the merged native; a later hooked answer unfolds the calls.
   if (!inputs.length || !attached || hooked === false) return <CellLine cell={cell} turnId={turnId} focusable={focusable} renderDetail={standalone && inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} /> : undefined} />;

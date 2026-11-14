@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T19:00:55.697Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:00:59.165Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:6673a9a8-c37d-486e-a345-836c51925f70",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T19:00:55.704Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "e09da185-dddf-452c-a7a5-e0245adb0b5d",
+    "recordedMs": null,
     "text": "The user is asking me to call the AskUserQuestion tool with a simple question \"Red or Blue?\" with two options. They want me to:\n1. Call the tool once with that question\n2. If I get an answer, reply with only the chosen color\n3. If the question is declined or I get no answer, reply with only \"SKIPPED\"\n\nLet me call the tool now.",
     "turnId": "turn:6673a9a8-c37d-486e-a345-836c51925f70"
   },
@@ -112,6 +119,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "bb9e064b-8da1-4954-afa6-937e3f96502f",
+    "recordedMs": null,
     "text": "The user denied the question. According to the instructions, if the question was declined or I got no answer, I should not ask again and reply with only the word SKIPPED.",
     "turnId": "turn:6673a9a8-c37d-486e-a345-836c51925f70"
   },

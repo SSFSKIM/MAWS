@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T03:07:28.684Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws · echo_file",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T03:07:32.971Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws · echo_file"
+    ],
     "startedAt": "2026-10-06T03:07:28.691Z",
     "state": "completed",
     "summary": {
@@ -68,99 +77,196 @@
     "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
   },
   {
-    "agent": null,
-    "at": "2026-10-06T03:07:30.515Z",
-    "category": "skills",
-    "classification": {
-      "category": "skills",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "max_results": 1,
-        "query": "select:mcp__maws__echo_file"
+    "at": "2026-10-06T03:07:29.405Z",
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 690,
+          "kind": "thinking",
+          "recordedMs": 690,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:29.405Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFDvPDhWdFRdgbhYhEW:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:29.405Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
       },
-      "isError": false,
-      "kind": "generic",
-      "result": [
-        {
-          "tool_name": "mcp__maws__echo_file",
-          "type": "tool_reference"
-        }
-      ],
-      "spill": null,
-      "structured": {
-        "matches": [
-          "mcp__maws__echo_file"
-        ],
-        "query": "select:mcp__maws__echo_file",
-        "total_deferred_tools": 18
+      {
+        "agent": null,
+        "background": false,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:mcp__maws__echo_file"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "mcp__maws__echo_file",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "mcp__maws__echo_file"
+            ],
+            "query": "select:mcp__maws__echo_file",
+            "total_deferred_tools": 18
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T03:07:30.527Z",
+        "expanded": true,
+        "id": "cell:toolu_01Uw8rwr5JU9WH7anHfE4mEq",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:30.515Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_01Uw8rwr5JU9WH7anHfE4mEq"
       },
-      "truncated": null
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 501,
+          "kind": "thinking",
+          "recordedMs": 501,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:31.025Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFE3Ura9Vwj7YWK1ei2:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:31.025Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "mcp",
+        "classification": {
+          "category": "mcp",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": true,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "path": "probe.txt"
+          },
+          "kind": "mcp",
+          "result": [
+            {
+              "text": "MCP_ECHO_7731\n",
+              "type": "text"
+            }
+          ],
+          "server": "maws",
+          "spill": null,
+          "structured": [
+            {
+              "text": "MCP_ECHO_7731\n",
+              "type": "text"
+            }
+          ],
+          "tool": "echo_file"
+        },
+        "endedAt": "2026-10-06T03:07:31.741Z",
+        "expanded": true,
+        "id": "cell:toolu_01EThqbUucMRpM9sLzabT5Vs",
+        "label": "Used maws · echo_file",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:31.732Z",
+        "status": "done",
+        "toolName": "mcp__maws__echo_file",
+        "toolUseId": "toolu_01EThqbUucMRpM9sLzabT5Vs"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 206,
+          "kind": "thinking",
+          "recordedMs": 206,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:32.551Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFE9BQYsu2VtLEDAuDd:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:32.551Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "endedAt": "2026-10-06T03:07:30.527Z",
     "expanded": true,
-    "id": "cell:toolu_01Uw8rwr5JU9WH7anHfE4mEq",
-    "kind": "cell",
-    "label": "Loaded 1 tool",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:30.515Z",
-    "status": "done",
-    "toolName": "ToolSearch",
-    "toolUseId": "toolu_01Uw8rwr5JU9WH7anHfE4mEq",
-    "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-06T03:07:31.732Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "path": "probe.txt"
-      },
-      "kind": "mcp",
-      "result": [
-        {
-          "text": "MCP_ECHO_7731\n",
-          "type": "text"
-        }
-      ],
-      "server": "maws",
-      "spill": null,
-      "structured": [
-        {
-          "text": "MCP_ECHO_7731\n",
-          "type": "text"
-        }
-      ],
-      "tool": "echo_file"
-    },
-    "endedAt": "2026-10-06T03:07:31.741Z",
-    "expanded": true,
-    "id": "cell:toolu_01EThqbUucMRpM9sLzabT5Vs",
-    "kind": "cell",
-    "label": "Used maws · echo_file",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:31.732Z",
-    "status": "done",
-    "toolName": "mcp__maws__echo_file",
-    "toolUseId": "toolu_01EThqbUucMRpM9sLzabT5Vs",
+    "icon": "mcp",
+    "id": "group:cell:toolu_01Uw8rwr5JU9WH7anHfE4mEq",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Loaded 1 tool, used maws · echo_file",
     "turnId": "turn:e7bcbbba-ef90-4bcd-8a20-732d7cee58ad"
   },
   {
@@ -192,6 +298,11 @@
   {
     "at": "2026-10-06T03:07:33.481Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws · echo_upper",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T03:07:37.170Z",
     "expanded": true,
@@ -200,6 +311,10 @@
     "id": "divider:turn:6c078ad4-88df-447c-a13b-ba0417a054d0",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws · echo_upper"
+    ],
     "startedAt": "2026-10-06T03:07:33.482Z",
     "state": "completed",
     "summary": {
@@ -237,99 +352,196 @@
     "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
   },
   {
-    "agent": null,
-    "at": "2026-10-06T03:07:35.097Z",
-    "category": "skills",
-    "classification": {
-      "category": "skills",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "max_results": 1,
-        "query": "select:mcp__maws__echo_upper"
+    "at": "2026-10-06T03:07:34.006Z",
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 703,
+          "kind": "thinking",
+          "recordedMs": 703,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:34.006Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEGDpceP5f5vyeFgwG:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:34.006Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
       },
-      "isError": false,
-      "kind": "generic",
-      "result": [
-        {
-          "tool_name": "mcp__maws__echo_upper",
-          "type": "tool_reference"
-        }
-      ],
-      "spill": null,
-      "structured": {
-        "matches": [
-          "mcp__maws__echo_upper"
-        ],
-        "query": "select:mcp__maws__echo_upper",
-        "total_deferred_tools": 19
+      {
+        "agent": null,
+        "background": false,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:mcp__maws__echo_upper"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "mcp__maws__echo_upper",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "mcp__maws__echo_upper"
+            ],
+            "query": "select:mcp__maws__echo_upper",
+            "total_deferred_tools": 19
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T03:07:35.103Z",
+        "expanded": true,
+        "id": "cell:toolu_016rCwqxYV7GDfovU92nk8Za",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:35.097Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_016rCwqxYV7GDfovU92nk8Za"
       },
-      "truncated": null
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 352,
+          "kind": "thinking",
+          "recordedMs": 352,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:35.739Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEPeZEtGbDYpQ92c2J:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:35.739Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "mcp",
+        "classification": {
+          "category": "mcp",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": true,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "text": "quiet"
+          },
+          "kind": "mcp",
+          "result": [
+            {
+              "text": "QUIET",
+              "type": "text"
+            }
+          ],
+          "server": "maws",
+          "spill": null,
+          "structured": [
+            {
+              "text": "QUIET",
+              "type": "text"
+            }
+          ],
+          "tool": "echo_upper"
+        },
+        "endedAt": "2026-10-06T03:07:36.280Z",
+        "expanded": true,
+        "id": "cell:toolu_01RfCnFUEHK4LDECmY3yNDQY",
+        "label": "Used maws · echo_upper",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:36.271Z",
+        "status": "done",
+        "toolName": "mcp__maws__echo_upper",
+        "toolUseId": "toolu_01RfCnFUEHK4LDECmY3yNDQY"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 206,
+          "kind": "thinking",
+          "recordedMs": 206,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:36.959Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEU3DmCVe6wgE4g8wy:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:36.959Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "endedAt": "2026-10-06T03:07:35.103Z",
     "expanded": true,
-    "id": "cell:toolu_016rCwqxYV7GDfovU92nk8Za",
-    "kind": "cell",
-    "label": "Loaded 1 tool",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:35.097Z",
-    "status": "done",
-    "toolName": "ToolSearch",
-    "toolUseId": "toolu_016rCwqxYV7GDfovU92nk8Za",
-    "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-06T03:07:36.271Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "text": "quiet"
-      },
-      "kind": "mcp",
-      "result": [
-        {
-          "text": "QUIET",
-          "type": "text"
-        }
-      ],
-      "server": "maws",
-      "spill": null,
-      "structured": [
-        {
-          "text": "QUIET",
-          "type": "text"
-        }
-      ],
-      "tool": "echo_upper"
-    },
-    "endedAt": "2026-10-06T03:07:36.280Z",
-    "expanded": true,
-    "id": "cell:toolu_01RfCnFUEHK4LDECmY3yNDQY",
-    "kind": "cell",
-    "label": "Used maws · echo_upper",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:36.271Z",
-    "status": "done",
-    "toolName": "mcp__maws__echo_upper",
-    "toolUseId": "toolu_01RfCnFUEHK4LDECmY3yNDQY",
+    "icon": "mcp",
+    "id": "group:cell:toolu_016rCwqxYV7GDfovU92nk8Za",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Loaded 1 tool, used maws · echo_upper",
     "turnId": "turn:6c078ad4-88df-447c-a13b-ba0417a054d0"
   },
   {
@@ -361,6 +573,11 @@
   {
     "at": "2026-10-06T03:07:37.685Z",
     "autoDenied": 0,
+    "caption": "Loaded 1 tool, used maws2 · shout",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T03:07:41.191Z",
     "expanded": true,
@@ -369,6 +586,10 @@
     "id": "divider:turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "loaded 1 tool",
+      "used maws2 · shout"
+    ],
     "startedAt": "2026-10-06T03:07:37.686Z",
     "state": "completed",
     "summary": {
@@ -406,99 +627,196 @@
     "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
   },
   {
-    "agent": null,
-    "at": "2026-10-06T03:07:39.225Z",
-    "category": "skills",
-    "classification": {
-      "category": "skills",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "max_results": 1,
-        "query": "select:mcp__maws2__shout"
+    "at": "2026-10-06T03:07:38.328Z",
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 520,
+          "kind": "thinking",
+          "recordedMs": 520,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:38.328Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEaCoYG5GihAg4ErFr:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:38.328Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
       },
-      "isError": false,
-      "kind": "generic",
-      "result": [
-        {
-          "tool_name": "mcp__maws2__shout",
-          "type": "tool_reference"
-        }
-      ],
-      "spill": null,
-      "structured": {
-        "matches": [
-          "mcp__maws2__shout"
-        ],
-        "query": "select:mcp__maws2__shout",
-        "total_deferred_tools": 20
+      {
+        "agent": null,
+        "background": false,
+        "category": "skills",
+        "classification": {
+          "category": "skills",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "max_results": 1,
+            "query": "select:mcp__maws2__shout"
+          },
+          "isError": false,
+          "kind": "generic",
+          "result": [
+            {
+              "tool_name": "mcp__maws2__shout",
+              "type": "tool_reference"
+            }
+          ],
+          "spill": null,
+          "structured": {
+            "matches": [
+              "mcp__maws2__shout"
+            ],
+            "query": "select:mcp__maws2__shout",
+            "total_deferred_tools": 20
+          },
+          "truncated": null
+        },
+        "endedAt": "2026-10-06T03:07:39.228Z",
+        "expanded": true,
+        "id": "cell:toolu_016eqiy7CSc6umje5Lzdtgoq",
+        "label": "Loaded 1 tool",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:39.225Z",
+        "status": "done",
+        "toolName": "ToolSearch",
+        "toolUseId": "toolu_016eqiy7CSc6umje5Lzdtgoq"
       },
-      "truncated": null
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 301,
+          "kind": "thinking",
+          "recordedMs": 301,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:39.875Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEgvsAds8DcZk3be1w:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:39.875Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "mcp",
+        "classification": {
+          "category": "mcp",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": true,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "input": {
+            "text": "hello"
+          },
+          "kind": "mcp",
+          "result": [
+            {
+              "text": "hello!!!",
+              "type": "text"
+            }
+          ],
+          "server": "maws2",
+          "spill": null,
+          "structured": [
+            {
+              "text": "hello!!!",
+              "type": "text"
+            }
+          ],
+          "tool": "shout"
+        },
+        "endedAt": "2026-10-06T03:07:40.342Z",
+        "expanded": true,
+        "id": "cell:toolu_013SDtbFMEGndEHwGZjCQJNU",
+        "label": "Used maws2 · shout",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:40.335Z",
+        "status": "done",
+        "toolName": "mcp__maws2__shout",
+        "toolUseId": "toolu_013SDtbFMEGndEHwGZjCQJNU"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 105,
+          "kind": "thinking",
+          "recordedMs": 105,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T03:07:41.069Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfkFEmZvkWkY1Uo542FXa:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T03:07:41.069Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "endedAt": "2026-10-06T03:07:39.228Z",
     "expanded": true,
-    "id": "cell:toolu_016eqiy7CSc6umje5Lzdtgoq",
-    "kind": "cell",
-    "label": "Loaded 1 tool",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:39.225Z",
-    "status": "done",
-    "toolName": "ToolSearch",
-    "toolUseId": "toolu_016eqiy7CSc6umje5Lzdtgoq",
-    "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
-  },
-  {
-    "agent": null,
-    "at": "2026-10-06T03:07:40.335Z",
-    "category": "mcp",
-    "classification": {
-      "category": "mcp",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "input": {
-        "text": "hello"
-      },
-      "kind": "mcp",
-      "result": [
-        {
-          "text": "hello!!!",
-          "type": "text"
-        }
-      ],
-      "server": "maws2",
-      "spill": null,
-      "structured": [
-        {
-          "text": "hello!!!",
-          "type": "text"
-        }
-      ],
-      "tool": "shout"
-    },
-    "endedAt": "2026-10-06T03:07:40.342Z",
-    "expanded": true,
-    "id": "cell:toolu_013SDtbFMEGndEHwGZjCQJNU",
-    "kind": "cell",
-    "label": "Used maws2 · shout",
-    "paths": [],
-    "startedAt": "2026-10-06T03:07:40.335Z",
-    "status": "done",
-    "toolName": "mcp__maws2__shout",
-    "toolUseId": "toolu_013SDtbFMEGndEHwGZjCQJNU",
+    "icon": "mcp",
+    "id": "group:cell:toolu_016eqiy7CSc6umje5Lzdtgoq",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Loaded 1 tool, used maws2 · shout",
     "turnId": "turn:4b0468ce-8b8f-4460-9d4f-15e67987bf95"
   },
   {

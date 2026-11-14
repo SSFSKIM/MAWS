@@ -23,6 +23,11 @@
   {
     "at": "2026-09-30T09:14:23.573Z",
     "autoDenied": 0,
+    "caption": "Ran an agent, updated todos, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-30T09:14:35.285Z",
     "expanded": true,
@@ -31,6 +36,11 @@
     "id": "divider:turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent",
+      "updated todos",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-09-30T09:14:23.578Z",
     "state": "completed",
     "summary": {
@@ -88,17 +98,16 @@
     "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
   },
   {
-    "activeLabel": null,
     "at": "2026-09-30T09:14:26.861Z",
     "cells": [
       {
         "agent": null,
+        "background": false,
         "category": "skills",
         "classification": {
           "category": "skills",
           "denial": null,
           "groupable": true,
-          "hidden": false,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": true,
@@ -139,12 +148,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -179,12 +188,12 @@
       },
       {
         "agent": null,
+        "background": false,
         "category": "other",
         "classification": {
           "category": "other",
           "denial": null,
           "groupable": true,
-          "hidden": true,
           "humanDecision": false,
           "safeguard": "not_evaluated",
           "startsGroup": false,
@@ -218,12 +227,16 @@
         "toolUseId": "toolu_01Q4we4H3GQWt6nfHK7Lx8Mc"
       }
     ],
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "expanded": true,
     "icon": "skills",
     "id": "group:cell:toolu_01N1QyKDMdHB2wutXKxiPQzC",
     "kind": "group",
     "state": "completed",
-    "summary": "Loaded 1 tool",
+    "summary": "Updated todos, loaded 1 tool",
     "turnId": "turn:1d46edae-31c0-471e-b7b4-9c8b3c93acf1"
   },
   {

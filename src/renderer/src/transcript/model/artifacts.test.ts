@@ -1,7 +1,7 @@
 // E2 (M5, Design §9): the artifact tools in the transcript through the public reducer-to-rows pipeline. An
 // `artifact_create` or `artifact_update` call is an artifact row, opened from the call, filled from its result (the first
-// JSON text block) and refined by `maws.delivery.artifact`; `artifact_list` and `artifact_screenshot` are standalone
-// cells whose labels read their results. The recorded `p1-maws-artifacts` journal pins the same rows; the disk path
+// JSON text block) and refined by `maws.delivery.artifact`; `artifact_list` and `artifact_screenshot` are cells whose
+// labels read their results (UX wave U2, l6-artifacts-12: a listing is a step of its run, a screenshot a cell of its own). The recorded `p1-maws-artifacts` journal pins the same rows; the disk path
 // (no events) is pinned over its exported transcript in disk.test.ts.
 import { describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -19,6 +19,7 @@ type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const ofKind = <K extends Row['kind']>(rows: Row[], kind: K) => rows.filter((row): row is RowOf<K> => row.kind === kind);
 const expandedRows = (events: Builder['events']) => rowsOf(withAllExpanded(applyEvents(createState(null, null), events)));
 const foldedRows = (events: Builder['events']) => rowsOf(applyEvents(createState(null, null), events));
+const allCells = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
 
 const CREATE = 'mcp__maws__artifact_create';
 const UPDATE = 'mcp__maws__artifact_update';
@@ -186,10 +187,10 @@ describe('the artifact row of a publish (P3-A)', () => {
     expect(artifactHeading(refused!)).toBe('Could not register artifact dash: changed by someone else since your read: index.html');
   });
 
-  it('classes the other artifact tools as standalone cells, and the retired update still as a row', () => {
+  it('classes the other artifact tools as cells that join their run (UX wave U2, l6-artifacts-12), and the retired update still as a row', () => {
     for (const name of ['artifact_read', 'artifact_describe_type', 'artifact_upload_asset', 'artifact_list_assets', 'artifact_export']) {
       expect(presentationOf(`mcp__maws__${name}`), name).toBe('cell');
-      expect(tableRowOf(`mcp__maws__${name}`), name).toMatchObject({ groupable: false });
+      expect(tableRowOf(`mcp__maws__${name}`), name).toMatchObject({ groupable: true });
     }
     expect(presentationOf(UPDATE)).toBe('artifact');
     expect(presentationOf(PUBLISH)).toBe('artifact');
@@ -200,14 +201,14 @@ describe('the artifact row of a publish (P3-A)', () => {
     b.turn('u1');
     b.toolUse('toolu_l', LIST, {});
     b.result('toolu_l', json({ status: 'listed', artifacts: [{ id: DELIVERABLE, handle: 'dash', kind: 'html', title: 'Dashboard', revision: 2, updatedAt: '2026-10-13T00:00:00.000Z', lastEditor: null }] }));
-    expect(ofKind(expandedRows(b.events), 'cell').find((cell) => cell.toolUseId === 'toolu_l')?.label).toBe('Listed 1 artifact');
+    expect(allCells(expandedRows(b.events)).find((cell) => cell.toolUseId === 'toolu_l')?.label).toBe('Listed 1 artifact');
   });
 });
 
 describe('the artifact_list and artifact_screenshot cells', () => {
-  const cells = (b: Builder) => ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.toolUseId, cell.status, cell.label, cell.category, cell.classification.groupable]);
+  const cells = (b: Builder) => allCells(expandedRows(b.events)).map((cell) => [cell.toolUseId, cell.status, cell.label, cell.category, cell.classification.groupable]);
 
-  it('read what the result says, or why it failed; running before it', () => {
+  it('read what the result says, or that it failed (why is the row’s reason); running before it', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('toolu_l1', LIST, {});
@@ -221,13 +222,14 @@ describe('the artifact_list and artifact_screenshot cells', () => {
     b.toolUse('toolu_s3', SCREENSHOT, { id: 'dash' });
     b.toolUse('toolu_l3', LIST, {});
     expect(cells(b)).toEqual([
-      ['toolu_l1', 'done', 'Listed no artifacts', 'other', false],
-      ['toolu_l2', 'done', 'Listed 2 artifacts', 'other', false],
+      ['toolu_l1', 'done', 'Listed no artifacts', 'other', true],
+      ['toolu_l2', 'done', 'Listed 2 artifacts', 'other', true],
       ['toolu_s1', 'done', 'Screenshot of Dashboard v2 (1280 × 800)', 'other', false],
-      ['toolu_s2', 'error', 'Could not screenshot: no artifact "gone" in this session', 'other', false],
+      ['toolu_s2', 'error', 'Could not screenshot ‹gone›', 'other', false], // UX wave U2: its reason is the row's (`error`)
       ['toolu_s3', 'running', 'Taking a screenshot of dash', 'other', false],
-      ['toolu_l3', 'running', 'Listing artifacts', 'other', false],
+      ['toolu_l3', 'running', 'Listing artifacts', 'other', true],
     ]);
+    expect(allCells(expandedRows(b.events)).find((cell) => cell.toolUseId === 'toolu_s2')?.error).toBe('no artifact "gone" in this session');
   });
 });
 

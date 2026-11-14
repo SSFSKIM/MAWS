@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T08:19:54.356Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T08:19:55.404Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T08:19:54.370Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "d46f6253-5ba8-442d-84eb-37f97c4afd54",
+    "recordedMs": null,
     "text": "The user asked me to remember the word \"MANGO\" in the previous message. They're now asking me to reply with just that word.",
     "turnId": "turn:e0b15a6d-10ba-4966-a896-af9a08dda7c0"
   },

@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T19:00:51.480Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:00:52.474Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:fa4d0234-8ffe-440f-b32b-3ec27cea7416",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-29T19:00:51.487Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "1f2fe5a1-f531-498f-a3d2-9612c2096f6c",
+    "recordedMs": null,
     "text": "The user is asking me to reply with exactly \"OK\". This is a simple request that requires no tools or analysis. I should just respond with \"OK\".",
     "turnId": "turn:fa4d0234-8ffe-440f-b32b-3ec27cea7416"
   },
@@ -106,6 +113,11 @@
   {
     "at": "2026-09-29T19:00:52.483Z",
     "autoDenied": 0,
+    "caption": "Read one.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T19:00:55.082Z",
     "expanded": true,
@@ -114,6 +126,9 @@
     "id": "divider:turn:66cfb780-b906-4f92-af32-02b7c17fec7b",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read one.txt"
+    ],
     "startedAt": "2026-09-29T19:00:52.486Z",
     "state": "completed",
     "summary": {
@@ -157,18 +172,19 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "6f8705f8-0528-4b2f-82a2-6790ab6ae475",
+    "recordedMs": null,
     "text": "The user wants me to:\n1. Use the Read tool to read a file called \"one.txt\"\n2. Reply with only the single word it contains\n\nLet me read the file first.",
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"
   },
   {
     "agent": null,
     "at": "2026-09-29T19:00:54.084Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -206,6 +222,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "85514452-2e7d-42ea-a8f2-5df22a87dc04",
+    "recordedMs": null,
     "text": "The file contains the word \"ONE\" on line 1. The user asked me to reply with only the single word it contains. So I should reply with just \"ONE\".",
     "turnId": "turn:66cfb780-b906-4f92-af32-02b7c17fec7b"
   },

@@ -23,7 +23,12 @@
   {
     "at": "2026-09-28T12:00:00.010Z",
     "autoDenied": 0,
+    "caption": "Ran a command (1 stopped)",
     "cause": "crash",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T12:00:05.001Z",
     "expanded": true,
@@ -32,6 +37,9 @@
     "id": "divider:turn:u-exit-1",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command (1 stopped)"
+    ],
     "startedAt": "2026-09-28T12:00:00.000Z",
     "state": "stopped",
     "summary": {
@@ -65,12 +73,12 @@
   {
     "agent": null,
     "at": "2026-09-28T12:00:01.010Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -89,11 +97,12 @@
       "stdout": "",
       "truncated": null
     },
+    "doneLabel": "Ran `./release.sh` in 3s",
     "endedAt": null,
     "expanded": true,
     "id": "cell:toolu_exit_1",
     "kind": "cell",
-    "label": "Stopped `./release.sh` after 3s",
+    "label": "Stopped: Run the release script",
     "paths": [],
     "startedAt": "2026-09-28T12:00:01.010Z",
     "status": "stopped",

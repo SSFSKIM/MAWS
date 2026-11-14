@@ -27,7 +27,6 @@ export type ToolCategory = (typeof TOOL_CATEGORIES)[number];
 // Attached to every tool event at derivation time (X3's five fields, plus the two X1 facts the renderer shows in detail).
 export interface ToolClassification {
   groupable: boolean; // false ⇒ standalone: the cell is a row of its own and breaks the group run
-  hidden: boolean; // true ⇒ the cell exists in the expanded group but contributes no summary phrase (bookkeeping tools)
   category: ToolCategory;
   denial: { kind: DenialKind; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean; reason: string | null } | null; // disposition from the denial table under Derivation; interruption: user-rejected inside an aborted turn
   subagentLifecycle: 'start' | 'progress' | 'finish' | 'message' | null;
@@ -78,12 +77,20 @@ export type Row = RowBase &
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' | 'message' /* E11: present when the engine, not the reader, stopped it; UX wave U4a: `message`, a message sent now ended it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
-        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
+        toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | RowId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
         // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
         // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)
         opener?: { class: Arrival['class']; line: string };
+        // UX wave U2 (O-15; the U2a document, Interfaces §B): what the turn did, by caption.ts's builder over every step of
+        // the turn, ordered by what changed and capped (`''` while the turn runs and for a turn with no step); every part's
+        // text, uncapped (empty while it runs), for the popover; and the lines the main loop's finished edits added and
+        // removed, for every turn, a running one included
+        caption: string;
+        parts: string[];
+        counts: ChangedLines;
       }
-    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
+    // UX wave U2 (O-29; Interfaces §B): `summary` is the run's caption (caption.ts), `counts` its finished edits' lines
+    | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
     | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number } // overflow: agents beyond the four glyphs
@@ -92,7 +99,7 @@ export type Row = RowBase &
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
         body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }
-    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
+    | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; recordedMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
     | { kind: 'question'; toolUseId: ToolUseId; questions: Question[]; answers: Record<string, string> | null; error: string | null } // E1 (A-17): error, the engine's refusal of the call, tags stripped
     | {
@@ -240,6 +247,10 @@ export interface Attachment {
   mediaType: string | null;
   text: string | null; // the content of a `text` attachment (pasted content, *Pasted content* under Derivation), null otherwise
 }
+export interface ChangedLines {
+  added: number;
+  removed: number;
+}
 export interface ChangedFile {
   path: string;
   change: 'create' | 'update' | 'delete';
@@ -277,6 +288,15 @@ export interface Cell {
   detail: CellDetail;
   expanded: boolean;
   agent: SubagentRef | null; // set when rendered inside a child transcript (variant 'child')
+  // UX wave U2 (decision 20): the call has its result and its recorded status still reads running, a call moved to the
+  // background; a mod's draw-time status does not change it
+  background: boolean;
+  // UX wave U2 (Interfaces §B): what the call's row reads in its done form, where its own label reads another (a stopped
+  // call's `Stopped: …`, a failed artifact call's `Could not …`): the words a caption gives a call of no kind
+  doneLabel?: string;
+  // UX wave U2 (decision 13): why a failed call failed, the first line of its error, which its row draws after the label;
+  // only on a cell whose status is `error` (a refused call says why in its label, a stopped one did not fail)
+  error?: string;
 }
 
 export type CellDetail =
@@ -291,7 +311,7 @@ export type CellDetail =
   | { kind: 'web'; url: string | null; query: string | null; output: string; truncated: Truncation | null }
   | { kind: 'mcp'; server: string; tool: string; input: unknown; result: string | ContentBlock[]; structured: unknown; spill: Spill | null }
   | { kind: 'image'; images: { dataUrl: string; mediaType: string; alt: string | null }[]; caption: string | null }
-  | { kind: 'thinking'; text: string; durationMs: number | null }
+  | { kind: 'thinking'; text: string; durationMs: number | null; recordedMs: number | null }
   | { kind: 'generic'; input: unknown; result: string | ContentBlock[]; structured: unknown; isError: boolean; spill: Spill | null; truncated: Truncation | null };
 
 export interface Hunk {
@@ -317,7 +337,7 @@ export interface TurnSummary {
   durationMs: number | null;
   toolCalls: number;
   byCategory: Record<ToolCategory, number>;
-  denials: { kind: DenialKind; cellId: CellId; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean }[]; // `denied` counts disposition 'denied', `autoDenied` counts 'auto_denied'; 'stopped' entries are listed and counted in neither
+  denials: { kind: DenialKind; cellId: CellId | RowId; disposition: 'denied' | 'auto_denied' | 'stopped'; interruption: boolean }[]; // `denied` counts disposition 'denied', `autoDenied` counts 'auto_denied'; 'stopped' entries are listed and counted in neither. `cellId` is a refused sent message's row id where the refusal is that row's (the architect's ruling of 2026-11-13: a fold never hides a denial)
   autoDenied: number;
   safeguard: { reviewed: number; flagged: number; notEvaluated: number }; // shown here and in cell detail only (§19)
   costUsd: number | null;

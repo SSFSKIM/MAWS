@@ -83,10 +83,11 @@ describe("the ask mod's answer", () => {
     const { rows, expanded, report } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
     expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
-    // The turn the answer opened reads as one the session continued ("Continued for …").
-    expect(dividers(rows)).toEqual(['engine']);
-    // the line heads the turn it opened, which its divider names (UX wave U3, the U3a document's head rule)
-    expect(rows.find((r) => r.kind === 'divider')).toMatchObject({ turnId: expanded.find((r) => r.kind === 'notice')?.turnId, opener: { class: 'answer', line: NOTICE.answered('Color → Blue · Season → Summer') } });
+    // UX wave U2 (O-15; the U2a document's C5): the turn the answer opened only answers, so it has no line; the answer's
+    // line heads it, in view (UX wave U3, the U3a document's head rule)
+    expect(dividers(rows)).toEqual([]);
+    const answered = expanded.find((r) => r.kind === 'notice')!;
+    expect(rows.find((r) => r.kind !== 'time' && r.turnId === answered.turnId)).toMatchObject({ id: answered.id });
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
     // The report folds the answered turn's work and keeps the line, with the question's row: until U1b fills that row
     // with the answer, an answer's notice stays through a fold (the architect's ruling of 2026-11-13), so the report
@@ -137,7 +138,7 @@ describe("the ask mod's answer", () => {
 // message:` under origin `sminos`; a machine not yet rolled writes the old names, and a session resumed across the roll
 // holds a call under one name and its answer under the other. Every one is read, for good.
 describe("the ask mod's answer under either plugin's name", () => {
-  it.each(['doperpowers', 'sminos'] as const)('%s: the idle answer draws its line by the call’s headers, in a turn the session continued', async (plugin) => {
+  it.each(['doperpowers', 'sminos'] as const)('%s: the idle answer draws its line by the call’s headers, in a turn the session continued, which only answers', async (plugin) => {
     const c = new Chain('c4a10000', plugin);
     c.prompt('Pick my colors, then write the palette.');
     c.asyncAsk('toolu_01RZQ8nn9jVyPaqznEmsoXMr', QUESTIONS);
@@ -151,7 +152,7 @@ describe("the ask mod's answer under either plugin's name", () => {
     const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
     expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
-    expect(dividers(rows)).toEqual(['engine']);
+    expect(dividers(rows)).toEqual([]); // UX wave U2 (O-15): the turn the answer opened only answers: no line
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
   });
 

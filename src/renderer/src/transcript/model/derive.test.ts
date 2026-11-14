@@ -4,11 +4,14 @@ import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
 import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
-import { HANDOVER_REINIT_COPY } from './copy';
+import { dividerCopy, HANDOVER_REINIT_COPY } from './copy';
+import { journalToEvents } from '../dev/journal'; // UX wave U2: a recording read up to a seq
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { cellId, rowId, turnId } from './keys';
-import { applyEvents, createState, withAgents, type AgentLookup } from './reduce';
+import { applyEvents, createState, withAgents, withUi, type AgentLookup } from './reduce';
 import type { Row, SubagentRef } from './rows';
-import { api, BASH_RESULT, builder, task, tool, uuid } from './test-events';
+import { api, BASH_RESULT, builder, request, task, tool, uuid, type Builder } from './test-events';
+import type { CarriedArrival } from '@shared/engine/arrival-schema';
 import { configureTime } from './time';
 
 const reduce = (events: SessionEvent[]) => applyEvents(createState(null, null), events);
@@ -36,11 +39,11 @@ describe('group state machine', () => {
     const g = group(list);
     expect(g.id).toBe(rowId.group('cell:t1' as never));
     expect(g.cells.map((cell) => cell.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3']);
-    expect(g.summary).toBe('Searched for `TODO`, ran 2 commands');
+    expect(g.summary).toBe('Ran 2 commands, searched code'); // UX wave U2 (O-29): Desktop's caption, its kinds in the order they first occurred
     expect(g.state).toBe('completed');
     expect(g.cells[0].classification.startsGroup).toBe(true);
     expect(g.cells[1].classification.startsGroup).toBe(false);
-    expect(find(list, 'divider')).toMatchObject({ toolCalls: 3, state: 'completed' });
+    expect(find(list, 'divider')).toMatchObject({ toolCalls: 3, state: 'completed', caption: 'Ran 2 commands, searched code' });
   });
 
   it('flushes the group on a standalone row and starts a new one after it', () => {
@@ -98,7 +101,8 @@ describe('group state machine', () => {
     expect(list.filter((row) => row.kind === 'group').map((row) => (row as Extract<Row, { kind: 'group' }>).cells.length)).toEqual([2, 2, 2, 2]);
   });
 
-  it('thinking blocks become cells inside the open group and never start one; a thinking-only group is a thinking row', () => {
+  // UX wave U2 (decisions 4 and 19): a thought after a run's last call is that run's, and the run's id is its first call's
+  it('thinking blocks become cells inside the open group, the one after its last call included; a thinking-only group is a thinking row', () => {
     const b = builder();
     b.turn('u1');
     b.thinking('m1', 0, 'Plan first');
@@ -111,12 +115,18 @@ describe('group state machine', () => {
     b.text('m3', 1, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'thinking', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
     const g = group(list);
-    expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2']);
-    expect(g.id).toBe('group:cell:think:m1:0');
+    expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2', 'cell:think:m3:0']);
+    expect(g.id).toBe('group:cell:t1');
     expect(g.cells[0].detail.kind).toBe('thinking');
-    expect(find(list, 'thinking')).toMatchObject({ id: rowId.think('m3' as never, 0), text: 'Finally', live: false });
+    expect(g.cells.at(-1)?.detail).toMatchObject({ kind: 'thinking', text: 'Finally' });
+    const alone = builder();
+    alone.turn('u1');
+    alone.thinking('m1', 0, 'Only thinking');
+    alone.text('m1', 1, 'Done');
+    alone.end(['u1']);
+    expect(find(rows(alone.events), 'thinking')).toMatchObject({ id: rowId.think('m1' as never, 0), text: 'Only thinking', live: false });
   });
 
   it('a completed group with exactly one non-hidden cell unwraps to a standalone cell, with its thinking as a row before it', () => {
@@ -133,7 +143,9 @@ describe('group state machine', () => {
     expect(find(list, 'cell').detail).toMatchObject({ kind: 'shell', command: 'git log', stdout: '2299dcc seed', exitCode: 0 });
   });
 
-  it('a hidden bookkeeping cell exists in the expanded group but contributes no phrase, and does not count as the one visible cell', () => {
+  // UX wave U2 (O-29, decision 10): a bookkeeping call is an ordinary step of its run, a part of its caption, and a call
+  // of its own: one alone unwraps as any run of one does
+  it('a bookkeeping call is a step of its run and a part of its caption; alone it is the call’s row', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'TodoWrite', { todos: [] });
@@ -145,18 +157,24 @@ describe('group state machine', () => {
     expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
     const g = group(list);
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2']);
-    expect(g.cells[0].classification.hidden).toBe(true);
-    expect(g.summary).toBe('Ran 1 command');
+    expect(g.summary).toBe('Updated todos, ran a command');
+    const alone = builder();
+    alone.turn('u1');
+    alone.toolUse('t1', 'EnterPlanMode', {});
+    alone.result('t1', 'ok');
+    alone.end(['u1']);
+    expect(kinds(rows(alone.events))).toEqual(['time', 'user', 'divider', 'cell']);
   });
 
-  it('an active group never unwraps and labels what is running', () => {
+  it('an active group never unwraps and carries its caption so far', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'pnpm test' });
     b.emit('tool.progress', { toolUseId: tool('t1'), toolName: 'Bash', elapsedSeconds: 3, taskId: null, heartbeat: true });
     const list = rows(b.events);
     expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
-    expect(group(list)).toMatchObject({ state: 'active', activeLabel: 'Running `pnpm test` for 3s' });
+    expect(group(list)).toMatchObject({ state: 'active', summary: 'Ran a command' });
+    expect(group(list)).not.toHaveProperty('activeLabel');
     expect(group(list).cells[0].status).toBe('running');
     expect(find(list, 'divider')).toMatchObject({ state: 'working' });
   });
@@ -177,7 +195,7 @@ describe('group state machine', () => {
     expect(g.cells.map((c) => c.id)).toEqual(['cell:t1', 'cell:t2', 'cell:t3', 'cell:t4']);
     expect(g.cells[0]).toMatchObject({ label: 'Read a.ts', paths: ['/p/a.ts'] });
     expect(g.cells[1].detail).toMatchObject({ kind: 'read', files: [{ path: '/p/b.ts', range: [10, 29] }] });
-    expect(g.summary).toBe('Read 3 files, searched for `x`');
+    expect(g.summary).toBe('Read 3 files, searched code');
   });
 
   it('a read cell expands without opening its neighboring read', () => {
@@ -338,7 +356,9 @@ describe('completed divider changed-file counts', () => {
       { path: '/p/b.ts', change: 'update', added: 1, removed: 2, cellId: 'cell:t3' },
     ]);
     const g = group(list);
-    expect(g.summary).toBe('Edited 2 files, created 1 file');
+    expect(g.summary).toBe('Edited 2 files, created a file');
+    expect(g.counts).toEqual({ added: 5, removed: 3 }); // UX wave U2: the run's finished edits
+    expect(divider).toMatchObject({ caption: 'Edited 2 files, created a file', counts: { added: 5, removed: 3 } });
     expect(g.cells[0]).toMatchObject({ label: 'Edited /p/a.ts +2 −1' });
     expect(g.cells[0].detail).toMatchObject({ kind: 'edit', hunks: [hunk], added: 2, removed: 1 });
     expect(g.cells[1]).toMatchObject({ label: 'Created /p/new.ts +2 −0' });
@@ -399,7 +419,8 @@ describe('time separators', () => {
     b.text('m4', 0, 'Four');
     b.end([], { origin: 'task-notification' });
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'time', 'user', 'assistant_text', 'time', 'divider', 'assistant_text']); // the engine turn's divider
+    // UX wave U2 (O-15): the engine's turn that only answers has no line, as no turn with nothing done has
+    expect(kinds(list)).toEqual(['time', 'user', 'assistant_text', 'user', 'assistant_text', 'time', 'user', 'assistant_text', 'time', 'assistant_text']);
     expect(find(list, 'time', 0)).toMatchObject({ id: rowId.time(turnId.ofMessage(uuid('u1'))), label: 'Today 10:00 AM' });
     expect(find(list, 'time', 1).label).toBe('Today 11:31 AM');
   });
@@ -1137,5 +1158,299 @@ describe('the end of an adopted engine whose re-initialize failed', () => {
     b.emit('process.exited', { code: null, signal: 'SIGTERM', reason: 'crash', lostAttentionCount: 0, budget: null, cause: CAUSE });
     b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
     expect(rows(b.events).filter((row) => row.kind === 'error').map((row) => row.kind === 'error' && row.severity)).toEqual(['notice', 'error']);
+  });
+});
+
+// UX wave U2, M2 (the U2a execution document; decisions 9, 10, 18, 20 and 23, Interfaces §B and §D): what joins a run,
+// the caption a run and a turn read, the turn's line, the stopped form and a waiting request's slot. Invented content.
+describe('what joins a run (O-29)', () => {
+  it('a bookkeeping call between two reads is a member of the run and a part of its caption', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Read', { file_path: '/w/a.ts' });
+    b.result('t1', 'one');
+    b.toolUse('t2', 'TodoWrite', { todos: [{ content: 'Check b', status: 'pending' }] });
+    b.result('t2', 'Todos updated');
+    b.toolUse('t3', 'Read', { file_path: '/w/b.ts' });
+    b.result('t3', 'two');
+    b.end(['u1']);
+    const list = rows(b.events);
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group']);
+    expect(group(list).cells.map((cell) => cell.toolUseId)).toEqual(['t1', 't2', 't3']);
+    expect(group(list).summary).toBe('Read 2 files, updated todos');
+  });
+});
+
+describe('the turn’s line (O-15; decision 9)', () => {
+  const PATCH = (added: number, removed: number) => ({ structuredPatch: [{ oldStart: 1, oldLines: removed, newStart: 1, newLines: added, lines: [...Array<string>(removed).fill('-x'), ...Array<string>(added).fill('+y')] }], userModified: false });
+  const line = (list: Row[]) => {
+    const d = find(list, 'divider');
+    return dividerCopy({ ...d, durationMs: d.summary.durationMs ?? 0 });
+  };
+
+  it('a running turn carries no caption and its finished edits’ counts: an edit in flight adds nothing, a call in the background holds nothing back', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Edit', { file_path: '/w/a.ts', old_string: 'x', new_string: 'y' });
+    b.result('t1', 'ok', { structured: { filePath: '/w/a.ts', ...PATCH(3, 1) } });
+    b.toolUse('t2', 'Bash', { command: 'pnpm dev', run_in_background: true });
+    b.emit('task.started', { taskId: task('bg1'), toolUseId: tool('t2'), taskType: 'local_bash', description: 'pnpm dev', isBackground: true, workflowName: null });
+    b.result('t2', 'Command running in background with ID: bg1');
+    b.toolUse('t3', 'Edit', { file_path: '/w/b.ts', old_string: 'p', new_string: 'q' });
+    const list = rowsOf(reduce(b.events));
+    const divider = find(list, 'divider');
+    expect(divider).toMatchObject({ state: 'working', caption: '', parts: [], counts: { added: 3, removed: 1 } });
+    expect(group(list).cells.map((cell) => [cell.toolUseId, cell.status, cell.background])).toEqual([['t1', 'done', false], ['t2', 'running', true], ['t3', 'running', false]]);
+    b.result('t3', 'ok', { structured: { filePath: '/w/b.ts', ...PATCH(2, 2) } });
+    b.end(['u1'], { durationMs: 72_000 });
+    const after = rowsOf(reduce(b.events));
+    expect(find(after, 'divider')).toMatchObject({ state: 'completed', caption: 'Edited 2 files, ran a command', parts: ['edited 2 files', 'ran a command'], counts: { added: 5, removed: 3 } });
+    expect(line(after)).toBe('Worked for 1m 12s · Edited 2 files, ran a command +5 −3');
+  });
+
+  it('a stopped turn keeps its verb and gains the caption; denied and auto-denied counts follow it', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'rm -rf build' });
+    b.result('t1', 'Not allowed', { isError: true, denial: 'permission-rule' });
+    b.toolUse('t2', 'Bash', { command: 'curl demo.invalid' });
+    b.result('t2', 'blocked', { isError: true, denial: 'automode-blocked' });
+    b.toolUse('t3', 'Grep', { pattern: 'TODO' });
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools', durationMs: 9_000 });
+    const list = rows(b.events);
+    // the refused calls stand alone and are no part; the call the Stop left unfinished is the turn's one step
+    expect(find(list, 'divider')).toMatchObject({ state: 'stopped', caption: 'Searched code (1 stopped)', denied: 1, autoDenied: 1 });
+    expect(line(list)).toBe('You stopped after 9s · Searched code (1 stopped) · 1 denied · 1 auto-denied');
+  });
+
+  it('an engine’s turn with one answer and no work has no line; with one call it reads `Continued for …` and the call', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.text('m1', 0, 'All quiet.');
+    b.end([], { origin: 'task-notification' });
+    expect(kinds(rows(b.events))).toEqual(['time', 'assistant_text']);
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a');
+    b.text('m2', 0, 'Listed.');
+    b.end([], { origin: 'task-notification' });
+    const list = rows(b.events);
+    expect(list.filter((row) => row.kind === 'divider')).toHaveLength(1);
+    expect(line(list)).toBe('Continued for 1s · Ran a command');
+  });
+
+  it('a toggle of one run derives one turn, and the turn’s line is data: no reader derives the turn again to word it', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'a' });
+    b.result('t1', 'ok');
+    b.toolUse('t2', 'Bash', { command: 'b' });
+    b.result('t2', 'ok');
+    b.end(['u1']);
+    b.turn('u2');
+    b.text('m2', 0, 'Two');
+    b.end(['u2']);
+    const state = reduce(b.events);
+    const one = turnId.ofMessage(uuid('u1'));
+    const opened = withUi(state, { ...state.ui, expandedTurns: new Set([one]), stamps: new Map([[one, 1]]), version: state.ui.version + 1 });
+    const before = rowsOf(opened);
+    const id = group(before).id;
+    const derived = turnDerivations.count;
+    const toggled = withUi(opened, { ...opened.ui, expandedGroups: new Set([id]), stamps: new Map([[one, 2]]), version: opened.ui.version + 1 });
+    const after = rowsOf(toggled);
+    expect(turnDerivations.count - derived).toBe(1);
+    expect(group(after)).toMatchObject({ id, expanded: true });
+    expect(find(after, 'divider')).toMatchObject({ caption: 'Ran 2 commands', parts: ['ran 2 commands'] });
+    expect(rowsOf(toggled)).toBe(after);
+    expect(turnDerivations.count - derived).toBe(1);
+  });
+});
+
+// Decision 23, R2, Interfaces §D: one form for a stopped call's row, family by family, from a turn a Stop cut with the
+// call unfinished (no result, the turn closed aborted)
+describe('the stopped form', () => {
+  const stopped = (name: string, input: Record<string, unknown>) => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', name, input);
+    b.end(['u1'], { isError: true, result: 'error_during_execution', terminalReason: 'aborted_tools' });
+    const cell = find(rows(b.events), 'cell');
+    expect(cell.status).toBe('stopped');
+    return cell.label;
+  };
+
+  it.each([
+    ['a shell call with a description', 'Bash', { command: 'pnpm test', description: 'Run the tests' }, 'Stopped: Run the tests'],
+    ['a shell call with none', 'Bash', { command: 'pnpm test' }, 'Stopped: `pnpm test`'],
+    ['an edit', 'Edit', { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }, 'Stopped: `src/app.ts`'],
+    ['a read', 'Read', { file_path: 'src/app.ts' }, 'Stopped: `Read`'],
+    ['a search', 'Grep', { pattern: 'TODO' }, 'Stopped: `Grep`'],
+    ['a web call', 'WebFetch', { url: 'https://docs.example.org/guide' }, 'Stopped: `WebFetch`'],
+    ['a skill', 'Skill', { skill: 'release-notes' }, 'Stopped: `Skill`'],
+    ['a bookkeeping call', 'TodoWrite', { todos: [] }, 'Stopped: `TodoWrite`'],
+    ['an MCP call', 'mcp__github__create_issue', { title: 'Flaky test' }, 'Stopped: `github · create_issue`'],
+    ['a shell call the short form’s rule refuses', 'Bash', { command: './deploy.sh production' }, 'Stopped a command'],
+    ['an artifact call (M3: its artifact, by the handle no result named)', 'mcp__maws__artifact_read', { artifact: 'q3-memo' }, 'Stopped: ‹q3-memo›'],
+  ])('%s', (_family, name, input, label) => {
+    expect(stopped(name, input)).toBe(label);
+  });
+});
+
+// Decision 18: a waiting request's slot is no boundary of a run; it follows the run's row, whenever that row is made
+describe('a waiting request’s slot, as sequences through the reducer', () => {
+  const asked = (b: Builder, r: string, t: string) => b.emit('permission.requested', { requestId: request(r), toolUseId: tool(t), toolName: 'Bash', displayName: null, input: {}, description: null, decisionReasonType: null, suggestions: [], blockedPath: null });
+  const answered = (b: Builder, r: string, t: string, resolvedBy: 'user' | 'abort' = 'user') => b.emit('permission.resolved', { requestId: request(r), toolUseId: tool(t), behavior: resolvedBy === 'user' ? 'allow' : 'deny', message: null, updatedInput: null, updatedPermissions: [], resolvedBy });
+  const read = (list: Row[]) => list.filter((row) => row.kind !== 'time' && row.kind !== 'user' && row.kind !== 'divider').map((row) => (row.kind === 'group' ? `group ${row.id} ${row.cells.map((cell) => cell.toolUseId).join(',')}` : row.kind === 'request_slot' ? `slot ${row.requestId}` : row.kind === 'cell' ? `cell ${row.toolUseId}` : row.kind));
+  const live = (b: Builder) => read(rowsOf(withAllExpanded(reduce(b.events))));
+  const RUN = (ids: string) => `group ${rowId.group(`cell:${ids.split(',')[0]}` as never)} ${ids}`;
+
+  it('a run of one, then its request, its answer and its result: one group row with one id, the slot directly after it while it waits', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make' });
+    expect(live(b)).toEqual([RUN('t1')]);
+    asked(b, 'r1', 't1');
+    expect(live(b)).toEqual([RUN('t1'), 'slot r1']);
+    answered(b, 'r1', 't1');
+    expect(live(b)).toEqual([RUN('t1')]);
+    b.result('t1', 'ok');
+    expect(live(b)).toEqual([RUN('t1')]);
+  });
+
+  it('a request between two calls of one message: one group row holding both, with the first call’s id, before, during and after', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+    asked(b, 'r1', 't1');
+    b.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
+    expect(live(b)).toEqual([RUN('t1,t2'), 'slot r1']);
+    answered(b, 'r1', 't1');
+    expect(live(b)).toEqual([RUN('t1,t2')]);
+    const without = builder();
+    without.turn('u1');
+    without.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+    without.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
+    expect(live(without)).toEqual([RUN('t1,t2')]);
+  });
+
+  it('a request whose pending entry leaves with no answer: the same rows as before it came', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make' });
+    const before = rowsOf(withAllExpanded(reduce(b.events)));
+    asked(b, 'r1', 't1');
+    answered(b, 'r1', 't1', 'abort');
+    expect(rowsOf(withAllExpanded(reduce(b.events)))).toEqual(before);
+  });
+
+  it('a slot with no run open stands in place, as before', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make' });
+    b.result('t1', 'ok');
+    b.text('m1', 0, 'One question first.');
+    b.toolUse('q1', 'AskUserQuestion', { questions: [] });
+    b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A', description: null, preview: null }, { label: 'B', description: null, preview: null }], multiSelect: false }] });
+    expect(live(b)).toEqual(['cell t1', 'assistant_text', 'slot r1']);
+  });
+
+  it('two requests waiting at once on two calls of one run: one group row, both slots after it in arrival order, and the same row when either is answered first', () => {
+    const waiting = () => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+      b.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
+      asked(b, 'r2', 't2');
+      asked(b, 'r1', 't1');
+      return b;
+    };
+    expect(live(waiting())).toEqual([RUN('t1,t2'), 'slot r2', 'slot r1']);
+    const first = waiting();
+    answered(first, 'r1', 't1');
+    expect(live(first)).toEqual([RUN('t1,t2'), 'slot r2']);
+    const second = waiting();
+    answered(second, 'r2', 't2');
+    expect(live(second)).toEqual([RUN('t1,t2'), 'slot r1']);
+  });
+
+  it('a real row arriving while a slot is carried: the run’s row is made there, the slot follows it and the real row comes after', () => {
+    const subagent = builder();
+    subagent.turn('u1');
+    subagent.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+    subagent.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
+    asked(subagent, 'r1', 't2');
+    subagent.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'p' }, 'msg-1', 2);
+    subagent.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null });
+    expect(live(subagent)).toEqual([RUN('t1,t2'), 'slot r1', 'subagent']);
+    const steer = builder();
+    steer.turn('u1');
+    steer.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+    steer.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
+    asked(steer, 'r1', 't2');
+    steer.emit('user.message', { messageUuid: uuid('u2'), content: 'also run the linter', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    steer.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
+    const list = rowsOf(withAllExpanded(reduce(steer.events)));
+    expect(list.filter((row) => row.kind !== 'time' && row.kind !== 'divider').map((row) => (row.kind === 'user' ? `user ${row.steer}` : row.kind))).toEqual(['user false', 'group', 'request_slot', 'user true']);
+  });
+
+  it('the rows with a slot are the rows without it but for the slot', () => {
+    const turn = (slot: boolean) => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
+      if (slot) asked(b, 'r1', 't1');
+      else b.tick(100); // the builder's clock moves 100 ms per event
+      b.toolUse('t2', 'Read', { file_path: '/w/a.ts' }, 'msg-1', 1);
+      b.result('t2', 'one');
+      b.text('m2', 0, 'Waiting on make.');
+      return rowsOf(withAllExpanded(reduce(b.events)));
+    };
+    expect(turn(true).filter((row) => row.kind !== 'request_slot')).toEqual(turn(false));
+  });
+});
+
+// Decision 20: a call the engine moved to the background has its result and still runs. Since the composer landing
+// (U4a, decision 33; at the chain merge) a moved call runs past its turn's close until its task's end, and the field
+// follows the status, as decision 20 says it does.
+describe('`background` over a recorded MCP call moved to the background (uxwave/u4p2-k-mcp-1)', () => {
+  const journal = loadUxwaveJournal('u4p2-k-mcp-1');
+  const callsUpTo = (seq: number) => rowsOf(withAllExpanded(reduce(journalToEvents(journal.filter((row) => row.seq <= seq))))).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : [])).filter((cell) => cell.toolUseId !== null);
+  const moved = (seq: number) => callsUpTo(seq).find((cell) => cell.toolName === 'mcp__slow__slow_wait')!;
+
+  it('up to seq 55 the moved call runs in the background and ToolSearch is done; past the turn’s end (132) it still does, and at its task’s end (136) it runs no more', () => {
+    expect(callsUpTo(55).map((cell) => [cell.toolName, cell.status, cell.background])).toEqual([['ToolSearch', 'done', false], ['mcp__slow__slow_wait', 'running', true]]);
+    expect([moved(132).status, moved(132).background]).toEqual(['running', true]);
+    expect(moved(136).status).not.toBe('running');
+    expect(moved(136).background).toBe(false);
+  });
+});
+
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// where it only answers; the notice stays in view through a fold either way
+describe('the line of a turn an answer opened', () => {
+  const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
+  const opened = (work: boolean) => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.emit('user.message', { messageUuid: uuid('a1'), content: 'The human responded to your async AskUserQuestion (call tu-q7): Teal', isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [ANSWER] });
+    if (work) {
+      b.toolUse('t1', 'Bash', { command: 'make theme' });
+      b.result('t1', 'ok');
+    }
+    b.text('m1', 0, 'Teal it is.');
+    b.end([], { origin: 'task-notification' });
+    return rowsOf(reduce(b.events)).filter((row) => row.kind !== 'time'); // at rest: folded
+  };
+
+  it('that only answers has no line, and its notice and answer stay', () => {
+    expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
+  });
+
+  it('with one call reads `Worked for …` and keeps its notice in view when folded', () => {
+    const list = opened(true);
+    expect(kinds(list)).toEqual(['divider', 'notice', 'assistant_text']);
+    const line = find(list, 'divider');
+    expect(line.opener).toMatchObject({ class: 'answer' });
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
   });
 });

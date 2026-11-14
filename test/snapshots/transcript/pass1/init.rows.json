@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:21:20.978Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:21:22.541Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:2b29cb4f-86d5-4f09-94c7-2f44d3a43f83",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T09:21:21.365Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "992b4db2-21b5-4678-98d7-4f3d7f8e6834",
+    "recordedMs": null,
     "text": "The user is asking me to reply with exactly \"OK\". This is a simple request - they want me to respond with just those two letters.",
     "turnId": "turn:2b29cb4f-86d5-4f09-94c7-2f44d3a43f83"
   },

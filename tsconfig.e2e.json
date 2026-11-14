@@ -121,6 +121,13 @@
     "src/renderer/src/sessions/share/copy.ts", // P5 O8 M6b Task 3: the share spec reads the sheet's own words
     "src/renderer/src/sidebar/registry-copy.ts", // the project registry's M11: the registry spec reads the page's own words
     "src/renderer/src/tools/agents/copy.ts",
+    // UX wave U2a (M5): the reasoning scene reads the thinking tier from the transcript's copy (decision 17), with what
+    // the copy imports
+    "src/renderer/src/transcript/model/agent-listing.ts",
+    "src/renderer/src/transcript/model/classify.ts",
+    "src/renderer/src/transcript/model/copy.ts",
+    "src/renderer/src/transcript/model/rows.ts",
+    "src/renderer/src/transcript/model/time.ts",
     "src/renderer/src/tools/agents/model/elapsed.ts",
     "src/renderer/src/tools/agents/model/relay.ts",
     "src/renderer/src/tools/agents/model/task-graph.ts",

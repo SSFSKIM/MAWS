@@ -7,7 +7,7 @@ import type { ContentBlock, EventBase, SessionEvent } from '@shared/graph/events
 import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, SessionId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { isNoContent, type AgentMeta, type TranscriptRecord } from '@shared/wire/transcript';
 import { slashCommandLine } from '@shared/wire/local-command';
-import { INTERRUPT_MARKER } from '../normalizer-support';
+import { denialKindOf, INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
@@ -413,6 +413,10 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arriv
   // arrives later as a <task-notification> user record.
   const asyncLaunched = (structured as { status?: unknown } | null)?.status === 'async_launched';
   if (results.length > 0 && !marker) ctx.inToolLoop = true;
+  // UX wave U2 (O-29): the kind of a refusal, from the row's own `toolDenialKind`, which the engine makes the wire's
+  // `non_execution_kind` from for a row that holds exactly one result (`cli.pretty.js:237652-237668` of 2.1.322); a word
+  // this build does not know is no kind, as the normaliser reads the wire's
+  const fileDenial = results.length === 1 ? denialKindOf(typeof record.toolDenialKind === 'string' ? record.toolDenialKind : undefined) : null;
   for (const block of results) {
     const toolUseId = block.tool_use_id;
     if (typeof toolUseId !== 'string' || toolUseId.length === 0) continue;
@@ -429,7 +433,7 @@ function userEvents(record: TranscriptRecord, uuid: MessageUuid, arrivals: Arriv
       isError,
       structured,
       spillPath: typeof persisted === 'string' ? persisted : (SPILL_MARKER.exec(text)?.[1] ?? null),
-      denial: null, // denial kinds are not recorded on disk in a parseable form
+      denial: fileDenial === 'unknown' ? null : fileDenial,
       safeguard: 'not_evaluated',
       messageUuid: uuid,
     });
@@ -618,6 +622,10 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
   const apiMessageId = (typeof message?.id === 'string' && message.id.length > 0 ? message.id : uuid) as ApiMessageId;
   const model = typeof message?.model === 'string' ? message.model : '';
   const apiBlockIndex = typeof record.apiBlockIndex === 'number' ? record.apiBlockIndex : null;
+  // UX wave U2 (X1): the engine's recorded duration of the record's thinking block (`thinkingDurationMs`), on that
+  // block's event when the record holds exactly one thinking block and the value is a duration
+  const recordedMs = record.thinkingDurationMs;
+  const thinkingDurationMs = typeof recordedMs === 'number' && Number.isFinite(recordedMs) && recordedMs >= 0 && content.filter((block) => block.type === 'thinking').length === 1 ? recordedMs : undefined;
   ctx.inToolLoop = false;
   ctx.lastAssistantWasApiError = record.isApiErrorMessage === true;
   if (isNoResponseMarker(record)) return; // resume bookkeeping still resets the assistant context above
@@ -636,6 +644,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
       userMessageUuids: [],
       ...(record.isApiErrorMessage === true && { isApiErrorMessage: true }),
       ...(typeof record.error === 'string' && { error: record.error }),
+      ...(block.type === 'thinking' && thinkingDurationMs !== undefined && { thinkingDurationMs }),
     });
     if (block.type !== 'tool_use' || typeof block.id !== 'string' || block.id.length === 0) return;
     const toolUseId = block.id as ToolUseId;

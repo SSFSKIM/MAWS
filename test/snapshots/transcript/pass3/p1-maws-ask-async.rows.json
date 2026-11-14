@@ -23,6 +23,11 @@
   {
     "at": "2026-10-06T06:35:31.641Z",
     "autoDenied": 0,
+    "caption": "Ran a command, loaded 1 tool",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T06:35:41.127Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:e26615e0-8187-4ee5-aa9e-b25b8fa7660d",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command",
+      "loaded 1 tool"
+    ],
     "startedAt": "2026-10-06T06:35:31.662Z",
     "state": "completed",
     "summary": {
@@ -82,12 +91,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:34.886Z",
+    "background": false,
     "category": "skills",
     "classification": {
       "category": "skills",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -170,12 +179,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:37.839Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -221,6 +230,11 @@
   {
     "at": "2026-10-06T06:35:41.130Z",
     "autoDenied": 0,
+    "caption": "Read bufnxcjfn.output",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T06:35:44.700Z",
     "expanded": true,
@@ -229,6 +243,9 @@
     "id": "divider:turn:c36b75ca-a621-4c8c-8bed-bc9e5a87298a",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "read bufnxcjfn.output"
+    ],
     "startedAt": "2026-10-06T06:35:41.130Z",
     "state": "completed",
     "summary": {
@@ -268,12 +285,12 @@
   {
     "agent": null,
     "at": "2026-10-06T06:35:42.890Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

@@ -5,7 +5,8 @@ import { handbackReport, messageText, parsePeerMessage, peerLabel } from '@share
 import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@shared/engine/surface-rows';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
-import { cellOf, type ToolRecord, type TurnContext } from '../model/cells';
+import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
+import { artifactTitlesIn } from '../model/derive'; // UX wave U2
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
@@ -64,10 +65,21 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
   toolCache.set(turn.events, records);
   return records;
 }
-const turnContext = (turn: TurnState): TurnContext => ({ closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt });
 
-export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext }
-export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId): ToolInput[] {
+// UX wave U2 (decision 21, Interfaces §C): every tool use of a turn, a cell or not, by the records above, so the run's
+// line can tell a waiting permission that names a call of the turn from one that names none
+const callsCache = new WeakMap<Map<ToolUseId, ToolRecord>, ReadonlySet<ToolUseId>>();
+export function callsOfTurn(turn: TurnState): ReadonlySet<ToolUseId> {
+  const records = toolRecords(turn);
+  let calls = callsCache.get(records);
+  if (!calls) callsCache.set(records, (calls = new Set(records.keys())));
+  return calls;
+}
+
+// UX wave U2: `titles` names an artifact as the derivation does, from the session's loaded turns (`state`), so a
+// rewritten call keeps the title its row read
+export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext; titles: ArtifactTitles }
+export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId, state?: TranscriptState): ToolInput[] {
   if (!turn || cell.toolUseId === null || cell.id === revealed) return [];
   const records = toolRecords(turn);
   const all = [...records.values()];
@@ -75,10 +87,11 @@ export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: R
   if (at < 0) return [];
   // X3 mergeReads merges consecutive Read/NotebookRead/LS calls, one file per call, under the first tool id.
   const count = cell.id.startsWith('cell:reads:') && cell.detail.kind === 'read' ? cell.detail.files.length : 1;
-  const context = turnContext(turn);
+  const context = turnContextOf(turn); // UX wave U2: the turn's derivation's own context
+  const titles = artifactTitlesIn(state ?? null, turn); // UX wave U2
   return all.slice(at, at + count).map((rec) => {
-    const native = count === 1 ? cell : cellOf(rec, context, cell.expanded);
-    return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, props: callProps(rec, native) };
+    const native = count === 1 ? cell : cellOf(rec, context, cell.expanded, undefined, titles);
+    return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, titles, props: callProps(rec, native) };
   });
 }
 
@@ -108,7 +121,7 @@ function sameValue(left: unknown, right: unknown): boolean {
 
 export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse']): Cell {
   if (sameValue(props, input.props)) return input.cell;
-  const { record, cell, context } = input;
+  const { record, cell, context, titles } = input;
   const output = props.output;
   const replacedOutput = !sameValue(output, input.props.output);
   // This record exists only for drawing, including output supplied for a still-unresolved call. Never attach it
@@ -121,7 +134,7 @@ export function withToolProps(input: ToolInput, props: TranscriptProps['ToolUse'
     ...(replacedOutput && { spillPath: null }),
   };
   const status = props.isInterrupted ? 'stopped' : props.isErrored ? cell.status === 'denied' ? 'denied' : 'error' : props.isRunning ? 'running' : 'done';
-  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded, status);
+  const drawn = cellOf({ ...record, use: { ...record.use, toolName: props.tool, input: props.input }, result }, context, cell.expanded, status, titles);
   // Reader state lives on the native cell, not the historical event. It remains applicable only to the same output/spill.
   if (!replacedOutput && 'spill' in drawn.detail && 'spill' in cell.detail && cell.detail.spill !== null && drawn.detail.spill?.path === cell.detail.spill.path) {
     drawn.detail = { ...drawn.detail, spill: cell.detail.spill };
@@ -152,7 +165,12 @@ function bounded(value: unknown, depth = 1): Sized | null {
   return { value: Array.isArray(value) ? entries.map(([, item]) => item) : Object.fromEntries(entries), nodes, chars };
 }
 
-export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending']): RowInput<'ToolGroup'> | null {
+// UX wave U2 (the U2a document, M4 "The mods' site"; C13): the run's ask reads the tab's revealed jump target as every
+// other ask does, for the run as a whole: a run that is the target or holds it asks nothing. `revealed` is not handed to
+// `toolInputs`, since an ask that left the revealed call out would name another first call, and the instance id is
+// made from the first call. The open state sent is the run's own.
+export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+  if (revealed !== undefined && (row.id === revealed || row.cells.some((cell) => cell.id === revealed))) return null;
   const tools = row.cells.flatMap((cell) => toolInputs(cell, turn));
   if (!tools.length) return null;
   const ids = new Set(tools.map((t) => t.instanceId));
@@ -169,7 +187,7 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
       calls.unshift(sized.value as TranscriptProps['ToolUse']); nodes += sized.nodes; chars += sized.chars; break;
     }
   }
-  return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: false } };
+  return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
 export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {
@@ -242,7 +260,7 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
   if (!turn || row.id === revealed || (row.peer !== undefined && row.peer.sender !== null)) return null;
   const toolUseId = row.peer?.toolUseId ?? turn.events.find((e): e is Extract<SessionEvent, { kind: 'tool.use' }> => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
   const rec = toolUseId == null ? undefined : toolRecords(turn).get(toolUseId);
-  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContext(turn), false)) };
+  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContextOf(turn), false)) };
 }
 
 /**

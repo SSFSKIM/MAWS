@@ -54,7 +54,7 @@ describe('where an arrival’s row sits (decision 5)', () => {
     b.text('m1', 0, 'The count is done.');
     endEngine(b);
     const list = rowsOf(reduce(b.events));
-    expect(kinds(list)).toEqual(['notice', 'divider', 'assistant_text']);
+    expect(kinds(list)).toEqual(['notice', 'assistant_text']); // UX wave U2 (O-15): at rest, a turn that only answers has no line
     expect(of(list, 'notice')[0]).toMatchObject({ id: rowId.notice('run-1', uuid('n1'), 0), class: 'task', outcome: 'completed', text: OK, taskId: 'bt1', toolUseId: 'tu-bt1', outputFile: '/tmp/work/bt1.output', durationMs: null, detail: null });
   });
 
@@ -214,7 +214,7 @@ describe('one arrival per uuid (decision 8)', () => {
     step(() => carry(b, 'n1', [task()], '')); // placed again, on the later turn
     expect(of(turnRows(state, first)!, 'notice')).toEqual([]);
     expect(of(turnRows(state, second)!, 'notice').map((row) => row.id)).toEqual([rowId.notice('run-1', uuid('n1'), 0)]);
-    expect(shown(rowsOf(state)).map((row) => `${row.kind}:${row.turnId === first ? 1 : 2}`)).toEqual(['divider:1', 'assistant_text:1', 'notice:2', 'divider:2']);
+    expect(shown(rowsOf(state)).map((row) => `${row.kind}:${row.turnId === first ? 1 : 2}`)).toEqual(['assistant_text:1', 'notice:2', 'divider:2']); // UX wave U2 (O-15): the first only answered
     step(() => carry(b, 'n1', [task()], '')); // and again on the same turn: still one line
     expect(of(rowsOf(state), 'notice')).toHaveLength(1);
   });
@@ -379,7 +379,7 @@ describe('a provisional line needs its turn’s end (decision 21)', () => {
     b.turn('u1');
     const list = rowsOf(reduce(b.events));
     expect(lines(list)).toEqual([rowId.notice('run-f', uuid('f1'), 0)]);
-    expect(of(list, 'divider').map((row) => row.state)).toEqual(['completed', 'working']);
+    expect(of(list, 'divider').map((row) => row.state)).toEqual(['working']); // UX wave U2 (O-15): the closed turn did nothing
   });
 
   it('a turn whose only line was provisional and that a later start closes is no turn at all', () => {
@@ -505,7 +505,8 @@ describe('an engine turn that held nothing is no turn (decision 6)', () => {
     b.turn('u2');
     const state = reduce(b.events);
     expect(state.order).toHaveLength(2);
-    expect(of(rowsOf(state), 'divider').map((row) => [row.origin, row.state])).toEqual([['engine', 'completed'], ['human', 'working']]);
+    expect(state.turns.get(state.order[0])!.state).toBe('closed');
+    expect(of(rowsOf(state), 'divider').map((row) => [row.origin, row.state])).toEqual([['human', 'working']]); // UX wave U2 (O-15): the closed one only answered
   });
 });
 

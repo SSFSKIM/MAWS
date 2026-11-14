@@ -23,6 +23,11 @@
   {
     "at": "2026-09-29T15:33:45.840Z",
     "autoDenied": 0,
+    "caption": "Ran a command",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T15:33:50.490Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:3b554458-484d-4333-bae1-a226650ae08b",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command"
+    ],
     "startedAt": "2026-09-29T15:33:45.860Z",
     "state": "completed",
     "summary": {
@@ -70,12 +78,12 @@
   {
     "agent": null,
     "at": "2026-09-29T15:33:47.595Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_flagged",
       "startsGroup": false,
@@ -149,6 +157,11 @@
   {
     "at": "2026-09-29T15:33:55.852Z",
     "autoDenied": 0,
+    "caption": "Ran an agent (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T15:34:00.523Z",
     "expanded": true,
@@ -157,6 +170,9 @@
     "id": "divider:turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent (1 stopped)"
+    ],
     "startedAt": "2026-09-29T15:33:55.855Z",
     "state": "completed",
     "summary": {
@@ -226,53 +242,6 @@
     "turnId": "turn:e4fd229a-e799-4d3d-88cb-7ffe1dfd542f"
   },
   {
-    "at": "2026-09-29T15:34:03.991Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-29T15:34:05.552Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:143:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-29T15:34:03.991Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.28434079999999995,
-      "denials": [],
-      "durationMs": 1564,
-      "model": "claude-sonnet-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 561,
-        "cacheReadInputTokens": 30188,
-        "inputTokens": 2,
-        "outputTokens": 71,
-        "thinkingTokens": 0
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:143:1"
-  },
-  {
     "at": "2026-09-29T15:34:04.996Z",
     "blockIndex": 0,
     "id": "text:msg_011CfXyVZPCbn9h2VdJXUrjM:0",
@@ -301,6 +270,11 @@
   {
     "at": "2026-09-29T15:34:09.904Z",
     "autoDenied": 0,
+    "caption": "Ran an agent (1 stopped)",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-29T15:34:14.358Z",
     "expanded": true,
@@ -309,6 +283,9 @@
     "id": "divider:turn:1b21fa19-adda-4fd4-9a79-e6cd27f88468",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran an agent (1 stopped)"
+    ],
     "startedAt": "2026-09-29T15:34:09.906Z",
     "state": "completed",
     "summary": {

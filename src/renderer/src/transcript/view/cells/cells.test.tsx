@@ -10,6 +10,7 @@ import { cellId } from '../../model/keys';
 import type { Cell, Row } from '../../model/rows';
 import { BASH_RESULT, builder, tool, type Builder } from '../../model/test-events';
 import { renderRow, storeWith } from '../rows/test-support';
+import { shellLabel } from './CellLine';
 
 afterEach(cleanup);
 
@@ -45,8 +46,8 @@ describe('cell line', () => {
     const row = store.rows().find((r) => r.kind === 'cell')!;
     const view = renderRow(row, { storeKey: store.key });
     const line = screen.getByRole('button', { expanded: false });
-    expect(line.textContent).toBe('Ran Bash');
-    expect(line.querySelector('code')).toBeNull();
+    expect(line.textContent).toBe('Ran pnpm test'); // UX wave U2 (O-49): the short form of the command, in the code font
+    expect(line.querySelector('code')?.textContent).toBe('pnpm test');
     fireEvent.click(line);
     view.rerenderRow(store.rows().find((r) => r.kind === 'cell')!);
     expect(screen.getByRole('button', { expanded: true })).toBe(line);
@@ -74,6 +75,13 @@ describe('a call the engine moved to the background', () => {
     }
   });
 
+  // the chain merge with U2a: opened, the run that holds it while its turn still runs (45) draws the same line
+  it('inside its run, opened, while the turn still runs (u4p1-a-seeded-1 at 45): the moved label, before the description', async () => {
+    const line = await lineAt('u4p1-a-seeded-1', 45, 'toolu_01UK719ATPuRjLtWeTEn9rZ1');
+    expect(line.closest('.transcript-group')).not.toBeNull();
+    expect(line.textContent).toMatch(/^Moved node wait\.cjs a1 40 to the background after [\dhms ]+$/);
+  });
+
   it('a moved MCP call (u4p2-k-mcp-1) reads its moved label', async () => {
     const line = await lineAt('u4p2-k-mcp-1', 55, 'toolu_01UFS9wFBAFW85EKmXuDepTL');
     expect(line.textContent).toMatch(/^Moved slow · slow_wait to the background after [\dhms ]+$/);
@@ -82,6 +90,89 @@ describe('a call the engine moved to the background', () => {
   it('a foreground shell call that was not moved (u4p2-n-never-1) still reads its description', async () => {
     const line = await lineAt('u4p2-n-never-1', 50, 'toolu_01NSPqqrTjEJuLAnyjw1eDhR');
     expect(line.textContent).toBe('Ran wait.cjs with arguments nnever1 and 30');
+  });
+});
+
+// UX wave U2 (O-49; the U2a document, M3, Interfaces §D, acceptance 11): what a shell row reads, by its status, with and
+// without a description, and where Desktop's rule refuses the command. Invented commands.
+describe('the shell row', () => {
+  const lineOf = async (input: Record<string, unknown>, outcome: 'done' | 'error' | 'none', name = 'Bash') => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', name, input);
+    if (outcome !== 'none') b.result('t1', outcome === 'done' ? 'ok' : 'Exit code 2\nmake: no rule to make target', { isError: outcome === 'error', structured: BASH_RESULT('ok') });
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key);
+    const row = rowHolding(store.rows(), 'cell:t1');
+    const view = renderRow(row, { storeKey: store.key });
+    const cell = view.container.querySelector<HTMLElement>('[data-cell-id="cell:t1"]')!;
+    const model = cellsOf([row]).find((one) => one.id === 'cell:t1')!;
+    return { label: cell.querySelector('.transcript-cell-label')!, code: cell.querySelector('.transcript-cell-label code')?.textContent ?? null, model };
+  };
+
+  it('with no description: the verb and the short form, running, done and failed', async () => {
+    expect(await lineOf({ command: 'cd /repo && pnpm test --watch' }, 'none')).toMatchObject({ code: 'pnpm test…' });
+    expect((await lineOf({ command: 'pnpm test' }, 'none')).label.textContent).toBe('Running pnpm test');
+    expect((await lineOf({ command: 'pnpm test' }, 'done')).label.textContent).toBe('Ran pnpm test');
+    expect((await lineOf({ command: 'make build' }, 'error')).label.textContent).toBe('Failed make build Exit code 2');
+  });
+
+  it('where the rule refuses the command: the verb and `a command`, with no code', async () => {
+    for (const [outcome, words] of [['none', 'Running a command'], ['done', 'Ran a command']] as const) {
+      const { label, code } = await lineOf({ command: './deploy.sh production' }, outcome);
+      expect([label.textContent, code]).toEqual([words, null]);
+    }
+    const failed = await lineOf({ command: 'export TOKEN=abc' }, 'error');
+    expect(failed.label.querySelector('.transcript-cell-reason')?.textContent).toBe('Exit code 2');
+    expect(failed.label.textContent).toBe('Failed to run a command Exit code 2');
+  });
+
+  it('with a description: the description, always, whatever the command', async () => {
+    expect((await lineOf({ command: './deploy.sh production', description: 'Deploy the site' }, 'done')).label.textContent).toBe('Deploy the site');
+    expect((await lineOf({ command: 'pnpm test', description: 'Run the tests' }, 'none')).label.textContent).toBe('Running the tests');
+  });
+
+  it('a shell tool with no command line of its own reads the verb and its name', async () => {
+    expect((await lineOf({ bash_id: 'shell-1' }, 'done', 'BashOutput')).label.textContent).toBe('Ran BashOutput');
+  });
+
+  it('the row and its exported label read the same words', async () => {
+    const { label, model } = await lineOf({ command: 'git status --short' }, 'done');
+    expect(shellLabel(model)).toBe('Ran `git status…`');
+    expect(label.textContent).toBe('Ran git status…');
+  });
+});
+
+// UX wave U2 (decision 13): a failed call carries the first line of its error after its label, muted; a call that did
+// not fail carries none.
+describe('a failed call’s reason', () => {
+  const rendered = async (build: (b: Builder) => void) => {
+    const b = builder();
+    b.turn('u1');
+    build(b);
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key);
+    const row = rowHolding(store.rows(), 'cell:t1');
+    return renderRow(row, { storeKey: store.key }).container.querySelector<HTMLElement>('[data-cell-id="cell:t1"]')!;
+  };
+
+  it('sits inside the label, after its words, so the label’s ellipsis cuts both', async () => {
+    const cell = await rendered((b) => {
+      b.toolUse('t1', 'Read', { file_path: 'src/missing.ts' });
+      b.result('t1', '<tool_use_error>File does not exist.</tool_use_error>', { isError: true });
+    });
+    const reason = cell.querySelector('.transcript-cell-label > .transcript-cell-reason');
+    expect(reason?.textContent).toBe('File does not exist.');
+    expect(cell.getAttribute('data-status')).toBe('error');
+  });
+
+  it('is absent on a call that did not fail', async () => {
+    const cell = await rendered((b) => {
+      b.toolUse('t1', 'Read', { file_path: 'src/app.ts' });
+      b.result('t1', 'contents');
+    });
+    expect(cell.querySelector('.transcript-cell-reason')).toBeNull();
   });
 });
 
@@ -279,15 +370,22 @@ describe('image, thinking and generic detail', () => {
     expect(generic.cell.textContent).toContain('type A = string');
   });
 
-  it('a thinking cell inside a group discloses its text', async () => {
-    const { cell } = await expandedCell((b) => {
-      b.thinking('m1', 0, 'Look at the drag handler first.');
-      b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
-      b.result('t1', 'a', { structured: BASH_RESULT('a') });
-      b.toolUse('t2', 'Bash', { command: 'pwd' });
-      b.result('t2', '/', { structured: BASH_RESULT('/') });
-    }, 'cell:think:m1:0');
-    expect(cell.textContent).toContain('Look at the drag handler first.');
+  // UX wave U2 (O-27): a thought inside a run is no cell row; the opened run draws it as a thought line (run-row.test.tsx)
+  it('a thought inside a run has no cell row: it discloses its text by its thought line', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('assistant.block.complete', { messageUuid: 'm1-u0' as never, apiMessageId: 'm1' as never, blockIndex: 0, block: { type: 'thinking', thinking: 'Look at the drag handler first.', signature: '' }, model: 'claude-test', supersedes: [], aborted: false, userMessageUuids: [], thinkingDurationMs: 12_000 });
+    b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    b.result('t2', '/', { structured: BASH_RESULT('/') });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key);
+    const view = renderRow(rowHolding(store.rows(), 'cell:t1'), { storeKey: store.key });
+    expect(view.container.querySelector('[data-cell-id="cell:think:m1:0"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Thought for 12s' }));
+    expect(view.container.querySelector('.transcript-thinking-text')?.textContent).toBe('Look at the drag handler first.');
   });
 });
 

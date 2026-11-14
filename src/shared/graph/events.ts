@@ -181,6 +181,9 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     // first frame of the replacement only); empty on every other block (debt wave 4: was one uuid or null)
     supersedes: z.array(MessageUuidSchema), aborted: z.boolean(), userMessageUuids: z.array(MessageUuidSchema),
     isApiErrorMessage: z.boolean().optional(), error: z.string().optional(), // synthetic API diagnostic envelope (live and disk)
+    // UX wave U2 (X1, amended): the engine's recorded duration of a finished thinking block, in milliseconds (the wire's
+    // `thinking_duration_ms`, the transcript row's `thinkingDurationMs`); absent when none came, as from an older build
+    thinkingDurationMs: z.number().nonnegative().optional(),
   }),
   event('user.message', {
     messageUuid: MessageUuidSchema.nullable(), content: z.union([z.string(), z.array(ContentBlockSchema)]), isReplay: z.boolean(),

@@ -49,6 +49,11 @@
   {
     "at": "2026-10-06T11:03:51.603Z",
     "autoDenied": 0,
+    "caption": "Ran a command, read probe.txt",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-10-06T11:04:19.123Z",
     "expanded": true,
@@ -57,6 +62,10 @@
     "id": "divider:turn:f0f8bab2-dd91-4659-842b-beee9d2c28ed",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran a command",
+      "read probe.txt"
+    ],
     "startedAt": "2026-10-06T11:03:51.605Z",
     "state": "completed",
     "summary": {
@@ -96,12 +105,12 @@
   {
     "agent": null,
     "at": "2026-10-06T11:03:53.318Z",
+    "background": false,
     "category": "commands",
     "classification": {
       "category": "commands",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,
@@ -169,12 +178,12 @@
   {
     "agent": null,
     "at": "2026-10-06T11:04:17.203Z",
+    "background": false,
     "category": "exploration",
     "classification": {
       "category": "exploration",
       "denial": null,
       "groupable": true,
-      "hidden": false,
       "humanDecision": false,
       "safeguard": "not_evaluated",
       "startsGroup": false,

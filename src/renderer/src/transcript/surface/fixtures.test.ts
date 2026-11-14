@@ -45,7 +45,8 @@ describe('adapters against installed-engine transcript asks', () => {
     const props = recorded('tool-group', 'ToolGroup'); const b = builder(); b.turn('u');
     for (const call of props.calls) { b.toolUse(call.tool_use_id!, call.tool, call.input as Record<string, unknown>); b.result(call.tool_use_id!, 'R3', { structured: call.output }); }
     const { rows, turn, state } = setup(b);
-    expect(groupInput(first(rows, 'group'), turn, state.pending)?.props).toEqual(props);
+    // UX wave U2: the ask carries the run's own open state, so the run is drawn as open as the recorded ask's was
+    expect(groupInput({ ...first(rows, 'group'), expanded: props.isExpanded }, turn, state.pending)?.props).toEqual(props);
   });
   it('CommandOutput associates the native output with its command echo', () => {
     const props = recorded('command-output', 'CommandOutput'); const b = builder(); b.turn('u', `/${props.command}${props.args ? ` ${props.args}` : ''}`);

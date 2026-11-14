@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:20:00.045Z",
     "autoDenied": 0,
+    "caption": "Ran 2 agents, messaged a subagent",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:20:01.714Z",
     "expanded": true,
@@ -31,6 +36,10 @@
     "id": "divider:turn:u-agents-and-messages-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 agents",
+      "messaged a subagent"
+    ],
     "startedAt": "2026-09-28T10:20:00.100Z",
     "state": "completed",
     "summary": {
@@ -74,6 +83,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-agents-and-messages-013",
+    "recordedMs": null,
     "text": "Two independent surveys: run them in parallel.",
     "turnId": "turn:u-agents-and-messages-002"
   },
@@ -136,53 +146,6 @@
     "model": "claude-opus-5-5",
     "phase": "answer",
     "turnId": "turn:u-agents-and-messages-002"
-  },
-  {
-    "at": "2026-09-28T10:20:03.289Z",
-    "autoDenied": 0,
-    "denied": 0,
-    "endedAt": "2026-09-28T10:20:03.414Z",
-    "expanded": true,
-    "files": [],
-    "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:85:1",
-    "kind": "divider",
-    "origin": "engine",
-    "startedAt": "2026-09-28T10:20:03.289Z",
-    "state": "completed",
-    "summary": {
-      "autoDenied": 0,
-      "byCategory": {
-        "commands": 0,
-        "exploration": 0,
-        "files": 0,
-        "mcp": 0,
-        "other": 0,
-        "skills": 0,
-        "web": 0
-      },
-      "childAgents": 0,
-      "costUsd": 0.0123,
-      "denials": [],
-      "durationMs": 110,
-      "model": "claude-opus-5-5",
-      "safeguard": {
-        "flagged": 0,
-        "notEvaluated": 0,
-        "reviewed": 0
-      },
-      "terminalReason": "completed",
-      "toolCalls": 0,
-      "usage": {
-        "cacheCreationInputTokens": 0,
-        "cacheReadInputTokens": 21000,
-        "inputTokens": 12,
-        "outputTokens": 240,
-        "thinkingTokens": null
-      }
-    },
-    "toolCalls": 0,
-    "turnId": "turn:ereplay:journal:85:1"
   },
   {
     "at": "2026-09-28T10:20:03.320Z",

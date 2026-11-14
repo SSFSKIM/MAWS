@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T09:21:59.216Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T09:22:04.356Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:3807c712-5d96-4ba4-9e71-908ac237f8e4",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T09:21:59.224Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "ee584a59-4687-4f41-89a4-00ffbff1d74f",
+    "recordedMs": null,
     "text": "The user wants me to:\n1. Call AskUserQuestion with two questions\n2. First question: choose Red or Blue (with short previews for each)\n3. Second question: choose fruits Apple and Pear (multiSelect true)\n4. After receiving answers, repeat them briefly\n\nLet me set up the AskUserQuestion tool call with these two questions.",
     "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
   },
@@ -132,6 +139,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "af811042-4b43-40aa-817c-7994ad1500f6",
+    "recordedMs": null,
     "text": "Great! The user answered:\n- Color: Red\n- Fruits: Apple, Pear (both selected)\n\nNow I should repeat these answers briefly as requested.",
     "turnId": "turn:3807c712-5d96-4ba4-9e71-908ac237f8e4"
   },

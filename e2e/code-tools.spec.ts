@@ -163,6 +163,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     // The visible transcript has its own harness:<n> disclosure state, distinct from Review's source A.
     const divider = transcript.locator('[data-kind="divider"] button[aria-expanded]').first();
     if (await divider.getAttribute('aria-expanded') === 'false') await divider.click();
+    // UX wave U2 (O-29): the edit's run is folded until it is opened onto its calls' rows
+    const folded = transcript.locator('.transcript-run-line[aria-expanded="false"]');
+    for (let guard = 0; guard < 20 && (await folded.count()) > 0; guard += 1) await folded.first().click();
+    await expect(folded).toHaveCount(0);
     await expect(transcript.locator('.transcript-receipt')).toHaveCount(0);
     const cell = transcript.locator('.transcript-cell').filter({ has: h.page.getByRole('button', { name: /^Edited.*app.ts.*\+1.*−1/ }) });
     await cell.locator('.transcript-cell-line').click();

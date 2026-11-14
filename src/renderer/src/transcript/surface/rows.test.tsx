@@ -50,17 +50,32 @@ describe('mounted transcript surface integration', () => {
     const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' });
     const store = await mounted(b); const row = rowOf(store.rows(), 'group');
     const view = renderRow(row, { storeKey: store.key });
-    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(2);
+    expect(view.container.querySelectorAll('[data-cell-id]')).toHaveLength(0); // UX wave U2 (O-29): folded, the run mounts no call
     const asked = asks()[0];
-    expect(asked).toMatchObject({ component: 'ToolGroup', instanceId: 'group:t1' });
+    expect(asked).toMatchObject({ component: 'ToolGroup', instanceId: 'group:t1', props: { isExpanded: false } });
     await act(() => fake.reply('session.ui.render', answer({ ...asked.props, isExpanded: true }, { type: 'Box', children: [] }, true)));
     await waitFor(() => expect(rowOf(store.rows(), 'group').expanded).toBe(true));
     view.rerenderRow(rowOf(store.rows(), 'group'));
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
     expect(Array.from(view.container.querySelectorAll('[data-cell-id]'), (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
-    expect(view.container.querySelector('.transcript-group-header')).toBeNull();
+    expect(view.container.querySelector('.transcript-run-line')?.getAttribute('aria-expanded')).toBe('true');
     await waitFor(() => expect(asks().filter((x) => x.component === 'ToolUse').map((x) => x.instanceId)).toEqual(['t1', 't2']));
     expect(asks().filter((x) => x.component === 'ToolResult')).toHaveLength(0);
+  });
+
+  // UX wave U2 (the U2a document, M4 "The mods' site"; C13)
+  it('a run the tab’s jump landed in asks nothing at ToolGroup, and asks again under the same instance id once the next jump names another row', async () => {
+    const b = builder();
+    b.turn('u1'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' }); b.result('t2', 'ok'); b.end(['u1']);
+    b.turn('u2'); b.toolUse('t3', 'Bash', { command: 'third' }); b.result('t3', 'ok'); b.end(['u2']);
+    const store = await mounted(b);
+    act(() => useTranscriptStore.getState().jumpTo(store.key, 'cell:t2' as never));
+    const view = renderRow(rowOf(store.rows(), 'group'), { storeKey: store.key });
+    const groupAsks = () => asks().filter((x) => x.component === 'ToolGroup').map((x) => x.instanceId);
+    expect(groupAsks()).toEqual([]);
+    act(() => useTranscriptStore.getState().jumpTo(store.key, 'cell:t3' as never));
+    view.rerenderRow(rowOf(store.rows(), 'group'));
+    await waitFor(() => expect(groupAsks()).toEqual(['group:t1']));
   });
 
   it('asks ToolResult for only the mounted standalone resolved output and applies its rewrite inside detail', async () => {
@@ -68,7 +83,7 @@ describe('mounted transcript surface integration', () => {
     const store = await mounted(b); act(() => useTranscriptStore.getState().expandAll(store.key));
     const row = rowOf(store.rows(), 'cell'); const view = renderRow(row, { storeKey: store.key });
     await act(() => fake.reply('session.ui.render', { ...answer({}), hooked: false }));
-    fireEvent.click(screen.getByRole('button', { name: 'Ran Bash' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
+    fireEvent.click(screen.getByRole('button', { name: 'Ran pwd' })); view.rerenderRow(rowOf(store.rows(), 'cell'));
     await waitFor(() => expect(asks().some((x) => x.component === 'ToolResult')).toBe(true));
     const props = asks().find((x) => x.component === 'ToolResult')!.props;
     await act(() => fake.reply('session.ui.render', answer({ ...props, output: BASH_RESULT('rewritten output') }, engine, true)));

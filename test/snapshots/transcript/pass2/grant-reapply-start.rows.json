@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:06:54.639Z",
     "autoDenied": 0,
+    "caption": "Ran 2 commands",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:07:01.690Z",
     "expanded": true,
@@ -31,6 +36,9 @@
     "id": "divider:turn:97f0bde7-943e-49c3-9f54-571410819204",
     "kind": "divider",
     "origin": "human",
+    "parts": [
+      "ran 2 commands"
+    ],
     "startedAt": "2026-09-28T10:06:54.688Z",
     "state": "completed",
     "summary": {
@@ -68,81 +76,91 @@
     "turnId": "turn:97f0bde7-943e-49c3-9f54-571410819204"
   },
   {
-    "agent": null,
     "at": "2026-09-28T10:06:57.043Z",
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": false,
-      "hidden": false,
-      "humanDecision": true,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
+    "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": true,
+          "safeguard": "not_evaluated",
+          "startsGroup": true,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "touch granted.txt",
+          "cwd": null,
+          "description": "Create granted.txt file",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T10:06:57.902Z",
+        "expanded": true,
+        "id": "cell:toolu_01Eu21W4avHdQXawFme4uM4y",
+        "label": "Ran `touch granted.txt` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T10:06:57.043Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_01Eu21W4avHdQXawFme4uM4y"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "commands",
+        "classification": {
+          "category": "commands",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "backgroundTaskId": null,
+          "command": "touch granted.txt",
+          "cwd": null,
+          "description": "Create granted.txt file again",
+          "exitCode": 0,
+          "interrupted": false,
+          "kind": "shell",
+          "spill": null,
+          "stderr": "",
+          "stdout": "",
+          "truncated": null
+        },
+        "endedAt": "2026-09-28T10:06:59.955Z",
+        "expanded": true,
+        "id": "cell:toolu_01EGPWeyXBiKMRQKQfsXWxXe",
+        "label": "Ran `touch granted.txt` in 0s",
+        "paths": [],
+        "startedAt": "2026-09-28T10:06:59.929Z",
+        "status": "done",
+        "toolName": "Bash",
+        "toolUseId": "toolu_01EGPWeyXBiKMRQKQfsXWxXe"
+      }
+    ],
+    "counts": {
+      "added": 0,
+      "removed": 0
     },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "touch granted.txt",
-      "cwd": null,
-      "description": "Create granted.txt file",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:06:57.902Z",
     "expanded": true,
-    "id": "cell:toolu_01Eu21W4avHdQXawFme4uM4y",
-    "kind": "cell",
-    "label": "Ran `touch granted.txt` in 0s",
-    "paths": [],
-    "startedAt": "2026-09-28T10:06:57.043Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_01Eu21W4avHdQXawFme4uM4y",
-    "turnId": "turn:97f0bde7-943e-49c3-9f54-571410819204"
-  },
-  {
-    "agent": null,
-    "at": "2026-09-28T10:06:59.929Z",
-    "category": "commands",
-    "classification": {
-      "category": "commands",
-      "denial": null,
-      "groupable": true,
-      "hidden": false,
-      "humanDecision": false,
-      "safeguard": "not_evaluated",
-      "startsGroup": false,
-      "subagentLifecycle": null
-    },
-    "detail": {
-      "backgroundTaskId": null,
-      "command": "touch granted.txt",
-      "cwd": null,
-      "description": "Create granted.txt file again",
-      "exitCode": 0,
-      "interrupted": false,
-      "kind": "shell",
-      "spill": null,
-      "stderr": "",
-      "stdout": "",
-      "truncated": null
-    },
-    "endedAt": "2026-09-28T10:06:59.955Z",
-    "expanded": true,
-    "id": "cell:toolu_01EGPWeyXBiKMRQKQfsXWxXe",
-    "kind": "cell",
-    "label": "Ran `touch granted.txt` in 0s",
-    "paths": [],
-    "startedAt": "2026-09-28T10:06:59.929Z",
-    "status": "done",
-    "toolName": "Bash",
-    "toolUseId": "toolu_01EGPWeyXBiKMRQKQfsXWxXe",
+    "icon": "commands",
+    "id": "group:cell:toolu_01Eu21W4avHdQXawFme4uM4y",
+    "kind": "group",
+    "state": "completed",
+    "summary": "Ran 2 commands",
     "turnId": "turn:97f0bde7-943e-49c3-9f54-571410819204"
   },
   {

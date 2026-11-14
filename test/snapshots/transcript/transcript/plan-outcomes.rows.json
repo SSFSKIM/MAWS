@@ -23,6 +23,11 @@
   {
     "at": "2026-09-28T10:10:00.045Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:10:03.625Z",
     "expanded": true,
@@ -31,6 +36,7 @@
     "id": "divider:turn:u-plan-outcomes-002",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:10:00.100Z",
     "state": "completed",
     "summary": {
@@ -74,6 +80,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-013",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-002"
   },
@@ -116,6 +123,11 @@
   {
     "at": "2026-09-28T10:10:03.655Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:10:07.164Z",
     "expanded": true,
@@ -124,6 +136,7 @@
     "id": "divider:turn:u-plan-outcomes-035",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:10:03.710Z",
     "state": "completed",
     "summary": {
@@ -167,6 +180,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-046",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-035"
   },
@@ -208,6 +222,11 @@
   {
     "at": "2026-09-28T10:10:07.194Z",
     "autoDenied": 0,
+    "caption": "",
+    "counts": {
+      "added": 0,
+      "removed": 0
+    },
     "denied": 0,
     "endedAt": "2026-09-28T10:10:10.782Z",
     "expanded": true,
@@ -216,6 +235,7 @@
     "id": "divider:turn:u-plan-outcomes-060",
     "kind": "divider",
     "origin": "human",
+    "parts": [],
     "startedAt": "2026-09-28T10:10:07.249Z",
     "state": "completed",
     "summary": {
@@ -259,6 +279,7 @@
     "kind": "thinking",
     "live": false,
     "messageUuid": "a-plan-outcomes-071",
+    "recordedMs": null,
     "text": "Plan mode: present the plan and wait.",
     "turnId": "turn:u-plan-outcomes-060"
   },

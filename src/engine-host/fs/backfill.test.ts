@@ -1068,3 +1068,44 @@ describe('what arrived from elsewhere (UX wave U3)', () => {
     expect(events).toEqual([expect.objectContaining({ kind: 'user.message', isSynthetic: false, origin: 'local-command', content: '<local-command-stdout>Compacted</local-command-stdout>' })]);
   });
 });
+
+// UX wave U2 (O-29, the U2a execution document's M1 and decision 22): the kind of a refusal, read from the row's own
+// `toolDenialKind`, the field the engine makes the wire's `non_execution_kind` from, for a row that holds exactly one
+// result (`cli.pretty.js:237652-237668` of 2.1.322). Recorded files first, then rows with the keys the U1 probe recorded
+// (its journals carry a digest of the file's refused rows: `uxw_transcript_failed_rows`), with invented content.
+describe('a refused call’s kind, from the file', () => {
+  const resultsOf = (records: TranscriptRecord[]) => only(mapAll(records), 'tool.result');
+
+  it('the two recorded files of a call the person’s Stop interrupted give user-rejected, as their journals do', () => {
+    for (const name of ['w1-steer-next-interrupted', 'p1-maws-ask-interrupt']) {
+      const refused = resultsOf(loadTranscriptFixture(name)).filter((result) => result.denial !== null);
+      expect(refused.map((result) => result.denial), name).toEqual(['user-rejected']);
+    }
+  });
+
+  // A refused row as the U1 probe recorded its keys: the classifier's block, its permission decision and context.
+  const refusedRow = (fields: Record<string, unknown>, content: unknown[] = [{ type: 'tool_result', tool_use_id: 'toolu_9', is_error: true, content: 'Permission for this action was denied by the auto mode classifier.' }]) => rec({
+    type: 'user', uuid: 'r9', parentUuid: 'a9', timestamp: at(9), cwd: '/work/demo', entrypoint: 'sdk-cli', gitBranch: 'main', isSidechain: false, permissionDecision: 'deny',
+    promptId: 'p-9', serverClassifierContext: {}, sessionId: 'sess-1', sourceToolAssistantUUID: 'a9', toolUseResult: 'Error: Permission for this action was denied by the auto mode classifier.',
+    userType: 'external', version: '2.1.322', message: { role: 'user', content }, ...fields,
+  });
+
+  it('a row with the probe’s keys and toolDenialKind automode-blocked gives that kind', () => {
+    expect(resultsOf([refusedRow({ toolDenialKind: 'automode-blocked' })]).map((r) => r.denial)).toEqual(['automode-blocked']);
+  });
+
+  it.each(['user-rejected', 'permission-rule', 'automode-blocked', 'automode-parsing-error', 'automode-unavailable', 'interrupted', 'cancelled'])('the kind %s reads as itself', (kind) => {
+    expect(resultsOf([refusedRow({ toolDenialKind: kind })]).map((r) => r.denial)).toEqual([kind]);
+  });
+
+  it('a row with two results and a kind gives none: the engine names a kind only for a row of one result', () => {
+    const two = [{ type: 'tool_result', tool_use_id: 'toolu_9', is_error: true, content: 'no' }, { type: 'tool_result', tool_use_id: 'toolu_10', is_error: true, content: 'no' }];
+    expect(resultsOf([refusedRow({ toolDenialKind: 'user-rejected' }, two)]).map((r) => r.denial)).toEqual([null, null]);
+  });
+
+  it('a word this build does not know, a value that is no word, and a row with no kind give none', () => {
+    expect(resultsOf([refusedRow({ toolDenialKind: 'classifier-later-kind' })]).map((r) => r.denial)).toEqual([null]);
+    expect(resultsOf([refusedRow({ toolDenialKind: 7 })]).map((r) => r.denial)).toEqual([null]);
+    expect(resultsOf([refusedRow({})]).map((r) => r.denial)).toEqual([null]);
+  });
+});

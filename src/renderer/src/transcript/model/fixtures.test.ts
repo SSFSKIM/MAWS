@@ -42,13 +42,20 @@ describe('synthetic journals', () => {
       'Auto mode blocked: `rm -rf build` · Auto mode blocked this command: destructive deletion outside the workspace allowlist.',
       'Auto mode blocked: `curl -X POST https://deploy.example.com/hook` · review unreadable',
     ]);
+    // UX wave U2 (decision 23, R2): in the aborted turn the rejected call is a stopped member of its run, here a run of
+    // one, so the call's row; a stopped shell call with a description reads it as written
     const interrupted = cellsOf(second);
     expect(interrupted).toHaveLength(1);
-    expect(interrupted[0]).toMatchObject({ status: 'stopped', label: 'Stopped: `sleep 1; echo 1`', classification: { denial: { kind: 'user-rejected', disposition: 'stopped', interruption: true } } });
+    expect(ofKind(second, 'cell')).toHaveLength(1);
+    expect(interrupted[0]).toMatchObject({ status: 'stopped', label: 'Stopped: Count 1', classification: { groupable: true, denial: { kind: 'user-rejected', disposition: 'stopped', interruption: true } } });
     expect(dividers[1].firstDeniedCell).toBeNull();
     const stopped = cellsOf(third);
     expect(stopped.map((c) => [c.status, c.classification.denial?.kind])).toEqual([['stopped', 'automode-unavailable'], ['stopped', 'interrupted'], ['stopped', 'cancelled']]);
-    expect(stopped.map((c) => c.label)).toEqual(['Stopped: `./deploy.sh stage` · auto mode unavailable', 'Stopped: `./deploy.sh prod`', 'Stopped: `./deploy.sh verify`']);
+    expect(stopped.map((c) => c.label)).toEqual(['Stopped: `./deploy.sh stage` · auto mode unavailable', 'Stopped: Deploy to production', 'Stopped: Verify the deploy']);
+    // `automode-unavailable` stands alone with its diagnostic label; the interrupted and cancelled calls after it are one run
+    expect(ofKind(third, 'cell').map((c) => c.classification.denial?.kind)).toEqual(['automode-unavailable']);
+    expect(ofKind(third, 'group').map((g) => [g.summary, g.cells.map((c) => c.classification.denial?.kind)])).toEqual([['Ran 2 commands (2 stopped)', ['interrupted', 'cancelled']]]);
+    expect(dividers.map((d) => d.caption)).toEqual(['', 'Ran a command (1 stopped)', 'Ran 2 commands (2 stopped)']);
     expect(dividers[2].firstDeniedCell).toBeNull();
     expect(dividers[2].summary.denials.map((d) => d.disposition)).toEqual(['stopped', 'stopped', 'stopped']);
     for (const cell of [...interrupted, ...stopped]) expect(cell.label.toLowerCase().includes('auto')).toBe(cell.classification.denial?.kind === 'automode-unavailable');
@@ -100,7 +107,7 @@ describe('synthetic journals', () => {
     expect(divider.summary.byCategory).toEqual({ mcp: 0, skills: 0, files: 3, exploration: 4, commands: 5, web: 0, other: 0 });
     const denied = ofKind(rows, 'cell').find((c) => c.id === 'cell:toolu_synth_mock_7')!;
     expect(denied).toMatchObject({ status: 'denied', label: 'Denied: `rm -rf node_modules/.vite` · Permission denied by rule: Bash(rm -rf:*) is denied in this project.' });
-    expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual(['Read 2 files, searched for `setWidth`, searched for `src/layout/*.css`', 'Edited 2 files', 'Ran 4 commands']);
+    expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual(['Read 2 files, searched code, searched for files', 'Edited 2 files', 'Ran 4 commands']); // UX wave U2: Desktop's caption
     expect(ofKind(rows, 'assistant_text').map((t) => t.phase)).toEqual(['commentary', 'commentary', 'answer']);
     const files = divider.files!;
     expect(files.map((f) => f.path.split('/').at(-1))).toEqual(['useSidebarDrag.ts', 'store.ts', 'sidebar.css']);
@@ -148,9 +155,10 @@ describe('synthetic journals', () => {
       id: `cell:toolu_synth_x_read${index + 1}`, toolUseId: `toolu_synth_x_read${index + 1}`, paths: [paths[index]], label: `Read ${paths[index].split('/').at(-1)}`,
       detail: { kind: 'read', files: [{ path: paths[index], range: index === 1 ? [10, 49] : null }] },
     }));
+    // UX wave U2 (Interfaces §B): the kinds in the order each first occurred, then the parts of no kind; five parts are capped
     expect(ofKind(rows, 'group').map((g) => g.summary)).toEqual([
-      'Read 6 files, searched for `rowsOf`, searched for `src/model/**/*.ts`',
-      'Used docs, loaded test-driven-development skill, loaded 2 tools, searched the web for tanstack virtual followOnAppend, fetched tanstack.com',
+      'Searched code, searched for files, read 6 files',
+      'Searched the web, fetched a page, ran /test-driven-development, and 2 more actions',
     ]);
     expect(cells.find((c) => c.toolName === 'mcp__docs__search')?.detail).toMatchObject({ kind: 'mcp', server: 'docs', tool: 'search' });
     expect(ofKind(rows, 'divider')[0].toolCalls).toBe(13); // Grep, Glob, six Reads, WebSearch, WebFetch, Skill, ToolSearch, one MCP call
