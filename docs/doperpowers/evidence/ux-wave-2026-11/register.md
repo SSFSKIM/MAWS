@@ -88,6 +88,7 @@ Verbatim, as chosen on the question cards; a note is the owner's own text. An an
 | Connector switches (ticket #476): which model? A running session cannot drop a connector, so a switch for one session restarts that session's engine process. | Two switches, as scopes (typed) | typed on the card in place of an option; the options were "Two switches (Recommended)" (a default per machine and a switch per session), "One switch, like Claude Desktop" and "Per-machine default only": "two switches mean that a connector can be installed like plugin -- user scope and project scope." |
 | Where should "Add custom connector…" write: Claude Code's own config, or the list MAWS keeps in Settings that only sessions MAWS starts can see? | Claude Code's config (Recommended) |  |
 | Between the two scopes an off always wins in the engine: a connector off at user scope cannot be switched on for one project by an on/off setting (a plugin can). Which behaviour do you need for a connector with many tools? | Off by default, on per project (Recommended) |  |
+| In the "Add custom connector" form, should the value fields of request headers and environment variables show what is typed, or hide it behind dots with an eye button? | Plain text (Recommended) |  |
 
 ## Questions still open
 
