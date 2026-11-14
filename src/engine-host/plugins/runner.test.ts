@@ -508,7 +508,7 @@ describe('a custom add and the rule about values', () => {
     const lines = events.filter((e) => e.phase === 'output').map((e) => e.line);
     expect(lines).toContain('add-json'); // clean stderr lines pass whole
     expect(lines).toContain('--scope');
-    expect(lines.some((line) => line.startsWith('{'))).toBe(false); // the JSON argument holds the values
+    expect(lines.some((line) => line?.startsWith('{'))).toBe(false); // the JSON argument holds the values
     expect(lines.filter((line) => line === 'mcp').length).toBe(2); // stderr's copy in each round; stdout's is not emitted
     for (const event of [...events, ...replay]) expect(holds(JSON.stringify(event)), JSON.stringify(event)).toBe(false);
     for (const call of warn.mock.calls) expect(holds(call.map(String).join(' '))).toBe(false);
