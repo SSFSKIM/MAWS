@@ -243,11 +243,13 @@ gates_trailer=$gates
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
-  git_dir=$target
+  git_dir=$(git -C "$target" rev-parse --show-toplevel) || exit 2
   sha=$(git -C "$git_dir" rev-parse --verify HEAD) || exit 2
   branch=$(git -C "$git_dir" symbolic-ref --quiet --short HEAD || true)
 else
-  git_dir=$(dirname "$0")
+  # The checkout's top, not scripts/: `git archive` run from a subfolder archives only that subfolder, which left the
+  # coverage graph and mini copies without package.json for every bare-sha call.
+  git_dir=$(git -C "$(dirname "$0")" rev-parse --show-toplevel) || exit 2
   sha=$(git -C "$git_dir" rev-parse --verify --quiet "$target^{commit}") || { echo "ci-gate: no commit $target" >&2; exit 2; }
   branch=''
 fi
