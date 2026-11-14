@@ -4,7 +4,7 @@ Every item the wave considered, one row each: where it came from, its state, and
 
 240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (four of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
-Built and on master, as the state column says: 9 items, those of the other-machines landing (pull request #650). The rows of the landings before it (#631, #632, #634, #635, #637, #642, #643) still read "build"; they are marked in the register's next revision.
+Built and on master, as the state column says: 54 items whole and 9 in part (a later landing of the same child owes the rest), from pull requests #631, #632, #634, #635, #637, #642, #643, #650 and #651. The rows of four earlier landings (#604, #618, #623 and the working-folder selector's) still read "build"; they are marked in the register's next revision.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
@@ -143,23 +143,23 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | id | from | state | the line |
 |---|---|---|---|
 | l2-transcript-10 | mark | build | The jump-to-latest button says when a request is waiting, as you accepted. |
-| l4-approvals-08 | mark | build | You confirmed on 11-12: a question is drawn in the transcript in the row of the call that asked, a permission prompt at the transcript's end, and the composer stays free; a card in the right-hand column lists what waits in the session (your addition), present only while something waits. A message you send while a question waits is delivered as a message and the question keeps waiting; every question's form gets a Dismiss button for when the message settled it (your answers of 11-12). For a terminal session's question that does not block, Dismiss needs a small change in the sminos plugin first and is drawn disabled until then. |
+| l4-approvals-08 | mark | built in part, on master (#631) | You confirmed on 11-12: a question is drawn in the transcript in the row of the call that asked, a permission prompt at the transcript's end, and the composer stays free; a card in the right-hand column lists what waits in the session (your addition), present only while something waits. A message you send while a question waits is delivered as a message and the question keeps waiting; every question's form gets a Dismiss button for when the message settled it (your answers of 11-12). For a terminal session's question that does not block, Dismiss needs a small change in the sminos plugin first and is drawn disabled until then. |
 | O-17 | observation | build | The notice above the composer goes. You answered on 11-12: the jump-to-latest button says when a request waits, and (your addition) the right-hand column gets a queue of pending questions, present only while something waits; choosing one brings it into view. |
 | l4-approvals-07 | mark | build | The composer notice for a pending question is dropped; the request is announced once. |
-| #358 | ticket | build | One cause with S-04, S-07 and X-066: an answered request counted as waiting until its tool sent a first frame. Only an unanswered request docks or counts. |
-| S-04 | sitting | build | The same cause as #358: after you allow a long command, its row, tab, Needs you and the badge no longer read "Needs approval". |
-| S-07 | sitting | build | The same cause as #358: the answered card leaves the composer at the answer. |
-| O-22 | observation | build | An async question from a terminal session no longer takes the composer. It is answered in its own row in the transcript, from Needs you, the hover card or the Overview, and can be dismissed once the sminos plugin carries a dismissal (l4-approvals-08). |
+| #358 | ticket | built, on master (#631) | One cause with S-04, S-07 and X-066: an answered request counted as waiting until its tool sent a first frame. Only an unanswered request docks or counts. |
+| S-04 | sitting | built, on master (#631) | The same cause as #358: after you allow a long command, its row, tab, Needs you and the badge no longer read "Needs approval". |
+| S-07 | sitting | built, on master (#631) | The same cause as #358: the answered card leaves the composer at the answer. |
+| O-22 | observation | built in part, on master (#631) | An async question from a terminal session no longer takes the composer. It is answered in its own row in the transcript, from Needs you, the hover card or the Overview, and can be dismissed once the sminos plugin carries a dismissal (l4-approvals-08). |
 | O-21 | observation | build | An answer to an async question fills the question's own row, on every route; the row no longer reads "Not answered" forever. |
-| l4-approvals-02 | mark | build | The permission card becomes three buttons with key hints (Deny, Allow once, Always allow), about half its height; "Composer paused" and "Main session wants to" go. |
+| l4-approvals-02 | mark | built in part, on master (#631) | The permission card becomes three buttons with key hints (Deny, Allow once, Always allow), about half its height; "Composer paused" and "Main session wants to" go. |
 | l4-approvals-04 | mark | build | A call that waits for approval reads "Waiting for approval", not "Running" or "Edited". |
-| O-23 | observation | build | Double-click picks and submits on a single-choice question and on Allow once. Not on multi-select or "Other". Claude Desktop has no double-click: by default its question card answers at one click on an option, and in its layout behind a server switch it preselects the first option. Your double-click is kept, because a single click that submits is easy to make by accident. |
-| l4-approvals-05 | mark | build | A file-change approval shows a real diff, says "create" for a new file, and shortens paths. |
-| l4-approvals-11 | mark | build | The plan approval button names the mode that follows, with a menu. Editing the plan is left out. |
-| l4-approvals-13 | mark | build | The trust card lists only what would really load. |
+| O-23 | observation | built, on master (#631) | Double-click picks and submits on a single-choice question and on Allow once. Not on multi-select or "Other". Claude Desktop has no double-click: by default its question card answers at one click on an option, and in its layout behind a server switch it preselects the first option. Your double-click is kept, because a single click that submits is easy to make by accident. |
+| l4-approvals-05 | mark | built, on master (#631) | A file-change approval shows a real diff, says "create" for a new file, and shortens paths. |
+| l4-approvals-11 | mark | built, on master (#631) | The plan approval button names the mode that follows, with a menu. Editing the plan is left out. |
+| l4-approvals-13 | mark | built, on master (#631) | The trust card lists only what would really load. |
 | l4-approvals-12 | mark | build | Yes, it works, as "Approve and retry": probed on 11-12, the button's message got the blocked command to run 5 times out of 5. It is not what I first told you: nothing MAWS can do grants one exact call in auto mode. The button sends the engine's own consent sentence as a message, and the classifier treats your go-ahead after a block as consent. A command blocked by a rule that always denies is blocked again every time (0 of 3), and the engine does not say which kind of rule blocked a call, so the button stays and a repeated block says so. After two blocks in a row the engine asks you with an ordinary prompt instead. |
-| l4-approvals-09 | mark | build | From a notification you can allow a shell command (shown in full) or a read-only tool, and deny anything. An edit opens the app. |
-| #333 | ticket | build | The same rule on the sidebar hover card. |
+| l4-approvals-09 | mark | built, on master (#631) | From a notification you can allow a shell command (shown in full) or a read-only tool, and deny anything. An edit opens the app. |
+| #333 | ticket | built, on master (#631) | The same rule on the sidebar hover card. |
 | #420 | ticket | build | Part of O-19. Its second half is a separate small choice (defer the edit tools again). |
 | O-19 | observation | build, last | Larger than it reads: the sminos ask cannot serve a session MAWS runs today, for three separate reasons, and MAWS has no path to deliver its async answer. Two repositories. |
 | #421 | ticket | later | Follows O-19's answer. |
@@ -200,16 +200,16 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-12 | observation | build | A peer or subagent message is one line ("› Message from @name: …"), opened on demand, and folds with its turn. This is the CLI's form; Claude Desktop draws these as bordered cards, which is what you are asking to leave. |
-| O-28 | observation | build | A background job's notification is drawn as one row where it reached the model, coloured by outcome, as the CLI does. Claude Desktop instead updates the task's own row. |
-| O-34 | observation | build | A failed background task no longer raises an error card, a Needs you entry or a notification; its red line in the transcript says it (O-28). Dismiss looked dead because the session was on another machine, where dismissing is not carried yet (it will be). You answered on 11-12 that the line alone is enough, as in the terminal. |
-| O-41 | observation | build | Two defects. A terminal session on this Mac draws a peer's delivery as your own message; and even the remote path draws it as a bubble labelled "From X" by an earlier decision. Every route will draw a peer row; your own sends stay your bubble. |
-| X-032 | tracker | build | A steer of yours that went through the fallback route is drawn as yours, not as a peer's message. |
+| O-12 | observation | built, on master (#643) | A peer or subagent message is one line ("› Message from @name: …"), opened on demand, and folds with its turn. This is the CLI's form; Claude Desktop draws these as bordered cards, which is what you are asking to leave. |
+| O-28 | observation | built, on master (#643) | A background job's notification is drawn as one row where it reached the model, coloured by outcome, as the CLI does. Claude Desktop instead updates the task's own row. |
+| O-34 | observation | built, on master (#643, #650) | A failed background task no longer raises an error card, a Needs you entry or a notification; its red line in the transcript says it (O-28). Dismiss looked dead because the session was on another machine, where dismissing is not carried yet (it will be). You answered on 11-12 that the line alone is enough, as in the terminal. |
+| O-41 | observation | built, on master (#643) | Two defects. A terminal session on this Mac draws a peer's delivery as your own message; and even the remote path draws it as a bubble labelled "From X" by an earlier decision. Every route will draw a peer row; your own sends stay your bubble. |
+| X-032 | tracker | built, on master (#643) | A steer of yours that went through the fallback route is drawn as yours, not as a peer's message. |
 | O-07 | observation | build | Code blocks wrap long lines and have one frame with no empty header band, as Claude Desktop's do. |
 | O-08 | observation | build | Code blocks and tables stay inside the text column; a wide table scrolls sideways. This reverses the 10-01 rule that let them break out. |
 | O-02 | observation | build | Copy, Edit and the time sit below the message and show on hover. |
 | l2-transcript-07 | mark | build | An answer gets Copy, Fork from here and its time. No Read aloud, no ratings. |
-| O-18 | observation | build | A slash command's output is one dim line under the command, folded past two lines, as the CLI draws it. Newer engines send some outputs in a form MAWS reads as an answer; that is fixed with it. |
+| O-18 | observation | built in part, on master (#643) | A slash command's output is one dim line under the command, folded past two lines, as the CLI draws it. Newer engines send some outputs in a form MAWS reads as an answer; that is fixed with it. |
 | #331 | ticket | build | While a session compacts, its working line says "Compacting session…". The engine host already knows; nothing reads it. |
 | #146 | ticket | build | The web plugin's fetch is drawn like a web fetch. |
 | l2-transcript-08 | mark | build | ⌘F finds in the session: messages, answers and tool labels, opening the fold that holds a match. |
@@ -252,14 +252,14 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-45 | observation | build | Side thread is already the default. The two-way control becomes a "Send to main" checkbox, unchecked each time. (In Claude Desktop an unchecked comment reaches no agent; in MAWS it opens the side thread, as you said.) |
-| l6-artifacts-05 | mark | build | Send to main confirms with a short note naming the session; the comment count ignores drafts. |
-| l6-artifacts-19 | mark | build | After the agent answers a comment, only the commented passage is highlighted once, and the card folds to its pin in a narrow window. |
-| l6-artifacts-20 | mark | build | The agent's reply to a comment is its own words, not tool output. The export dialog opens in the last export folder. |
+| O-45 | observation | built in part, on master (#651) | Side thread is already the default. The two-way control becomes a "Send to main" checkbox, unchecked each time. (In Claude Desktop an unchecked comment reaches no agent; in MAWS it opens the side thread, as you said.) |
+| l6-artifacts-05 | mark | built, on master (#651) | Send to main confirms with a short note naming the session; the comment count ignores drafts. |
+| l6-artifacts-19 | mark | built, on master (#651) | After the agent answers a comment, only the commented passage is highlighted once, and the card folds to its pin in a narrow window. |
+| l6-artifacts-20 | mark | built, on master (#651) | The agent's reply to a comment is its own words, not tool output. The export dialog opens in the last export folder. |
 | l5-code-01 | mark | build | Review gets line comments through the same comment card, opened with "Send to main" ticked; comments made in one pass are sent together. Checked on 11-12 in the app's own browser engine: the diff library closes an open card whenever the diff is re-read, so while you write a comment the diff of that file holds still and its header says "This file changed · Refresh". |
-| l9-browser-delivery-05 | mark | build | Several comments on a page are collected into one message, as Claude Desktop does, designed once for the shared card. |
-| X-216 | tracker | build | The page stops auto-scrolling after the comment card closes. |
-| X-218 | tracker | build | The browser's comment card keeps its draft like the others. |
+| l9-browser-delivery-05 | mark | built, on master (#651) | Several comments on a page are collected into one message, as Claude Desktop does, designed once for the shared card. |
+| X-216 | tracker | built, on master (#651) | The page stops auto-scrolling after the comment card closes. |
+| X-218 | tracker | built, on master (#651) | The browser's comment card keeps its draft like the others. |
 | l5-code-05 | mark | build | Review becomes one stacked list of files with sticky headers, as Claude Desktop's. Large; it is the anchor of the Review work. |
 | l5-code-03 | mark | build | "This branch" compares against the default branch for every session, the main checkout included, and counts uncommitted and new files. |
 | l5-code-04 | mark | build | New files already draw as added. Their line counts and their place in "This branch" are added. |
@@ -279,7 +279,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l5-code-09 | mark | build | Files gets a Changed group on top, status colours and dimmed ignored files, then ⌘P quick open. |
 | l5-code-10 | mark | build | "Open in" for VS Code, Cursor, Zed, Xcode, Terminal and Finder, where installed. |
 | l9-browser-delivery-08 | mark | build | The same "Open in" on a session's menu and its sidebar row. |
-| O-37 | observation | build | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Your answers of 11-13: on this Mac a file outside the session's folders opens read-only when that session's transcript writes its path as a link or a file chip ('Files the transcript names'); the machine's daemon, which reads files, checks the path against the transcript before it reads, which stops a direct request for another path but not someone who can also send a message into that session; a session on another machine keeps the refusal. It is built now as a small landing of its own, U6c, after the tab strip landing ('Own small landing, now'); the rest of this item follows in U6b, on top of it. |
+| O-37 | observation | built in part, on master (#642) | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Your answers of 11-13: on this Mac a file outside the session's folders opens read-only when that session's transcript writes its path as a link or a file chip ('Files the transcript names'); the machine's daemon, which reads files, checks the path against the transcript before it reads, which stops a direct request for another path but not someone who can also send a message into that session; a session on another machine keeps the refusal. It is built now as a small landing of its own, U6c, after the tab strip landing ('Own small landing, now'); the rest of this item follows in U6b, on top of it. |
 | l9-browser-delivery-03 | mark | build | A local session's localhost links open in the in-app browser, as a remote session's already do; ⌘-click sends one to the system browser. |
 | l5-code-08 | mark | build | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
 | l7-shell-06 | mark | build | ⌘K opens on your recent sessions and artifacts and can find artifacts. |
@@ -296,12 +296,12 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-16 | observation | build | Hide is built as its own thing, not as archive (archive stops a process and cannot reach a session a terminal holds). Hide is one item in the row's three-dot menu, with no confirmation and nothing stopped; hidden sessions sit behind "Hidden · N" at the end of the project; Unhide brings one back, and a hidden session comes back by itself when it starts a new turn. |
-| O-38 | observation | build | Local rows already have "Open in new tab". Rows of sessions on other machines do not; they get it. |
-| #559 | ticket | build | The same change as O-38: a remote row also honours ⌘-click and middle-click. |
-| #407 | ticket | build | While the machine daemon restarts, the sidebar shows what it has with a "reconnecting" mark instead of ending the skeleton early. |
-| S-11 | sitting | build | A new session is titled by the first six words of its prompt (60 characters at most) until a title is generated. The whole prompt stays searchable. |
-| O-03 | observation | build | One regression from 10-24: the project chip's box is 96 px wide but its text may grow to 192 px, so a long name runs under the first tab. |
+| O-16 | observation | built, on master (#632) | Hide is built as its own thing, not as archive (archive stops a process and cannot reach a session a terminal holds). Hide is one item in the row's three-dot menu, with no confirmation and nothing stopped; hidden sessions sit behind "Hidden · N" at the end of the project; Unhide brings one back, and a hidden session comes back by itself when it starts a new turn. |
+| O-38 | observation | built, on master (#632) | Local rows already have "Open in new tab". Rows of sessions on other machines do not; they get it. |
+| #559 | ticket | built, on master (#632) | The same change as O-38: a remote row also honours ⌘-click and middle-click. |
+| #407 | ticket | built, on master (#632) | While the machine daemon restarts, the sidebar shows what it has with a "reconnecting" mark instead of ending the skeleton early. |
+| S-11 | sitting | built, on master (#632) | A new session is titled by the first six words of its prompt (60 characters at most) until a title is generated. The whole prompt stays searchable. |
+| O-03 | observation | built, on master (#632) | One regression from 10-24: the project chip's box is 96 px wide but its text may grow to 192 px, so a long name runs under the first tab. |
 | O-40 | observation | build | You answered "a page, like Desktop" on 11-12, on a card of mine that was wrong about Claude Desktop, and then, on the corrected card the same day, "As Desktop really does". Settings opens as a dialog over the window (over your tabs, or over the Customize page when that is showing). Customize, Projects and the Library open as pages that replace the main area with the sidebar kept. None of them is a tab. |
 | O-47 | observation | build | Usage becomes a small ring in the title bar that opens a compact one-column popover; the full multi-account grid moves to a Settings › Usage section. The sidebar footer keeps only the gear. |
 | S-03 | sitting | hands-on check (U14) | The mini's own window showed none of one project's sessions. The cause is not found; it has to be diagnosed on the mini, and the fix goes on top of the registry branch. |
@@ -332,15 +332,15 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-36 | observation | build | You answered on 11-12: tabs beside the chat, one tool in view, and you added that stacking should stay possible when you want it. So the tools beside the chat are tabs of one strip (Review, each terminal, the browser, each open file, the panels), nothing is placed under another by itself, and you can move a tab into a second group under the first. A click on the icon of the tool in view hides the column and closes nothing. It reverses your 10-24 ruling. On the card that asked how far "stacked, and so on" goes you chose two groups ("Tabs, plus one group below"), not a free arrangement and not tabs alone. |
-| O-05 | observation | build | You answered on 11-12: two cards, Subagents and Background tasks, each present only while it has something running. Your addition: Subagents is a tree, listing the first level by default, and a nested agent opens when its parent is clicked. Artifacts leaves the cards for the title bar's three-dot menu, Connectors stays, and Environment opens by default. |
-| O-09 | observation | build | The list reads "Running N" with every running kind together, then one folded "Done N" with counts by kind. Narrow tools remember their own width (about 360 px) apart from wide ones; today one shared width makes them open as wide as the browser. |
-| O-10 | observation | build | The Context card drops its compaction, subagent and background rows. |
-| #359 | ticket | build | Mostly built already: an ended agent reads finished, finished with errors, stopped or ended with the session, and one with a request of its own reads "Approval needed". What remains: an agent with work still running under it says how much; Done counts the failed and the stopped; a terminal session's agents stop reading "Working" once its process is gone (tracker row X-168). |
-| X-165 | tracker | build | A panel width saved as exactly 380 px is no longer read as "automatic". |
-| X-168 | tracker | build | A terminal session's background agent stops reading "working" once its terminal has ended. |
+| O-36 | observation | built, on master (#637) | You answered on 11-12: tabs beside the chat, one tool in view, and you added that stacking should stay possible when you want it. So the tools beside the chat are tabs of one strip (Review, each terminal, the browser, each open file, the panels), nothing is placed under another by itself, and you can move a tab into a second group under the first. A click on the icon of the tool in view hides the column and closes nothing. It reverses your 10-24 ruling. On the card that asked how far "stacked, and so on" goes you chose two groups ("Tabs, plus one group below"), not a free arrangement and not tabs alone. |
+| O-05 | observation | built in part, on master (#637) | You answered on 11-12: two cards, Subagents and Background tasks, each present only while it has something running. Your addition: Subagents is a tree, listing the first level by default, and a nested agent opens when its parent is clicked. Artifacts leaves the cards for the title bar's three-dot menu, Connectors stays, and Environment opens by default. |
+| O-09 | observation | built, on master (#637) | The list reads "Running N" with every running kind together, then one folded "Done N" with counts by kind. Narrow tools remember their own width (about 360 px) apart from wide ones; today one shared width makes them open as wide as the browser. |
+| O-10 | observation | built, on master (#637) | The Context card drops its compaction, subagent and background rows. |
+| #359 | ticket | built, on master (#637) | Mostly built already: an ended agent reads finished, finished with errors, stopped or ended with the session, and one with a request of its own reads "Approval needed". What remains: an agent with work still running under it says how much; Done counts the failed and the stopped; a terminal session's agents stop reading "Working" once its process is gone (tracker row X-168). |
+| X-165 | tracker | built, on master (#637) | A panel width saved as exactly 380 px is no longer read as "automatic". |
+| X-168 | tracker | built, on master (#637) | A terminal session's background agent stops reading "working" once its terminal has ended. |
 | l5-code-14 | mark | build | Larger than the display you asked for: once the agent moves into a worktree, Review, Source control, Files and the Environment card all keep reading the launch folder. They will follow the agent into a worktree of the same repository (Claude Desktop follows its own worktree tool; MAWS also follows a cd into a worktree, if the engine records it), and the card shows the live folder and branch. Another repository is not followed. A probe of the engine's record comes first. |
-| l5-code-16 | mark | build | The Environment card's change line already opens Review; it is drawn as a control so that this shows. The second Review button and the Claude Code version row leave the card (the version stays in Session info). |
+| l5-code-16 | mark | built, on master (#637) | The Environment card's change line already opens Review; it is drawn as a control so that this shows. The second Review button and the Claude Code version row leave the card (the version stays in Session info). |
 | l7-shell-04 | mark | same ask as another item | Your words on this mark are O-05. |
 | l6-artifacts-06 | mark | same ask as another item | Overtaken by your later O-44 (no automatic opening) and O-05 (card order). |
 | #566 | ticket | not MAWS's to fix | What the window draws while sessions work unattended: context for the cards work, not a change of its own. |
@@ -390,20 +390,20 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| l8-settings-01 | mark | build | Sign in exists, but not for plugin-provided servers or the servers added in MAWS's own Settings. Both get it. |
+| l8-settings-01 | mark | built in part, on master (#635) | Sign in exists, but not for plugin-provided servers or the servers added in MAWS's own Settings. Both get it. |
 | X-184 | tracker | build | Plugin-provided connectors appear under My items, with Sign in. |
-| l8-settings-03 | mark | build | The libraries work before the first message. |
-| l8-settings-04 | mark | build | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
+| l8-settings-03 | mark | built, on master (#635) | The libraries work before the first message. |
+| l8-settings-04 | mark | built in part, on master (#635) | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
 | #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
-| l8-settings-06 | mark | build | Settings is regrouped and its long notes shortened, then gets a search. |
+| l8-settings-06 | mark | built, on master (#635) | Settings is regrouped and its long notes shortened, then gets a search. |
 | l8-settings-11 | mark | build | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
 | O-14 | observation | build | MAWS has the kind on the outside (Plugins, Skills, Connectors, each with My items and Discover), and so does Claude Desktop 5. Your sentences ask for both orders. Missing icons are a recorded privacy ruling, not a bug. |
-| #540 | ticket | build | Each refusal on the Org sheets names the next step. |
-| #523 | ticket | build | Share sheet: one scrim for every sheet, a plain remedy line, the full machine name on hover. |
-| #505 | ticket | build | Channel tab: a stable scrollbar gutter and sensible truncation of names. |
-| #456 | ticket | build | The LiveQuery sheet gets its missing line for a paused query. |
-| S-09 | sitting | build | The Channel tab says it is offline and retrying as soon as its read fails. |
-| S-10 | sitting | build | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
+| #540 | ticket | built, on master (#635) | Each refusal on the Org sheets names the next step. |
+| #523 | ticket | built, on master (#635) | Share sheet: one scrim for every sheet, a plain remedy line, the full machine name on hover. |
+| #505 | ticket | built, on master (#635) | Channel tab: a stable scrollbar gutter and sensible truncation of names. |
+| #456 | ticket | built, on master (#635) | The LiveQuery sheet gets its missing line for a paused query. |
+| S-09 | sitting | built, on master (#635) | The Channel tab says it is offline and retrying as soon as its read fails. |
+| S-10 | sitting | built, on master (#635) | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
 | l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
 | #476 | ticket | hands-on check (U14) | The ticket names switches that do not exist in MAWS, and no engine setting is yet shown to drop a server's tools at launch. A probe first, then its own design. |
@@ -417,11 +417,11 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| l9-browser-delivery-01 | mark | build | Mostly answered in code already: when cua acts on an in-app tab, the Browser pane opens. What is left is wording: cua tells the agent about the in-app browser only in a place it does not read. I could not find the ticket you mention, so I file one. MAWS adds one sentence to its instructions. |
-| l9-browser-delivery-02 | mark | build | The agent's show-pane call reloads the page unless you are using that tab. |
-| l9-browser-delivery-06 | mark | build | Device sizes and a page screenshot. No site-permission prompt: nobody asked for one, and Claude Desktop's only such prompt is for local-network access. |
+| l9-browser-delivery-01 | mark | built, on master (#634) | Mostly answered in code already: when cua acts on an in-app tab, the Browser pane opens. What is left is wording: cua tells the agent about the in-app browser only in a place it does not read. I could not find the ticket you mention, so I file one. MAWS adds one sentence to its instructions. |
+| l9-browser-delivery-02 | mark | built, on master (#634) | The agent's show-pane call reloads the page unless you are using that tab. |
+| l9-browser-delivery-06 | mark | built, on master (#634) | Device sizes and a page screenshot. No site-permission prompt: nobody asked for one, and Claude Desktop's only such prompt is for local-network access. |
 | #435 | ticket | build | A pane the agent opens from a remote session appears on the device that sent the turn. |
-| l9-browser-delivery-07 | mark | build | MAWS shows "computer use running · Stop" while a cua call is in flight. The wire cannot say which app is driven; I file a cua ticket for that. The on-screen cursor gets the session's name. |
+| l9-browser-delivery-07 | mark | built, on master (#634) | MAWS shows "computer use running · Stop" while a cua call is in flight. The wire cannot say which app is driven; I file a cua ticket for that. The on-screen cursor gets the session's name. |
 | l9-browser-delivery-09 | mark | later | Deferred on 11-12 by your word: "defer drive work for now. we won't use gws, but will rather later use real MCP connectors through Drive MCP and GWS MCPs". Send to Drive stays as it is; Drive delivery through MCP connectors is ticket #400, designed when taken. |
 | #400 | ticket | later | Drive through a connector instead of gws: its own design. Note that gws sign-in expires weekly while its Google client is in testing mode. |
 | l9-browser-delivery-04 | mark | keep | Kept. |
