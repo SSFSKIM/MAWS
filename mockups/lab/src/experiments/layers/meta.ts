@@ -8,6 +8,8 @@ export const experiment: Experiment = {
   thesis:
     'Glass taken into the transcript: the colour field runs under the whole window, prose is read directly on it, and what the agent made that can be opened (a tool run, an edit, a running command) is a piece of glass standing over it.',
   notes: [
+    'Newest: code is coloured. Three quiet hues and the ink: the language\'s words in a plum, values in a bronze, type names in a slate; comments in the quiet ink; nothing green, red or orange, which the page already spends. Look at the bucket.ts tab, then keys.ts and index.ts in the side column, and at an edit in the session. "Code: colour" switches back to plain ink to compare.',
+    'Newest: more tabs than fit. Set "Tabs open" to 6, 9 and 14 and narrow the window. The tab you are on keeps its whole name; the others shorten together, then give their names up together and stand as their marks (the orange disc is never lost; rest on a mark for its name), then leave for a menu beside the plus. Tabs close now: rest on a tab\'s mark for the cross.',
     'New, and first: the two pages that were missing. Press "Overview" in the pane (key 4) and the bucket.ts tab (key 5). Both are meant to be this same design at the product\'s other scale; say where they are not.',
     'Overview: twenty sessions, and one piece of glass. A session that is the agents\' business is one line on the field (unread first, then working, then at rest, told apart by the dot alone). The three that wait stand on glass at the top right: it is the orange capsule\'s list standing open, so Approve, the question\'s chips and the plan are answered there, one item open at a time. Answer one and watch it join the working lines; answer all three and the glass is gone. Rest on a line for where it runs.',
     'A file, corrected: you said it was only floating text and to put it on glass so it is clearly a file card. It is one now (the bucket.ts tab, key 5): a card of glass with all four edges in view, the file\'s name as its top, numbered lines, and the code scrolling inside it. In the side column press keys.ts or index.ts for a file with lines taken out and the marks at the card\'s right edge that show where its changes are. Press a line and the composer names it. The look you saw before is still on the switch ("File: code", On the field).',
@@ -23,6 +25,17 @@ export const experiment: Experiment = {
   ],
   scenes: ['session', 'settings', 'home', 'overview', 'file'],
   knobs: [
+    {
+      id: 'tabs',
+      label: 'Tabs open',
+      default: '4',
+      options: [
+        { value: '4', label: '4' },
+        { value: '6', label: '6' },
+        { value: '9', label: '9' },
+        { value: '14', label: '14' },
+      ],
+    },
     {
       id: 'sessions',
       label: 'Overview: sessions',
@@ -48,6 +61,15 @@ export const experiment: Experiment = {
       options: [
         { value: 'card', label: 'A card of glass' },
         { value: 'field', label: 'On the field' },
+      ],
+    },
+    {
+      id: 'syntax',
+      label: 'Code: colour',
+      default: 'colour',
+      options: [
+        { value: 'colour', label: 'Coloured' },
+        { value: 'ink', label: 'Plain ink' },
       ],
     },
     {

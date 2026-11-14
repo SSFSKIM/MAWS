@@ -8,6 +8,7 @@ import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, u
 import { createPortal } from 'react-dom';
 import type { DiffLine, FileBody } from '../../content/fixtures';
 import { RootCtx, split } from './parts';
+import { Tokens } from './syntax';
 import { Block } from './Transcript';
 
 export type DiffForm = 'inline' | 'sides';
@@ -63,7 +64,9 @@ function Line({ row, picked, onPick, old }: { row: Row | null; picked?: boolean;
   return (
     <div className="xl-src-line" data-at={row.at} data-sign={row.sign} data-first={row.first || undefined} data-last={row.last || undefined} data-picked={picked || undefined} onClick={onPick}>
       <i />
-      <span className="xl-src-text">{row.text}</span>
+      <span className="xl-src-text">
+        <Tokens text={row.text} />
+      </span>
       {no !== undefined && <span className="xl-src-no">{no}</span>}
     </div>
   );

@@ -1056,3 +1056,65 @@
   .x-layers .xl-src-line i, .x-layers .xl-rail-mark { forced-color-adjust: none; }
   .x-layers :is(.xl-o-row:focus-visible, .xl-src-line[data-picked], .xl-line[aria-current='page']) { outline: 2px solid Highlight; outline-offset: -2px; }
 }
+
+/* ==== 19. Colour for code (DESIGN.md section 19) ==================================================================
+   One palette for the file's card, the transcript's sheet and the file on the field. Three hues and the ink: the
+   language's words in a plum, values (strings, numbers, constants) in a bronze, type names in a slate; comments in
+   the quiet ink; names, calls and punctuation in the ink. None of the three is the green of a line added, the red
+   of a line taken out or the orange of the waiting mark, and each is a deep, low-chroma step of its hue, so a
+   screen of code reads as ink with temperature in it, not as a palette. */
+.x-layers {
+  --xl-syn-key: #6a4380; --xl-syn-value: #6f5210; --xl-syn-type: #375680;
+  --xl-syn-note: var(--xl-fg3, var(--xl-ink-3));
+}
+.x-layers[data-scheme='dark'] {
+  --xl-syn-key: #dcc4ea; --xl-syn-value: #e6d39c; --xl-syn-type: #bed1f2;
+}
+.x-layers .xl-t-key { color: var(--xl-syn-key); }
+.x-layers .xl-t-value { color: var(--xl-syn-value); }
+.x-layers .xl-t-type { color: var(--xl-syn-type); }
+.x-layers .xl-t-note { color: var(--xl-syn-note); }
+/* The Code colour switch's other position: every token in its line's own ink. */
+.x-layers[data-syntax='ink'] :is(.xl-t-key, .xl-t-value, .xl-t-type, .xl-t-note) { color: inherit; }
+/* On the field by day the hues take a deeper step, as the counts do (section 17): the field is a shade darker than a
+   glass body, and darker again over the shaded side of the picture's paper (a value read 4.11 there, a keyword 4.54). */
+.x-layers[data-scheme='light'] .xl-file[data-ground='field'] { --xl-syn-key: #54316a; --xl-syn-value: #563f00; --xl-syn-type: #2a456c; }
+/* A pointed line's fill is lighter than the card at night (white at 15 %), and light text loses to it: a comment
+   read 3.71 there and a keyword 4.81. On the card at night the fill is white at 11 %, and the comment on a pointed
+   line steps up, to the second ink by day and a step past it at night. */
+.x-layers .xl-src-line[data-picked] .xl-t-note { color: var(--xl-fg2, var(--xl-ink-2)); }
+.x-layers[data-scheme='dark'] .xl-file-card .xl-src-line[data-picked]::before { background: rgb(255 255 255 / 0.11); }
+.x-layers[data-scheme='dark'] .xl-file-card .xl-src-line[data-picked] .xl-t-note { color: color-mix(in srgb, var(--xl-fg) 90%, transparent); }
+
+/* ==== 20. More tabs than fit (DESIGN.md section 20) ================================================================
+   The row never grows past its room: it starts on the reading column's left edge and ends a seam short of the
+   waiting capsule, as before. What gives is the tabs, in three steps, and Session.tsx decides which step the row
+   is on from the same numbers these rules draw. */
+.x-layers { --xl-tab-end: 13px; }
+.x-layers[data-face='system'] { --xl-tab-end: 9px; }
+/* 1. The tab on screen keeps its whole title. The others shorten together; a title fades out where it is cut. */
+.x-layers .xl-tabs-room { position: fixed; top: 0; height: 0; left: var(--xl-tabs-l); right: var(--xl-tabs-r); visibility: hidden; pointer-events: none; }
+/* A tab is never narrower than its mark, 44 px of its title and its end. */
+.x-layers .xl-tabs .xl-tab { flex: 0 1 auto; min-width: calc(30px + 44px + var(--xl-tab-end)); }
+.x-layers .xl-tabs .xl-tab[data-current='true'] { flex: none; }
+.x-layers .xl-tabs .xl-tab-main { flex: 1; padding-right: 0; }
+.x-layers .xl-tabs .xl-tab-title {
+  flex: 0 1 auto; min-width: 0; padding-right: var(--xl-tab-end); text-overflow: clip;
+  mask-image: linear-gradient(to right, #000 calc(100% - var(--xl-tab-end)), transparent);
+}
+/* 2. When a title would be shorter than 44 px, the others give their titles up together and stand as their marks:
+   the state's glyph, and so the waiting disc, is what a tab keeps longest. Its name is under the pointer. */
+.x-layers .xl-tabs .xl-tab[data-fold] { flex: none; width: 30px; min-width: 0; }
+.x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-main { justify-content: center; gap: 0; padding: 0; }
+.x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-title { display: none; }
+.x-layers .xl-tabs .xl-tab[data-fold]:hover .xl-tab-mark { opacity: 1; transform: none; }
+.x-layers .xl-tabs .xl-tab[data-fold] [data-tip]::after { transition-delay: 160ms; }
+.x-layers .xl-tab-mark { animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+/* A session at rest has no glyph in the pane; a tab needs something to hold, so it is a ring the size of the dot. */
+.x-layers .xl-tab-rest { display: block; width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px currentColor; opacity: 0.55; }
+/* 3. When the marks do not fit either, tabs leave from the end of the row for a menu beside the plus. One that
+   waits never leaves. */
+.x-layers .xl-tab-more[aria-expanded='true'] { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+.x-layers .xl-tab-menu { min-width: 236px; max-height: min(60vh, 420px); overflow-y: auto; scrollbar-width: none; }
+.x-layers .xl-tab-menu .xl-tab-mark { color: var(--xl-fg2); }
+.x-layers .xl-tab-menu .xl-item svg { color: inherit; }

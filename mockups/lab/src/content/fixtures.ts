@@ -749,3 +749,68 @@ export const fileBodies: FileBody[] = [
 `),
   },
 ];
+
+// ---- More tabs than fit -------------------------------------------------------------------------------------------
+// Invented. What else a person might have open beside the four tabs of `tabs`, in the order they would be added:
+// sessions of `fleet` and files of `fileBodies`. An experiment opens as many of them as it wants to show its tab row
+// under.
+
+export const moreTabs: ({ id: string; kind: 'session' } | { id: string; kind: 'file'; path: string })[] = [
+  { id: 's3', kind: 'session' },
+  { id: 'f2', kind: 'file', path: 'src/limits/keys.ts' },
+  { id: 's4', kind: 'session' },
+  { id: 's9', kind: 'session' },
+  { id: 'f3', kind: 'file', path: 'src/limits/index.ts' },
+  { id: 's12', kind: 'session' },
+  { id: 's6', kind: 'session' },
+  { id: 's13', kind: 'session' },
+  { id: 'f4', kind: 'file', path: 'src/upload/client.ts' },
+  { id: 's10', kind: 'session' },
+];
+
+/** Those sessions, as they read when opened: a few lines each, enough for a tab to lead somewhere. */
+export const moreTranscripts: Record<string, TranscriptItem[]> = {
+  // "Trim the Docker image": finished, not read yet.
+  s4: [
+    { kind: 'user', text: 'The API image is over 600 MB. Get it down without changing what runs.' },
+    {
+      kind: 'tools',
+      summary: 'Read 3 files, ran 4 commands',
+      seconds: 143,
+      calls: [
+        { tool: 'Read', target: 'Dockerfile' },
+        { tool: 'Bash', target: 'docker history atlas-api:latest', detail: '14 layers' },
+        { tool: 'Edit', target: 'Dockerfile', detail: '+11 −6' },
+        { tool: 'Bash', target: 'docker build -t atlas-api:slim .', detail: '402 MB' },
+      ],
+    },
+    { kind: 'assistant', paragraphs: ['The image is 212 MB smaller. The build tools now stay in a first stage and only the compiled output is copied into the image that ships; the test suite passes against it.'] },
+  ],
+  // "Firing schedule export": at work.
+  s9: [
+    { kind: 'user', text: 'Add an export of the firing schedule as CSV, one row per firing.' },
+    { kind: 'assistant', paragraphs: ['The schedule is stored per kiln, so the exporter walks the kilns and writes their firings in date order. I am writing it now, with a test for a kiln that has none.'] },
+    { kind: 'running', command: 'pnpm vitest run test/export', seconds: 12, tail: ['✓ writes a header row (3 ms)', '◌ orders firings by date'] },
+  ],
+  // "Image pipeline": at work, on another machine.
+  s12: [
+    { kind: 'user', text: 'Make every photograph on the site available at three widths.' },
+    { kind: 'assistant', paragraphs: ['There are 318 photographs. Each is resized to 640, 1280 and 2560 pixels wide and the pages pick one by the width of the screen. The resizing is running; it has done a third of them.'] },
+    { kind: 'running', command: 'node scripts/resize.mjs --widths 640,1280,2560', seconds: 706, tail: ['106 of 318 done'] },
+  ],
+  // "Map tile caching": finished and seen.
+  s6: [
+    { kind: 'user', text: 'Cache map tiles on the device so a place that was looked at once opens without a connection.' },
+    { kind: 'assistant', paragraphs: ['Tiles are kept for thirty days, up to 200 MB, and the oldest go first. It was merged in pull request 48.'] },
+  ],
+  // "Dark mode pass": at work.
+  s13: [
+    { kind: 'user', text: 'Go through every page in dark mode and fix what is hard to read.' },
+    { kind: 'assistant', paragraphs: ['The home page and the archive are done. On the article page the captions and the pull quotes are too faint; I am checking each of them against the page behind it.'] },
+  ],
+  // "Kiln log parser": finished, not read yet.
+  s10: [
+    { kind: 'user', text: 'The three controllers write their logs differently. Parse all three into one shape.' },
+    { kind: 'assistant', paragraphs: ['One parser per controller, each answering with the same record: a time, a temperature and the segment of the firing. All three formats parse, and a file that matches none is refused with the line that failed.'] },
+  ],
+};

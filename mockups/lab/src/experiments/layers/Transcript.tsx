@@ -5,10 +5,11 @@
 // state. Glass therefore means one thing here: something the agent made that can be opened.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowUpRight, ChevronRight, Sparkle } from 'lucide-react';
-import { approval, overview, plan, sessionTranscripts, transcript, type Session, type TranscriptItem } from '../../content/fixtures';
+import { approval, moreTranscripts, overview, plan, sessionTranscripts, transcript, type Session, type TranscriptItem } from '../../content/fixtures';
 import { useGlassUnder, useKick } from './glass';
 import { Kept, Steps, useNeeds, waitOf } from './needs';
 import { clock, cx, Fold, split } from './parts';
+import { Tokens } from './syntax';
 
 type Of<K extends TranscriptItem['kind']> = Extract<TranscriptItem, { kind: K }>;
 
@@ -128,7 +129,9 @@ function Code({ item, session }: { item: Of<'edit'>; session: string }) {
                 return (
                   <div key={i} className="xl-diff-line" data-sign={l.sign} data-first={prev !== l.sign || undefined} data-last={next !== l.sign || undefined}>
                     <i />
-                    {l.text}
+                    <span>
+                      <Tokens text={l.text} />
+                    </span>
                   </div>
                 );
               })}
@@ -262,7 +265,7 @@ function Plan() {
   );
 }
 
-export const itemsOf = (id: string): TranscriptItem[] => (id === 's1' ? transcript : sessionTranscripts[id] ?? []);
+export const itemsOf = (id: string): TranscriptItem[] => (id === 's1' ? transcript : sessionTranscripts[id] ?? moreTranscripts[id] ?? []);
 
 export function Transcript({ session, open }: { session: Session; open: boolean }) {
   const { replies } = useNeeds();

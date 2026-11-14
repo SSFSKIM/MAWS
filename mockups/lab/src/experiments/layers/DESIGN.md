@@ -13,7 +13,8 @@ has a fourth position with no drawing at all, Open's plain ground (section 16). 
 session went to a board of alternatives (`../choices/`), the owner took its suggested set, and those forms are the
 design now: section 17, which is read over sections 2, 3 and 5. Last, the product's other scene and the second
 surface of the first were drawn in the same design, the Overview and a file's page: section 18, whose file page
-the owner then asked to be a card of glass (18.10). Sections 0 to 11 are the experiment as it was built, under what is now
+the owner then asked to be a card of glass (18.10). Code is coloured (section 19), and the tab row has a rule for more
+tabs than fit (section 20). Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -328,7 +329,8 @@ given), `card=<id>` (that row's card) and `wait=<id>` (the list's open item).
 
 Section 18 adds four knobs, one per fork on its two pages, with the chosen form first: sessions on the Overview as
 lines or as cards (`sessions`), grouped by state or by project (`by`), a file's code on the field or on a sheet
-(`code`; since 18.10 a card of glass or on the field, with `numbers` for a gutter or the pointed line only), its changes in the file or side by side (`diff`). And three aids: `file=keys.ts` (the file its tab
+(`code`; since 18.10 a card of glass or on the field, with `numbers` for a gutter or the pointed line only), its changes in the file or side by side (`diff`). Section 19 adds `syntax` (coloured or plain ink) and section 20 `tabs` (how many are
+open: 4, 6, 9, 14) with the aid `x=tabs`. And three aids: `file=keys.ts` (the file its tab
 holds), `line=35` (a line pointed at), `x=end`; `wait=<id>` also names the open item of the Overview's glass.
 
 ## 11. Rejected
@@ -1781,6 +1783,235 @@ place the card's own scroll. `layers.css`: the card's rules in section 18's bloc
 `measure.mjs`: on a page that stands still, the faded bands are the card's own. `meta.ts`: the Code switch's
 positions, the Numbers switch, the note.
 
+## 19. Colour for code
+
+Added 2026-11-14, asked for after the file became a card (18.10): the card and the transcript's sheet are one
+family, so one palette serves both, and the file on the field too. The owner's wish for it: warm, refined, quiet.
+The page already spends three colours on meanings (green for a line added, red for a line taken out, orange for
+"waiting on you"), so a palette for code has to keep clear of reading as any of them.
+
+### 19.1 The palette
+
+Five kinds of token, three hues, and the ink.
+
+| token | what it covers | by day | at night |
+|---|---|---|---|
+| the language's words | `import`, `export`, `const`, `function`, `return`, `await`, `if`... | a plum, `#6a4380` | `#dcc4ea` |
+| values | strings, regular expressions, numbers, `true`, `null`, constants written in capitals | a bronze, `#6f5210` | a straw, `#e6d39c` |
+| type names | names that begin with a capital, and `string`, `number`, `boolean`... | a slate, `#375680` | `#bed1f2` |
+| comments | | the quiet ink | the quiet ink |
+| everything else | names, calls, members, punctuation | the ink | the ink |
+
+Why these. Each hue is taken from a part of the wheel the page does not use: the plum sits past the red towards
+blue, the slate is blue, and the bronze is the yellow side of brown, well short of the mark's orange and deep
+enough by day to read as a brown ink, not as a colour of state. None is green. All three are low in chroma and
+close to the ink in lightness (by day they are dark inks with a temperature; at night they are pale tints of it),
+so a screen of code reads as one text with three quiet voices in it and not as a palette laid over the page. The
+warmest of the three goes to what there is most of in the fixtures' code after names: values. Names, calls and
+punctuation are the ink, so more than half of every line is not coloured at all, and that is what keeps it quiet.
+
+A line taken out keeps its colours (its plain words are the second ink, as before): what was removed is still
+code to be compared with what replaced it. The change bars, the wash and the counts are the only green and red.
+
+The switch "Code: colour" has Plain ink as its second position (`syntax=ink`): every token in its line's ink, as
+18.10 was drawn.
+
+### 19.2 Where it had to be tuned
+
+- **On the field, by day.** The field is a shade darker than a glass body and darker again over the shaded side
+  of the picture's paper: there a value read 4.11 and a keyword 4.54. On the field by day the three take a deeper
+  step (`#54316a`, `#563f00`, `#2a456c`), as the counts do there (section 17). On glass and at night there is one
+  set.
+- **The pointed line, at night.** Its fill was white at 15 %, lighter than the card, and pale text loses to a
+  lighter ground: a comment read 3.71 on it and a keyword 4.81. On the card at night the fill is white at 11 %
+  now, and a comment on the pointed line steps up (the second ink by day, a step past it at night).
+
+### 19.3 Readings
+
+`measure.mjs`, the floor of 4.5 for every token (all of it is 12 px text). Warm paper under the defaults at 1280
+by 800, 1440 by 900 and 1728 by 1117, 28 routes at each: the card with a new file; a changed one at its top, with
+a line of code pointed at, with a comment pointed at, and mid-file; the file with the most lines taken out;
+another session's file; side by side at the top and at an end; the file on the field with a line pointed at and
+with lines taken out; the transcript's sheet for an added passage and for one with lines taken out; and the card
+in plain ink. Each in both schemes. 84 routes, 21,488 gated readings, none
+under its floor once the two things of 19.2 were mended.
+
+Lowest reading of each token, Warm paper, over the three sizes:
+
+| | on the card, day | on the card, night | transcript's sheet, day / night | on the field, day / night |
+|---|---|---|---|---|
+| the language's words | 5.65 | 5.38 | 6.25 / 6.22 | 5.36 / 6.44 |
+| values | 5.20 | 5.89 | 6.63 / 8.17 | 5.63 / 7.41 |
+| type names | 5.14 | 5.57 | 6.83 / 7.84 | 5.12 / 7.11 |
+| comments | 5.48 | 5.19 | none in the sheets drawn | 4.69 / 5.39 |
+
+The lowest on the card are tokens on a line taken out, side by side, by day (the wash darkens what is behind
+them) and tokens on the pointed line at night (its fill lightens it). The 4.69 is a comment on the field by day
+over the shaded side of the picture's paper: over its floor, and the nearest to it of anything here.
+
+Other colourings, at 1440 by 900, the card with a line pointed at, the file with lines taken out, and the
+transcript's sheet, both schemes: Paper, Clay paper, Blue hour and Orange (was). 24
+routes, 5,488 readings, none under. The lowest token in each, day and night: Paper 5.67 and 5.25, Clay paper 5.69
+and 5.20, Blue hour 6.09 and 5.35, Orange 5.94 and 5.06. Not measured: Orange light, Orange underside, Peach,
+Honey, Rose, Opal, Cobalt; and the field form under any colouring but Warm paper.
+
+### 19.4 What the app would use, and what to measure again there
+
+The lab's tokenizer (`syntax.tsx`) reads a line at a time and knows enough TypeScript for the fixtures: comments
+on one line, quoted strings, a regular expression after an opening context, numbers, a list of keywords, and
+names told apart by their case. It has no grammar: a template string with code in it, a comment that runs over
+lines, JSX, a generic's angle brackets and every other language are beyond it.
+
+The app has two real highlighters. The editor and the file viewer are CodeMirror with Lezer grammars, styled from
+twelve colour tokens (keyword, string, comment, number, type, function, variable, property, operator,
+punctuation, meta, invalid). The transcript's code blocks and the review's diffs are highlighted by a second
+library with its own class names. Shipping this palette means:
+
+- **Mapping twelve roles onto three hues and two inks.** Keyword to the plum; string and number to the bronze;
+  type to the slate; comment to the quiet ink; function, variable, property, operator and punctuation to the ink;
+  meta to the quiet ink; invalid to the red of a line taken out, which is the one place a state colour belongs in
+  code. Both highlighters have to be given the same mapping, so a passage in the transcript and the same passage
+  in its file are coloured alike.
+- **Measuring again**, because a real grammar colours more text than this one: a decorator, a tag name, a long
+  template string, a whole comment block. Each token colour against the card, against a line taken out and a line
+  added if added lines ever take a wash, against the selection colour (text selection is not drawn in the lab at
+  all), against the search-match colour, against the pointed line, in both schemes; on the field if the field
+  form ships; and in every colouring that ships, since the glass draws its level from the colouring.
+- **Languages whose weight sits elsewhere.** Markdown, JSON, shell and CSS put most of their text in what is a
+  string or a property here. One hue carrying a whole file is not quiet; they need their own look at this
+  palette before it is called done.
+
+### 19.5 Not good about it
+
+- **Three hues are few.** A call and a plain name are the same ink, and so are a property and a variable: a
+  reader used to a fuller palette will miss them. It is what keeps the page quiet, and it is the first thing to
+  give if the owner wants code to say more.
+- **The bronze and the plum are close to the ink by day.** At 12 px on warm glass they separate from it by hue
+  more than by lightness; on a poor display they will read as one dark ink with comments in grey.
+- **At night all three are pale.** They have to be, to hold their floor on the pointed line, so they sit near the
+  ink in lightness and differ by tint only.
+- **The slate is the one cool colour on a warm page.** It was kept because types need to be told from values and
+  a second warm hue would have had to be the orange or the red. Under Blue hour it is no longer an accent at all.
+- **The lab's tokenizer is naive** (19.4); what it calls a type is anything that begins with a capital.
+- **Hover is not measured.** A line under the pointer takes a fill of the ink at 5 % by day, a little darker than
+  the card; the readings above have about one point of room for it and it was not read.
+
+### 19.6 What changed in the code
+
+`syntax.tsx` (new): the tokenizer and `Tokens`. `File.tsx` and `Transcript.tsx`: a line of code is its tokens (in
+the sheet they are inside one span, so the spaces between them are kept). `layers.css`: section 19's block: the
+three hues in both schemes, the deeper step on the field by day, the pointed line's fill on the card at night.
+`Layers.tsx`, `meta.ts`: the "Code: colour" switch (`syntax=ink`).
+
+## 20. More tabs than fit
+
+Added 2026-11-14. Until now a fifth tab shortened every title to an ellipsis after two or three letters (17.7),
+and tabs did not close. The row had one rule, the column rule of 13.4: it starts on the reading column's left
+edge and ends a seam short of the waiting capsule. That rule stands untouched, so the row's room is fixed by the
+column, and the question is what the tabs do inside it as they are added.
+
+### 20.1 The rule
+
+**A tab gives up its title before the row gives up a tab, and the row never gives up a tab that waits for you.**
+In three steps:
+
+1. **The tab on screen keeps its whole title, always.** The others shorten together, each as far as 44 px of its
+   title; where a title is cut it fades out over its last pixels, with no ellipsis.
+2. **When a title would be shorter than that, the others give their titles up together** and stand as their marks
+   alone, 30 px round: the state's glyph for a session (the orange disc, the solid dot, the breathing dot), a
+   ring for a session at rest, the file mark for a file. A mark's name is under the pointer, sooner than other
+   tooltips arrive. The mark is what a tab keeps longest because it is what this design reads first: state by
+   glyph, and above all the disc.
+3. **When the marks do not fit either, tabs leave from the end of the row** for a menu behind a chevron beside
+   the plus, which lists them by mark and whole title. A tab that waits for the person never leaves: the row
+   gives up its neighbours first. Choosing one in the menu makes it the tab on screen, so it is in the row.
+
+They fold together, not one by one. A row in which some tabs have names and some do not reads as damage, and
+which ones kept their names would change every time another tab is chosen; all or none is one fact a person can
+hold. The price is in 20.4.
+
+**Closing.** The rule's third step is where a person wants to close things, so tabs close now: the mark of a tab
+gives way to a cross under the pointer, as it always did, and the cross works. Closing the tab on screen shows
+its neighbour (the next, or the one before the last); closing the last one leaves New chat. A folded tab is all
+mark, so a press on it opens it and it is closed once it is open; a session that was closed opens again from its
+row in the pane.
+
+### 20.2 What it comes to
+
+The room is the reading column less the waiting capsule and its seam: 458 px at 1280 by 800 with both panes open,
+and 630 px wherever the column reaches its 744 (1280 with the right column closed, and 1440 and 1728 either way,
+since the column rule holds the row to the column and not to the window). With "Rate limiter rewrite" on screen:
+
+| the room | titles, whole or shortened | marks | the menu |
+|---|---|---|---|
+| 458 px: 1280, both panes | up to 4 tabs | 5 to 9 | from 10 |
+| 630 px: 1280 with the right column closed; 1440; 1728 | up to 6 | 7 to 14 | from 15 |
+
+A shorter title on screen leaves a little more, a longer one a little less; the row decides from the widths it
+draws (`fitTabs` in `Session.tsx`, fed by a hidden element that is laid from the row's left limit to its right,
+so every rule that moves a limit is already in it).
+
+Held, at every count and size looked at: the disc of a waiting tab is in the row; the tab on screen has its whole
+title; the row starts on the column's edge; and between the row and the waiting capsule there is the seam or
+more. The runtime's own check, with `dev=1`, raised nothing at 1280, 1440 and 1728 with 4, 6, 9 and 14 tabs, with
+the right column open and closed (the overlap that 15.1 tuned for cannot return: the row cannot be wider than
+its room).
+
+### 20.3 What was added to draw it
+
+- `fixtures.ts`, additions only: `moreTabs` (ten more things a person might have open, sessions and three files)
+  and `moreTranscripts` (a few invented lines for six of those sessions, so their tabs lead somewhere). The
+  "Tabs open" switch opens 4, 6, 9 or 14 of them (`tabs=9`).
+- Every file tab after the first holds a file of its own; the first still holds whichever file was opened last
+  from a session, unless that file has a tab, in which case its tab is shown.
+- A session at rest has a mark in a tab (a ring the size of the dot). In the pane it still has none.
+- A session with no side content of its own has no side column; before, it borrowed the first session's.
+- Address aid: `x=tabs` opens the menu at once.
+
+### 20.4 Readings
+
+`measure.mjs`, Warm paper under the defaults, 1280 by 800, 1440 by 900 and 1728 by 1117, 22 routes at each: a
+session with 4, 6, 9 and 14 tabs; 14 with the menu open; 9 with the right column closed; two more with one of the
+added tabs on screen; the Overview with 9; a file's card with 14; and a session whose sheet has lines taken out.
+Each in both schemes. 66 routes, 9,000 gated readings, none under its floor.
+
+| in the row | light | dark |
+|---|---|---|
+| a title, whole or shortened | 9.08 | 6.03 |
+| a mark (the file mark, the chevron, the plus) | 9.03 | 5.33 |
+| the glyph in a disc | 6.57 | 6.50 |
+| the menu: a name / a mark | 15.8 / 8.43 | 10.1 / 7.10 |
+
+The dots and the ring are drawn in CSS and are not read by the script, as before. The same routes read the
+transcript's sheet again after the spaces between its tokens were mended (19.6): its lowest token is 6.25 by day
+and 6.22 at night, as in 19.3.
+
+### 20.5 Not good about it
+
+- **Folded, the row can stand half empty with every name hidden.** At 1280 with the right column closed, or at
+  1728, nine tabs fold to 440 px of a 630 px room. Shortening further instead was refused (a title of three
+  letters is what this replaces), and folding one by one was refused above; but it is room spent on nothing.
+- **Marks do not say which.** Two files are the same mark; two working sessions are the same breathing dot. The
+  name is a hover away and the pane lists every session by name, but the row alone no longer tells them apart.
+  A file's mark could carry its first letter; not drawn.
+- **The row changes its width when another tab is chosen**, because the tab on screen takes its whole title and
+  the one that was gives its up. With folded tabs every mark to the right of the two moves.
+- **1728 gains nothing over 1440.** The row is held to the column by the column rule, so a wide window has the
+  same room for tabs and more empty field beside them.
+- **The steps cut, they do not move.** A tab folding, a title shortening, a tab leaving for the menu: none is
+  animated, and none was watched.
+- **Not drawn:** more waiting tabs than the row can hold as marks (the rule keeps them all, so the row would
+  then pass its room); dragging a tab; a keyboard path along the row; the menu when it is longer than the
+  window (it scrolls inside itself, not seen); reopening a closed file other than through its session.
+- **On the Overview no tab is current**, so with many open the row there is marks only.
+
+### 20.6 What changed in the code
+
+`Session.tsx`: `Tabs` (the fit, the folded tab, the menu, closing), `fitTabs`. `Layers.tsx`: the open tabs as one
+list with the closed ones taken out, `pickTab` and `closeTab`, a file tab's own file, the room's probe element,
+the "Tabs open" switch. `Transcript.tsx`: `itemsOf` reads `moreTranscripts`. `layers.css`: section 20's block.
+`meta.ts`: the switch and the note. `fixtures.ts`: `moreTabs`, `moreTranscripts`.
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -1853,5 +2084,12 @@ What the real renderer would need, against "The app today" in the brief.
   to the same margin and the same two hues, and its syntax colours measured on the field. The session's composer
   is mounted on the file's page with a collapsed state, and an anchored line becomes a chip in it; the side
   column is kept mounted across a session and its files so that it does not leave and return.
+- **Colour for code** (section 19). Three hues and two inks as theme tokens, with a deeper day step for code on the
+  field if that form ships; both of the app's highlighters mapped onto them (19.4), and every token measured
+  again against each ground code can stand on, in every colouring that ships.
+- **The tab row** (section 20). The row's steps are decided from measured widths against a room that the layout
+  already knows; in the app the room is the strip's own slot. Tabs keep a mark for every kind of thing that can
+  be a tab (a session's state, a file, a tool), since the mark is what survives. Closing, the overflow menu and
+  a keyboard path along the row belong to the same piece of work.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

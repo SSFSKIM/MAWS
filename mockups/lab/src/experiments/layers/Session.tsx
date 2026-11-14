@@ -9,7 +9,7 @@ import { Composer } from './Composer';
 import { PLANE, THICKNESS, useGlassUnder, useKick } from './glass';
 import type { SideForm } from './Layers';
 import { Remote, useNeeds } from './needs';
-import { cx, Fold, GBtn, Pop, split, StateGlyph, stateWord } from './parts';
+import { cx, Fold, GBtn, isYours, Pop, split, StateGlyph, stateWord } from './parts';
 
 // ---- Tabs: Instrument's capsule, with the marks the sidebar uses -------------------------------------------------
 
@@ -17,30 +17,174 @@ export interface TabItem {
   id: string;
   title: string;
   kind: string;
+  /** A file tab's own file; the first file tab holds whichever file was opened last. */
+  path?: string;
+}
+
+// The row's sizes, as the stylesheet draws them: its padding, the gap between tabs, a tab's own padding and mark,
+// the least of a title that still says which tab it is, a folded tab, a round button.
+const ROW_PAD = 6;
+const GAP = 1;
+/** A tab's own padding, mark and gap; its trailing space is the stylesheet's `--xl-tab-end`. */
+const TAB_LEAD = 8 + 16 + 6;
+const TITLE_FLOOR = 44;
+const TAB_MAX = 200;
+const FOLDED = 30;
+const BTN = 30;
+
+/** How the row stands for the room it has (DESIGN.md section 20). */
+export interface TabFit {
+  /** The tabs other than the current one have given up their titles and stand as their marks. */
+  folded: boolean;
+  /** Tabs that are not in the row at all: they wait in the menu at its end. */
+  hidden: string[];
+}
+
+/**
+ * The rule, as arithmetic. The current tab keeps its whole title. The others shorten together, each no shorter
+ * than a floor; when the floor does not fit they all fold to their marks; when the marks do not fit, tabs leave
+ * for the menu from the end of the row, and one that waits for the person never leaves.
+ */
+export function fitTabs(tabs: { id: string; width: number; current: boolean; waits: boolean }[], room: number, end: number): TabFit {
+  const current = tabs.find((t) => t.current);
+  const others = tabs.filter((t) => !t.current);
+  const fixed = ROW_PAD + BTN + (current ? current.width + GAP : 0);
+  const floors = others.length * (TAB_LEAD + TITLE_FLOOR + end + GAP);
+  if (fixed + floors <= room) return { folded: false, hidden: [] };
+  const fits = Math.floor((room - fixed) / (FOLDED + GAP));
+  if (others.length <= fits) return { folded: true, hidden: [] };
+  // The menu's button takes a place of its own.
+  const places = Math.max(0, Math.floor((room - fixed - BTN - GAP) / (FOLDED + GAP)));
+  const hidden: string[] = [];
+  for (let i = others.length - 1; i >= 0 && others.length - hidden.length > places; i--) if (!others[i]!.waits) hidden.push(others[i]!.id);
+  return { folded: true, hidden };
+}
+
+interface TabsProps {
+  list: TabItem[];
+  current: string;
+  onPick: (id: string) => void;
+  onClose: (id: string) => void;
+  live: (s: Session) => Session;
+  /** The row's own element, for its face. */
+  bar: React.RefObject<HTMLElement | null>;
+  /** An empty element laid from the row's left limit to its right limit: its width is the room. */
+  room: React.RefObject<HTMLElement | null>;
+  /** Changes when the room may have (a pane sliding, the side column leaving). */
+  layout: string;
+  /** Capture aid: the menu is open at once. */
+  open?: boolean;
 }
 
 /** The tabs are the window's: which is current, and what a press on one opens, are decided above. */
-export function Tabs({ list, current, onPick, live }: { list: TabItem[]; current: string; onPick: (id: string) => void; live: (s: Session) => Session }) {
+export function Tabs({ list, current, onPick, onClose, live, bar, room: probe, layout, open: openAtOnce }: TabsProps) {
   const all = fleet.flatMap((p) => p.sessions);
+  const stateOf = (tab: TabItem) => {
+    const session = tab.kind === 'session' ? all.find((s) => s.id === tab.id) : undefined;
+    return session ? live(session).state : undefined;
+  };
+  const [fit, setFit] = useState<TabFit>({ folded: false, hidden: [] });
+  const [more, setMore] = useState<HTMLButtonElement | null>(null);
+  const [menu, setMenu] = useState(false);
+  const closeMenu = useCallback(() => setMenu(false), []);
+  const key = list.map((t) => `${t.id}:${t.title}:${stateOf(t) ?? ''}`).join('|');
+  useLayoutEffect(() => {
+    const read = () => {
+      // The row's element is its parent's, and is not there yet the first time this runs.
+      const el = bar.current;
+      if (!el) return;
+      const style = getComputedStyle(el);
+      const room = probe.current?.getBoundingClientRect().width ?? 0;
+      if (room <= 0) return;
+      const pen = document.createElement('canvas').getContext('2d')!;
+      pen.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+      const end = parseFloat(style.getPropertyValue('--xl-tab-end')) || 9;
+      const next = fitTabs(
+        list.map((t) => ({ id: t.id, width: Math.min(TAB_MAX, TAB_LEAD + Math.ceil(pen.measureText(t.title).width) + end), current: t.id === current, waits: isYours(stateOf(t) ?? 'idle') })),
+        room,
+        end,
+      );
+      setFit((was) => (was.folded === next.folded && was.hidden.join() === next.hidden.join() ? was : next));
+    };
+    read();
+    const frame = requestAnimationFrame(read);
+    window.addEventListener('resize', read);
+    void document.fonts?.ready.then(read);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener('resize', read);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, current, layout, bar, probe]);
+  useEffect(() => {
+    if (openAtOnce && more) setMenu(true);
+  }, [openAtOnce, more]);
+
+  const mark = (tab: TabItem, state: Session['state'] | undefined) =>
+    tab.kind === 'file' ? (
+      <FileCode size={14} strokeWidth={1.75} />
+    ) : tab.kind === 'settings' ? (
+      <SlidersHorizontal size={14} strokeWidth={1.75} />
+    ) : state && state !== 'idle' ? (
+      <StateGlyph state={state} size={14} />
+    ) : (
+      // A session at rest has no glyph in the pane; a tab needs something to hold, so here it is a ring.
+      <i className="xl-tab-rest" />
+    );
+  const shown = list.filter((t) => !fit.hidden.includes(t.id));
+  const waiting = list.filter((t) => fit.hidden.includes(t.id));
   return (
     <>
-      {list.map((tab) => {
-        const session = all.find((s) => s.id === tab.id);
-        const state = session ? live(session).state : undefined;
+      {shown.map((tab) => {
+        const state = stateOf(tab);
+        const isCurrent = tab.id === current;
+        const folded = fit.folded && !isCurrent;
         return (
-          <div key={tab.id} className="xl-tab" data-current={tab.id === current}>
-            <button type="button" className="xl-tab-main" aria-current={tab.id === current ? 'page' : undefined} title={state ? stateWord[state] || undefined : undefined} onClick={() => onPick(tab.id)}>
-              <span className="xl-tab-mark">
-                {tab.kind === 'file' ? <FileCode size={14} strokeWidth={1.75} /> : tab.kind === 'settings' ? <SlidersHorizontal size={14} strokeWidth={1.75} /> : state ? <StateGlyph state={state} size={14} /> : null}
-              </span>
+          <div key={tab.id} className="xl-tab" data-current={isCurrent} data-fold={folded || undefined}>
+            <button
+              type="button"
+              className="xl-tab-main"
+              aria-current={isCurrent ? 'page' : undefined}
+              aria-label={folded ? tab.title : undefined}
+              title={!folded && state ? stateWord[state] || undefined : undefined}
+              data-tip={folded ? tab.title : undefined}
+              onClick={() => onPick(tab.id)}
+            >
+              <span className="xl-tab-mark">{mark(tab, state)}</span>
               <span className="xl-tab-title">{tab.title}</span>
             </button>
-            <button type="button" className="xl-tab-x" aria-label={`Close ${tab.title}`} tabIndex={-1}>
-              <X size={13} strokeWidth={2} />
-            </button>
+            {/* A folded tab is all mark, so a press on it opens it; it is closed once it is open. */}
+            {!folded && (
+              <button type="button" className="xl-tab-x" aria-label={`Close ${tab.title}`} tabIndex={-1} onClick={() => onClose(tab.id)}>
+                <X size={13} strokeWidth={2} />
+              </button>
+            )}
           </div>
         );
       })}
+      {waiting.length > 0 && (
+        <>
+          <button type="button" ref={setMore} className="xl-gbtn xl-tab-more" aria-label={`${waiting.length} more tabs`} aria-expanded={menu} data-tip="More tabs" onClick={() => setMenu((v) => !v)}>
+            <ChevronDown size={16} strokeWidth={1.75} />
+          </button>
+          <Pop open={menu} anchor={more} place="below-end" onClose={closeMenu} className="xl-tab-menu" label="More tabs">
+            {waiting.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className="xl-item"
+                onClick={() => {
+                  onPick(tab.id);
+                  closeMenu();
+                }}
+              >
+                <i className="xl-tab-mark">{mark(tab, stateOf(tab))}</i>
+                <span>{tab.title}</span>
+              </button>
+            ))}
+          </Pop>
+        </>
+      )}
       <GBtn label="New tab" tip="New tab">
         <Plus size={16} strokeWidth={1.75} />
       </GBtn>

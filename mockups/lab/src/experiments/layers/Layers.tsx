@@ -12,7 +12,7 @@ import {
   type VitreaDiagnosticSink,
 } from '@vitreajs/vitrea-react';
 import { PanelLeft, PanelRight } from 'lucide-react';
-import { fileBodies, fleet, overview, plan, sessionOverviews, tabs as fixedTabs, type FileBody, type Session } from '../../content/fixtures';
+import { fileBodies, fleet, moreTabs, overview, plan, sessionOverviews, tabs as fixedTabs, type FileBody, type Session } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
 import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
@@ -68,6 +68,11 @@ const PIN: Record<Scheme, { disc: string; glyph: string; ring: string }> = {
 
 /** A file the lab holds whole, by its path or by its name alone (`file=keys.ts` in the address). */
 const bodyOf = (path: string): FileBody | undefined => fileBodies.find((f) => f.path === path || f.path.endsWith(`/${path}`));
+
+/** The first file tab: it holds whichever file was opened last from a session. */
+const F1 = fixedTabs.find((t) => t.kind === 'file')!.id;
+/** What a session with no changes, agents or list of its own has beside it: nothing. */
+const NO_SIDE: SideData = { branch: '', added: 0, removed: 0, files: [], agents: [], background: [], todos: [] };
 
 /** Capture and review aids read from the address (`x=tools,card`, `pose=inactive`, `tier=css`, `dev=1`); never design states. */
 function addressFlags(): URLSearchParams {
@@ -354,11 +359,19 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const asked = flags.get('at');
   // A file opens as a tab beside the session that changed it, and the window has one such tab: opening another
   // file from the session shows it there. `file=keys.ts` starts on one; `line=31` starts with a line pointed at.
-  const [file, setFile] = useState(() => bodyOf(flags.get('file') ?? '') ?? fileBodies[0]!);
+  const [first, setFirst] = useState(() => bodyOf(flags.get('file') ?? '') ?? fileBodies[0]!);
+  // More tabs than the four of the fixtures, to see the row's rule at work (the Tabs open switch; section 20), and
+  // the tabs that were closed. Other file tabs hold a file of their own.
+  const opened = useMemo(() => moreTabs.slice(0, Math.max(0, (Number(knobs.tabs) || 4) - fixedTabs.length)), [knobs.tabs]);
+  const [closed, setClosed] = useState<string[]>([]);
+  const [fileTab, setFileTab] = useState(F1);
+  const held = opened.find((t) => t.id === fileTab);
+  const file = (held && held.kind === 'file' ? bodyOf(held.path) : undefined) ?? first;
   const [picked, setPicked] = useState<number | null>(() => Number(flags.get('line')) || null);
   const [at, setAt] = useState(() => (asked && itemsOf(asked).length > 0 ? asked : scene === 'file' ? file.session : 's1'));
   // A session opened from its row gets a tab, as it would in the app.
   const [extra, setExtra] = useState<string[]>(() => (fixedTabs.some((t) => t.id === at) ? [] : [at]));
+  const tabbed = useRef<string[]>([]);
   // An answer is real in the lab: the session goes back to work and its mark leaves the window. `did=s2-approved`
   // (also `denied`, `chose`, `said`) starts with one given, so an answered state can be captured and measured.
   const [replies, setReplies] = useState<Record<string, Reply | undefined>>(() => {
@@ -379,7 +392,8 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     (id: string) => {
       if (itemsOf(id).length === 0) return;
       setAt(id);
-      setExtra((list) => (fixedTabs.some((t) => t.id === id) || list.includes(id) ? list : [...list, id]));
+      setClosed((list) => list.filter((x) => x !== id));
+      setExtra((list) => (tabbed.current.includes(id) || list.includes(id) ? list : [...list, id]));
       const raw = window.location.hash.replace(/^#\/?/, '');
       const [path = '', query = ''] = raw.split('?');
       if (!path.endsWith('/session')) window.location.hash = `#/layers/session${query ? `?${query}` : ''}`;
@@ -396,13 +410,20 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
       const body = bodyOf(path);
       if (!body) return undefined;
       return () => {
-        setFile(body);
+        // A file that has a tab of its own is shown there; any other is shown in the first file tab.
+        const has = opened.find((t) => t.kind === 'file' && t.path === body.path && !closed.includes(t.id));
+        if (has) setFileTab(has.id);
+        else {
+          setFirst(body);
+          setFileTab(F1);
+          setClosed((list) => list.filter((x) => x !== F1));
+        }
         setPicked(null);
         setAt(session);
         go('file');
       };
     },
-    [go],
+    [go, opened, closed],
   );
   const waits = useMemo<Needs>(
     () => ({
@@ -420,15 +441,43 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const here = scene === 'file' ? file.session : at;
   // A plan's steps are not a to-do list until the plan is approved; then they are.
   const sideData: SideData =
-    here === 's1' ? overview : here === 's5' && replies.s5?.kind === 'approved' ? { ...sessionOverviews.s5!, todos: plan.steps.map((text, i) => ({ text, done: false, current: i === 0 })) } : sessionOverviews[here] ?? overview;
-  // The file tab carries the name of the file it holds. Settings is a tab while it is open; the Overview is not
-  // one: it is a place in the pane, and the tabs over it are what the person has open, none of them current.
+    here === 's1' ? overview : here === 's5' && replies.s5?.kind === 'approved' ? { ...sessionOverviews.s5!, todos: plan.steps.map((text, i) => ({ text, done: false, current: i === 0 })) } : sessionOverviews[here] ?? NO_SIDE;
+  // The first file tab carries the name of the file it holds. Settings is a tab while it is open; the Overview is
+  // not one: it is a place in the pane, and the tabs over it are what the person has open, none of them current.
+  const titleOf = (id: string) => all.find((s) => s.id === id)?.title ?? id;
+  const every: TabItem[] = [
+    ...fixedTabs.map((t) => (t.kind === 'file' ? { id: t.id, kind: t.kind, title: split(first.path)[1] } : { id: t.id, kind: t.kind, title: t.title })),
+    ...opened.map((t) => (t.kind === 'file' ? { id: t.id, kind: 'file', title: split(t.path)[1], path: t.path } : { id: t.id, kind: 'session', title: titleOf(t.id) })),
+    ...extra.map((id) => ({ id, title: titleOf(id), kind: 'session' })),
+  ];
   const tabList: TabItem[] = [
-    ...fixedTabs.map((t) => (t.kind === 'file' ? { ...t, title: split(file.path)[1] } : t)),
-    ...extra.map((id) => ({ id, title: all.find((s) => s.id === id)?.title ?? id, kind: 'session' })),
+    ...every.filter((t, i) => every.findIndex((x) => x.id === t.id) === i && !closed.includes(t.id)),
     ...(scene === 'settings' ? [{ id: 'settings', title: 'Settings', kind: 'settings' }] : []),
   ];
-  const fileTab = fixedTabs.find((t) => t.kind === 'file')!.id;
+  tabbed.current = tabList.map((t) => t.id);
+  const currentTab = scene === 'settings' ? 'settings' : scene === 'overview' || scene === 'home' ? '' : scene === 'file' ? fileTab : at;
+  const pickTab = (id: string) => {
+    const tab = tabList.find((t) => t.id === id);
+    if (!tab || tab.kind === 'settings') return;
+    if (tab.kind === 'file') {
+      const body = tab.path ? bodyOf(tab.path) ?? first : first;
+      setFileTab(id);
+      setPicked(null);
+      setAt(body.session);
+      go('file');
+    } else openSession(id);
+  };
+  // Closing the tab on screen shows its neighbour: the next one, or the one before the last. With none left, New chat.
+  const closeTab = (id: string) => {
+    if (id === 'settings') return go('session');
+    const i = tabList.findIndex((t) => t.id === id);
+    setClosed((list) => [...list, id]);
+    setExtra((list) => list.filter((x) => x !== id));
+    if (id !== currentTab) return;
+    const next = tabList[i + 1] ?? tabList[i - 1];
+    if (next && next.kind !== 'settings') pickTab(next.id);
+    else go('home');
+  };
 
   // The Overview's and the file page's own forks (DESIGN.md section 18): the first position of each is the design.
   const board: BoardForm = knobs.sessions === 'cards' ? 'cards' : 'rows';
@@ -486,6 +535,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-board={scene === 'overview' ? board : undefined}
             data-diff={scene === 'file' ? diff : undefined}
             data-code={scene === 'file' ? codeGround : undefined}
+            data-syntax={knobs.syntax === 'ink' ? 'ink' : undefined}
             style={
               {
                 '--xl-ground': ground,
@@ -540,15 +590,10 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               waiting={waiting}
               at={live(all.find((s) => s.id === here)!)}
               side={sideData}
-              tab={scene === 'settings' ? scene : scene === 'overview' ? '' : scene === 'file' ? fileTab : at}
+              tab={currentTab}
               tabList={tabList}
-              onTab={(id) => {
-                if (id === 'settings') return;
-                if (id === fileTab) {
-                  setAt(file.session);
-                  go('file');
-                } else if (itemsOf(id).length > 0) openSession(id);
-              }}
+              onTab={pickTab}
+              onCloseTab={closeTab}
               file={file}
               picked={picked}
               setPicked={setPicked}
@@ -603,6 +648,7 @@ interface ShellProps {
   tab: string;
   tabList: TabItem[];
   onTab: (id: string) => void;
+  onCloseTab: (id: string) => void;
   /** Capture aids: the row whose card is open at once, and the item of the waiting list that is open at first. */
   card: string | undefined;
   waitFirst: string | undefined;
@@ -625,6 +671,7 @@ interface ShellProps {
 function Shell(p: ShellProps) {
   const { scene, scheme, material, layout, refs } = p;
   const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const tabRoom = useRef<HTMLElement>(null);
 
   // Content clears each floating bar by the bar's measured far edge, never by a typed constant.
   useGlassBarInset(refs.tabBar, { scrollRef: refs.scroller, edge: 'top', measure: 'far-edge' });
@@ -766,6 +813,8 @@ function Shell(p: ShellProps) {
         </GlassSurface>
       </GlassGroup>
 
+      {/* The room the tab row has, from its left limit to its right: read by the row to decide how it stands. */}
+      <i className="xl-tabs-room" ref={tabRoom} aria-hidden="true" />
       <div className="xl-lights" aria-hidden="true">
         <i />
         <i />
@@ -787,7 +836,7 @@ function Shell(p: ShellProps) {
         <GlassGroup id="xl-tabs" backdrop={PLANE}>
           <GlassSurface asChild capsule thickness={THICKNESS} foreground="vibrant">
             <nav className="xl-host xl-tabs" ref={refs.tabBar} aria-label="Tabs" data-glass-role="control">
-              <Tabs list={p.tabList} current={p.tab} onPick={p.onTab} live={p.live} />
+              <Tabs list={p.tabList} current={p.tab} onPick={p.onTab} onClose={p.onCloseTab} live={p.live} bar={refs.tabBar} room={tabRoom} layout={layout} open={p.flags.includes('tabs')} />
             </nav>
           </GlassSurface>
         </GlassGroup>
