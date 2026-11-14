@@ -87,8 +87,9 @@ export interface ProjectEntry {
 //
 // P5 O8 M2 ("Drawing", membership): another machine's listed session the member owns joins the row `rowOfListed` files it
 // under, unless a record holds its address (the yield rule: the record's row is drawn); its issue counts as activity, and
-// a listed row waiting or busy adds to the counts. P5 O7 M2: a record at a listed address whose project is not known here
-// (another machine's lane B session main read over its link) is filed where its listing is, so the row stands still.
+// a listed row waiting or busy adds to the counts. P5 O7 M2: a record at a listed address is filed where its listing is,
+// so the row stands still: another machine's (a lane B session main read over its link) always, this Mac's while its
+// project is not known here (`rowOfListedRecord`).
 //
 // P5 O8 M5 ("The People toggle"): ownership comes first. An address, a record's or a listing's, is others' when a listing
 // at it exists and isn't the member's, and yours otherwise (a record carries no owners). Filed as above, others' rows are

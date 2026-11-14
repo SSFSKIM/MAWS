@@ -57,8 +57,8 @@ describe('org projects', () => {
   });
 
   // P5 O7 M2 (one row per address): another machine's lane B session files where its listing does, before its record
-  // (the tab a click opens) and after (main read the record over the link; its project is unknown here, RL2 machines
-  // sending no projects), so neither its row nor its tab moves when the record arrives. A lane A listing keeps O9's rule.
+  // (the tab a click opens) and after (main read the record over the link), so neither its row nor its tab moves when
+  // the record arrives. A lane A listing keeps O9's rule.
   it('files a listed lane B session’s tabs where its listing is filed, with or without its record', () => {
     const listed = (session: string, lane: 'A' | 'B', orgKey: string | null): [AppSessionId, ListedSession] => {
       const appId = studio(session) as AppSessionId;

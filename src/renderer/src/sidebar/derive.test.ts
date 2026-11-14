@@ -246,8 +246,8 @@ describe('listed rows in the project list', () => {
     expect(shape(entries)).toEqual([[ORG, [addr('s1')], []], [machineKey(OTHER_MACHINE), [there('b1')], [there('b3')]]]);
   });
 
-  // P5 O7 M2: the record main read over the link for a lane B row it opened stands where the row stood (its project is
-  // unknown here), so one row per address, and it doesn't move when the record arrives
+  // P5 O7 M2: the record main read over the link for a lane B row it opened stands where the row stood, so one row per
+  // address, and it doesn't move when the record arrives
   it('draws a record at a listed address where its listing was filed when its project is not known here', () => {
     const recorded = sessionOn(OTHER_MACHINE, 'b1', { projectId: there('maws-b') as ProjectId });
     const entries = list(listedMap(listedOn('b1', { orgKey: ORG })), { records: recs(local, recorded) });
