@@ -321,8 +321,9 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   // editor's catalogue and panels when the suggestion renders, at a keystroke, not when a registration lands (popup.tsx),
   // so a list left open across them still holds the engine's rows (the Macs' runs of 443319d64; the CI run of b1bad4a07,
   // which read the engine's `/compact`, chosen too and listed before `/model`, first)
-  await clearEditor(page);
+  await page.keyboard.press('Escape'); // the highlighted row's popover stands over the box and would take the clear's click
   await expect(commands).toBeHidden();
+  await clearEditor(page);
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
   await page.keyboard.type('/');
   await expect(commands.getByRole('option').nth(0)).toHaveAccessibleName('/model');
