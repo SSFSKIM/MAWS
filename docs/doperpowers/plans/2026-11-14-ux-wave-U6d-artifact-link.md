@@ -21,7 +21,7 @@ How to see it working: in a session whose agent wrote `[Launch plan](maws-artifa
 - [x] (2026-11-14 22:01Z) Document written against master `c7b62e48b`: the design carried in full; every statement about the code, the tests and build F (`f1852de3a`) checked at that commit ("What the code holds today"); eleven points reported to the architect, each with the default built unless ruled otherwise.
 - [x] (2026-11-14) The adversarial review of the document (three findings), and the architect's rulings on them and on the eleven reported points.
 - [x] (2026-11-14 22:26Z) Revision 2: the rulings folded in (Decision Log 6 and 7); the two findings the architect accepted read again in the code (`dispatchKey` in `keymap/dispatcher.ts`; `ShowPaneResultSchema` at `f1852de3a`).
-- [ ] M1 — The agent opens no artifact: the texts, the two schemas, the refusal at the host and at the window, and old journals.
+- [x] (2026-11-14 23:59Z) M1 — The agent opens no artifact: the texts, the two schemas, the refusal at the host and at the window, and old journals. Commits `6ef9a2acd`..`04deff757`; the red seen and each half-switch tried (Surprises); proof set of Concrete Steps 3 and 4 green on the VM; frontier review clean.
 - [ ] M2 — The mention is a link: the element, the look, the click, the scenes, and the acceptance run.
 - [ ] The proof an executor does not run: the scenes and their groups on a Mac, the one paid live group, class 1a, the branch's panel review, the pull request.
 
