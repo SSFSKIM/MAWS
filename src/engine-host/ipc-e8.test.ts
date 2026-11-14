@@ -334,7 +334,7 @@ describe('connectors.addJson', () => {
   const entry = { type: 'stdio' as const, command: 'files-probe', args: ['--root', '/srv'], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }] };
   const add = (name: string, scope: 'user' | 'local' | 'project', over: Partial<CommandInput<'connectors.addJson'>> = {}): CommandInput<'connectors.addJson'> => ({ cwd: project, binary: join(fake, 'claude'), name, scope, entry, folder: project, ...over });
   // as the engine writes a user-scope add: the entry under the top-level mcpServers of the global config
-  const WRITES = `while [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '{"mcpServers":{"%s":{"type":"stdio","command":"files-probe","args":[]}}}' "$3" > "${root}/config/.claude.json"\necho "Added stdio MCP server $3 to $6 config"\n`;
+  const writes = () => `while [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '{"mcpServers":{"%s":{"type":"stdio","command":"files-probe","args":[]}}}' "$3" > "${root}/config/.claude.json"\necho "Added stdio MCP server $3 to $6 config"\n`;
 
   it('refuses a name configured at any scope the folder reads, naming that scope, and starts no CLI', async () => {
     writeUser({ 'files-probe': { type: 'http', url: 'https://files.example.test/mcp' } });
@@ -363,7 +363,7 @@ describe('connectors.addJson', () => {
 
   it('runs add-json in the folder for a free name; a second add of the name at another scope, queued behind it, is refused and the CLI ran once', async () => {
     writeUser({});
-    behave(WRITES);
+    behave(writes());
     const host = engineHost();
     const first = await host.call('connectors.addJson', add('files-probe', 'user'));
     const second = await host.call('connectors.addJson', add('files-probe', 'local'));
