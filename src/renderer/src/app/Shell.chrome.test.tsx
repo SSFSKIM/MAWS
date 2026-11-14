@@ -14,6 +14,7 @@ import { at } from '../../../../test/support/machine';
 import { useShellView } from './shell-view';
 import { registerSlot, resetSlots } from './slots';
 import { registerSessionAction } from './session-actions';
+import { registerAction } from '../keymap/actions-runtime';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -27,7 +28,7 @@ const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() 
 beforeEach(() => {
   setWidth(1440);
   resetPanelStores();
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   for (const id of ['terminal', 'review', 'browser', 'files', 'scm']) offs.push(registerPanelTool(probeTool(id, { title: id }).tool));
   registerSlot('panelHost', PanelHost);
 });
@@ -188,6 +189,88 @@ it.each([
   expect(target.closest('[inert]')).toBeNull();
 });
 
+// UX wave U7b (Interfaces §H, row 11): under a page the sheet's Esc listener is not mounted, so the press reaches the
+// page, which closes, and no side column is folded.
+it('in a window 620 px wide with a side surface drawn as a sheet, Esc on a page closes the page and folds no side column', async () => {
+  setWidth(620);
+  { useLayout.getState().setPanelTabs(A, { tabs: [ref('review:aaaaaaaa')], activeTabId: 'review:aaaaaaaa' }); useLayout.getState().showSurfaceTab(A, 'review:aaaaaaaa'); }
+  renderShell();
+  expect(screen.getByRole('button', { name: 'Close surface sheet' })).toBeTruthy();
+  act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+  expect(screen.queryByRole('button', { name: 'Close surface sheet' })).toBeNull();
+  const collapsed = useLayout.getState().regions.panel.collapsed;
+  await userEvent.keyboard('{Escape}');
+  expect(useLayout.getState().destination).toBeNull();
+  expect(useLayout.getState().regions.panel.collapsed).toBe(collapsed);
+  expect(screen.getByRole('button', { name: 'Close surface sheet' }), 'the sheet is drawn again as it was').toBeTruthy();
+});
+
+// UX wave U7b (Interfaces §H, row 10): the sidebar drawn over the window keeps its own Esc, which the page does not see.
+it('with a page open and the keyboard in the sidebar drawn over the window, Esc closes that overlay and the page stays', async () => {
+  setWidth(620);
+  renderShell();
+  act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  const sidebar = document.getElementById('region-sidebar')!;
+  const control = within(sidebar).getByRole('button', { name: 'Projects' });
+  act(() => control.focus());
+  await userEvent.keyboard('{Escape}');
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+});
+
+// UX wave U7b (the branch review): a page or Settings opened from the sidebar drawn over a narrow window leaves that
+// overlay, so neither it nor its scrim stays above what was opened.
+it('in a narrow window, a page and Settings each dismiss the sidebar drawn over the window, with its scrim', async () => {
+  setWidth(620);
+  renderShell();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  expect(screen.getByRole('button', { name: 'Close sidebar overlay' })).toBeTruthy();
+  await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Projects' }));
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Close sidebar overlay' })).toBeNull();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  act(() => useLayout.getState().openSettings());
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(screen.queryByRole('button', { name: 'Close sidebar overlay' })).toBeNull();
+});
+
+// The review of the fix wave: a row of the sidebar drawn over the window opens a page, and the overlay goes with it;
+// the page then takes the keyboard on its region, as it does when it opens with the keyboard in what it hides. Where
+// the sidebar stays in view, the keyboard stays on the row.
+it.each([
+  [620, 'the page’s region'],
+  [1440, 'the row'],
+] as const)('a page opened by keyboard from a sidebar row, in a window %i px wide, leaves the keyboard on %s', async (width, target) => {
+  setWidth(width);
+  renderShell();
+  if (width === 620) act(() => useShellView.setState({ sidebarOverlay: true }));
+  const row = within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Projects' });
+  act(() => row.focus());
+  await userEvent.keyboard('{Enter}');
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(document.activeElement).toBe(target === 'the row' ? row : document.getElementById('region-page'));
+});
+
+// The overlay goes with Settings opened from its gear, so the gear is folded away when Settings closes: the keyboard
+// lands in what is on screen, not on the folded gear and not nowhere.
+it('Settings opened from the gear of the sidebar drawn over the window gives the keyboard, at its close, to what is on screen', async () => {
+  offs.push(registerAction('settings.open', () => useLayout.getState().openSettings()));
+  setWidth(620);
+  renderShell();
+  act(() => useShellView.setState({ sidebarOverlay: true }));
+  await userEvent.click(within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Workspace settings' }));
+  expect(useLayout.getState().settings).toEqual({ section: null });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  await userEvent.keyboard('{Escape}');
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+  expect(useLayout.getState().settings).toBeNull();
+  expect(document.activeElement).not.toBe(document.body);
+  expect(document.activeElement?.closest('[inert]')).toBeNull();
+});
+
 it('leaves composing Escape and keyboard focus in a narrow sheet field', async () => {
   setWidth(620);
   offs.push(registerPanelTool(probeTool('ime', { render: () => <input aria-label="Korean sheet field" defaultValue="한" /> }).tool));
@@ -226,7 +309,7 @@ describe('the portaled pane strip order', () => {
   it('restores left before right in DOM and keyboard order after the left session floats and docks', async () => {
     const user = userEvent.setup();
     useLayout.setState({ main: mainShowing(A) });
-    useLayout.getState().openTab({ kind: 'settings', section: null }, { pane: 'other' });
+    useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 'other' }); // a tab of no session
     renderShell();
     const order = () => [...strips().querySelectorAll<HTMLElement>('[data-chrome-pane]')].map((node) => node.dataset.chromePane);
     expect(order()).toEqual(['0', '1']);

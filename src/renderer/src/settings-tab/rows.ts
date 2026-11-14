@@ -5,6 +5,7 @@
 // of its extensions) and drawn under its own name. A {name} in a state's words is a value the drawn row fills in.
 import type { SettingsSection } from './SettingsView';
 import { APPEARANCE, ARTIFACTS, BROWSER, BUDGET_SETTINGS, ENGINE, GATEWAY, KEYBOARD, LAUNCH_PROFILE, MCP_SERVERS, NOTIFICATIONS, SESSIONS, SUPERVISOR, VOICE } from './copy';
+import { USAGE } from '../accounts/copy'; // UX wave U7b (O-47)
 
 export interface SettingsRow {
   id: string; // '<section>.<row>': the search's result and the row's mark in the page (data-settings-row)
@@ -63,6 +64,9 @@ export const SETTINGS_ROWS: readonly SettingsRow[] = [
   { id: 'gateway.offerDirect', section: 'gateway', label: GATEWAY.offerDirect, states: GATEWAY.offerDirectNotes, keywords: GATEWAY_WORDS },
   { id: 'gateway.directLogin', section: 'gateway', label: GATEWAY.directLogin, states: GATEWAY.directLoginNotes, keywords: GATEWAY_WORDS },
   { id: 'gateway.relay', section: 'gateway', label: GATEWAY.relay, states: NO_NOTE, keywords: GATEWAY_WORDS },
+
+  // UX wave U7b (O-47): the usage panel, one row; its account cards are not rows (UsageSection.tsx)
+  { id: 'usage.accounts', section: 'usage', label: USAGE.claudeTitle, states: NO_NOTE, keywords: ['limit', 'account', 'route', 'codex'] },
 
   { id: 'engine.binary', section: 'engine', label: ENGINE.binary, states: ENGINE.binaryNotes },
   { id: 'engine.update', section: 'engine', label: ENGINE.update, states: ENGINE.updateNotes },

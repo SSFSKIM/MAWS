@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { machineKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import {
-  EMPTY_TAB_SET, NO_PROJECT, tabId, UNPINNABLE_KINDS, type PaneState, type ProjectKey, type Strip, type TabRef, type TabSet, type TabSetKey, type TabTarget,
+  EMPTY_TAB_SET, NO_PROJECT, tabId, type PaneState, type ProjectKey, type Strip, type TabRef, type TabSet, type TabSetKey, type TabTarget,
 } from '@shared/ipc/schema/layout';
 
 type Pane = 0 | 1;
@@ -175,17 +175,14 @@ function activateIn(view: View, id: string): View {
 function openIn(view: View, target: TabTarget, pane: PaneTarget, activate: boolean): View {
   const found = locate(view, tabId(target));
   if (found) {
-    // The settings tab is one tab whatever its section: opening it again moves it to the section asked for. A file tab
-    // is one tab per path whatever its line or session: opening it again takes the line and the session (null
+    // A file tab is one tab per path whatever its line or session: opening it again takes the line and the session (null
     // included) of this open, keeping its pin, so the right panel follows the session that last opened it (C8's tenth
-    // ask).
+    // ask). (UX wave U7b: the Settings and Customize tabs, which moved to the section asked for, retired.)
     const open = paneAt(view, found.pane).tabs[found.index];
     const updated =
-      target.kind === 'settings' || target.kind === 'customize'
-        ? replaceTab(view, found.pane, found.index, toRef(target))
-        : target.kind === 'file' && open.kind === 'file'
-          ? replaceTab(view, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })
-          : view;
+      target.kind === 'file' && open.kind === 'file'
+        ? replaceTab(view, found.pane, found.index, { ...open, line: target.line, appSessionId: target.appSessionId })
+        : view;
     return activate ? activateIn(updated, tabId(target)) : updated;
   }
   return place(view, toRef(target), paneOf(view, pane), 'afterActive', activate);
@@ -341,7 +338,6 @@ export function togglePinned(main: Strip, id: string): Strip {
   const found = locateTab(main, id);
   if (!found) return main;
   return onStrip(main, (v) => {
-    if (UNPINNABLE_KINDS.has(paneAt(v, found.pane).tabs[found.index].kind)) return v;
     const panes = [...v.panes] as PaneState[];
     const pane = panes[found.pane];
     panes[found.pane] = { ...pane, tabs: pinnedFirst(pane.tabs.map((t) => (t.id === id ? ({ ...t, pinned: !t.pinned } as TabRef) : t))) };

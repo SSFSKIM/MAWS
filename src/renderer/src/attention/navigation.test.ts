@@ -68,6 +68,31 @@ describe('⌘⇧J (attention.next)', () => {
     expect(active()).toBe(`session:${idOf('Sidebar interaction pass')}`);
   });
 
+  // UX wave U7b (§N): behind a page the waiting session's tab is not on screen; ⌘⇧J opens it, which leaves the page.
+  it('with the one waiting session’s tab in front behind a page, opens that session, which leaves the page', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!;
+    useAttention.setState({ bySession: new Map([[fix.appSessionId, fix.items]]), version: useAttention.getState().version + 1 });
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().openDestination({ kind: 'projects' });
+    runAction('attention.next');
+    expect(useLayout.getState().destination).toBeNull();
+    expect(active()).toBe(`session:${fix.appSessionId}`);
+  });
+
+  // The architect's ruling (§N, the second table): behind a page no session is current, so with two waiting rows the
+  // first, the session behind the page, is opened, not passed over.
+  it('with two waiting rows, the first the session behind a page, opens that session and the page closes', () => {
+    const [first, second] = [idOf('Fix sidebar drag'), idOf('Sidebar interaction pass')];
+    runAction('attention.next');
+    expect(active(), 'the first waiting row is the oldest').toBe(`session:${first}`);
+    useLayout.getState().openDestination({ kind: 'library' });
+    runAction('attention.next');
+    expect(useLayout.getState().destination).toBeNull();
+    expect(active()).toBe(`session:${first}`);
+    runAction('attention.next');
+    expect(active(), 'with the page gone, the session in front is passed over again').toBe(`session:${second}`);
+  });
+
   it('opens into the focused pane of a split', () => {
     useLayout.getState().openSession(idOf('Settings idle probe')); // the left pane's tab (an empty pane takes a split's tab itself)
     useLayout.getState().openSession(idOf('Charter + research'), { split: true });
@@ -262,6 +287,19 @@ describe('the fallback toast', () => {
     useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId, machine: TEST_MACHINE }); // the docked card is not in a file tab
     fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${plan.id}`, `attention:${fix.id}`]);
+  });
+
+  // UX wave U7b (§N): behind a page the shown session's request is not on screen, so its notice falls back to a toast.
+  it('toasts for the shown session while a page covers it, and not once the page is left', () => {
+    const fix = nine.attention.find((a) => a.appSessionId === idOf('Fix sidebar drag'))!.items[0];
+    useLayout.getState().openSession(fix.appSessionId);
+    useLayout.getState().openDestination({ kind: 'library' });
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${fix.id}`]);
+    useNotices.setState({ notices: [] });
+    useLayout.getState().closeDestination();
+    fake.event('attention.notified', { appSessionId: fix.appSessionId, attentionId: fix.id, delivery: 'fallback', at: fix.createdAt });
+    expect(useNotices.getState().notices).toEqual([]);
   });
 
   // P4-B3 (its Decision Log 11): a pane that yielded into the split's card keeps its tab active, but the request shows

@@ -2,12 +2,14 @@
 // and dark themes, saved under docs/doperpowers/plans/shots/c11-*.png, and the mockups they answer to rendered in the
 // same Electron beside them (mockup 06 vignettes 01, 03, 04 and 05, mockup 04 vignette 4) into a scratch directory for
 // the comparison, not the repository. The widgets and Session info are taken on the `#widgets` harness page over the
-// fixture-backed widget backend (the scenario's routed Sonnet session in auto mode); the Accounts and Settings tabs in
-// the product shell over C5's scenario and the committed ClaudeUsage fixture moved to now (accounts.spec.ts's recipe).
+// fixture-backed widget backend (the scenario's routed Sonnet session in auto mode); the usage popover and the Settings
+// dialog in the product shell over C5's scenario and the committed ClaudeUsage fixture moved to now (accounts.spec.ts's
+// recipe). UX wave U7b (O-40, O-47): the title bar's ring opens a compact popover, the whole accounts panel is
+// Settings › Usage, and Settings is a dialog over the window.
 // Nothing here asserts a look: it drives each state to where the mockup shows it and photographs it. Run on purpose only:
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C11_SHOTS=1 pnpm exec playwright test e2e/c11-shots.spec.ts
 import { addressed } from './support/address';
-import { hideSurfaces, mainTab } from './support/shell';
+import { hideSurfaces, settingsDialog, usageRing } from './support/shell';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
@@ -123,27 +125,37 @@ test('the widgets and Session info on the #widgets harness page', async () => {
   }
 });
 
-test('the usage popover (W6: the Accounts tab retired into it) and the Settings tab in the product shell', async () => {
+test('the usage popover (W6: the Accounts tab retired into it) and the Settings dialog in the product shell', async () => {
   test.setTimeout(180_000);
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_SESSION_SOURCE: 'stub:test/fixtures/shell/nine-sessions.json', MAWS_SCENARIO_CLOCK: 'manual', MAWS_CLAUDE_USAGE_DIR: usage } });
   const { app, page } = maws;
   try {
     await expect(page.locator('[data-region="main"]')).toBeVisible();
     await hideSurfaces(page); // the tabs at the mockup's width: no optional surface open
-    await menu(app, 'accounts.open'); // View › Usage: the sidebar footer's usage popover
-    const popover = page.getByRole('dialog', { name: 'Claude Usage' });
+    await menu(app, 'accounts.open'); // View › Usage: the title bar ring's compact popover (U7b)
+    const popover = page.getByRole('dialog', { name: 'Usage', exact: true });
+    await expect(usageRing(page)).toHaveAttribute('aria-expanded', 'true');
+    // the Claude accounts, outside the popover's Codex group
     await expect(popover.locator('[data-account]:not([data-codex] [data-account])')).toHaveCount(5);
     await shoot(page, 'accounts', false);
     await page.keyboard.press('Escape');
+    await expect(popover).toHaveCount(0);
+    // Settings is a dialog over the window; the surfaces were hidden above, and nothing behind it is clicked
     await menu(app, 'settings.open');
-    await expect(mainTab(page, /Settings/)).toBeVisible();
-    await hideSurfaces(page); // the mockup has no optional surface beside Settings
+    const settings = settingsDialog(page);
+    await expect(settings).toBeVisible();
     await shoot(page, 'settings', false);
     for (const section of ['Keyboard', 'Notifications']) {
-      await page.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section, exact: true }).click();
+      await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: section, exact: true }).click();
       await page.waitForTimeout(300);
       await shoot(page, `settings-${section.toLowerCase()}`, false);
     }
+    // the whole accounts panel, which the popover showed before U7b: Settings › Usage, its grid of the Claude accounts
+    await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Usage', exact: true }).click();
+    const panel = settings.getByRole('region', { name: 'Usage', exact: true }).locator('[data-usage-panel]');
+    await expect(panel.locator('[data-account]:not([data-codex] [data-account])')).toHaveCount(5);
+    await page.waitForTimeout(300);
+    await shoot(page, 'settings-usage', false);
   } finally {
     await maws.cleanup();
   }

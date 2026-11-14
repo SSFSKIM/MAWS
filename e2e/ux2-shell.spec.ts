@@ -12,7 +12,7 @@ import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
-import { hideSurface, moveSideTab, openSurface, sessionCard, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
+import { backToTabs, hideSurface, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 
 const SIZES = [{ width: 1280, height: 820 }, { width: 1512, height: 982 }] as const;
 const ENV = {
@@ -84,10 +84,20 @@ async function singleChromeRow(page: Page): Promise<void> {
   expect(strip.y).toBeGreaterThanOrEqual(header.y);
   expect(strip.y + strip.height).toBeLessThanOrEqual(header.y + header.height);
   expect((await box(main(page))).y).toBe(header.y + header.height);
-  // Owner ruling: usage and its unit belong to the sidebar footer, not the title bar.
-  await expect(page.getByRole('banner').locator('[data-usage-pill]')).toHaveCount(0);
-  await expect(sidebar(page).locator('footer [data-usage-pill]')).toBeVisible();
-  await expect(sidebar(page).locator('footer [data-usage-pill]')).toContainText(/Usage|%/);
+  // UX wave U7b (O-47): usage is a ring at the title bar's own right end, and the sidebar's foot holds no usage control.
+  await expect(page.getByRole('banner').locator('[data-usage-ring]')).toBeVisible();
+  await expect(page.getByRole('banner').locator('[data-usage-ring]')).toHaveAttribute('aria-label', /^Usage · /);
+  await expect(sidebar(page).locator('footer [data-usage-ring], footer [data-usage-pill]')).toHaveCount(0);
+}
+// UX wave U7b (O-40): Settings is a dialog over the window and adds no tab; Esc closes it.
+async function settingsAddsNoTab(maws: MawsLaunch): Promise<void> {
+  const tabs = mountedTabs(maws.page); // the strip is hidden from accessibility under the dialog: its mounted tabs
+  const before = await tabs.count();
+  await menu(maws.app, 'settings.open');
+  await expect(settingsDialog(maws.page)).toBeVisible();
+  await expect(tabs, 'the tab count after ⌘, is unchanged').toHaveCount(before);
+  await maws.page.keyboard.press('Escape');
+  await expect(settingsDialog(maws.page)).toHaveCount(0);
 }
 async function openSession(page: Page): Promise<void> {
   await expect(sidebar(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 15_000 });
@@ -224,7 +234,7 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
         await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
         await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
         await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
-        await capture('customize-live-plugins', { header: '[data-region="main"] header', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
+        await capture('customize-live-plugins', { header: '[data-region="page"] [data-customize-header]', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
       }
       expect(maws.consoleErrors()).toEqual([]);
     } finally { await maws.cleanup(); }
@@ -254,13 +264,16 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
       await openSession(page);
       await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
-      const header = main(page).locator('[data-customize-header]');
+      // UX wave U7b (O-40): Customize is a page; its name is the title bar's heading, so the header row holds the section
+      // tabs and the Project select, and the content is measured against the page's box
+      const header = pageRegion(page).locator('[data-customize-header]');
       const library = page.locator('[data-widget="plugins"][data-widget-variant="embedded"] > header');
       await expect(library.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
       await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
       for (const { width, height } of SIZES) {
         await size(maws, width, height);
-        const headerControls = await Promise.all([box(header.getByRole('heading', { name: 'Customize', exact: true })), box(header.getByRole('tablist', { name: 'Customize sections' })), box(header.getByRole('combobox', { name: 'Project', exact: true }))]);
+        await expect(header.getByRole('heading', { name: 'Customize', exact: true })).toHaveCount(0);
+        const headerControls = await Promise.all([box(header.getByRole('tablist', { name: 'Customize sections' })), box(header.getByRole('combobox', { name: 'Project', exact: true }))]);
         const libraryControls = await Promise.all([box(library.getByRole('radio', { name: 'My items', exact: true })), box(library.getByRole('searchbox', { name: 'Search plugins', exact: true })), box(library.getByRole('combobox', { name: 'Live session', exact: true }))]);
         for (const row of [headerControls, libraryControls]) {
           const centers = row.map((rect) => rect.y + rect.height / 2);
@@ -269,11 +282,11 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
         await expect(library.getByRole('heading', { name: 'Plugins', exact: true })).toHaveCount(0);
         const loaded = await box(page.locator('[data-plugins-loaded]'));
         const content = await box(page.locator('[data-plugin-row="chrome-review@chrome-tools"]'));
-        const mainBox = await box(main(page));
+        const pageBox = await box(pageRegion(page));
         expect(loaded.y).toBeGreaterThanOrEqual((await box(library)).y + (await box(library)).height);
         expect(content.y).toBeGreaterThan(loaded.y + loaded.height);
-        expect(await main(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
-        await info.attach(`customize-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, main: mainBox, headerControls, libraryControls, loaded, firstPlugin: content, contentTopFromMain: content.y - mainBox.y }, null, 2)), contentType: 'application/json' });
+        expect(await pageRegion(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
+        await info.attach(`customize-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, page: pageBox, headerControls, libraryControls, loaded, firstPlugin: content, contentTopFromPage: content.y - pageBox.y }, null, 2)), contentType: 'application/json' });
         await shot(maws, info, 'customize-three-rows');
       }
       expect(maws.consoleErrors()).toEqual([]);
@@ -281,7 +294,8 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
-test('UX2: one chrome row and no reserved column for empty main or Settings', async ({ maws }, info) => {
+// UX wave U7b (O-40): Settings is no tab, so Diagnostics stands for the tab of no session; Settings adds no tab.
+test('UX2: one chrome row and no reserved column for empty main or a tab of no session', async ({ maws }, info) => {
   const { page } = maws;
   await expect(main(page).getByText('No open tabs')).toBeVisible({ timeout: 15_000 });
   for (const { width, height } of SIZES) {
@@ -289,11 +303,12 @@ test('UX2: one chrome row and no reserved column for empty main or Settings', as
     await singleChromeRow(page);
     await noReservedPanel(page);
     await shot(maws, info, 'empty');
-    await menu(maws.app, 'settings.open');
-    await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Settings', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await settingsAddsNoTab(maws);
+    await menu(maws.app, 'diagnostics.open');
+    await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Diagnostics', exact: true })).toHaveAttribute('aria-selected', 'true');
     await singleChromeRow(page);
     await noReservedPanel(page);
-    await shot(maws, info, 'settings');
+    await shot(maws, info, 'diagnostics');
     await menu(maws.app, 'tab.close');
     await expect(main(page).getByText('No open tabs')).toBeVisible();
   }
@@ -394,9 +409,14 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
       await expect(page.getByRole('menuitem', { name: 'Move above', exact: true })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Move below', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
+      // The menu closed hands the keyboard back to the tab it was opened on, in a task after the close; so the scene waits
+      // for that before it takes the keyboard to the bar, or the hand-back lands between the bar's focus and the keys
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(sideTab(sideGroup(page, 'lower'), 'Review'), 'the closed menu hands the keyboard back to its tab').toBeFocused();
       // the bar from the keyboard: the lower group grows by three steps
       const evenShare = Number(await bar.getAttribute('aria-valuenow'));
       await bar.focus();
+      await expect(bar).toBeFocused();
       for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp');
       await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { message: 'the lower group’s share grew' }).toBeGreaterThan(evenShare);
       for (const { width, height } of SIZES) {
@@ -854,8 +874,41 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
 
   for (let i = 0; i < 20; i++) await menu(maws.app, 'session.new');
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(21);
-  await menu(maws.app, 'settings.open');
+  await menu(maws.app, 'diagnostics.open'); // UX wave U7b: Diagnostics stands for the tab of no session Settings was
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(22);
+  await settingsAddsNoTab(maws);
+  // UX wave U7b (M5's observation; the branch review): Back shows the strip at the offset it had when the page opened.
+  // With a side column open the title bar spans main's columns only, and a page widens it across the column, which
+  // clamps the hidden strip's offset. The strip is left 40 px short of its end, and the tab drawn at its centre is put in
+  // front, wholly in view, so neither the click nor keeping the tab in front in view moves the strip: after Back only the
+  // restored offset puts it back where it was, since the clamp left it short of that. (The first Mac run: the strip's
+  // last tab cannot be in view 40 px short of the strip's end, which its own last 40 px are.)
+  await openSurface(page, 'Background tasks');
+  const list = page.locator('[data-chrome-tabs] [role="tablist"]');
+  const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
+  expect(overflow, 'the strip overflows by more than the step short of its end').toBeGreaterThan(80);
+  // the offset the scene sets is known, so every read below waits on that value, not on two reads agreeing
+  const offset = overflow - 40;
+  await list.evaluate((el, to) => { el.scrollLeft = to; }, offset);
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'the strip is scrolled, short of its end' }).toBe(offset);
+  const centre = await list.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('[role="tab"]')?.getAttribute('data-tab-id') ?? null;
+  });
+  expect(centre, 'a tab is drawn at the strip’s centre').not.toBeNull();
+  const inFront = list.locator(`[role="tab"][data-tab-id="${centre}"]`);
+  await inFront.click();
+  await expect(inFront).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'putting the tab in view in front moved nothing' }).toBe(offset);
+  const [stripBox, tabBox] = [await box(list), await box(inFront)];
+  expect(tabBox.x + tabBox.width, 'the tab in front is in view').toBeLessThanOrEqual(stripBox.x + stripBox.width + 1);
+  expect(tabBox.x, 'the tab in front is in view').toBeGreaterThanOrEqual(stripBox.x - 1);
+  await openAppDestination(page, 'Customize');
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'the wider strip under the page clamps the offset' }).not.toBe(offset);
+  await backToTabs(page);
+  await expect(inFront).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'Back shows the strip at the same offset' }).toBe(offset);
+  await hideSurface(page, 'Background tasks');
   for (const dimensions of [...SIZES, { width: 900, height: 820 }, { width: 620, height: 820 }]) {
     await size(maws, dimensions.width, dimensions.height);
     const all = page.getByRole('button', { name: 'All tabs', exact: true });
@@ -864,10 +917,10 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
     const overflowBox = await box(all);
     expect(overflowBox.x + overflowBox.width).toBeLessThanOrEqual(chromeBox.x + chromeBox.width + 1);
     await all.click();
-    await expect(page.getByRole('menuitemradio', { name: 'Settings', exact: true })).toBeVisible();
+    await expect(page.getByRole('menuitemradio', { name: 'Diagnostics', exact: true })).toBeVisible();
     await shot(maws, info, 'acceptance-tab-overflow');
-    await page.getByRole('menuitemradio', { name: 'Settings', exact: true }).click();
-    await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Settings', exact: true })).toHaveAttribute('aria-selected', 'true');
+    await page.getByRole('menuitemradio', { name: 'Diagnostics', exact: true }).click();
+    await expect(page.locator('[data-chrome-tabs]').getByRole('tab', { name: 'Diagnostics', exact: true })).toHaveAttribute('aria-selected', 'true');
   }
   expect(maws.consoleErrors()).toEqual([]);
 });
@@ -897,7 +950,9 @@ test('Acceptance: compact inactive file tabs contain their extension, pin, dirty
     await page.keyboard.type('// unsaved tab');
     await page.keyboard.press('Enter');
     await expect(tab).toHaveAttribute('data-dirty', 'true');
-    await menu(maws.app, 'settings.open');
+    await settingsAddsNoTab(maws); // UX wave U7b: Settings is a dialog; Diagnostics is the other tab that takes the front
+    await expect(tab, 'the dialog left the file tab in front').toHaveAttribute('aria-selected', 'true');
+    await menu(maws.app, 'diagnostics.open');
     await expect(tab).toHaveAttribute('aria-selected', 'false');
     await expect(tab.getByRole('img', { name: 'Pinned', exact: true })).toBeVisible();
     await expect(tab.getByRole('img', { name: 'Unsaved changes', exact: true })).toBeVisible();

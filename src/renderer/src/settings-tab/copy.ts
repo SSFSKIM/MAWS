@@ -18,6 +18,7 @@ export const SECTIONS = {
   artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14)
   org: 'Org', // P5 O8 M1: Settings › Org, the sign-in to the org, last in the index
   supervisor: 'Supervisor', // U11a M9: the background supervisor and the memory budget, out of Engine (the owner's name)
+  usage: 'Usage', // UX wave U7b (O-47): the usage panel, which the title bar's ring links to
 } as const;
 
 export const INDEX = {

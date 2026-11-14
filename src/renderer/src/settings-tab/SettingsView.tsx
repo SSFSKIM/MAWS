@@ -28,11 +28,12 @@ import { VoiceSection } from './VoiceSection'; // E9
 import { BrowserSection } from './BrowserSection'; // E4a
 import { ArtifactsSection } from './ArtifactsSection'; // P3-D
 import { OrgSection } from './org/OrgSection'; // P5 O8 M1; M4a: the Org page, split by group
+import { UsageSection } from './UsageSection'; // UX wave U7b (O-47): the usage panel, after Gateway
 import { openCustomize } from '../customize/open';
 import type { SettingsResult } from './search';
 import { landingOf, MARK, RowMark, scrollTopToLand, SettingsSearch } from './SettingsSearch';
 
-export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'engine', 'supervisor', 'org'] as const;
+export const SETTINGS_SECTIONS = ['appearance', 'notifications', 'keyboard', 'voice', 'browser', 'artifacts', 'sessions', 'gateway', 'usage', 'engine', 'supervisor', 'org'] as const; // UX wave U7b: 'usage'
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number];
 type Group = 'app' | 'sessions';
 // the index's and the body's order
@@ -45,6 +46,7 @@ export const SECTION_TABLE: readonly { group: Group | null; section: SettingsSec
   { group: 'app', section: 'artifacts' },
   { group: 'sessions', section: 'sessions' },
   { group: 'sessions', section: 'gateway' },
+  { group: 'sessions', section: 'usage' }, // UX wave U7b (O-47)
   { group: 'sessions', section: 'engine' },
   { group: 'sessions', section: 'supervisor' },
   { group: null, section: 'org' },
@@ -60,7 +62,7 @@ const GROUPS = SECTION_TABLE.reduce<{ group: Group; sections: SettingsSection[] 
 const UNGROUPED = SECTION_TABLE.filter(({ group }) => group === null).map(({ section }) => section);
 
 // fills its host; null opens at the table's first section
-export function SettingsView({ section }: { section: SettingsSection | null }) {
+export function SettingsView({ section, request }: { section: SettingsSection | null; request?: object }) {
   const settings = useSettingsValue();
   const body = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -68,9 +70,11 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   const [mark] = useState(() => new RowMark());
   useEffect(() => () => mark.clear(), [mark]);
   const [active, setActive] = useState<SettingsSection>(section ?? ORDER[0]!);
-  const [opened, setOpened] = useState(section);
-  if (opened !== section) {
-    setOpened(section);
+  // UX wave U7b: the dialog's `request` is new at each explicit request, which lands on its section again
+  const asked = request ?? section;
+  const [opened, setOpened] = useState(asked);
+  if (opened !== asked) {
+    setOpened(asked);
     if (section) setActive(section);
   }
 
@@ -84,7 +88,7 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   const ready = settings !== null;
   useEffect(() => {
     if (section && ready) scrollTo(section);
-  }, [section, ready]);
+  }, [section, request, ready]);
 
   // Codex's selected-section highlighting: the last section whose top has scrolled to the body's top.
   const onScroll = () => {
@@ -212,6 +216,8 @@ function SectionBody({ section, settings, showKeyboard }: { section: SettingsSec
       return <SessionsSection settings={settings} />;
     case 'gateway':
       return <GatewaySection settings={settings} />;
+    case 'usage':
+      return <UsageSection />; // UX wave U7b (O-47): the usage panel, which the title bar's ring links to
     case 'engine':
       return <EngineSection settings={settings} />;
     case 'supervisor':

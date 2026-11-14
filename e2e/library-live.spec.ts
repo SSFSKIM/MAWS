@@ -244,7 +244,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     const toolRows = await list.locator('[data-artifact-row]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-kind')}: ${el.textContent}`));
     note(`the panel's Artifacts tool (This session): ${JSON.stringify(toolRows)}`);
 
-    // the Artifacts main tab: both rows with the session's chip and "by <title>"; search finds the page's word
+    // the library (UX wave U7b: a page beside the sidebar, no longer a main tab): both rows with the session’s chip and "by <title>"; search finds the page’s word
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
     const library = page.locator('[data-library]');
     const row = (title: string) => library.getByRole('article', { name: title, exact: true });

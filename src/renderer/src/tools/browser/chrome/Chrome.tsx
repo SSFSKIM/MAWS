@@ -82,7 +82,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false, room = 
     if (tabId === null) return;
     return onExtensionReveal(({ tabId: from, show }) => {
       if (from !== tabId) return;
-      if (show.kind === 'settings') return useLayout.getState().openTab({ kind: 'settings', section: 'browser' });
+      if (show.kind === 'settings') return useLayout.getState().openSettings('browser'); // UX wave U7b: the Settings dialog
       if (show.kind !== 'tab') return; // a replacement never reaches here (`connectBrowser`)
       tabOpened(show.tab);
       if (surface === 'main') openMainTab(appSessionId, show.tab.tabId);

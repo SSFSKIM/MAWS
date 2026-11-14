@@ -166,7 +166,8 @@ function IdleExit({ settings }: { settings: Settings }) {
 // The action, then in its place the question naming the live count (it follows the status while asked), Stop all and
 // Cancel. The question ends when the supervisor stops being ready (it never reopens by itself) and as soon as the owner
 // confirms (the action then reads Stopping… until main answers). Focus moves to Cancel when asked and, when the
-// question closes, back to the action if it is enabled, else to the section's heading.
+// question closes, back to the action if it is enabled, else to the section's heading. UX wave U7b: Esc on the question
+// is its own (`data-escape-own`), so the Settings dialog around it stays.
 function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: KeepFocus }) {
   const questionId = useId();
   const [asking, setAsking] = useState(false);
@@ -197,10 +198,10 @@ function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: 
           <span id={questionId} className="text-ui-sm text-fg">
             {SUPERVISOR.confirm(status?.supervisor?.liveSessions ?? 0)}
           </span>
-          <button type="button" aria-describedby={questionId} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
+          <button type="button" data-escape-own aria-describedby={questionId} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
             {SUPERVISOR.confirmAction}
           </button>
-          <button ref={cancel} type="button" aria-describedby={questionId} className={TEXT_ACTION} onClick={() => setAsking(false)} onKeyDown={onEscape}>
+          <button ref={cancel} type="button" data-escape-own aria-describedby={questionId} className={TEXT_ACTION} onClick={() => setAsking(false)} onKeyDown={onEscape}>
             {SUPERVISOR.cancel}
           </button>
         </>

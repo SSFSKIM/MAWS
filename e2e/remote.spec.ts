@@ -88,7 +88,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { activeMainTab, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
+import { activeMainTab, backToTabs, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
 import { backgroundAgentRecords, backgroundBashRecords, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U8b M9
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
@@ -1041,7 +1041,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
       // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
-      await sessionTab.click();
+      // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
+      // again (the strip is inert under a page, so the tab is not clicked)
+      await backToTabs(again);
+      await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
       await openSurface(again, 'Files');
       const files = surface(again, 'files');
       const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);

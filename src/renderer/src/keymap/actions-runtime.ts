@@ -11,7 +11,7 @@ import type { ActionId } from '@shared/keymap/actions';
 import type { Location } from '@shared/sessions/intent';
 import { askEditorHostClose } from '../panel/editor-host'; // P3-G
 import { markFocusOnMount, useComposerStore } from '../stores/composer';
-import { frontOf, useLayout, type ReplaceVerdict } from '../stores/layout';
+import { frontOf, placeOf as viewedPlace, useLayout, type ReplaceVerdict } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { NEW_CHAT } from '../sessions/title';
 import { allTabs, currentSet, locateTab } from '../stores/layout-model';
@@ -60,11 +60,13 @@ export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('c
 // registry: `registry`, the registry project a New chat with no project here is opened in (sidebar/registry-new-chat.ts),
 // the unstarted session's before its tab opens (panel sweep#3), so its tab names that project's row. ticket 497 (UX wave U13a):
 // the tab in front is read at the call and again at the answer; a chat whose answer finds another tab in front is added
-// after that tab, unselected, and its composer takes the keyboard when the person selects it.
+// after that tab, unselected, and its composer takes the keyboard when the person selects it. UX wave U7b (M5, decision 11):
+// what the person looks at is compared (the store's `placeOf`), so a chat that arrives after a page or the Settings dialog opened is
+// added unselected and takes neither away.
 export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
   if (!creator) return null; // C12
-  const front = frontOf(useLayout.getState());
+  const front = viewedPlace(useLayout.getState());
   let appSessionId: AppSessionId | null;
   try {
     appSessionId = await (opts.location ? creator(projectId, opts.location) : creator(projectId));
@@ -78,7 +80,7 @@ export async function createSession(projectId: ProjectId | null, opts: { pane?: 
   // and T3's new thread); marked as the tab opens, before anything could render its composer
   markFocusOnMount(appSessionId);
   const tab: TabTarget = { kind: 'session', appSessionId };
-  if (frontOf(useLayout.getState()) === front) useLayout.getState().openTab(tab, { pane: opts.pane ?? 'focused' });
+  if (viewedPlace(useLayout.getState()) === front) useLayout.getState().openTab(tab, { pane: opts.pane ?? 'focused' });
   else useLayout.getState().openTab(tab, { activate: false });
   return appSessionId; // C12
 }

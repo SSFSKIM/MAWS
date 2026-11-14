@@ -16,7 +16,7 @@ import { ipc } from '../ipc/client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
 import { instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../panel/host';
 import { HolderNotice } from '../session/HolderNotice';
-import { useLayout } from '../stores/layout';
+import { tabOnScreen, useLayout } from '../stores/layout';
 import { surfaceTabs } from '../panel/surface-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -387,6 +387,33 @@ describe('held outcomes and the attach command', () => {
     held(JOB);
     act(() => runSessionAction('attach', A));
     await waitFor(() => expect(opened()).toMatchObject([{ appSessionId: A, command: COMMAND }]));
+  });
+
+  // UX wave U7b (the architect's ruling 2): behind a page Attach leaves the page, with the session in front and its tab
+  // shown, whether it opens the terminal or shows the one it remembers.
+  it('the row menu’s Attach behind a page leaves the page for the session in front, its new terminal shown', async () => {
+    held(JOB);
+    act(() => useLayout.getState().openSession(A)); // the session in front: the host would not open it again
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(tabOnScreen(useLayout.getState())).toMatchObject({ kind: 'session', appSessionId: A });
+    expect(inViewOfA()).toBe(opened()[0]!.label);
+  });
+
+  it('a second Attach behind a page leaves it for the session already in front, the remembered tab shown', async () => {
+    held(JOB);
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    const first = opened()[0]!.label;
+    act(() => panelHost.showSummary());
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(tabOnScreen(useLayout.getState())).toMatchObject({ kind: 'session', appSessionId: A });
+    expect(opened(), 'the remembered tab, not another').toHaveLength(1);
   });
 
   it("Resume answered held offers the job's Attach in its toast, with the command main named", async () => {

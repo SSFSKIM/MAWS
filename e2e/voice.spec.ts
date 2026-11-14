@@ -20,6 +20,7 @@ import { expect, test as base, type ElectronApplication, type Page } from '@play
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { settingsDialog } from './support/shell';
 
 const PACKAGED = Boolean(process.env.MAWS_E2E_EXECUTABLE);
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -69,7 +70,7 @@ const test = base.extend<{ voice: MawsLaunch; voiceApp: MawsLaunch; packagedVoic
       await maws.cleanup();
     }
   },
-  // The app itself (its Settings tab) over the scripted recognizer.
+  // The app itself (its Settings dialog) over the scripted recognizer.
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
   voiceApp: async ({}, use, testInfo) => {
     testInfo.skip(PACKAGED, 'the scripted recognizer is proven on the development build; the packaged run proves the helper');
@@ -482,7 +483,7 @@ async function menu(app: ElectronApplication, id: string): Promise<void> {
 test('Settings › Voice reads the status from main and writes the language to settings version 9', async ({ voiceApp }) => {
   const { page, app, userData } = voiceApp;
   await menu(app, 'settings.open');
-  const settings = page.locator('[data-region="main"]').getByRole('tabpanel');
+  const settings = settingsDialog(page); // UX wave U7b: Settings is a dialog over the window, not a main tab
   await settings.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Voice', exact: true }).click();
   const section = settings.getByRole('region', { name: 'Voice' });
   await expect(section).toBeVisible();

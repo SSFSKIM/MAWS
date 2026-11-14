@@ -6,9 +6,9 @@ import { matchesChord, parseChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { runAction } from './actions-runtime';
 import { currentSet } from '../stores/layout-model';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
 import { A, probeTool, resetPanelStores, TestHost } from '../test-support/panel';
@@ -160,7 +160,7 @@ describe('strip-order navigation', () => {
   it('steps the pane owning DOM focus instead of moving a different pane', () => {
     openTabs();
     useLayout.getState().splitWithActive();
-    useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' });
+    useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }); // a tab of no session
     render(<Regions />);
     screen.getByLabelText('Pane 1 content').focus();
     // A store focus is not a substitute for the keyboard's actual owner.
@@ -236,6 +236,52 @@ describe('visible region focus', () => {
   });
 });
 
+
+// UX wave U7b (M5, decision 8): an open page is a stop of F6 after the sidebar; what it covers is inert and invisible, as
+// the shell leaves it (a wrapper around the main area's panes, the side column's region), so F6 passes over it.
+describe('F6 with a page open', () => {
+  function WithPage() {
+    const page = useLayout(pageOpen);
+    const set = useLayout((s) => currentSet(s.main));
+    return <>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-main">
+        <div data-behind-page inert={page} className={page ? 'invisible' : ''}>
+          {set.panes.map((pane, index) => <section id={`pane-${index}`} data-pane={index} key={index}>
+            <div data-pane-strip><div role="tablist" aria-label={`Tabs ${index}`}>
+              {pane.tabs.map((tab) => <button role="tab" aria-selected={tab.id === pane.activeTabId} tabIndex={tab.id === pane.activeTabId ? 0 : -1} key={tab.id}>{tab.id}</button>)}
+            </div></div>
+            <div role="tabpanel"><textarea aria-label={`Pane ${index} content`} /></div>
+          </section>)}
+        </div>
+      </section>
+      {page && <section id="region-page" tabIndex={-1}><button>Page control</button></section>}
+      <section id="region-panel" inert={page}><button>Surface overflow</button></section>
+    </>;
+  }
+  beforeEach(() => {
+    openTabs();
+    render(<WithPage />);
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+  });
+
+  it('from the sidebar lands on the page, and the next F6 on the sidebar, never in a pane or the side column', () => {
+    screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Page control' }));
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sidebar destination' }));
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Page control' }));
+  });
+
+  it('after Back the stops are the sidebar, the strip, the pane and the side column again', () => {
+    act(() => useLayout.getState().closeDestination());
+    screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true }));
+  });
+});
 
 // UX wave U8b (M2, decision 7): each group of the side column is its strip (its selected tab) and then its content.
 it('visits Session cards, each group’s strip and its content, without stopping on resize controls', () => {

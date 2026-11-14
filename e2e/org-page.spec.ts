@@ -26,13 +26,14 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type ElectronApplication } from '@playwright/test';
+import { expect, test, type ElectronApplication, type Locator } from '@playwright/test';
 import type { GrantsView, OrgStatus, OrgView, ProvisioningSecret } from '../src/shared/ipc/schema/org';
 import { readOrMintMachineRef } from '../src/shared/machine/identity-file';
 import { memberNames } from '../src/shared/org/member-name';
 import { ORG, SECTIONS } from '../src/renderer/src/settings-tab/copy';
 import { actionsNotWhole, addClippedProbes, probeFaults, type ActionEntry } from './support/actions-whole';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { settingsDialog } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now; a plain build's main lacks the seam.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -280,8 +281,10 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
     try {
       const { app, page } = maws;
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'light'); // the app's default
+      // UX wave U7b (O-40): Settings is a modal dialog over the window, no longer the main pane's tab
       await menu(app, 'settings.open');
-      const panel = page.locator('[data-region="main"]').getByRole('tabpanel');
+      const panel = settingsDialog(page);
+      await expect(panel).toBeVisible();
       await panel.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: SECTIONS.org, exact: true }).click();
       const section = panel.getByRole('region', { name: SECTIONS.org });
       const body = panel.locator('[data-settings-body]');
@@ -346,31 +349,46 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       await section.evaluate((root) => root.querySelectorAll('[data-probe]').forEach((probe) => probe.remove()));
       expect(probeFaults(probed), `the check names every clipped probe and not the mirror: ${probed.join('; ')}`).toEqual([]);
 
+      // Each sheet is read by its name: the Settings dialog under it is a dialog too (UX wave U7b). A sheet is a layer over
+      // Settings, so Esc closes the sheet alone and Settings stays (Interfaces §H, row 2).
+      const sheetNamed = (title: string) => page.getByRole('dialog', { name: title, exact: true });
+      const closedToSettings = async (sheet: Locator) => {
+        await page.keyboard.press('Escape');
+        await expect(sheet).toHaveCount(0);
+        await expect(panel).toBeVisible();
+      };
+
       // The sheet taken up on the running pairing: the new device's fingerprint to compare, Approve and Cancel pairing.
+      const pairing = view.members.find((m) => m.id === status.pairing!.member)!;
       await show.click();
-      const sheet = page.getByRole('dialog');
-      await expect(sheet.getByText(status.pairing!.entry!.fingerprint, { exact: true })).toBeVisible();
-      await test.info().attach('org-page-pair-sheet', { body: await sheet.screenshot(), contentType: 'image/png' });
-      expect(await sheet.evaluate(overflowing), 'nothing in the pairing sheet is wider than its box').toEqual([]);
-      expect(await sheet.evaluate(actionsNotWhole, ROW), "every action is drawn whole inside the pairing sheet").toEqual([]);
+      const pairSheet = sheetNamed(ORG.pairTitle(pairing.email, pairing.you));
+      await expect(pairSheet.getByText(status.pairing!.entry!.fingerprint, { exact: true })).toBeVisible();
+      await test.info().attach('org-page-pair-sheet', { body: await pairSheet.screenshot(), contentType: 'image/png' });
+      expect(await pairSheet.evaluate(overflowing), 'nothing in the pairing sheet is wider than its box').toEqual([]);
+      expect(await pairSheet.evaluate(actionsNotWhole, ROW), "every action is drawn whole inside the pairing sheet").toEqual([]);
 
       // M4b's sheets, each opened from its row, photographed and checked as the pairing sheet is, then closed
-      const photographed = async (open: () => Promise<void>, ready: string, name: string) => {
-        await open();
+      const photographed = async (title: string, open: (sheet: Locator) => Promise<void>, ready: string, name: string) => {
+        const sheet = sheetNamed(title);
+        await open(sheet);
         await expect(sheet.getByText(ready, { exact: true })).toBeVisible();
         await test.info().attach(name, { body: await sheet.screenshot(), contentType: 'image/png' });
         expect(await sheet.evaluate(overflowing), `nothing in ${name} is wider than its box`).toEqual([]);
         expect(await sheet.evaluate(actionsNotWhole, ROW), `every action is drawn whole inside ${name}`).toEqual([]);
-        await page.keyboard.press('Escape');
-        await expect(sheet).toHaveCount(0);
+        await closedToSettings(sheet);
       };
-      await page.keyboard.press('Escape');
-      await expect(sheet).toHaveCount(0);
+      await closedToSettings(pairSheet);
       // the enrollment awaiting its key, taken up without its code
-      await photographed(() => group('machines').getByRole('group', { name: ORG.enroll, exact: true }).getByRole('button', { name: ORG.enrollShow, exact: true }).click(), ORG.enrollWaiting('gpu-box-02'), 'org-page-enroll-sheet');
+      await photographed(
+        ORG.enrollTitle,
+        () => group('machines').getByRole('group', { name: ORG.enroll, exact: true }).getByRole('button', { name: ORG.enrollShow, exact: true }).click(),
+        ORG.enrollWaiting('gpu-box-02'),
+        'org-page-enroll-sheet',
+      );
       // a grant on studio-mini, Ben chosen: his rights as the machine holds them
       await photographed(
-        async () => {
+        ORG.grantTitle('studio-mini'),
+        async (sheet) => {
           await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
           await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
         },
@@ -378,10 +396,16 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
         'org-page-grant-sheet',
       );
       // lab-mini-02's missing grants, each shown
-      await photographed(() => machineRow('lab-mini-02').getByRole('button', { name: ORG.regrant, exact: true }).click(), ORG.regrantIntro('lab-mini-02'), 'org-page-regrant-sheet');
+      await photographed(
+        ORG.regrantTitle('lab-mini-02'),
+        () => machineRow('lab-mini-02').getByRole('button', { name: ORG.regrant, exact: true }).click(),
+        ORG.regrantIntro('lab-mini-02'),
+        'org-page-regrant-sheet',
+      );
       // Ben's grant on studio-mini saved, machine-admin added: studio-mini brought up to date before Touch ID (held there)
       await photographed(
-        async () => {
+        ORG.grantTitle('studio-mini'),
+        async (sheet) => {
           await machineRow('studio-mini').getByRole('button', { name: ORG.grant, exact: true }).click();
           await sheet.getByRole('combobox', { name: ORG.grantPerson }).selectOption({ label: `${names.get(view.members[3]!.id)!} (${view.members[3]!.email})` });
           await sheet.getByRole('checkbox', { name: /^machine-admin / }).check();
@@ -392,7 +416,8 @@ test('org page: a seeded org in its four groups, each photographed; nothing scro
       );
       // M4c: the create sheet, its fields filled, where its code goes said and the code never shown
       await photographed(
-        async () => {
+        ORG.createTitle,
+        async (sheet) => {
           await create.click();
           await sheet.getByRole('textbox', { name: ORG.createFields.label, exact: true }).fill('devcloud VMs for the clinical research operations render farm');
           await sheet.getByRole('textbox', { name: ORG.createFields.prefix, exact: true }).fill('crops-render-');
