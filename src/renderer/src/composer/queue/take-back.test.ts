@@ -799,3 +799,59 @@ describe('the settle of a session on another machine whose route turns refused',
     expect(b.state.held.at(-1)).toBe(false);
   });
 });
+
+// the branch panel's findings 3 and 4 (decision 13's table): a message the record says is still listed keeps its stage
+// and is withdrawn again, however many times that takes; each read of the record replays it from the stage's own name
+describe('a message the record keeps listed', () => {
+  it('(finding 4) a promote and then a revert, read from the stage’s own name: listed under its queue id again, withdrawn there, and loaded', async () => {
+    const w = world();
+    // the entry was sent on under a uuid before the take-back's withdrawal reached it
+    w.steers.add(U2);
+    w.row('promote', 'q-1', U2);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.controls.cancelSteer.mockImplementationOnce(async () => {
+      // the frame's write failed: the promotion is reverted, the entry listed again
+      w.steers.delete(U2);
+      w.entries.add('q-1');
+      w.row('revert', 'q-1', null);
+      w.listed();
+      return { ok: true, value: { outcome: 'already_started' as const } };
+    });
+    await takeBack(APP, after('q-1'), w.deps);
+    expect(w.controls.remove).toHaveBeenLastCalledWith({ queueId: 'q-1' });
+    expect(w.entries.size).toBe(0); // withdrawn under its queue id
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(notice()).toBeNull(); // not "may already have been read": the record could say
+  });
+
+  it('(finding 3) withdrawals that keep failing while it stays listed: the stage stays, the box stays held, and nothing is loaded; Delete on the row is the way out', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.entries.add('q-1');
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    // the queue's persistence fails: the entry is put back and the removal rejected, again and again
+    w.controls.remove.mockImplementation(async () => ({ ok: false, error: { code: 'internal' as const, message: 'the queue could not be saved' } }));
+    const run = takeBack(APP, after('q-1'), w.deps);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 120);
+    expect(w.controls.remove.mock.calls.length).toBeGreaterThan(4); // still withdrawing past the old four rounds
+    expect(b.state.loaded).toEqual([]);
+    expect(stageMark(w.store.get(APP))).not.toBeNull();
+    expect(b.state.held.at(-1)).toBe(true);
+    expect(takingBack(APP)).toBe(true);
+    expect(notice()).toBeNull(); // nothing new drawn
+    // Delete on the still-listed row: the engine removes it; the next withdrawal is refused and the record says removed
+    w.entries.delete('q-1');
+    w.row('remove', 'q-1', null);
+    w.listed();
+    w.controls.remove.mockImplementation(w.real.remove);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(stageMark(w.store.get(APP))).toBeNull();
+    expect(b.state.held.at(-1)).toBe(false);
+  });
+});
