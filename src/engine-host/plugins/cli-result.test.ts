@@ -253,7 +253,7 @@ describe('the outcome of a custom add', () => {
   });
 
   it('withholds a line holding a value as written, and one holding it as JSON escapes it, with the exit code and the shown command', () => {
-    expect(failed('could not be read to confirm the change (value-one)\n')).toEqual(withheld());
+    expect(failed('refused because of value-one, try again\n')).toEqual(withheld());
     const quoted: McpEntry = { ...stdio, env: [{ name: 'FILES_PROBE_KEY', value: 'say "hi" \\ there' }] };
     const escaped = `Invalid configuration: env.OTHER: Invalid input, near ${JSON.stringify({ FILES_PROBE_KEY: 'say "hi" \\ there' })}`; // not the read-back error, which R10 withholds by its phrase
     expect(escaped.includes('say "hi" \\ there')).toBe(false); // only its JSON form is in the line
