@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sourceKey } from '../../shared/plugins/source-key';
 import { mcpShownCommand, type McpEntry } from '../../shared/plugins/cli';
-import { availableOf, CUSTOM_ADD_WORDS, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, nameCheckOutcome, pluginRowsOf } from './cli-result';
+import { availableOf, CUSTOM_ADD_WORDS, ENGINE_READBACK_PHRASE, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, nameCheckOutcome, pluginRowsOf, withheldLine } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
 const NOT_FOUND = '{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \\"nope\\" not found in marketplace \\"e8-scratch\\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}';
@@ -275,6 +275,37 @@ describe('the outcome of a custom add', () => {
     expect(failed('saw value-one-more', nested)).toEqual(withheld(nested));
     expect(failed('saw value-one', nested)).toEqual(withheld(nested));
     expect(failed('saw value-on', nested)).toMatchObject({ ok: false, error: { message: 'saw value-on', failureCode: null } });
+  });
+
+  it('tests the line as the CLI wrote it, before trimming: a value with a space, a tab or a Unicode space at either end is withheld', () => {
+    for (const value of ['value-one ', ' value-one', 'value-one\t', '\tvalue-one', 'value-one\u00a0', '\u2003value-one', 'value-one\u3000']) {
+      for (const entry of [{ ...stdio, env: [{ name: 'FILES_PROBE_KEY', value }] }, { ...http, headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
+        const outcome = failed(`refused ${value}\n`, entry);
+        expect(outcome, JSON.stringify(value)).toEqual(withheld(entry));
+        expect(JSON.stringify(outcome).includes(value.trim())).toBe(false);
+      }
+    }
+    // what is forwarded is still the trimmed line
+    expect(failed('  MCP server files-probe already exists in user config  \n')).toMatchObject({ ok: false, error: { message: 'MCP server files-probe already exists in user config', failureCode: null } });
+  });
+
+  // R10: the read-back error's reason can quote any fragment of the file, so it is withheld whole by its phrase
+  it('withholds the engine’s read-back error whole, with its own sentence and no shown command, whatever part of a value it quotes', () => {
+    const header: McpEntry = { ...http, headers: [{ name: 'X-Files-Key', value: 'value-one-two-three' }] };
+    const readback = `MCP server "files-probe" may not have been saved to user config: /cfg/.claude.json could not be read to confirm the change (Unexpected token in JSON at position 212: "X-Files-Key": "value-one-t). Run claude mcp list to check.`;
+    const outcome = failed(`${readback}\n`, header);
+    expect(outcome).toEqual({ ok: false, error: { code: 'cli_failed', message: 'Claude Code exited 1. It could not read its configuration file back after writing it, and its message may quote that file, so it is not shown. The connector may have been added: check the list before adding it again.', failureCode: 'readback_unconfirmed', shownCommand: null } });
+    expect(JSON.stringify(outcome)).not.toContain('value-one');
+    expect(failed(`${readback}\n`, header, 'files-probe', null as unknown as number)).toMatchObject({ error: { message: expect.stringMatching(/^Claude Code exited on a signal\. It could not read/) } });
+    expect(failed('MCP server files-probe already exists in user config\n', header)).toMatchObject({ ok: false, error: { message: 'MCP server files-probe already exists in user config', failureCode: null } }); // still forwarded
+  });
+
+  it('pins the read-back phrase of engine 2.1.322, and drops a line by it or by a value, testing the line before trimming', () => {
+    expect(ENGINE_READBACK_PHRASE).toBe('could not be read to confirm the change');
+    expect(withheldLine('/cfg/.claude.json could not be read to confirm the change (EACCES)', [])).toBe('readback');
+    expect(withheldLine('refused value-one ', ['value-one '])).toBe('value');
+    expect(withheldLine('refused value-one', ['value-one '])).toBeNull();
+    expect(withheldLine('MCP server files-probe already exists in user config', ['value-one'])).toBeNull();
   });
 
   it('never reads stdout: a failure with no error line is no_result in today’s words, whatever stdout holds', () => {

@@ -16,7 +16,8 @@
 // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §C): a custom add (`mcp-add` with an
 // entry) carries its value slots, and what leaves the runner for it is held to the rule about values: no line of its
 // stdout is emitted, a line of its stderr only whole and only when it holds no slot's content (so its latest event, the
-// replay, holds only such lines), its outcome is cli-result's custom branch, and a spawn's or a thrown error's message is
+// replay, holds only such lines; the line is tested as the CLI wrote it, before trimming, and the engine's read-back
+// error is dropped the same way, R10), its outcome is cli-result's custom branch, and a spawn's or a thrown error's message is
 // forwarded or logged only when it holds none. A mutation may name a check (`PreRunCheck`, R3) that the runner awaits
 // inside its queue, after `started` and before anything is spawned.
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
@@ -25,7 +26,7 @@ import { stat } from 'node:fs/promises';
 import type { PluginsOperationEvent, PluginsOutcome } from '@shared/ipc/schema/plugins';
 import { holdsValueSlot, isMcpAction, isMcpEntryAdd, mcpValueSlotsOf, PLUGINS_SCOPES, runnerCommandLine, type McpAction, type McpActionInputs, type PluginsAction, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
-import { CONFIGURATION_UNREAD, mcpOutcome, mutationOutcome, resultOf, SPAWN_WITHHELD, type CliRun } from './cli-result';
+import { CONFIGURATION_UNREAD, mcpOutcome, mutationOutcome, resultOf, SPAWN_WITHHELD, withheldLine, type CliRun } from './cli-result';
 import { RELOADING_ACTIONS, reloadAfter, SETTLE_MS, type ReloadTarget } from './reload-after';
 
 export { SETTLE_MS };
@@ -316,9 +317,10 @@ export class PluginsRunner {
       this.deps.emit(op.latest);
     };
     emit({ phase: 'started' });
-    // UX wave U11g: a custom add emits no stdout line, and a stderr line only when it holds no value slot's content
-    const hear = (line: string, stream: Stream) => {
-      if (op.values !== null && (stream === 'stdout' || holdsValueSlot(line, op.values))) return;
+    // UX wave U11g: a custom add emits no stdout line, and a stderr line only when the line as the CLI wrote it holds no
+    // value slot's content and is not the engine's read-back error (R10); what is emitted is the trimmed line
+    const hear = (line: string, stream: Stream, raw: string) => {
+      if (op.values !== null && (stream === 'stdout' || withheldLine(raw, op.values) !== null)) return;
       emit({ phase: 'output', line });
     };
     const read = (run: CliRun): PluginsOutcome => (isMcpAction(op.action) ? mcpOutcome(op.action, op.input as McpActionInputs[McpAction], run) : mutationOutcome(run)); // P4-AGG M4
@@ -369,9 +371,9 @@ export class PluginsRunner {
     this.settledOne(); // E10
   }
 
-  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line, with its stream; `op` is told of
-  // the group it owns.
-  private async exec(args: readonly string[], cwd: string, onLine: ((line: string, stream: Stream) => void) | null, op: Operation | null): Promise<Ended> {
+  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line, trimmed, with its stream and the
+  // line as the CLI wrote it; `op` is told of the group it owns.
+  private async exec(args: readonly string[], cwd: string, onLine: ((line: string, stream: Stream, raw: string) => void) | null, op: Operation | null): Promise<Ended> {
     // a stop or cancel asked while preparing ends the run without a spawn: checked after every await, the last one
     // immediately before the synchronous spawn
     const aborted = (): Ended | null => {
@@ -415,7 +417,7 @@ export class PluginsRunner {
         let partial = '';
         const hear = (line: string) => {
           const trimmed = line.trim();
-          if (trimmed.length > 0 && resultOf(trimmed) === null) onLine?.(trimmed, stream);
+          if (trimmed.length > 0 && resultOf(trimmed) === null) onLine?.(trimmed, stream, line);
         };
         return {
           data: (text: string) => {

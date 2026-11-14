@@ -73,7 +73,23 @@ export const CUSTOM_ADD_WORDS = {
   unread: 'Not every configuration here could be read, so the name can’t be checked. Nothing was added.',
   withheld: (code: number | null, command: string) => `Claude Code exited ${code === null ? 'on a signal' : code}. Its message repeats a header or variable value, so it is not shown. To read it, run this in a terminal with your values in place of ${MCP_MASK}: ${command}`,
   spawnWithheld: 'The command could not be started. The system’s message repeats a header or variable value, so it is not shown.',
+  readback: (code: number | null) => `Claude Code exited ${code === null ? 'on a signal' : code}. It could not read its configuration file back after writing it, and its message may quote that file, so it is not shown. The connector may have been added: check the list before adding it again.`, // R10
 } as const;
+
+// R10: the fixed phrase of the engine's read-back error, read from engine 2.1.322 (`cli.pretty.js:475658`, thrown at
+// `:476792`): "MCP server "<name>" may not have been saved…: <file> could not be read to confirm the change (<reason>)…".
+// Its `<reason>` is free text from the failed read and can quote any fragment of the file, so a line holding the phrase
+// is withheld whole whatever else it holds.
+export const ENGINE_READBACK_PHRASE = 'could not be read to confirm the change';
+
+/** Why a custom add's CLI line is withheld whole, or null when it may be forwarded: tested on the line as the CLI wrote
+ * it, before any trimming (what is forwarded is the trimmed line). The read-back error first, since its sentence says
+ * the connector may have been added; then a value slot's content, as written or as JSON escapes it. The one drop of the
+ * `output` path and the outcome's path alike. */
+export function withheldLine(raw: string, slots: readonly string[]): 'readback' | 'value' | null {
+  if (raw.includes(ENGINE_READBACK_PHRASE)) return 'readback';
+  return holdsValueSlot(raw, slots) ? 'value' : null;
+}
 
 /** The check before the run could not be made, or its read of the configuration was not whole: nothing was added. */
 export const CONFIGURATION_UNREAD: Failed = failed('spawn_failed', CUSTOM_ADD_WORDS.unread, 'configuration_unread');
@@ -89,15 +105,17 @@ export function nameCheckOutcome(configured: { servers: readonly { name: string;
   return configured.serversRead ? null : CONFIGURATION_UNREAD;
 }
 
-// The rule about values (§C): stdout is never read; the success is worded from the input; the CLI's last error line is
-// forwarded whole when it holds no value slot's content, as written or as JSON escapes it, and is otherwise replaced
-// whole by the fixed sentence. Nothing is replaced inside a line.
+// The rule about values (§C): stdout is never read; the success is worded from the input; the CLI's last error line, as
+// the CLI wrote it, is forwarded whole (trimmed) when `withheldLine` passes it, and is otherwise replaced whole by the
+// fixed sentence of its trigger (R10's read-back error, or a value slot's content). Nothing is replaced inside a line.
 function customAddOutcome(input: McpEntryAdd, run: CliRun): PluginsOutcome {
   if (run.code === 0) return { ok: true, result: { command: 'mcp add-json', outcome: 'ok', message: CUSTOM_ADD_WORDS.added(input.entry.type, input.name, input.scope), name: input.name, scope: input.scope } };
-  const said = lines(run.stderr).at(-1);
-  if (said === undefined) return noResult(run);
-  if (holdsValueSlot(said, mcpValueSlotsOf(input))) return failed('cli_failed', CUSTOM_ADD_WORDS.withheld(run.code, mcpShownCommand(input)), 'message_withheld');
-  return failed('cli_failed', said);
+  const raw = run.stderr.split('\n').filter((line) => line.trim().length > 0).at(-1); // as the CLI wrote it
+  if (raw === undefined) return noResult(run);
+  const withheld = withheldLine(raw, mcpValueSlotsOf(input));
+  if (withheld === 'readback') return failed('cli_failed', CUSTOM_ADD_WORDS.readback(run.code), 'readback_unconfirmed');
+  if (withheld === 'value') return failed('cli_failed', CUSTOM_ADD_WORDS.withheld(run.code, mcpShownCommand(input)), 'message_withheld');
+  return failed('cli_failed', raw.trim());
 }
 
 // -- the reads -----------------------------------------------------------------------------------------------------------
