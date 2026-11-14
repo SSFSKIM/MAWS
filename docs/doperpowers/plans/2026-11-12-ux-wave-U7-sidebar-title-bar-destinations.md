@@ -1188,7 +1188,7 @@ U7a's pull request carries the dated amendment of the ruling S-11 reverses; U7b'
   | 1440 by 900 | 760 px | 0 of 30 |
   | 600 by 820 (the 552 px dialog) | 352 px | the rightmost control 2 px left of Close, as before |
 
-  Under overlay bars nothing changes at any window size. The two scenes stay strict at 760 in both modes. Rejected: a dialog 15 px wider (the same measurement, a shared box overridden for one dialog, and the box's `100vw - 48px` cap takes it back under about 1023 px); a fixed 15 px inset with a capped column (no measurement, but it changes the layout at every narrow window under overlay bars); accepting 745 (the owner's own Mac mini has no trackpad, so the wrap would be the first thing seen at a sitting there). A tracker row (owner U7) holds what remains: under classic bars Close sits over the top 22 px of the body's bar, so the thumb cannot be grabbed there at scroll 0.
+  Under overlay bars nothing changes at any window size. The two scenes stay strict at 760 in both modes. Rejected: a dialog 15 px wider (the same measurement, a shared box overridden for one dialog, and the box's `100vw - 48px` cap takes it back under about 1023 px); a fixed 15 px inset with a capped column (no measurement, but it changes the layout at every narrow window under overlay bars); accepting 745 (a Mac with a mouse and no trackpad is an ordinary desk set-up, and the wrapped note would be seen there every time Settings opens). A tracker row (owner U7) holds what remains: under classic bars Close sits over the top 22 px of the body's bar, so the thumb cannot be grabbed there at scroll 0.
   Date/Author: 2026-11-14, the controller of U7b, on the architect's ruling.
 
 ## Outcomes & Retrospective
