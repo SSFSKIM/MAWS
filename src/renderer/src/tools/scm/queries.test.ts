@@ -8,16 +8,17 @@ import { invalidateScmQueries, prStateKey, refreshPrState, refreshPublishedPrSta
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
+const AT = '/work/app-a'; // A's working folder
 const invalidated = (queryKey: readonly unknown[]) => queryClient.getQueryState(queryKey)?.isInvalidated;
 
 describe('invalidateScmQueries', () => {
   afterEach(() => queryClient.clear());
 
   it('invalidates the picked sessions’ queries and passes over a key without a session', () => {
-    for (const key of [scmStatusKey(A), scmStatusKey(B), prStateKey(A), [...SCM_STATUS_QUERIES]]) queryClient.setQueryData(key, {});
+    for (const key of [scmStatusKey(A), scmStatusKey(B), prStateKey(A, AT), [...SCM_STATUS_QUERIES]]) queryClient.setQueryData(key, {});
     expect(() => invalidateScmQueries((appSessionId) => appSessionId === A)).not.toThrow();
     expect(invalidated(scmStatusKey(A))).toBe(true);
-    expect(invalidated(prStateKey(A))).toBe(true);
+    expect(invalidated(prStateKey(A, AT))).toBe(true);
     expect(invalidated(scmStatusKey(B))).toBe(false);
     expect(invalidated([...SCM_STATUS_QUERIES])).toBe(false);
   });
@@ -29,25 +30,25 @@ describe('resetScmQueries', () => {
   afterEach(() => queryClient.clear());
 
   it('drops the picked sessions’ answers and passes over a key without a session', () => {
-    for (const key of [scmStatusKey(A), scmStatusKey(B), prStateKey(A), [...SCM_STATUS_QUERIES]]) queryClient.setQueryData(key, {});
+    for (const key of [scmStatusKey(A), scmStatusKey(B), prStateKey(A, AT), [...SCM_STATUS_QUERIES]]) queryClient.setQueryData(key, {});
     expect(() => resetScmQueries((appSessionId) => appSessionId === A)).not.toThrow();
     expect(queryClient.getQueryData(scmStatusKey(A))).toBeUndefined();
-    expect(queryClient.getQueryData(prStateKey(A))).toBeUndefined();
+    expect(queryClient.getQueryData(prStateKey(A, AT))).toBeUndefined();
     expect(queryClient.getQueryData(scmStatusKey(B))).toEqual({});
     expect(queryClient.getQueryData([...SCM_STATUS_QUERIES])).toEqual({});
   });
 
   it('writes no published PR lookup asked before the move', async () => {
-    queryClient.setQueryData(prStateKey(A), { branch: 'main', pr: null }); // a surface holds the PR state
+    queryClient.setQueryData(prStateKey(A, AT), { branch: 'main', pr: null }); // a surface holds the PR state
     let release!: () => void;
     const client = {
       invoke: () => new Promise((resolve) => (release = () => resolve({ ok: true, value: { branch: 'main', pr: { number: 1 } } }))),
     } as unknown as MawsBridge;
-    refreshPublishedPrState(A, { url: 'https://example.invalid/pr/1', action: 'created', at: new Date().toISOString() }, client);
+    refreshPublishedPrState(A, AT, { url: 'https://example.invalid/pr/1', action: 'created', at: new Date().toISOString() }, client);
     resetScmQueries((appSessionId) => appSessionId === A);
     release();
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(queryClient.getQueryData(prStateKey(A))).toBeUndefined();
+    expect(queryClient.getQueryData(prStateKey(A, AT))).toBeUndefined();
   });
 });
 
@@ -58,16 +59,16 @@ describe('refreshPrState', () => {
   afterEach(() => queryClient.clear());
 
   it('keeps its answer over an ordinary read begun before it and answered after it', async () => {
-    queryClient.setQueryData(prStateKey(A), { branch: 'main', pr: null });
+    queryClient.setQueryData(prStateKey(A, AT), { branch: 'main', pr: null });
     let answerRead!: () => void;
     const read = queryClient
-      .fetchQuery({ queryKey: prStateKey(A), queryFn: () => new Promise((resolve) => (answerRead = () => resolve({ branch: 'main', pr: null }))) })
+      .fetchQuery({ queryKey: prStateKey(A, AT), queryFn: () => new Promise((resolve) => (answerRead = () => resolve({ branch: 'main', pr: null }))) })
       .catch(() => undefined); // the cancelled read rejects
     const client = { invoke: () => Promise.resolve({ ok: true, value: { branch: 'main', pr: { number: 7 } } }) } as unknown as MawsBridge;
-    await refreshPrState(A, client);
+    await refreshPrState(A, AT, client);
     answerRead();
     await read;
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(queryClient.getQueryData(prStateKey(A))).toEqual({ branch: 'main', pr: { number: 7 } });
+    expect(queryClient.getQueryData(prStateKey(A, AT))).toEqual({ branch: 'main', pr: { number: 7 } });
   });
 });

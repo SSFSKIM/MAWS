@@ -125,13 +125,13 @@ describe('shell event subscription', () => {
     const { fake } = setup();
     await answerSnapshots(fake);
     try {
-      for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
-      const kept = () => [prStateKey(A), scmStatusKey(A)].map((key) => queryClient.getQueryData(key) !== undefined);
+      for (const key of [prStateKey(A, '/work/a'), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      const kept = () => [prStateKey(A, '/work/a'), scmStatusKey(A)].map((key) => queryClient.getQueryData(key) !== undefined);
       fake.event('session.changed', { record: record('a', { title: { text: 'renamed', source: 'user' } }), cause: 'update', revision: 2 });
       expect(kept()).toEqual([true, true]);
       fake.event('session.changed', { record: record('a', MOVED), cause: 'facts', revision: 3 });
       expect(kept()).toEqual([false, false]);
-      for (const key of [prStateKey(A), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      for (const key of [prStateKey(A, '/work/a'), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
       fake.event('session.changed', { record: record('a', { agentFolder: { ...MOVED.agentFolder, cwd: '/work/a/.claude/worktrees/w1/lib' } }), cause: 'facts', revision: 4 });
       expect(kept()).toEqual([true, true]); // the agent's folder alone: the checkout is the same
       fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 5 }); // back at the launch folder
@@ -669,7 +669,7 @@ describe('the shell per machine', () => {
     await answerSnapshots(fake);
     await answerOther(fake, [record('b1')], 5);
     const b1 = onB('b1');
-    const keys = [prStateKey(b1), scmStatusKey(b1)];
+    const keys = [prStateKey(b1, '/work/b1'), scmStatusKey(b1)];
     const kept = () => keys.map((key) => queryClient.getQueryData(key) !== undefined);
     try {
       for (const key of keys) queryClient.setQueryData(key, { kept: true });
@@ -678,13 +678,13 @@ describe('the shell per machine', () => {
       expect(kept()).toEqual([true, true]);
       let release!: () => void;
       const held = { invoke: () => new Promise((resolve) => (release = () => resolve({ ok: true, value: { branch: 'main', pr: { number: 1 } } }))) } as unknown as MawsBridge;
-      const refreshing = refreshPrState(b1, held); // the summary's Refresh, asked of the folder the agent then left
+      const refreshing = refreshPrState(b1, '/work/b1', held); // the summary's Refresh, asked of the folder the agent then left
       fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 3)] });
       await answerOther(fake, [record('b1', { agentFolder: { checkout: '/work/b1/.claude/worktrees/w1', cwd: '/work/b1/.claude/worktrees/w1', branch: 'w1', linked: true } })], 1);
       expect(kept()).toEqual([false, false]);
       release();
       await refreshing;
-      expect(queryClient.getQueryData(prStateKey(b1))).toBeUndefined();
+      expect(queryClient.getQueryData(prStateKey(b1, '/work/b1'))).toBeUndefined();
     } finally {
       queryClient.clear();
     }

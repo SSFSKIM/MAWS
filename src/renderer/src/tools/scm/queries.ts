@@ -7,18 +7,23 @@
 // remote. Both are asked again when the repository's head or refs move (a push from anywhere, a new remote or upstream),
 // and `scm.status` when a session's setup records trust: one app-level listener (`connectPanelEvents`, ipc/events.ts)
 // does it through `invalidateScmQueries`, so neither surface subscribes to an event of its own (E11 W-D).
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
-import type { ScmStatus } from '@shared/ipc/schema/scm';
-import { queryClient, useCommand } from '../../ipc/query';
+import type { ScmPrState, ScmStatus } from '@shared/ipc/schema/scm';
+import { ipc } from '../../ipc/client';
+import { IpcCommandError, queryClient, useCommand } from '../../ipc/query';
 
-// `useCommand`'s keys (`['maws', name, input]`), and each command's prefix for every session.
+// `useCommand`'s keys (`['maws', name, input]`), and each command's prefix for every session. UX wave U8c-2 (the branch
+// review, finding 7): the PR state's key names the checkout after its input, which is the session's alone: main answers
+// for the checkout the session works in, so an answer is that checkout's, and a checkout on a branch of another's name
+// never reads the other's.
 export const SCM_STATUS_QUERIES = ['maws', 'scm.status'] as const;
 export const PR_STATE_QUERIES = ['maws', 'scm.pr.state'] as const;
 export const scmStatusKey = (appSessionId: AppSessionId) => [...SCM_STATUS_QUERIES, { appSessionId }];
-export const prStateKey = (appSessionId: AppSessionId) => [...PR_STATE_QUERIES, { appSessionId, refresh: false }];
+export const prStateKey = (appSessionId: AppSessionId, checkout: string) => [...PR_STATE_QUERIES, { appSessionId, refresh: false }, { checkout }];
 
 export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const; // main keeps an answer 60 s
 
@@ -55,9 +60,10 @@ const sessionsOf = (which: (appSessionId: AppSessionId) => boolean) => (query: {
 // answer is the last written.
 const publishedSeen = new Map<AppSessionId, string>();
 const lookups = new Map<AppSessionId, number>();
-export function refreshPublishedPrState(appSessionId: AppSessionId, published: EngineSessionStatus['published'], client: MawsBridge): void {
+// `checkout` is the session's working folder as the page holds it, whose PR state the lookup's answer is.
+export function refreshPublishedPrState(appSessionId: AppSessionId, checkout: string, published: EngineSessionStatus['published'], client: MawsBridge): void {
   if (published === undefined || publishedSeen.get(appSessionId) === published.at) return;
-  const key = prStateKey(appSessionId);
+  const key = prStateKey(appSessionId, checkout);
   if (Date.now() - Date.parse(published.at) >= PR_STATE_POLL.refetchInterval || queryClient.getQueryState(key) === undefined) return;
   publishedSeen.set(appSessionId, published.at);
   const lookup = (lookups.get(appSessionId) ?? 0) + 1;
@@ -80,8 +86,8 @@ function writeLookup(key: readonly unknown[], result: CommandResult<'scm.pr.stat
 // reset the PR state and no later lookup began meanwhile, under the generation the published lookup and the reset share,
 // and written as that lookup writes it (fix wave 1): an ordinary read begun before it is cancelled. A failed ask asks
 // the query again, as before.
-export async function refreshPrState(appSessionId: AppSessionId, client: MawsBridge): Promise<void> {
-  const key = prStateKey(appSessionId);
+export async function refreshPrState(appSessionId: AppSessionId, checkout: string, client: MawsBridge): Promise<void> {
+  const key = prStateKey(appSessionId, checkout);
   const lookup = (lookups.get(appSessionId) ?? 0) + 1;
   lookups.set(appSessionId, lookup);
   const result = await client.invoke('scm.pr.state', { appSessionId, refresh: true });
@@ -101,24 +107,35 @@ function prStateEnabled(branch: string | null, scm: ScmStatus | undefined): bool
 }
 
 // The PR state of the session's checkout on `branch`, read again when its repository's head or refs move. The query is
-// the session's, so the tool and the row share one poll, while main answers for the branch the
-// checkout was on when asked; a query that stops asking keeps its last answer. So an answer is shown only while there
+// the session's and its checkout's (`checkout`, the working folder the surface shows), so the tool and the row share one
+// poll, while main answers for the branch the checkout was on when asked; a query that stops asking keeps its last answer. So an answer is shown only while there
 // is something to ask and only when it names the current branch: after a switch nothing is said until the new branch's
 // answer, and nothing on a detached head or once trust or the last remote is gone. An answer naming no branch (main
 // found the checkout untrusted, not a repository or detached) carries no PR and stands: the row reads trust from it.
 // E11: an answer naming another branch is asked again at once, once per pair of branches (a switch made while nothing
 // showed the query leaves a fresh answer for the old branch, which the poll would otherwise keep for up to 2 minutes).
-export function usePrState(appSessionId: AppSessionId, { branch, scm }: { branch: string | null; scm: ScmStatus | undefined }) {
+export function usePrState(appSessionId: AppSessionId, { checkout, branch, scm }: { checkout: string; branch: string | null; scm: ScmStatus | undefined }) {
   const enabled = prStateEnabled(branch, scm);
-  const query = useCommand('scm.pr.state', { appSessionId, refresh: false }, { ...PR_STATE_POLL, enabled });
+  const key = prStateKey(appSessionId, checkout);
+  // `useCommand`'s query with the checkout in its key (its input stays the session's)
+  const query = useQuery<ScmPrState, IpcCommandError>({
+    queryKey: key,
+    queryFn: async () => {
+      const result = await ipc.invoke('scm.pr.state', { appSessionId, refresh: false });
+      if (!result.ok) throw new IpcCommandError(result.error);
+      return result.value;
+    },
+    ...PR_STATE_POLL,
+    enabled,
+  });
   const answer = query.data;
   const reasked = useRef<string | null>(null);
   const named = answer?.branch ?? null;
   useEffect(() => {
     const mismatch = enabled && named !== null && named !== branch ? `${named}\0${branch}` : null;
-    if (mismatch !== null && reasked.current !== mismatch) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
+    if (mismatch !== null && reasked.current !== mismatch) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId, checkout) });
     reasked.current = mismatch;
-  }, [enabled, named, branch, appSessionId]);
+  }, [enabled, named, branch, appSessionId, checkout]);
   return {
     data: enabled && answer !== undefined && (answer.branch === null || answer.branch === branch) ? answer : undefined,
     error: enabled ? query.error : null,

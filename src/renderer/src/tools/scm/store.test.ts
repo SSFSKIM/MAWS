@@ -614,8 +614,8 @@ describe('source control store applies no status of its own and resumes a run fr
   it('reads every PR state again when any run ends, mounted or not; output chunks and a disconnected listener do not', async () => {
     const main = scmMain();
     const client = validated(main.bridge);
-    const prA = prStateKey(at(A));
-    const prB = prStateKey(at(B));
+    const prA = prStateKey(at(A), DIR);
+    const prB = prStateKey(at(B), '/repo-b');
     const statusA = scmStatusKey(at(A));
     queryClient.clear();
     for (const key of [prA, prB, statusA]) queryClient.setQueryData(key, {});

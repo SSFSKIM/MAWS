@@ -505,7 +505,10 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
     client.on('host.status', (_status, { machine }) => useGit.getState().retryUnanswered(machine)),
     client.on('session.setup', () => invalidateScmQueries(() => true, [SCM_STATUS_QUERIES])),
     client.on('fs.workflowChanged', ({ appSessionId }) => void queryClient.invalidateQueries({ queryKey: ['maws', 'fs.workflows', { appSessionId }] })),
-    client.on('session.status', ({ appSessionId, status }) => refreshPublishedPrState(appSessionId, status.published, client)), // P5 E312
+    client.on('session.status', ({ appSessionId, status }) => {
+      const checkout = checkoutOf(appSessionId); // P5 E312; UX wave U8c-2: the PR state is its checkout's
+      if (checkout !== null) refreshPublishedPrState(appSessionId, checkout, status.published, client);
+    }),
   ];
   return () => offs.forEach((off) => off());
 }
@@ -513,9 +516,14 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
 // The repository a session's checkout is in, as the git store knows it (the surfaces that read the scm queries watch
 // the checkout): the checkout from the session's record, else from its `scm.status` answer.
 function repoRootOf(appSessionId: AppSessionId): string | null {
+  const checkout = checkoutOf(appSessionId);
+  return checkout === null ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
+}
+
+// The checkout a session works in as the page knows it: its record's working folder, else the folder its `scm.status` answered.
+function checkoutOf(appSessionId: AppSessionId): string | null {
   const record = useSessions.getState().records.get(appSessionId);
-  const checkout = record ? workingFolder(record).path : queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory;
-  return checkout === undefined ? null : (useGit.getState().entries.get(checkoutKey(machineOf(appSessionId), checkout))?.status?.repoRoot ?? null);
+  return record ? workingFolder(record).path : (queryClient.getQueryData<ScmStatus>(scmStatusKey(appSessionId))?.directory ?? null);
 }
 // C8a end
 

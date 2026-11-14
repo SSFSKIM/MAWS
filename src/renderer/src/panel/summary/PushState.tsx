@@ -68,12 +68,12 @@ export function PushState({ directory, appSessionId, embedded = false }: { direc
 function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId; directory: string; branch: string }) {
   // The queries the tool's header shares (tools/scm/queries.ts): the bounded poll and the rule for asking.
   const scm = useScmStatus(appSessionId);
-  const pr = usePrState(appSessionId, { branch, scm: scm.data });
+  const pr = usePrState(appSessionId, { checkout: directory, branch, scm: scm.data });
   const [refreshing, setRefreshing] = useState(false);
   const behind = prStateBehind(scm.data, pr.data);
   useEffect(() => {
-    if (behind) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
-  }, [behind, appSessionId]);
+    if (behind) void queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId, directory) });
+  }, [behind, appSessionId, directory]);
 
   const line = prLine({ branch, scm: { data: scm.data, error: scm.error?.message }, pr: { data: pr.data, error: pr.error?.message } });
   if (line.kind === 'hidden') return null;
@@ -84,7 +84,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
   const refresh = async () => {
     setRefreshing(true);
     try {
-      if (scm.data?.trusted) await refreshPrState(appSessionId, ipc);
+      if (scm.data?.trusted) await refreshPrState(appSessionId, directory, ipc);
       await queryClient.invalidateQueries({ queryKey: scmStatusKey(appSessionId) });
     } finally {
       setRefreshing(false);
