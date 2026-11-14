@@ -201,8 +201,7 @@ describe('floating session cards', () => {
   // the record carries no fast-mode state, so it never says Fast
   it('names the model as the composer’s chip does, with the engine’s id in the tooltip, and Fast only from a live status', async () => {
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { projectId: P, model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: 'high' })) }));
-    mount();
-    await open('Environment');
+    mount(); // Environment is held open (U8b)
     await waitFor(() => expect(fake.pending('engine.models')).toBeGreaterThan(0));
     await act(() => fake.reply('engine.models', { models: [{ value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5[1m]' }, { value: 'opus', displayName: 'Opus 5.5 (1M context)', resolvedModel: 'claude-opus-5-5[1m]' }], source: 'live', at: null }));
     const line = await within(region('Environment')).findByText('Opus 5.5 High');
