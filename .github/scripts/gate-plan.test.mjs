@@ -58,6 +58,7 @@ function plan(scenarioEnv) {
         LAUNCHD_E2E: '',
         MAC_EC2: '',
         MAC_MINI_OVERFLOW: '',
+        MAC_MINI_LANES: '',
         E2E_MINUTES: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
@@ -2567,4 +2568,96 @@ test("a guest copy whose own bound would pass a guest job's 90 minutes takes the
   const daemon = copyPlan(['to-human'], ['to-human e2e/to-human.spec.ts'], { E2E_MINUTES: 'to-human=70', LAUNCHD_E2E: 'daemon-unit to-human' });
   assert.ok(entries(daemon.outputs, 'e2e').every((entry) => !entry.copy));
   assert.match(daemon.stdout, /^Mini copy kept off: e2e:to-human, its 70 minutes pass a guest job's 90, and LAUNCHD_E2E never runs in the home account /m);
+});
+
+// The mini's scheduled holds (MAC_MINI_LANES `windows`): one line, in the summary, the step's stdout and `mini_window`,
+// when a window in force or starting within three hours holds a lane a job of this run takes; never a move.
+const windowNow = Date.parse('2026-11-08T22:50:00Z');
+const quiet = { from: '2026-11-08T23:00Z', until: '2026-11-08T23:50Z', lanes: ['host', 'vm'], why: 'quiet window 23:00Z 23:50Z semis' };
+const vmPause = { ...quiet, lanes: ['vm'], why: 'VM paused' };
+const lanesValue = (windows, extra = {}) => JSON.stringify({ v: 1, at: '2026-11-08T21:00:00Z', host: 'free', vm: 'free', why: '', windows, ...extra });
+const windowScripts = { e2e: 'playwright test', 'e2e:guest': 'scripts/e2e-build.sh plain && playwright test', 'e2e:host': 'playwright test', 'e2e:desk-web': 'pnpm --filter desk-web e2e' };
+const windowPlan = (lanes, { gates = 'e2e:guest,e2e:host,unit:darwin', now = windowNow, trailers = '', ...extra } = {}) =>
+  planOf({ MAC_VM_E2E: 'guest', POOL_E2E: 'desk-web', LINUX_E2E: 'desk-web', MAC_MINI_LANES: lanes, ...extra, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${gates}\nRunner: macos${trailers}` }, windowScripts, now);
+const withoutWindow = (outputs) => Object.fromEntries(Object.entries(outputs).filter(([key]) => key !== 'mini_window'));
+
+test('a hold in force or starting within three hours is said once; one ended or further off says nothing', () => {
+  const upcoming = windowPlan(lanesValue([quiet]));
+  const line = "Mac mini: the host and VM lanes are held 23:00Z-23:50Z (quiet window 23:00Z 23:50Z semis), so this run's jobs there not started by 23:00Z wait until 23:50Z: unit:darwin, e2e:guest, e2e:host.";
+  assert.equal(upcoming.outputs.mini_window, line);
+  assert.equal(upcoming.summary.split(line).length, 2);
+  assert.equal(upcoming.stdout.split(line).length, 2);
+  const active = windowPlan(lanesValue([quiet]), { now: Date.parse('2026-11-08T23:00:00Z') });
+  assert.equal(active.outputs.mini_window, "Mac mini: the host and VM lanes are held until 23:50Z (quiet window 23:00Z 23:50Z semis), so this run's jobs there wait until then: unit:darwin, e2e:guest, e2e:host.");
+  // Three hours ahead is inside, a minute more is not; the end is exclusive.
+  assert.match(windowPlan(lanesValue([quiet]), { now: Date.parse('2026-11-08T20:00:00Z') }).outputs.mini_window, /held 23:00Z-23:50Z/);
+  for (const now of ['2026-11-08T19:59:00Z', '2026-11-08T23:50:00Z', '2026-11-09T01:00:00Z']) {
+    const quietPlan = windowPlan(lanesValue([quiet]), { now: Date.parse(now) });
+    assert.equal(quietPlan.outputs.mini_window, undefined, now);
+    assert.doesNotMatch(quietPlan.summary + quietPlan.stdout, /Mac mini:/, now);
+  }
+  // Absolute times: a window across midnight needs nothing of its own.
+  const wrap = windowPlan(lanesValue([{ ...quiet, from: '2026-11-08T23:30Z', until: '2026-11-09T00:20Z' }]));
+  assert.match(wrap.outputs.mini_window, /held 23:30Z-00:20Z .* not started by 23:30Z wait until 00:20Z: /);
+  // A window too far off to say as a clock time says its date.
+  const long = windowPlan(lanesValue([{ ...quiet, until: '2026-11-10T09:00Z' }]), { now: Date.parse('2026-11-08T23:10:00Z') });
+  assert.match(long.outputs.mini_window, /held until 2026-11-10T09:00Z \(/);
+});
+
+test('a VM pause names only the jobs that can take the guest, and is silent for a run whose Mac jobs take the host alone', () => {
+  // e2e:guest is on [ci-kit-mac-solo], which ci-kit admits only while both lanes are free; under Lane: vm, the guest alone.
+  for (const trailers of ['', '\nLane: vm']) {
+    assert.equal(windowPlan(lanesValue([vmPause]), { trailers }).outputs.mini_window,
+      "Mac mini: the VM lane is held 23:00Z-23:50Z (VM paused), so this run's jobs there not started by 23:00Z wait until 23:50Z: e2e:guest.", trailers);
+  }
+  assert.equal(windowPlan(lanesValue([vmPause]), { gates: 'e2e:host,unit:darwin' }).outputs.mini_window, undefined);
+  // An earlier hold that touches no job of the run gives way to the next one that does.
+  assert.match(windowPlan(lanesValue([{ ...vmPause, until: '2026-11-08T23:10Z' }, quiet]), { gates: 'e2e:host' }).outputs.mini_window, /^Mac mini: the host and VM lanes are held 23:00Z-23:50Z .*: e2e:host\.$/);
+  // Class 1a, unit:darwin and packaged on the mini's labels count; a reason left empty says none.
+  assert.equal(windowPlan(lanesValue([{ ...quiet, why: '' }]), { gates: 'static,unit,probes,packaged', GATE_RUNNER: 'macos' }).outputs.mini_window,
+    "Mac mini: the host and VM lanes are held 23:00Z-23:50Z, so this run's jobs there not started by 23:00Z wait until 23:50Z: static, unit, probes, packaged.");
+});
+
+test('a run with no job on the mini says nothing of its holds', () => {
+  for (const extra of [
+    { gates: 'static,unit,probes,e2e:desk-web' },
+    { gates: 'e2e:guest,e2e:host', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'guest host' },
+    { gates: 'e2e:host', LAUNCHD_E2E: 'host' },
+  ]) assert.equal(windowPlan(lanesValue([quiet]), extra).outputs.mini_window, undefined, JSON.stringify(extra));
+});
+
+test('an absent, unreadable or malformed value, or a malformed window, says nothing and changes no other output', () => {
+  const original = windowPlan('').outputs;
+  assert.equal(original.mini_window, undefined);
+  assert.deepEqual(withoutWindow(windowPlan(lanesValue([quiet])).outputs), original);
+  for (const value of [
+    'not json', 'null', '[]', lanesValue([quiet], { v: 2 }), lanesValue(quiet), lanesValue([null]),
+    lanesValue([{ ...quiet, from: '2026-11-08T23:00:00Z' }]), lanesValue([{ ...quiet, until: '2026-11-08 23:50Z' }]),
+    lanesValue([{ ...quiet, from: '2026-11-08T24:00Z' }]), lanesValue([{ ...quiet, until: quiet.from }]),
+    lanesValue([{ ...quiet, lanes: [] }]), lanesValue([{ ...quiet, lanes: ['host', 'gpu'] }]), lanesValue([{ ...quiet, lanes: 'host vm' }]),
+    lanesValue([{ ...quiet, why: 7 }]),
+  ]) {
+    const result = windowPlan(value);
+    assert.deepEqual(result.outputs, original, value);
+    assert.doesNotMatch(result.summary + result.stdout, /Mac mini:/, value);
+  }
+  // A malformed entry leaves the well-formed ones beside it; a stale publication's windows still count.
+  assert.match(windowPlan(lanesValue([{ ...quiet, lanes: ['gpu'] }, quiet], { at: '2026-11-01T00:00:00Z' })).outputs.mini_window, /^Mac mini: /);
+  // planOf without a clock (an old caller) says nothing.
+  assert.equal(planOf({ MAC_MINI_LANES: lanesValue([quiet]), HEAD_MESSAGE: 'Gates: unit:darwin\nRunner: macos' }, windowScripts).outputs.mini_window, undefined);
+});
+
+test('the workflow entry point writes the hold to its output on one line and escapes it in the summary', () => {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  const stamp = (time) => `${new Date(time).toISOString().slice(0, 16)}Z`;
+  const window = { from: stamp(minute + 3_600_000), until: stamp(minute + 7_200_000), lanes: ['host', 'vm'], why: 'quiet <night> & day\nGates: all' };
+  const { outputs, raw, summary, stdout } = plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos', MAC_MINI_LANES: lanesValue([window]) });
+  assert.match(outputs.mini_window, /^Mac mini: the host and VM lanes are held \S+ \(quiet <night> & day Gates: all\), so this run's jobs there not started by \S+ wait until \S+: unit:darwin\.$/);
+  assert.equal(raw.split('\n').filter((line) => line.startsWith('mini_window=')).length, 1);
+  assert.doesNotMatch(raw, /^Gates: all/m);
+  assert.match(summary, /\(quiet &lt;night&gt; &amp; day Gates: all\)/);
+  assert.match(stdout, /^Mac mini: .*\(quiet <night> & day Gates: all\)/m);
+  assert.equal(plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos' }).raw, plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos', MAC_MINI_LANES: lanesValue([]) }).raw);
+  // The plan step reads the variable at plan time.
+  assert.match(jobBody(readWorkflow(), 'plan'), /^ {10}MAC_MINI_LANES: \$\{\{ vars\.MAC_MINI_LANES \}\}$/m);
 });
