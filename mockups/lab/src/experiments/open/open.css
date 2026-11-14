@@ -1,0 +1,625 @@
+/* Open. Every rule is under .x-open; the glass planes are mounted inside that element, so the hosts and their
+   platters inherit these tokens. Values and where each was lifted from: DESIGN.md. */
+
+@font-face { font-family: 'XO Figtree'; font-style: normal; font-weight: 300 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations'); }
+@font-face { font-family: 'XO Geist'; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2') format('woff2-variations'); }
+@font-face { font-family: 'XO Geist Mono'; font-style: normal; font-weight: 100 900; font-display: block;
+  src: url('../../../node_modules/@fontsource-variable/geist-mono/files/geist-mono-latin-wght-normal.woff2') format('woff2-variations'); }
+
+.x-open {
+  position: absolute; inset: 0; overflow: hidden;
+  background: var(--xo-ground);
+
+  /* Colour (Quiet's): two inputs per scheme, the ground (set inline from the knob) and the ink; every neutral on
+     the ground is a mix of the two. */
+  --xo-ink: #1b1a17;
+  --xo-ink-rgb: 27 26 23;
+  --xo-raised: #ffffff;
+  --xo-fg: var(--xo-ink);
+  --xo-fg2: color-mix(in srgb, var(--xo-ink) 76%, var(--xo-ground));
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 62%, var(--xo-ground));
+  --xo-faint: color-mix(in srgb, var(--xo-ink) 42%, var(--xo-ground));
+  --xo-line: rgb(var(--xo-ink-rgb) / 0.09);
+  --xo-line-strong: rgb(var(--xo-ink-rgb) / 0.16);
+  --xo-hover: rgb(var(--xo-ink-rgb) / 0.045);
+  --xo-selected: rgb(var(--xo-ink-rgb) / 0.075);
+  --xo-well: rgb(var(--xo-ink-rgb) / 0.055);
+  /* Orange has one meaning: it is your move. The fill is the owner's value; marks on a light ground take a deeper
+     step of the same hue to be seen. */
+  --xo-accent: #fd780f;
+  --xo-accent-mark: #d95f06;
+  --xo-on-accent: #2a1300;
+  --xo-add: #1f7345;
+  --xo-del: #c0392b;
+  --xo-del-wash: color-mix(in srgb, var(--xo-del) 7%, transparent);
+  --xo-solid: var(--xo-ink);
+  --xo-on-solid: #ffffff;
+
+  /* Type: one sans and its mono; the knob swaps the family and nothing else. */
+  --xo-font: 'XO Figtree', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
+  --xo-mono: 'XO Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  --xo-w: 450;       /* interface weight */
+  --xo-w-strong: 580;
+  --xo-mono-size: 12.5px;
+
+  /* Geometry. The left pane is Field's (20 px continuous corner, 8 px from the window); rows on it are that
+     corner minus the 8 px inset. Bars are capsules at one height. */
+  --xo-gap: 8px;
+  --xo-pane-w: 272px;
+  --xo-side-w: 288px;
+  --xo-col: 744px;          /* the reading column, and the composer's width */
+  --xo-air: 66px;           /* pane to reading column: replaced at run time by the gap the glass runtime derives */
+  --xo-seam: 26px;          /* small control to small control, likewise derived */
+  --xo-bar-top: 12px;
+  --xo-bar-h: 36px;
+  --xo-left: calc(var(--xo-gap) + var(--xo-pane-w));
+  --xo-right: calc(var(--xo-gap) + var(--xo-side-w));
+  --xo-colm: max(var(--xo-air), (100vw - var(--xo-left) - var(--xo-right) - var(--xo-col)) / 2);
+  --xo-r-row: 12px;
+  --xo-r-ctl: 11px;
+  --xo-r-item: 10px;
+  --xo-r-card: 18px;
+  --xo-r-bubble: 22px;
+
+  /* Motion. Quiet's durations for what is on the ground and for fills; Field's long curve for panes that travel;
+     Instrument's light spring for small round things. The glass itself moves only as the runtime moves it. */
+  --xo-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --xo-ease-pane: cubic-bezier(0.32, 0.72, 0, 1);
+  --xo-spring: linear(0, 0.19 5%, 0.56 12%, 0.87 20%, 1.02 28%, 1.06 35%, 1.045 44%, 1.01 58%, 0.997 74%, 1);
+  --xo-t-press: 90ms;
+  --xo-t-hover: 130ms;
+  --xo-t-pop: 210ms;
+  --xo-t-fold: 300ms;
+  --xo-t-pane: 460ms;
+
+  color: var(--xo-fg);
+  font: var(--xo-w) 14px/20px var(--xo-font);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  font-variant-numeric: tabular-nums;
+  cursor: default;
+  user-select: none;
+}
+.x-open[data-scheme='dark'] {
+  --xo-ink: #f4f2ed;
+  --xo-ink-rgb: 244 242 237;
+  --xo-raised: color-mix(in srgb, var(--xo-ink) 7%, var(--xo-ground));
+  --xo-fg: color-mix(in srgb, var(--xo-ink) 93%, var(--xo-ground));
+  --xo-fg2: color-mix(in srgb, var(--xo-ink) 74%, var(--xo-ground));
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 58%, var(--xo-ground));
+  --xo-faint: color-mix(in srgb, var(--xo-ink) 40%, var(--xo-ground));
+  --xo-line: rgb(var(--xo-ink-rgb) / 0.1);
+  --xo-line-strong: rgb(var(--xo-ink-rgb) / 0.16);
+  --xo-hover: rgb(var(--xo-ink-rgb) / 0.06);
+  --xo-selected: rgb(var(--xo-ink-rgb) / 0.1);
+  --xo-well: rgb(var(--xo-ink-rgb) / 0.075);
+  --xo-accent-mark: #fd780f;
+  --xo-add: #6fcf97;
+  --xo-del: #f08a7e;
+  --xo-del-wash: color-mix(in srgb, var(--xo-del) 8%, transparent);
+  --xo-solid: #f4f2ed;
+  --xo-on-solid: #191919;
+}
+.x-open[data-face='geist'] { --xo-font: 'XO Geist', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif; --xo-w: 420; --xo-w-strong: 580; }
+.x-open[data-face='system'] { --xo-font: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif; --xo-mono: ui-monospace, 'SF Mono', Menlo, monospace; --xo-w: 400; --xo-w-strong: 560; --xo-mono-size: 12px; }
+.x-open[data-pane='closed'] { --xo-left: 0px; }
+/* On the settings page the column is the page's, so the tabs stand on that one's edge. */
+.x-open[data-scene='settings'] { --xo-colm: max(var(--xo-air), (100vw - var(--xo-left) - 620px) / 2); }
+.x-open[data-side='closed'] { --xo-right: 0px; }
+@media (max-width: 1340px) {
+  .x-open { --xo-pane-w: 256px; --xo-side-w: 264px; }
+}
+
+.x-open *, .x-open *::before, .x-open *::after { box-sizing: border-box; }
+.x-open :where(button) { font: inherit; letter-spacing: inherit; color: inherit; background: none; border: 0; padding: 0; margin: 0; cursor: default; text-align: left; -webkit-tap-highlight-color: transparent; }
+.x-open :where(p, h1, h2, h3, pre) { margin: 0; }
+.x-open :where(code, pre) { font-family: var(--xo-mono); font-size: var(--xo-mono-size); font-variant-ligatures: none; }
+.x-open :focus { outline: none; }
+.x-open :focus-visible { outline: 2px solid var(--xo-accent); outline-offset: 2px; }
+.x-open ::selection { background: rgb(253 120 15 / 0.26); }
+.x-open svg { display: block; flex: none; }
+/* Continuous corners on the rounded rectangles that are drawn here; circles and capsules stay what they are, and
+   the glass draws its own. */
+.x-open :where(.xo-row, .xo-card, .xo-bubble, .xo-btn, .xo-input, .xo-ask-cmd, .xo-item, .xo-queued, .xo-cap, .xo-chip, .xo-side-row, .xo-back, .xo-group-head) { corner-shape: squircle; }
+
+/* ---- The light, under everything ------------------------------------------------------------------------------ */
+
+.x-open .xo-gather { position: fixed; z-index: 0; display: block; pointer-events: none; }
+.x-open .xo-gather-left { left: 0; top: 0; height: 100%; width: calc(var(--xo-gap) + var(--xo-pane-w) + 140px); transition: transform var(--xo-t-pane) var(--xo-ease-pane), opacity var(--xo-t-pane) var(--xo-ease-pane); }
+.x-open .xo-gather-left[data-away] { transform: translateX(calc(-1 * var(--xo-pane-w) - 32px)); opacity: 0; }
+.x-open .xo-gather-right { right: 0; top: 0; height: 100%; width: calc(var(--xo-gap) + var(--xo-side-w) + 150px); transition: opacity 320ms var(--xo-ease-pane); }
+.x-open .xo-gather-right[data-away] { opacity: 0; }
+.x-open .xo-gather-seat { position: fixed; z-index: 0; pointer-events: none; }
+.x-open .xo-gather-seat > .xo-gather { position: absolute; inset: 0; width: 100%; height: 100%; }
+.x-open .xo-gather-seat-composer {
+  left: var(--xo-left); right: var(--xo-right); bottom: 0; height: 360px; margin-inline: auto;
+  width: min(calc(var(--xo-col) + 320px), calc(100vw - var(--xo-left) - var(--xo-right)));
+  transition: left var(--xo-t-pane) var(--xo-ease-pane), right var(--xo-t-pane) var(--xo-ease-pane);
+}
+.x-open .xo-gather-seat-home { left: var(--xo-left); right: 0; top: 0; bottom: 0; transition: left var(--xo-t-pane) var(--xo-ease-pane); }
+.x-open .xo-gather-seat-tabs {
+  top: 0; height: 132px; left: calc(max(var(--xo-left) + var(--xo-colm), var(--xo-tabs-min, 0px)) - 90px);
+  transition: left var(--xo-t-pane) var(--xo-ease-pane);
+}
+
+/* ---- What is read: on the ground, edge to edge ---------------------------------------------------------------- */
+
+.x-open .xo-main { position: absolute; inset: 0; z-index: 1; }
+.x-open .xo-scroll {
+  position: absolute; inset: 0; overflow-y: auto; scrollbar-width: none; overscroll-behavior: contain;
+  padding-left: var(--xo-left); padding-right: var(--xo-right);
+  transition: padding var(--xo-t-pane) var(--xo-ease-pane);
+}
+.x-open .xo-column {
+  width: min(var(--xo-col), 100% - 2 * var(--xo-air)); margin: 0 auto; user-select: text;
+  padding-top: calc(var(--vitrea-bar-inset-top, 48px) + 20px);
+  padding-bottom: calc(var(--vitrea-bar-inset-bottom, 170px) + 22px);
+}
+
+.x-open .xo-lights { position: absolute; z-index: 1002; left: 24px; top: 24px; display: flex; gap: 8px; pointer-events: none; }
+.x-open .xo-lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.14); }
+.x-open .xo-lights i:nth-child(1) { background: #ff5f57; }
+.x-open .xo-lights i:nth-child(2) { background: #febc2e; }
+.x-open .xo-lights i:nth-child(3) { background: #28c840; }
+
+/* ---- Glass hosts. No background, border, shadow, filter or opacity is authored on any of these: the runtime
+   owns them. Ink is the runtime's, read on children; the second and third levels are authored from it, because
+   the runtime's own secondary measured under 4.5:1 on light panes in round 1. -------------------------------------- */
+
+.x-open .xo-host { position: fixed; box-sizing: border-box; margin: 0; }
+.x-open .xo-host, .x-open .xo-platter {
+  --xo-g: var(--vitrea-foreground, var(--xo-fg));
+  --xo-g2: color-mix(in srgb, var(--xo-g) 80%, transparent);
+  --xo-g3: color-mix(in srgb, var(--xo-g) 68%, transparent);
+  --xo-g-line: color-mix(in srgb, var(--xo-g) 12%, transparent);
+  /* Fills on a bar that floats over the reading ground are the ink at a low alpha (Instrument's). */
+  --xo-g-hover: color-mix(in srgb, var(--xo-g) 8%, transparent);
+  --xo-g-current: color-mix(in srgb, var(--xo-g) 11%, transparent);
+  --xo-g-well: color-mix(in srgb, var(--xo-g) 7%, transparent);
+  color: var(--xo-g);
+  font: var(--xo-w) 14px/20px var(--xo-font);
+  -webkit-font-smoothing: antialiased;
+  outline: none;
+}
+.x-open[data-scheme='dark'] :is(.xo-host, .xo-platter) {
+  --xo-g2: color-mix(in srgb, var(--xo-g) 88%, transparent);
+  --xo-g3: color-mix(in srgb, var(--xo-g) 80%, transparent);
+}
+/* Fills on a pane that stands on its own light are lighter lifts, in both schemes (Field's). */
+.x-open :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.4); --xo-g-current: rgb(255 255 255 / 0.76); --xo-g-shadow: 0 1px 2px rgb(60 30 0 / 0.07); }
+.x-open[data-scheme='dark'] :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.07); --xo-g-current: rgb(255 255 255 / 0.15); --xo-g-shadow: none; }
+
+/* A plain control on glass: a fill under the pointer, never glass of its own (Instrument's). */
+.x-open .xo-gbtn {
+  position: relative; flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; color: var(--xo-g2);
+  transition: background-color var(--xo-t-hover), color var(--xo-t-hover), transform var(--xo-t-press);
+}
+.x-open .xo-gbtn:hover { background: var(--xo-g-hover); color: var(--xo-g); }
+.x-open .xo-gbtn:active { transform: scale(0.94); }
+.x-open .xo-gbtn:is([aria-pressed='true'], [aria-expanded='true']) { background: var(--xo-g-current); color: var(--xo-g); }
+
+/* Tooltips: the words that are not on screen (Quiet's). They wait, then arrive small. */
+.x-open [data-tip]::after {
+  content: attr(data-tip); position: absolute; top: calc(100% + 7px); left: 50%; z-index: 80; padding: 4px 8px; border-radius: 8px;
+  background: var(--xo-solid); color: var(--xo-on-solid); font: 500 12px/16px var(--xo-font); white-space: nowrap; pointer-events: none;
+  opacity: 0; transform: translate(-50%, -3px) scale(0.96); transform-origin: 50% 0; transition: opacity var(--xo-t-hover), transform var(--xo-t-hover);
+}
+.x-open [data-tip]:hover::after, .x-open [data-tip]:focus-visible::after { opacity: 1; transform: translate(-50%, 0) scale(1); transition: opacity var(--xo-t-hover) 480ms, transform var(--xo-t-pop) var(--xo-ease) 480ms; }
+.x-open [data-tip-at='above']::after { top: auto; bottom: calc(100% + 7px); transform-origin: 50% 100%; transform: translate(-50%, 3px) scale(0.96); }
+.x-open [data-tip-at='start']::after { left: 0; transform-origin: 0 0; transform: translate(0, -3px) scale(0.96); }
+.x-open [data-tip-at='start']:is(:hover, :focus-visible)::after { transform: translate(0, 0) scale(1); }
+.x-open [data-tip-at='above-start']::after { top: auto; bottom: calc(100% + 7px); left: 0; transform-origin: 0 100%; transform: translate(0, 3px) scale(0.96); }
+.x-open [data-tip-at='above-start']:is(:hover, :focus-visible)::after { transform: translate(0, 0) scale(1); }
+
+/* ---- The left pane: Field's component, Quiet's content ---------------------------------------------------------- */
+
+.x-open .xo-pane { top: var(--xo-gap); bottom: var(--xo-gap); left: var(--xo-gap); width: var(--xo-pane-w); transition: left var(--xo-t-pane) var(--xo-ease-pane); }
+.x-open[data-pane='closed'] .xo-pane { left: calc(-1 * var(--xo-pane-w) - 24px); }
+.x-open .xo-pane-in { height: 100%; display: flex; flex-direction: column; }
+.x-open .xo-pane-top { position: relative; flex: none; height: 44px; }
+.x-open .xo-pane-toggle { position: absolute; left: 71px; top: 7px; }
+.x-open .xo-pane-body {
+  flex: 1; min-height: 0; overflow-y: auto; padding: 4px 8px 12px; scrollbar-width: none;
+  mask-image: linear-gradient(transparent, #000 10px, #000 calc(100% - 14px), transparent);
+  animation: xo-side-in 340ms var(--xo-ease);
+}
+@keyframes xo-side-in { from { opacity: 0; transform: translateX(-10px); } }
+.x-open .xo-pane-body[data-from='right'] { animation-name: xo-side-in-right; }
+@keyframes xo-side-in-right { from { opacity: 0; transform: translateX(10px); } }
+
+.x-open .xo-group { margin-top: 18px; }
+.x-open .xo-group-head {
+  display: flex; align-items: center; gap: 4px; width: 100%; height: 28px; padding: 0 6px 0 10px; border-radius: var(--xo-r-row);
+  color: var(--xo-g3); font: 550 12px/16px var(--xo-font); transition: color var(--xo-t-hover);
+}
+.x-open button.xo-group-head:hover { color: var(--xo-g); }
+.x-open .xo-group-head span { flex: 1; }
+.x-open .xo-caret { opacity: 0; margin-right: 7px; transition: opacity var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-ease); }
+.x-open .xo-group-head:is(:hover, :focus-visible, [aria-expanded='false']) .xo-caret { opacity: 0.82; }
+.x-open .xo-group-head[aria-expanded='true'] .xo-caret { transform: rotate(90deg); }
+
+.x-open .xo-row {
+  position: relative; display: flex; align-items: center; height: 34px; margin-top: 1px; border-radius: var(--xo-r-row);
+  color: color-mix(in srgb, var(--xo-g) 90%, transparent); transition: background-color var(--xo-t-hover), color var(--xo-t-hover);
+}
+.x-open .xo-row:is(:hover, :focus-within), .x-open .xo-row:has([aria-expanded='true']) { background: var(--xo-g-hover); color: var(--xo-g); }
+.x-open .xo-row[data-selected='true'] { background: var(--xo-g-current); color: var(--xo-g); box-shadow: var(--xo-g-shadow); }
+.x-open .xo-row[data-weight='unread'] { color: var(--xo-g); font-weight: var(--xo-w-strong); }
+.x-open .xo-row[data-weight='rest'] { color: var(--xo-g3); }
+.x-open .xo-row[data-weight='rest']:is(:hover, :focus-within) { color: var(--xo-g); }
+.x-open .xo-row-main { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 4px 0 10px; border-radius: inherit; font-weight: inherit; transition: transform var(--xo-t-press); }
+.x-open .xo-row-main:active { transform: scale(0.99); }
+.x-open .xo-row-main svg { opacity: 0.8; transition: opacity var(--xo-t-hover); }
+.x-open .xo-row:is(:hover, [data-selected='true']) .xo-row-main svg { opacity: 1; }
+/* A long title fades out; no ellipsis. The fade lives in padding the text only reaches when it is too long. */
+.x-open .xo-fade { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; padding-right: 16px; margin-right: -10px; mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+.x-open .xo-keys { flex: none; padding-right: 10px; color: var(--xo-g3); font: 450 12px/16px var(--xo-font); letter-spacing: 0.03em; opacity: 0; transition: opacity var(--xo-t-hover); }
+.x-open .xo-row:is(:hover, :focus-within) .xo-keys { opacity: 1; }
+/* One slot at the end of a row. At rest it holds the state; under the pointer the state steps aside for actions. */
+.x-open .xo-slot { position: relative; flex: none; width: 28px; height: 28px; margin-right: 3px; }
+.x-open .xo-slot .xo-slot-state, .x-open .xo-slot .xo-slot-act { position: absolute; inset: 0; display: grid; place-items: center; }
+.x-open .xo-slot-state { transition: opacity var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-ease); }
+.x-open .xo-slot-act { border-radius: 9px; color: var(--xo-g2); opacity: 0; transform: scale(0.8); transition: opacity var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-ease), background-color var(--xo-t-hover); }
+.x-open .xo-slot-act:is(:hover, [aria-expanded='true']) { background: var(--xo-g-current); color: var(--xo-g); }
+.x-open .xo-row:is(:hover, :focus-within) .xo-slot-state, .x-open .xo-row:has([aria-expanded='true']) .xo-slot-state { opacity: 0; transform: scale(0.8); }
+.x-open .xo-row:is(:hover, :focus-within) .xo-slot-act, .x-open .xo-row .xo-slot-act[aria-expanded='true'] { opacity: 1; transform: scale(1); }
+
+/* State glyphs (Quiet's). Grey and breathing is the agent's business; orange with a shape is yours. */
+.x-open .xo-glyph { display: grid; place-items: center; width: 16px; height: 16px; animation: xo-glyph-in var(--xo-t-fold) var(--xo-ease); }
+@keyframes xo-glyph-in { from { opacity: 0; transform: scale(0.5); } }
+.x-open .xo-glyph[data-kind='yours'] { color: var(--xo-accent-mark); }
+.x-open .xo-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.x-open .xo-dot[data-run] { opacity: 0.7; animation: xo-breathe 1.8s ease-in-out infinite; }
+@keyframes xo-breathe { 0%, 100% { opacity: 0.28; transform: scale(0.82); } 50% { opacity: 0.8; transform: scale(1); } }
+
+.x-open .xo-pane-foot { flex: none; display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 10px 2px; }
+.x-open .xo-back { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; margin-bottom: 12px; border-radius: var(--xo-r-row); font-weight: 620; transition: background-color var(--xo-t-hover); }
+.x-open .xo-back:hover { background: var(--xo-g-hover); }
+.x-open .xo-back svg { opacity: 0.75; transition: transform var(--xo-t-pop) var(--xo-ease); }
+.x-open .xo-back:hover svg { transform: translateX(-2px); }
+
+/* The small glass that brings the pane back. */
+.x-open .xo-lead { left: 76px; top: var(--xo-bar-top); width: var(--xo-bar-h); height: var(--xo-bar-h); display: grid; place-items: center; }
+.x-open .xo-lead > * { transition: opacity 160ms; }
+.x-open .xo-lead[data-away='true'] { pointer-events: none; }
+.x-open .xo-lead[data-away='true'] > * { opacity: 0; }
+
+/* ---- Tabs: Instrument's capsule -------------------------------------------------------------------------------- */
+
+.x-open[data-pane='closed'] { --xo-tabs-min: calc(76px + var(--xo-bar-h) + var(--xo-seam)); }
+.x-open .xo-tabs {
+  top: var(--xo-bar-top); height: var(--xo-bar-h); padding: 3px; display: flex; align-items: center; gap: 1px;
+  left: max(calc(var(--xo-left) + var(--xo-colm)), var(--xo-tabs-min, 0px));
+  max-width: calc(min(var(--xo-col), 100vw - var(--xo-left) - var(--xo-right) - 2 * var(--xo-air)) - 92px - var(--xo-seam));
+  font-size: 13px; line-height: 18px; font-weight: 500;
+  transition: left var(--xo-t-pane) var(--xo-ease-pane);
+}
+.x-open[data-scene='settings'] .xo-tabs { max-width: calc(100vw - var(--xo-left) - var(--xo-colm) - 140px); }
+.x-open .xo-tab {
+  position: relative; display: flex; align-items: center; gap: 4px; height: 30px; min-width: 0; max-width: 200px; padding: 0 11px 0 4px; border-radius: 15px;
+  color: var(--xo-g2); white-space: nowrap; transition: background-color var(--xo-t-hover), color var(--xo-t-hover);
+}
+.x-open .xo-tab:hover { background: var(--xo-g-hover); color: var(--xo-g); }
+.x-open .xo-tab[aria-current='page'] { color: var(--xo-g); background: var(--xo-g-current); }
+.x-open .xo-tab:not([aria-current='page']) { flex: 0 1 auto; }
+.x-open .xo-tab[aria-current='page'] { flex: none; }
+/* A title that does not fit thins out; no dots (Quiet's). */
+.x-open .xo-tab-title { min-width: 0; overflow: hidden; padding-right: 12px; margin-right: -12px; mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent); }
+.x-open .xo-tab-slot { position: relative; flex: none; width: 22px; height: 22px; }
+.x-open .xo-tab-slot > * { position: absolute; inset: 0; display: grid; place-items: center; transition: opacity var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-ease); }
+.x-open .xo-tab-x { border-radius: 50%; opacity: 0; transform: scale(0.8); }
+.x-open .xo-tab:hover .xo-slot-state { opacity: 0; transform: scale(0.8); }
+.x-open .xo-tab:hover .xo-tab-x { opacity: 0.8; transform: scale(1); }
+.x-open .xo-tabs > .xo-gbtn { margin-left: 2px; }
+
+/* The top row travels as a file: whichever control is in front leaves a moment before the one behind it. */
+.x-open[data-drift='right'] :is(.xo-tabs, .xo-gather-seat-tabs) { transition-delay: 90ms; }
+.x-open[data-drift='left'] .xo-wait-slot { transition-delay: 90ms; }
+
+/* ---- What waits for you: Quiet's capsule of glyphs, as the one tinted piece of glass -------------------------- */
+
+.x-open .xo-wait-slot { position: fixed; z-index: 1; top: var(--xo-bar-top); right: 12px; transition: right var(--xo-t-pane) var(--xo-ease-pane); }
+/* In a session it stands on the reading column's right edge, as the tabs stand on its left, and moves with them. */
+.x-open[data-scene='session'] .xo-wait-slot { right: max(calc(var(--xo-right) + var(--xo-colm)), calc(12px + var(--xo-bar-h) + var(--xo-seam))); }
+.x-open .xo-wait { height: var(--xo-bar-h); padding: 0 13px; display: inline-flex; align-items: center; gap: 8px; }
+.x-open .xo-wait .xo-glyph { color: var(--xo-g); animation: none; }
+.x-open .xo-waitlist { width: 348px; padding: 6px; }
+.x-open .xo-wait-item { padding: 10px; border-radius: 16px; transition: background-color var(--xo-t-hover); }
+.x-open .xo-wait-item + .xo-wait-item { margin-top: 2px; }
+.x-open .xo-wait-item:not([data-open='true']):hover { background: var(--xo-g-hover); }
+.x-open .xo-wait-head { display: flex; align-items: flex-start; gap: 10px; }
+.x-open .xo-wait-head .xo-glyph { margin-top: 2px; }
+.x-open .xo-wait-text { flex: 1; min-width: 0; }
+.x-open .xo-wait-age { flex: none; color: var(--xo-g2); font-size: 12px; }
+
+/* The approval, wherever it is answered (Quiet's): the command, why, and two answers. */
+.x-open .xo-card-title { font-weight: 620; }
+.x-open .xo-card-line { margin-top: 2px; color: var(--xo-g2); }
+.x-open .xo-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; color: var(--xo-g2); font-size: 12px; line-height: 16px; }
+.x-open .xo-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.x-open .xo-ask { margin-top: 12px; }
+.x-open .xo-ask-cmd { padding: 8px 10px; border-radius: var(--xo-r-item); background: var(--xo-g-well); font: 450 12px/18px var(--xo-mono); color: var(--xo-g); user-select: text; overflow-wrap: anywhere; }
+.x-open .xo-ask-why { margin: 8px 2px 0; color: var(--xo-g2); font-size: 13px; line-height: 18px; }
+.x-open .xo-ask-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+
+.x-open .xo-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0 13px; border-radius: var(--xo-r-ctl);
+  box-shadow: inset 0 0 0 0.5px var(--xo-line-strong); font-weight: 540; font-size: 13px; white-space: nowrap;
+  transition: background-color var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-spring);
+}
+.x-open .xo-btn:hover { background: var(--xo-hover); }
+.x-open .xo-btn:active { transform: scale(0.97); background: var(--xo-selected); }
+.x-open .xo-btn[data-on='glass'] { box-shadow: none; background: var(--xo-g-current); }
+.x-open .xo-btn[data-on='glass']:hover { background: color-mix(in srgb, var(--xo-g) 16%, transparent); }
+.x-open .xo-btn[data-kind='go'] { background: var(--xo-accent); color: var(--xo-on-accent); box-shadow: none; }
+.x-open .xo-btn[data-kind='go']:hover { background: color-mix(in srgb, var(--xo-accent) 90%, #1b1a17); }
+
+/* The row's card, beside the pane and over the transcript. */
+.x-open .xo-rowcard { left: calc(var(--xo-left) + 10px); width: 300px; transition: top 200ms var(--xo-ease); }
+.x-open .xo-rowcard-in { padding: 14px 16px; transition: opacity 150ms; }
+.x-open .xo-rowcard[data-away='true'] { pointer-events: none; }
+.x-open .xo-rowcard[data-away='true'] .xo-rowcard-in { opacity: 0; }
+
+/* ---- Platters: menus and popovers, all of the same glass ------------------------------------------------------- */
+
+.x-open .xo-menu { min-width: 190px; padding: 5px; display: flex; flex-direction: column; }
+.x-open .xo-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 11px; color: var(--xo-g); cursor: default; user-select: none; outline: none; }
+.x-open .xo-item:is(:hover, [data-highlighted]) { background: var(--xo-g-current); }
+/* The library wraps an item's children in a label part beside an indicator part it leaves for the page to draw. */
+.x-open .xo-item > [data-vitrea-part='menu-item-indicator'] { display: none; }
+.x-open .xo-item > [data-vitrea-part='menu-item-label'] { flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; }
+.x-open .xo-item svg { opacity: 0.7; }
+.x-open .xo-item [data-vitrea-part='menu-item-label'] > span:first-of-type { flex: 1; }
+.x-open .xo-item-value { color: var(--xo-g2); }
+.x-open .xo-item-radio svg { opacity: 0; }
+.x-open .xo-item-radio:is([aria-checked='true'], [data-state='checked']) svg { opacity: 1; }
+.x-open .xo-sep { height: 1px; margin: 5px 10px; border: 0; background: var(--xo-g-line); }
+.x-open .xo-usage { width: 216px; padding: 12px 14px; }
+.x-open .xo-usage-row { display: flex; align-items: center; gap: 10px; height: 26px; }
+.x-open .xo-usage-row span:first-of-type { flex: 1; }
+.x-open .xo-usage-note { margin-top: 6px; color: var(--xo-g2); font-size: 12px; line-height: 16px; }
+
+/* ---- The transcript: Quiet's, in the sans ----------------------------------------------------------------------- */
+
+.x-open .xo-user { display: flex; justify-content: flex-end; margin-top: 30px; }
+.x-open .xo-turn-user:first-child .xo-user { margin-top: 8px; }
+.x-open .xo-bubble { max-width: 84%; padding: 10px 16px; border-radius: var(--xo-r-bubble); background: var(--xo-well); font-size: 15px; line-height: 22px; }
+.x-open .xo-prose { margin-top: 16px; font-size: 15px; line-height: 24px; text-wrap: pretty; }
+.x-open .xo-prose p + p { margin-top: 12px; }
+
+/* A folded run: one grey caption, a pill under the pointer. The chevron and the time are there only then. */
+.x-open .xo-cap {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 28px; margin: 10px 0 0 -8px; padding: 0 8px; border-radius: var(--xo-r-ctl);
+  color: var(--xo-muted); font-size: 13px; line-height: 18px; user-select: none; transition: background-color var(--xo-t-hover), color var(--xo-t-hover);
+}
+.x-open button.xo-cap:is(:hover, [aria-expanded='true']) { color: var(--xo-fg); }
+.x-open button.xo-cap:hover { background: var(--xo-hover); }
+.x-open .xo-cap-chev { color: var(--xo-muted); opacity: 0; transition: opacity var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-ease); }
+.x-open .xo-cap:is(:hover, :focus-visible, [aria-expanded='true']) .xo-cap-chev { opacity: 1; }
+.x-open .xo-cap[aria-expanded='true'] .xo-cap-chev { transform: rotate(90deg); }
+.x-open .xo-cap-time { opacity: 0; transition: opacity var(--xo-t-hover); }
+.x-open .xo-cap:is(:hover, [aria-expanded='true']) .xo-cap-time { opacity: 1; }
+
+/* Height that opens and closes without knowing its size. */
+.x-open .xo-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--xo-t-fold) var(--xo-ease); }
+.x-open .xo-fold[data-open='true'] { grid-template-rows: 1fr; }
+.x-open .xo-fold-in { min-height: 0; overflow-x: visible; overflow-y: clip; opacity: 0; transform: translateY(-4px); transition: opacity var(--xo-t-pop) ease, transform var(--xo-t-fold) var(--xo-ease); }
+.x-open .xo-fold[data-open='true'] > .xo-fold-in { opacity: 1; transform: none; transition-delay: 40ms, 0ms; }
+
+/* A card is a ring on the ground. It does not lift (Quiet's). */
+.x-open .xo-block { position: relative; }
+.x-open .xo-card { position: relative; border-radius: var(--xo-r-card); box-shadow: inset 0 0 0 0.5px var(--xo-line-strong); overflow: hidden; }
+.x-open .xo-calls { margin-top: 6px; padding: 5px; }
+.x-open .xo-call { display: flex; align-items: baseline; gap: 10px; min-height: 30px; padding: 6px 10px; border-radius: 13px; font-size: 13px; line-height: 18px; }
+.x-open .xo-call:hover { background: var(--xo-hover); }
+.x-open .xo-call-verb { flex: none; width: 34px; color: var(--xo-muted); }
+.x-open .xo-call-target { flex: 1; min-width: 0; font: 400 var(--xo-mono-size)/18px var(--xo-mono); color: var(--xo-fg2); overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-open .xo-call-detail { flex: none; color: var(--xo-muted); font-size: 12px; }
+.x-open .xo-thought { margin: 4px 0 2px; color: var(--xo-fg2); font-size: 14px; line-height: 21px; }
+
+.x-open .xo-edit, .x-open .xo-live { margin-top: 14px; }
+.x-open .xo-edit-head { display: flex; align-items: center; gap: 8px; width: 100%; height: 40px; padding: 0 14px; font-size: 13px; transition: background-color var(--xo-t-hover); }
+.x-open .xo-edit-head:hover { background: var(--xo-hover); }
+.x-open .xo-edit-head svg { color: var(--xo-muted); }
+.x-open .xo-edit-file { flex: 1; min-width: 0; }
+.x-open .xo-edit-dir { color: var(--xo-muted); }
+.x-open .xo-stat { flex: none; font: 450 12px/16px var(--xo-mono); color: var(--xo-muted); }
+.x-open .xo-add { color: var(--xo-add); }
+.x-open .xo-del { color: var(--xo-del); }
+.x-open .xo-diff { padding: 6px 0 10px; border-top: 0.5px solid var(--xo-line); font: 400 var(--xo-mono-size)/20px var(--xo-mono); overflow-x: auto; scrollbar-width: none; }
+.x-open .xo-diff-line { display: flex; padding: 0 14px 0 0; white-space: pre; }
+.x-open .xo-diff-line i { flex: none; width: 30px; text-align: center; font-style: normal; color: var(--xo-faint); user-select: none; }
+.x-open .xo-diff-line[data-sign='+'] i { color: var(--xo-add); }
+.x-open .xo-diff-line[data-sign='-'] i { color: var(--xo-del); }
+.x-open .xo-diff-line[data-sign='-'] { background: var(--xo-del-wash); }
+.x-open .xo-live-head { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 14px 0 16px; font: 400 var(--xo-mono-size)/18px var(--xo-mono); }
+.x-open .xo-live-head .xo-dot { color: var(--xo-muted); }
+.x-open .xo-live-cmd { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-open .xo-live-time { flex: none; color: var(--xo-muted); font: var(--xo-w) 12.5px/18px var(--xo-font); }
+.x-open .xo-tail { padding: 2px 16px 12px 33px; font: 400 var(--xo-mono-size)/20px var(--xo-mono); color: var(--xo-muted); white-space: pre-wrap; }
+.x-open .xo-tail div:last-child { color: var(--xo-fg2); }
+
+/* ---- The owner's suggestion, as a knob: the tool-run card, the diff and the running command as glass. These
+   scroll with the page and pass under the bars, so they are drawn on the CSS path (one backdrop blur, one tint, a
+   rim, a shadow that follows the span), each over a pool of the same light the panes stand on. ------------------ */
+
+.x-open[data-tools='glass'] .xo-block::before {
+  /* The pool stays inside the block's own height, because an opened fold clips there, and is feathered by a mask
+     rather than a blur so that nothing of it can be cut. */
+  content: ''; position: absolute; inset: 0 -34px; z-index: 0; pointer-events: none; opacity: var(--xo-pool, 0.5);
+  background:
+    radial-gradient(ellipse 46% 130% at 4% 30%, rgb(255 181 92 / 0.9), transparent 100%),
+    radial-gradient(ellipse 44% 130% at 97% 80%, rgb(250 116 112 / 0.66), transparent 100%),
+    radial-gradient(ellipse 40% 110% at 58% 110%, rgb(188 118 178 / 0.4), transparent 100%);
+  mask-image: linear-gradient(90deg, transparent, #000 44px, #000 calc(100% - 44px), transparent), linear-gradient(transparent, #000 18px, #000 calc(100% - 18px), transparent);
+  mask-composite: intersect;
+}
+.x-open[data-tools='glass'] .xo-block:has(> .xo-calls)::before { top: 6px; }
+.x-open[data-tools='glass'] .xo-block:has(> :is(.xo-edit, .xo-live))::before { top: 14px; }
+.x-open[data-scheme='dark'][data-tools='glass'] .xo-block::before {
+  --xo-pool: 0.4;
+  background:
+    radial-gradient(ellipse 46% 130% at 4% 30%, rgb(253 132 30 / 0.72), transparent 100%),
+    radial-gradient(ellipse 44% 130% at 97% 80%, rgb(206 44 84 / 0.6), transparent 100%),
+    radial-gradient(ellipse 40% 110% at 58% 110%, rgb(128 52 138 / 0.5), transparent 100%);
+}
+.x-open[data-tools='glass'] .xo-card {
+  /* Text on a tinted card steps up one level, so the quiet tones still hold 4.5:1 over the light. */
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 76%, var(--xo-ground)); --xo-fg2: color-mix(in srgb, var(--xo-ink) 88%, var(--xo-ground)); --xo-add: #1b6a40; --xo-del: #ad2f22;
+  z-index: 1; background: rgb(255 255 255 / 0.52); backdrop-filter: blur(18px) saturate(1.5);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.7), inset 0 1px 0 0 rgb(255 255 255 / 0.9), 0 0 0 0.5px rgb(60 30 0 / 0.1), 0 1px 2px rgb(60 30 0 / 0.05), 0 12px 26px -12px rgb(70 35 0 / 0.22);
+}
+.x-open[data-scheme='dark'][data-tools='glass'] .xo-card {
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 84%, var(--xo-ground)); --xo-fg2: color-mix(in srgb, var(--xo-ink) 92%, var(--xo-ground)); --xo-add: #86dba9; --xo-del: #f6a096;
+  background: linear-gradient(rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.05)), rgb(18 17 16 / 0.34);
+  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.16), inset 0 1px 0 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 28px -12px rgb(0 0 0 / 0.6);
+}
+@supports not (backdrop-filter: blur(1px)) { .x-open[data-tools='glass'] .xo-card { background: var(--xo-raised); } }
+
+/* ---- The composer: one sheet of glass the transcript slides under (Instrument's host), carrying Quiet's
+   controls. ------------------------------------------------------------------------------------------------------ */
+
+.x-open .xo-composer {
+  left: var(--xo-left); right: var(--xo-right); bottom: 16px; margin-inline: auto;
+  width: min(var(--xo-col), calc(100vw - var(--xo-left) - var(--xo-right) - 2 * var(--xo-air)));
+  transition: left var(--xo-t-pane) var(--xo-ease-pane), right var(--xo-t-pane) var(--xo-ease-pane);
+}
+.x-open .xo-composer-home { bottom: auto; top: calc(50% - 80px); width: min(680px, calc(100vw - var(--xo-left) - 2 * var(--xo-air))); }
+.x-open .xo-queued { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: calc(100% - 20px); height: 30px; margin: 10px 10px 0; padding: 0 5px 0 10px; border-radius: var(--xo-r-ctl); background: var(--xo-g-well); color: color-mix(in srgb, var(--xo-g) 92%, transparent); font-size: 13px; }
+.x-open .xo-queued .xo-fade { flex: 0 1 auto; }
+.x-open .xo-queued-x { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; opacity: 0; transition: opacity var(--xo-t-hover), background-color var(--xo-t-hover); }
+.x-open .xo-queued:hover .xo-queued-x, .x-open .xo-queued-x:focus-visible { opacity: 1; }
+.x-open .xo-queued-x:hover { background: var(--xo-g-current); }
+.x-open .xo-field {
+  display: block; width: 100%; min-height: 48px; max-height: 200px; padding: 15px 20px 4px; border: 0; background: none; resize: none; field-sizing: content;
+  color: var(--xo-g); font: var(--xo-w) 15px/22px var(--xo-font); cursor: text; user-select: text;
+}
+.x-open .xo-field::placeholder { color: var(--xo-g2); }
+.x-open .xo-field:focus-visible { outline: none; }
+.x-open .xo-tools { display: flex; align-items: center; gap: 4px; padding: 4px 9px 9px 10px; }
+.x-open .xo-grow { flex: 1; }
+.x-open .xo-chip { display: inline-flex; align-items: center; gap: 4px; height: 30px; padding: 0 8px 0 11px; border-radius: var(--xo-r-ctl); color: var(--xo-g2); font-size: 13px; transition: background-color var(--xo-t-hover), color var(--xo-t-hover), transform var(--xo-t-press); }
+.x-open .xo-chip:is(:hover, [aria-expanded='true']) { background: var(--xo-g-hover); color: var(--xo-g); }
+.x-open .xo-chip:active { transform: scale(0.97); }
+.x-open .xo-chip svg { opacity: 0.74; }
+.x-open .xo-chip[data-on='ground'] { color: var(--xo-fg2); }
+.x-open .xo-chip[data-on='ground'] svg { opacity: 0.9; }
+.x-open .xo-chip[data-on='ground']:hover { background: var(--xo-hover); color: var(--xo-fg); }
+.x-open .xo-send {
+  display: grid; place-items: center; width: 32px; height: 32px; margin-left: 4px; border-radius: 50%; background: var(--xo-solid); color: var(--xo-on-solid);
+  transition: background-color var(--xo-t-pop), color var(--xo-t-pop), transform var(--xo-t-pop) var(--xo-spring);
+}
+.x-open .xo-send:active { transform: scale(0.92); }
+.x-open .xo-send[data-kind='go'] { background: var(--xo-accent); color: var(--xo-on-accent); }
+.x-open .xo-send[data-kind='idle'] { background: var(--xo-g-current); color: var(--xo-g3); }
+.x-open .xo-send svg { animation: xo-swap var(--xo-t-pop) var(--xo-ease); }
+@keyframes xo-swap { from { opacity: 0; transform: scale(0.5) rotate(-30deg); } }
+
+/* ---- New chat: Quiet's layout, the composer as glass in the one pool of light the scene has --------------------- */
+
+.x-open .xo-home { position: absolute; top: 0; bottom: 0; left: var(--xo-left); right: 0; pointer-events: none; transition: left var(--xo-t-pane) var(--xo-ease-pane); animation: xo-scene-in 340ms var(--xo-ease); }
+@keyframes xo-scene-in { from { opacity: 0; transform: translateY(8px); } }
+.x-open .xo-home > * { position: absolute; left: 0; right: 0; margin-inline: auto; width: min(680px, calc(100% - 2 * var(--xo-air))); pointer-events: auto; }
+.x-open .xo-home-ask { bottom: calc(50% + 80px + 18px); padding-left: 20px; font: 560 28px/34px var(--xo-font); letter-spacing: -0.015em; user-select: text; }
+.x-open .xo-where { top: calc(50% - 80px + var(--xo-composer-h, 104px) + 10px); display: flex; align-items: center; gap: 2px; padding-left: 9px; }
+
+/* ---- The right pane: one piece of glass that grows out of its button. Content is Desktop's, drawn plainly. ------ */
+
+.x-open .xo-side-slot { position: fixed; z-index: 1; top: var(--xo-bar-top); right: 12px; width: var(--xo-bar-h); height: var(--xo-bar-h); }
+.x-open .xo-side-open { width: var(--xo-bar-h); height: var(--xo-bar-h); display: grid; place-items: center; border-radius: 50%; color: var(--xo-g2); }
+.x-open .xo-side-open:hover { color: var(--xo-g); }
+.x-open .xo-side-in { width: var(--xo-side-w); max-height: calc(100vh - 16px); display: flex; flex-direction: column; font-size: 13px; line-height: 18px; animation: xo-side-arrive 420ms var(--xo-ease) both; }
+@keyframes xo-side-arrive { from { opacity: 0; } 35% { opacity: 0; } }
+.x-open .xo-side-head { flex: none; height: 44px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; padding: 0 7px 0 16px; color: var(--xo-g2); }
+.x-open .xo-side-branch { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font: 450 12.5px/18px var(--xo-mono); color: var(--xo-g); }
+.x-open .xo-side .xo-stat { color: var(--xo-g2); }
+.x-open .xo-side-close { margin-left: 2px; }
+.x-open .xo-side-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 0 8px 10px; }
+.x-open .xo-side-group { margin-bottom: 14px; }
+.x-open .xo-side-group:last-child { margin-bottom: 4px; }
+.x-open .xo-side-label { display: flex; align-items: center; height: 26px; padding: 0 8px; font: 580 12px/16px var(--xo-font); color: var(--xo-g3); }
+.x-open .xo-side-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: var(--xo-r-row); }
+.x-open button.xo-side-row { transition: background-color var(--xo-t-hover); }
+.x-open button.xo-side-row:hover { background: var(--xo-g-hover); }
+.x-open .xo-side-row[data-two] { align-items: flex-start; padding: 5px 8px 6px; }
+.x-open .xo-side-mark { flex: none; width: 16px; height: 18px; display: grid; place-items: center; color: var(--xo-g2); }
+.x-open .xo-side-text { min-width: 0; display: flex; flex-direction: column; }
+.x-open .xo-side-name { flex: none; white-space: nowrap; }
+.x-open .xo-side-dir, .x-open .xo-side-line { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 12px; color: var(--xo-g3); }
+.x-open .xo-side-dir { flex: 1; }
+.x-open .xo-side-code { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.x-open .xo-side-aside { flex: none; font-size: 12px; color: var(--xo-g2); }
+.x-open .xo-todo { display: flex; align-items: flex-start; gap: 8px; padding: 5px 8px; }
+.x-open .xo-todo[data-done] { color: var(--xo-g3); }
+.x-open .xo-todo[data-now] { font-weight: 560; }
+.x-open .xo-todo-mark { flex: none; width: 16px; height: 16px; margin-top: 1px; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xo-g) 34%, transparent); }
+.x-open .xo-todo[data-done] .xo-todo-mark { box-shadow: none; background: color-mix(in srgb, var(--xo-g) 18%, transparent); color: var(--xo-g); }
+.x-open .xo-todo[data-now] .xo-todo-mark { box-shadow: inset 0 0 0 1.5px var(--xo-g); }
+.x-open .xo-todo[data-now] .xo-todo-mark::after { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--xo-g); }
+
+/* ---- Settings: Quiet's page, Instrument's controls ------------------------------------------------------------- */
+
+.x-open .xo-page { display: grid; grid-template-columns: minmax(32px, 1fr) minmax(0, 620px) minmax(264px, 1fr); padding: calc(var(--vitrea-bar-inset-top, 48px) + 16px) 0 40vh; animation: xo-scene-in 340ms var(--xo-ease); }
+.x-open .xo-page-col { grid-column: 2; }
+.x-open .xo-section { scroll-margin-top: 62px; padding-top: 20px; }
+.x-open .xo-section + .xo-section { margin-top: 28px; }
+.x-open .xo-section-title { margin: 0 0 6px; font: 620 20px/28px var(--xo-font); letter-spacing: -0.012em; }
+.x-open .xo-set { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px 28px; min-height: 54px; padding: 11px 0; border-top: 0.5px solid var(--xo-line); }
+.x-open .xo-section .xo-set:first-of-type { border-top-color: transparent; }
+.x-open .xo-set[data-stack='true'] { flex-direction: column; align-items: stretch; padding: 14px 0 15px; }
+.x-open .xo-set-label { flex: none; }
+/* The margin note: the sentence appears beside the row you are on, in space nothing else uses. */
+.x-open .xo-note {
+  position: absolute; left: calc(100% + 32px); top: 16px; width: 216px; color: var(--xo-muted); font-size: 13px; line-height: 19px; text-wrap: pretty; pointer-events: none;
+  opacity: 0; transform: translateX(-6px); transition: opacity var(--xo-t-hover) ease, transform var(--xo-t-hover) ease;
+}
+.x-open .xo-set:is(:hover, :focus-within) > .xo-note { opacity: 1; transform: none; transition: opacity var(--xo-t-pop) ease 60ms, transform var(--xo-t-fold) var(--xo-ease) 60ms; }
+
+.x-open .xo-switch { position: relative; flex: none; width: 38px; height: 22px; border-radius: 11px; background: rgb(var(--xo-ink-rgb) / 0.17); transition: background-color 220ms var(--xo-ease-pane); }
+.x-open .xo-switch[aria-checked='true'] { background: var(--xo-solid); }
+.x-open .xo-switch i { position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 9px; background: #fff; box-shadow: 0 1px 2px rgb(0 0 0 / 0.22), 0 0 0 0.5px rgb(0 0 0 / 0.06); transition: transform 420ms var(--xo-spring), width 120ms var(--xo-ease-pane), left 120ms var(--xo-ease-pane), background-color 220ms; }
+.x-open .xo-switch:active i { width: 22px; }
+.x-open .xo-switch[aria-checked='true'] i { transform: translateX(16px); background: var(--xo-on-solid); }
+.x-open .xo-switch[aria-checked='true']:active i { left: -2px; }
+
+.x-open .xo-seg { position: relative; flex: none; display: inline-flex; padding: 3px; border-radius: 17px; background: rgb(var(--xo-ink-rgb) / 0.06); }
+.x-open .xo-seg button { position: relative; z-index: 1; height: 28px; padding: 0 13px; border-radius: 14px; font-size: 13px; color: var(--xo-fg2); transition: color var(--xo-t-hover); }
+.x-open .xo-seg button[aria-checked='true'] { color: var(--xo-fg); font-weight: 540; }
+.x-open .xo-seg-thumb { position: absolute; top: 3px; left: 0; height: 28px; border-radius: 14px; background: var(--xo-thumb, #fff); box-shadow: 0 1px 2.5px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.05); transition: transform 440ms var(--xo-spring), width 300ms var(--xo-ease-pane); }
+.x-open[data-scheme='dark'] { --xo-thumb: rgb(255 255 255 / 0.17); }
+
+.x-open .xo-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.x-open .xo-pill {
+  display: inline-flex; align-items: center; height: 30px; padding: 0 12px; border-radius: 15px; font-size: 13px; color: var(--xo-muted); box-shadow: inset 0 0 0 1px var(--xo-line);
+  transition: background-color 220ms var(--xo-ease-pane), color 220ms var(--xo-ease-pane), box-shadow 220ms var(--xo-ease-pane), transform 220ms var(--xo-spring);
+}
+.x-open .xo-pill:active { transform: scale(0.96); }
+.x-open .xo-pill svg { width: 0; height: 13px; stroke-width: 2.5; opacity: 0; transition: width 220ms var(--xo-ease-pane), opacity 220ms var(--xo-ease-pane), margin 220ms var(--xo-ease-pane); }
+.x-open .xo-pill[aria-pressed='true'] { color: var(--xo-fg); background: rgb(var(--xo-ink-rgb) / 0.075); box-shadow: inset 0 0 0 1px transparent; }
+.x-open .xo-pill[aria-pressed='true'] svg { width: 13px; opacity: 1; margin-right: 6px; }
+
+.x-open .xo-input { flex: 0 1 284px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--xo-r-ctl); background: rgb(var(--xo-ink-rgb) / 0.05); color: var(--xo-fg); font: var(--xo-w) 13px/18px var(--xo-font); cursor: text; user-select: text; transition: box-shadow var(--xo-t-hover), background-color var(--xo-t-hover); }
+.x-open .xo-input[data-mono='true'] { font: 400 var(--xo-mono-size)/18px var(--xo-mono); }
+.x-open .xo-input::placeholder { color: color-mix(in srgb, var(--xo-ink) 68%, var(--xo-ground)); }
+.x-open .xo-input:focus-visible { outline: 0; background: transparent; box-shadow: inset 0 0 0 1.5px var(--xo-fg); }
+.x-open .xo-path { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.x-open .xo-path code { min-width: 0; color: var(--xo-fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.x-open .xo-badge { flex: none; padding: 1px 8px; border-radius: 10px; background: rgb(var(--xo-ink-rgb) / 0.06); font: 450 11.5px/18px var(--xo-mono); color: var(--xo-fg2); }
+.x-open .xo-select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; font-size: 13px; font-weight: 540; background: rgb(var(--xo-ink-rgb) / 0.06); transition: background-color var(--xo-t-hover); }
+.x-open .xo-select:is(:hover, [data-state='open'], [aria-expanded='true']) { background: rgb(var(--xo-ink-rgb) / 0.1); }
+.x-open .xo-select svg { width: 13px; height: 13px; stroke-width: 2; color: var(--xo-muted); }
+
+/* ---- The system's own preferences ------------------------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .x-open *, .x-open *::before, .x-open *::after { transition-duration: 1ms !important; transition-delay: 0ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
+}
+@media (forced-colors: active) {
+  .x-open .xo-gather, .x-open .xo-block::before { display: none; }
+  .x-open .xo-lights i, .x-open .xo-glyph, .x-open .xo-dot { forced-color-adjust: none; }
+  .x-open :is(.xo-row[data-selected='true'], .xo-tab[aria-current='page'], .xo-seg-thumb) { outline: 2px solid Highlight; outline-offset: -2px; }
+  .x-open :is(.xo-switch, .xo-pill, .xo-input, .xo-select, .xo-btn, .xo-seg, .xo-card, .xo-bubble) { border: 1px solid CanvasText; }
+  .x-open :is(.xo-switch[aria-checked='true'], .xo-send, .xo-btn[data-kind='go']) { background: Highlight; color: HighlightText; }
+}
