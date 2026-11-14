@@ -15,7 +15,7 @@ import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { addToScopes, addToWords, checkCustom, customFieldsOf, customInputOf, customShownInputOf, type CustomCheck, type CustomFields, type CustomType, type RowsField } from './custom-form';
+import { addToScopes, addToWords, checkCustom, customFieldsOf, customInputOf, customDetailsInputOf, type CustomCheck, type CustomFields, type CustomType, type RowsField } from './custom-form';
 import { writesFor } from './present';
 
 type Row = McpPair & { id: number }; // `id`: the row's React key; only the name and the value are sent
@@ -46,7 +46,7 @@ export function CustomConnectorSheet({ request, env, onConfirm, onClose }: { req
   const engine = env.engine.state === 'ready' ? env.engine.env : null;
   const input = customInputOf(fields, check, env.configured);
   const ask = (asked: McpEntryAdd): PluginsRequest => ({ ...request, input: asked, folder: env.cwd }) as PluginsRequest;
-  const shown = customShownInputOf(fields, check);
+  const detailed = customDetailsInputOf(fields, check);
   const remote = fields.type !== 'stdio';
   const rowsField: RowsField = remote ? 'headers' : 'env';
   const place = env.place ?? env.cwd ?? '';
@@ -110,7 +110,7 @@ export function CustomConnectorSheet({ request, env, onConfirm, onClose }: { req
           <p className={MUTED}>{C.takesEffect}</p>
           {engine && (
             <SheetDetails>
-              {shown && <ShownCommand binary={engine.binary} request={{ ...request, input: shown } as PluginsRequest} />}
+              {detailed && <ShownCommand binary={engine.binary} request={{ ...request, input: detailed } as PluginsRequest} />}
               <div className="flex flex-col gap-0.5 text-ui-sm text-fg-muted">
                 <p className="m-0">{C.writes}</p>
                 <p data-connector-writes className="m-0 font-mono break-all text-fg">

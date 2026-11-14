@@ -164,8 +164,9 @@ export function customInputOf(fields: CustomFields, check: CustomCheck, configur
   return { name: fields.name, scope: fields.scope, entry: check.entry };
 }
 
-/** The input the command shows, whatever is configured here: the same as Add's but for the name check against it. */
-export const customShownInputOf = (fields: CustomFields, check: CustomCheck): McpEntryAdd | null => (check.entry === null || check.name !== null ? null : { name: fields.name, scope: fields.scope, entry: check.entry });
+/** The input Details builds the shown line from (`argvOf`, which puts `•••` in every value slot), whatever is configured
+ * here: Add's input but for the name check against what is configured. */
+export const customDetailsInputOf = (fields: CustomFields, check: CustomCheck): McpEntryAdd | null => (check.entry === null || check.name !== null ? null : { name: fields.name, scope: fields.scope, entry: check.entry });
 
 // A word as a shell reads it back with `splitArgs`: as it is when nothing in it is special, else single-quoted.
 const argWord = (arg: string): string => (/^[\w@%+=:,./~-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);

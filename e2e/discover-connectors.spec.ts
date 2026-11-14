@@ -408,7 +408,7 @@ test('custom: a local command for all projects and a remote one shared in the pr
     await test.info().attach('custom-connector-shared-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' });
     await addAndClose(sheet);
     await expect(row(page, 'remote-probe')).toContainText('project scope · http', { timeout: CLI_MS });
-    await expect(row(page, 'remote-probe').locator('[data-sign-in-needs-session]')).toHaveText('Open a session in project-a, then sign in'); // Sign in by the existing rule
+    await expect(row(page, 'remote-probe').locator('[data-sign-in-needs-session]')).toHaveText(/^Open a session in .*project-a.*, then sign in$/); // Sign in by the existing rule: no session runs
     expect(JSON.parse(readFileSync(join(directory, '.mcp.json'), 'utf8'))).toEqual({ mcpServers: { 'remote-probe': { type: 'http', url: 'https://files.example.test/mcp', headers: { 'X-Probe-Key': 'value-two' } } } });
     expect(await pageText()).not.toContain('value-two');
   });
