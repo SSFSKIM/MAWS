@@ -3,7 +3,7 @@ import type { Experiment } from '../../lab/types';
 
 export const experiment: Experiment = {
   id: 'layers',
-  order: 3,
+  order: 0,
   name: 'Layers',
   thesis:
     'Glass taken all the way into the transcript: the colour field runs under the whole window, prose is read directly on it, and every block (a tool run, a diff, a running command, your own message) is a piece of glass standing over it.',

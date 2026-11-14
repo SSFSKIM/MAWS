@@ -4,7 +4,7 @@ import { GROUNDS, PARTS } from './parts';
 
 export const experiment: Experiment = {
   id: 'choices',
-  order: 3.5,
+  order: 0.5,
   name: 'Choices',
   thesis:
     'Not a design: a board. Each smaller part of the Layers session view that nobody has judged yet stands here in two to four variants that differ in kind, at true size on the real glass over the Paper field, so each can be answered with a letter.',
