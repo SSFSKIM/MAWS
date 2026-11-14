@@ -27,9 +27,3 @@ export function scenarioPath(env: Env, where: { packaged: boolean; appRoot: stri
 export function scenarioClock(env: Env): ScenarioClock {
   return env.MAWS_SCENARIO_CLOCK === 'manual' && env.MAWS_E2E === '1' ? { kind: 'manual' } : { kind: 'wall' };
 }
-
-// UX wave U7b: one session a scene names gets an invented long history from the stub (stub-history.ts); a test
-// instrument like the manual clock, so honoured only with MAWS_E2E=1.
-export function stubLongHistory(env: Env): string | null {
-  return env.MAWS_E2E === '1' && env.MAWS_STUB_LONG_HISTORY ? env.MAWS_STUB_LONG_HISTORY : null;
-}

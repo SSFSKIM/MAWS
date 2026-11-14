@@ -7,7 +7,7 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import { waits } from '@shared/attention/kinds';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, SessionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { BudgetState } from '@shared/ipc/schema/engine'; // C12
 import type { EventName, EventPayload } from '@shared/ipc/schema';
@@ -17,7 +17,6 @@ import type { ReadModelWriter, SessionSource } from './read-model';
 import type { ScenarioClock } from '@shared/sessions/select-source';
 import { StubStore } from './stub-store';
 import { readRecentTurns } from './recent-turns'; // P2-D
-import { inventedHistory } from './stub-history'; // UX wave U7b
 import type { Draft, SessionPatch } from '@shared/ipc/schema/session';
 
 export interface StubSourceDeps {
@@ -35,13 +34,9 @@ declare global {
   var __maws_scenario: ScenarioControl | undefined;
 }
 
-export interface StubSourceOptions {
-  longHistory?: AppSessionId; // UX wave U7b: the one session that answers session.events with an invented long history
-}
-
 export type StubSource = SessionSource & ScenarioControl;
 
-export function stubSource(scenario: string | Scenario, clock: ScenarioClock, deps: StubSourceDeps, options: StubSourceOptions = {}): StubSource {
+export function stubSource(scenario: string | Scenario, clock: ScenarioClock, deps: StubSourceDeps): StubSource {
   const wallNow = deps.now ?? Date.now;
   const iso = () => new Date(wallNow()).toISOString();
 
@@ -57,7 +52,6 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
   const statuses = new Map<AppSessionId, EngineSessionStatus>();
   const costAtSeen = new Map<AppSessionId, number>();
   let budget: BudgetState | null = null; // C12: the last budget the timeline played
-  let longHistory: SessionEvent[] | undefined; // UX wave U7b: built at its first read
 
   // While the scenario loads nothing is emitted but attention: the renderer reads the snapshots, as it would from C3 and
   // C4, and the read model learns attention only from `attention.changed` as emitted (the tap in sessions/index.ts),
@@ -193,16 +187,9 @@ export function stubSource(scenario: string | Scenario, clock: ScenarioClock, de
         deps.intercept('session.answer', ({ appSessionId, requestId }) => answer(appSessionId as AppSessionId, requestId)),
         // C6: a stub session has no journal and no transcript, so its history is empty (the transcript hydrates to
         // nothing rather than to the load-failure banner); an id the stub does not hold is refused as C4 refuses it.
-        // UX wave U7b: the one session a scene names for a long history answers its invented transcript instead, whole
-        // and complete, with no child agent's traffic
-        deps.intercept('session.events', ({ appSessionId, afterSeq, agentId }) => {
-          const record = s.get(appSessionId as AppSessionId);
-          if (!record) throw new Error(`unknown app session: ${appSessionId}`);
-          if (appSessionId !== options.longHistory) return { events: [], lastSeq: 0, complete: true };
-          longHistory ??= inventedHistory(record.engineSessionId ?? (appSessionId as SessionId));
-          const lastSeq = longHistory.length;
-          const events = agentId ? [] : longHistory.filter((e) => (e.seq ?? 0) > (afterSeq ?? 0));
-          return { events, lastSeq, complete: true };
+        deps.intercept('session.events', ({ appSessionId }) => {
+          if (!s.get(appSessionId as AppSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
+          return { events: [], lastSeq: 0, complete: true };
         }),
         // end C6
         // P2-D (2026-10-09): the resume chooser's preview reads the scenario's transcript for the session, through main's

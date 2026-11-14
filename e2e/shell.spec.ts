@@ -748,20 +748,20 @@ test('Settings is a dialog', async () => {
 });
 
 // UX wave U7b, O-40 (the same document, M8; A7 and A9; M5, decisions 2 and 5): a page takes everything right of the
-// sidebar. With a transcript scrolled up, a draft typed and a side surface open, Customize opens as a page: the side
-// column is not drawn, the title bar spans to the window's right edge with the ring at its end, Back and "Customize"
-// stand where the strip was, and the sidebar's row is current. ⌘, opens the dialog over the page and Esc shows the page
-// again. Back returns to the same tab at the same scroll offset with its draft, and to the side surface as it was, with
-// nothing of the side column written by the visit. A session's row leaves the page. A request raised while a page is
-// open shows under Needs you and on the Overview button, and the page stays. A relaunch with the page open shows the
-// page; with the dialog open over it, the page without the dialog.
+// sidebar. With a draft typed and a side surface open, Customize opens as a page: the side column is not drawn, the
+// title bar spans to the window's right edge with the ring at its end, Back and "Customize" stand where the strip was,
+// and the sidebar's row is current. ⌘, opens the dialog over the page and Esc shows the page again. Back returns to the
+// same tab with its draft, and to the side surface as it was, with nothing of the side column written by the visit.
+// A session's row leaves the page. A request raised while a page is open shows under Needs you and on the Overview
+// button, and the page stays. A relaunch with the page open shows the page; with the dialog open over it, the page
+// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub draws
+// no transcript today (its history never reaches the app, and the daemon relay is being repaired on master); it is
+// proved on a replayed session by library.spec.ts's "a replayed session's transcript keeps its scroll offset across a
+// page and Back".
 test('a page beside the sidebar', async () => {
   test.setTimeout(150_000);
   const DRAFT = 'A draft that waits behind the page';
-  // the stub gives Charter + research a long invented history, so its transcript has something to scroll (a stub
-  // session has none; second Mac run)
-  const env = { ...SHELL_ENV, MAWS_STUB_LONG_HISTORY: CHARTER };
-  const first = await launchMaws({ env });
+  const first = await launchMaws({ env: SHELL_ENV });
   try {
     const { app, page, userData } = first;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
@@ -776,32 +776,17 @@ test('a page beside the sidebar', async () => {
     const files = panel.locator('[data-surface="files"]');
     const bar = page.getByRole('banner');
     const region = pageRegion(page);
-    // the premise: a session whose composer is drawn and whose transcript scrolls (FIX's docked permission hides FIX's
-    // draft; first Mac run)
+    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
     await (await sidebarRow(page, CHARTER_TITLE)).click();
     await expect.poll(labels).toEqual([CHARTER_TITLE]);
 
-    // the tab as the person leaves it: a side surface open, a draft typed, the transcript scrolled up from its end
+    // the tab as the person leaves it: a side surface open, a draft typed
     await openSurface(page, 'Files');
     await composer.click();
     await page.keyboard.type(DRAFT);
     await expect(composer).toHaveText(DRAFT);
-    // the transcript drawn and taller than its pane before the wheel
-    await expect(scroller.locator('[data-row-id]').first(), 'the transcript’s rows are drawn').toBeVisible();
-    await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), { message: 'the transcript overflows its pane' }).toBeGreaterThan(0);
-    const scrollBox = (await scroller.boundingBox())!;
-    await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2);
-    await page.mouse.wheel(0, -600);
-    await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop), { message: 'the transcript scrolled up from its end' }).toBeGreaterThan(0);
-    let offset = -1;
-    await expect.poll(async () => {
-      const now = await scroller.evaluate((el) => el.scrollTop);
-      const settled = now === offset;
-      offset = now;
-      return settled;
-    }, { message: 'the scroll has settled', intervals: [250] }).toBe(true);
     // layout.json settled on what is drawn: the side surface stored, and two reads in a row the same (the store writes a
-    // key 250 ms after its last change; typing and scrolling change neither key)
+    // key 250 ms after its last change; typing changes neither key)
     const sides = () => JSON.stringify({ regions: storedKey(userData, 'regions'), surfaces: storedKey(userData, 'panelTools.surfaces') });
     let read = '';
     await expect.poll(() => {
@@ -839,13 +824,12 @@ test('a page beside the sidebar', async () => {
     await expect(dialog).toHaveCount(0);
     await expect(region).toHaveAttribute('data-destination', 'customize');
 
-    // Back: the same tab at the same scroll offset with its draft, the side surface as it was, nothing written
+    // Back: the same tab with its draft, the side surface as it was, nothing written
     await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     await backToTabs(page);
     await expect(behind).toHaveJSProperty('inert', false);
     await expect(files).toBeVisible();
     await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(CHARTER_TITLE);
-    expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
     await expect(composer).toHaveText(DRAFT);
     // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
     // `panelTools.surfaces` before `destination` (persistedKeys' order), so once the key is gone a write of either made
@@ -880,7 +864,7 @@ test('a page beside the sidebar', async () => {
     await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     expect(first.consoleErrors(), 'the console stays free of errors').toEqual([]);
     await first.app.close();
-    const second = await launchMaws({ env, userData });
+    const second = await launchMaws({ env: SHELL_ENV, userData });
     try {
       await expect(pageRegion(second.page), 'the page comes back').toHaveAttribute('data-destination', 'customize', { timeout: 20_000 });
       await expect(pageTitle(second.page).getByRole('heading', { level: 1, name: 'Customize', exact: true })).toBeVisible();
@@ -890,7 +874,7 @@ test('a page beside the sidebar', async () => {
     } finally {
       await second.cleanup();
     }
-    const third = await launchMaws({ env, userData });
+    const third = await launchMaws({ env: SHELL_ENV, userData });
     try {
       await expect(pageRegion(third.page), 'the page, without the dialog').toHaveAttribute('data-destination', 'customize', { timeout: 20_000 });
       await expect(settingsDialog(third.page)).toHaveCount(0);
