@@ -24,6 +24,7 @@
     "at": "2026-09-29T02:22:35.434Z",
     "autoDenied": 0,
     "caption": "Ran a command",
+    "cause": "message",
     "counts": {
       "added": 0,
       "removed": 0
