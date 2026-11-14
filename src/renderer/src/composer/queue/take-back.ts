@@ -49,8 +49,6 @@ export const TAKE_BACK_WORDS = {
 
 /** How long a withdrawal's answer is waited for before the record is read instead (Acceptance 6 (a)). */
 export const WITHDRAW_WAIT_MS = 5_000;
-/** How many times the take-back withdraws under a new name the record gave before it says the record cannot tell. */
-const ROUNDS = 4;
 /**
  * A settling save that fails is asked again, first this long after, the wait doubling to a bound; after this many tries
  * the box's writer names its form too. Neither ends the hold: an acknowledged save or a read of what is kept does.
@@ -235,19 +233,30 @@ export async function carryForward(appSessionId: AppSessionId, stage: Draft, dep
   await inHandFor(appSessionId, () => forward(appSessionId, stage, deps));
 }
 
-// Steps 3 and 4, under the message's current name.
+// Steps 3 and 4, under the message's current name. Each read of the record is replayed from the stage's own name (the
+// panel's finding 4): a promotion and its revert read from the promoted uuid would say nothing. A message the record
+// keeps listed keeps its stage and is withdrawn again, at once under a new name and after the settle's backoff under the
+// same one; only a record that cannot say loads it (decision 13's table; the panel's finding 3, ruled (A)).
 async function forward(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps): Promise<void> {
   const mark = stageMark(stage)!;
-  let name: Name = { kind: mark.kind, ref: mark.ref };
-  for (let round = 0; round < ROUNDS; round++) {
+  const own: Name = { kind: mark.kind, ref: mark.ref };
+  const started = epoch;
+  let name = own;
+  for (let again = 0; ; ) {
     if (await withdraw(deps, name)) return load(appSessionId, stage, deps, null); // this caller's own withdrawal
-    const said = await record(deps.client, appSessionId, mark.since, name);
+    if (epoch !== started) return;
+    const said = await record(deps.client, appSessionId, mark.since, own);
+    if (epoch !== started) return;
     if (said.kind === 'gone') return load(appSessionId, stage, deps, null);
     if (said.kind === 'read') return clear(appSessionId, stage, deps);
     if (said.kind === 'unknown') return load(appSessionId, stage, deps, TAKE_BACK_WORDS.mayHaveRead);
-    name = said.name; // still listed (under this name, or a new one): ask again
+    if (said.name.kind === name.kind && said.name.ref === name.ref) {
+      await new Promise((resolve) => setTimeout(resolve, Math.min(SETTLE_RETRY_MS * 2 ** again, SETTLE_RETRY_MAX_MS)));
+      again += 1;
+      if (epoch !== started) return;
+    }
+    name = said.name;
   }
-  return load(appSessionId, stage, deps, TAKE_BACK_WORDS.mayHaveRead);
 }
 
 const bounded = <T>(promise: Promise<T> | undefined): Promise<T | undefined> =>
