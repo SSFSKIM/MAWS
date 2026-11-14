@@ -108,7 +108,8 @@ describe('decision 7 (Decision Log 22): a record an older build filed last, at t
       // the older build: its text pass at the moved stamp, then one more row filed by its own rule (its columns only, a
       // summary with no newestCwd), and its text pass at that row's stamp or not
       const raw = new DatabaseSync(path);
-      const { newestCwd: _dropped, ...olderSummary } = onDisk;
+      const olderSummary: Partial<TranscriptSummary> = { ...onDisk };
+      delete olderSummary.newestCwd;
       raw.prepare('UPDATE sessions SET transcript_size = ?, transcript_mtime_ms = ?, summary = ? WHERE app_id = ?').run(peerStamp.size, peerStamp.mtimeMs, JSON.stringify(olderSummary), appId);
       raw.close();
       index = new Index(path);
