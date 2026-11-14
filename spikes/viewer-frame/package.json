@@ -1,0 +1,21 @@
+{
+  "name": "maws-spike-viewer-frame",
+  "private": true,
+  "type": "module",
+  "description": "Spike: can untrusted Word, PowerPoint and Excel files be drawn by third-party libraries inside a contained host (architecture A, a sandboxed maws-viewer: frame; architecture B, a WebContentsView of its own). Findings only, never product code.",
+  "main": "main.mjs",
+  "scripts": {
+    "build": "node build.mjs",
+    "spike": "node run.mjs"
+  },
+  "dependencies": {
+    "@aiden0z/pptx-renderer": "1.4.0",
+    "@extend-ai/react-xlsx": "0.23.0",
+    "docx-preview": "0.4.1"
+  },
+  "devDependencies": {
+    "electron": "44.4.5",
+    "esbuild": "0.25.12",
+    "ws": "8.22.0"
+  }
+}
