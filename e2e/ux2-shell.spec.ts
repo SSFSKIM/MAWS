@@ -409,9 +409,14 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
       await expect(page.getByRole('menuitem', { name: 'Move above', exact: true })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Move below', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
+      // The menu closed hands the keyboard back to the tab it was opened on, in a task after the close; so the scene waits
+      // for that before it takes the keyboard to the bar, or the hand-back lands between the bar's focus and the keys
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(sideTab(sideGroup(page, 'lower'), 'Review'), 'the closed menu hands the keyboard back to its tab').toBeFocused();
       // the bar from the keyboard: the lower group grows by three steps
       const evenShare = Number(await bar.getAttribute('aria-valuenow'));
       await bar.focus();
+      await expect(bar).toBeFocused();
       for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp');
       await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { message: 'the lower group’s share grew' }).toBeGreaterThan(evenShare);
       for (const { width, height } of SIZES) {
