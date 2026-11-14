@@ -11,6 +11,7 @@
 //   scene keeps every console message of the app window, so `expectNothingLogged` can assert that none of the fixture's
 //   sentinels (cookie values, history paths and titles, the passwords) reached any of them (Design §16);
 // - `openSettingsBrowser`, `importThrough` and `report` drive Settings › Browser and the import sheet as the owner does;
+//   Settings is a modal dialog over the window (UX wave U7b, O-40): `closeSheet` leaves it open, `closeSettings` closes it;
 // - `shootImport` writes `e4b-<state>-<theme>.png` under docs/doperpowers/evidence/p1-e4b/ when MAWS_E4B_SHOTS=1.
 import { generateKeyPairSync } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -25,6 +26,7 @@ import { invoke, value } from './c7-replay';
 import { clearToasts, scratchProject, type Scratch } from './maws-tools';
 import { onLaunched, REPO_ROOT } from './launch';
 import { menu } from './menu';
+import { settingsDialog } from './shell';
 
 export interface ImportScene extends BrowserScene {
   chrome: ChromeUserData;
@@ -114,16 +116,15 @@ export async function expectNothingLogged(s: ImportScene): Promise<void> {
 
 // ---- Settings › Browser and the sheet -------------------------------------------------------------------------------
 
-const settingsPanel = (s: ImportScene) => s.page.locator('[data-region="main"]').getByRole('tabpanel');
-
-// Settings (⌘,) at its Browser section: the section's region.
+// Settings (⌘,) at its Browser section: the section's region, in the Settings dialog (UX wave U7b; it was a main tab).
 // The application menu can still be building just after launch, so its item is awaited before it is clicked.
 export async function openSettingsBrowser(s: ImportScene): Promise<Locator> {
   await expect
     .poll(() => s.maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('settings.open')?.enabled ?? false), { message: 'the Settings menu item is ready' })
     .toBe(true);
   await menu(s.maws.app, 'settings.open');
-  const panel = settingsPanel(s);
+  const panel = settingsDialog(s.page);
+  await expect(panel).toBeVisible();
   await panel.getByRole('navigation', { name: 'Settings sections' }).getByRole('button', { name: 'Browser', exact: true }).click();
   const region = panel.getByRole('region', { name: 'Browser', exact: true });
   await expect(region).toBeVisible();
@@ -182,10 +183,22 @@ export async function report(s: ImportScene): Promise<Locator> {
   return sheet;
 }
 
+// The sheet is a layer over the Settings dialog (UX wave U7b, Interfaces §H row 2): its own close closes it alone, and
+// Settings stays open behind it.
 export async function closeSheet(s: ImportScene): Promise<void> {
   const sheet = sheetOf(s);
   await sheet.getByRole('button', { name: /^(Done|Close|Cancel)$/ }).first().click();
   await expect(sheet).toHaveCount(0);
+  await expect(settingsDialog(s.page)).toBeVisible();
+}
+
+// The Settings dialog closed by its Close button, when it is open. A click on the dimmed window outside it closes it
+// and goes nowhere (UX wave U7b), so a scene closes it before it clicks anything behind it, a session's row included.
+export async function closeSettings(s: ImportScene): Promise<void> {
+  const dialog = settingsDialog(s.page);
+  if (!(await dialog.count())) return;
+  await dialog.locator('[data-settings-close]').click();
+  await expect(dialog).toHaveCount(0);
 }
 
 // Every `browser.import.progress` phase the window hears, in order (installed once per launch).

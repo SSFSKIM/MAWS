@@ -15,7 +15,7 @@
 // The support writes the MCP fixtures and the two repositories into $C12 on first use. MAWS_C12_LIVE_MAX_USD (default
 // 5) stops the run before it starts another session once the journals show that much spent.
 import { addressed } from './support/address';
-import { openSurface } from './support/shell';
+import { openSurface, settingsDialog } from './support/shell';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
@@ -552,7 +552,7 @@ test('nine sessions under a memory budget: releases, the released surfaces, Send
 
     await test.step('Settings › Engine’s Memory budget takes a GB value with one decimal', async () => {
       await app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('settings.open')?.click());
-      const field = main(page).getByRole('textbox', { name: 'Memory budget' });
+      const field = settingsDialog(page).getByRole('textbox', { name: 'Memory budget' }); // UX wave U7b: a dialog, not a main tab
       await field.fill('12.5');
       await field.press('Enter');
       await expect.poll(async () => value(await invoke(page, 'settings.get', undefined)).settings.engine.memoryBudgetMiB).toBe(12_800);

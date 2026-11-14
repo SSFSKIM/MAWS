@@ -32,7 +32,7 @@ import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginRea
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
-import { mainTab, unfoldSessionCard } from './support/shell';
+import { backToTabs, pageRegion, unfoldSessionCard } from './support/shell';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
 const skip = process.env.MAWS_E8_LIVE === '1' ? pluginsLiveSkipReason() : null;
@@ -194,8 +194,9 @@ async function loadedIds(w: Locator): Promise<string[]> {
   return ids;
 }
 // P4-AGG Decision Log 10: Customize's library, Discover beside My items; a card's line is on its card, or at Discover's
-// head once the catalog no longer lists it (the marketplace withdrew it and nothing installed it).
-const discoverLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+// head once the catalog no longer lists it (the marketplace withdrew it and nothing installed it). UX wave U7b (O-40):
+// Customize is a page beside the sidebar, not a main tab, so the library is found in the page's region.
+const discoverLibrary = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
 const discoverLine = (page: Page, id: string) => {
   const [name, marketplace] = id.split('@');
   const d = discoverLibrary(page);
@@ -233,9 +234,9 @@ async function discoverCard(page: Page, id: string): Promise<Locator> {
   await expect(card).toBeVisible({ timeout: 60_000 });
   return card;
 }
-// Back from Customize to the session, its `/plugins` open again on My items.
+// Back from Customize to the session, its `/plugins` open again on My items. UX wave U7b: the page's Back, not a tab's close.
 async function backToSession(page: Page): Promise<Locator> {
-  await mainTab(page, /^Customize/).getByRole('button', { name: /^Close / }).click();
+  await backToTabs(page);
   return openPlugins(page);
 }
 

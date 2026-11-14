@@ -24,7 +24,7 @@ import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject, sidebarRow } from './support/sidebar';
-import { unfoldSessionCard } from './support/shell';
+import { pageRegion, unfoldSessionCard } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -288,12 +288,14 @@ const lineOf = (row: Locator) => row.getByRole('status');
 // Plugins › Discover for the session's directory: main's catalog over the engine's reads (the stub's here; under
 // MAWS_E2E the network sources are offline), whose cards install through E8's sheet. Customize is the product window's,
 // so the cases through Discover run there (`appBackend`, `openSessionPlugins`); the harness page has no main area. The
-// Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks.
-const customizeLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+// Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks. UX wave U7b (O-40):
+// Customize is a page beside the sidebar, not a main tab, so its library is found in the page's region.
+const customizeLibrary = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
 const allOf = (w: Locator) => w.locator('[data-discover="plugins"] [data-catalog-results]').last(); // All, on the home
 async function openDiscover(w: Locator): Promise<Locator> {
   await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
   await expect(w).toBeHidden();
+  await expect(pageRegion(w.page())).toHaveAttribute('data-destination', 'customize');
   const library = customizeLibrary(w.page());
   await expect(allOf(library).locator('[data-catalog-grid] [data-catalog-card]').first()).toBeVisible({ timeout: 30_000 });
   return library;

@@ -62,6 +62,7 @@ import { invoke as appInvoke, value as appValue, TOOL_NAME, wait, WATCH_MS, with
 import { holdFileOf, newMembers, wrappedServer } from './support/connector-direct-scene';
 import { connectorsPid } from './support/connector-direct-oauth'; // P5 O4 M2
 import { ps } from './support/processes';
+import { backToTabs, pageRegion } from './support/shell';
 // P3-HD M4 end
 // P3-HD M4b start
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -682,8 +683,9 @@ test('disconnect: the page reads through MAWS’s own instance after the engine 
 // the owner's Start, no message, no model turn), docs/doperpowers/plans/2026-10-17-p3-hd-direct-route.md acceptance 1-6:
 //   transition: one read grant reads through the engine, then, the engine stopped, through MAWS's own instance (route D,
 //          the same grant, no engine acquired), then through the engine again once the owner's session is resumed; each
-//          refresh submits exactly one call. Under D, the window hidden, minimized, or the page's surface unmounted, it
-//          calls nothing past its interval and catches up once. The sheet names the verified file and scope.
+//          refresh submits exactly one call. Under D, the window hidden, minimized, or the page's surface behind the
+//          library's page (UX wave U7b; until then, unmounted by the library's tab), it calls nothing past its interval
+//          and catches up once. The sheet names the verified file and scope.
 //   lifecycle: under D, a call held by the fixture (submitted, unanswered) when the owner revokes, or when the artifact
 //          is deleted, never reaches the page when the fixture answers it late, an Allow once already consumed by its
 //          held call included; a duplicate holds no grant and restoring a version saved while the grant stood restores
@@ -707,13 +709,13 @@ async function liftHold(scene: ConnectorScene, hold: string, held: { pid: number
   return { fate: fate as 'released' | 'teardown', ms: Date.now() - from };
 }
 
-test('transition: one grant reads through E, then D with no engine, then E again, one submission each; hidden, minimized or unmounted it calls nothing and catches up once', async () => {
+test('transition: one grant reads through E, then D with no engine, then E again, one submission each; hidden, minimized or behind a page it calls nothing and catches up once', async () => {
   test.setTimeout(600_000);
   const info = test.info();
   await withScene('transition', info, async (scene) => {
     const run = await scene.launch();
     const artifactId = await scene.createPage(run.page);
-    let { frame } = await scene.openPage(run.page, artifactId);
+    const { frame } = await scene.openPage(run.page, artifactId);
     await expect(frame.locator('#last')).toHaveText('paused:noRoute', { timeout: 20_000 });
     const engine = await scene.ownerStart(run.page);
     await expect(frame.locator('#last')).toHaveText('revoked:notGranted', { timeout: WATCH_MS + 15_000 });
@@ -768,22 +770,26 @@ test('transition: one grant reads through E, then D with no engine, then E again
       quiet[label] = { silentMs: WATCH_MS + 10_000, caught };
     }
 
-    // the page's surface gone (the library over its tab unmounts it), then back: a new load reads once
+    // the page's surface behind the library's page, then Back: exactly one catch-up. UX wave U7b (O-40; its execution
+    // document §N): the library is a page beside the sidebar, no longer a tab that unmounted the page's; the surface stays
+    // mounted behind it, invisible, and is not on screen, so it is asserted quiet, not gone
     const tab = run.page.locator(`[data-region="main"] [data-artifact-tab="${artifactId}"]`);
     await run.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
-    await expect(tab.locator('[data-artifact-frame="html"]'), 'the page’s surface is gone').toHaveCount(0);
-    const unmounted = Date.now();
+    await expect(pageRegion(run.page)).toHaveAttribute('data-destination', 'library');
+    await expect(tab.locator('[data-artifact-frame="html"]'), 'the page’s surface stays mounted behind the library').toHaveCount(1);
+    await expect(tab.locator('[data-artifact-frame="html"]'), 'and is not shown').toBeHidden();
+    const behind = Date.now();
     await wait(WATCH_MS + 10_000);
-    expect(scene.toolCallsBetween(unmounted, Date.now()), 'no call while its surface is gone').toEqual([]);
-    const before = calls();
-    ({ frame } = await scene.openPage(run.page, artifactId));
-    refreshes.remounted(frame, before);
+    expect(scene.toolCallsBetween(behind, Date.now()), 'no call while its surface is behind the page').toEqual([]);
+    expect(await refreshes.since(), 'nothing arrived while behind the page').toEqual({ updates: 0, submitted: 0 });
+    await backToTabs(run.page);
+    await expect(tab.locator('[data-artifact-frame="html"]')).toBeVisible();
     const shown = await refreshes.next(15_000);
-    expect(shown.last).toMatch(/^ok n=\d+ via=direct$/);
-    expect(shown.submitted, 'the new load read once').toBe(1);
+    expect(shown.last, 'behind a page: the catch-up reads through D').toMatch(/^ok n=\d+ via=direct$/);
+    expect(shown.submitted, 'behind a page: one catch-up call').toBe(1);
     await wait(5_000);
-    expect(await refreshes.since(), 'and only once').toEqual({ updates: 0, submitted: 0 });
-    quiet.unmounted = { silentMs: WATCH_MS + 10_000, shown };
+    expect(await refreshes.since(), 'behind a page: and only one').toEqual({ updates: 0, submitted: 0 });
+    quiet.behindPage = { silentMs: WATCH_MS + 10_000, shown };
 
     // D → E: back to an engine with no message. The owner's session is resumed; the engine refuses a resume of a session
     // that never wrote a transcript (the no-message Start wrote none: existing sessions debt, outside P3-HD, Decision Log 40;

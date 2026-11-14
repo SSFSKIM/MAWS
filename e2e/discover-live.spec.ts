@@ -22,7 +22,7 @@ import type { CatalogItem, CatalogTab } from '../src/shared/ipc/schema/catalog';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { REAL_ENGINE_VERSION } from './support/real-engine';
-import { openAppDestination } from './support/shell';
+import { openAppDestination, pageRegion } from './support/shell';
 
 test.skip(process.env.MAWS_LIVE_SMOKE !== '1', 'the Discover live smoke runs under pnpm e2e:discover-live (MAWS_LIVE_SMOKE=1)');
 
@@ -41,7 +41,8 @@ function engineCli(launch: MawsLaunch, args: string[]): string {
   return execFileSync('/usr/bin/env', ['-i', `HOME=${engine.scratch.home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS });
 }
 
-const library = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+// UX wave U7b (O-40): Customize is a page beside the sidebar, not a main tab; its library is found in the page's region.
+const library = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
 const pane = (page: Page, tab = 'plugins') => page.locator(`[data-discover="${tab}"]`);
 const results = (page: Page, tab = 'plugins') => pane(page, tab).locator('[data-catalog-results]').last();
 const sheet = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);

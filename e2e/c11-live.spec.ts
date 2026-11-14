@@ -13,7 +13,7 @@
 // MAWS_C11_LIVE_GPT names the relay alias the gateway-model case uses (default `luna`; a Codex alias at its usage limit
 // is refused by the relay at `set_model`).
 import { addressed } from './support/address';
-import { openSurface } from './support/shell';
+import { openSurface, usageRing } from './support/shell';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -436,8 +436,10 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('the usage popover and Session info read ClaudeUsage alike', async () => {
       const popover = await (await openSessionInfo(page, id)).innerText();
-      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click()); // W6: View › Usage, the top bar's usage popover (the Accounts tab retired into it)
-      const usagePopover = page.getByRole('dialog', { name: 'Claude Usage' });
+      // W6: View › Usage (the Accounts tab retired into it); UX wave U7b: the title bar ring's compact popover, named "Usage"
+      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click());
+      const usagePopover = page.getByRole('dialog', { name: 'Usage', exact: true });
+      await expect(usageRing(page)).toHaveAttribute('aria-expanded', 'true');
       await expect(usagePopover.getByText(/^updated /)).toBeVisible();
       const tab = await usagePopover.innerText();
       const usage = value(await invoke(page, 'settings.usage', { engineSessionIds: [] }));
@@ -447,6 +449,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       if (drain) expect(tab.indexOf(drain.email)).toBeLessThan(tab.indexOf('Routing here'));
       await page.screenshot({ path: join(scratch.root, 'accounts-live.png') }); // the owner's accounts: kept in the scratch only
       await page.keyboard.press('Escape');
+      await expect(usagePopover).toHaveCount(0);
     });
 
     observe('cost', { total_cost_usd: await usageCost(page, id) });

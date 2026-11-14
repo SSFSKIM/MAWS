@@ -42,7 +42,7 @@
 // naming the extension, and lists no action.
 // Runs under `pnpm e2e:browser-chrome` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
-import { mainTabById, mainTabs as chromeTabs } from './support/shell';
+import { mainTabById, mainTabs as chromeTabs, settingsDialog } from './support/shell';
 import { addressed } from './support/address';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
@@ -54,7 +54,7 @@ import { writeChromeBookmarks, type ChromeUserData, type FixtureBookmarks } from
 import type { AppSessionId } from '@shared/graph/ids';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
 import {
-  closeSheet, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard, recordOf, recordPhases,
+  closeSettings, closeSheet, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard, recordOf, recordPhases,
   settingsFile, suggest, type ImportScene, type ImportSeams,
 } from './support/browser-import-scene';
 import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, pageAt, paneIn, paneRect, preloadRunsAt, resizeWindow, tabAt, tabsOf, viewOf } from './support/browser-scene';
@@ -237,7 +237,10 @@ async function launchBarScene(scratch: Scratch, server: BrowserServer, chrome: C
 }
 
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
+// UX wave U7b: Settings is a dialog over the window, and a click on the dimmed window closes it and goes nowhere, so a
+// Settings left open by `importThrough`, `openImportSheet` or `openSettingsBrowser` is closed before the row is clicked.
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {
+  await closeSettings(s);
   await show(s, id);
   return openBrowser(s);
 }
@@ -443,7 +446,9 @@ test('4, 6: ⌘⇧B in the page hides the bar and the page grows by 28 px; a rel
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'true');
       await expect.poll(() => (settingsFile(again.maws.userData).browser as { bookmarksBar?: string }).bookmarksBar).toBe('shown');
-      await expect(barIn(await browserPanel(again, id))).toBeVisible(); // the Settings tab hid the session's panel
+      // the panel was behind the Settings dialog all along (UX wave U7b); `browserPanel` closes the dialog before the
+      // session's row is clicked, since a click on the dimmed window closes it and goes nowhere
+      await expect(barIn(await browserPanel(again, id))).toBeVisible();
       await expectNothingLogged(again);
     } catch (error) {
       await again.maws.cleanup();
@@ -518,8 +523,9 @@ test('5, 7, 8, 10: the pill\'s avatar and its popover: the account, Sync bookmar
       await expect(popover.locator('[data-profile-sync-line]')).toHaveText(/^Last synced (now|\d+ minutes? ago)$/);
       await expect(popover.locator('[data-profile-reimport]')).toHaveText('Re-import this profile…');
       await expect(popover.locator('[data-profile-settings]')).toHaveText('Browser settings');
-      // the main area keeps the Browser tab: no Settings tab opened
+      // the main area keeps the Browser tab: Settings not opened (UX wave U7b: it would be the dialog over the window)
       await expect(main).toBeVisible();
+      await expect(settingsDialog(s.page)).toHaveCount(0);
       await expect(s.page.getByRole('navigation', { name: 'Settings sections' })).toHaveCount(0);
       // a click on the chrome outside closes it
       await addressOf(main).click();

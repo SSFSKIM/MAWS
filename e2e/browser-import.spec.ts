@@ -21,7 +21,7 @@ import { buildChromeUserData } from '../test/support/chrome-profile';
 import { address, chipsIn, openBrowser, pageAt } from './support/browser-scene';
 import { startBrowserServer } from './support/browser-server';
 import {
-  addExtensions, closeSheet, echoedCookies, expectContentScript, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard,
+  addExtensions, closeSettings, closeSheet, echoedCookies, expectContentScript, expectNothingLogged, importScratch, importThrough, launchImportScene, openImportSheet, openSettingsBrowser, phasesHeard,
   profilesFile, recordIn, recordOf, recordPhases, report, settingsFile, sheetOf, shootImport, stagingLeft, suggest, type ImportScene,
 } from './support/browser-import-scene';
 import { invoke, value } from './support/c7-replay';
@@ -39,7 +39,10 @@ const FAILS_STATUS = 'Loaded · background failed: chrome.contextMenus.onClicked
 const pill = (view: Locator) => view.locator('[data-browser-partition] [data-browser-partition-name]'); // cua #90: the name, beside the avatar
 
 // The session shown and its Browser tool in the panel (the tool comes back after a relaunch, or is added afresh).
+// UX wave U7b: Settings is a dialog over the window, and a click on the dimmed window closes it and goes nowhere, so a
+// Settings left open by `importThrough`, `openImportSheet` or `openSettingsBrowser` is closed before the row is clicked.
 async function browserPanel(s: ImportScene, id: AppSessionId): Promise<Locator> {
+  await closeSettings(s);
   await show(s, id);
   return openBrowser(s);
 }

@@ -19,8 +19,8 @@
 //   6. a malformed result (the owner's Refresh) and a tool error (the agent's) keep the rows and their time and say the
 //      closed error, never the server's text, in the view's label and in the open sheet's live block beside its controls
 //   7. the agent replaces the query: the open sheet asks to be reopened; the new query is fetched with its arguments
-//   8. silences longer than the schedule, each followed by exactly one catch-up: the tab inactive behind the Artifacts
-//      tab beside it, the panel showing the dashboard beside its session hidden, the window hidden, main killed with its
+//   8. silences longer than the schedule, each followed by exactly one catch-up: the tab behind the library's page
+//      (UX wave U7b), the panel showing the dashboard beside its session hidden, the window hidden, main killed with its
 //      supervisor, engine and server alive (then reopened on the same launch)
 //   9. a retained version previews its own rows and time with no live controls and no calls
 //  10. a revoke during a slow call publishes nothing; the last rows stay and turn stale by expiry alone, uncalled
@@ -91,6 +91,7 @@ import {
 } from './support/live-data';
 import { stopEngine } from './support/connector-direct-acceptance';
 import { ps } from './support/processes';
+import { backToTabs, pageRegion } from './support/shell';
 import { sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_DASHBOARD_LIVE_DATA !== '1', 'the live dataset acceptance runs under pnpm e2e:dashboard-live-data (MAWS_DASHBOARD_LIVE_DATA=1)');
@@ -314,23 +315,25 @@ test('granted live dataset: the owner’s grant, Start and controls, the agent�
         await closeSheet(sheet);
       });
 
-      await test.step('8a. the dashboard’s tab inactive behind the Artifacts tab beside it: no call; selected again: one catch-up', async () => {
+      await test.step('8a. the dashboard’s tab behind the library page: no call; Back: one catch-up', async () => {
         await setPanel(page, false);
         const board = stripTab(page, BOARD);
         await expect(board).toHaveAttribute('aria-selected', 'true');
-        // the sidebar's Artifacts opens its own tab beside the dashboard's (main/artifacts.ts `openArtifacts`); a plain
-        // session click would instead take the active tab's place (layout-model.ts `replaceActive`), closing it
+        // UX wave U7b (O-40; §N): the sidebar's Artifacts opens the library as a page beside the sidebar
+        // (main/artifacts.ts `openArtifacts`), not a tab. The dashboard's tab stays in front behind it, mounted and
+        // invisible, and nothing behind a page is on screen, so its live query stops; a plain session click would instead
+        // take the active tab's place (layout-model.ts `replaceActive`), closing it
         await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
-        await expect(stripTab(page, 'Artifacts')).toHaveAttribute('aria-selected', 'true');
-        await expect(board, 'the dashboard’s tab stays open, inactive').toHaveAttribute('aria-selected', 'false');
+        await expect(pageRegion(page)).toHaveAttribute('data-destination', 'library');
+        await expect(tab, 'the dashboard’s tab stays mounted behind the page').toHaveCount(1);
         await expect(tab.locator('.ds-doc').first()).toBeHidden();
         await wait(1_000);
-        await silence(scene, 'the dashboard’s tab is inactive');
+        await silence(scene, 'the dashboard’s tab is behind the library page');
         const back = Date.now();
-        await board.click();
+        await backToTabs(page);
         await expect(board).toHaveAttribute('aria-selected', 'true');
         await expect(tab.locator('.ds-doc .ProseMirror').first()).toBeVisible();
-        await oneCatchUp(scene, back, 'the dashboard’s tab selected again');
+        await oneCatchUp(scene, back, 'the dashboard’s tab shown again at Back');
       });
 
       await test.step('8b. the panel showing the dashboard beside its session: hidden, no call; shown, one catch-up', async () => {

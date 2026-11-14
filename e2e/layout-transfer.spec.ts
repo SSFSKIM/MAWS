@@ -282,7 +282,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   const right = mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' });
   await expect(right.locator(`[data-tab-id="artifact:${await localRef(page)}:${id}"]`)).toBeVisible();
   const left = mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' });
-  await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (the library tab stayed active there)
+  await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (UX wave U7b: the library is a page now, no tab of its own stays active there)
   // UX2 optional surfaces: explicitly open a narrow tool so Expand/Restore still exercises folding a real column.
   await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
