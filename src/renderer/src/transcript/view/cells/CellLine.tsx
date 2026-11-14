@@ -35,6 +35,7 @@ function FileLabel({ label, path, target }: { label: string; path: string; targe
 function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
   // Bash's description is the agent-authored summary, not a command to reformat. Keep diagnostic denial labels.
   if (cell.detail.kind === 'shell' && !cell.classification.denial) {
+    if (cell.label.startsWith('Moved `')) return <CodeText text={cell.label} />; // UX wave U4a (decision 33): the model's moved label first
     const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
     const verb = { running: 'Running', done: 'Ran', error: 'Failed', stopped: 'Stopped', denied: 'Denied' }[cell.status];
     return <>{description ? descriptionLabel(description, cell.status) : `${verb} ${cell.toolName}`}</>;
