@@ -37,7 +37,7 @@ U8c-2:
 - [x] (2026-11-13) M2 — The record says where the agent is. Built at `dc73e0929`..`dfe65a74a` (red run first: the routes test failed at `s1-enter-worktree` on `launch` in both fixtures, with `directory`, `worktree` and `branch` passing); wire minor 41 in two commits (`161f8f98b` the number, `f9c22eabc` the generated files, made on the VM at the number's pushed commit). The task review found one Important point, the false move inside one checkout (Decision Log 12), and one Minor; both fixed at `8e481e3fd` and re-reviewed clean. At `8e481e3fd` on the VM, M2 step 3's set: 100 files, 1719 passed, 1 skipped (the macOS bound); `tsc-node` and `tsc-web` clean (`tsc-web` at `dfe65a74a`), eslint clean on the changed files. The 4,000-upsert bound is the architect's Mac run.
 - [x] (2026-11-13) M3 — What may be read there. Built at `993d44bce`..`33d53695a` (red first: against M2's tree, and against containment alone on a scratch branch, never committed); M3's set on the VM: 179 files, 2817 passed, 13 skipped; `tsc-node`, `tsc-web`, eslint and the secret scan clean. The measurement: 50 remote `files.list` calls, 257.5 ms with a fact against 7.2 ms without, 5.01 ms per call; no cache. The task review found two Important points (Decision Log 16), fixed at `daff3d97f` (red: 5 failed for the expected reasons) to `bcf22004d` and re-reviewed clean; at `917949755` M3's set plus `src/services/index`: 201 files, 3198 passed, 14 skipped; `tsc-node` and eslint clean at `bcf22004d`.
 - [x] (2026-11-13) M4 — The window follows. Built at `22f1cc8b2` (red: 45 failing for the predicted reasons, the five held-open cases among them) to `0ecd57788`; the task review found three Important points (Decision Log 17), fixed at `de1771cb4` (red) to `224785b38`. At `224785b38` on the VM: the M4 folder set plus `test/one-working-folder.test.ts` and `test/support/tokens-guard.test.ts`, 244 files, 3926 passed; `tsc-web` and eslint clean. Re-reviewed clean (2026-11-13).
-- [ ] M5 — A shell row keeps its folder.
+- [x] (2026-11-13) M5 — A shell row keeps its folder. Built at `451e6bafb` (red: 11 failed for the expected reasons) to `814aabfbf`, on the merged chain head; wire minor 45 in two adjacent commits (`94e9aa5d4` the number, `12d4637f0` the generated files). On the VM: M5's set plus the folders that import what changed and the tokens guard, 284 files, 5492 passed, 5 skipped; `tsc-node`, `tsc-web`, `tsc-e2e` and eslint clean; the secret scan 8 of 8. Task review clean but for the one file outside §J, which the architect ratified (Decision Log 19).
 - [ ] M6 — The scenes, the record, and the acceptance run.
 - [ ] Hand-back to the architect.
 
@@ -683,7 +683,7 @@ A move here is any change of the selector's `path` (into a worktree, between two
 | file | owner | this landing's insertion | milestone |
 |---|---|---|---|
 | `src/engine-host/fs/backfill.ts` | U3 | one optional member on a shell tool's `tool.use` | M5 |
-| `src/renderer/src/transcript/model/cells.ts`, `view/cells/ShellDetail.tsx`, `view/TranscriptSlot.tsx`, `view/Transcript.tsx`, `view/context.tsx` | per UC-3 | the shell cell's folder; the detail's rule; the slot's two values and the one new optional member that carries the second | M5 |
+| `src/renderer/src/transcript/model/cells.ts`, `model/schema.ts` (one optional `rowCwd` in the snapshot suite's strict mirror of the rows; Decision Log 19), `view/cells/ShellDetail.tsx`, `view/TranscriptSlot.tsx`, `view/Transcript.tsx`, `view/context.tsx` | per UC-3 | the shell cell's folder; the detail's rule; the slot's two values and the one new optional member that carries the second | M5 |
 | `src/renderer/src/composer/Composer.tsx`, `frame/bindings.ts`, `resubmit-seam.ts`, `mentions/AtMenu.tsx` | U4 | the folder read from the selector; the chip's path and recorded branch; the list kept with its folder | M4 |
 | `src/renderer/src/request-card/RequestCard.tsx` | U1 | the hover line's expression | M4 |
 | `src/renderer/src/sidebar/RequestPreview.tsx`, `SessionRow.tsx`, `HoverCard.tsx`, `derive.ts`; `app/Toolbar.tsx` | U7 | the preview line's expression; the mark's condition; `placeOf`; `rowBranch` and the search's branch; one call in `toolbarTitle`. Made on a master that holds U7a | M4 |
@@ -1119,6 +1119,20 @@ Found while writing this document and in its adversarial review, against master 
      Evidence: the reading pass's report (file and line for each); `git diff 292e1a0fe 4fe93daf1`.
    - Observation, for M6's scenes: a record that carries no `agentFolder` answers `cwd` as `record.directory` (§D), so a scene that seeds a record without the index, filed in a worktree with its directory below the worktree's root, shows the directory in the card's folder row; this build's index writes the fact whenever the agent's folder is not the directory.
      Evidence: `src/shared/sessions/working-folder.ts`.
+
+19. **2026-11-13 (the executor of M5, folded by the controller; the architect's rulings): M5's means.**
+   - Decision (the slot in `cells.ts`): one inserted line after base line 195, inside the shell detail's object, on lines neither `origin/ux-wave/U2a` (`5250dccb5`; its nearest changes around base lines 189 and 225) nor `origin/ux-wave/U4a` (`894636024`; base line 189, and an insertion after 217) changed; a trial `git merge-tree` against each shows no conflict in `cells.ts`. The cell's member is `rowCwd`, optional and present only when the event carries a folder, so every live-route snapshot is unchanged; only the disk snapshot of `p1-maws-ask-async` changes (its one shell cell carries its row's recorded folder).
+     Date/Author: 2026-11-13, the executor; the placement confirmed by the task review.
+   - Decision (`src/renderer/src/transcript/model/schema.ts`; ratified by the architect): the snapshot suite's strict mirror of the rows gains `rowCwd: z.string().optional()`, one line, named in §J.
+     Rationale: without it the snapshot suite refuses every shell cell read from rows. Date/Author: 2026-11-13, the executor; accepted by the architect.
+   - Decision (the props line of `transcript/view/Transcript.tsx`): M5 adds `sessionCwd` to `export function Transcript({ … })`, the line U4a appends `waiting` to; whichever of the two merges second keeps both names (the architect carries it).
+     Date/Author: 2026-11-13, the architect.
+   - Decision: `SHELL_TOOLS` is a local set in `backfill.ts` (the engine host cannot import the renderer's list; U4a adds its own in `cells.ts`). The detail compares `sameFile(rowCwd, the folder handed down)`, the order Files uses. The model's test builds a `ToolRecord` and calls `cellOf`; the view tests leave the shared `test-events.ts` untouched.
+     Date/Author: 2026-11-13, the executor.
+   - Decision (the wire): minor 45 went in as two adjacent commits, the number with its note and then the two generated files, which is Decision Log 11's form; no force-push. M6 collapses the landing to one number.
+     Date/Author: 2026-11-13, the executor; accepted by the architect.
+   - Observation (what a person now sees, as §K and M5 decision 2 say; on the architect's look list): a child agent's transcript, and another machine's terminal session, name "cwd <the row's folder>" on each shell call read from rows, where they named none; a live call in a session at its launch folder names the launch folder, not the agent's sub-folder; a row read from disk that ran in a folder the agent has since left names that folder. And: the strict event schema refuses an unknown key on `tool.use`, so a receiver without the tolerant reader would fail on this build's events, which §C's table already rests on the tolerant reader for.
+     Evidence: M5's report; the slot's and the detail's suites.
 
 ## Outcomes & Retrospective
 
