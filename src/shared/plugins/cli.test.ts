@@ -5,7 +5,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   commandLine, holdsValueSlot, isMcpAction, isMcpName, isMcpUrl, isPluginsArgument, MCP_ENTRY_BOUNDS, MCP_MASK, mcpCommandLine, mcpEntryJson, mcpEntryProblem, mcpShown, mcpShownCommand, mcpShownLine, mcpValueSlotsOf,
-  PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, RUNNER_ACTIONS, runnerCommandLine, writesOf, type McpEntry, type McpEntryProblem, type PluginsAction, type PluginsActionInputs,
+  PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, RUNNER_ACTIONS, runnerCommandLine, writesOf, type McpEntry, type McpEntryProblem, type McpPair, type PluginsAction, type PluginsActionInputs,
 } from './cli';
 
 const ROOT = resolve(__dirname, '../../..');
@@ -334,7 +334,14 @@ describe('mcpEntryProblem', () => {
   });
 
   it('makes the builder throw on each problem in words that name the field and the row, never a slot’s content', () => {
-    for (const [what, entry] of refused) {
+    // a value of a letter or two is in any words; each short value is made one that no fixed word holds
+    const distinct = (entry: McpEntry): McpEntry => {
+      const values = (pairs: McpPair[]) => pairs.map(({ name, value }, i) => ({ name, value: value.length < 8 ? `slot-value-${i}` : value }));
+      return entry.type === 'stdio' ? { ...entry, env: values(entry.env) } : { ...entry, headers: values(entry.headers) };
+    };
+    for (const [what, given] of refused) {
+      const entry = distinct(given);
+      expect(mcpEntryProblem(entry), what).toEqual(mcpEntryProblem(given));
       let message = '';
       try {
         mcpCommandLine('mcp-add', add(entry));
