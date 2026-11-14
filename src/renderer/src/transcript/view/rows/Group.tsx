@@ -32,9 +32,14 @@ export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: 
   // keys the subagent's requests by its calls); a transcript with no session reads none
   const session = useRowSession();
   const waiting = useAttention((state) => (session === null ? NO_CALLS : selectWaitingByCall(state, session)));
-  // decision 21: only an open turn of a session's own transcript is held by a permission that names none of its calls
-  const turn = useTranscriptStore((state) => (variant === 'session' && row.turnId !== null ? state.entries[storeKey]?.state.turns.get(row.turnId) : undefined));
-  const held = turn?.state === 'open' && waiting.size > 0 && heldByPermission(waiting, callsOfTurn(turn));
+  // decision 21: only an open turn of a session's own transcript is held by a permission that names none of its calls.
+  // Read as one boolean, so a batch of the open turn re-renders no run, and the turn's calls are read only while
+  // something waits.
+  const held = useTranscriptStore((state) => {
+    if (variant !== 'session' || row.turnId === null || waiting.size === 0) return false;
+    const turn = state.entries[storeKey]?.state.turns.get(row.turnId);
+    return turn?.state === 'open' && heldByPermission(waiting, callsOfTurn(turn));
+  });
   const line = runLine(row.cells, waiting, held);
   const active = row.state === 'active';
   const last = row.cells.at(-1);
