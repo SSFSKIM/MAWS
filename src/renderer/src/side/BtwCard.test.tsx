@@ -136,6 +136,7 @@ describe('the /btw card', () => {
     expect(waiting(chip()!)).toEqual([expect.stringMatching(/^(Thinking|Still thinking|Thinking more|Thinking some more|Deep in thought) · /)]);
     expect(chip()!.querySelector('[data-btw-unseen]')).toBeNull();
     act(() => onSideOperation(completion(A, 'op-1', answered('ZEBRA'))));
+    listing([exchange({})]); // the host's log holds the answer now
     expect(waiting(chip()!)).toEqual([]);
     expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
     await userEvent.click(chip()!);
@@ -154,6 +155,7 @@ describe('the /btw card', () => {
     expect(card()).toBeNull();
     expect(chip()).toBeNull();
     act(() => onSideOperation(completion(A, 'op-1', answered('ZEBRA'))));
+    listing([exchange({})]); // the host's log holds the answer now
     expect(btwUnseen(btwCardOf(useBtwCards.getState(), A), sidePaneOf(useSidePane.getState(), A).exchanges ?? [])).toBe(true);
     await act(async () => void (await applyBtw(A, 'and then?')));
     expect(within(card()!).getByText('What word?')).toBeTruthy();
@@ -179,7 +181,7 @@ describe('the /btw card', () => {
 
   it('Clear starts a new side conversation; “Continue as a side thread” opens the thread from the answered exchanges', async () => {
     withProcess(A, 'ready');
-    listing([exchange({})], { 'side.question.clear': undefined });
+    listing([exchange({})], { 'side.question.clear': {} });
     act(() => openBtwCard(A));
     render(<BtwCard appSessionId={A} />);
     await screen.findByText('ZEBRA');
@@ -311,6 +313,7 @@ describe('the /btw card for a session on another machine', () => {
     expect(waiting()).toEqual(['Thinking · 3s']);
     fireEvent.change(field(), { target: { value: 'And here?' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
+    await settle();
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: R_ID, question: 'And here?' }]);
   });
 
@@ -324,6 +327,7 @@ describe('the /btw card for a session on another machine', () => {
     await act(() => fake.reply('side.question.list', { exchanges: [] }));
     fireEvent.change(field(), { target: { value: 'Over there?' } });
     fireEvent.keyDown(field(), { key: 'Enter' });
+    await settle();
     act(() => vi.advanceTimersByTime(5_000));
     expect(waiting()).toEqual(['Thinking · 5s']);
     await act(() => fake.reply('session.sideQuestion', { opId: 'op-8' }));
@@ -377,6 +381,7 @@ describe('the /btw card for a terminal session', () => {
     window.maws = fake.client as unknown as PreloadBridge;
     await act(async () => void (await applyBtw(L, 'why?')));
     render(<BtwCard appSessionId={L} />);
+    console.log('DEBUG-L', card()!.textContent, JSON.stringify(sidePaneOf(useSidePane.getState(), L).exchanges));
     expect(within(card()!).getByText('why?')).toBeTruthy();
     expect(waiting(card()!)).toHaveLength(1);
     await settle();
