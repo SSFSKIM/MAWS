@@ -71,6 +71,12 @@ describe('a call the engine moved (decision 33; Interfaces C)', () => {
     expect(done.label).toBe(atEnd.label);
   });
 
+  it('the cell carries the model’s fact, not only its words: `moved` on the moved call (u4p1-a-seeded-1) and on no call that was not moved (u4p2-n-never-1)', () => {
+    const all = cells(rowsAt('u4p1-a-seeded-1', 50));
+    expect(all.filter((cell) => cell.moved === true).map((cell) => cell.toolUseId)).toEqual([A_BASH]);
+    expect(cells(rowsAt('u4p2-n-never-1', 50)).some((cell) => 'moved' in cell)).toBe(false);
+  });
+
   it('u4p2-k-mcp-1: an MCP call, moved with no flag, ties by its task; it reads moved from its result (55), runs after the turn’s end (132) and is finished at its task’s end (136)', () => {
     const moved = cellOf(rowsAt('u4p2-k-mcp-1', 55), MCP_CALL)!;
     expect(moved.label).toMatch(/^Moved `slow · slow_wait` to the background after [\dhms ]+$/);
