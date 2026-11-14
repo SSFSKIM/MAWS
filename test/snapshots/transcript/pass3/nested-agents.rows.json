@@ -23,7 +23,7 @@
   {
     "at": "2026-09-29T15:35:19.829Z",
     "autoDenied": 0,
-    "caption": "Ran 2 agents",
+    "caption": "Ran an agent",
     "counts": {
       "added": 0,
       "removed": 0
@@ -37,7 +37,7 @@
     "kind": "divider",
     "origin": "human",
     "parts": [
-      "ran 2 agents"
+      "ran an agent"
     ],
     "startedAt": "2026-09-29T15:35:19.845Z",
     "state": "completed",
