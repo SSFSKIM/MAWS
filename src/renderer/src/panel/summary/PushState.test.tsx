@@ -146,10 +146,13 @@ describe('push state row shows PR state, install and sign-in states and opens th
     let held!: (answer: ScmPrState) => void;
     const invoke = fake.client.invoke;
     let asks = 0;
-    fake.client.invoke = ((command: CommandName, input: never, opts: never) =>
-      command === 'scm.pr.state' && asks++ > 0
-        ? (void invoke(command, input, opts), new Promise((resolve) => (held = (value) => resolve({ ok: true, value })))) // recorded, then held
-        : invoke(command, input, opts)) as never;
+    fake.client.invoke = ((command: CommandName, input: never, opts: never) => {
+      if (command !== 'scm.pr.state') return invoke(command, input, opts);
+      asks += 1;
+      if (asks === 1) return invoke(command, input, opts);
+      void invoke(command, input, opts); // recorded, then held
+      return new Promise((resolve) => (held = (value) => resolve({ ok: true, value })));
+    }) as never;
     function At({ directory }: { directory: string }) {
       useEffect(() => useGit.getState().watch(TEST_MACHINE, directory), [directory]);
       return <QueryClientProvider client={queryClient}><PushState directory={directory} appSessionId={A} /></QueryClientProvider>;
