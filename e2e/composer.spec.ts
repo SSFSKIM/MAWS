@@ -677,9 +677,13 @@ const stackOf = (page: Page, index: 0 | 1) => pane(page, index).getByRole('regio
 const transcriptOf = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-transcript-scroller]');
 const queueOf = async (page: Page, id: string) => value(await invoke(page, 'session.queue.list', { appSessionId: id }));
 
-// A turn running behind the count (`queue-and-interrupt`, held at its next `user` write), its prompt drawn.
-async function countRunning(page: Page, id: string, journal: string): Promise<void> {
+// A turn running behind the count (`queue-and-interrupt`, held at its next `user` write), its prompt drawn. `indexed`:
+// the replay is launched under the scratch config home's indexed session, for an act that needs the session's record,
+// as a take-back's save to the session's draft store does (the store refuses a session it does not hold; a replayed
+// launch writes no record); the id launched is answered.
+async function countRunning(page: Page, id: string, journal: string, options: { indexed?: true } = {}): Promise<string> {
   await openComposerPage(page);
+  if (options.indexed) await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
   await launchReady(page, id, journal);
   await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
   await messageIn(page, 0).click();
@@ -688,6 +692,7 @@ async function countRunning(page: Page, id: string, journal: string): Promise<vo
   await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   await expect(transcriptOf(page, 0)).toContainText('Count to 30 slowly');
+  return id;
 }
 
 test('U4a, the stack: Enter adds a Next step row and ⌘Enter an After the turn row, each drawn once; three fold to one line that opens on a click', async ({ editor }) => {
@@ -829,8 +834,7 @@ test('U4a, Send now: on an after-the-turn row it promotes the message at priorit
 
 test('U4a, take back: ↑ in the empty box returns the newest waiting message to the box and removes its row', async ({ editor }) => {
   const { page } = editor;
-  const id = 'u4a-take-back';
-  await countRunning(page, id, steerStopJournal(scratch, id));
+  const id = await countRunning(page, 'u4a-take-back', steerStopJournal(scratch, 'u4a-take-back'), { indexed: true });
   const [steered, later] = ['Count only to ten.', 'Then say the total.'];
   const list = stackOf(page, 0);
   await page.keyboard.type(steered);
