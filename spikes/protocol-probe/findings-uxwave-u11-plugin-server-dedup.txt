@@ -1,0 +1,14 @@
+UX wave, child U11a: engine 2.1.322 drops a plugin's MCP server that another server already names by address
+(docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, P1; 2026-11-12)
+
+Fact. Engine 2.1.322 drops a plugin's MCP server whose address a file-configured server (scope user, project or local)
+already names, and drops a later plugin's server that duplicates an earlier plugin's. The dropped server never appears
+in mcp_status. The only trace is a line in the engine's debug output:
+  Suppressing plugin MCP server "<name>": duplicates manually-configured "<name>"
+Servers of the launch's own list (--mcp-config) are not checked this way. A URL server's key for the comparison is its
+normalised URL. The function is near line 476051 of the readable 2.1.322 bundle (~/claude-code-bundle/2.1.322/cli.pretty.js).
+
+Seen. In gate run 43357272365 (e2e:discover on the Mac mini, the sign-in spike's `plugin` question), the scratch plugin's
+server was suppressed because file-configured servers named the same fixture address; in gate run 43358963647, with
+those file-configured servers removed first, the same plugin server was listed and signed in. The spike's own record
+is the dated part "UX wave U11a, M1" of spikes/p4-aggregator/findings-m4.txt.

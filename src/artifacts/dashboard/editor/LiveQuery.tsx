@@ -13,7 +13,7 @@ import { useState, useSyncExternalStore } from 'react';
 import type { QuerySource } from '../datasets';
 import { utcTime } from '../states';
 import { queryIdentity } from '../query'; // E3 M3 fix: the shared identity
-import { LIVE_COPY as C, scheduleWords, type LiveDatasets, type LivePause, type LiveStart } from './live';
+import { concrete, LIVE_COPY as C, notOfferedOn, scheduleWords, type LiveDatasets, type LivePause, type LiveStart } from './live';
 
 export interface LiveQueryProps {
   id: string;
@@ -49,11 +49,12 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
   const name = `${status.server} · ${status.tool}`;
   const changed = status.pause === 'allowChanged';
   const permission = changed ? C.changed : status.permission === 'read' ? C.allowedRead : status.permission === 'none' ? C.notAllowed : C.checking;
-  // why it pauses: no session first (a grant refused for want of one too), then a concrete refusal, then how to allow it;
-  // the permission line says a changed or lost grant itself
-  const concrete = status.pause === 'noRoute' || status.pause === 'mayWrite' || status.pause === 'failed' || status.pause === 'watchLimit';
-  const detail: LivePause | null = concrete ? status.pause : status.permission === 'none' ? 'notAllowed' : null;
+  // why it pauses: no session first (a grant refused for want of one too), then a concrete refusal as live.ts tells one,
+  // then how to allow it; the permission line says a changed or lost grant itself
+  const detail: LivePause | null = status.pause === 'noRoute' || (status.pause !== null && concrete(status.pause)) ? status.pause : status.permission === 'none' ? 'notAllowed' : null;
   const mayWrite = status.pause === 'mayWrite' && (!refusedBefore || tried); // refused in this opening
+  // U11a board 456: its machine doesn't offer connectors: neither a grant nor a refresh can work while that holds
+  const notOffered = status.pause !== null && notOfferedOn(status.pause) !== null;
   const busy = status.busy !== null;
   const { start } = snapshot;
   const starting = start.phase === 'asking' || start.phase === 'starting';
@@ -84,7 +85,7 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
         </p>
       )}
       <div className="dash-sheet-live-actions">
-        {(status.permission !== 'read' || changed) && !mayWrite && (
+        {(status.permission !== 'read' || changed) && !mayWrite && !notOffered && (
           <button
             type="button"
             className="doc-tool"
@@ -103,7 +104,7 @@ export function LiveQuery({ id, title, captured, live, onReopen }: LiveQueryProp
             {C.revoke}
           </button>
         )}
-        <button type="button" className="doc-tool" disabled={busy || !snapshot.shown || status.permission === 'none' || changed || mayWrite} aria-label={C.refreshLabel(title)} onClick={() => void live.refresh(id)}>
+        <button type="button" className="doc-tool" disabled={busy || !snapshot.shown || status.permission === 'none' || changed || mayWrite || notOffered} aria-label={C.refreshLabel(title)} onClick={() => void live.refresh(id)}>
           {C.refresh}
         </button>
         {status.pause === 'noRoute' && (

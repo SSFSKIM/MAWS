@@ -1,5 +1,5 @@
-// E10 Task 3.2 (E10 execution document, §Design 11; Interfaces "Settings version 10"): Settings › Engine › Background
-// supervisor. The status line reads main's `host.status`; the idle time writes settings version 10's `supervisor`
+// E10 Task 3.2 (E10 execution document, §Design 11; Interfaces "Settings version 10"): the Background supervisor, under
+// Settings › Supervisor since U11a M9. The status line reads main's `host.status`; the idle time writes settings version 10's `supervisor`
 // section; Stop all asks inline, naming the live count, then calls `host.restart {stopSessions: true}`. P5 O15 M2: every
 // status is the daemon's (main reports no other transport), and the group has no shape switch and no quit default.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -13,9 +13,11 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { daemonStatus, hostStatus as status, SUPERVISOR_STARTED, supervisorStatus as supervisor } from '../test-support/host-status';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
-import { EngineSection } from './EngineSection';
+import { Section } from './parts';
+import { SupervisorSection } from './SupervisorSection';
 import { SupervisorSettings } from './SupervisorSettings';
 import { formatClock } from '@shared/app/date-format';
+import { escapeTaker } from '../destination/escape';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
 
@@ -25,13 +27,18 @@ let b: SettingsBridge;
 let unsubscribe = () => {};
 const settings = () => useSettings.getState().state!.settings;
 
-// The hosts store connects on mount and reads main's snapshot: the bridge answers it with `initialStatus`.
+// The hosts store connects on mount and reads main's snapshot: the bridge answers it with `initialStatus`. U11a M9: the
+// group is drawn in its section, whose heading takes the keyboard when a pressed control leaves.
 async function renderGroup(initialStatus: HostStatus = status(), initial: Settings = SETTINGS_DEFAULTS_V21, whole = false) {
   b = settingsBridge(initial);
   b.answers['host.status'] = () => initialStatus;
   window.maws = b.bridge;
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = () => (whole ? <QueryClientProvider client={client}><EngineSection settings={settings()} /></QueryClientProvider> : <SupervisorSettings settings={settings()} />);
+  const view = () => (
+    <QueryClientProvider client={client}>
+      <Section id="supervisor">{whole ? <SupervisorSection settings={settings()} /> : <SupervisorSettings settings={settings()} />}</Section>
+    </QueryClientProvider>
+  );
   const rendered = render(view());
   unsubscribe = useSettings.subscribe((state) => {
     if (state.state) rendered.rerender(view());
@@ -111,7 +118,7 @@ describe('the status line, from host.status', () => {
     await vi.waitFor(() => expect(toasts()).toEqual(['The supervisor was not restarted · the engine host is not available']));
   });
 
-  it('when Restart now leaves with the focus, the focus goes to the group’s heading', async () => {
+  it('when Restart now leaves with the focus, the focus goes to the section’s heading', async () => {
     await renderGroup(status({ state: 'crashed', supervisor: null, matches: null, reason: 'held_lock' }));
     const button = within(row('Status')).getByRole('button', { name: 'Restart now' });
     button.focus();
@@ -119,7 +126,7 @@ describe('the status line, from host.status', () => {
     await vi.waitFor(() => expect(restarts()).toEqual([{ stopSessions: true }]));
     event(status({ state: 'starting', supervisor: null, matches: null })); // main starts afresh: the button goes
     expect(within(row('Status')).queryByRole('button')).toBeNull();
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Background supervisor' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Supervisor' }));
   });
 
   // E11 W-D (tracker row E10 "Restart now acted flag strands focus"): the heading held the focus only while the button
@@ -132,7 +139,7 @@ describe('the status line, from host.status', () => {
     invoke.mockImplementation((name, input) =>
       name === 'host.restart' ? new Promise((resolve) => (refuse = () => resolve({ ok: false, error: { code: 'internal', message: 'the engine host is not available' } }))) : answer(name, input),
     );
-    const heading = screen.getByRole('heading', { name: 'Background supervisor' });
+    const heading = screen.getByRole('heading', { name: 'Supervisor' });
     const button = within(row('Status')).getByRole('button', { name: 'Restart now' }) as HTMLButtonElement;
     button.focus();
     fireEvent.click(button);
@@ -220,9 +227,11 @@ describe('Stop all', () => {
     expect(restarts()).toEqual([]);
   });
 
-  it('Escape cancels too', async () => {
+  it('Escape cancels too, and is the question’s own, so the Settings dialog around it stays (UX wave U7b)', async () => {
     await renderGroup();
     fireEvent.click(stopAll());
+    const question = ['Stop all', 'Cancel'].map((name) => within(row('Stop all')).getByRole('button', { name }));
+    expect(question.map((button) => escapeTaker(button))).toEqual(['own', 'own']);
     fireEvent.keyDown(within(row('Stop all')).getByRole('button', { name: 'Cancel' }), { key: 'Escape' });
     expect(stopAll()).toBeTruthy();
   });
@@ -285,7 +294,7 @@ describe('Stop all', () => {
     expect(document.activeElement).toBe(stopAll());
   });
 
-  it('confirmed, the question closes at once (its count frozen out of sight) and the focus goes to the heading while it stops', async () => {
+  it('confirmed, the question closes at once (its count frozen out of sight) and the focus goes to the section’s heading while it stops', async () => {
     await renderGroup();
     let answer = () => {};
     b.answers['host.restart'] = () => undefined;
@@ -297,17 +306,20 @@ describe('Stop all', () => {
     expect(within(row('Stop all')).queryByText('Stop 3 sessions and the supervisor?')).toBeNull();
     const stopping = within(row('Stop all')).getByRole('button', { name: 'Stopping…' }) as HTMLButtonElement;
     expect(stopping.disabled).toBe(true);
-    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Background supervisor' }));
+    expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'Supervisor' }));
     await act(async () => answer());
     expect(await within(row('Stop all')).findByRole('button', { name: 'Stop all sessions and the supervisor…' })).toBeTruthy();
     expect(restarts()).toEqual([{ stopSessions: true }]);
   });
 });
 
-describe('inside Settings › Engine', () => {
-  it('is a Background supervisor group of the Engine section, after the engine rows', async () => {
+describe('inside Settings › Supervisor', () => {
+  it('is the Background supervisor group, named but with no heading of its own, before the memory budget', async () => {
     await renderGroup(status(), SETTINGS_DEFAULTS_V21, true);
     const group = screen.getByRole('group', { name: 'Background supervisor' });
+    expect(within(group).queryByRole('heading')).toBeNull();
+    expect(screen.getAllByRole('heading').map((h) => h.getAttribute('aria-label'))).toEqual(['Supervisor']);
+    expect(group.compareDocumentPosition(row('Memory budget')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // P5 O15 M2: its rows, in order; no shape switch and no quit default
     expect(within(group).getAllByRole('group').map((g) => g.firstElementChild?.textContent)).toEqual(['Status', 'Machine daemon', 'Exit when idle', 'Stop all']); // each row's label
     expect(within(group).queryByRole('switch')).toBeNull();

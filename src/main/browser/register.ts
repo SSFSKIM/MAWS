@@ -8,7 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
-import type { BrowserWindow, WebContents } from 'electron';
+import type { BrowserWindow, NativeImage, WebContents } from 'electron';
 import type { BrowserBookmarksStore } from './data/bookmarks';
 import type { BrowserHistoryStore, BrowserSuggestion } from './data/history';
 import { pageOf } from '../ipc/clients';
@@ -20,7 +20,8 @@ import type { SessionMachines } from './machines';
 import type { BrowserProfile } from './partition';
 import { UnknownTabError, type TabStore } from './tabs';
 import { shown, type ViewManager } from './view';
-import { captureTabView } from './capture'; // P3-G
+import { captureTabView, copyTabScreenshot } from './capture'; // P3-G; U12a: copyTabScreenshot
+import { agentTabComesForward } from './agent/control'; // U12a
 // cua #90 start
 import { UnknownBookmarkError, type BookmarkBar } from './bookmarks/bar';
 import type { Favicons } from './favicon';
@@ -45,6 +46,8 @@ export interface BrowserHandlerDeps {
   // P5 O7 M3: a session of another machine's tabs (machines.ts), and a tab opened at a forward's listener (forwarded.ts)
   sessions?: Pick<SessionMachines, 'keyOf' | 'machineOf' | 'bareOf'>;
   forwarded?: Pick<ForwardedTabs, 'opened'>;
+  now?(): number; // U12a: the clock `browser.agent.show` reads the person's input against
+  writeImage(image: NativeImage): Promise<void>; // U12a: Copy screenshot's write, to this Mac's clipboard
 }
 
 // A handler whose unknown tab is the caller's mistake, not main's fault.
@@ -84,7 +87,7 @@ function suggestionsOr(read: () => BrowserSuggestion[], what: string): BrowserSu
   }
 }
 
-export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded }: BrowserHandlerDeps): void {
+export function registerBrowserHandlers({ store, views, navigator, downloads, history, bookmarks, bar, windowOf, favicons, avatars, profiles, register, sessions, forwarded, now = Date.now, writeImage }: BrowserHandlerDeps): void {
   // P5 O7 M3: the three that name a session are answered for a session of any machine (the router's
   // BROWSER_TOOL_HERE_FOR_ANY_MACHINE): the store keys it by its session key (machines.ts: the bare id here, the address
   // for another machine's), and the answer says the bare id again for the invoke's machine; a list of every session is
@@ -110,6 +113,10 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
   register('browser.tabs.select', knownTabs(({ appSessionId, tabId }, { target }) => store.select(keyOf(appSessionId, target), tabId)));
   register('browser.tabs.navigate', knownTabs(({ tabId, to }) => ({ accepted: navigator.navigate(tabId, to) })));
   register('browser.tabs.zoom', knownTabs(({ tabId, action }) => ({ zoom: navigator.zoom(tabId, action) })));
+  // U12a (Interfaces §D, §K): the tab's device size, from any window by tab id, as zoom; an extension's options tab has none
+  register('browser.tabs.setViewport', knownTabs(({ tabId, viewport }) => {
+    if (!store.setViewport(tabId, viewport)) throw new CommandFailure(ipcError('invalid_input', `browser tab ${tabId} is an extension's page, which has no device size`));
+  }));
   register('browser.tabs.find', knownTabs(({ tabId, ...request }) => navigator.find(tabId, request)));
   register('browser.tabs.dismiss', knownTabs(({ tabId, notice }) => navigator.dismiss(tabId, notice)));
   register('browser.tabs.devtools', knownTabs(({ tabId }) => navigator.devtools(tabId)));
@@ -145,8 +152,34 @@ export function registerBrowserHandlers({ store, views, navigator, downloads, hi
       return captureTabView({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, page && windowOf(page));
     }),
   );
+  // U12a (Interfaces §D, §K): Copy screenshot, under the same rule, written whole to the clipboard here (capture.ts)
+  register(
+    'browser.view.copyScreenshot',
+    knownTabs(({ tabId }, { client }) => {
+      const entry = store.require(tabId);
+      const contents = entry.view?.webContents ?? null;
+      const page = pageOf(client);
+      return copyTabScreenshot({ tabId, window: entry.placement?.window ?? null, shown: shown(entry), contents }, page && windowOf(page), writeImage);
+    }),
+  );
   // The chrome's Hand back: the page returns to idle from any state (E4c moves it everywhere else).
   register('browser.control.handBack', knownTabs(({ tabId }) => store.setControl(tabId, 'idle')));
+  // U12a (Interfaces §C; ruling R2, and the branch review's rulings 5 and 7): the window about to open the Browser by
+  // itself asks for the acting tab. The session is the tab's own (a side thread's acting tab is its parent's), and the tab
+  // is selected there when `agentTabComesForward` says so; the answer is the session's selected tab then, whole, so the
+  // window lists that selection before its panel mounts (main's own notice follows on a later task). The only selection
+  // made for the agent: cua's acting command selects nothing (cua/connection.ts).
+  register('browser.agent.show', knownTabs(({ tabId }) => {
+    const acting = store.require(tabId);
+    const { appSessionId } = acting.tab;
+    const selectedOf = () => {
+      const id = store.list(appSessionId).selected[appSessionId] ?? null;
+      return id === null ? null : (store.entry(id) ?? null);
+    };
+    const sessionTabs = store.all().filter((entry) => entry.tab.appSessionId === appSessionId);
+    if (agentTabComesForward(selectedOf(), acting, now(), sessionTabs)) store.select(appSessionId, tabId);
+    return { selected: selectedOf()?.tab ?? null };
+  }));
   // cua #90 start: the bookmarks bar (bookmarks/bar.ts): a chip's click, a native menu on the sender's window, the icons
   register('browser.bookmarks.open', knownTabs(({ tabId, nodeId, how }) => bar.open(tabId, nodeId, how)));
   register(

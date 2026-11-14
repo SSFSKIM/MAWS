@@ -1,11 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { TaskId } from '@shared/graph/ids';
 import type { GitDiffFile, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
 import { loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { applyEvents, createState, turnActivity, type TurnActivity, type TurnId } from '../../transcript';
 import { journalToEvents } from '../../transcript/dev/journal';
 import { useTranscriptStore } from '../../stores/transcript';
-import { absolutePath, agentGlyphs, backgroundCounts, changeLine, displayPath, githubUrl, pushState, sourcesOf } from './derive';
+import { absolutePath, changeLine, displayPath, githubUrl, pushState, sourcesOf } from './derive';
 
 const file = (path: string, over: Partial<GitFileStatus> = {}): GitFileStatus => ({ path, oldPath: null, index: '.', worktree: 'M', untracked: false, ...over });
 const status = (over: Partial<GitStatus> = {}): GitStatus => ({
@@ -20,9 +19,6 @@ const activityOf = (name: string) => turnActivity(applyEvents(createState(null, 
 function turn(over: Partial<TurnActivity>): TurnActivity {
   return { turnId: 'turn:x' as TurnId, origin: 'human', state: 'closed', startedAt: '', endedAt: null, files: [], tools: [], subagents: [], crons: [], listings: [] /* E7 */, ...over };
 }
-const agent = (n: number, status: TurnActivity['subagents'][number]['status']): TurnActivity['subagents'][number] => ({
-  taskId: `t${n}` as TaskId, agentId: null, toolUseId: null, name: `agent ${n}`, glyph: n % 8, kind: 'agent', subagentType: null, status,
-});
 
 describe('summary derivations', () => {
   describe('changeLine', () => {
@@ -69,14 +65,6 @@ describe('summary derivations', () => {
       expect(githubUrl('https://github.com/o', 'main')).toBeNull();
       expect(githubUrl('/tmp/origin.git', 'main')).toBeNull();
       expect(githubUrl(null, 'main')).toBeNull();
-    });
-  });
-
-  describe('backgroundCounts', () => {
-    it('groups by task type, leaving agents to Subagents', () => {
-      const task = (taskType: string) => ({ taskId: taskType as TaskId, taskType, description: '', ambient: false });
-      expect(backgroundCounts([task('local_bash'), task('local_workflow'), task('local_agent'), task('monitor_ws')])).toEqual({ shells: 1, workflows: 1, monitors: 1, other: 0 });
-      expect(backgroundCounts([task('remote_thing')])).toEqual({ shells: 0, workflows: 0, monitors: 0, other: 1 });
     });
   });
 
@@ -135,21 +123,6 @@ describe('summary derivations', () => {
     });
   });
 
-  describe('agentGlyphs', () => {
-    it('lists the agents not yet terminal before the finished ones, and stops at four', () => {
-      const turns = [turn({ subagents: [agent(1, 'finished'), agent(2, 'working'), agent(3, 'stopped')] }), turn({ subagents: [agent(4, 'started'), agent(5, 'finished_with_errors'), agent(6, 'working')] })];
-      expect(agentGlyphs(turns).map((a) => a.name)).toEqual(['agent 2', 'agent 4', 'agent 6', 'agent 1']);
-      expect(agentGlyphs(turns, 10).map((a) => a.name)).toEqual(['agent 2', 'agent 4', 'agent 6', 'agent 1', 'agent 3', 'agent 5']);
-    });
-
-    it('reads agents-and-messages’ children with the transcript’s glyph index', () => {
-      expect(agentGlyphs(activityOf('agents-and-messages')).map(({ name, glyph }) => [name, glyph])).toEqual([
-        ['Survey src for TODOs', 0],
-        ['List the tests', 2],
-      ]);
-    });
-  });
-
   describe('source paths', () => {
     it('shows a path relative to the session directory when it lies inside it, and opens a relative one resolved against it', () => {
       expect(displayPath('/w/repo/docs/charter.md', '/w/repo')).toBe('docs/charter.md');
@@ -169,9 +142,9 @@ describe('summary derivations', () => {
       await useTranscriptStore.getState().attach(key, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) });
       const store = useTranscriptStore.getState;
       for (const id of store().entries[key].state.order) if (store().entries[key].state.ui.expandedTurns.has(id)) store().toggleTurn(key, id);
-      const collapsed = { sources: sourcesOf(store().activity(key)), glyphs: agentGlyphs(store().activity(key)) };
+      const collapsed = sourcesOf(store().activity(key));
       store().expandAll(key, { cells: true });
-      expect({ sources: sourcesOf(store().activity(key)), glyphs: agentGlyphs(store().activity(key)) }, name).toEqual(collapsed);
+      expect(sourcesOf(store().activity(key)), name).toEqual(collapsed);
       store().drop(key);
     }
   });

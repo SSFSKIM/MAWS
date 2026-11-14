@@ -53,6 +53,10 @@ export interface TranscriptSlotProps {
   startAt?: (rows: readonly Row[], loaded: boolean) => number | null; // P2-E1: the first row shown; null: none yet
   presentation?: 'local'; // P2-E1: the owner channel through MAWS's presenter, whatever the surface's attachment
   actions?: Partial<TranscriptActions>; // P2-E1: merged over the registered actions, for this mount only
+  // UX wave U4a (decision 12): the mount has a stack (the session's pane, where it mounts the composer), which draws the
+  // held messages and a message while it is unread: no held rows at the tail, and no row marked unread. Absent (the
+  // side thread's card, which mounts no composer), the held bubble is its only drawing of a reply that waits.
+  waiting?: 'stacked';
 }
 
 export function TranscriptSlot(props: TranscriptSlotProps) {
@@ -82,7 +86,7 @@ function RemoteAgentSlot({ appSessionId, agentId, className, actions: overrides 
   );
 }
 
-function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
+function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presentation, actions: overrides, waiting }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
   const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer(); // C7's card; the placeholder until it registers
@@ -98,11 +102,15 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const atRest = agentId === undefined && controls?.turn()?.running === false;
   const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
   const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);
-  // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
-  // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
+  // Where the session runs, from the selector: the engine's Bash input names no cwd, so a shell call shows the launch
+  // folder, labelled as the session's directory. UX wave U8c-2 (§K): the launch folder and the agent's folder are handed
+  // down only while the session is in its launch folder, and neither while it reads moved, so a live call never names a
+  // folder its command may not have run in (a call read from rows names its own). Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.
   const folder = useWorkingFolder(appSessionId);
-  const sessionDirectory = agentId === undefined ? (folder?.cwd ?? null) : null;
+  const here = agentId === undefined && folder !== null && !folder.moved ? folder : null;
+  const sessionDirectory = here?.launch ?? null;
+  const sessionCwd = here?.cwd ?? null;
   useEffect(() => (agentId === undefined ? attachQueue(appSessionId) : undefined), [appSessionId, agentId]);
   const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
   const held = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain), [queue.entries]);
@@ -118,7 +126,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   );
   // P5 O9 M5: a terminal session driven through its bridge draws its reply as it is written, after the rows on disk
   const streaming = useLaneAStreaming(agentId === undefined ? appSessionId : null, storeKey);
-  const tail = useMemo(() => [...streaming.tail, ...held.filter((_, i) => !answered[i]).map(heldRow)], [streaming.tail, held, answered]);
+  const tail = useMemo(() => [...streaming.tail, ...(waiting === 'stacked' ? [] : held.filter((_, i) => !answered[i]).map(heldRow))], [streaming.tail, held, answered, waiting]); // UX wave U4a: a stack draws the held ones
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
   const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
@@ -132,6 +140,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       renderRequest={renderRequest}
       className={className}
       sessionDirectory={sessionDirectory}
+      sessionCwd={sessionCwd}
       tail={tail}
       withdrawn={withdrawn}
       effort={agentId === undefined ? effort : null}
@@ -141,6 +150,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       atRest={atRest}
       placed={streaming.kept}
       promptAuthor={promptAuthor}
+      waiting={waiting}
     />
   );
 }

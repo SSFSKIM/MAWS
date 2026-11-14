@@ -2,11 +2,11 @@
 // The engine puts its own pointer text beside an image block (M0: `[image, "[Image: source: …]", server JSON]`), so
 // joining every text block, as E1's `resultJson` does, would not parse.
 import { describe, expect, it } from 'vitest';
-import type { ContentBlock } from '@shared/graph/events';
+import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import { ArtifactScreenshotResultSchema } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { firstJsonBlock } from './cells';
+import { cellOf, firstJsonBlock, type ToolRecord } from './cells';
 
 const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
 const RESULT = { status: 'captured', id: 'dash', title: 'Dashboard', version: 1 };
@@ -38,5 +38,27 @@ describe('firstJsonBlock', () => {
     const screenshot = results.find((event) => typeof event.content !== 'string' && event.content.some((block) => block.type === 'image'));
     expect(screenshot && typeof screenshot.content !== 'string' && screenshot.content.map((block) => block.type)).toEqual(['image', 'text', 'text']);
     expect(ArtifactScreenshotResultSchema.parse(firstJsonBlock(screenshot!.content))).toMatchObject({ status: 'captured', id: 'dash', title: 'Dashboard', version: 1, width: 64, height: 64 });
+  });
+});
+
+// UX wave U8c-2 (M5, §K): the shell cell keeps the two folders apart. Its `cwd` stays the input's (which the engine's
+// Bash input never names); `rowCwd` is the folder the call's row records, present only when its event carries one.
+describe('the shell cell’s folders', () => {
+  const AT = '2026-11-13T10:00:00.000Z';
+  const shell = (input: Record<string, unknown>, cwd?: string): ToolRecord => ({
+    use: {
+      id: 'e1', sessionId: 'S', at: AT, seq: 1, agentId: null, parentToolUseId: null, kind: 'tool.use', toolUseId: 't1', toolName: 'Bash', input, apiMessageId: null, messageUuid: null,
+      ...(cwd !== undefined && { cwd }),
+    } as Extract<SessionEvent, { kind: 'tool.use' }>,
+    result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false,
+  });
+  const detailOf = (rec: ToolRecord) => cellOf(rec, { closed: false, terminalReason: null, lastAt: AT }, true).detail;
+
+  it('carries the event’s folder beside the input’s, and neither stands in for the other', () => {
+    expect(detailOf(shell({ command: 'ls' }, '/repo/.claude/worktrees/w1'))).toMatchObject({ kind: 'shell', cwd: null, rowCwd: '/repo/.claude/worktrees/w1' });
+    expect(detailOf(shell({ command: 'ls', cwd: '/w/elsewhere' }, '/repo'))).toMatchObject({ kind: 'shell', cwd: '/w/elsewhere', rowCwd: '/repo' });
+    const live = detailOf(shell({ command: 'ls' }));
+    expect(live).toMatchObject({ kind: 'shell', cwd: null });
+    expect('rowCwd' in live).toBe(false); // an event with no folder makes the cell it made before
   });
 });

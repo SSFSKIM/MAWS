@@ -5,7 +5,7 @@
 // root's stop releasing what it held. The exact commands, intercepts and taps the root installs are pinned here.
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CLIENT, type ClientPort } from '@shared/client/port';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
@@ -25,6 +25,7 @@ import { Index } from './index/index';
 import { IndexSessionSource } from './index/source';
 import { STREAM_GRACE_MS } from './lane-a/attention';
 import { ScmService } from './scm/service';
+import { transcriptPathOf } from './sessions/context';
 import { openSpineData, startSpine, type SpineData, type SpineRoot } from './spine-root';
 import { takeSpineLock } from './settings/spine-lock';
 
@@ -122,7 +123,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   };
 
   // The root as either process composes it, on its bus
-  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { engineEnv = Promise.resolve<Record<string, string>>({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }) } = {}) => {
+  const compose = (data: SpineData, host: FakeSpineHost, bus: FakeBus, { engineEnv = Promise.resolve<Record<string, string>>({ HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') }), env = {} as Record<string, string> } = {}) => {
     const spine = startSpine({
       profile,
       machine: MACHINE,
@@ -134,7 +135,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
       browserSocket: () => null,
       trash: async () => {},
       engineEnv,
-      env: { SMINOS_HOME: sminos },
+      env: { SMINOS_HOME: sminos, ...env },
       packaged: false,
       appPath: dir.path, // no checkout's fixtures beside it
       devRoot: dir.path,
@@ -496,6 +497,66 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await bus.invoke('files.readResolved', { path: outside })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
     expect(await bus.main('files.readResolved', { path: outside })).toMatchObject({ ok: true, value: { content: 'a,b\n' } });
     expect(await bus.main('files.readResolved', { path: join(dir.path, 'gone.csv') })).toMatchObject({ ok: false, error: { message: `not found: ${join(dir.path, 'gone.csv')}` } });
+  });
+
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, M2; decision 13): files' admission by name
+  // reads the session's transcript where the spine's other readers find it, the index's path when it is the record's
+  // engine session's file, else where the engine writes it; none for a record with no engine session id. Invented rows.
+  const linking = (outside: string, name: string) => `${JSON.stringify({ type: 'assistant', uuid: `a-${name}`, message: { role: 'assistant', content: [{ type: 'text', text: `See [it](${join(outside, name)}).` }] } })}\n`;
+  const writeAt = (path: string, content: string) => {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, content);
+    return path;
+  };
+  const REFUSED = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
+
+  it('admits a file outside the session’s folder that its transcript links, from the transcript the index keeps or the engine writes', async () => {
+    const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
+    const outside = realpathSync(mkdtempSync(join(dir.path, 'outside-')));
+    for (const name of ['kept.txt', 'written.txt', 'stale.txt']) writeFileSync(join(outside, name), `${name}\n`);
+    const engineEnv = { HOME: join(dir.path, 'home'), CLAUDE_CONFIG_DIR: join(dir.path, 'claude') };
+    const kept = '0e5b1c0d-0000-4000-8000-0000000000d1' as SessionId;
+    const cleared = '0e5b1c0d-0000-4000-8000-0000000000d2' as SessionId;
+    const earlier = '0e5b1c0d-0000-4000-8000-0000000000d3' as SessionId; // the engine session `cleared` had before a /clear
+    const unbound = '0e5b1c0d-0000-4000-8000-0000000000d4' as SessionId;
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const upsert = (sessionId: SessionId, transcriptPath: string) => seeded.sessions.upsertFromSummary(summary({ sessionId, directory: repository, transcriptPath })).record.appId;
+    // the index's path, outside the engine's tree, named for the record's engine session
+    const K = upsert(kept, writeAt(join(dir.path, 'moved', `${kept}.jsonl`), linking(outside, 'kept.txt')));
+    // the index's path names another engine session's file; the engine writes this one's where it always does
+    const C = upsert(cleared, writeAt(join(dir.path, 'moved', `${earlier}.jsonl`), linking(outside, 'stale.txt')));
+    writeAt(await transcriptPathOf(engineEnv, repository, cleared), linking(outside, 'written.txt'));
+    const U = upsert(unbound, writeAt(join(dir.path, 'moved', `${unbound}.jsonl`), linking(outside, 'kept.txt')));
+    seeded.sessions.unbindEngineId(U);
+    seeded.close();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus, { engineEnv: Promise.resolve(engineEnv) });
+    const read = (appSessionId: AppSessionId, name: string, named = true) => bus.invoke('files.read', { appSessionId, path: join(outside, name), ...(named && { named: true }) });
+
+    expect(await read(K, 'kept.txt')).toMatchObject({ ok: true, value: { content: 'kept.txt\n', named: true } });
+    expect(await read(K, 'kept.txt', false)).toEqual(REFUSED);
+    expect(await read(C, 'written.txt')).toMatchObject({ ok: true, value: { content: 'written.txt\n', named: true } });
+    expect(await read(C, 'stale.txt'), 'the old file is not read').toEqual(REFUSED);
+    expect(await read(U, 'kept.txt'), 'no engine session id, no transcript').toEqual(REFUSED);
+  });
+
+  it('admits nothing by name in launch mode scenario, whose index is not read', async () => {
+    const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
+    writeFileSync(join(repository, 'inside.txt'), 'inside\n');
+    const outside = realpathSync(mkdtempSync(join(dir.path, 'outside-')));
+    writeFileSync(join(outside, 'kept.txt'), 'kept\n');
+    const kept = '0e5b1c0d-0000-4000-8000-0000000000d5' as SessionId;
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const { record } = seeded.sessions.upsertFromSummary(summary({ sessionId: kept, directory: repository, transcriptPath: writeAt(join(dir.path, 'moved', `${kept}.jsonl`), linking(outside, 'kept.txt')) }));
+    seeded.close();
+    // the scenario shows the same session, so its folders are the scenario's record's
+    const scenario = writeAt(join(dir.path, 'scenario.json'), JSON.stringify({ version: 1, projects: [], sessions: [{ ...record, projectId: null }], digests: [], engine: [], attention: [], timeline: [] }));
+    vi.spyOn(console, 'log').mockImplementation(() => {}); // the scenario's and the read model's lines
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), new FakeSpineHost(), bus, { env: { MAWS_SESSION_SOURCE: `stub:${scenario}` } });
+    expect(await bus.invoke('session.launchMode', undefined)).toEqual({ ok: true, value: { mode: 'scenario' } });
+    expect(await bus.invoke('files.read', { appSessionId: record.appId, path: join(repository, 'inside.txt') })).toMatchObject({ ok: true, value: { content: 'inside\n' } });
+    expect(await bus.invoke('files.read', { appSessionId: record.appId, path: join(outside, 'kept.txt'), named: true })).toEqual(REFUSED);
   });
 
   // P5 O15 M1 (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md): what src/main/sessions/main-wiring.test.ts

@@ -13,7 +13,7 @@ import { HOME_CHECKOUT, SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session
 import { ipc } from '../../ipc/client';
 import { useDialogs } from '../../sessions/dialogs';
 import { resetRemoteSpawn, SPAWN_WORDS, spawnTargetOf, useRemoteSpawn, type SpawnTarget } from '../../sessions/remote-spawn';
-import { SETUP_WORDS } from '../../sessions/remote-setup';
+import { forgetRemotePlaces, SETUP_WORDS } from '../../sessions/remote-setup';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -73,15 +73,53 @@ describe('the project row', () => {
     expect(screen.queryByLabelText(/^Branch /)).toBeNull();
   });
 
+  // UX wave U4a M6 (l3-input-07; decision 24): two projects named alike each show, dimmed in the folder name's place, the
+  // part of the path that tells them apart; every row's title is its whole path
   it('lists the projects most recently active first, the folder beside a name it differs from, then New project and Don’t work in a project', async () => {
+    const delta = at('delta' as ProjectId);
+    useSessions.setState({ projects: new Map([...useSessions.getState().projects, [delta, project(delta, 4, { name: 'Delta', directory: '/work/delta-app', createdAt: '2025-12-01T00:00:00.000Z' })]]) });
     const b = binding();
     render(<ProjectRow binding={b} />);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
     expect(within(menu()).getByPlaceholderText('Search projects')).toBeTruthy();
-    expect(rows()).toEqual(['beta', 'Alphaalpha', 'Alphaalpha-two', 'New project', "Don't work in a project"]);
-    // two projects named alike: the path is the tooltip (Codex's collision rule)
-    expect(within(menu()).getAllByRole('option').slice(1, 3).map((o) => o.title)).toEqual(['/work/alpha', '/elsewhere/alpha-two']);
-    expect(within(menu()).getAllByRole('option')[0]!.title).toBe('');
+    // the two Alphas: the part of the path that tells them apart, in the folder's place
+    expect(rows()).toEqual(['beta', 'Alphawork', 'Alphaelsewhere', 'Deltadelta-app', 'New project', "Don't work in a project"]);
+    const options = within(menu()).getAllByRole('option');
+    expect(options.slice(0, 4).map((o) => o.title)).toEqual(['/work/beta', '/work/alpha', '/elsewhere/alpha-two', '/work/delta-app']);
+    expect(within(options[1]!).getByText('work').className).toContain('text-fg-muted'); // dimmed
+  });
+
+  // M6 review: two projects of one name under one parent: the sidebar's part of the parent path ties ("work" for both),
+  // so the chooser shows the part of the whole path that differs (their folders), never a part that tells nothing apart
+  it('tells two projects of one name under one parent apart by the part of their path that differs', async () => {
+    const [x, y] = [at('repo-x' as ProjectId), at('repo-y' as ProjectId)];
+    useSessions.setState({
+      projects: new Map([
+        [x, project(x, 0, { name: 'repo', directory: '/work/x', createdAt: '2026-02-01T00:00:00.000Z' })],
+        [y, project(y, 1, { name: 'repo', directory: '/work/y', createdAt: '2026-01-01T00:00:00.000Z' })],
+      ]),
+      records: new Map(),
+    });
+    render(<ProjectRow binding={binding()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]);
+  });
+
+  // M6 re-review: with a third namesake whose parent part alone would read "x" too, every row of the name is told apart
+  // by its whole path, so no two read alike
+  it('keeps every row of a shared name distinct when some of their parent parts tie', async () => {
+    const [x, y, z] = [at('repo-x' as ProjectId), at('repo-y' as ProjectId), at('repo-z' as ProjectId)];
+    useSessions.setState({
+      projects: new Map([
+        [x, project(x, 0, { name: 'repo', directory: '/work/x', createdAt: '2026-03-01T00:00:00.000Z' })],
+        [y, project(y, 1, { name: 'repo', directory: '/work/y', createdAt: '2026-02-01T00:00:00.000Z' })],
+        [z, project(z, 2, { name: 'repo', directory: '/x/repo', createdAt: '2026-01-01T00:00:00.000Z' })],
+      ]),
+      records: new Map(),
+    });
+    render(<ProjectRow binding={binding()} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]);
   });
 
   it('searches names and paths, says when nothing matches, and chooses a project, a new one or none', async () => {
@@ -90,7 +128,7 @@ describe('the project row', () => {
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Choose a project' }));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'elsewhere');
-    expect(rows()).toEqual(['Alphaalpha-two', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['Alphaelsewhere', 'New project', "Don't work in a project"]);
     await user.clear(within(menu()).getByPlaceholderText('Search projects'));
     await user.type(within(menu()).getByPlaceholderText('Search projects'), 'zzz');
     expect(within(menu()).getByText('No projects found')).toBeTruthy();
@@ -227,9 +265,30 @@ describe('the project row on another machine', () => {
   const roster = (capabilities?: string[]) => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-06T00:00:00Z', generation: 0 }, mini(capabilities)]);
   afterEach(() => {
     resetRemoteSpawn();
+    forgetRemotePlaces(); // the UX wave, U9: the chooser's listing of this run
     useDialogs.setState({ open: null });
     useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
     vi.restoreAllMocks();
+  });
+
+  // The UX wave, U9 (O-39, A1; M5): the machine's projects show as they answer, the folder read holding nothing back;
+  // the two choices that need it wait for it
+  it('lists the machine’s projects before its folders answer, New project and Don’t work in a project disabled until they do', async () => {
+    roster();
+    let folders: (value: unknown) => void = () => {};
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('notes', 'notes', '/Users/mini/notes')], revision: 1 } };
+      if (name === 'machine.folders.list') return new Promise((resolve) => (folders = resolve));
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['notes', 'New project', "Don't work in a project"]));
+    expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    await act(async () => folders({ ok: true, value: HOME_PAGE }));
+    await vi.waitFor(() => expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['false', 'false']));
   });
 
   it('reads Choose a project there, lists that machine’s projects newest first, and a choice is the place there, no branch or Worktree box', async () => {
@@ -249,6 +308,46 @@ describe('the project row on another machine', () => {
     await user.click(within(menu()).getByRole('option', { name: 'notes' }));
     expect(spawnTargetOf(TAB, null)).toEqual({ machine: OTHER_MACHINE, name: 'mini', checkout: '/Users/mini/notes', key: null, label: 'notes' });
     expect(screen.getByRole('button', { name: 'Project notes' }).title).toBe(PLACE_WORDS.change('notes', 'mini'));
+  });
+
+  it('tells two of that machine’s projects of one name apart by the part of their path, and titles every row with its path', async () => {
+    roster();
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('a', 'site', '/Users/mini/work/site', '2026-02-01T00:00:00.000Z'), theirs('b', 'site', '/Users/mini/play/site', '2026-03-01T00:00:00.000Z'), theirs('c', 'notes', '/Users/mini/notes')], revision: 1 } };
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['siteplay', 'sitework', 'notes', 'New project', "Don't work in a project"]));
+    expect(within(menu()).getAllByRole('option').slice(0, 3).map((o) => o.title)).toEqual(['~/play/site', '~/work/site', '~/notes']);
+  });
+
+  it('tells two of that machine’s projects of one name under one parent apart by the part of their path that differs', async () => {
+    roster();
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('x', 'repo', '/Users/mini/src/x', '2026-02-01T00:00:00.000Z'), theirs('y', 'repo', '/Users/mini/src/y')], revision: 1 } };
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'New project', "Don't work in a project"]));
+  });
+
+  it('keeps every row of a shared name there distinct when some of their parent parts tie', async () => {
+    roster();
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('x', 'repo', '/Users/mini/src/x', '2026-03-01T00:00:00.000Z'), theirs('y', 'repo', '/Users/mini/src/y', '2026-02-01T00:00:00.000Z'), theirs('z', 'repo', '/Users/mini/x/repo')], revision: 1 } };
+      if (name === 'machine.folders.list') return { ok: true, value: HOME_PAGE };
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['repox', 'repoy', 'reporepo', 'New project', "Don't work in a project"]));
   });
 
   it('takes the home for Don’t work in a project, and opens that machine’s folder sheet for New project', async () => {
@@ -310,7 +409,7 @@ describe('the project row on another machine', () => {
     expect(screen.getByRole('button', { name: 'Project Alpha' })).toBeTruthy();
     expect(screen.getByLabelText('Branch main')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Project Alpha' }));
-    expect(rows()).toEqual(['beta', 'Alphaalpha✓', 'Alphaalpha-two', 'New project', "Don't work in a project"]);
+    expect(rows()).toEqual(['beta', 'Alphawork✓', 'Alphaelsewhere', 'New project', "Don't work in a project"]);
   });
 });
 

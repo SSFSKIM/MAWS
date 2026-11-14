@@ -14,7 +14,7 @@ import { latencyBudgets } from './support/latency';
 import { CHARTER } from './support/panel-support';
 import { APP_EDIT, APP_LINES,buildScmScratch, CHECKS_PASSED, PR_URL, prepareScm, UNTRACKED_TEXT, type ScmScratch } from './support/scm-scratch';
 import { sidebarOf, sidebarRow } from './support/sidebar';
-import { mainTab, openSurface, sessionCards, surface, unfoldSessionCard } from './support/shell';
+import { mainTab, openSurface, sessionCard, sessionCards, showSessionCards, surface, unfoldSessionCard } from './support/shell';
 
 test.skip(process.env.MAWS_SCM_E2E !== '1', 'the source control e2e runs under pnpm e2e:scm (MAWS_SCM_E2E=1)');
 
@@ -48,6 +48,9 @@ async function withScm(options: ScmOptions, body: (p: Scm) => Promise<void>): Pr
     await (await sidebarRow(page, CHARTER)).click();
     await expect(mainTab(page, CHARTER)).toHaveAttribute('aria-selected', 'true');
     const p = { maws, page, scratch };
+    // UX wave U8b (A1): on a fresh profile Environment is open before anything unfolds it; its fold is then remembered.
+    await showSessionCards(page);
+    await expect(sessionCard(page, 'Environment').getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
     await showEnvironment(p);
     await expectGh(p, options.ghState ?? (gh === 'fake' ? 'ready' : 'missing'));
     await body(p);

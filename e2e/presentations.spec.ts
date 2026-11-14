@@ -26,7 +26,7 @@
 //   one gesture; a table's cell edited by a double-click, Tab to the next; single clicks through a group (P7).
 // - P4-B2 K6: the Edit menu's Undo and Redo, clicked by id, undo and redo a nudge on the stage and only the field's own
 //   typing in the inspector.
-import { mainTab, openArtifactInPanel, openSurface, pinSurfaceForSessions } from './support/shell';
+import { mainTab, openArtifactInPanel, openSurface, pinSurfaceForSessions, sideGroup } from './support/shell';
 import { loadavg } from 'node:os';
 import { expect, test, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { benchDeckFiles } from '../src/artifacts/slides/fixtures/bench';
@@ -407,8 +407,13 @@ test('a deck in the panel at its 280 px minimum: the toolbar wraps by whole cont
   await expect(toolbar.getByRole('button', { name: 'Text style', exact: true })).toBeVisible();
   const identity = toolbar.locator('[data-header-title]');
   await expect(identity).toHaveText('Q3 review');
-  for (const label of ['Present', 'Deck actions', 'Float conversation over surface', 'Expand surface', 'Close surface']) {
+  for (const label of ['Present', 'Deck actions']) {
     await expect(toolbar.getByRole('button', { name: label, exact: true })).toBeVisible();
+  }
+  // UX wave U8b (M2, decision 4): the region's controls end the column's first strip, above the deck's toolbar
+  const strip = sideGroup(page, 'upper').locator('[data-side-strip]');
+  for (const label of ['Float conversation over surface', 'Expand surface', 'Hide side column']) {
+    await expect(strip.getByRole('button', { name: label, exact: true })).toBeInViewport();
   }
   const titleBox = (await identity.boundingBox())!;
   const panelBox = (await panel.boundingBox())!;

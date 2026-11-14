@@ -95,6 +95,8 @@ const mount = (ctx: PanelToolContext) => {
 };
 // The value beside a key, with its note.
 const valueOf = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.textContent ?? '';
+// UX wave U4a (decision 19): a value's title, where it has one (the Main row's raw model id)
+const titleOf = (label: string) => screen.getByText(label, { selector: 'dt' }).nextElementSibling?.querySelector('[title]')?.getAttribute('title') ?? null;
 
 describe('session info renders the six sections', () => {
   it('Engine, Model, Gateway, Permissions, Context·usage·cost, Hooks and MCP over a routed scenario session', async () => {
@@ -105,7 +107,12 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Version')).toBe('2.1.283'); // W13: the session's own, no pin note
     expect(valueOf('Binary')).toBe('~/.local/share/claude/versions/2.1.283'); // W13: the file it was spawned from, not today's setting
     expect(valueOf('Session id')).toBe(record.engineSessionId);
-    expect(valueOf('Main')).toBe('claude-sonnet-5[1m]');
+    // UX wave U4a (decision 19): before any selector has listed the engine's models, the chip's name from the route's
+    // catalogue (`engine.models`), as the chip reads it; the raw id as its title
+    await waitFor(() => expect(valueOf('Main')).toBe('Sonnet 5'));
+    expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
+    const routeCatalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models; // the backend's engine.models
+    expect(liveBindings(useSessions.getState().engine.get(READY)!, record, { modelNames: routeCatalogue }).model.label).toBe('Sonnet 5'); // the chip, before any menu
     expect(valueOf('Subagents')).toBe("each agent's own, else Main"); // W3: no "engine default"
     expect(valueOf('Route')).toBe('Gateway · ClaudeUsage relay · http://127.0.0.1:8641Switch to Direct…Back to the machine’s own…'); // W2: the switch; P5 O7 M9: and back
     expect(valueOf('Account')).toBe('1@example.test · pinned for this session');
@@ -131,7 +138,9 @@ describe('session info renders the six sections', () => {
     expect(valueOf('Context')).toBe('42,812 of 200,000 · 21% · autocompact at 167,000');
     await waitFor(() => expect(valueOf('Rules')).toMatch(/^1 allow/)); // the other reads answered meanwhile
     expect(backend.calls.filter((c) => c.command === 'session.getContextUsage')).toEqual([]);
-    expect(backend.calls.filter((c) => c.command === 'engine.models'), 'the lane reads the listed models only').toEqual([]);
+    // UX wave U4a (decision 19): the Main row names the model from the route's catalogue, as the chip does (the lane's
+    // entry still reads the listed models only)
+    await waitFor(() => expect(backend.calls.filter((c) => c.command === 'engine.models')).toHaveLength(1));
   });
 
   // Whole-branch review: after a set_model the engine accepted and before the next init frame, the Main row names the
@@ -142,13 +151,15 @@ describe('session info renders the six sections', () => {
     const status = pageStatus();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'claude/astra', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
-    expect(valueOf('Main')).toMatch(/^claude\/astra( · \w+)? · set · the next init frame confirms it$/);
+    expect(valueOf('Main')).toMatch(/^astra( [A-Z][a-z]+( high)?)? · set · the next init frame confirms it$/);
+    expect(titleOf('Main')).toBe('claude/astra');
     expect(valueOf('Auto-mode lane')).toMatch(/^Local \(expected\)/);
     cleanup();
     useSessions.setState({ engine: new Map([[READY, { ...status, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' } }]]) });
     mount(ctxOf(READY));
     expect(valueOf('Main')).not.toContain('set · the next init frame confirms it'); // the alias resolved: confirmed
-    expect(valueOf('Main')).toMatch(/^claude-sonnet-5\[1m\]/);
+    expect(valueOf('Main')).toMatch(/^Sonnet 5/);
+    expect(titleOf('Main')).toBe('claude-sonnet-5[1m]');
     useComposerStore.setState({ models: new Map() });
   });
 
@@ -157,17 +168,21 @@ describe('session info renders the six sections', () => {
   // reads pending exactly when the composer's chip does.
   describe('the Main row over the request this renderer holds, as the composer’s chip reads it', () => {
     const PENDING = 'set · the next init frame confirms it';
+    const chipText = (status: EngineSessionStatus) => {
+      const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
+      return liveBindings(status, record, { models: catalogue, effort: status.effort, asked: heldModel(useModelRequests.getState(), READY, status) ?? null }).model.label;
+    };
     afterEach(() => {
       resetModelRequests();
       useComposerStore.setState({ models: new Map() });
     });
     const cases: { name: string; held: HeldModel | null; model: EngineSessionStatus['model']; main: RegExp; pending: boolean }[] = [
       // the catalogue's Default runs Opus (auto-routed seq 143)
-      { name: 'an explicit Default with nothing reported yet', held: { value: null, starting: false, basis: null, resolved: null }, model: { requested: null, resolved: null }, main: /^claude-opus-5-5\[1m\]/, pending: true },
-      { name: 'an explicit Default while Sonnet still runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^claude-opus-5-5\[1m\]/, pending: true },
-      { name: 'a choice of the model last reported, its start not through yet', held: { value: 'sonnet', starting: true, basis: null, resolved: null }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^sonnet/, pending: true },
-      { name: 'an explicit Default the engine runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-opus-5-5[1m]' }, model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, main: /^claude-opus-5-5\[1m\]/, pending: false },
-      { name: 'no request held, the reported model', held: null, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, main: /^claude-sonnet-5\[1m\]/, pending: false },
+      { name: 'an explicit Default with nothing reported yet', held: { value: null, starting: false, basis: null, resolved: null }, model: { requested: null, resolved: null }, main: /^Opus 5\.5/, pending: true },
+      { name: 'an explicit Default while Sonnet still runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^Opus 5\.5/, pending: true },
+      { name: 'a choice of the model last reported, its start not through yet', held: { value: 'sonnet', starting: true, basis: null, resolved: null }, model: { requested: null, resolved: 'claude-sonnet-5[1m]' }, main: /^Sonnet 5/, pending: true },
+      { name: 'an explicit Default the engine runs', held: { value: null, starting: false, basis: 'sonnet', resolved: 'claude-opus-5-5[1m]' }, model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, main: /^Opus 5\.5/, pending: false },
+      { name: 'no request held, the reported model', held: null, model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, main: /^Sonnet 5/, pending: false },
     ];
     it.each(cases)('$name', ({ held, model, main, pending }) => {
       const catalogue = (fixtureLine(ROOT, RESPONSES.list_models) as { models: ListedModel[] }).models;
@@ -178,6 +193,7 @@ describe('session info renders the six sections', () => {
       mount(ctxOf(READY));
       expect(valueOf('Main')).toMatch(main);
       expect(valueOf('Main').endsWith(PENDING)).toBe(pending);
+      expect(chipText(status)).toBe(valueOf('Main').replace(` · ${PENDING}`, '')); // the chip's words
       // the composer's chip over the same status and the same held request
       const chip = liveBindings(status, record, { models: catalogue, asked: heldModel(useModelRequests.getState(), READY, status) ?? null }).model;
       expect(chip.requested).toBe(pending);

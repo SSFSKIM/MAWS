@@ -27,7 +27,7 @@ import { ipc } from '../ipc/client';
 import { registerReplaceVerdict } from '../keymap/actions-runtime';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../panel/editor-host';
 import { useHosts } from '../stores/hosts';
-import { useLayout, type ReplaceVerdict } from '../stores/layout';
+import { pageOpen, useLayout, type ReplaceVerdict } from '../stores/layout';
 import { markArtifactViewed } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
@@ -41,7 +41,7 @@ export function ArtifactTab({ tab }: { tab: ArtifactTabRef }) {
   const scope = useMemo<EditorHostScope>(() => ({ surface: 'main', tabId: tab.id }), [tab.id]);
   // A main tab's body is mounted only while it is its pane's active tab; it is on screen unless the panel has taken the
   // main column's place (maximized or floating).
-  const visible = useLayout((s) => !panelInMain(s.regions));
+  const visible = useLayout((s) => !panelInMain(s.regions) && !pageOpen(s)); // UX wave U7b (§N): not behind a page
   return <ArtifactView artifactId={tab.artifactId} scope={scope} visible={visible} />;
 }
 

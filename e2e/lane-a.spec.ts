@@ -14,9 +14,9 @@ import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOpt
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type TerminalSession } from './support/lane-a';
+import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
-import { openSurface } from './support/shell';
+import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -158,12 +158,26 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(mode).toHaveAttribute('title', 'Not reported by the terminal session: its mode is changed in the terminal');
     await expect(mode).toHaveText(/^Mode/);
     await editor(page).click();
+    // UX wave U4a (decision 17 f): a row that cannot run from here is listed, greyed, once the typed text matches its
+    // name, and its reason is in the popover beside the highlighted row
     await editor(page).pressSequentially('/doc');
-    await expect(page.getByRole('option', { name: /doctor/ }), 'a command only the terminal runs, listed with why').toContainText(/runs only in the terminal/i);
+    const doctor = page.getByRole('option', { name: /doctor/ });
+    await expect(doctor, 'a command only the terminal runs, greyed').toHaveAttribute('aria-disabled', 'true');
+    await doctor.hover();
+    await expect(doctor).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tooltip'), 'listed with why').toContainText(/runs only in the terminal/i);
+    // the list and its popover close before the box is cleared: the popover stands over the box and takes its click
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await editor(page).pressSequentially('/rewind');
-    await expect(page.getByRole('option', { name: /rewind/ }).first(), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
+    const rewind = page.getByRole('option', { name: /rewind/ }).first();
+    await expect(rewind, 'rewind, a terminal panel, greyed').toHaveAttribute('aria-disabled', 'true');
+    await rewind.hover();
+    await expect(rewind).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tooltip'), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await main(page).getByRole('button', { name: 'Turn summary' }).last().click();
     const restore = page.getByRole('button', { name: 'Restore files to before this turn' });
@@ -256,8 +270,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const c = await begin((sid, cwd, after) => backgroundBashRecords(sid, cwd, after, shellJob));
     const { page } = c;
     const { bridge } = await drive(c);
-    await openSurface(page, 'Background work');
-    const shell = page.locator('[data-shell="bsleep01"]');
+    await openSurface(page, 'Background tasks');
+    const tool = surface(page, 'background');
+    const shell = tool.locator('[data-shell="bsleep01"]');
     await expect(shell, 'derived by main from the transcript, carried by the watch').toContainText('Wait ten minutes · running', { timeout: 15_000 });
     await expect(shell.getByRole('button', { name: 'Output' }), 'a local job has no output tail').toHaveCount(0);
     await shell.getByRole('button', { name: 'Stop' }).click();
@@ -265,7 +280,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(shell.getByRole('button', { name: 'stopping…' })).toBeVisible();
     // the engine's notification that it ended, as the transcript records it
     await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, randomUUID(), { taskId: 'bsleep01', status: 'killed', summary: 'Background command "Wait ten minutes" was stopped', at: '2026-10-28T10:00:09.000Z' }))]);
-    await expect(shell).toContainText('Wait ten minutes · stopped', { timeout: 10_000 });
+    // UX wave U8b (M7): an ended task leaves Running for Done, which is folded at first and counts it by its kind
+    await expect(tool.locator('section[data-section="running"]'), 'nothing runs').toHaveCount(0, { timeout: 10_000 });
+    await expect(tool.getByText('Nothing running', { exact: true })).toBeVisible();
+    const done = tool.locator('section[data-section="done"]');
+    await expect(done).toHaveAttribute('aria-label', 'Done 1 · 1 shell');
+    await done.getByRole('heading').getByRole('button').click();
+    await expect(shell).toContainText('Wait ten minutes · stopped');
     await expect(shell.getByRole('button')).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
@@ -471,9 +492,14 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(page.getByText('Because you asked for a short one.')).toBeVisible({ timeout: 10_000 });
 
     // the agents tool: the subagent the transcript started (its sidecars on disk), told through the drill-in's box, then
-    // stopped through its Stop (the jobs list's stop has its own scene)
+    // stopped through its Stop (the jobs list's stop has its own scene). UX wave U8b (M5 decision 5): nothing tells this
+    // Mac's graph which of a terminal session's agents run, so the panel lists it under On disk, folded at first.
     await openSurface(page, 'Subagents');
-    await page.locator('[data-agent-row]').filter({ hasText: agent.description }).click();
+    const agents = surface(page, 'subagents');
+    const onDisk = agents.locator('section[data-section="disk"]');
+    const unfold = onDisk.getByRole('heading').getByRole('button');
+    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
+    await agents.locator(`[data-agent-row="${agent.agentId}"]`).click();
     const relay = page.locator('[data-region="panel"] [data-key-sink="composer"]'); // the drill-in's box, not the pane's composer
     await relay.getByRole('textbox', { name: /^Message / }).fill('wrap up');
     await relay.getByRole('button', { name: 'Send', exact: true }).click();
@@ -548,6 +574,97 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(row).toContainText('Sleep a while started working');
     await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, toolUseId: `toolu_${agent.agentId}`, status: 'completed', summary: 'Slept.', at: '2026-10-28T10:00:09.000Z' }))]);
     await expect(row, 'the agent ended: its row folds with the turn').toHaveCount(0, { timeout: 10_000 });
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U8b (A2; M5 decision 5, M8): the card column of a terminal session this Mac drives. Its shells are known from
+  // its transcript (main derives its jobs, its watch carries them), so a running one gives the Background tasks card; its
+  // agents' states have no source here yet, so there is no Subagents card while the transcript's own row says one works.
+  // The card for running work is the column's last, so its going moves no card above it.
+  test('the card column of a terminal session this Mac drives: the Background tasks card while its shell runs and no Subagents card while its transcript says an agent works; the shell ending takes the card away and moves no card above it', async () => {
+    const agent = { agentId: 'a1e2e000000000003', description: 'Index the notes', prompt: 'Index notes.md.', at: '2026-10-28T10:00:04.000Z' };
+    const job = { taskId: 'bwatch03', command: 'sleep 600', description: 'Watch the build', at: '2026-10-28T10:00:03.000Z' };
+    let last = '';
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const shell = backgroundBashRecords(sid, cwd, ask, job);
+      const turn = backgroundAgentRecords(sid, cwd, shell.at(-1)!.uuid as string, agent);
+      last = turn.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Watch the build and index the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...turnEndRecords(sid, cwd, last, '2026-10-28T10:00:05.000Z')];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const { page } = c;
+    await drive(c);
+    const row = main(page).locator('.transcript-subagent', { hasText: agent.description });
+    await expect(row, 'the transcript: the agent works under the ended turn').toBeVisible({ timeout: 15_000 });
+
+    await showSessionCards(page);
+    const background = sessionCard(page, 'Background tasks');
+    await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell, as the session’s watch carries it').toContainText(job.description, { timeout: 15_000 });
+    await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
+    await expect(sessionCard(page, 'Subagents'), 'no Subagents card on this route').toHaveCount(0);
+    const above = sessionCard(page, 'Connectors');
+    // Read once the Environment card's own reads have answered, since each that lands grows it, which is no move the
+    // card's leaving made: git's (its branch and push rows), then the pull request's, whose row is drawn only once
+    // `scm.status` answers. That answer waits for gh's probe (`gh auth status`, which may ask GitHub) even for a folder not
+    // trusted, so it can land well after the rest; this checkout is not trusted, so the row then says so and nothing more
+    // is asked.
+    await expect(sessionCard(page, 'Environment').getByTestId('pr-line'), 'the Environment card’s last read has answered').toHaveText(
+      'Trust this folder to see PR state',
+      { timeout: 40_000 },
+    );
+    const before = await above.boundingBox();
+    expect(before, 'the card above it is drawn').not.toBeNull();
+
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: job.taskId, status: 'completed', summary: 'Background command "Watch the build" completed (exit code 0)', at: '2026-10-28T10:00:09.000Z' }))]);
+    await expect(background, 'its last running task ended: the card leaves').toHaveCount(0, { timeout: 10_000 });
+    expect(await above.boundingBox(), 'and the card above it has not moved').toEqual(before);
+    await expect(sessionCard(page, 'Subagents')).toHaveCount(0);
+    await expect(row, 'the agent still works in the transcript').toBeVisible();
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U8b (A7, M6; X-168): a terminal session's engine runs an agent in the background, so its turn ends while the
+  // agent works, and the transcript never says the agent ended when the terminal closes. The terminal going (its registry
+  // record and its bridge gone) ends the agents it left running, so their row folds with the turn. A resume in a terminal
+  // (its registry record again: what tells this Mac a process holds the session; no bridge is needed for that) that
+  // starts another agent and then goes too ends that one as well.
+  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn; resumed in a terminal, the next agent’s row stays in view, then folds once that terminal goes too', async () => {
+    const first: BackgroundAgent = { agentId: 'a1e2e000000000004', description: 'Sort the notes', prompt: 'Sort notes.md.', at: '2026-10-28T10:00:03.000Z' };
+    const second: BackgroundAgent = { agentId: 'a1e2e000000000005', description: 'Tidy the notes', prompt: 'Tidy notes.md.', at: '2026-10-28T10:01:03.000Z' };
+    let last = '';
+    const c = await begin((sid, cwd, after) => {
+      const ask = randomUUID();
+      const turn = backgroundAgentRecords(sid, cwd, ask, first);
+      const end = turnEndRecords(sid, cwd, turn.at(-1)!.uuid as string, '2026-10-28T10:00:04.000Z');
+      last = end.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Sort them in the background.', '2026-10-28T10:00:03.000Z'), ...turn, ...end];
+    });
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, first);
+    const { page } = c;
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
+    const rowOf = (agent: BackgroundAgent) => main(page).locator('.transcript-subagent', { hasText: agent.description });
+    const terminal = await drive(c);
+    await expect(rowOf(first), 'the turn ended while its agent works: the call stays in view').toContainText(`${first.description} started working`, { timeout: 15_000 });
+
+    await terminal.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(rowOf(first), 'its terminal went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
+
+    // resumed in a terminal, which starts another agent in the background and ends its turn
+    await drive(c, { bridged: false, open: false });
+    const ask = randomUUID();
+    const turn = backgroundAgentRecords(c.sid, c.repo.root, ask, second);
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, second);
+    await c.store.appendLines(c.transcript, [userRecord(c.sid, c.repo.root, ask, last, 'Now tidy them in the background.', '2026-10-28T10:01:03.000Z'), ...turn, ...turnEndRecords(c.sid, c.repo.root, turn.at(-1)!.uuid as string, '2026-10-28T10:01:04.000Z')].map((r) => JSON.stringify(r)));
+    await expect(rowOf(second), 'the resumed session’s agent works: its call stays in view').toContainText(`${second.description} started working`, { timeout: 15_000 });
+    await expect(rowOf(first), 'the first stays ended').toHaveCount(0);
+
+    await c.terminal!.close();
+    c.terminal = null;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(rowOf(second), 'that terminal went too: the second agent ended with it').toHaveCount(0, { timeout: 15_000 });
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 

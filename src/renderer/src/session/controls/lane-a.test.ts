@@ -13,6 +13,7 @@ import { applyLaneAState, resetLaneAStore, useLaneA } from '../../stores/lane-a'
 import { laneACatalog, laneAState } from '../../lane-a/test-support/lane-a-state';
 import { resetUploadFollows } from '../../lane-a/uploads';
 import { resetLaneAWatches } from '../../lane-a/watches';
+import { TERMINAL_KEEPS_NO_QUEUE } from '../../composer/submit/submit-state'; // UX wave U4a
 import { laneAAnswerCapability, laneAControls, LANE_A_WORDS } from './lane-a';
 
 const APP = at('app-a') as AppSessionId;
@@ -94,8 +95,15 @@ describe('send', () => {
     expect(await refused.controls.send('x', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: 'too many messages waiting for this session' });
     const key = { writer: 'maws/m', seq: 3 };
     const later = port({}, { 'laneA.send': { key, state: 'submitted' } });
-    expect(await later.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(await later.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false, pendingKey: key }); // UX wave U5a: the strip's key
     expect(useLaneA.getState().pendingSends.get(APP)).toEqual([{ key, text: 'slow words', state: 'sending', reason: null }]);
+  });
+
+  // UX wave U5a (decision 8): the pending send is named by its key; with none the bridge made no pending send to name
+  it('an unconfirmed answer naming no key holds nothing and carries no key', async () => {
+    const { controls } = port({}, { 'laneA.send': { key: null, state: 'submitted' } });
+    expect(await controls.send('lost words', { origin: 'comment' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(useLaneA.getState().pendingSends.get(APP)).toBeUndefined();
   });
 
   it('runs a `/` text whose route runs as a command, and refuses one whose route does not, sending nothing', async () => {
@@ -106,6 +114,27 @@ describe('send', () => {
     expect(await controls.send('/doctor', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: 'runs only in the terminal' });
     expect(fake.invoked('laneA.command')).toHaveLength(1);
     expect(fake.invoked('laneA.send')).toEqual([]);
+  });
+
+  // UX wave U4a (l3-input-08): Enter sends a draft of any line count, and a terminal session's send is the same call
+  it('delivers a draft of several lines as one laneA.send, as one line goes', async () => {
+    const { fake, controls } = port({}, { 'laneA.send': { key: { writer: 'maws/m', seq: 4 }, state: 'entered', uuid: 'row-4' } });
+    expect(await controls.send('one\ntwo\nthree', { origin: 'composer' })).toMatchObject({ disposition: 'sent' });
+    expect(fake.invoked('laneA.send')).toEqual([{ appSessionId: APP, text: 'one\ntwo\nthree' }]);
+  });
+
+  // UX wave U4a (l3-input-03; Interfaces D): MAWS keeps no queue for a terminal session, so ⌘Enter during its turn is
+  // refused with the sentence and nothing goes; with no turn running it sends as Enter does
+  it('refuses a prompt kept for after the turn while a turn runs, sending nothing; idle, it sends', async () => {
+    const busy = port({ turn: { running: true, unknown: false } }, { 'laneA.send': { key: { writer: 'maws/m', seq: 5 }, state: 'entered', uuid: 'row-5' } });
+    const precheck = () => true;
+    expect(await busy.controls.send('later', { origin: 'composer', when: 'after', precheck })).toEqual({ disposition: 'refused', started: false, reason: TERMINAL_KEEPS_NO_QUEUE });
+    expect(await busy.controls.send([{ type: 'text', text: 'later' }], { origin: 'composer', when: 'after' })).toEqual({ disposition: 'refused', started: false, reason: TERMINAL_KEEPS_NO_QUEUE });
+    expect(busy.fake.calls.filter((c) => ['invoke laneA.send', 'invoke laneA.media', 'invoke laneA.command'].includes(c))).toEqual([]);
+    expect(TERMINAL_KEEPS_NO_QUEUE).toBe('A terminal session takes a message at its next step; MAWS cannot hold one for after the turn');
+    const idle = port({}, { 'laneA.send': { key: { writer: 'maws/m', seq: 6 }, state: 'entered', uuid: 'row-6' } });
+    expect(await idle.controls.send('now', { origin: 'composer', when: 'after' })).toEqual({ disposition: 'sent', started: false, messageUuid: 'row-6' });
+    expect(idle.fake.invoked('laneA.send')).toEqual([{ appSessionId: APP, text: 'now' }]);
   });
 
   it('honours the caller’s own checks', async () => {
@@ -219,18 +248,21 @@ describe('the chips', () => {
   it('names the override, else the session’s model, and lists the catalog’s models with fable', () => {
     const { controls } = port({ override: { model: 'haiku', effort: 'low' } });
     const model = controls.bindings().model;
-    expect(model.label).toBe('haiku low');
+    expect(model.label).toBe('haiku Low');
     expect(model.value).toEqual({ model: 'haiku', effort: 'low' });
     expect(model.options.map((o) => o.value)).toEqual(['opus', 'sonnet', 'haiku', 'fable']);
     expect(port().controls.bindings().model.label).toBe('opus');
+    // UX wave U4a (decision 19): the bridge's catalog has no display names, so each row is named by its alias; no status,
+    // so no Fast; the tooltip's display name is the alias itself
+    expect(port().controls.bindings().model.name).toMatchObject({ name: 'opus', fast: false, display: 'opus', alias: 'opus' });
   });
 
   // The O9 sitting (item 4): after `/model haiku` and `/effort low` in the terminal the chip still read Opus. It names
   // what the session's latest request ran on; an override MAWS set names itself before the next request carries it.
   it('names the model and effort the session runs on, an override MAWS set winning, each part on its own', () => {
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku low');
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet low');
-    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku high');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.label).toBe('haiku Low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: 'sonnet', effort: null } }).controls.bindings().model.label).toBe('sonnet Low');
+    expect(port({ model: 'claude-haiku-5-5', effort: 'low', override: { model: null, effort: 'high' } }).controls.bindings().model.label).toBe('haiku High');
     // what MAWS set stays the selector's choice: the terminal's own is its Default
     expect(port({ model: 'claude-haiku-5-5', effort: 'low' }).controls.bindings().model.value).toEqual({ model: null, effort: null });
   });
@@ -251,6 +283,15 @@ describe('the chips', () => {
     expect(controlsCapabilityMode()).toEqual({ available: false, reason: LANE_A_WORDS.mode }); // Q2's words where the gap is listed
     expect(bindings().directories.disabled).toBe(LANE_A_WORDS.directories);
     expect(bindings().location.path).toBe('/work/here');
+  });
+
+  // UX wave U8c-2 (M4 decision 10): the location chip names the working folder and the branch recorded for it.
+  it('names the working folder and its recorded branch in the location chip', () => {
+    const state = laneAState(APP);
+    applyLaneAState(APP, state);
+    const moved = { ...rec, branch: 'main', agentFolder: { checkout: '/work/here/.claude/worktrees/w1', cwd: '/work/here/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+    const { client } = fakeClient({ 'laneA.catalog': laneACatalog() });
+    expect(laneAControls(state, moved, { appSessionId: APP, client }).bindings().location).toMatchObject({ path: '/work/here/.claude/worktrees/w1', branch: 'w1' });
   });
 
   // sminos 1.27.14: the bridge reports the mode (main's state holds it only from such a bridge); MAWS shows it and when
@@ -460,7 +501,7 @@ describe('a grade refusal on another machine', () => {
     expect(await controls.send('hello', { origin: 'composer' })).toEqual({ disposition: 'refused', started: false, reason: WORDS });
     const key = { writer: 'remote/m', seq: 2 };
     const slow = remotePort({}, { 'laneA.send': { key, state: 'submitted' } });
-    expect(await slow.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false });
+    expect(await slow.controls.send('slow words', { origin: 'composer' })).toEqual({ disposition: 'unconfirmed', started: false, pendingKey: key });
     applyLaneAState(APP, laneAState(APP, { link: LINK, acts: [], deliveries: [{ key, at: AT, state: 'refused', reason: WORDS }] }));
     expect(useLaneA.getState().pendingSends.get(APP)).toEqual([{ key, text: 'slow words', state: 'refused', reason: WORDS }]);
   });

@@ -1,7 +1,7 @@
 // W3 (C6, charter §5.4 as amended 2026-10-01): a slash widget opens as one floating dialog over the window; Esc or the
 // widget's close puts it away and gives the keyboard back to the session's composer.
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
@@ -47,6 +47,44 @@ describe('the widget dialog', () => {
       act(() => openWidgetDialog(A, 'mcp', ''));
       fireEvent.click(screen.getByRole('button', { name: 'Done' }));
       await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    } finally {
+      off();
+    }
+  });
+
+  // UX wave U4a (M7): `/btw` on a session that can take a question closes its dialog before it paints and puts the
+  // keyboard in the session's card instead; the dialog's close then leaves the keyboard where the widget put it.
+  it('a widget that hands the keyboard to a field outside the dialog as it closes leaves it there', async () => {
+    const focusEditor = vi.fn();
+    registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
+    let handOff = () => {};
+    function Outside() {
+      const [asked, setAsked] = useState(false);
+      const field = useRef<HTMLInputElement>(null);
+      useLayoutEffect(() => void (handOff = () => setAsked(true)), []);
+      useEffect(() => void (asked && field.current?.focus()), [asked]);
+      return <input aria-label="Card field" ref={field} />;
+    }
+    function HandsOff({ close }: { close(): void }) {
+      useLayoutEffect(() => {
+        handOff();
+        close();
+      }, [close]);
+      return null;
+    }
+    const off = registerSlashWidget('btw', { title: 'Side question', component: HandsOff });
+    try {
+      render(
+        <>
+          <Outside />
+          <WidgetDialogHost />
+        </>,
+      );
+      act(() => openWidgetDialog(A, 'btw', ''));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20))); // past the dialog's own close focus
+      expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Card field' }));
+      expect(focusEditor).not.toHaveBeenCalled();
     } finally {
       off();
     }

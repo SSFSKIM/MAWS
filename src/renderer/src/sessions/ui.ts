@@ -8,3 +8,7 @@ export const QUIET = `${BASE} text-fg-muted hover:bg-bg-hover hover:text-fg disa
 // A native checkbox or radio painted with the accent token rather than the system accent colour.
 export const CHOICE = 'accent-accent';
 export const FIELD = 'w-full rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
+// What a sheet or a dialog dims the window with (board 523, UX wave U11a): one value from one place, read through `useScrim`
+// (scrim.tsx). A tint the theme already has, not a shade (in the dark theme it lightens the window): the renewal owns a
+// scrim token of its own.
+export const SCRIM = 'bg-bg-active';

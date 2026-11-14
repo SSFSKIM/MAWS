@@ -889,6 +889,21 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
     ]);
     expect(kinds(events.filter((e) => e.kind.startsWith('maws.')))).toEqual(['maws.pane.shown']); // the well-formed one alone
   });
+
+  // U12a (M1; Interfaces §H): a browser answer's `page` and `note` are the agent's to read; the journaled event keeps its shape
+  it('maps a show_pane result that carries page and note to maws.pane.shown of the same shape as before', () => {
+    const opened = { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' };
+    const result = { content: [{ type: 'text', text: JSON.stringify({ status: 'shown', pane: 'browser', opened, page: 'kept', note: 'The user is using this tab.' }) }] };
+    const events = feed(make(), [
+      call('r1', { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'show_pane', arguments: { pane: 'browser', target: 'https://a.test/' }, _meta: meta } }),
+      answer('r1', 1, result),
+    ]);
+    expect(only(events, 'maws.pane.shown')).toEqual([
+      expect.objectContaining({ kind: 'maws.pane.shown', toolUseId: 'toolu_a', requestId: 'r1', pane: 'browser', target: 'https://a.test/', opened, error: null }),
+    ]);
+    expect(Object.keys(only(events, 'maws.pane.shown')[0]!)).not.toContain('page');
+    expect(Object.keys(only(events, 'maws.pane.shown')[0]!)).not.toContain('note');
+  });
 });
 
 // E7 start: a message from another session, beside the user.message that carries it (E7 execution document, Design §4,
@@ -1088,5 +1103,39 @@ describe('a gap reseeded from the transcript', () => {
     feed(other, [metaRow({ event: 'transcript_reseed', rows })], 1);
     const otherStart = stream({ type: 'message_start', message: { id: 'msg_10', role: 'assistant', model: 'claude-sonnet-5', content: [], stop_reason: null, usage: { input_tokens: 0, output_tokens: 0 } } });
     expect(only(feed(other, [otherStart, block, delta], 2), 'assistant.block.delta')).toHaveLength(1);
+  });
+});
+
+// The UX wave's U8b, M5 decision 1: who started a task. The engine names a subagent's shell's and monitor's starter on
+// `task_started` (`owned_by_subagent`, `parent_task_id`) and on each `background_tasks_changed` entry (`parent_task_id`),
+// and neither key for the main loop's (pass3/uxwave/uxwave-subagent-tasks-nodelay: the agent at seq 41, its shell at 75
+// and 76, the main loop's shell at 176 and 177; findings-uxwave-U8-subagent-tasks.txt (b)).
+describe('normaliser: a task’s starter', () => {
+  const AGENT = 'ab2a8ea9925ee4d69';
+  const events = () => {
+    const n = make();
+    return loadJournal('pass3', 'uxwave/uxwave-subagent-tasks-nodelay').flatMap((row) => n.push(row));
+  };
+  const at = (list: SessionEvent[], seq: number) => list.filter((e) => e.seq === seq);
+
+  it('carries a subagent’s shell’s starter on task.started, and none for the main loop’s shell or an agent', () => {
+    const list = events();
+    for (const e of list) SessionEventSchema.parse(e);
+    expect(at(list, 76)).toMatchObject([{ kind: 'task.started', taskId: 'brqab7ydc', parentTaskId: AGENT }]);
+    expect(at(list, 177)).toMatchObject([{ kind: 'task.started', taskId: 'bfg1i3ud3' }]);
+    expect(at(list, 177)[0]).not.toHaveProperty('parentTaskId');
+    expect(at(list, 41)[0]).toMatchObject({ kind: 'subagent.started', taskId: AGENT });
+    expect(at(list, 41)[0]).not.toHaveProperty('parentTaskId');
+  });
+
+  it('carries each listed task’s starter on tasks.snapshot, and none where the entry names none', () => {
+    const list = events();
+    expect(at(list, 75)).toEqual([expect.objectContaining({
+      kind: 'tasks.snapshot',
+      tasks: [
+        { taskId: AGENT, taskType: 'local_agent', description: 'Run background sleep command', ambient: false },
+        { taskId: 'brqab7ydc', taskType: 'local_bash', description: 'Sleep 30 seconds then print marker', ambient: false, parentTaskId: AGENT },
+      ],
+    })]);
   });
 });

@@ -1,13 +1,14 @@
-import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn } from 'node:child_process';
+import { copyFileSync, mkdirSync, readFileSync, renameSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectId } from '@shared/graph/ids';
 import { ProjectRecordSchema } from '@shared/ipc/schema/session';
 import { runGit } from '../../../test/support/git-fixture';
-import { summary, tempDir } from '../../../test/support/index-fixture';
+import { gitCheckout, gitWorktree, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from './index';
-import { locate, mainWorktree, warmLinkedWorktrees } from './projects';
+import { checkoutIn, headBranch, locate, mainWorktree, repositoryAt, warmLinkedWorktrees } from './projects';
 
 describe('projects and the membership rule', () => {
   let dir: ReturnType<typeof tempDir>;
@@ -352,5 +353,111 @@ describe('projects and the membership rule', () => {
     expect(index.projects.list().map((p) => p.id)).toEqual([b.id, a.id]);
     expect(() => index.projects.update('nope' as ProjectId, { name: 'x' })).toThrow('unknown project: nope');
     expect(() => index.projects.hide('nope' as ProjectId)).toThrow('unknown project: nope');
+  });
+});
+
+// UX wave U8c-2 (§B): a folder's repository read from git's own files, with no git run: what the index judges the
+// launch folder and the working folder by. The same repository is the same common git directory; a linked work tree
+// counts only while its git directory names it back.
+describe("a folder's repository, from git's files", () => {
+  let tree: ReturnType<typeof tempDir>;
+  const at = (rel: string) => join(tree.path, rel);
+  beforeAll(async () => {
+    tree = tempDir('maws-repository-');
+    await gitCheckout(at('repo'), 'main', { 'README.md': 'hello\n', 'src/index.ts': 'export {};\n' });
+    await gitWorktree(at('repo'), at('repo/.claude/worktrees/w1'), 'worktree-w1'); // the engine's tool makes these
+    await gitWorktree(at('repo'), at('side'), 'side'); // one registered by hand, beside the checkout
+    await runGit(at('repo'), ['worktree', 'add', '-q', '--detach', at('detached')]);
+    await gitCheckout(at('other'), 'main');
+    await gitCheckout(at('repo/src/nested'), 'main'); // a repository made inside the checkout
+    mkdirSync(at('plain/sub'), { recursive: true });
+    mkdirSync(at('copy'));
+    copyFileSync(at('side/.git'), at('copy/.git')); // a copy of a worktree's pointer: its git directory names `side`
+  });
+  afterAll(() => tree.dispose());
+
+  const common = () => at('repo/.git');
+
+  it('answers the common git directory and the work tree of a checkout, a linked worktree and a sub-folder of each', () => {
+    expect(repositoryAt(at('repo'))).toEqual({ commonDir: common(), workTree: at('repo'), linked: false });
+    expect(repositoryAt(at('repo/src'))).toEqual({ commonDir: common(), workTree: at('repo'), linked: false });
+    expect(repositoryAt(at('repo/.claude/worktrees/w1'))).toEqual({ commonDir: common(), workTree: at('repo/.claude/worktrees/w1'), linked: true });
+    expect(repositoryAt(at('repo/.claude/worktrees/w1/src'))).toEqual({ commonDir: common(), workTree: at('repo/.claude/worktrees/w1'), linked: true });
+    expect(repositoryAt(at('side'))).toEqual({ commonDir: common(), workTree: at('side'), linked: true });
+  });
+
+  it('answers another repository, a nested one as its own, and none for a plain, a gone or a copied-pointer folder', () => {
+    expect(repositoryAt(at('other'))).toEqual({ commonDir: at('other/.git'), workTree: at('other'), linked: false });
+    expect(repositoryAt(at('repo/src/nested'))).toEqual({ commonDir: at('repo/src/nested/.git'), workTree: at('repo/src/nested'), linked: false });
+    expect(repositoryAt(at('plain/sub'))).toBeNull();
+    expect(repositoryAt(at('gone'))).toBeNull();
+    expect(repositoryAt(at('copy'))).toBeNull(); // the git directory it names does not name it back
+  });
+
+  it("reads the branch HEAD names at a work tree, and none when it is detached or no work tree's", () => {
+    expect(headBranch(at('repo'))).toBe('main');
+    expect(headBranch(at('repo/.claude/worktrees/w1'))).toBe('worktree-w1');
+    expect(headBranch(at('side'))).toBe('side');
+    expect(headBranch(at('detached'))).toBeNull();
+    expect(headBranch(at('plain'))).toBeNull();
+    expect(headBranch(at('gone'))).toBeNull();
+  });
+
+  // §B's table for `checkoutIn(launch, folder)`
+  it('places a folder in the launch folder\'s repository, row by row', () => {
+    const w1 = at('repo/.claude/worktrees/w1');
+    expect(checkoutIn(at('repo'), at('gone'))).toBeNull(); // does not resolve
+    expect(checkoutIn(at('plain'), at('plain/sub'))).toEqual({ checkout: at('plain'), cwd: at('plain/sub'), workTree: null, linked: false });
+    expect(checkoutIn(at('plain'), at('plain'))).toEqual({ checkout: at('plain'), cwd: at('plain'), workTree: null, linked: false });
+    expect(checkoutIn(at('plain/sub'), at('plain'))).toBeNull(); // no repository, and not under the launch folder
+    expect(checkoutIn(at('plain'), at('repo'))).toBeNull();
+    expect(checkoutIn(at('repo'), at('plain/sub'))).toBeNull(); // no repository under a launch folder that is in one
+    expect(checkoutIn(at('repo'), at('other'))).toBeNull(); // another repository
+    expect(checkoutIn(at('repo'), at('repo/src/nested'))).toBeNull(); // a nested repository is another
+    expect(checkoutIn(at('repo'), at('copy'))).toBeNull();
+    expect(checkoutIn(at('repo/src'), at('repo/src'))).toEqual({ checkout: at('repo/src'), cwd: at('repo/src'), workTree: at('repo'), linked: false });
+    expect(checkoutIn(at('repo'), at('repo/src'))).toEqual({ checkout: at('repo'), cwd: at('repo/src'), workTree: at('repo'), linked: false });
+    expect(checkoutIn(at('repo/src'), at('repo'))).toEqual({ checkout: at('repo'), cwd: at('repo'), workTree: at('repo'), linked: false }); // elsewhere in its own work tree
+    expect(checkoutIn(at('repo'), `${w1}/src`)).toEqual({ checkout: w1, cwd: `${w1}/src`, workTree: w1, linked: true });
+    expect(checkoutIn(at('repo/src'), at('side'))).toEqual({ checkout: at('side'), cwd: at('side'), workTree: at('side'), linked: true });
+    expect(checkoutIn(w1, at('repo/src'))).toEqual({ checkout: at('repo'), cwd: at('repo/src'), workTree: at('repo'), linked: false }); // the main checkout, from a worktree
+  });
+
+  // The branch review (P2): the index reads these files synchronously, inside its transaction, so a FIFO among them (a
+  // `commondir`, a worktree's `gitdir`, a `HEAD`) would block it for ever at the open. Only a regular file is read; any
+  // other is unreadable metadata, which answers null. Each FIFO here has a writer waiting, so a read that does open it
+  // takes the file's own content and returns, and the case fails rather than hangs; the writer still waiting after the
+  // call shows that nothing opened it.
+  it('reads no metadata file that is not a regular file (a FIFO), and answers it as unreadable', async () => {
+    const wt = await gitWorktree(at('repo'), at('fifo-wt'), 'fifo-wt');
+    const gitDir = at('repo/.git/worktrees/fifo-wt');
+    const asFifo = async (file: string, read: () => unknown) => {
+      const content = readFileSync(file, 'utf8');
+      renameSync(file, `${file}.kept`);
+      execFileSync('mkfifo', [file]);
+      const writer = spawn('sh', ['-c', 'printf "%s" "$0" > "$1"', content, file], { stdio: 'ignore' });
+      const exited = new Promise<void>((resolve) => writer.once('exit', () => resolve()));
+      try {
+        const answer = read();
+        await new Promise((resolve) => setTimeout(resolve, 200)); // a writer whose FIFO was opened has exited by now
+        return { answer, writerWaiting: writer.exitCode === null && writer.signalCode === null };
+      } finally {
+        writer.kill('SIGKILL');
+        await exited;
+        renameSync(`${file}.kept`, file);
+      }
+    };
+    expect.soft(await asFifo(join(gitDir, 'commondir'), () => repositoryAt(wt)), 'commondir').toEqual({ answer: null, writerWaiting: true });
+    expect.soft(await asFifo(join(gitDir, 'gitdir'), () => repositoryAt(wt)), 'gitdir').toEqual({ answer: null, writerWaiting: true });
+    expect.soft(await asFifo(join(gitDir, 'HEAD'), () => headBranch(wt)), 'HEAD').toEqual({ answer: null, writerWaiting: true });
+    expect(repositoryAt(wt)).toEqual({ commonDir: common(), workTree: wt, linked: true }); // each file back, it reads again
+    expect(headBranch(wt)).toBe('fifo-wt');
+  });
+
+  it('judges a link where it lands, and "at or under" at a segment boundary', () => {
+    symlinkSync(at('side'), at('to-side'));
+    expect(checkoutIn(at('repo'), at('to-side'))).toEqual({ checkout: at('side'), cwd: at('side'), workTree: at('side'), linked: true });
+    mkdirSync(at('plain-2'));
+    expect(checkoutIn(at('plain'), at('plain-2'))).toBeNull();
   });
 });

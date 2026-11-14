@@ -27,6 +27,7 @@ export function taskNodeOf(job: Job): TaskNode {
     reason: null,
     outputFile: job.outputFile,
     isBackground: true,
+    parentTaskId: null, // DX4's jobs name no starter (the UX wave's U8b, M5 decision 1)
     agent: null,
     workflow: null,
     provenance: { wire: false, disk: false, snapshot: false },

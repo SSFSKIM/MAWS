@@ -268,6 +268,29 @@ describe('the spine’s intercepts on every path (D44(3))', () => {
     expect(scene.lastEngine().named('session.rewind')).toEqual([REWIND]); // today's only: the stand-in intercept answered the post-D app's
   });
 
+  // The scenario stub (src/services/sessions/stub-source.ts) intercepts session.events, outside SPINE_ENGINE_INTERCEPTS: a
+  // post-D app's relayed history request for a stub session is answered by it, never refused by the engine host
+  it('a post-D app’s relay: an engine-host name the loaded spine intercepts beyond the set (the stub’s session.events) goes through it; a claimed op of another goes on raw', async () => {
+    const chunk = standInChunk();
+    const events: unknown[] = [];
+    const SNAPSHOT = { events: [], lastSeq: 0, complete: true };
+    const load = async (): Promise<SpineEntry> => {
+      const entry = await chunk.load();
+      return { ...entry, startSpine: (started) => (started.bus.intercept('session.events', (input) => (events.push(input), SNAPSHOT)), entry.startSpine(started)) };
+    };
+    await scene.start({ spine: { load } });
+    const app = await scene.app('engine-host', { capabilities: POST_D });
+    expect(await (await scene.app('machine')).request('session.launchMode')).toMatchObject({ ok: true }); // the stub's session.list loads it so
+    const EVENTS = { appSessionId: 'stub-1', afterSeq: null, limit: null };
+    expect(await app.request('session.events', EVENTS)).toMatchObject({ t: 'res', ok: true, value: SNAPSHOT });
+    expect(events).toEqual([EVENTS]);
+    expect(scene.lastEngine().named('session.events')).toEqual([]);
+    const CLAIMED_STOP = { opId: 'phone-op-00000002', opCreated: '2026-10-30T00:00:00.000Z', member: 'member-1', device: 'phone-1', fingerprint: 'fp-1', name: 'session.stop', input: { appSessionId: 'app-1', reason: 'stop' }, context: { launchId: 'l', engineSessionId: 'e' } };
+    await app.request('host.op', CLAIMED_STOP);
+    expect(chunk.noted).toEqual([]); // the spine's host.op intercept takes an inner name of the set only
+    expect(scene.lastEngine().named('host.op')).toEqual([CLAIMED_STOP]);
+  });
+
   it('the endpoint’s machine route: dispatch(machine, session.rewind) through the loaded spine’s intercept', async () => {
     const seam = endpoint();
     const chunk = standInChunk();

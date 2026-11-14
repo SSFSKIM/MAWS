@@ -34,6 +34,10 @@ export interface ScmShellProps {
   appSessionId: AppSessionId;
   directory: string; // the checkout: the session's working folder, workingFolder(session).path
   ui: StoreApi<ScmUi>;
+  // UX wave U8c-2 (M4 decision 6): false while the session works away from its launch folder. The page then draws its
+  // reads (the branch line, the changed files and their diff, the output) and none of its acts: no Push or Open PR, no
+  // git action on a row or a group, no commit form, no sheet. The service refuses an act there too (M3 decision 8).
+  acts?: boolean;
 }
 
 const Message = ({ children, role }: { children: string; role?: 'status' }) => (
@@ -42,10 +46,10 @@ const Message = ({ children, role }: { children: string; role?: 'status' }) => (
   </p>
 );
 
-export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
+export function ScmShell({ appSessionId, directory, ui, acts = true }: ScmShellProps) {
   const machine = machineFor(appSessionId);
   useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
-  useEffect(() => useScm.getState().resume(appSessionId), [appSessionId]);
+  useEffect(() => useScm.getState().resume(appSessionId, { ownRuns: acts }), [appSessionId, acts]); // acts: the launch folder's page
   const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
@@ -97,7 +101,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
         <p data-scm-header className="m-0 min-w-0 flex-1 truncate text-ui-sm text-fg">
           {headerOf(status)}
         </p>
-        <RemoteActions appSessionId={appSessionId} ui={ui} status={status} directory={directory} scm={{ data: scm.data, error: scm.error?.message }} trusted={trusted} />
+        <RemoteActions appSessionId={appSessionId} ui={ui} status={status} directory={directory} scm={{ data: scm.data, error: scm.error?.message }} trusted={trusted} acts={acts} />
       </div>
       {scm.data && !scm.data.trusted ? (
         <p role="status" data-scm-untrusted className="m-0 shrink-0 border-b border-border px-3 py-1.5 text-ui-sm text-warning">
@@ -112,7 +116,7 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
       <div data-scm-groups className="max-h-[45%] shrink-0 overflow-y-auto border-b border-border py-1">
         {SCM_GROUPS.map((name) =>
           name === 'conflicts' && groups.conflicts.length === 0 ? null : (
-            <GroupSection key={name} name={name} groups={groups} ui={ui} selected={selected} enabled={trusted === true} actions={actions} />
+            <GroupSection key={name} name={name} groups={groups} ui={ui} selected={selected} enabled={trusted === true} acts={acts} actions={actions} />
           ),
         )}
       </div>
@@ -123,9 +127,9 @@ export function ScmShell({ appSessionId, directory, ui }: ScmShellProps) {
           <Message>{empty ? SCM_COPY.noChanges : SCM_COPY.selectFile}</Message>
         </div>
       )}
-      <CommitForm appSessionId={appSessionId} ui={ui} groups={groups} trusted={trusted} />
+      {acts && <CommitForm appSessionId={appSessionId} ui={ui} groups={groups} trusted={trusted} />}
       <Output appSessionId={appSessionId} ui={ui} />
-      <Sheets appSessionId={appSessionId} ui={ui} status={status} scm={scm.data} directory={directory} />
+      {acts && <Sheets appSessionId={appSessionId} ui={ui} status={status} scm={scm.data} directory={directory} />}
     </div>
   );
 }
@@ -169,7 +173,7 @@ function GroupActions({ name, entries, enabled, actions }: { name: ScmGroupName;
   );
 }
 
-function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: ScmGroupName; groups: ScmGroups; ui: StoreApi<ScmUi>; selected: { group: ScmGroupName; path: string } | null; enabled: boolean; actions: RowActions }) {
+function GroupSection({ name, groups, ui, selected, enabled, acts, actions }: { name: ScmGroupName; groups: ScmGroups; ui: StoreApi<ScmUi>; selected: { group: ScmGroupName; path: string } | null; enabled: boolean; acts: boolean; actions: RowActions }) {
   const collapsed = useStore(ui, (s) => s.collapsed.has(name));
   const entries = groups[name];
   const title = SCM_COPY.groups[name];
@@ -185,12 +189,12 @@ function GroupSection({ name, groups, ui, selected, enabled, actions }: { name: 
             {entries.length}
           </span>
         </button>
-        <GroupActions name={name} entries={entries} enabled={enabled} actions={actions} />
+        {acts && <GroupActions name={name} entries={entries} enabled={enabled} actions={actions} />}
       </div>
       {collapsed || entries.length === 0 ? null : (
         <ul aria-label={title} className="m-0 list-none p-0">
           {entries.map((entry) => (
-            <FileRow key={entry.path} group={name} entry={entry} selected={selected?.group === name && selected.path === entry.path} enabled={enabled} actions={actions} />
+            <FileRow key={entry.path} group={name} entry={entry} selected={selected?.group === name && selected.path === entry.path} enabled={enabled} acts={acts} actions={actions} />
           ))}
         </ul>
       )}

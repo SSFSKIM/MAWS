@@ -52,6 +52,9 @@ export interface TaskNode {
   reason: string | null;
   outputFile: string | null;
   isBackground: boolean | null; // the start event's, then task.updated.patch.isBackground; null for a node with no start event
+  // The UX wave's U8b (M5): the subagent that started this task, from its start or a listing (the first named is kept);
+  // null for the main loop's, for one whose producer names none, and for an agent, whose parent is `agent.parentAgentId`
+  parentTaskId: TaskId | null;
   agent: AgentFacts | null; // agents only
   workflow: WorkflowFacts | null; // workflows only
   provenance: { wire: boolean; disk: boolean; snapshot: boolean };
@@ -75,10 +78,14 @@ export function emptyGraph(): TaskGraph {
   return { tasks: new Map(), order: [], byToolUse: new Map(), issuer: new Map(), monitorCalls: new Set() };
 }
 
+// A task type, or the label the engine's Stop callback writes for it (`Guo`, engine 2.1.322: `shell`, `subagent`,
+// `workflow`, `monitor`, `MCP task`), which a status whose list a Stop wrote carries, from this build's host or build F's
+// (the UX wave's U8b, fix round A; the architect's ruling of 2026-11-13). The one reading of a task type string: the
+// summary's counts read it too.
 export function kindOf(taskType: string): TaskKind {
-  if (taskType === 'local_agent') return 'agent';
-  if (taskType === 'local_workflow') return 'workflow';
-  if (taskType === 'local_bash') return 'shell';
+  if (taskType === 'local_agent' || taskType === 'subagent') return 'agent';
+  if (taskType === 'local_workflow' || taskType === 'workflow') return 'workflow';
+  if (taskType === 'local_bash' || taskType === 'shell') return 'shell';
   if (taskType.startsWith('monitor')) return 'monitor';
   return 'other';
 }
@@ -100,7 +107,7 @@ const blankWorkflow = (): WorkflowFacts => ({ workflowName: null, progress: null
 function blankNode(taskId: TaskId, kind: TaskKind, status: TaskStatus): TaskNode {
   return {
     taskId, kind, taskType: null, toolUseId: null, description: taskId, status, stopping: false, startedAt: null, endedAt: null, usage: null,
-    lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null, isBackground: null,
+    lastToolName: null, activity: null, summary: null, report: null, reason: null, outputFile: null, isBackground: null, parentTaskId: null,
     agent: kind === 'agent' ? blankAgent() : null, workflow: kind === 'workflow' ? blankWorkflow() : null,
     provenance: { wire: false, disk: false, snapshot: false },
   };
@@ -247,6 +254,7 @@ function applyStart(draft: Draft, e: Extract<SessionEvent, { kind: 'subagent.sta
     if (parent !== undefined) agent.parentAgentId = parent;
   }
   const workflow = kind === 'workflow' ? { ...(current.workflow ?? blankWorkflow()), ...(e.kind === 'task.started' && e.workflowName !== null ? { workflowName: e.workflowName } : {}) } : current.workflow;
+  const parentTaskId = kind === 'agent' ? null : (current.parentTaskId ?? (e.kind === 'task.started' ? (e.parentTaskId ?? null) : null));
   draft.put({
     ...current,
     kind,
@@ -258,6 +266,7 @@ function applyStart(draft: Draft, e: Extract<SessionEvent, { kind: 'subagent.sta
     startedAt: e.at,
     endedAt: null,
     isBackground: e.isBackground,
+    parentTaskId,
     agent,
     workflow,
     provenance: { ...current.provenance, wire: true },
@@ -406,13 +415,20 @@ export function applyTaskEvents(graph: TaskGraph, events: SessionEvent[]): TaskG
 
 function snapshotInto(draft: Draft, tasks: EngineSessionStatus['backgroundTasks']): void {
   for (const t of tasks) {
-    if (draft.get(t.taskId)) continue;
-    draft.put({ ...blankNode(t.taskId, kindOf(t.taskType), 'running'), taskType: t.taskType, description: t.description || t.taskId, provenance: { wire: false, disk: false, snapshot: true } });
+    const kind = kindOf(t.taskType);
+    const starter = kind === 'agent' ? null : (t.parentTaskId ?? null);
+    const current = draft.get(t.taskId);
+    if (current) {
+      if (current.parentTaskId === null && starter !== null && current.kind !== 'agent') draft.patch(t.taskId, { parentTaskId: starter });
+      continue;
+    }
+    draft.put({ ...blankNode(t.taskId, kind, 'running'), taskType: t.taskType, description: t.description || t.taskId, parentTaskId: starter, provenance: { wire: false, disk: false, snapshot: true } });
   }
 }
 
 // tasks.snapshot and the status's backgroundTasks: creates, never removes (the engine's stop emits the absent snapshot
-// before the terminal frames; removal is the store's resolution rule).
+// before the terminal frames; removal is the store's resolution rule). A listing names a task's starter where its start
+// did not (a session attached to after the task began); it never takes a starter away.
 export function applySnapshot(graph: TaskGraph, tasks: EngineSessionStatus['backgroundTasks']): TaskGraph {
   const draft = new Draft(graph);
   snapshotInto(draft, tasks);
@@ -708,3 +724,137 @@ export function counts(graph: TaskGraph): { working: number; done: number; onDis
     };
   });
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The UX wave's U8b start (M5; its document, Interfaces §E): the readings the Subagents and Background tasks cards and
+// panels share. The agents read are the topology tree's (`agentTree`): the listed agents whose status is known. "Under"
+// an agent is its descendants at any depth, agents by `agent.parentAgentId` and the other tasks by `parentTaskId`. A
+// background task is a workflow, a monitor, a task of another kind, or a shell while it is in the background.
+
+const isBackgroundTask = (n: TaskNode) => n.kind !== 'agent' && (n.kind !== 'shell' || inBackground(n));
+
+interface Family {
+  members: TaskNode[]; // first-seen order
+  firstLevel: ReadonlySet<TaskId>;
+  agentsUnder: ReadonlyMap<TaskId, TaskId[]>; // a member's direct child agents, none of them first level
+  tasksUnder: ReadonlyMap<TaskId, TaskNode[]>; // the background tasks each agent started
+}
+
+// First level: a member whose parent is the main loop or not a member. A parent cycle reaches no such member, so its
+// first member in first-seen order is taken as first level, with the rest under it, as `agentTree` lists one.
+function family(graph: TaskGraph): Family {
+  return memoised(graph, 'family', () => {
+    const members = nodesOf(graph).filter((n) => listedAgent(n) && n.status !== 'unknown');
+    const isMember = new Set(members.map((n) => n.taskId));
+    const children = new Map<TaskId, TaskId[]>();
+    const roots: TaskId[] = [];
+    for (const n of members) {
+      const parent = (n.agent?.parentAgentId ?? null) as unknown as TaskId | null;
+      if (parent !== null && parent !== n.taskId && isMember.has(parent)) children.set(parent, [...(children.get(parent) ?? []), n.taskId]);
+      else roots.push(n.taskId);
+    }
+    const firstLevel = new Set<TaskId>();
+    const reached = new Set<TaskId>();
+    const reach = (root: TaskId) => {
+      firstLevel.add(root);
+      reached.add(root);
+      for (const stack = [root]; stack.length > 0; ) {
+        for (const child of children.get(stack.pop()!) ?? []) {
+          if (reached.has(child)) continue;
+          reached.add(child);
+          stack.push(child);
+        }
+      }
+    };
+    roots.forEach(reach);
+    for (const n of members) if (!reached.has(n.taskId)) reach(n.taskId);
+    const agentsUnder = new Map([...children].map(([parent, kids]) => [parent, kids.filter((kid) => !firstLevel.has(kid))] as const));
+    const tasksUnder = new Map<TaskId, TaskNode[]>();
+    for (const n of nodesOf(graph)) if (isBackgroundTask(n) && n.parentTaskId !== null && n.parentTaskId !== n.taskId) tasksUnder.set(n.parentTaskId, [...(tasksUnder.get(n.parentTaskId) ?? []), n]);
+    return { members, firstLevel, agentsUnder, tasksUnder };
+  });
+}
+
+// The running agents and the running background tasks below one agent, at any depth.
+function runningBelow(graph: TaskGraph, taskId: TaskId): { agents: number; tasks: number } {
+  return memoised(graph, `below:${taskId}`, () => {
+    const { agentsUnder, tasksUnder } = family(graph);
+    let agents = 0;
+    let tasks = 0;
+    const seen = new Set<TaskId>([taskId]);
+    for (const stack = [taskId]; stack.length > 0; ) {
+      const at = stack.pop()!;
+      tasks += (tasksUnder.get(at) ?? []).filter((n) => n.status === 'running').length;
+      for (const child of agentsUnder.get(at) ?? []) {
+        if (seen.has(child)) continue;
+        seen.add(child);
+        if (graph.tasks.get(child)?.status === 'running') agents += 1;
+        stack.push(child);
+      }
+    }
+    return { agents, tasks };
+  });
+}
+
+// Above zero keeps an agent whose own run has ended among the running.
+export const runningUnder = (graph: TaskGraph, taskId: TaskId): number => {
+  const { agents, tasks } = runningBelow(graph, taskId);
+  return agents + tasks;
+};
+export const agentsRunningUnder = (graph: TaskGraph, taskId: TaskId): number => runningBelow(graph, taskId).agents; // the N of "(+N)"
+export const tasksRunningUnder = (graph: TaskGraph, taskId: TaskId): number => runningBelow(graph, taskId).tasks; // an ended agent's "N background tasks running"
+
+// Every running agent, nested ones included: the card's "N running" and the panel's "Running N".
+export const runningAgents = (graph: TaskGraph): number => memoised(graph, 'runningAgents', () => family(graph).members.filter((n) => n.status === 'running').length);
+
+const isActive = (graph: TaskGraph, n: TaskNode) => n.status === 'running' || runningUnder(graph, n.taskId) > 0;
+
+// running: those that run or have running work under them, in the order they started (first seen); done: the others,
+// newest end first.
+function split(graph: TaskGraph, nodes: TaskNode[]): { running: TaskId[]; done: TaskId[] } {
+  return {
+    running: nodes.filter((n) => isActive(graph, n)).map((n) => n.taskId),
+    done: newestEndFirst(nodes.filter((n) => !isActive(graph, n))).map((n) => n.taskId),
+  };
+}
+
+export function firstLevelAgents(graph: TaskGraph): { running: TaskId[]; done: TaskId[] } {
+  return memoised(graph, 'firstLevel', () => {
+    const { members, firstLevel } = family(graph);
+    return split(graph, members.filter((n) => firstLevel.has(n.taskId)));
+  });
+}
+
+// A parent's direct child agents, by the same split.
+export function nestedOf(graph: TaskGraph, parent: TaskId): { active: TaskId[]; done: TaskId[] } {
+  return memoised(graph, `nested:${parent}`, () => {
+    const { running, done } = split(graph, (family(graph).agentsUnder.get(parent) ?? []).map((taskId) => graph.tasks.get(taskId)!));
+    return { active: running, done };
+  });
+}
+
+// The Subagents card's narrower list: of these agents, those that run or have a running agent under them. One whose own
+// run has ended with only tasks still running is not among them; the panel's lists keep it.
+export function onCard(graph: TaskGraph, taskIds: readonly TaskId[]): TaskId[] {
+  return taskIds.filter((taskId) => graph.tasks.get(taskId)?.status === 'running' || agentsRunningUnder(graph, taskId) > 0);
+}
+
+export function backgroundRunning(graph: TaskGraph): TaskNode[] {
+  return memoised(graph, 'backgroundRunning', () => nodesOf(graph).filter((n) => isBackgroundTask(n) && n.status === 'running'));
+}
+
+// Those not running, newest end first (a workflow read from disk with no status among them, as `workflows` lists it).
+export function backgroundDone(graph: TaskGraph): TaskNode[] {
+  return memoised(graph, 'backgroundDone', () => newestEndFirst(nodesOf(graph).filter((n) => isBackgroundTask(n) && n.status !== 'running')));
+}
+
+export function doneByKind(nodes: readonly TaskNode[]): { workflows: number; shells: number; monitors: number; other: number } {
+  const of = (kind: TaskKind) => nodes.filter((n) => n.kind === kind).length;
+  return { workflows: of('workflow'), shells: of('shell'), monitors: of('monitor'), other: of('other') };
+}
+
+export function doneByOutcome(graph: TaskGraph, taskIds: readonly TaskId[]): { failed: number; stopped: number } {
+  const of = (status: TaskStatus) => taskIds.filter((taskId) => graph.tasks.get(taskId)?.status === status).length;
+  return { failed: of('failed'), stopped: of('stopped') };
+}
+// The UX wave's U8b end

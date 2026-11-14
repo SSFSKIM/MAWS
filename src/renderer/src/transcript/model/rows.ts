@@ -42,6 +42,14 @@ export interface AnchorFrame {
   screenshot: boolean;
 }
 
+// UX wave U5a (Interfaces §H, decision 13): one comment of a message that carried several, in the order made; `attachment`
+// is the index in the row's `attachments` of the screenshot its lead announced, when every announced one can be paired
+export interface UserComment {
+  anchor: Anchor;
+  text: string;
+  attachment?: number;
+}
+
 export interface RowBase {
   id: RowId;
   turnId: TurnId | null;
@@ -54,18 +62,21 @@ export type Row = RowBase &
     | {
         kind: 'user'; messageUuid: MessageUuid | null; text: string; attachments: Attachment[]; placeholders: number[]; lines: number; editable: boolean; steer: boolean; dropped: boolean;
         pending?: 'next' | 'held'; // W1: not taken yet, a dimmed tail bubble: 'next' a steer the engine delivers at the running turn's next step, 'held' in MAWS's queue until the turn ends
+        unread?: true; // UX wave U4a (decision 12): it waited behind a turn and has neither started nor been dropped; a mount with a stack draws it there, not here
         // E3 start: what the prompt is about, when MAWS framed it as an anchored comment (X10; parsed from its own text by
         // `userTextOf`, which strips the framing from `text`); absent on every other prompt
         anchor?: Anchor;
         anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
+        comments?: UserComment[]; // UX wave U5a (§H): a message of two or more comments, which then has no `anchor` and no `anchorFrame`
+        commentsTo?: 'thread'; // UX wave U5a (M5's review): such a message framed for a side thread, which only a thread opens with
         // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): the prompt is MAWS's "Approve and retry" for
         // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
         consent?: { kind: 'command' | 'call'; subject: string };
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
-        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
+        kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' | 'message' /* E11: present when the engine, not the reader, stopped it; UX wave U4a: `message`, a message sent now ended it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | RowId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
         // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
         // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)
@@ -270,6 +281,7 @@ export interface Cell {
   status: 'running' | 'done' | 'error' | 'denied' | 'stopped';
   label: string; // diagnostic/copy label (copy.ts)
   summary?: string; // optional engine summary; never replaces a denial diagnostic
+  moved?: true; // UX wave U4a (decision 33): the engine moved the call to the background (rec.moved)
   paths: string[]; // file chips; a merged read cell lists every path
   startedAt: string;
   endedAt: string | null;
@@ -291,6 +303,7 @@ export type CellDetail =
   | {
       kind: 'shell'; command: string; description: string | null; cwd: string | null; stdout: string; stderr: string; exitCode: number | null; interrupted: boolean;
       backgroundTaskId: TaskId | null; truncated: Truncation | null; spill: Spill | null;
+      rowCwd?: string; // UX wave U8c-2 (§K): the folder the call's row records, where the call was read from rows; absent live
     }
   | { kind: 'edit'; filePath: string; change: 'create' | 'update' | 'delete'; hunks: Hunk[]; added: number; removed: number }
   | { kind: 'read'; files: { path: string; range: [number, number] | null }[]; preview: string | null; truncated: Truncation | null }

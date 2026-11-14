@@ -3,16 +3,18 @@
 // Derivation, C7's contract verbatim: extraction before the markdown stage, which shows raw tags as written since W1).
 // The engine's record of a slash command folds to the one line the human typed here too. E3: an anchored comment
 // (X10's framing, `@shared/anchor/message`) is recognised here, so the live prompt, the engine's queued steer on disk and
-// a held entry draw its anchor chip from the text alone, and the row's text is the comment as typed.
+// a held entry draw its anchor chip from the text alone, and the row's text is the comment as typed. UX wave U5a (M5;
+// Interfaces §H): a message of several comments is read whole by `readAnchoredMessage`, each comment with its anchor and
+// text, and each screenshot paired with the comment that announced it (decision 13).
 import { slashCommandLine } from '@shared/wire/local-command';
 import { LOCAL_COMMAND_TAG } from '@shared/engine/engine-markers';
 export { slashCommandLine } from '@shared/wire/local-command';
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchoredMessage, anchorLead, anchorTag, parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
 import { linkedReadOf } from '@shared/maws/linked-read'; // P4-A3
-import type { AnchorFrame, Attachment } from './rows';
+import type { AnchorFrame, Attachment, UserComment } from './rows';
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
 
@@ -23,6 +25,8 @@ export interface UserText {
   lines: number;
   anchor: Anchor | null; // E3: what an anchored comment is about; null for every other message
   frame: AnchorFrame | null; // E11: the framing taken off with it, null exactly when `anchor` is
+  comments: UserComment[] | null; // UX wave U5a: a message of two or more comments (then `anchor` is null), else null
+  commentsTo: 'thread' | null; // UX wave U5a: such a message framed for a side thread (its plural preamble), else null
 }
 
 // The n-th match becomes a `text` attachment; its place in the text is `[Pasted text #n +L lines]`, keeping one
@@ -60,12 +64,16 @@ export function placeholdersOf(text: string, attachments: Attachment[], placehol
 
 // A user row as Copy and the markdown export give it (scale-review C scalpel-2#2): its text untagged, after the anchor
 // in words when it is an anchored comment (the lead X10 writes; for an anchorless `/btw` promotion its label), so what
-// the chip names is not lost.
-export function copiedUserText(row: { text: string; attachments: Attachment[]; placeholders: number[]; anchor?: Anchor }): string {
+// the chip names is not lost. UX wave U5a: a message of several comments gives each comment's lead and text, a blank line
+// between.
+export function copiedUserText(row: { text: string; attachments: Attachment[]; placeholders: number[]; anchor?: Anchor; comments?: UserComment[] }): string {
+  if (row.comments !== undefined) return row.comments.map((comment) => `${leadOf(comment.anchor)}\n${comment.text}`).join('\n\n');
   const text = untaggedUserText(row.text, row.attachments, row.placeholders);
   if (row.anchor === undefined) return text;
-  return `${row.anchor.kind === 'none' ? `${row.anchor.label}:` : anchorLead(row.anchor, false)}\n${text}`;
+  return `${leadOf(row.anchor)}\n${text}`;
 }
+
+const leadOf = (anchor: Anchor) => (anchor.kind === 'none' ? `${anchor.label}:` : anchorLead(anchor, false));
 
 // Copy and export: each recorded placeholder replaced by its body, untagged (the engine's own behaviour); text typed
 // in the placeholder's shape stays as typed.
@@ -114,12 +122,29 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
     });
   }
   const joined = texts.join('\n\n');
-  const anchored = joined.includes('<maws_anchor') ? parseAnchoredText(joined) : null; // E3: the framing is MAWS's, not the human's words
-  const body = anchored?.text ?? joined;
-  const split = splitPastedSegments(slashCommandLine(body) ?? body);
+  const read = joined.includes('<maws_anchor') ? readAnchoredMessage(joined) : null; // E3: the framing is MAWS's, not the human's words
+  // UX wave U5a: several comments are their texts, a blank line between (what find and the fold measure), as typed in the card
+  const several = read !== null && read.comments.length > 1 ? read.comments : null;
+  const anchored = read !== null && several === null ? read.comments[0]! : null;
+  const body = several?.map((comment) => comment.text).join('\n\n') ?? anchored?.text ?? joined;
+  const split = several ? { text: body, attachments: [], placeholders: [] } : splitPastedSegments(slashCommandLine(body) ?? body);
   const text = split.text;
-  const frame = anchored ? { destination: anchored.destination, screenshot: joined.split('\n', 1)[0] === anchorLead(anchored.anchor, true) } : null;
-  return { text, attachments: [...split.attachments, ...attachments], placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null, frame };
+  const frame = anchored ? { destination: read!.destination, screenshot: anchored.screenshot } : null;
+  const all = [...split.attachments, ...attachments];
+  return { text, attachments: all, placeholders: split.placeholders, lines: text.length === 0 ? 0 : text.split('\n').length, anchor: anchored?.anchor ?? null, frame, comments: several && commentsOf(several, all), commentsTo: several && read!.destination === 'thread' ? 'thread' : null };
+}
+
+// UX wave U5a (decision 13): the k-th image of the message is the k-th comment's whose lead announced a screenshot, when
+// the images are exactly as many as those comments; otherwise (a terminal session's files travel apart from its words, a
+// route left screenshots out) no comment claims one, and the bubble draws the images after the comments.
+function commentsOf(comments: MessageComment[], attachments: Attachment[]): UserComment[] {
+  const images = attachments.flatMap((attachment, index) => (attachment.kind === 'image' ? [index] : []));
+  const announcing = comments.flatMap((comment, index) => (comment.screenshot ? [index] : []));
+  const paired = images.length === announcing.length;
+  return comments.map(({ anchor, text }, index) => {
+    const k = paired ? announcing.indexOf(index) : -1;
+    return k < 0 ? { anchor, text } : { anchor, text, attachment: images[k]! };
+  });
 }
 
 // E11 (scale-review C scalpel-2#1): `userTextOf`'s parse inverted, a comment put back in the framing it was sent in, so

@@ -12,6 +12,8 @@
 // no tab of their own shown; a chip of the person's shows theirs again, as does a new tab of theirs selected (a forwarded
 // link opened, the agent's show_pane), whichever was shown. The capability's notice gives way to the view's
 // own states, which carry the machine's reason, except for an older MAWS there, whose capabilities are all it tells.
+// U12a (Interfaces §D): the room a device size has to fit is this mount's, told by its pane while the pane holds the view
+// (beside `owns`) and handed to its chrome; a second mount of the tab at another size has its own.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
@@ -22,6 +24,7 @@ import { useForwards } from './forward';
 import { ForwardFailedPage } from './pages/ForwardFailed';
 import { BrowserPane } from './Pane';
 import { listSession, sessionTabs, useBrowser } from './store';
+import type { Room } from './viewport'; // U12a
 import { TabStrip } from './chrome/TabStrip'; // P5 O17 M10
 import { AgentGroup, RemoteCanvas, RemoteNav, useMachineName, useRemoteBrowser } from './remote/View'; // P5 O17 M10
 
@@ -43,6 +46,7 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
   const tab = tabs.find((candidate) => candidate.tabId === shownId) ?? null;
   const gone = browserTabId !== undefined && known && tab === null;
   const [owns, setOwns] = useState(false); // the pane holds the page's view
+  const [room, setRoom] = useState<Room | null>(null); // U12a: its page box's size, while it holds the view
   const refused = useForwards((s) => (surface === 'panel' ? (s.failures.get(appSessionId) ?? null) : null));
   const failure = refused !== null && refused.selected === selected ? refused : null;
   // P5 O17 M10: the agent's tabs on the session's machine
@@ -83,7 +87,7 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
           <RemoteNav remote={shownRemote} machine={machine} />
         </div>
       ) : (
-        <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} agent={agent ?? undefined} onLocal={elsewhere ? onLocal : undefined} />
+        <Chrome appSessionId={appSessionId} surface={surface} tab={tab} tabs={tabs} owns={owns} room={room} agent={agent ?? undefined} onLocal={elsewhere ? onLocal : undefined} />
       )}
       {(!elsewhere || remote?.state.view.kind === 'unsupported') && <AgentBrowserNotice appSessionId={appSessionId} />}
       <div className="min-h-0 flex-1">
@@ -94,7 +98,7 @@ export function BrowserView({ appSessionId, surface, browserTabId, visible = tru
             <ForwardFailedPage appSessionId={appSessionId} failure={failure} />
           </div>
         ) : (
-          <BrowserPane tab={tab} surface={surface} gone={gone} onOwns={setOwns} />
+          <BrowserPane tab={tab} surface={surface} gone={gone} onOwns={setOwns} onRoom={setRoom} />
         )}
       </div>
     </div>

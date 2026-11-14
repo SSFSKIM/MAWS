@@ -23,8 +23,8 @@ import { KILL_GRACE_MS } from '../src/engine-host/plugins/runner';
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { sidebarRow } from './support/sidebar';
-import { unfoldSessionCard } from './support/shell';
+import { newChatIn, openProject, sidebarRow } from './support/sidebar';
+import { pageRegion, unfoldSessionCard } from './support/shell';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -70,15 +70,19 @@ function scenarioHere(userData: string, project: string): string {
 
 // The scenario launch with the widget backend and the CLI stub: the harness's window (`harness: '1'`, the widgets page),
 // or the product's (`'0'`: the panel's summary, and Customize, whose READY project is the scratch one), from the same
-// harness build.
-async function withBackend(harness: '0' | '1', use: (maws: BackendLaunch) => Promise<void>): Promise<void> {
+// harness build. U11a (Mac run 43405665313): `'index'` is the product's window in launch mode index with the CLI stub and
+// no scenario or widget backend, for a New chat: in launch mode scenario a new tab is a bare id with no setup intent
+// (app/scenario-session-creator.ts), which every dialog reads as a started session; only `session.create` makes the
+// intent an unstarted tab is.
+async function withBackend(harness: '0' | '1' | 'index', use: (maws: BackendLaunch) => Promise<void>): Promise<void> {
   const userData = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-')));
   const project = join(userData, 'project');
   mkdirSync(project);
   const cli = writePluginCliStub(userData, stubStart(scratchMarketplace(join(userData, 'market'), { name: MARKET, plugins: MARKET_PLUGINS })));
   try {
     const source = harness === '0' ? scenarioHere(userData, project) : SCENARIO;
-    const maws = await launchMaws({ userData, env: { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    const env: Record<string, string> = harness === 'index' ? { MAWS_HARNESS: '0', MAWS_E2E_ENGINE_BIN: cli.bin } : { MAWS_HARNESS: harness, MAWS_SESSION_SOURCE: source, MAWS_SCENARIO_CLOCK: 'manual', MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin };
+    const maws = await launchMaws({ userData, env });
     try {
       await use(Object.assign(maws, { cli, project }));
     } finally {
@@ -89,7 +93,7 @@ async function withBackend(harness: '0' | '1', use: (maws: BackendLaunch) => Pro
   }
 }
 
-const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; replay: MawsLaunch }>({
+const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; chatBackend: BackendLaunch; replay: MawsLaunch }>({
   // eslint-disable-next-line no-empty-pattern -- Playwright requires the fixtures argument to be destructured
   backend: async ({}, use, testInfo) => {
     testInfo.skip(!HARNESS_BUILT, 'the widgets page needs a harness build (pnpm e2e:widgets)');
@@ -99,6 +103,11 @@ const test = base.extend<{ backend: BackendLaunch; appBackend: BackendLaunch; re
   appBackend: async ({}, use, testInfo) => {
     testInfo.skip(!HARNESS_BUILT, 'the widgets group runs on a harness build (pnpm e2e:widgets)');
     await withBackend('0', use);
+  },
+  // eslint-disable-next-line no-empty-pattern -- as above
+  chatBackend: async ({}, use, testInfo) => {
+    testInfo.skip(!HARNESS_BUILT, 'the widgets group runs on a harness build (pnpm e2e:widgets)');
+    await withBackend('index', use);
   },
   // eslint-disable-next-line no-empty-pattern -- as above
   replay: async ({}, use, testInfo) => {
@@ -204,6 +213,14 @@ async function settledLog(maws: BackendLaunch): Promise<string> {
 // P2-B M3: My items draws one row per plugin, at its representative installation's scope (`data-plugin-scope`); "Disabled"
 // when the CLI lists it not enabled here; its changes in the row's overflow (Turn on or off, Update, Uninstall…).
 const installedRow = (w: Locator, id: string, scope = 'user') => w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${id}"][data-plugin-scope="${scope}"]`);
+// A dialog layer that has just opened takes Esc and an outside press once its mount effects have run (the focus is
+// inside it) and the timer turn after them has passed: Radix's dismissable layer arms its outside-press listener on a
+// zero-delay timer from that effect, so a press dispatched before that turn reaches no listener and is lost (the board
+// 523 scene's press on Mac run 43405665313). A zero-delay timer set after the focus is seen runs after the layer's.
+async function layerTakesInput(layer: Locator): Promise<void> {
+  await expect.poll(() => layer.evaluate((node) => node.contains(document.activeElement)), { message: 'the layer holds the focus' }).toBe(true);
+  await layer.page().evaluate(() => new Promise<void>((done) => setTimeout(done, 0)));
+}
 async function expectListed(w: Locator, id: string, scope = 'user', enabled = true): Promise<void> {
   const row = installedRow(w, id, scope);
   await expect(row).toBeVisible();
@@ -237,6 +254,21 @@ async function detailUninstall(detail: Locator): Promise<void> {
   await detail.page().getByRole('menuitem', { name: 'Uninstall…', exact: true }).click();
 }
 const sheetOf = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
+// board 523: the window's colour at a point, from a one-pixel screenshot decoded in the page.
+async function pixelAt(page: Page, point: { x: number; y: number }): Promise<number[]> {
+  const shot = await page.screenshot({ clip: { ...point, width: 1, height: 1 } });
+  return page.evaluate(async (base64) => {
+    const image = new Image();
+    image.src = `data:image/png;base64,${base64}`;
+    await image.decode();
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const context = canvas.getContext('2d')!;
+    context.drawImage(image, 0, 0);
+    return [...context.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+  }, shot.toString('base64'));
+}
 // The commands and the files they write sit behind a sheet's Details, closed at every opening (the owner's ruling,
 // 2026-10-25); the second sheet, for a marketplace-declared command, has none: its command is in view.
 const detailsOf = (sheet: Locator) => sheet.getByRole('button', { name: 'Details', exact: true });
@@ -256,12 +288,14 @@ const lineOf = (row: Locator) => row.getByRole('status');
 // Plugins › Discover for the session's directory: main's catalog over the engine's reads (the stub's here; under
 // MAWS_E2E the network sources are offline), whose cards install through E8's sheet. Customize is the product window's,
 // so the cases through Discover run there (`appBackend`, `openSessionPlugins`); the harness page has no main area. The
-// Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks.
-const customizeLibrary = (page: Page) => page.locator('[data-region="main"] [data-widget="plugins"][data-widget-variant="embedded"]');
+// Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks. UX wave U7b (O-40):
+// Customize is a page beside the sidebar, not a main tab, so its library is found in the page's region.
+const customizeLibrary = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
 const allOf = (w: Locator) => w.locator('[data-discover="plugins"] [data-catalog-results]').last(); // All, on the home
 async function openDiscover(w: Locator): Promise<Locator> {
   await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
   await expect(w).toBeHidden();
+  await expect(pageRegion(w.page())).toHaveAttribute('data-destination', 'customize');
   const library = customizeLibrary(w.page());
   await expect(allOf(library).locator('[data-catalog-grid] [data-catalog-card]').first()).toBeVisible({ timeout: 30_000 });
   return library;
@@ -323,6 +357,17 @@ test.describe('interactive', () => {
         await expect(page.getByRole('dialog', { name: 'Model and effort' })).toBeVisible();
         await page.keyboard.press('Escape');
         await expect(widget(page, name)).toBeHidden();
+        continue;
+      }
+      if (name === 'btw') {
+        // UX wave U4a (M7's decisions; `openSideQuestions` in side/btw.ts): on a session that can take a question now
+        // (`canAskSide`), a pick of `/btw` hands itself to the session's side chat card and closes before its dialog is
+        // drawn. This harness mounts the composer alone and no card, so what this scene proves here is the hand-off: the
+        // pick is taken and no dialog stays. The card itself is proven where the app mounts it, `e2e/side.spec.ts` scene 5
+        // (a bare `/btw` picked from the palette opens the card with its field focused).
+        await expect(page.locator('[data-widget-dialog="btw"]')).toHaveCount(0);
+        await expect(widget(page, name)).toHaveCount(0);
+        await expect.poll(async () => (await message.textContent()) ?? '').toBe('');
         continue;
       }
       if (name === 'rename') {
@@ -389,11 +434,26 @@ test.describe('interactive', () => {
     await expect(widget(page, 'diff')).toContainText('0 files · +0 −0 · working tree');
 
     await pick(page, 'mcp'); // pass2/real-settings.jsonl seq 63
-    const servers = widget(page, 'mcp').getByRole('list', { name: 'MCP servers' }).getByRole('listitem');
+    // UX wave U11a (§C, A3): Connectors, "MCP servers" muted beside it, the switch's reach once in the head; one line
+    // per connector (name, status in words, tool count), the transport only once a row is opened
+    const mcp = widget(page, 'mcp');
+    await expect(mcp.locator('header h3')).toHaveText('Connectors');
+    await expect(mcp.locator('[data-widget-subtitle]')).toHaveText('MCP servers');
+    const reach = mcp.locator('[data-widget-note]');
+    await expect(reach).toHaveText(/^Off here is off for every session in .+\.$/);
+    await expect(reach).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
+    const list = mcp.getByRole('list', { name: 'Connectors' });
+    const servers = list.getByRole('listitem');
     await expect(servers).toHaveCount(3);
+    await expect(servers.nth(0).locator('[data-connector-state]')).toHaveText('Connected · 6 tools');
+    for (let i = 0; i < 3; i++) await expect(servers.nth(i).locator('[data-connector-state]')).toContainText('Connected');
+    await expect(list).not.toContainText('stdio ·');
+    await expect(list).not.toContainText('~/.claude.json');
+    await servers.nth(0).locator('button[aria-expanded]').click();
     await expect(servers.nth(0)).toContainText('stdio · …/ptc-launch');
+    await servers.nth(2).locator('button[aria-expanded]').click();
     await expect(servers.nth(2)).toContainText('http · https://developers.openai.com/mcp');
-    for (let i = 0; i < 3; i++) await expect(servers.nth(i)).toContainText('connected');
+    await expect(servers.nth(2).getByRole('button', { name: 'Reconnect' })).toBeVisible(); // a connected row's, in its opened part
 
     await inProject(backend); // E8: the frame follows `plugins.list`, the CLI stub's, run in the session's directory
     await pick(page, 'plugins'); // pass2/real-settings.jsonl seq 15, from the status
@@ -471,13 +531,15 @@ test.describe('interactive', () => {
 
   // ---- M3: the mutating half ----------------------------------------------------------------------------------------
 
-  // W3 (C4, charter §5.4 as amended 2026-10-01): the chip reads `<alias> <effort>` with the effort get_settings applied
-  // (pass2/dialogs seq 58: high), and opens Codex's selector above itself: the effort view first, then the model list
-  test('the model chip says sonnet high and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
+  // W3 (C4, charter §5.4 as amended 2026-10-01 and by the UX wave's U4, l3-input-14): the chip reads the model's display
+  // name and the effort in words, with the effort get_settings applied (pass2/dialogs seq 58: high), its tooltip the whole
+  // display name and the alias, and opens Codex's selector above itself: the effort view first, then the model list
+  test('the model chip says Sonnet 5 High and opens the selector: effort first, the list with Default, a pick applies at once, fast after its warning', async ({ backend }) => {
     const { page } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     const chip = page.getByRole('button', { name: /^Model / });
-    await expect(chip).toHaveAttribute('aria-label', 'Model sonnet high');
+    await expect(chip).toHaveAttribute('aria-label', 'Model Sonnet 5 High'); // named from the route's catalogue (`engine.models`)
+    await expect(chip).toHaveAttribute('title', 'Sonnet 5 · sonnet');
     await chip.click();
     const menu = page.getByRole('dialog', { name: 'Model and effort' });
     const selector = menu.locator('[data-model-selector]');
@@ -504,8 +566,11 @@ test.describe('interactive', () => {
     await expect.poll(async () => (await calls(backend)).filter((c) => c.subtype === 'set_model')).toEqual([{ subtype: 'set_model', input: { appSessionId: READY, model: 'opus' } }]);
     // P2-F wave S (S-chip; the sitting's A1.6): the chip names the model asked for at once, marked as the list marks its
     // checked row, while the engine's last init frame still names Sonnet
-    await expect(chip).toHaveAttribute('aria-label', 'Model opus high, setting…');
-    const fast = selector.getByRole('switch', { name: 'Fast mode' });
+    await expect(chip).toHaveAttribute('aria-label', 'Model Opus 5.5 High, setting…');
+    // UX wave U4a (decision 20): no lightning; fast mode is a row with its switch and a muted line, where the model offers it
+    const fastRow = selector.locator('[data-fast-row]');
+    await expect(fastRow).toContainText('Fast mode');
+    const fast = fastRow.getByRole('switch', { name: 'Fast mode' });
     await expect(fast).toBeEnabled(); // opus has fast mode
     await fast.click();
     await expect(selector).toContainText('Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage');
@@ -654,6 +719,7 @@ test.describe('interactive', () => {
 
     await pick(page, 'mcp');
     const docs = widget(page, 'mcp').getByRole('listitem').filter({ hasText: 'openaiDeveloperDocs' });
+    await docs.locator('button[aria-expanded]').click(); // U11a: a connected row's Reconnect is in its opened part
     await docs.getByRole('button', { name: 'Reconnect' }).click();
     await expect(docs.getByRole('status')).toHaveText('Working…');
     const before = (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
@@ -663,7 +729,7 @@ test.describe('interactive', () => {
     expect((await calls(backend)).find((c) => c.subtype === 'mcp_reconnect')?.input).toEqual({ appSessionId: READY, serverName: 'openaiDeveloperDocs' });
   });
 
-  test('mcp toggle discloses ~/.claude.json and reads its state back after either outcome', async ({ backend }) => {
+  test('mcp toggle: its reach said once in the head; it reads its state back after either outcome', async ({ backend }) => {
     const { page, app } = backend;
     await openPage(page, { appSessionId: READY, mode: 'interactive' });
     await pick(page, 'mcp');
@@ -671,8 +737,9 @@ test.describe('interactive', () => {
     const docs = row('openaiDeveloperDocs');
     const mcpReads = async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
 
-    // Toggle off: the persistence beside the switch, one read after the outcome, the switch from that read
-    await expect(docs).toContainText('Recorded by the engine for this project in ~/.claude.json');
+    // Toggle off: what the switch reaches said once, in the head (U11a), one read after the outcome, the switch from that read
+    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in /);
+    await expect(docs).not.toContainText('~/.claude.json');
     await holdOperations(backend, true);
     await docs.getByRole('switch').click();
     await expect(docs.getByRole('status')).toHaveText('Working…');
@@ -921,8 +988,9 @@ test.describe('replay conformance', () => {
     await control('setPermissionMode', { mode: 'default' }); // seq 167
     await control('setModel', { model: 'opus' }); // seq 171
     await control('applyFlagSettings', { settings: { fastMode: true } }); // seq 175
-    await expect(effort.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
-    await expect(effort.getByText('Fast mode · set · the next init frame confirms it', { exact: true })).toBeVisible();
+    const fastRow = effort.locator('[data-fast-row]'); // UX wave U4a (decision 20): fast mode's row, its line the pending word
+    await expect(fastRow.getByRole('switch', { name: 'Fast mode' })).toBeEnabled(); // opus has fast mode
+    await expect(fastRow.getByText('set · the next init frame confirms it', { exact: true })).toBeVisible();
     await read('session.getStatus'); // seq 177
     await expect(valueOf(widget(page, 'status').getByRole('region', { name: 'Environment' }), 'Auto mode server')).toHaveText('Disabled');
     await control('setPermissionMode', { mode: 'auto' }); // seq 179
@@ -1054,6 +1122,58 @@ test.describe('plugin management (E8)', () => {
     await expect(page.locator('[data-catalog-metric]')).toHaveCount(0); // a folder marketplace carries no count
     expect(mutations(backend)).toEqual([]);
     expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // board 523 (UX wave U11a M3; the execution document's Interfaces §E): where layers stack only the top one's backdrop
+  // paints, so the window is dimmed once; Esc, a press outside and the focus are the dialog library's, the top layer's first.
+  test('board 523: the Plugins dialog, then a plugin’s Uninstall… confirmation over it: one backdrop paints, the confirmation’s, and the window reads as under one layer; Esc, and then a press outside both, closes the confirmation alone and the dialog keeps the keyboard; Esc again closes the dialog', async ({ appBackend: backend }) => {
+    const { page } = backend;
+    const w = await openSessionPlugins(backend);
+    const backdrops = page.locator('[data-scrim]');
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/);
+    // A point of the window outside both layers: left of the dialog, at its middle.
+    const box = (await page.locator('[data-widget-dialog="plugins"]').boundingBox())!;
+    const point = { x: Math.floor(box.x / 2), y: Math.floor(box.y + box.height / 2) };
+    const alone = await pixelAt(page, point);
+
+    await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
+    const sheet = sheetOf(page, 'uninstall');
+    await expect(sheet).toBeVisible();
+    await expect(backdrops).toHaveCount(2);
+    await expect(page.locator('[data-scrim].bg-bg-active')).toHaveCount(1);
+    await expect(page.locator('[data-sheet-scrim]')).toHaveClass(/\bbg-bg-active\b/); // the confirmation's
+    await expect(page.locator('[data-scrim]:not([data-sheet-scrim])')).toHaveClass(/\bbg-transparent\b/); // the dialog's, covered
+    const apart = (a: number[], b: number[]) => Math.max(...a.map((channel, i) => Math.abs(channel - b[i]!)));
+    const stacked = await pixelAt(page, point);
+    expect(apart(stacked, alone), `the window reads ${stacked} under both layers, ${alone} under the dialog alone`).toBeLessThanOrEqual(2);
+    await test.info().attach('stacked-plugins-uninstall', { body: await page.screenshot(), contentType: 'image/png' });
+
+    await layerTakesInput(sheet);
+    await page.keyboard.press('Escape');
+    await expect(sheet).toBeHidden();
+    await expect(w).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-widget-dialog]')?.contains(document.activeElement) ?? false), { message: 'the dialog under it holds the keyboard' }).toBe(true);
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/); // the dialog's paints again
+    const single = await pixelAt(page, point);
+    expect(apart(single, alone), 'the dialog alone dims the window as before').toBeLessThanOrEqual(2);
+
+    // The confirmation again, then a press outside both layers: it closes the confirmation alone.
+    await rowAction(installedRow(w, 'e8-tools@e8-scratch'), 'Uninstall…');
+    await expect(sheet).toBeVisible();
+    await expect(backdrops).toHaveCount(2);
+    await layerTakesInput(sheet);
+    await page.mouse.click(point.x, point.y);
+    await expect(sheet).toBeHidden();
+    await expect(w).toBeVisible();
+    await expect.poll(() => page.evaluate(() => document.querySelector('[data-widget-dialog]')?.contains(document.activeElement) ?? false), { message: 'after a press outside, the dialog holds the keyboard' }).toBe(true);
+    await expect(backdrops).toHaveCount(1);
+    await expect(backdrops).toHaveClass(/\bbg-bg-active\b/);
+    await page.keyboard.press('Escape');
+    await expect(w).toBeHidden();
+    await expect(backdrops).toHaveCount(0);
+    expect(mutations(backend)).toEqual([]); // nothing ran
   });
 
   test('install at user scope from a Discover card: the sheet names the command and the writes; the card shows the CLI’s progress, then its result; the CLI ran the sheet’s argv', async ({ appBackend: backend }) => {
@@ -1604,6 +1724,77 @@ test.describe('plugin management (E8)', () => {
     await expect(skills.getByRole('status')).toHaveText('Reloaded · 15 skills');
     const ops = (await commandsOf(backend)).filter((c) => c.command === 'session.reloadPlugins' || c.command === 'session.reloadSkills').map((c) => c.command);
     expect(ops).toEqual(['session.reloadPlugins', 'session.reloadSkills', 'session.reloadSkills']);
+    expect(backend.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U11a (§D, l8-settings-03; A4): a New chat with nothing sent lists what is configured on disk for its folder,
+  // read by this Mac's engine host from the scratch project and config home (invented names): "+" › Connectors and the
+  // Connectors dialog the project's `.mcp.json` server with its scope, `/skills` the project's and the person's skills
+  // with Use in chat inserting `/<name> `, `/plugins` the CLI's installed plugin under "Not observed yet" alone; none says
+  // "Available once the session starts", and nothing starts the chat. In launch mode index (`chatBackend`): the New chat
+  // is `session.create`'s, a setup intent on the scratch project.
+  test('a New chat lists its folder’s connectors, skills and plugins before the first message, and Use in chat inserts the skill', async ({ chatBackend: backend }) => {
+    const { page, project } = backend;
+    const write = (path: string, text: string) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, text);
+    };
+    write(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'fx-docs': { type: 'http', url: 'https://docs.example.test/mcp' } } }));
+    write(join(project, '.claude', 'skills', 'fx-review', 'SKILL.md'), '---\nname: fx-review\ndescription: Review the change\n---\nReply with one word.\n');
+    write(join(configHome(backend), 'skills', 'fx-mine', 'SKILL.md'), '---\nname: fx-mine\ndescription: A skill of your own\n---\nReply with one word.\n');
+    await expect.poll(async () => value(await invoke(page, 'engine.hostState', undefined)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+    const { name } = value(await invoke(page, 'session.projects.add', { directory: project }));
+    await openProject(page, name);
+    await newChatIn(page, name);
+    await expect(page.getByRole('heading', { name: `New chat in ${name}` })).toBeVisible();
+    const tab = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+    const main = page.locator('[data-region="main"]');
+    const notYet = 'Available once the session starts';
+
+    // "+" › Connectors: the configured connector with its scope; then the dialog, one row with no switch
+    await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
+    await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
+    await expect(page.getByRole('menuitem').filter({ hasText: 'fx-docs' })).toContainText('project scope');
+    await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
+    const connectors = widget(page, 'mcp');
+    await expect(connectors.locator('[data-before-start]')).toHaveText(`Configured for ${name}. Connection state, and connectors from plugins, show once the chat starts.`);
+    await expect(connectors.locator('[data-mcp-server="fx-docs"] [data-connector-state]')).toHaveText('project scope');
+    await expect(connectors.getByRole('switch')).toHaveCount(0);
+    await expect(connectors).not.toContainText(notYet);
+    await page.keyboard.press('Escape');
+    await expect(connectors).toBeHidden();
+
+    // /skills: the skills on disk in Customize's groups; Use in chat puts `/fx-review ` in the composer and sends nothing
+    const message = main.getByRole('textbox', { name: 'Message' });
+    await message.click();
+    await page.keyboard.type('/skills');
+    await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/skills');
+    await page.keyboard.press('Enter');
+    const skills = widget(page, 'skills');
+    await expect(skills.locator('[data-before-start]')).toHaveText(`On disk for ${name}. The chat may load more once it starts.`);
+    await expect(skills.locator('[data-skills-group="here"] [data-skill-row="fx-review"]')).toBeVisible();
+    await expect(skills.locator('[data-skills-group="yours"] [data-skill-row="fx-mine"]')).toBeVisible();
+    await expect(skills.getByRole('button', { name: 'Reload skills' })).toHaveCount(0);
+    await expect(skills).not.toContainText(notYet);
+    await skills.locator('[data-skill-row="fx-review"]').getByRole('button', { name: 'Use in chat' }).click();
+    await expect(skills).toBeHidden();
+    await expect(message).toContainText('/fx-review');
+
+    // /plugins: the CLI's installed plugin, under the loaded line's "Not observed yet" alone
+    await message.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.type('/plugins');
+    await expect(page.getByRole('listbox', { name: 'Commands' }).locator('[role="option"][aria-selected="true"]')).toContainText('/plugins');
+    await page.keyboard.press('Enter');
+    const plugins = widget(page, 'plugins').and(page.locator(':not([data-widget-variant="embedded"])'));
+    await expect(plugins.locator('[data-plugins-loaded]')).toHaveText('Not observed yet');
+    await expectListed(plugins, `e8-tools@${MARKET}`);
+    await expect(plugins).not.toContainText(notYet);
+    // nothing started the chat: its setup intent stands and no session record has its id
+    expect(value(await invoke(page, 'session.intent.list', undefined)).intents.map((i) => i.appSessionId)).toContain(tab);
+    expect(value(await invoke(page, 'session.list', { includeArchived: true })).sessions.map((r) => r.appId)).not.toContain(tab);
+    await page.screenshot({ path: test.info().outputPath('u11a-before-start-plugins.png') });
     expect(backend.consoleErrors()).toEqual([]);
   });
 });

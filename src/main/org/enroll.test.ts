@@ -389,14 +389,14 @@ describe('starting an enrollment', () => {
     expect(await h.enrollment.start({ name: 'hub' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     expect(await h.enrollment.start({ name: 'a/b' }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     expect(await h.enrollment.start({ name: 'Mini' }, WINDOW)).toMatchObject({ ok: false, reason: 'machine-name-taken' });
-    expect(await h.enrollment.start({ name: 'DC-vm9' }, WINDOW)).toMatchObject({ ok: false, reason: 'prefix-names-machine' });
+    expect(await h.enrollment.start({ name: 'DC-vm9' }, WINDOW)).toEqual({ ok: false, reason: 'prefix-names-machine', detail: 'DC-vm9 falls under the delegation prefix dc-' }); // the sheet's line says the rest (U11a board 540)
     expect(await h.enrollment.start({ name: 'box', replace: newRef() }, WINDOW)).toMatchObject({ ok: false, reason: 'no-machine' });
     expect(await h.enrollment.start({ name: 'other', replace: MINI }, WINDOW)).toMatchObject({ ok: false, reason: 'shape' });
     h.busy = true;
     expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'busy' });
     h.busy = false;
     h.online = false;
-    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'hub', detail: 'the hub sign-in has ended' }); // the sheet's line says to sign in again
     h.signedIn = false;
     expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'not-root' });
     expect(h.hub.mints).toEqual([]);
@@ -415,9 +415,9 @@ describe('starting an enrollment', () => {
   it("the hub's refusal of the mint is the start's, and an enrollment cancelled while its token was minted never starts", async () => {
     const h = await harness();
     h.hub.mintAnswer = { ok: false, kind: 'status', status: 403, error: 'not-admin' };
-    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'refused', detail: 'the hub refused the enrollment: 403 not-admin' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'refused', detail: '403 not-admin' }); // the hub's status and code: the sheet's line says it refused
     h.hub.mintAnswer = { ok: false, kind: 'unreachable', detail: 'down' };
-    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toMatchObject({ ok: false, reason: 'hub' });
+    expect(await h.enrollment.start({ name: 'box' }, WINDOW)).toEqual({ ok: false, reason: 'hub', detail: 'the hub was not reached: down' });
     h.hub.mintAnswer = null;
     const pending = h.enrollment.start({ name: 'box' }, WINDOW);
     const second = h.enrollment.start({ name: 'box2' }, WINDOW);

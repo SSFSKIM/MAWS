@@ -5,6 +5,7 @@
 // (O-16, O-38): every row's three dots, where only a row that could be renamed had them. UX wave U7 (O-16): whether it is
 // nested under its lineage parent is a prop (`nested`), and a row under its project's Hidden row is `indented` one step.
 import type { SessionRecord } from '@shared/graph/session';
+import { workingWorktree } from '@shared/sessions/working-folder'; // UX wave U8c-2: the mark follows the agent
 import { PinIcon } from '../app/IconButton';
 import { MachineChip } from '../app/MachineChip';
 import { greyWords, useMachineMark } from '../app/machine-mark';
@@ -77,7 +78,7 @@ export function SessionRow({ record, level, nested, indented = false }: { record
         onAuxClick={(event) => event.button === 1 && useLayout.getState().openSession(id, { how: 'tab' })}
         className={`group/session relative flex h-(--row-h) cursor-default items-center gap-[5px] rounded-sm ${rowInset(nested, indented)} outline-accent select-none hover:bg-bg-hover focus-visible:outline-2 focus-visible:-outline-offset-2 ${selected ? 'bg-bg-active' : ''}`}
       >
-        {record.worktree !== null && <span data-testid="row-branch" role="img" aria-label="Worktree" className="shrink-0 text-ui-sm text-fg-faint">⎇</span>}
+        {workingWorktree(record) !== null && <span data-testid="row-branch" role="img" aria-label="Worktree" className="shrink-0 text-ui-sm text-fg-faint">⎇</span>}
         {/* E3 */}
         {nested && (
           <span aria-hidden data-testid="row-nested" className="-mr-[3px] shrink-0 text-ui text-fg">

@@ -1,5 +1,8 @@
 // The Settings tab's words (C11 execution document, Interfaces "Settings tab"; mockup 06 vignette 04). Every row says
 // where its value comes from and what MAWS will not touch.
+// Amended 2026-11-13, UX wave U11 (l8-settings-06): a Settings row's note is one line; where its value comes from and
+// what MAWS will not touch sit behind the row's More, and what a whole section shares is said once under its heading.
+// Engine is split into Sessions, Engine and Supervisor, and the index is grouped.
 import { MAX_IDLE_MINUTES } from '@shared/ipc/schema/settings'; // E10
 import { MAX_APP_MCP_SERVERS } from '@shared/engine/app-mcp-servers'; // P4-R8
 
@@ -14,6 +17,8 @@ export const SECTIONS = {
   browser: 'Browser', // E4a: Settings › Browser (settings version 11)
   artifacts: 'Artifacts', // P3-D: Settings › Artifacts (settings version 14)
   org: 'Org', // P5 O8 M1: Settings › Org, the sign-in to the org, last in the index
+  supervisor: 'Supervisor', // U11a M9: the background supervisor and the memory budget, out of Engine (the owner's name)
+  usage: 'Usage', // UX wave U7b (O-47): the usage panel, which the title bar's ring links to
 } as const;
 
 export const INDEX = {
@@ -21,53 +26,76 @@ export const INDEX = {
   footer: "Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.",
   writeFailed: (why: string) => `The setting was not saved · ${why}`,
   reading: 'Reading settings…',
+  // U11a M9 (l8-settings-06): the index's two group headings (an ampersand: "Sessions and engine" does not fit its width),
+  // and its last link
+  groups: { app: 'App', sessions: 'Sessions & engine' },
+  customize: 'Customize',
+  // U11a M10 (l8-settings-06): the search at the index's top; a result is a name with what stands under it, a row's
+  // section, or one of these
+  search: 'Search settings',
+  noMatch: 'No matching settings',
+  under: { section: 'Section', customize: 'Plugins, skills and connectors' },
 };
+
+// U11a M9 (l8-settings-06): a row's note is one line; the rest is behind More, opened in place. A note's words are its
+// row's states (rows.ts): `line`, `more`, and `state` for a line that reports a condition the person must act on, which
+// is never cut. A {name} in the words is a value the row fills in (a size, a number of minutes, a name).
+export const NOTE = { more: 'More', less: 'Less' };
 
 export const ENGINE = {
   // W13 (charter D-1 as amended 2026-10-01): the installed Claude Code by default, never refused for its version
   binary: 'Binary',
   change: 'Change…',
   useInstalled: 'Use installed',
-  binaryNote: "New sessions start on your installed Claude Code (~/.local/bin/claude, else claude on your shell's PATH), found again at every launch. Running sessions keep the binary they started on.",
-  binaryChosenNote: 'New sessions start on the binary you chose. Running sessions keep the binary they started on.',
-  tested: (version: string) => `MAWS was verified against Claude Code ${version}`, // E11 2.8: the release E11's live sittings ran, as the compat notice words it
+  // E11 2.8: {version} is the release E11's live sittings ran, as the compat notice words it
+  binaryNotes: {
+    installed: { line: 'New sessions start on your installed Claude Code.', more: "Found again at every launch: ~/.local/bin/claude, else claude on your shell's PATH. Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}." },
+    chosen: { line: 'New sessions start on the binary you chose.', more: 'Running sessions keep the binary they started on. MAWS was verified against Claude Code {version}.' },
+  },
   binaryReading: 'Reading the binary…',
   update: 'Update',
   updateAction: 'Update Claude Code…',
-  updateNote: 'Runs claude update in a terminal tab. New sessions start on the new version; running sessions keep theirs.',
-  updateChosenNote: 'Runs claude update in a terminal tab. New sessions stay on the binary you chose until Use installed.',
+  updateNotes: {
+    installed: { line: 'Runs claude update in a terminal tab.', more: 'New sessions start on the new version; running sessions keep theirs.' },
+    chosen: { line: 'Runs claude update in a terminal tab.', more: 'New sessions stay on your chosen binary until Use installed. Running sessions keep theirs.' },
+  },
   configHome: 'Config home',
   readOnly: 'read-only to MAWS',
-  configHomeNote: 'The engine owns transcripts, settings and trust. MAWS reads them and keeps its own index elsewhere.',
-  // R1 (charter D-9 as amended 2026-10-01): what MAWS honours of a plugin, information only
-  plugins: 'Plugins',
-  pluginsNote: 'Plugin hooks run in MAWS sessions as in the terminal; their toasts, status lines and log lines show in the session, their panes and bands not yet.',
-  subagent: 'Subagent model',
-  subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
-  subagentNote: 'Sets CLAUDE_CODE_SUBAGENT_MODEL per launch for new sessions; Session info shows what a session actually got.',
-  // W3 (charter D-18 as amended 2026-10-01)
-  autoFallback: 'When auto mode is unavailable',
-  autoFallbackNote: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS then sets this mode for the session and says so; the next resume asks for auto again.",
+  configHomeNotes: { default: { line: 'Where the engine keeps transcripts, settings and trust.' } },
 };
 
-// P4-A2 start: Settings › Engine, the launch profile every session MAWS launches runs under (settings version 17)
+// U11a M9 (l8-settings-06): Settings › Sessions, what shapes a session MAWS runs; the line under its heading says once
+// what its rows' notes each said before
+export const SESSIONS = {
+  line: 'For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.',
+  subagent: 'Subagent model',
+  subagentPlaceholder: 'inherit', // W3: the engine's own word for no override (each agent's model, else the session's)
+  subagentNotes: { default: { line: 'The model subagents use in new sessions; empty inherits.', more: 'Set as CLAUDE_CODE_SUBAGENT_MODEL at launch. Session info shows what a session actually got.' } },
+  // W3 (charter D-18 as amended 2026-10-01)
+  autoFallback: 'When auto mode is unavailable',
+  autoFallbackNotes: { default: { line: 'The mode MAWS sets when the engine refuses auto for a session.', more: "Some models (Haiku), fast mode and auto mode's circuit breaker refuse auto. MAWS says so in the session, and the next resume asks for auto again." } },
+  archive: 'Archive sessions inactive for',
+  archiveNotes: { default: { line: 'Archived sessions can be restored from the sidebar.', more: 'Pinned, live, waiting and background-running sessions stay, as do worktrees with uncommitted changes.' } },
+};
+
+// P4-A2 start: the launch profile every session MAWS launches runs under (settings version 17); Settings › Sessions (U11a M9)
 export const LAUNCH_PROFILE = {
   plugins: 'Plugins in sessions',
-  pluginsNote: 'The plugins your Claude Code settings turn on, as a terminal session loads them. Switch one off to keep it out of the sessions MAWS starts, forks and resumes; your own settings files are never changed.',
+  pluginsNotes: { default: { line: 'Switch a plugin off to keep it out of the sessions MAWS runs.', more: "The list is what your Claude Code settings turn on. A change applies at a session's next launch." } },
   pluginsReading: 'Reading your plugins…',
   pluginsNone: 'Your settings turn on no plugins.',
   pluginOn: (id: string) => `Load ${id} in MAWS sessions`,
   hooks: 'Hooks in sessions',
-  hooksNote: "None turns off every hook from your settings and your plugins in MAWS's sessions, the to-human plugin's included, so they run without MAWS's report. Each change on this page applies at a session's next launch, never to a terminal session.", // P4-R7z: the plugin's message tool needs its hooks
+  hooksNotes: { default: { line: "None turns off every hook in the sessions MAWS runs, the to-human plugin's included.", more: "Hooks come from your settings and your plugins. Without the to-human plugin's hooks a session runs without MAWS's report. A change applies at a session's next launch." } }, // P4-R7z: the plugin's message tool needs its hooks
   hooksYours: 'Yours',
   hooksNone: 'None',
 };
 // P4-A2 end
 
-// P4-R8 start: Settings › Engine › MCP servers (settings version 16)
+// P4-R8 start: Settings › Sessions › MCP servers (settings version 16; Engine's until U11a M9)
 export const MCP_SERVERS = {
   label: 'MCP servers',
-  note: "Loaded by every session MAWS starts, forks or resumes, never by a terminal session. An entry wins over a server of the same name in your own or a project's config, and a Claude Code sign-in for an HTTP server of the same name and URL without custom headers carries over. A change applies at each session's next launch.",
+  notes: { default: { line: 'Extra HTTP servers for the sessions MAWS runs.', more: "An entry wins over a server of the same name in your own or a project's config. A Claude Code sign-in for a server of the same name and URL, without custom headers, carries over. A change applies at a session's next launch." } },
   name: 'Server name',
   url: 'Server URL',
   namePlaceholder: 'name',
@@ -82,22 +110,25 @@ export const MCP_SERVERS = {
 };
 // P4-R8 end
 
-// C12 start: the memory budget's rows in Settings › Engine (C12 execution document, "Surfaces of the budget")
+// C12 start: the memory budget's rows in Settings › Supervisor (Engine's until U11a M9; C12 execution document, "Surfaces of the budget")
 export const BUDGET_SETTINGS = {
   // W7 start: the switch (settings version 7); off hides the rows below it
   enabled: 'Memory budget',
   enabledLabel: 'Release idle sessions to stay under a memory limit',
-  offNote: 'Off · engine processes never exit on their own; only archive, quit or a stop ends one. Session info still shows the memory they use.',
+  enabledNotes: { on: {}, off: { line: 'Off: an engine process ends only on archive, quit or stop.', more: 'Session info still shows the memory they use.' } },
   limit: 'Limit',
   // W7 end
   budget: 'Memory budget', // the limit's field
   placeholder: 'default',
-  defaultNote: (limit: string | null) => `Default · 25% of physical memory${limit === null ? '' : ` (${limit})`}. Past it, MAWS releases the least recently used idle session; Send resumes it.`,
-  setNote: 'Default · 25% of physical memory. Past it, MAWS releases the least recently used idle session; Send resumes it.',
+  // the default's size while the setting is the default and the host has said it ({size}); without it once a limit is set
+  limitNotes: {
+    sized: { line: 'Default: 25% of physical memory ({size}).', more: 'Past it the least recently used idle session is released. Send resumes a released session.' },
+    unsized: { line: 'Default: 25% of physical memory.', more: 'Past it the least recently used idle session is released. Send resumes a released session.' },
+  },
   useDefault: 'Use default',
   invalid: 'Enter the memory budget in GB, at least 0.5',
   stateful: 'Stateful MCP servers',
-  statefulNote: 'Servers whose state is lost when their process ends: a session connected to one is never released. Names match exactly; the field suggests those live sessions report.',
+  statefulNotes: { default: { line: 'A session connected to one of these is never released.', more: 'For servers whose state is lost when their process ends. Names match exactly; the field suggests those live sessions report.' } },
   addServer: 'Add a stateful MCP server',
   addPlaceholder: 'server name',
   remove: (name: string) => `Remove ${name}`,
@@ -105,12 +136,12 @@ export const BUDGET_SETTINGS = {
 
 // C12 end
 
-// E10 start: Settings › Engine › Background supervisor (E10 execution document, §Design 11; settings version 10)
+// E10 start: the Background supervisor, Settings › Supervisor since U11a M9 (E10 execution document, §Design 11; settings version 10)
 const sessions = (n: number) => (n === 0 ? 'no sessions' : `${n} ${n === 1 ? 'session' : 'sessions'}`);
 // The idle time as the supervisor holds it: whole minutes from the setting, seconds under the e2e seam
 const idleSpan = (ms: number) => (ms % 60_000 === 0 ? `${ms / 60_000} min` : `${Math.round(ms / 1000)} s`);
 export const SUPERVISOR = {
-  title: 'Background supervisor',
+  title: 'Background supervisor', // U11a M9: its group's name; the section's heading stands where it was drawn
   status: 'Status',
   reading: 'Reading…',
   running: (since: string, pid: number, live: number, exit: string) => `Running since ${since} · pid ${pid} · ${sessions(live)} · ${exit}`,
@@ -122,19 +153,25 @@ export const SUPERVISOR = {
   notRunning: 'Not running',
   heldLock: 'Not running · another supervisor holds its lock and does not answer',
   waiting: (live: number) => `Waiting · the previous version's supervisor still runs ${sessions(live)}; MAWS moves to a new one when they become idle`,
-  waitingNote: "This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.",
+  // what the background process is for, once main has answered; while an older version's is waited for, a state, whole
+  statusNotes: {
+    reading: {},
+    default: { line: 'Sessions run in this background process, so they can keep running after MAWS quits.' },
+    waiting: { line: "This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.", state: true as const },
+  },
   restartNow: 'Restart now',
-  statusNote: 'Sessions run in this background process, so they can keep running after MAWS quits.',
   idle: 'Exit when idle',
   idleField: 'Minutes before the supervisor exits when idle',
   idleNever: 'never', // the empty field's placeholder
   idleUnit: 'min',
-  idleNote: (minutes: number) => `With MAWS closed, the supervisor exits ${minutes} min after its last session ends, and a kept session idle that long is stopped (Send resumes it). Empty means never.`,
-  idleNeverNote: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.',
+  idleNotes: {
+    minutes: { line: 'With MAWS closed, the supervisor exits {minutes} min after its last session ends.', more: 'A kept session idle that long is stopped; Send resumes it. Empty means never.' },
+    never: { line: 'Never · the supervisor keeps running after its last session ends, even with MAWS closed.' },
+  },
   idleInvalid: `Enter whole minutes from 1 to ${MAX_IDLE_MINUTES}, or leave the field empty for never`,
   stopAll: 'Stop all',
   stopAllAction: 'Stop all sessions and the supervisor…',
-  stopAllNote: 'Every session stops; Send resumes it from its transcript. A fresh supervisor starts in its place.',
+  stopAllNotes: { default: { line: 'Every session stops; Send resumes each from its transcript.', more: 'A fresh supervisor starts in its place.' } },
   confirm: (live: number) => (live === 0 ? 'No session is running. Stop the supervisor and start a fresh one?' : `Stop ${sessions(live)} and the supervisor?`),
   confirmAction: 'Stop all',
   cancel: 'Cancel',
@@ -150,20 +187,23 @@ export const SUPERVISOR = {
 export const GATEWAY = {
   defaultRoute: 'Default route',
   routes: { machine: 'Machine’s own', gateway: 'ClaudeUsage relay', direct: 'Direct' }, // P5 O7 M9: machine
-  defaultRouteNote: 'New sessions start on this route; a session can be switched from its Session info.', // W2: no status line
-  // P5 O7 M9: the machine's own route, every machine's default; and a choice an older daemon dropped (main's mirror's words)
-  machineRouteNote: 'Machine’s own: MAWS injects nothing; the machine’s own settings, environment and login decide, as claude in its terminal would.',
+  // W2: no status line. P5 O7 M9: the machine's own route, every machine's default, says what it means
+  defaultRouteNotes: {
+    default: { line: 'New sessions start on this route.', more: 'A session can be switched from its Session info.' },
+    machine: { line: 'New sessions start on this route.', more: 'A session can be switched from its Session info. Machine’s own: MAWS injects nothing; the machine’s own settings, environment and login decide, as claude in its terminal would.' },
+  },
+  // P5 O7 M9: a choice an older daemon dropped (main's mirror's words)
   routeDropped: 'This machine’s mawsd predates the machine route; choose gateway or direct until it runs this build.',
   policy: 'Relay unreachable at launch',
   policies: { ask: 'Ask each time', wait: 'Wait for the relay', direct: 'Run direct' },
-  policyDirectNote: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.',
+  policyNotes: { default: {}, direct: { line: 'A session on a gateway model (claude/…) is asked instead: Direct cannot serve it.' } },
   offerDirect: 'Per-session Direct',
   offerDirectLabel: 'Offer "Switch to Direct…" in Session info', // W2: no status line
-  offerDirectNote: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable.",
+  offerDirectNotes: { default: { line: "The relay card's Run direct stays either way: Direct is the fallback when the relay is unreachable." } },
   directLogin: 'Direct login',
   directLoginKnown: (login: string, email: string | null) => ["engine's own", login, email].filter(Boolean).join(' · '),
   directLoginUnknown: 'unknown until a Direct session runs',
-  directLoginNote: "Only Direct sessions use it. MAWS never stores a token; ClaudeUsage holds the relay's accounts.",
+  directLoginNotes: { default: { line: 'Only Direct sessions use it.', more: "MAWS never stores a token; ClaudeUsage holds the relay's accounts." } }, // the sign-in and its Copy follow the line
   signIn: 'Sign in: run claude /login in a terminal',
   signInCommand: 'claude /login',
   copy: 'Copy',
@@ -179,6 +219,7 @@ export const KEYBOARD = {
   was: (display: string) => `Was ${display}`,
   unbound: 'Unbound',
   conflict: (title: string) => `Already bound to ${title} · unbind it first`,
+  fixedKey: (title: string) => `${title} keeps this key`, // UX wave U4a: a key an editor handles itself, which cannot be unbound
   menuNeedsModifier: 'A menu shortcut needs ⌘, ⌃ or ⌥',
   appNeedsModifier: 'An app-wide shortcut needs ⌘, ⌃ or ⌥',
   reserved: (item: string) => `Reserved by macOS · ${item}`,
@@ -196,15 +237,19 @@ export const KEYBOARD = {
 export const VOICE = {
   shortcut: 'Shortcut',
   changeInKeyboard: 'Change in Keyboard',
-  shortcutNote: "Click the microphone in the composer's toolbar to start dictating and again to stop. A shortcut, once bound, dictates into the focused composer while you hold it.",
+  // the default, unbound: the toolbar's microphone is the primary control (the owner's ruling of 2026-10-06)
+  shortcutNotes: {
+    bound: { line: 'Hold the shortcut to dictate into the focused composer.', more: "Or click the microphone in the composer's toolbar to start, and again to stop." },
+    unbound: { line: "Click the microphone in the composer's toolbar to start dictating, and again to stop.", more: 'A shortcut, once bound, dictates into the focused composer while you hold it.' },
+  },
   language: 'Language',
   system: (locale: string | null) => (locale === null ? 'System' : `System (${locale})`),
   noOnDeviceMark: 'no on-device model',
-  languageNote: "Dictation runs on this Mac through Apple's speech recognition; MAWS stores no audio and no transcript.",
+  languageNotes: { default: { line: "Recognised on this Mac by Apple's speech recognition.", more: 'MAWS stores no audio and no transcript.' } },
   helper: 'Helper',
   helperFound: 'Found at',
   helperMissing: 'Not found at',
-  helperBuild: 'run pnpm build:helper',
+  helperNotes: { default: {}, build: { line: 'run pnpm build:helper', state: true as const } }, // a development build without the helper
   helperFailed: (message: string) => `Did not start · ${message}`,
   scripted: 'scripted recognizer (test harness)',
   reading: 'Reading…',
@@ -233,11 +278,11 @@ export const APPEARANCE = {
   themeHint: 'native chrome follows',
   monoFont: 'Monospace font',
   monoFontPlaceholder: 'the default stack (SF Mono)',
-  monoFontNote: 'Name a Nerd Font to draw prompt glyphs in the terminal',
+  monoFontNotes: { default: { line: 'Name a Nerd Font to draw prompt glyphs in the terminal' } },
   // W2: Claude Desktop's setting, in its words
   transcriptWidth: 'Transcript width',
   transcriptWidths: { 768: 'Narrow', 960: 'Medium', 1280: 'Wide' },
-  transcriptWidthNote: 'Maximum width of the transcript and composer columns',
+  transcriptWidthNotes: { default: { line: 'Maximum width of the transcript and composer columns' } },
   // U+E0A0 (branch) and U+E0B0 (right arrow): the powerline glyphs a prompt draws
   preview: 'main  ~/project  $',
 };
@@ -263,7 +308,7 @@ export const NOTIFICATIONS = {
   toHuman: {
     label: 'Messages to you',
     name: 'To-human',
-    note: 'Agents send you messages and ask questions you answer in place, and a session reads as their report. The view follows at once; the instructions, the next time each session starts.',
+    notes: { default: { line: 'Agents message you and ask questions you answer in place; a session reads as their report.', more: 'The view follows at once; the instructions, the next time each session starts.' } },
   },
   // P2-C end
   approvalsCaption: 'permission requests, dialogs and MCP elicitations',
@@ -279,22 +324,25 @@ export const BROWSER = {
   profile: 'Profile',
   defaultProfile: 'Default',
   missingProfile: (profileDir: string) => `${profileDir} · not found`,
-  profileNote: 'Applies to tabs opened from now on. The address bar shows which profile a tab browses with.',
+  profileNotes: { default: { line: 'Applies to tabs opened from now on. The address bar shows which profile a tab browses with.' } },
   search: 'Search engine',
-  searchNote: 'Use %s for the search text',
+  searchNotes: { default: { line: 'Use %s for the search text' } },
   searchInvalid: 'Enter an http or https address with %s where the search text goes',
   useDefault: 'Use default',
   links: 'Links that open a new window',
   linkTargets: { 'in-app': 'In MAWS', external: 'In the system browser' },
-  linksNote: 'In MAWS, such a link opens as a new tab of the same session.',
+  linksNotes: { inApp: { line: 'In MAWS, such a link opens as a new tab of the same session.' }, external: {} },
   // cua #90: settings 12's switch
   bookmarksBar: 'Bookmarks bar',
   bookmarksBarLabel: 'Show the bookmarks bar',
-  bookmarksBarNote: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.',
+  bookmarksBarNotes: { default: { line: 'An imported profile’s Chrome bookmarks, under the address bar. ⌘⇧B in the browser.' } },
   // E4b start: the imported Chrome profiles (E4b execution document, Design §11; Decision Log 35)
   chromeProfile: 'Chrome profile',
   import: 'Import a Chrome profile…',
-  importNote: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.',
+  chromeProfileNotes: { default: { line: 'A one-time copy of its history, cookies and extensions. Chrome is never changed.' }, running: {} },
+  // U11a M9: the rows made at run time, one per imported profile and one per extension of each; drawn by their own names
+  importedProfile: 'Imported Chrome profile',
+  importedProfileNotes: { default: { line: '{summary}', state: true as const } }, // the import's summary
   importing: (step: string) => `Import running · ${step}`,
   show: 'Show',
   lastImport: (outcome: 'cancelled' | 'failed') => (outcome === 'cancelled' ? 'The last import was cancelled' : 'The last import failed'),
@@ -302,7 +350,7 @@ export const BROWSER = {
   showReport: 'Show report',
   remove: 'Remove imported profile',
   extensions: 'Extensions',
-  walletOff: 'Wallet extensions start off',
+  extensionNotes: { default: {}, wallet: { line: 'Wallet extensions start off' } },
   // cua #90: what an extension's popup cannot do in MAWS's browser (its spec's S1: `chrome.tabs.query` never answers the page)
   popupLimit: 'Extension popups can’t see the current tab here, so ad blockers and per-site toggles may not work.',
   toggles: [
@@ -317,20 +365,21 @@ export const BROWSER = {
 // D9): the design-system defaults
 export const ARTIFACTS = {
   exportAuthorName: 'Export author name',
-  exportAuthorNote: (fallback: string) => `Name on your DOCX comments. When blank, use “${fallback}”. Agent comments keep their session name.`,
+  exportAuthorNotes: { default: { line: 'Name on your DOCX comments; blank uses “{name}”.', more: 'Agent comments keep their session name.' } },
   suggestedAuthor: (name: string) => `Use ${name}`,
   defaultSystem: 'Default design system',
   house: 'House system',
-  defaultSystemNote: 'Documents, decks and designs that name no system of their own, in no Space with a default, use it. The house system is MAWS.',
+  defaultSystemNotes: {
+    default: { line: 'Used by documents, decks and designs that name no system of their own.', more: 'A Space’s default comes first. The house system is MAWS.' },
+    readFailed: { line: 'Could not read the design systems · {why}', state: true as const },
+  },
   missing: 'A deleted system · the house system applies', // the owner's default: the chain's next link is the house
   missingSpace: 'A deleted system · the next default applies', // a Space's: yours first, then the house
   bySpace: 'By Space',
-  bySpaceNote: 'A Space’s default comes before yours.',
-  noSpaces: 'No Spaces yet. A Space can have its own default design system.',
+  bySpaceNotes: { spaces: { line: 'A Space’s default comes before yours.' }, none: { line: 'No Spaces yet. A Space can have its own default design system.' } },
   useMine: 'Use my default',
   spaceSystem: (space: string) => `Design system for ${space}`,
   reading: 'Reading design systems…',
-  readFailed: (why: string) => `Could not read the design systems · ${why}`,
 } as const;
 // P3-D end
 
@@ -539,7 +588,7 @@ export const ORG = {
   rightLines: {
     spawn: 'Start sessions on it.',
     shell: 'Open a terminal and forward ports on it, outside any session.',
-    'machine-admin': 'Set its read-only mode and its ceilings.',
+    'machine-admin': 'Connect, sign in and disconnect its connectors, and choose the connector tools its dashboards may use.',
   },
   onlyOwners: 'Only its owners have rights on it, and they hold every one.',
   noRightsYou: 'You hold no rights on it.',
@@ -564,7 +613,7 @@ export const ORG = {
   rightsUnanswered: (machine: string) => `${machine} hasn’t answered yet: as this Mac issued them`,
   missingGrants: (count: number, machine: string) => `${count === 1 ? '1 grant this Mac issued is' : `${count} grants this Mac issued are`} missing on ${machine}`,
   regrant: 'Re-grant…',
-  grantsDamaged: 'Grants can’t be signed on this Mac: its record of the grants it issued is damaged.',
+  grantsDamaged: 'Grants can’t be signed on this Mac: its record of the grants it issued is damaged. Sign them from another device of the machine’s owner.',
   // A read of a machine's grants that main refused (`why`, its refusal's line) or that failed: nothing to sign against
   grantsUnread: (machine: string, why?: string) => [`${machine}’s grants can’t be read now.`, why].filter((part) => part !== undefined).join(' '),
   roots: 'Roots',
@@ -666,10 +715,10 @@ export const ORG = {
   enrollApproved: (name: string, version: number) => `Enrolled ${name}. Signed version ${version}.`,
   enrollProblems: {
     expired: 'The enrollment expired before it was approved. Start over.',
-    'not-yours': 'The hub answers this enrollment only to the admin who started it.',
+    'not-yours': 'Another admin started this enrollment, and the hub answers only to them. Ask them to finish it, or Start over to enroll the machine yourself.',
     'unknown-enrollment': 'The hub no longer knows this enrollment. Start over.',
     'key-changed': 'Another key was posted after the one shown. Start over.',
-    'machine-names': 'That name is bound to another machine for the life of the org.',
+    'machine-names': 'That name is bound to another machine for the life of the org. Start over with a different name.',
   },
   enrollSignedOut: 'The sign-in ended, so the enrollment stopped. Nothing was signed.',
   enrollGone: 'This enrollment is no longer running.',
@@ -679,12 +728,12 @@ export const ORG = {
     'not-admin': 'Only an admin enrolls a machine.',
     busy: 'Another enrollment, pairing or sign-in is running.',
     hub: 'This Mac isn’t connected to the hub. Sign in again to enroll.',
-    shape: 'That isn’t an admitted machine name.',
+    shape: 'A machine name is up to 63 letters, digits, dots, hyphens or underscores, starts with a letter or digit, and is not "hub" or "legacy".',
     'machine-name-taken': 'A machine of that name is listed: re-enroll it from its row.',
-    'prefix-names-machine': 'That name falls under a delegation’s prefix, whose names are its certified machines’.',
+    'prefix-names-machine': 'That name starts with a delegation’s prefix, which is kept for the machines that delegation certifies. Choose a name outside it.',
     'certified-machine': 'A certified machine is enrolled again through its delegation.',
-    'no-machine': 'The org state lists no such machine.',
-    refused: 'The hub refused the enrollment.',
+    'no-machine': 'The org no longer lists this machine. Close this sheet and enroll it as a new machine.',
+    refused: 'The hub refused the enrollment. Try again; if it is refused again, sign in to the hub again under Org.',
     cancelled: 'The enrollment was cancelled before its code was shown.',
   },
   enrollEndedDuring: 'The enrollment ended while Touch ID was open. Nothing was signed.',
@@ -714,16 +763,17 @@ export const ORG = {
   grantedOutcomeUnknown: (version: number, machine: string) => `Signed grant version ${version}. This Mac stopped before ${machine}’s answer came: sign again.`,
   grantedNotNewer: (version: number) => `Signed grant version ${version}. Another device changed this grant: sign again.`,
   grantRefusals: {
-    'signed-out': 'This Mac isn’t signed in to the org.',
-    damaged: 'This Mac’s record of the grants it issued is damaged, so it signs no grant.',
-    storage: 'The grant couldn’t be kept on this Mac. Nothing was sent.',
+    'signed-out': 'This Mac isn’t signed in to the org. Sign in under Org, then try again.',
+    damaged: 'This Mac’s record of the grants it issued is damaged and can’t be repaired here, so it signs no grant. Sign from another device of the machine’s owner (an admin’s, for a machine the org owns).',
+    // U11a board 540: also refused after the machine answered, when its outcome couldn't be recorded: so it says nothing of a send
+    storage: 'The grant couldn’t be saved on this Mac. Try again; if it keeps failing, check the disk’s free space.',
     busy: 'Another grant is being signed. Try again once it’s done.',
-    invalid: 'A right was named twice.',
+    invalid: 'The rights were sent wrongly (one was named twice). Close this sheet and choose them again.',
     'no-change': 'They hold these rights already.',
-    ineligible: 'This Mac can’t sign this grant:',
-    'ledger-unread': 'The machine’s grants for this person couldn’t be read, so nothing was signed.',
+    ineligible: 'This Mac can’t sign this grant. Sign it from another device of the machine’s owner, or resolve:',
+    'ledger-unread': 'The machine’s grants for this person couldn’t be read, so nothing was signed. Try again in a moment.',
     cancelled: 'Touch ID was cancelled.',
-    refused: 'The signed grant didn’t verify against the org state held now. Nothing was kept or sent.',
+    refused: 'The signed grant didn’t verify against the org state held now. Nothing was kept or sent: sign again.',
     stale: 'What this would sign changed meanwhile. Nothing was kept or sent: sign again.',
     none: 'Nothing is missing on the machine now.',
   },

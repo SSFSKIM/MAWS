@@ -10,7 +10,9 @@
 //   opening `/c.html?popup=1` with `window.open` and one calling `window.close()`), `/plain.html` (no title),
 //   `/framed.html` (a same-origin frame of `/plain.html`, for the preload's main-frame rule), and `/favicon.ico` (a PNG);
 // - `/file.bin` (4 KiB), `/drop` (the socket destroyed: Chromium's ERR_EMPTY_RESPONSE, a generic error), `/slow` (never
-//   answers, for Stop); cua #90: `/later.html` (a page answered after LATER_MS).
+//   answers, for Stop); cua #90: `/later.html` (a page answered after LATER_MS);
+// - U12a: `/marker.html` ("Marker"), whose `#marker` reads `marker-<n>` for the n-th request of it, so a case sees each
+//   load of the page, and a text field `#field` a person types in (autocomplete off: a reload leaves it empty).
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo, Socket } from 'node:net';
 // E4d start
@@ -155,6 +157,11 @@ export async function startBrowserServer(): Promise<BrowserServer> {
     if (path === '/file.bin') {
       response.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': '4096' });
       return response.end(Buffer.alloc(4096, 0x61));
+    }
+    // U12a: a new marker for every load of the page
+    if (path === '/marker.html') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+      return response.end(page('Marker', `<h1 id="marker">marker-${hits.get(path)}</h1><p><input id="field" autocomplete="off" aria-label="Notes"></p>`));
     }
     if (path === '/drop') return request.socket.destroy();
     if (path === '/slow') return void held.add(response); // never answered; ended at close

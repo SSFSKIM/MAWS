@@ -192,6 +192,7 @@
       "exitCode": 0,
       "interrupted": false,
       "kind": "shell",
+      "rowCwd": "/private/tmp/maws-e1-repo-zQsycy",
       "spill": null,
       "stderr": "",
       "stdout": "",

@@ -14,11 +14,11 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
   const [draft, field] = useCommittedDraft(settings.appearance.monoFont, (next) => writeSettings({ appearance: { monoFont: next } }));
   return (
     <>
-      <Setting label={APPEARANCE.theme}>
+      <Setting row="appearance.theme">
         <Segment label={APPEARANCE.theme} value={settings.theme} options={THEMES} onChange={(theme) => writeSettings({ theme })} />
         <span className="text-ui-sm text-fg-muted">{APPEARANCE.themeHint}</span>
       </Setting>
-      <Setting label={APPEARANCE.transcriptWidth} note={APPEARANCE.transcriptWidthNote}>
+      <Setting row="appearance.transcriptWidth">
         <Segment
           label={APPEARANCE.transcriptWidth}
           value={String(settings.appearance.transcriptWidth) as `${TranscriptWidth}`}
@@ -26,7 +26,7 @@ export function AppearanceSection({ settings }: { settings: Settings }) {
           onChange={(width) => writeSettings({ appearance: { transcriptWidth: Number(width) as TranscriptWidth } })}
         />
       </Setting>
-      <Setting label={APPEARANCE.monoFont} note={APPEARANCE.monoFontNote}>
+      <Setting row="appearance.monoFont">
         <input aria-label={APPEARANCE.monoFont} placeholder={APPEARANCE.monoFontPlaceholder} maxLength={200} spellCheck={false} {...field} className={`${INPUT} max-w-[260px]`} />
         {/* The preview draws in the family being typed, falling back through the token stack as the terminal does. */}
         <span data-testid="mono-preview" aria-hidden className="text-code whitespace-pre text-fg" style={{ fontFamily: monoFontStack(draft) ?? 'var(--font-mono)' }}>

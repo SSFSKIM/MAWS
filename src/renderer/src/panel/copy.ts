@@ -1,7 +1,6 @@
 // Every sentence the panel host shows (C8a execution document, Interfaces *Copy*; the exact strings are decisions).
 // M2 adds the summary's section copy here.
 export const COPY = {
-  home: 'Session overview',
   add: 'Add a tool',
   addNoSession: 'Open a session to add a tool',
   noTools: 'No tools registered yet',
@@ -10,6 +9,14 @@ export const COPY = {
   pin: (title: string) => `Pin ${title}`,
   unpin: (title: string) => `Unpin ${title}`,
   close: (title: string) => `Close ${title}`,
+  // UX wave U8b (its execution document, Interfaces §F): the control at the strip's right end, and an icon's context menu
+  hideColumn: 'Hide side column',
+  openSurface: 'Open surface',
+  hideSurface: 'Hide surface',
+  // M3: a tab's menu, and the bar between the two groups
+  moveBelow: 'Move below',
+  moveAbove: 'Move above',
+  resizeGroups: 'Resize groups',
 } as const;
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
@@ -17,8 +24,9 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 // The summary card (Interfaces *Copy*).
 export const SUMMARY_COPY = {
   title: 'Session overview',
-  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background work', sources: 'Sources', plugins: 'Plugins' /* R1 */, artifacts: 'Artifacts' /* E2's Deliverables; P3-L M6b */ },
+  sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background tasks' /* UX wave U8b (M8): the card takes the tool's name */, sources: 'Sources', plugins: 'Plugins' /* R1 */, artifacts: 'Artifacts' /* E2's Deliverables; P3-L M6b */ },
   // Environment
+  movedFrom: (name: string) => `moved from ${name}`, // UX wave U8c-2 (§H): the launch folder's last segment, while the agent works elsewhere
   branch: (branch: string) => `⎇ ${branch}`,
   detached: (head: string) => `detached at ${head.slice(0, 7)}`,
   notRepository: 'Not a git repository',
@@ -30,9 +38,8 @@ export const SUMMARY_COPY = {
   binary: (n: number) => ` · ${n} binary`,
   changeUnavailable: 'Change unavailable',
   modelUnknown: 'model unknown', // W9 (H4): the row names the model by its alias (`<alias> <effort>`, the composer chip's words)
-  review: 'Review',
   sessionInfo: 'Session info',
-  engineVersion: (version: string) => `Claude Code ${version}`, // W13: the version the session last ran on
+  openChanges: 'Open changes', // UX wave U8b (l5-code-16): the change line's accessible name; its counts are its description
   // Push state
   notPushed: 'Not pushed',
   ahead: (n: number, upstream: string) => `${n} ahead of ${upstream}`,
@@ -58,21 +65,11 @@ export const SUMMARY_COPY = {
   refreshPrState: 'Refresh PR state',
   checkedAt: (time: string) => `Checked ${time}`,
   // E6 end
-  // Subagents and Background work
-  open: 'Open',
-  agents: (working: number, done: number) => `${working} working · ${done} done`,
-  noAgents: 'No subagents yet',
-  background: (counts: { shells: number; workflows: number; monitors: number; other: number }) =>
-    [
-      counts.shells && plural(counts.shells, 'shell'),
-      counts.workflows && plural(counts.workflows, 'workflow'),
-      counts.monitors && plural(counts.monitors, 'monitor'),
-      counts.other && `${counts.other} other`,
-    ]
-      .filter(Boolean)
-      .join(' · ') || 'Nothing running',
-  runsOnDisk: (n: number) => `${plural(n, 'workflow run')} on disk`,
-  shellsUnavailable: 'Shells and monitors are known only while the session runs here',
+  // UX wave U8b (M8; its execution document, Interfaces §F): the two cards for running work, their heading's count, the
+  // overflow that opens the panel and the tail that opens its Done
+  running: (n: number) => `${n} running`,
+  more: (n: number) => `${n} more`,
+  finished: (n: number) => `${n} finished`,
   // Sources
   noSources: 'No sources yet',
   openSession: 'Open the session to list its sources',

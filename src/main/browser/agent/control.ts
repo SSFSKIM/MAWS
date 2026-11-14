@@ -45,6 +45,28 @@ export function personHolds(entry: TabEntry, now: number): boolean {
   return last !== null && now - last < BROWSER_HANDBACK_IDLE_MS;
 }
 
+// U12a (the UX wave's U12 execution document, Interfaces §C; ruling R1): the person is using the tab: it reads "You have
+// the page" (control `human`), or `personHolds` (their last input within BROWSER_HANDBACK_IDLE_MS). The one statement of
+// this rule, which `show_pane`'s reload reads; the takeover gate keeps reading `personHolds`, whose grace ends while the
+// tab may still read "You have the page" (cua #103).
+export function personUses(entry: TabEntry, now: number): boolean {
+  return entry.tab.control === 'human' || personHolds(entry, now);
+}
+
+// U12a (Interfaces §C; ruling R2, and the branch review's ruling 5): whether the Browser's opening by itself selects
+// `acting` in its session (`browser.agent.show`, register.ts). The one statement of the rule: not while a panel in any
+// window shows any tab of the session (a second window with this session's Browser in view, whose selection is this
+// one: a session's selected tab is one value for every window; and every tab, not the selected one alone, because a
+// selection changes at once while its notice and the view's move follow, so for that interval the panel still shows the
+// tab it had), not when the agent's tab is the selected one already, and not when the person uses the selected tab. A
+// main tab showing a tab holds nothing back, since a main tab shows its own tab whatever is selected. `selected` is the
+// session's selected tab's entry, or null when it has none; `sessionTabs` is every entry of the session.
+export function agentTabComesForward(selected: TabEntry | null, acting: TabEntry, now: number, sessionTabs: readonly TabEntry[]): boolean {
+  if ([selected, ...sessionTabs].some((entry) => entry?.tab.placedIn?.surface === 'panel')) return false;
+  if (selected === null) return true;
+  return selected.tab.tabId !== acting.tab.tabId && !personUses(selected, now);
+}
+
 // Told after every control transition (`from`: the state it left).
 export type ControlListener = (entry: TabEntry, from: BrowserControl) => void;
 

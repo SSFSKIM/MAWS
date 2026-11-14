@@ -31,6 +31,14 @@
 // record's engine session. The join then places the record by its spawn: the app session whose spine record's
 // `launchedBy.opId` is the opId of the record's `session.spawn` act in `ownersProof` (`#bySpawn`), failing closed when two
 // app sessions share it.
+//
+// The UX wave (U9, M1's listing rule; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): a lane B session's
+// listing follows the spine's record, which the member frame does not carry. A joined session whose record is archived
+// is withdrawn with the gone record, and listed again when it is unarchived; a record's title replaces the one sminos
+// reported (one it holds as a title: its first prompt standing in for none does not). The record is read (`session.get`) when the session is first reported, and judged again at each
+// `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
+// one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
+// operation's hold, so the daemon does not collect over it.
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -94,6 +102,8 @@ export type MembersContext = {
   listed(): readonly string[];
   /** A session left: what notify keeps of it goes. */
   forget(session: string): void;
+  /** U9: an operation's hold around work outside a call or an act (the listing rule's reads); none in a suite that holds nothing. */
+  hold?(reason: string): () => void;
   log(line: string): void;
   now(): number;
   /**
@@ -102,6 +112,18 @@ export type MembersContext = {
    * is kept in memory only.
    */
   marks?: { read(): Marks | null; write(marks: Marks): void };
+};
+
+/**
+ * U9: what a lane B session's spine record says of its listing. `title` null: the record names none (the report's stands),
+ * which includes a record whose title is only its first prompt standing in (`source: 'none'`): a rename, the engine's
+ * generated title or a tool's is a title the record holds.
+ */
+export type RecordSays = { archived: boolean; title: string | null };
+const recordSaysOf = (record: Record<string, unknown>): RecordSays => {
+  const held = isObject(record.title) ? record.title : null;
+  const title = held !== null && held.source !== 'none' && isText(held.text) && held.text !== '' ? held.text : null;
+  return { archived: record.archived === true, title };
 };
 
 /** P5 O12 M11: the handed-off mark's two lists. */
@@ -120,6 +142,8 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #superseded = new Set<string>();
   readonly #checkouts = new Map<string, string[]>();
   readonly #listeners = new Set<(target: SessionTarget) => void>();
+  /** U9: what the spine's record says of each joined lane B app session's listing, by its appSessionId (read, or heard). */
+  readonly #records = new Map<string, RecordSays>();
   /** The sessions held from before the latest welcome, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
   /** P5 O12 M11: the handed-off mark as on disk, read on first use (null until then), and the marks not written yet. */
@@ -186,6 +210,7 @@ export class Members implements RecordSource, CheckoutSource {
       // Withdrawn first, which settles what notify told the hub (`settled 0`, or owed), then forgotten.
       await this.#ctx.listings.gone(listing);
       this.#ctx.forget(listing);
+      this.#records.delete(listing); // U9: read again if the session comes back
     } else if (listing !== null && member !== undefined) {
       // P5 Decision Log 190 (b): a superseded record that deferred to the one that left reports the listing now (the
       // spine's index can lag a `/clear`, so the record it deferred to may have been the older).
@@ -225,6 +250,38 @@ export class Members implements RecordSource, CheckoutSource {
     const member = this.#members.get(session);
     if (member === undefined) return null;
     return member.lane === 'A' ? session : (this.#apps.get(session) ?? null);
+  }
+
+  /**
+   * U9: what the spine's record says of a lane B app session's listing (archived, its title), as last read or heard;
+   * null while nothing is known of it (a lane A session's id, or one not yet read).
+   */
+  recordSays(listingId: string): RecordSays | null {
+    return this.#records.get(listingId) ?? null;
+  }
+
+  /**
+   * U9: the spine said a record changed (`session.changed`): a joined lane B session's listing is judged again when what
+   * it says of the listing moved. Any other record is passed by.
+   */
+  async recordChanged(record: unknown): Promise<void> {
+    if (!isObject(record) || !isId(record.appId)) return;
+    const app = record.appId;
+    const reporting = this.sessions().filter((session) => this.#members.get(session)?.lane === 'B' && this.listingId(session) === app);
+    if (reporting.length === 0) return;
+    const now = recordSaysOf(record);
+    const before = this.#records.get(app);
+    this.#records.set(app, now);
+    if (before !== undefined && before.archived === now.archived && before.title === now.title) return;
+    const release = this.#ctx.hold?.('a listing following its record') ?? (() => {});
+    try {
+      for (const session of reporting) {
+        const member = this.#members.get(session);
+        if (member !== undefined) await this.#report(member);
+      }
+    } finally {
+      release();
+    }
   }
 
   /** The appSessionId a lane B member was joined to, or null. */
@@ -460,15 +517,38 @@ export class Members implements RecordSource, CheckoutSource {
     if (session === null) return;
     // P5 Decision Log 190 (b): a superseded record never replaces the listing of one that is not.
     if (this.#superseded.has(member.session) && this.sessions().some((other) => other !== member.session && !this.#superseded.has(other) && this.listingId(other) === session)) return;
+    // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
+    const says = member.lane === 'B' ? await this.#recordOf(session) : null;
+    if (says?.archived === true) return this.#ctx.listings.gone(session);
     await this.#ctx.listings.report({
       session,
       project: member.project,
       lane: member.lane,
       state: member.state,
-      title: member.title ?? '',
+      title: says?.title ?? member.title ?? '',
       owners: member.owners,
       ...(member.access === undefined ? {} : { access: member.access }),
     });
+  }
+
+  /** U9: what the spine's record says of `app`'s listing, read once (inside a hold) and then kept current by `recordChanged`. */
+  async #recordOf(app: string): Promise<RecordSays | null> {
+    const known = this.#records.get(app);
+    if (known !== undefined) return known;
+    const release = this.#ctx.hold?.('a listing reading its record') ?? (() => {});
+    try {
+      const response = await this.#ctx.dispatch('machine', 'session.get', { appSessionId: app });
+      if (!response.ok || !isObject(response.value)) return null; // no record (or no answer): the member's report stands
+      // a change heard while the read was out is the newer
+      const says = this.#records.get(app) ?? recordSaysOf(response.value);
+      this.#records.set(app, says);
+      return says;
+    } catch (error) {
+      this.#ctx.log(`endpoint: a lane B record could not be read for its listing (${(error as Error).message}); its report stands`);
+      return null;
+    } finally {
+      release();
+    }
   }
 
   /** Tells the record's listeners when what authorization reads of it moved (or it came or went). */

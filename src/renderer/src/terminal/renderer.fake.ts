@@ -136,7 +136,7 @@ export class FakeRenderer implements TerminalRenderer {
 
   probe(): TerminalProbe {
     const modes: TerminalModes = { alternateScreen: false, bracketedPaste: false, applicationCursorKeys: false, mouseTracking: 'none' };
-    return { cols: 80, rows: 24, cursorX: 0, cursorY: 0, line: () => '', lineCount: () => 0, modes: () => modes };
+    return { cols: 80, rows: 24, cursorX: 0, cursorY: 0, line: () => '', wrapped: () => false, lineCount: () => 0, modes: () => modes };
   }
 
   dispose(): void {

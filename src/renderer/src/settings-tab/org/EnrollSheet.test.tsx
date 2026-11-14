@@ -120,16 +120,7 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     let answer: EnrollStartResult = { ok: false, reason: 'busy' };
     renderSection(signing(ROOT), { 'org.enroll.start': () => answer });
     const sheet = await openEnroll();
-    const said = new Set<string>();
-    for (const reason of ENROLL_REFUSALS) {
-      answer = { ok: false, reason, detail: `why-${reason}` };
-      makeCode(sheet, 'gpu-box');
-      await vi.waitFor(() => expect(within(sheet).getByRole('alert').textContent).toMatch(reason === 'not-root' || reason === 'not-admin' ? /\.$/ : new RegExp(`why-${reason}$`)));
-      said.add(within(sheet).getByRole('alert').textContent!);
-      expect(within(sheet).getByRole('button', { name: 'Make a code' })).toBeTruthy();
-    }
-    expect(said.size).toBe(ENROLL_REFUSALS.length);
-    // and each its own explanation, not its detail's: the same detail for all, then none
+    // each its own explanation, not its detail's: the same detail for all, then none
     for (const detail of ['the same detail', undefined]) {
       const lines = new Set<string>();
       for (const reason of ENROLL_REFUSALS) {
@@ -139,12 +130,49 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
         await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(asked + 1));
         await act(async () => {}); // its answer drawn
         lines.add(within(sheet).getByRole('alert').textContent!);
+        expect(within(sheet).getByRole('button', { name: 'Make a code' })).toBeTruthy();
+        expect(document.body.innerHTML).not.toContain('mawsenroll2');
       }
       expect(lines.size, `each refusal explained apart, with ${detail ?? 'no detail'}`).toBe(ENROLL_REFUSALS.length);
     }
-    expect(said.has('A machine of that name is listed: re-enroll it from its row. · why-machine-name-taken')).toBe(true);
-    expect(said.has('This Mac can’t sign: enroll from an admin’s Mac that does.')).toBe(true); // main's detail says the same
-    expect(sent('org.enroll.start')).toHaveLength(ENROLL_REFUSALS.length * 3);
+    expect(sent('org.enroll.start')).toHaveLength(ENROLL_REFUSALS.length * 2);
+  });
+
+  // U11a board 540 (§B): every reason main gives a start, with its detail as main words it, and the exact line drawn: main's
+  // detail follows the line only where it says something the line does not
+  it('each start refusal, given main’s detail, draws its line once, and the detail only where it adds to the line', async () => {
+    const drawn: Record<(typeof ENROLL_REFUSALS)[number], readonly (readonly [string, string])[]> = {
+      'not-root': [
+        ['this Mac is not signed in to the org', 'This Mac can’t sign: enroll from an admin’s Mac that does.'],
+        ["This Mac can't sign: enroll from an admin's Mac that does", 'This Mac can’t sign: enroll from an admin’s Mac that does.'],
+      ],
+      'not-admin': [['Only an admin enrolls a machine', 'Only an admin enrolls a machine.']],
+      busy: [['an enrollment is under way: cancel it first', 'Another enrollment, pairing or sign-in is running. · an enrollment is under way: cancel it first']],
+      hub: [
+        ['the hub sign-in has ended', 'This Mac isn’t connected to the hub. Sign in again to enroll. · the hub sign-in has ended'],
+        ['the hub was not reached: down', 'This Mac isn’t connected to the hub. Sign in again to enroll. · the hub was not reached: down'],
+      ],
+      shape: [['"a/b" is not an admitted machine name', 'A machine name is up to 63 letters, digits, dots, hyphens or underscores, starts with a letter or digit, and is not "hub" or "legacy".']],
+      'machine-name-taken': [['gpu-box is listed: re-enroll it from its row', 'A machine of that name is listed: re-enroll it from its row.']],
+      'prefix-names-machine': [['dc-vm9 falls under the delegation prefix dc-', 'That name starts with a delegation’s prefix, which is kept for the machines that delegation certifies. Choose a name outside it. · dc-vm9 falls under the delegation prefix dc-']],
+      'certified-machine': [['a certified machine is enrolled again through its delegation, never from here', 'A certified machine is enrolled again through its delegation.']],
+      'no-machine': [['the org state lists no machine by that ref', 'The org no longer lists this machine. Close this sheet and enroll it as a new machine.']],
+      refused: [['403 not-admin', 'The hub refused the enrollment. Try again; if it is refused again, sign in to the hub again under Org. · 403 not-admin']],
+      cancelled: [['the enrollment was cancelled while its token was minted: nothing was shown', 'The enrollment was cancelled before its code was shown.']],
+    };
+    let answer: EnrollStartResult = { ok: false, reason: 'busy' };
+    renderSection(signing(ROOT), { 'org.enroll.start': () => answer });
+    const sheet = await openEnroll();
+    for (const reason of ENROLL_REFUSALS) {
+      for (const [detail, words] of drawn[reason]) {
+        answer = { ok: false, reason, detail };
+        const asked = sent('org.enroll.start').length;
+        makeCode(sheet, 'gpu-box');
+        await vi.waitFor(() => expect(sent('org.enroll.start')).toHaveLength(asked + 1));
+        await act(async () => {}); // its answer drawn
+        expect(within(sheet).getByRole('alert').textContent, `${reason}, ${detail}`).toBe(words);
+      }
+    }
   });
 
   it('every end the status names reads in its own words, the code gone, and Start over makes a new one', async () => {
@@ -152,10 +180,10 @@ describe('Settings › Org: the enrollment sheet (M4b)', () => {
     const sheet = await openEnroll();
     const words = {
       expired: 'The enrollment expired before it was approved. Start over.',
-      'not-yours': 'The hub answers this enrollment only to the admin who started it.',
+      'not-yours': 'Another admin started this enrollment, and the hub answers only to them. Ask them to finish it, or Start over to enroll the machine yourself.',
       'unknown-enrollment': 'The hub no longer knows this enrollment. Start over.',
       'key-changed': 'Another key was posted after the one shown. Start over.',
-      'machine-names': 'That name is bound to another machine for the life of the org.',
+      'machine-names': 'That name is bound to another machine for the life of the org. Start over with a different name.',
     } satisfies Record<(typeof ENROLL_PROBLEMS)[number], string>;
     let generation = 0;
     for (const problem of ENROLL_PROBLEMS) {

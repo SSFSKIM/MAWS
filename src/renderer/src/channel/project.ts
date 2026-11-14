@@ -33,7 +33,7 @@
 // Placement is by time: each goes before the first log entry said after it, the words the log doesn't hold yet last.
 //
 // `waitingFor` is the "Waiting on you" section's filter: the open requests of the sessions the sidebar files under this
-// org project, this Mac's and other machines' (`rowOfSession`, `rowOfListed`), a greyed machine's left out (nothing
+// org project, this Mac's and other machines' (`rowOfRecord`, `rowOfListed`), a greyed machine's left out (nothing
 // there can be answered now).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -44,7 +44,7 @@ import { waitsOnAnswer } from '@shared/attention/kinds';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { displayTitle, listedTitle } from '../sessions/title';
-import { rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
+import { rowOfListed, rowOfRecord, type OrgIndex, type RowKey } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
 import { CHANNEL } from './copy';
 
@@ -210,6 +210,30 @@ export function channelEntries(input: { events: readonly ChannelEvent[]; session
 /** The sidebar rows that stand for the org project with this sminos id. */
 const rowsOf = (index: OrgIndex, project: string): Set<RowKey> => new Set([...index.orgs.values()].filter((o) => o.smnsId === project).map((o) => o.id));
 
+/**
+ * UX wave U11a M5 (S-10; Interfaces §F, "The Channel's entries"): the channel of the sidebar row `row`, the sminos id of
+ * its org project, or null where it has none. One rule for both of the sidebar's menus, which offer Channel on a project
+ * row whose org project has an id the registry does not keep off the hub, and on a registry row whose project is the
+ * hub's (`sidebar/menus.tsx`; has-channel.test.tsx holds them equal). A machine's own row, and a key no row has, has none.
+ */
+export function channelOfRow(row: RowKey, index: OrgIndex): string | null {
+  const org = index.orgs.get(row);
+  if (org === undefined || org.registry?.hub === false) return null;
+  return org.smnsId;
+}
+
+/** Every project of a row the sidebar lists that has a channel, once, named as its row reads, in name order. */
+export function channelProjects(index: OrgIndex): { project: string; name: string }[] {
+  const rows = [...index.listed].flatMap((key) => {
+    const project = channelOfRow(key, index);
+    return project === null ? [] : [{ project, name: index.orgs.get(key)!.name }];
+  });
+  rows.sort((a, b) => a.name.localeCompare(b.name) || (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
+  const once = new Map<string, { project: string; name: string }>();
+  for (const row of rows) if (!once.has(row.project)) once.set(row.project, row);
+  return [...once.values()];
+}
+
 /** The org project's name, as its row reads; null while no project names this id. */
 export function channelProjectName(index: OrgIndex, project: string): string | null {
   return [...index.orgs.values()].find((o) => o.smnsId === project)?.name ?? null;
@@ -228,10 +252,7 @@ export function waitingFor(input: {
   if (rows.size === 0) return [];
   const rowOf = (appSessionId: AppSessionId): RowKey | null => {
     const record = input.records.get(appSessionId);
-    if (record !== undefined) {
-      const filed = rowOfListedRecord(input.index, input.projects, record, input.listed);
-      return filed === undefined ? rowOfSession(input.index, input.projects, record) : filed;
-    }
+    if (record !== undefined) return rowOfRecord(input.index, input.projects, record, input.listed);
     const listing = input.listed.get(appSessionId);
     return listing === undefined ? null : rowOfListed(input.index, listing);
   };

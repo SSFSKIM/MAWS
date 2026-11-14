@@ -1,9 +1,12 @@
-// The model chip's words (W3; charter §5.4 as amended 2026-10-01): `<alias> <effort>`, as the owner reads them (opus
-// high, sonnet xhigh, fable high, sol high), and never "Default", "Default model" or "Default (recommended)". The alias
-// is the catalogue row's value without its `claude/` prefix; the catalogue's `default` row shares Opus's resolved id
-// and comes first (reads.jsonl seq 3), so a resolved id is named by the first row that is not `default`, and `default`
-// itself by the row its resolved model names. Pure. W9 (H4): moved here from the composer's frame, since the panel's
-// summary names the model by it too (beside Settings, the widgets and the Direct model sheet).
+// The model's name (UX wave U4, l3-input-14; charter §5.4 as amended by the wave's U4 record, after Claude Desktop's
+// control): the catalogue row's display name without a parenthesised qualifier at its end ("Opus 5.5 (1M context)" reads
+// "Opus 5.5"), then "Fast" while fast mode is on and the effort in words: "Opus 5.5 High", "Opus 5.5 Fast High". A row
+// whose display name is its own value, or empty (every row of a terminal session's catalogue), keeps the alias, the row's
+// value without its `claude/` prefix; never "Default", "Default model" or "Default (recommended)". The catalogue's
+// `default` row shares Opus's resolved id and comes first (reads.jsonl seq 3), so a resolved id is named by the first row
+// that is not `default`, and `default` itself by the row its resolved model names. Pure. W9 (H4): here, not in the
+// composer's frame, since the panel's summary and Session info name the model by it too (beside Settings, the widgets
+// and the Direct model sheet).
 import type { Effort } from '../engine/launch-spec';
 
 interface Row {
@@ -81,11 +84,36 @@ export function modelAsk(held: HeldAsk | undefined, model: { requested: string |
   return { asked, explicit, pending: reported === null ? held !== undefined : !reported };
 }
 
-// The chip's text: the alias and the effort the engine runs at; the alias alone for a model without effort (Haiku) or
-// while the effort is not known; `Model` while nothing names a model.
-export function chipLabel(alias: string | null, effort: Effort | null | undefined): string {
-  if (alias === null) return 'Model';
-  return effort ? `${alias} ${effort}` : alias;
+// The model's name in its parts (UX wave U4a, decision 19): `name`, whether "Fast" shows, the effort in words (a value
+// outside EFFORT_WORDS as it is), `text` the parts joined ("Opus 5.5 Fast High"), `display` the row's whole display name
+// and `alias` for the tooltip. Null while nothing names a model: no id, or `default` where the catalogue cannot say
+// what it runs (the chip then reads "Model"). `fast` is the engine's status alone (`fastMode.state === 'on'`), so a
+// place that reads only the record says none.
+export interface ModelName {
+  name: string;
+  fast: boolean;
+  effort: string | null;
+  text: string;
+  display: string;
+  alias: string | null;
+}
+
+// What the chip reads while nothing names a model.
+export const NO_MODEL = 'Model';
+
+const QUALIFIER = /\s*\([^()]*\)$/; // one parenthesised qualifier at the end: "(1M context)", "(OpenRouter)"
+
+export function modelName(id: string | null, rows: readonly Row[], state: { effort?: string | null; fast?: boolean } = {}): ModelName | null {
+  const alias = aliasOf(id, rows);
+  if (alias === null || alias === DEFAULT_ROW) return null;
+  const row = rowFor(rows, id);
+  const titled = row !== undefined && row.displayName !== '' && row.displayName !== row.value;
+  const display = titled ? row.displayName : alias;
+  const name = titled ? row.displayName.replace(QUALIFIER, '') || row.displayName : alias;
+  const effort = state.effort ? ((EFFORT_WORDS as Record<string, string>)[state.effort] ?? state.effort) : null;
+  const fast = state.fast === true;
+  const text = [name, fast ? 'Fast' : null, effort].filter((part) => part !== null).join(' ');
+  return { name, fast, effort, text, display, alias };
 }
 
 // A catalogue row's name in a list: `default` is named by the model it runs (its own display name is the engine's

@@ -11,7 +11,7 @@
 // `machineHome`, `os.homedir()`'s realpath read once (`$HOME`, else the account's), the home the trust card's `~` read and
 // the folder list read too, and one the home-root rule drops (it drops the account's home beside it: machineHomes); a
 // worktree needs a project's checkout.
-import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { ProjectId } from '@shared/graph/ids';
 import type { LaunchedBy } from '@shared/graph/session';
 import { PermissionModeSchema } from '@shared/graph/enums';
 import { EffortSchema } from '@shared/engine/launch-spec';
@@ -23,6 +23,7 @@ import { HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { machineHome } from '@shared/machine/machine-home';
 import type { ServicesBus } from '@shared/spine/bus';
 import { IntentRefused, type SessionService } from './service';
+import { untilLaunching } from './until-launching';
 
 type SpawnInput = CommandInput<'session.spawn'>;
 type SpawnOutput = CommandOutput<'session.spawn'>;
@@ -79,7 +80,7 @@ async function spawn(bus: Pick<ServicesBus, 'onEmitted'>, deps: SpawnDeps, input
     throw error;
   }
 
-  const launching = untilLaunching(bus, appSessionId); // tapped before the start: its setup's events may precede its answer
+  const launching = untilLaunching((listener) => bus.onEmitted('session.setup', listener), appSessionId); // tapped before the start: its setup's events may precede its answer
   let outcome: StartOutcome;
   try {
     const message = input.brief === undefined ? null : { content: input.brief, display: input.brief };
@@ -118,19 +119,4 @@ function startRefusal(outcome: Exclude<StartOutcome, { status: 'starting' }>): s
     default:
       return `the start answered ${outcome.status}`;
   }
-}
-
-// The setup's `launching` (null: the record exists and the launch is under way) or its `failed` (the error's message).
-function untilLaunching(bus: Pick<ServicesBus, 'onEmitted'>, appSessionId: AppSessionId): { done: Promise<string | null>; cancel(): void } {
-  let off = () => {};
-  const done = new Promise<string | null>((resolve) => {
-    off = bus.onEmitted('session.setup', (event) => {
-      if (event.appSessionId !== appSessionId) return;
-      if (event.phase === 'launching' || event.phase === 'ready') resolve(null);
-      else if (event.phase === 'failed') resolve(event.outcome?.kind === 'error' ? event.outcome.message : (event.detail ?? `the setup failed (${event.outcome?.kind ?? 'unknown'})`));
-      else return;
-      off();
-    });
-  });
-  return { done, cancel: () => off() };
 }

@@ -13,7 +13,7 @@
 // MAWS_C11_LIVE_GPT names the relay alias the gateway-model case uses (default `luna`; a Codex alias at its usage limit
 // is refused by the relay at `set_model`).
 import { addressed } from './support/address';
-import { openSurface } from './support/shell';
+import { openSurface, usageRing } from './support/shell';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -84,7 +84,7 @@ async function withApp(label: string, env: Record<string, string>, fn: (live: Li
     value(await invoke(page, 'settings.set', { engine: { subagentModel: 'sonnet' } }));
     await fn({ maws, page, main: page.locator('[data-region="main"]'), failures, observe, step });
     observe('consoleErrors', maws.consoleErrors());
-    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Could not load this transcript'))));
+    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Couldn’t load this conversation')))); // HYDRATION.failed (transcript/model/copy.ts)
   } finally {
     await page.screenshot({ path: join(scratch.root, `${label}.png`) }).catch(() => undefined);
     await maws.cleanup();
@@ -282,22 +282,27 @@ test('every widget opens with live engine data; controls take effect and are rea
       expect(diff).toContain('c11-live.txt');
     });
 
-    await step('MCP: Reconnect completes; the switch discloses ~/.claude.json and the engine writes the scratch home', async () => {
+    await step('MCP: Reconnect completes; the head says what the switch reaches and the engine writes the scratch home', async () => {
       const w = await openWidget(live, 'mcp');
-      await expect(w).toContainText(/c11probe\s*connected/);
+      // UX wave U11a (§C): one line per connector, its status in words; Reconnect of a connected row in its opened part
+      const row = w.locator('[data-mcp-server="c11probe"]');
+      const state = row.locator('[data-connector-state]');
+      await expect(state).toContainText('Connected');
       const project = () => scratch.claudeJson().projects?.[repo] ?? {};
       const before = { disabled: project().disabledMcpServers ?? null };
-      await w.getByRole('button', { name: 'Reconnect' }).click();
+      await row.locator('button[aria-expanded]').click();
+      await row.getByRole('button', { name: 'Reconnect' }).click();
       await expect(w.getByRole('status')).toHaveText('Reconnected', { timeout: 30_000 });
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });
-      await expect(w).toContainText('Recorded by the engine for this project in ~/.claude.json');
+      await expect(w.locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in .+\.$/);
+      await expect(w.locator('[data-widget-note]')).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*disabled/);
+      await expect(row.locator('button[aria-expanded]')).not.toContainText('Connected'); // disabled: the switch says it
       const off = { disabled: project().disabledMcpServers ?? null };
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'true', { timeout: 30_000 });
-      await expect(w).toContainText(/c11probe\s*connected/);
+      await expect(state).toContainText('Connected');
       const on = { disabled: project().disabledMcpServers ?? null };
       observe('mcp', { before, off, on, file: join(scratch.config, '.claude.json') });
       expect(off.disabled).toEqual(['c11probe']);
@@ -374,7 +379,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await typedLine(page, main, 'effort low');
       await expect.poll(async () => (await status(page, id)).effort).toBe('low');
       await openSessionInfo(page, id);
-      await expect.poll(() => infoRow(page, id, 'Main')).toMatch(/· low$/);
+      await expect.poll(() => infoRow(page, id, 'Main')).toMatch(/ Low$/); // UX wave U4a (decision 19): the chip's name, the effort in words
       observe('effort', { main: await infoRow(page, id, 'Main') });
     });
 
@@ -414,7 +419,8 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
       const statusText = await settled(await openWidget(live, 'status'));
       w = await openWidget(live, 'fast');
-      const caption = (await w.innerText()).match(/Fast mode · [^\n]+/)?.[0] ?? null; // W3: the selector's fast caption
+      // UX wave U4a (decision 20): fast mode's row, "Fast mode" over its muted line (the pending word, a reason, On or Off)
+      const caption = (await w.locator('[data-fast-row]').innerText()).match(/Fast mode\n([^\n]+)/)?.[1] ?? null;
       const s = await status(page, id);
       observe('fast', { warning, inits: inits(maws, id).slice(-2), fastMode: s.fastMode, autoModeServer: statusText.match(/Auto mode server\n[^\n]+/)?.[0], caption });
       expect(caption).not.toContain('the next init frame confirms it');
@@ -431,8 +437,10 @@ test('every widget opens with live engine data; controls take effect and are rea
 
     await step('the usage popover and Session info read ClaudeUsage alike', async () => {
       const popover = await (await openSessionInfo(page, id)).innerText();
-      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click()); // W6: View › Usage, the top bar's usage popover (the Accounts tab retired into it)
-      const usagePopover = page.getByRole('dialog', { name: 'Claude Usage' });
+      // W6: View › Usage (the Accounts tab retired into it); UX wave U7b: the title bar ring's compact popover, named "Usage"
+      await maws.app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('accounts.open')?.click());
+      const usagePopover = page.getByRole('dialog', { name: 'Usage', exact: true });
+      await expect(usageRing(page)).toHaveAttribute('aria-expanded', 'true');
       await expect(usagePopover.getByText(/^updated /)).toBeVisible();
       const tab = await usagePopover.innerText();
       const usage = value(await invoke(page, 'settings.usage', { engineSessionIds: [] }));
@@ -442,6 +450,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       if (drain) expect(tab.indexOf(drain.email)).toBeLessThan(tab.indexOf('Routing here'));
       await page.screenshot({ path: join(scratch.root, 'accounts-live.png') }); // the owner's accounts: kept in the scratch only
       await page.keyboard.press('Escape');
+      await expect(usagePopover).toHaveCount(0);
     });
 
     observe('cost', { total_cost_usd: await usageCost(page, id) });

@@ -7,15 +7,18 @@
 // session beside it and folding the right panel, and Restore split docking it with the panel back; and a relaunch that brings the pinned Artifacts tab back on its record
 // without ever drawing "No open tabs". Drags are Playwright's mouse over Chromium's HTML5 drag and drop. What a mouse in
 // Playwright's Electron cannot do mid-drag (Escape, a modifier at the drop: the prior art's live check 5) is covered by
-// the handler tests in src/renderer/src/shell/transfer-drag.test.tsx (C1, C2, Z2) and transfer.test.ts (C4).
+// the handler tests in src/renderer/src/shell/transfer-drag.test.tsx (C1, C2, Z2) and transfer.test.ts (C4). UX wave U8b
+// (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md, A5 and A11): the side column is a strip of tabs
+// with one in view per group; a narrow tool opens 360 px wide; a relaunch brings back one surface, or two groups with
+// their share.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { localRef } from './support/address';
+import { addressed, localRef } from './support/address';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, openSurface, closeSurface, pinSurfaceForSessions, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, moveSideTab, openSurface, hideSurface, pinSurfaceForSessions, sideColumn, sideGroup, sideTabNames, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -279,7 +282,7 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   const right = mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' });
   await expect(right.locator(`[data-tab-id="artifact:${await localRef(page)}:${id}"]`)).toBeVisible();
   const left = mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' });
-  await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (the library tab stayed active there)
+  await left.getByRole('tab', { name: /^Harness A/ }).click(); // the session beside it (UX wave U7b: the library is a page now, no tab of its own stays active there)
   // UX2 optional surfaces: explicitly open a narrow tool so Expand/Restore still exercises folding a real column.
   await openSurface(page, 'Session info');
   const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
@@ -374,7 +377,8 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 
 // The controller's measurement (at B1's landing): B1's margin tier (src/artifacts/comments/margin-tiers.ts, `tierFor`)
 // reads only the side space beside the page; Expand gives the document the main region minus its conversation. At
-// 1280 and 1512 × 900 with UX2's 240px sidebar and narrow default Artifacts surface and an open thread: (c) in the panel's record with the
+// 1280 and 1512 × 900 with UX2's 240px sidebar and the narrow Artifacts surface at its automatic 360 px (UX wave U8b, A5)
+// and an open thread: (c) in the panel's record with the
 // panel floated (P3-G's card over it), (a) alone in main with the panel docked, (d) the same with the panel closed, (b)
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
@@ -461,8 +465,8 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   const alone = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(a) settled');
   readings.a = alone;
 
-  // (d) the panel closed
-  await closeSurface(page, 'Artifacts');
+  // (d) the panel closed: the side column hidden, the Artifacts tab kept (UX wave U8b)
+  await hideSurface(page, 'Artifacts');
   await expect.poll(async () => (await widths()).panel).toBeLessThanOrEqual(0);
   await expect.poll(async () => (await marginOf(inMain(page, id))).scrollBox).toBeGreaterThan(alone.scrollBox);
   const closed = await settled(async () => ({ ...(await widths()), ...(await marginOf(inMain(page, id))) }), '(d) settled');
@@ -515,7 +519,7 @@ for (const [width, height] of [[1280, 820], [1512, 982]] as const) test(`the doc
   expect(alone.sidebar + alone.main + alone.panel, 'docked regions account for the whole window').toBe(width);
   expect(closed.sidebar + closed.main, 'closed-panel regions account for the whole window').toBe(width);
   expect(expanded.scrollBox, 'Expand gives the document every pixel beside the 240px sidebar').toBe(width - 240);
-  expect(gain, 'Expand returns the narrow surface’s full 420px to the document').toBe(420);
+  expect(gain, 'Expand returns the narrow surface’s full 360 px to the document (UX wave U8b: a narrow tool’s automatic width)').toBe(360);
   expect(expanded.scrollBox, 'Expand is wider than the preceding split').toBeGreaterThan(split.scrollBox);
 });
 
@@ -567,7 +571,73 @@ test('a relaunch brings the pinned Artifacts tab back on its record and never dr
   await expect(editorIn(inPanel(page, id))).toContainText(line(PARAGRAPHS));
   await expect(surface(page, 'artifacts')).toBeVisible();
   await expect(panel.locator('[data-surface]'), 'only the restored record surface, no summary column').toHaveCount(1);
+  // UX wave U8b (A11): one group, its strip the one Artifacts tab in view, at a narrow tool's automatic width (A5)
+  await expect(sideColumn(page).locator('section[data-side-group]')).toHaveCount(1);
+  expect(await sideTabNames(page, 'upper')).toEqual(['Artifacts']);
+  await expect(sideGroup(page, 'upper').getByRole('tab', { selected: true })).toHaveAccessibleName('Artifacts');
+  await expect.poll(() => regionWidth(page, 'panel'), { message: 'the narrow automatic width' }).toBe(360);
   await expect(await mainTab(page, id)).toHaveCount(1);
   expect(await sawNoOpenTabs(page), 'no "No open tabs" frame at any moment of the relaunch').toBe(false);
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// UX wave U8b (A11; its execution document, "Proof that an executor does not run", the `default` row): a relaunch with
+// two groups and a share. The pinned Artifacts tab on a record (a tab with stored params) and Session info share one
+// strip, one in view; "Move below" on the Artifacts tab puts it in a lower group under a bar, whose share is moved from the
+// keyboard; after the quit both groups come back with the same tabs, each its tab in view (the record among them), the
+// bar's share and the narrow width as they were.
+test('a relaunch brings back two groups of the side column, the tab in view of each (a record among them) and the bar’s share', async () => {
+  test.setTimeout(150_000); // two launches
+  let page = await test.step('first launch', () => start(undefined, null));
+  const panel = panelRegion(page);
+  const stack = () => panel.locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-surface')));
+  await pinArtifactsTool(page);
+  const { artifact } = await ok<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'B3 groups' });
+  const id = artifact.id;
+  await chromeTab(page, /^Harness A/).click(); // the session the column is of, in front at the quit
+  await openInPanel(page, id);
+  await openSurface(page, 'Session info');
+  await expect.poll(stack, { message: 'Session info in view in place of the record, which stays a tab' }).toEqual(['session-info']);
+  await expect.poll(() => sideTabNames(page, 'upper'), { message: 'the pin first, then the session’s own' }).toEqual(['Artifacts', 'Session info']);
+  await moveSideTab(page, 'Artifacts', 'below');
+  await expect.poll(stack, { message: 'two groups, a tab in view in each' }).toEqual(['session-info', 'artifacts']);
+  await expect(editorIn(inPanel(page, id)), 'the record in view below').toBeVisible({ timeout: 15_000 });
+  const bar = sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true });
+  const even = Number(await bar.getAttribute('aria-valuenow'));
+  await bar.focus();
+  for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp'); // the lower group grows
+  await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow'))).toBeGreaterThan(even);
+  const scope = await addressed(page, 'A');
+  const lower = async () => (await ok<{ value: { lower: Record<string, { tabs: string[]; share: number } | undefined> } | null }>(page, 'layout.get', { key: 'panelTools.groups' })).value?.lower[scope];
+  await expect.poll(async () => (await lower())?.share ?? 0, { message: 'the moved share is stored' }).toBeGreaterThan(0.5);
+  await expect
+    .poll(async () => (await ok<{ value: { stacks: Record<string, string[]> } | null }>(page, 'layout.get', { key: 'panelTools.surfaces' })).value?.stacks[scope]?.length, { message: 'both tabs in view are stored' })
+    .toBe(2);
+  await expect
+    .poll(async () => JSON.stringify((await ok<{ value: unknown }>(page, 'layout.get', { key: 'panelTools.params' })).value), { message: 'the record’s tab params are stored' })
+    .toContain(id);
+  const before = {
+    upper: await sideTabNames(page, 'upper'),
+    lower: await sideTabNames(page, 'lower'),
+    share: await bar.getAttribute('aria-valuenow'),
+    stored: await lower(),
+    width: await regionWidth(page, 'panel'),
+  };
+  expect(before.upper).toEqual(['Session info']);
+  expect(before.lower).toEqual(['Artifacts']);
+  expect(before.width, 'two narrow tools: the narrow automatic width').toBe(360);
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  await test.step('quit', () => launch!.cleanup());
+  launch = null;
+
+  page = await test.step('relaunch', () => start(undefined, null));
+  const again = panelRegion(page);
+  await expect.poll(() => again.locator('[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-surface'))), { message: 'both groups back, each with its tab in view', timeout: 15_000 }).toEqual(['session-info', 'artifacts']);
+  await expect(editorIn(inPanel(page, id)), 'the lower group’s tab back on its record').toBeVisible({ timeout: 15_000 });
+  expect(await sideTabNames(page, 'upper')).toEqual(before.upper);
+  expect(await sideTabNames(page, 'lower')).toEqual(before.lower);
+  await expect(sideColumn(page).getByRole('separator', { name: 'Resize groups', exact: true }), 'the bar’s share as it was left').toHaveAttribute('aria-valuenow', before.share!);
+  expect((await ok<{ value: { lower: Record<string, unknown> } }>(page, 'layout.get', { key: 'panelTools.groups' })).value.lower[scope], 'hydration rewrote no group').toEqual(before.stored);
+  expect(await regionWidth(page, 'panel')).toBe(before.width);
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });

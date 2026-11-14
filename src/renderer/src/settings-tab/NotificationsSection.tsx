@@ -17,17 +17,17 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
   return (
     <>
       {/* P2-C start (2026-10-10; the P2-C document, §9): the to-human mod's app switch (a session's own override is /plugins') */}
-      <Setting label={NOTIFICATIONS.toHuman.label} note={NOTIFICATIONS.toHuman.note}>
+      <Setting row="notifications.toHuman">
         <Switch checked={settings.mods.toHuman.enabled} label={NOTIFICATIONS.toHuman.name} onChange={(next) => void writeSettings({ mods: { toHuman: { enabled: next } } })} />
         <span>{NOTIFICATIONS.toHuman.name}</span>
       </Setting>
       {/* P2-C end */}
-      <Setting label={NOTIFICATIONS.when}>
+      <Setting row="notifications.when">
         <Switch checked={enabled} label={NOTIFICATIONS.enabledLabel} onChange={(next) => void writeSettings({ notifications: { enabled: next } })} />
         <span>{NOTIFICATIONS.enabledLabel}</span>
         {delivery && <Chip>{NOTIFICATIONS.delivery[delivery]}</Chip>}
       </Setting>
-      <Setting label={NOTIFICATIONS.kinds}>
+      <Setting row="notifications.kinds">
         <span className="flex flex-wrap gap-x-3 gap-y-1">
           {KINDS.map((kind) => {
             const held = kind === 'heldPeerMessages';
@@ -48,7 +48,7 @@ export function NotificationsSection({ settings }: { settings: Settings }) {
           })}
         </span>
       </Setting>
-      <Setting label={NOTIFICATIONS.sound}>
+      <Setting row="notifications.sound">
         <Switch checked={sound} label={NOTIFICATIONS.sound} onChange={(next) => void writeSettings({ notifications: { sound: next } })} />
         <span className="text-ui-sm text-fg-muted">{sound ? NOTIFICATIONS.on : NOTIFICATIONS.off}</span>
       </Setting>

@@ -25,6 +25,7 @@ export const grades = {
   'connectors.signIn': 'machine-admin',
   'connectors.signInCancel': 'machine-admin',
   'connectors.signInServer': 'machine-admin', // P5 O7 M8: connectors.signIn's, for the session's MCP widget
+  'connectors.signInDynamicServer': 'machine-admin', // UX wave U11a M8: the two sign-ins' grade
   // main-only
   'connectors.grants': 'internal',
   'connectors.grant': 'internal',

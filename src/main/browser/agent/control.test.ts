@@ -5,7 +5,7 @@ import { BROWSER_AGENT_IDLE_MS, BROWSER_HANDBACK_IDLE_MS, BROWSER_LOADED_TABS_MA
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { TabInputSeam } from '../input';
 import { TabStore, type TabEntry } from '../tabs';
-import { personHolds, TabControls } from './control';
+import { agentTabComesForward, personHolds, personUses, TabControls } from './control';
 
 // Design §8's table, row by row, over E4a's real TabStore and input seam with vitest's fake clock: who drives the page,
 // the two timers, a held command's wait (`whenReleased`), background throttling while the agent acts, and what a closed
@@ -302,6 +302,83 @@ describe('personHolds (Design §6 step 3, §8): the one statement of the rule', 
     h.store.setControl(entry.tab.tabId, 'human');
     expect(personHolds(entry, Date.now() + 60_000)).toBe(false);
     expect(h.controls.personHolds(entry)).toBe(true);
+  });
+});
+
+// U12a (M1; Interfaces §C, ruling R1): what `show_pane`'s reload and the agent's tab read; `personHolds` is unchanged
+describe('personUses: the tab reads "You have the page", or personHolds', () => {
+  it('is the grace while the tab is not the person’s, and lasts while it reads "You have the page"', () => {
+    const h = harness();
+    const entry = h.open();
+    expect(personUses(entry, Date.now())).toBe(false);
+    h.human(entry);
+    expect(personUses(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1)).toBe(true);
+    expect(personUses(entry, Date.now() + BROWSER_HANDBACK_IDLE_MS)).toBe(false); // a page typed in and left
+    h.store.setControl(entry.tab.tabId, 'human');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(true); // the case that tells it from personHolds
+    expect(personHolds(entry, Date.now() + 10_000)).toBe(false);
+    h.store.setControl(entry.tab.tabId, 'agent');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(false);
+    h.store.setControl(entry.tab.tabId, 'idle');
+    expect(personUses(entry, Date.now() + 10_000)).toBe(false);
+  });
+});
+
+// U12a (M2; Interfaces §C, ruling R2): whether the Browser's opening by itself selects the agent's tab in its session
+describe("agentTabComesForward: the agent's tab, unless the person uses the selected one or a panel shows a tab of the session", () => {
+  function tabs() {
+    const h = harness();
+    const theirs = h.open(); // the person's tab, selected
+    const agents = h.store.entry(h.store.open({ appSessionId: A, url: 'https://b.test/', select: false }).tab.tabId)!;
+    const session = () => h.store.all().filter((entry) => entry.tab.appSessionId === A);
+    return { h, theirs, agents, session };
+  }
+
+  it('comes forward when the session has no selected tab', () => {
+    const { agents, session } = tabs();
+    expect(agentTabComesForward(null, agents, Date.now(), session())).toBe(true);
+  });
+
+  it('does not when the agent’s tab is the selected one already', () => {
+    const { agents, session } = tabs();
+    expect(agentTabComesForward(agents, agents, Date.now(), session())).toBe(false);
+  });
+
+  it('comes forward over a selected tab that is idle and on show nowhere', () => {
+    const { theirs, agents, session } = tabs();
+    expect(agentTabComesForward(theirs, agents, Date.now(), session())).toBe(true);
+  });
+
+  it('does not while the person’s input in the selected tab is under three seconds old, and does after', () => {
+    const { h, theirs, agents, session } = tabs();
+    h.human(theirs);
+    expect(agentTabComesForward(theirs, agents, Date.now() + BROWSER_HANDBACK_IDLE_MS - 1, session())).toBe(false);
+    expect(agentTabComesForward(theirs, agents, Date.now() + BROWSER_HANDBACK_IDLE_MS, session())).toBe(true);
+  });
+
+  it('does not while the selected tab reads "You have the page", its input older than the grace', () => {
+    const { h, theirs, agents, session } = tabs();
+    h.human(theirs);
+    h.store.setControl(theirs.tab.tabId, 'human');
+    expect(agentTabComesForward(theirs, agents, Date.now() + 60_000, session())).toBe(false);
+  });
+
+  it('does not while a panel shows the selected tab; a main tab showing it holds nothing back', () => {
+    const { h, theirs, agents, session } = tabs();
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-panel', surface: 'panel' } });
+    expect(agentTabComesForward(theirs, agents, Date.now(), session())).toBe(false);
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-main', surface: 'main' } });
+    expect(agentTabComesForward(theirs, agents, Date.now(), session())).toBe(true);
+  });
+
+  it('does not while a panel still shows another tab of the session: the person has just selected an idle, unplaced tab', () => {
+    const { h, theirs, agents, session } = tabs();
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-panel', surface: 'panel' } }); // another window's panel
+    const next = h.store.entry(h.store.open({ appSessionId: A, url: 'https://c.test/', select: true }).tab.tabId)!; // its view not moved yet
+    expect(next.tab.placedIn).toBeNull();
+    expect(agentTabComesForward(next, agents, Date.now(), session())).toBe(false);
+    h.store.update(theirs.tab.tabId, { placedIn: { paneId: 'pane-main', surface: 'main' } });
+    expect(agentTabComesForward(next, agents, Date.now(), session())).toBe(true);
   });
 });
 

@@ -13,7 +13,7 @@ import { ARTIFACT_EXPORT_FONTS /* P3-C */, ARTIFACT_EXPORT_FORMATS, ARTIFACT_EXP
 import { ArtifactKindSchema } from '../../artifacts/entity'; // P3-A M7
 import { ArtifactRefusalSchema } from './artifacts'; // P3-E (E1 M5; Decision Log 26)
 import type { CommandSpec } from './common';
-import { BrowserTabIdSchema } from '../../browser/tab'; // E13
+import { BrowserOpenPageSchema /* U12a */, BrowserTabIdSchema } from '../../browser/tab'; // E13
 import { AbsolutePathSchema } from './settings'; // E13
 import { ConnectorRefusalSchema } from './connectors'; // E3
 
@@ -28,7 +28,7 @@ export const MawsPaneShowSchema = z.strictObject({
 export type MawsPaneShow = z.infer<typeof MawsPaneShowSchema>;
 
 export const MawsPaneAnswerResultSchema = z.discriminatedUnion('ok', [
-  z.strictObject({ ok: z.literal(true), opened: ShowPaneOpenedSchema }),
+  z.strictObject({ ok: z.literal(true), opened: ShowPaneOpenedSchema, page: BrowserOpenPageSchema.optional() }), // U12a: main's outcome of a browser target's open
   z.strictObject({ ok: z.literal(false), error: z.string() }),
 ]);
 export type MawsPaneAnswerResult = z.infer<typeof MawsPaneAnswerResultSchema>;

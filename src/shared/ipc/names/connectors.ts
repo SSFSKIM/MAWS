@@ -7,6 +7,7 @@ export const commands = [
   'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', // P3-HD M3c2: the owner's, from the sheet
   'connectors.add', 'connectors.remove', 'connectors.signIn', 'connectors.signInCancel', // P4-AGG M4: Customize › Connectors
   'connectors.signInServer', // P5 O7 M8: the session's MCP widget
+  'connectors.signInDynamicServer', // UX wave U11a M8: a plugin's connector and one of MAWS's own list
 ] as const;
 
 export const events = ['connectors.watchUpdate', 'connectors.operation', 'connectors.grantChanged', 'connectors.directOperation' /* P3-HD */, 'connectors.serversChanged' /* P3-HD M3c2 */, 'connectors.signInChanged' /* P4-AGG M4 */, 'connectors.reset' /* P5 O4 M2: main's, to its windows (D28) */] as const;

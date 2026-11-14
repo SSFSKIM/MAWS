@@ -10,7 +10,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../panel/tool';
 import { SCM_COPY } from './copy';
 import { ScmShell } from './ScmShell';
-import { createScmUi, forSession, type ScmParams, type ScmUi } from './view-state';
+import { createScmUi, forFolder, forSession, type ScmParams, type ScmUi } from './view-state';
 import { workingFolder } from '@shared/sessions/working-folder';
 
 export const SCM_TOOL_ID = 'source-control';
@@ -21,8 +21,8 @@ export interface ScmState {
 
 // `params` is undefined for a tab restored from layout.json (X5); a request is applied by the body once the shown
 // session's status is known.
-function createState({ appSessionId, params }: PanelToolInit<ScmParams>): ScmState {
-  return { ui: createScmUi({ session: appSessionId, params: params ?? null }) };
+function createState({ appSessionId, session, params }: PanelToolInit<ScmParams>): ScmState {
+  return { ui: createScmUi({ session: appSessionId, directory: session ? workingFolder(session).path : null, params: params ?? null }) };
 }
 
 // Re-targeting (X5): E1's `show_pane { pane: 'source-control', target }` and the summary's row pass `{ target? }`; the
@@ -45,19 +45,22 @@ export function ScmIcon({ className }: { className?: string }) {
 function ScmBody({ state, ctx }: { state: ScmState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  // A pinned tool shown for another session starts over there (each session's draft comes back to it); a new session
-  // renders nothing until then, so nothing of the old checkout is shown or read for it.
-  const synced = useStore(ui, (s) => s.session === shown);
+  const folder = ctx.session ? workingFolder(ctx.session) : null;
+  const directory = folder?.path ?? null;
+  // A pinned tool shown for another session starts over there (each session's draft comes back to it), and so does a
+  // session whose working folder changed (UX wave U8c-2: the agent moved; its draft stays); until then nothing renders,
+  // so nothing of the old checkout is shown, read or acted on for the new one.
+  const synced = useStore(ui, (s) => s.session === shown && s.directory === directory);
   useEffect(() => {
-    if (!synced) ui.setState((s) => forSession(s, shown));
-  }, [ui, shown, synced]);
+    if (!synced) ui.setState((s) => ({ ...forSession(s, shown), ...forFolder(s, directory) }));
+  }, [ui, shown, directory, synced]);
 
-  if (shown === null || ctx.session === null) {
+  if (shown === null || folder === null || directory === null) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{SCM_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  const directory = workingFolder(ctx.session).path;
-  return <ScmShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} />;
+  // M4 decision 6: while the session works away from its launch folder the page draws its reads and none of its acts
+  return <ScmShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} acts={!folder.moved} />;
 }
 
 export const scmTool: PanelTool<ScmState, ScmParams> = {

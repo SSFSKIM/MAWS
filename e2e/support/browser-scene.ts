@@ -15,7 +15,7 @@
 import { openSurface } from './shell';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { BrowserTab } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import { invoke, value } from './c7-replay';
@@ -317,4 +317,27 @@ export async function shootBrowser(s: Scene, surface: string, opts: { pane?: Loc
   }
   value(await invoke(s.page, 'settings.set', { theme: 'light' }));
   await expect(s.page.locator('html')).toHaveAttribute('data-theme', 'light');
+}
+
+// U12a: the window's picture with the view's page laid into `pane`, where the view draws (a view is not in the
+// renderer's screenshot), attached to the running test as `name`; the laid picture is taken out after.
+export async function attachShot(s: Scene, name: string, pane: Locator, page: Page): Promise<void> {
+  const picture = `data:image/png;base64,${(await page.screenshot()).toString('base64')}`;
+  await pane.evaluate(
+    (el, src) =>
+      new Promise<void>((resolve) => {
+        const img = document.createElement('img');
+        img.dataset.u12aShot = '';
+        img.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;z-index:5;pointer-events:none';
+        img.onload = () => resolve();
+        img.src = src;
+        el.appendChild(img);
+      }),
+    picture,
+  );
+  try {
+    await test.info().attach(name, { body: await s.page.screenshot(), contentType: 'image/png' });
+  } finally {
+    await pane.evaluate((el) => el.querySelector('img[data-u12a-shot]')?.remove());
+  }
 }

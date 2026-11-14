@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { closeSurface, hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
+import { hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -245,7 +245,8 @@ async function openThreadFromGutter(c: Case & { parent: string }): Promise<{ chi
   const child = await sideThreadOf(page, c.parent, 'comment');
   const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
   await expect(pane, 'the Side pane opens on the new thread').toBeVisible();
-  await closeSurface(page, 'Files');
+  // UX wave U8b: the Side pane's tab comes into view in Files' place (one tab in view per group); Files stays a tab
+  await expect(surface(page, 'files'), 'Files is out of view').toHaveCount(0);
   await expect(pane.getByText(CHILD_REPLY)).toBeVisible({ timeout: 20_000 });
   return { child, pane, viewer };
 }
@@ -263,17 +264,19 @@ async function projectRows(page: Page, parent: string): Promise<{ id: string; le
 }
 
 test.describe('side threads, Send to main and /btw (E3)', () => {
-  test('1. the gutter’s comment mark opens the sheet: titled by the line, Side thread selected, Send disabled until text', async () => {
+  test('1. the gutter’s comment mark opens the sheet: titled by the line, "Send to main" unchecked (a side thread), Send disabled until text', async () => {
     const c = await begin((cwd, dir) => [parentJournal(cwd).write(dir, 'parent')]);
     const viewer = await openFile(c.page, c.repo, APP);
     const sheet = await commentOn(c.page, viewer, 3);
     await expect(sheet).toHaveAttribute('data-anchor-kind', 'file-line');
     await expect(sheet).toHaveAttribute('data-anchor-locator', `${c.repo.path(APP)}#L3`);
     await expect(sheet.getByText(`${c.repo.path(APP)}#L3`), 'the locator shown').toBeVisible();
-    await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).not.toBeChecked();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeEnabled();
-    await expect(sheet.locator('[data-destination="main"]'), 'the parent is idle: an ordinary prompt').toContainText('Sent now');
+    // UX wave U5a (A1): one checkbox in place of the two segments, unchecked; its caption is its title alone
+    const toMain = sheet.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain).not.toBeChecked();
+    await expect(toMain).toBeEnabled();
+    await expect(sheet.getByRole('radio'), 'no two-segment control').toHaveCount(0);
+    await expect(sheet.locator('label:has([data-send-to-main])'), 'the parent is idle: an ordinary prompt').toHaveAttribute('title', 'Sent now');
     await expect(sheet.locator('[data-comment-screenshot]'), 'the gutter gives no screenshot').toHaveCount(0);
     const send = sheet.getByRole('button', { name: 'Send' });
     await expect(send).toBeDisabled();
@@ -357,7 +360,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(writtenControls(maws, child, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
     expect(writtenControls(maws, parent, 'side_question')).toEqual([]);
     expect(writtenUsers(maws, child), 'no user frame for the question').toHaveLength(2);
-    await expect(page.getByText('Side question asked in the panel of', { exact: false })).toHaveCount(0);
+    await expect(page.getByText('Side question asked in the side chat of', { exact: false })).toHaveCount(0);
+    await expect(page.locator('[data-btw-card]'), 'UX wave U4a: a question asked under a hosted thread opens no card').toHaveCount(0);
     await expect(mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`), 'the main view still shows the parent').toBeVisible();
     await threadPane.getByRole('button', { name: 'Side questions' }).click();
     await expect(inline).toHaveCount(0);
@@ -381,9 +385,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const panel = panelRegion(page);
     const thread = panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
 
-    // away to the question view, then back through the parent's row
-    await panel.locator('[data-side-chip="btw"]').click();
-    await expect(panel.locator(`[data-side-btw-view="${await addressed(page, parent)}"]`)).toBeVisible();
+    // away to another surface, then back through the parent's row (UX wave U4a, O-20: the Side pane has no question view
+    // to leave to; Files comes into view in its place, one tab in view per group)
+    await openSurface(page, 'Files');
     await expect(thread).toHaveCount(0);
     await mainRegion(page).locator(`[data-side-thread="${await addressed(page, child)}"]`).getByRole('button', { name: 'Open' }).click();
     await expect(thread).toBeVisible();
@@ -416,14 +420,17 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
   });
 
   test('4. Send to main: idle, an ordinary prompt that opens a turn; mid-turn, a `next` steer drawn where it was delivered; each with its anchor chip, and the screenshot as an image', async () => {
+    // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8): the sheet's "Send to main" ticked is
+    // the window's one path (`side.comment.content`, then the session's own send); `side.sendToMain` stays on the wire with
+    // no caller in this window (R1), so its screenshot case here is what a window of an earlier build still sends.
     test.setTimeout(120_000);
     const replies = { sheet: 'Sheet comment read: the total is recomputed per call.', idle: 'Screenshot read: the total is drawn in the header.', steered: 'Folded the comment in after the step: the header shows the total.' };
     let steerUuid = '';
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
       parent.turn(replies.sheet); // the sheet's Send to main, the parent idle
-      parent.turn(replies.idle); // `side.sendToMain` with a screenshot, idle
-      const slow = parent.prompt(); // a prompt the test sends, whose Bash call is still running when the comment arrives
+      parent.turn(replies.idle); // `side.sendToMain` with a screenshot, idle (R1: an earlier build's window)
+      const slow = parent.prompt(); // a prompt the test sends, whose Bash call is still running when the sheet's comment arrives
       parent.toolCall(slow);
       steerUuid = parent.steer();
       parent.toolResult();
@@ -440,11 +447,12 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     writeFileSync(shotPath, solidPng(96, 48, [64, 128, 200]));
     const screenshot = { path: shotPath, width: 96, height: 48 };
 
-    // the sheet, Send to main, the parent idle: `session.send` (no priority), an ordinary prompt opening a turn
+    // the sheet, Send to main ticked, the parent idle: `session.send` (no priority), an ordinary prompt opening a turn; the
+    // engine receives one text block, today's text for that anchor to the byte
     const viewer = await openFile(page, repo, APP);
     const sheet = await commentOn(page, viewer, 3);
-    await sheet.locator('[data-destination="main"]').click();
-    await expect(sheet.getByRole('radio', { name: /Send to main/ })).toBeChecked();
+    await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
+    await expect(sheet.locator('label:has([data-send-to-main])')).toHaveAttribute('title', 'Sent now');
     await sheet.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
@@ -459,7 +467,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(main.getByText('Comment on "app.ts:3"', { exact: false }), 'the lead line is not drawn').toHaveCount(0);
     await expect(main.locator('[data-side-thread]'), 'no side thread').toHaveCount(0);
 
-    // a producer's screenshot, the parent idle: sent, with the image first
+    // a producer's screenshot, the parent idle, through `side.sendToMain` as an earlier build's window sends it (R1):
+    // sent, with the image first
     const idleComment = 'The total in the header looks stale.';
     expect(value(await invoke(page, 'side.sendToMain', { appSessionId: parent as never, anchor: fileAnchor(repo, 5), text: idleComment, screenshot }))).toMatchObject({ disposition: 'sent' });
     await expect(main.getByText(replies.idle)).toBeVisible({ timeout: 20_000 });
@@ -467,21 +476,26 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(bubble(idleComment).locator('img.transcript-attachment-image')).toBeVisible();
     expect((writtenUsers(maws, parent)[2]!.frame.message!.content as { type: string }[]).map((b) => b.type)).toEqual(['image', 'text']);
 
-    // mid-turn: a `next` steer, folded in at the tool boundary and drawn there
+    // mid-turn: the sheet ticked is a `next` steer (its title the composer's words for it), folded in at the tool
+    // boundary and drawn there
     const slowPrompt = 'Run the slow step, then report.';
     value(await invoke(page, 'session.send', { appSessionId: parent as never, content: slowPrompt }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { message: 'the slow turn is running' }).not.toBeNull();
     const steerComment = 'While you are in there, check line 7 too.';
-    expect(value(await invoke(page, 'side.sendToMain', { appSessionId: parent as never, anchor: fileAnchor(repo, 7), text: steerComment, screenshot }))).toMatchObject({ disposition: 'steered' });
-    await expect(main.getByText(replies.steered)).toBeVisible({ timeout: 20_000 });
+    await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+    const busySheet = await commentOn(page, viewer, 7);
+    await busySheet.getByRole('checkbox', { name: 'Send to main' }).check();
+    await expect(busySheet.locator('label:has([data-send-to-main])'), 'the composer’s words for a steer').toHaveAttribute('title', 'Sends at the next step');
+    await busySheet.getByRole('textbox', { name: 'Comment' }).fill(steerComment);
+    await busySheet.getByRole('button', { name: 'Send' }).click();
+    await expect(busySheet, 'a steer is a confirmed delivery: the sheet closes').toHaveCount(0);
+    await expect.poll(() => writtenUsers(maws, parent).length).toBe(5);
     const steer = writtenUsers(maws, parent)[4]!.frame;
     expect(steer.priority).toBe('next');
-    expect(steer.message!.content).toEqual([
-      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: readFileSync(shotPath).toString('base64') } },
-      { type: 'text', text: anchoredMessage({ anchor: fileAnchor(repo, 7), text: steerComment, destination: 'main', screenshot: true }) },
-    ]);
+    expect(steer.message!.content).toEqual([{ type: 'text', text: anchoredMessage({ anchor: fileAnchor(repo, 7), text: steerComment, destination: 'main', screenshot: false }) }]);
+    await showSession(page, parent);
+    await expect(main.getByText(replies.steered)).toBeVisible({ timeout: 20_000 });
     await expect(bubble(steerComment).locator('[data-chip="anchor"]')).toHaveText('app.ts:7');
-    await expect(bubble(steerComment).locator('img.transcript-attachment-image')).toBeVisible();
     // drawn at its delivery position: after the slow prompt's tool call, before the turn's reply
     const order = await main.evaluate((root, texts) => {
       const at = (text: string) => Array.from(root.querySelectorAll('*')).findIndex((el) => el.children.length === 0 && el.textContent?.includes(text));
@@ -492,7 +506,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  test('5. /btw: the side question goes to the engine beside the conversation and answers in the Side pane, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
+  test('5. /btw: the side question goes to the engine beside the conversation and answers in the session’s side chat card, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
     test.setTimeout(120_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
@@ -509,24 +523,39 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type('/bt');
     const commands = page.getByRole('listbox', { name: 'Commands' });
     await expect(commands.getByRole('option').filter({ hasText: '/btw' })).toBeVisible();
-    await page.keyboard.press('Escape');
+    // UX wave U4a (M7's fix; `openSideQuestions`): a bare `/btw` picked from the palette opens the session's side chat
+    // card with its field focused, before any question (the widgets harness mounts no card: `e2e/widgets.spec.ts`
+    // proves the hand-off there)
+    await page.keyboard.type('w');
+    await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
+    await page.keyboard.press('Enter');
+    const picked = main.locator('[data-btw-card="corner"]');
+    await expect(picked).toBeVisible();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toBeFocused();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toHaveAttribute('placeholder', 'Ask a quick question…');
+    await expect(page.locator('[data-widget-dialog="btw"]'), 'no dialog: the card took the pick').toHaveCount(0);
+    expect(writtenControls(maws, parent, 'side_question'), 'nothing asked yet').toEqual([]);
     await composer.click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('Backspace');
     await expect(composer).toHaveText('');
 
-    // typed: asked, the composer cleared, the question view shows it answered
+    // typed: asked, the composer cleared, the session's card shows it answered (UX wave U4a, O-20: the card at the pane's
+    // corner, not the Side pane)
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     await expect(composer).toHaveText('');
-    const view = panelRegion(page).locator(`[data-side-btw-view="${await addressed(page, parent)}"]`);
+    const view = main.locator('[data-btw-card="corner"]');
     await expect(view).toBeVisible();
+    await expect(view.getByRole('heading', { name: 'Side chat' })).toBeVisible();
+    await expect(panelRegion(page).locator('[data-side-btw-view]'), 'no question view in the Side pane').toHaveCount(0);
     await expect(view.locator('[data-side-exchange]').first()).toContainText(SIDE_QUESTION);
     await expect(view.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
     expect(writtenControls(maws, parent, 'side_question').map((r) => r.frame.request)).toEqual([{ subtype: 'side_question', question: SIDE_QUESTION }]);
     expect(writtenUsers(maws, parent), 'no user frame').toHaveLength(1);
     await expect(main.locator('[data-bubble]'), 'the main transcript gained no row').toHaveCount(1);
-    await expect(main.getByText('ZEBRA', { exact: true })).toHaveCount(0);
+    // the card is in the main region and holds the answer: the transcript is what must not
+    await expect(main.locator('[data-transcript-scroller]').getByText('ZEBRA', { exact: true })).toHaveCount(0);
 
     // a second question carries the first exchange as history
     await view.getByRole('textbox', { name: 'Ask a side question' }).fill(SIDE_FOLLOW_UP);
@@ -673,7 +702,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(second.consoleErrors()).toEqual([]);
   });
 
-  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting, the question view and the comment card (composing, and its thread with the request card and the needs-you strip) use tokens only', async () => {
+  test('8. both themes: the sheet, the pane on a thread, the parent’s transcript (summary row and anchored prompt), the sidebar’s nesting, the side chat card and the comment card (composing, and its thread with the request card and the needs-you strip) use tokens only', async () => {
     test.setTimeout(180_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
@@ -690,7 +719,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const { child, viewer } = await openThreadFromGutter(c);
     // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row
     const sheet = await commentOn(page, viewer, 3);
-    await sheet.locator('[data-destination="main"]').click();
+    await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill('Is the recompute intended?');
     await sheet.getByRole('button', { name: 'Send' }).click();
     await expect(sheet).toHaveCount(0);
@@ -703,7 +732,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     const panel = panelRegion(page);
-    await expect(panel.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
+    const sideChat = main.locator('[data-btw-card="corner"]'); // UX wave U4a (O-20): the session's card, not the Side pane
+    await expect(sideChat.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
 
     for (const theme of ['light', 'dark'] as const) {
       await menu(maws, `theme.${theme}`);
@@ -724,16 +754,15 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       await open.getByRole('button', { name: 'Cancel' }).click();
       await expect(open).toHaveCount(0);
 
-      // the parent: its transcript, the pane on its thread, the question view, the sidebar
+      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar
       await showSession(page, parent);
       await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
       await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');
       await main.locator(`[data-side-thread="${await addressed(page, child)}"]`).scrollIntoViewIfNeeded();
       await shoot(main, 'parent-transcript');
-      await panel.locator('[data-side-chip="btw"]').click();
-      await expect(panel.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
-      await shoot(panel, 'side-questions');
+      await expect(sideChat.locator('[data-side-exchange="answered"]')).toContainText('ZEBRA');
+      await shoot(sideChat, 'side-chat');
       await (await sidebarRow(page, { appSessionId: child })).scrollIntoViewIfNeeded();
       await shoot(sidebarOf(page), 'sidebar-nesting');
     }
@@ -906,7 +935,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
     await pane.getByRole('button', { name: 'Show in artifact' }).click();
     await expect(surface(page, 'artifacts')).toBeVisible();
-    await closeSurface(page, 'Side');
+    await expect(surface(page, 'side'), 'the Artifacts tool came into view in the Side pane’s place').toHaveCount(0);
     const viewer = panelRegion(page).locator('[data-artifact-viewer]');
     const redocked = viewer.locator('[data-comment-card]');
     await expect(redocked).toHaveAttribute('data-card-phase', 'thread');

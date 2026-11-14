@@ -28,18 +28,18 @@ export function BrowserSection({ settings }: { settings: Settings }) {
   const { profile, searchUrl, linkTarget, bookmarksBar } = settings.browser;
   return (
     <>
-      <Setting label={BROWSER.profile} note={BROWSER.profileNote}>
+      <Setting row="browser.profile">
         <ProfileSelect profile={profile} />
       </Setting>
       {/* cua #90 start */}
-      <Setting label={BROWSER.bookmarksBar} note={BROWSER.bookmarksBarNote}>
+      <Setting row="browser.bookmarksBar">
         <Switch checked={bookmarksBar === 'shown'} label={BROWSER.bookmarksBarLabel} onChange={(next) => void writeSettings({ browser: { bookmarksBar: next ? 'shown' : 'hidden' } })} />
       </Setting>
       {/* cua #90 end */}
-      <Setting label={BROWSER.search} note={BROWSER.searchNote}>
+      <Setting row="browser.search">
         <SearchField searchUrl={searchUrl} />
       </Setting>
-      <Setting label={BROWSER.links} note={linkTarget === 'in-app' ? BROWSER.linksNote : undefined}>
+      <Setting row="browser.links" state={linkTarget === 'in-app' ? 'inApp' : 'external'}>
         <Segment label={BROWSER.links} value={linkTarget} options={LINK_TARGETS} onChange={(next) => writeSettings({ browser: { linkTarget: next } })} />
       </Setting>
       {/* E4b start: the imported Chrome profiles, their extension toggles and removal */}

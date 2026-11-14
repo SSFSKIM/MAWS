@@ -5,7 +5,7 @@
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
-import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Icon, SortIcon } from '../../app/IconButton';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
@@ -15,7 +15,7 @@ import { GroupHeading } from '../plugins/PluginRow';
 import { badgeOf, invocationOf, labelOf, type SkillGroup, type SkillRow, type SkillsSort } from './skills';
 
 const setSkills = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['skills']>) => useLibraryStore.setState((s) => ({ skills: { ...s.skills, ...patch } }));
-const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default';
+const ACTION = 'inline-flex h-7 shrink-0 items-center rounded-md px-2.5 text-ui outline-accent focus-visible:outline-2 disabled:cursor-default disabled:opacity-50';
 const SECONDARY = `${ACTION} border border-border text-fg hover:bg-bg-hover`;
 const PRIMARY = `${ACTION} bg-accent text-bg hover:opacity-90`;
 const BADGE = 'shrink-0 truncate rounded-sm bg-bg-active px-1.5 text-ui-sm leading-[18px] text-fg-muted';
@@ -23,16 +23,19 @@ const BADGE = 'shrink-0 truncate rounded-sm bg-bg-active px-1.5 text-ui-sm leadi
 // The head's right side: Search skills, Sort by (Plugin name offered only when a plugin brings a skill, Desktop's rule),
 // and Reload skills (E8's `reload_skills`, on a ready process).
 // P5 O7 M8: `unavailable`, why Reload is greyed for a session on another machine (lane-b/remote-unavailable.ts)
-export function SkillsToolbar({ plugins, canReload, reloading, onReload, unavailable = null }: { plugins: boolean; canReload: boolean; reloading: boolean; onReload(): void; unavailable?: string | null }) {
+// UX wave U11a: no `onReload`, no Reload (an unstarted tab's skills are the disk's; there is no engine to reload)
+export function SkillsToolbar({ plugins, canReload = false, reloading = false, onReload, unavailable = null }: { plugins: boolean; canReload?: boolean; reloading?: boolean; onReload?(): void; unavailable?: string | null }) {
   const { search, sort } = useLibraryStore((s) => s.skills);
   const sorts: readonly SkillsSort[] = plugins ? ['name', 'plugin'] : ['name'];
   return (
     <span className="flex min-w-0 items-center gap-1">
       <SearchField label={S.search} value={search} onChange={(next) => setSkills({ search: next })} />
       <Choice label={L.sortBy} icon={<SortIcon />} value={plugins ? sort : 'name'} values={sorts} words={S.sort} isDefault={!plugins || sort === 'name'} onChange={(next) => setSkills({ sort: next })} />
-      <button type="button" className={SECONDARY} disabled={!canReload || reloading || unavailable !== null} title={unavailable ?? undefined} onClick={onReload}>
-        {PLUGIN_MANAGEMENT.reloadSkills}
-      </button>
+      {onReload && (
+        <button type="button" className={SECONDARY} disabled={!canReload || reloading || unavailable !== null} title={unavailable ?? undefined} onClick={onReload}>
+          {PLUGIN_MANAGEMENT.reloadSkills}
+        </button>
+      )}
     </span>
   );
 }
@@ -84,7 +87,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
         </span>
         {row.description !== '' && <span className="truncate text-ui-sm text-fg-muted">{row.description}</span>}
       </div>
-      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} onClick={() => onUse(invocation)}>
+      {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
     </li>
@@ -109,7 +112,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
-        {onUse && invocation !== null && <button type="button" className={PRIMARY} onClick={() => onUse(invocation)}>
+        {onUse && invocation !== null && <button type="button" className={PRIMARY} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
           {S.useInChat}
         </button>}
       </div>
@@ -126,28 +129,33 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
   );
 }
 
+// A row's identity across answers: its file, else its name (the list's own key).
+const rowKey = (row: SkillRow): string => row.path ?? row.name;
+
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
-// it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop).
+// it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
+// selected row as `groups` has it now, so what it offers follows a new answer or a changed launch profile (the task
+// review of the branch panel's fix); a row a new answer no longer lists leaves the detail for the list.
 export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
-  const [selected, setSelected] = useState<SkillRow | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
+  if (selectedKey !== null && selected === null) setSelectedKey(null); // its skill is gone: the list again
   const open = (row: SkillRow) => {
     left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
-    setSelected(row);
-    onDetail(true);
+    setSelectedKey(rowKey(row));
   };
-  const back = () => {
-    setSelected(null);
-    onDetail(false);
-  };
+  const back = () => setSelectedKey(null);
+  const inDetail = selected !== null;
+  useLayoutEffect(() => onDetail(inDetail), [inDetail, onDetail]);
   useLayoutEffect(() => {
     const from = left.current;
-    if (selected !== null || from === null || pane.current === null) return;
+    if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
     pane.current.querySelector<HTMLElement>(`[data-skill-row="${CSS.escape(from.name)}"] [data-row-open]`)?.focus();
-  }, [selected]);
+  }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
   let body: ReactNode;

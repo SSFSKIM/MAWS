@@ -16,11 +16,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { MAX_SEND_CONTENT_JSON_BYTES, MAX_SEND_DOCUMENT_BYTES } from '@shared/engine/session-state-store';
 import { REMOTE_UPLOAD_PART_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_ID_PATTERN, UPLOAD_KEPT_MS, type FilesReadUploadsInput, type FilesReadUploadsOutput, type FilesUploadInput, type FilesUploadOutput, type UploadDocumentBlock, type UploadPart } from '@shared/ipc/schema/files';
 import type { SpineView } from '@shared/spine/view';
-import { workingFolder } from '@shared/sessions/working-folder';
 import { AlreadyThere, confirmOpens, excludeUploads, promoteStaged, readUpload, rootOf, saveFiles, stagePart, Unconfirmed, Unsafe, uploadId, uploadRecords, type UploadRecords } from '../fs/upload-roots';
 import type { GitRun } from '../git/runner';
 import { MEDIA_TYPES, typeOf } from '../lane-a/media';
-import { allowlistOf } from './allowlist';
+import { admittedFolder, allowlistOf, type AllowlistRecord } from './allowlist';
 
 // A run with no record of the upload roots (a run refused the spine) writes nothing
 export const UPLOADS_UNAVAILABLE: FilesUploadOutput = { status: 'refused', reason: 'uploads are not available this run' };
@@ -60,6 +59,24 @@ export function scheduleUploadSweep(roots: UploadRecords, { log }: { log: (line:
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const refused = (reason: string): { status: 'refused'; reason: string } => ({ status: 'refused', reason }); // either command's refusal
+
+// UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, M3 decision 7): the base of a
+// call, decided once, before a root is recorded, the exclude file is touched or a byte is written or read: the session's
+// working folder as the admission takes it (`admittedFolder`), so a folder only one of the record's facts names is used
+// only while it is a registered work tree of the record's repository, and then as the realpath the check ran on. The
+// record's own folder resolves as lane A resolves its bridge's cwd (links above it are the session's own spelling). What
+// is not pinned: the directory at that pathname between the admission and the walk that writes (tech-debt tracker).
+type Base = { base: string } | { refusal: string };
+async function baseOf(directories: AllowlistRecord): Promise<Base> {
+  const admitted = await admittedFolder(directories, 'path');
+  if (admitted === null) return { refusal: 'the session’s working folder is not a worktree of its repository' };
+  if (admitted.checked) return { base: admitted.folder };
+  try {
+    return { base: realpathSync(admitted.folder) };
+  } catch (error) {
+    return { refusal: `the session’s working directory could not be read (${errorText(error)})` };
+  }
+}
 
 // The stored extension: the signature's, else the name's when usable, else none.
 function extensionOf(name: string, bytes: Buffer): string | null {
@@ -107,12 +124,9 @@ export function createUpload({ sessions, roots, git, mint = uploadId, log }: Upl
     if (directories === null) return refused(sessions.record(id) === null && sessions.intent(id) == null ? `unknown app session: ${id}` : 'the session has no working directory');
     const separated = files.find((file) => /[/\\]/.test(file.name));
     if (separated) return refused(`${separated.name} has a path separator`);
-    let base: string;
-    try {
-      base = realpathSync(workingFolder(directories).path); // links above it are the session's own spelling, as lane A resolves its cwd
-    } catch (error) {
-      return refused(`the session’s working directory could not be read (${errorText(error)}), so nothing was saved`);
-    }
+    const decided = await baseOf(directories);
+    if ('refusal' in decided) return refused(`${decided.refusal}, so nothing was saved`);
+    const { base } = decided; // the one base of this call, whatever the record says later in it
     const root = rootOf(base, id);
     // P5 O7 M8: nothing written (the record, the exclude, a file) where no open can be confirmed to follow no link
     try {
@@ -173,12 +187,9 @@ export function createUploadReader({ sessions, now = Date.now }: UploadReaderDep
     const id = appSessionId as AppSessionId;
     const directories = directoriesOf(id);
     if (directories === null) return refused(sessions.record(id) === null && sessions.intent(id) == null ? `unknown app session: ${id}` : 'the session has no working directory');
-    let base: string;
-    try {
-      base = realpathSync(workingFolder(directories).path);
-    } catch (error) {
-      return refused(`the session’s working directory could not be read (${errorText(error)})`);
-    }
+    const decided = await baseOf(directories);
+    if ('refusal' in decided) return refused(decided.refusal);
+    const { base } = decided;
     const blocks: UploadDocumentBlock[] = [];
     let encoded = 0;
     for (const { uploadId: name } of uploads) {

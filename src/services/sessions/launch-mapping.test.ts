@@ -17,6 +17,8 @@ const PIN = 'c0000000-0000-4000-8000-000000000003' as SessionId;
 const SOURCE_ENGINE = 'd0000000-0000-4000-8000-000000000004' as SessionId;
 const REPO = '/private/tmp/maws-repo';
 const HOME = '/Users/someone';
+// UX wave U12a: a record with no title, whose resume sets no cursor label (the label's own cases are below)
+const UNTITLED = { title: { text: '', source: 'none' as const } };
 
 const base = {
   appSessionId: APP, cwd: REPO, additionalDirectories: [], model: null, effort: null, permissionMode: null, gateway: 'gateway' as const,
@@ -126,9 +128,9 @@ describe('launch mapping', () => {
     const created = intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: socket });
     expect(LaunchSpecSchema.parse(created)).toEqual(created);
     expect(created.extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
-    expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null, browserBackend: socket }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
+    expect(resumeLaunchSpec(record(APP, UNTITLED), {}, { trust: null, replay: null, browserBackend: socket }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: socket } });
     expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: null }).extraSettings).toBeNull();
-    expect(resumeLaunchSpec(record(APP), {}, { trust: null, replay: null }).extraSettings).toBeNull();
+    expect(resumeLaunchSpec(record(APP, UNTITLED), {}, { trust: null, replay: null }).extraSettings).toBeNull();
   });
 
   // P5 O12 M11 (Interfaces §H): a launch names the spawner of its own session, the intent's at the start and the record's
@@ -258,6 +260,51 @@ describe('withOwnerChannel', () => {
 });
 // P2-C end
 
+// UX wave U12a start (l9-browser-delivery-07; the execution document's Interfaces §F): a resume of a record with a title
+// gives the computer-use plugin's on-screen cursor that title as CUA_CURSOR_LABEL, in the settings environment beside
+// the browser socket; the plugin cuts it to 24 characters and picks the colour itself
+describe('the cursor label', () => {
+  const titled = (text: string, source: 'user' | 'generated' | 'tool' | 'none' = 'user') => record(APP, { title: { text, source } });
+  const resumed = (r: ReturnType<typeof record>, browserBackend: string | null = null) => resumeLaunchSpec(r, {}, { trust: null, replay: null, browserBackend });
+
+  it('is the record’s title at a resume, beside the browser socket and without one', () => {
+    expect(resumed(titled('Fix the login form'), '/u/cua.sock').extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form' } });
+    expect(resumed(titled('Fix the login form')).extraSettings).toEqual({ env: { CUA_CURSOR_LABEL: 'Fix the login form' } });
+    expect(resumed(titled('Generated title', 'generated')).extraSettings).toEqual({ env: { CUA_CURSOR_LABEL: 'Generated title' } });
+    const spec = resumed(titled('Fix the login form'), '/u/cua.sock');
+    expect(LaunchSpecSchema.parse(spec)).toEqual(spec);
+  });
+
+  it('is nothing for a record whose title source is none, or whose title is empty once cleaned', () => {
+    expect(resumed(titled('Leftover text', 'none')).extraSettings).toBeNull();
+    expect(resumed(titled(' \u0007\n\t ')).extraSettings).toBeNull();
+    expect(resumed(titled('', 'user'), '/u/cua.sock').extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } });
+  });
+
+  it('removes control characters, trims, and cuts the title at 64 characters', () => {
+    expect(resumed(titled('  Fix\u0000 the\u001b[31m form\u007f\u0085 \n')).extraSettings).toEqual({ env: { CUA_CURSOR_LABEL: 'Fix the[31m form' } });
+    const long = `${'a'.repeat(60)}bcdefgh`;
+    expect(resumed(titled(long)).extraSettings).toEqual({ env: { CUA_CURSOR_LABEL: `${'a'.repeat(60)}bcde` } });
+    const astral = '🙂'.repeat(70); // cut by characters, never inside one
+    expect((resumed(titled(astral)).extraSettings as { env: { CUA_CURSOR_LABEL: string } }).env.CUA_CURSOR_LABEL).toBe('🙂'.repeat(64));
+  });
+
+  it('is set by no intent’s launch and not by the trust bootstrap', () => {
+    expect(intentLaunchSpec(intent({}), { cwd: REPO, trust: null, replay: null, browserBackend: '/u/cua.sock' }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock' } });
+    expect(intentLaunchSpec(intent({ kind: 'fork', source: { appSessionId: BOOT, engineSessionId: SOURCE_ENGINE, rewindTo: null } }), { cwd: REPO, trust: null, replay: null }).extraSettings).toBeNull();
+    expect(bootstrapSpec({ bootstrapId: BOOT, cwd: REPO, additionalDirectories: [], gateway: 'gateway', trustKey: REPO, replay: null }).extraSettings).toBeNull();
+  });
+
+  it('is kept through the owner channel’s merge of the environment, lane on and off', () => {
+    const spec = resumed(titled('Fix the login form'), '/u/cua.sock');
+    expect(withOwnerChannel(spec, { laneOn: true, append: 'supplement', snapshotOff: false }).extraSettings).toEqual({
+      env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form', [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_CONTRACT_VERSION) },
+    });
+    expect(withOwnerChannel(spec, { laneOn: false, append: null, snapshotOff: false }).extraSettings).toEqual({ env: { CUA_BROWSER_BACKENDS: '/u/cua.sock', CUA_CURSOR_LABEL: 'Fix the login form' } });
+  });
+});
+// UX wave U12a end
+
 // P4-A2 start (2026-10-21; P4 §4.2 "The per-session launch profile", X6's amendment; the owner's ruling: one profile in
 // Settings › Engine, settings version 17): the profile reaches the engine as flag-level `--settings` keys alone
 describe('the launch profile', () => {
@@ -271,7 +318,7 @@ describe('the launch profile', () => {
     new: intentLaunchSpec(intent(), { ...ctx, browserBackend }, settings),
     fork: intentLaunchSpec(intent({ kind: 'fork', source }), { ...ctx, browserBackend }, settings),
     sideThread: intentLaunchSpec(intent({ kind: 'fork', source, lineage: { kind: 'side-thread', parentAppSessionId: SOURCE_APP, parentEngineSessionId: SOURCE_ENGINE, openedBy: 'btw' } }), { ...ctx, browserBackend }, settings),
-    resume: resumeLaunchSpec(record(APP, { engineSessionId: SOURCE_ENGINE, effort: 'high' }), {}, { trust: null, replay: null, browserBackend }, settings),
+    resume: resumeLaunchSpec(record(APP, { engineSessionId: SOURCE_ENGINE, effort: 'high', ...UNTITLED }), {}, { trust: null, replay: null, browserBackend }, settings), // U12a: untitled, so no cursor label
     bootstrap: bootstrapSpec(BOOTSTRAP, settings),
   });
   const argsOf = (spec: ReturnType<typeof toLaunchSpec>) => buildLaunch(spec, {}, { relayUrl: 'http://127.0.0.1:8641', bin: '/bin/claude', engineVersion: '2.1.306', spawnerPid: 1 }).args;

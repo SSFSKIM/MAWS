@@ -58,6 +58,7 @@ function plan(scenarioEnv) {
         LAUNCHD_E2E: '',
         MAC_EC2: '',
         MAC_MINI_OVERFLOW: '',
+        MAC_MINI_LANES: '',
         E2E_MINUTES: '',
         // The run's ref: a test chooses its own, never the ref the tests themselves run on.
         GITHUB_REF: '',
@@ -375,7 +376,7 @@ test("gate.yml's proven-VM groups run on Solo Mac, or the named VM lane alone; e
     assert.deepEqual(JSON.parse(laned.outputs.timeouts), JSON.parse(outputs.timeouts), lane);
     for (const job of ['static', 'unit', 'probes']) assert.equal(laned.outputs[`${job}_runner`], outputs[`${job}_runner`], `${lane} ${job}`);
     assert.doesNotMatch(laned.summary, /Shared Mac|Solo Mac/);
-    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:default, e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
+    assert.match(laned.summary, new RegExp(`\\. Lane: ${lane}, on \\[${guest[0]}\\] alone: e2e:default, e2e:artifacts, e2e:library, e2e:side, e2e:tools, e2e:to-human, e2e:deliverables, e2e:panel, e2e:browser, e2e:browser-comment, e2e:browser-import, e2e:settings, e2e:transcript, e2e:code, e2e:agents, e2e:widgets, e2e:c7, e2e:scm, e2e:c12, e2e:available, e2e:document, e2e:document-app, e2e:presentations, e2e:design-systems, e2e:browser-cua, e2e:browser-chrome, e2e:dashboard, e2e:connectors, e2e:connectors-direct, e2e:connectors-oauth, e2e:delivery\\. Lane: ${lane} moves only the MAC_VM_E2E groups, so off the mini: e2e:daemon-unit \\(EC2\\)\\. Out/ built on the pool \\(e2e-build\\) for the guest-eligible jobs: harness, plain\\.\\n$`), lane);
   }
   // composer and layout, outside the class-1 set, take the guest's labels when a run names them.
   const named = { ...own, GATE_RUNNER: 'pool', GATE_E2E_RUNNER: 'macos' };
@@ -1363,7 +1364,7 @@ const refusedStartWalk = (text) => {
   }
   return { macJobs: macJobs.sort(), unsafe };
 };
-const gateMacJobs = ['e2e', 'e2e-vm', 'packaged', 'plan', 'probes', 'static-local', 'unit', 'unit-darwin'];
+const gateMacJobs = ['e2e', 'e2e-copy', 'e2e-vm', 'packaged', 'plan', 'probes', 'static-local', 'unit', 'unit-darwin'];
 
 test('a step of a Mac job that can run after its start was refused is an upload, or waits on a step only an admitted job runs', () => {
   assert.deepEqual(refusedStartWalk(readWorkflow()), { macJobs: gateMacJobs, unsafe: [] });
@@ -1442,6 +1443,8 @@ test('a run without the Selection: trailer writes the outputs and the summary it
     'e2e_host=[]', 'e2e_vm=[]', 'e2e_build=[]', `e2e_build_runner=${JSON.stringify(['self-hosted', 'ci-kit-pool', 'cpus-4'])}`,
     // The hosted Macs' (ci-kit's hosted-Mac spec, Placement): no e2e job, so none hosted.
     'e2e_hosted=[]', 'peer_wait=[]',
+    // The mini copies' guest jobs (no MiniCopy: trailer, so none).
+    'e2e_copy=[]',
     'packaged_shards=[{"shard":"","slug":"","checks":true}]',
   ];
   assert.equal(pushed.raw, `${outputs.join('\n')}\n`);
@@ -1789,9 +1792,11 @@ test('mirror keeps the pre-direct planner byte-identical with the captured admis
   for (const { env, sha256 } of fixtures) {
     for (const route of ['', 'mirror']) {
       const { outputs: current, summary, stdout } = planOf({ ...env, HOSTED_MAC_ROUTE: route }, scripts);
-      // Added after this capture: mirror's single unsharded job, and the guest uplink margin with its separate test
-      // timeout. Remove only these additions; all older outputs remain byte-identical.
-      const { packaged_shards, ...outputs } = current;
+      // Added after this capture: mirror's single unsharded job, the mini copies' jobs (none without a trailer), and the
+      // guest uplink margin with its separate test timeout. Remove only these additions; all older outputs remain
+      // byte-identical.
+      const { packaged_shards, e2e_copy, ...outputs } = current;
+      assert.equal(e2e_copy, '[]');
       assert.deepEqual(JSON.parse(packaged_shards), [{ shard: '', slug: '', checks: true }]);
       for (const key of ['e2e', 'e2e_vm']) {
         outputs[key] = JSON.stringify(JSON.parse(outputs[key]).map((entry) => {
@@ -1801,7 +1806,9 @@ test('mirror keeps the pre-direct planner byte-identical with the captured admis
           return { ...before, timeout: before.timeout - 35 };
         }));
       }
-      assert.equal(createHash('sha256').update(JSON.stringify({ outputs, summary, stdout })).digest('hex'), sha256, `${env.HEAD_MESSAGE}, ${route}`);
+      // Added after this capture too: a Lane:'s sentence naming the groups it leaves off the mini.
+      const unlaned = (text) => text.replace(/ ?Lane: vm(?:-trial)? moves only the MAC_VM_E2E groups, so off the mini: [^.]*\./, '');
+      assert.equal(createHash('sha256').update(JSON.stringify({ outputs, summary: unlaned(summary), stdout: unlaned(stdout) })).digest('hex'), sha256, `${env.HEAD_MESSAGE}, ${route}`);
     }
   }
 });
@@ -2433,4 +2440,224 @@ test('planning expires the original lane publication independently of the fresh 
   assert.match(expired.summary, /host held, vm held/);
   assert.equal(JSON.parse(planned(snapshot, sampledAt + 2000, { MAC_EC2: '' }).outputs.e2e)[0].overflow, 'ec2');
   assert.equal(JSON.parse(planned({ ...snapshot, lanesAt: new Date(sampledAt + 1).toISOString() }, sampledAt).outputs.e2e)[0].hosted, true);
+});
+
+// Mini copies (gate-plan.mjs, `MiniCopy:`): a group this run puts off the mini runs once more on it, in the guest when
+// it is guest-eligible, else on the mini's home host; none for a group already there, never on a Mac, or LAUNCHD_E2E
+// outside the guest.
+const copyScripts = {
+  e2e: 'playwright test',
+  ...Object.fromEntries(['to-human', 'c12', 'side', 'widgets', 'code'].map((group, i) => [`e2e:${group}`, `scripts/e2e-build.sh ${i % 2 ? 'plain' : 'harness'} && playwright test e2e/${group}.spec.ts`])),
+  'e2e:lane-a': 'scripts/e2e-build.sh plain && playwright test e2e/lane-a.spec.ts',
+  'e2e:daemon-unit': 'node scripts/x.mjs && playwright test e2e/daemon-unit.spec.ts',
+  'e2e:panel': 'scripts/e2e-build.sh harness && playwright test e2e/panel.spec.ts',
+  'e2e:desk-web': 'pnpm --filter desk-web e2e',
+};
+const copyLists = {
+  HOSTED_MAC_E2E: 'to-human c12 side widgets code lane-a daemon-unit', MAC_VM_E2E: 'to-human c12 side widgets code panel',
+  LAUNCHD_E2E: 'daemon-unit', POOL_E2E: 'desk-web', LINUX_E2E: 'desk-web',
+};
+const copyPlan = (gates, copies, extra = {}) => planOf({
+  ...copyLists, ...extra, EVENT: extra.EVENT ?? 'push',
+  HEAD_MESSAGE: `ci-gate: test\n\nGates: ${gates.map((group) => `e2e:${group}`).join(',')}\nRunner: macos${extra.trailers ?? ''}${copies.map((line) => `\nMiniCopy: ${line}`).join('')}`,
+}, copyScripts, Date.now());
+const entries = (outputs, key) => JSON.parse(outputs[key] ?? '[]');
+
+test('a mini copy runs where the original is off the mini: guest-eligible in the guest, else on the home host, never a LAUNCHD_E2E group outside the guest', () => {
+  const { outputs, summary, stdout } = copyPlan(['to-human', 'lane-a', 'daemon-unit', 'panel', 'desk-web'], [
+    'to-human e2e/to-human.spec.ts', 'lane-a e2e/support/lane.ts, e2e/lane-a.spec.ts', 'daemon-unit e2e/support/lane.ts',
+    'panel e2e/panel.spec.ts', 'desk-web e2e/support/lane.ts', 'c12 e2e/c12.spec.ts',
+  ]);
+  // lane-a: a host copy beside its hosted original, on the mini's home label (today's three alone match the EC2 Mac
+  // too), with that runner's timeout and a slug of its own; no retry.
+  const host = entries(outputs, 'e2e_host').filter((entry) => entry.copy);
+  assert.deepEqual(host.map(({ group, slug, runner, timeout, retry }) => ({ group, slug, runner: JSON.parse(runner), timeout, retry })), [{ group: 'lane-a', slug: 'lane-a-mini', runner: ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'], timeout: 40, retry: undefined }]);
+  // to-human: one guest job, the copy's variant built on the pool for it, and never an e2e_vm entry of its own.
+  assert.deepEqual(entries(outputs, 'e2e_copy').map(({ groups, runner, variants, copies }) => ({ groups, runner: JSON.parse(runner), variants, slugs: copies.map((step) => step.slug) })), [{ groups: 'to-human', runner: ['ci-kit-mac-vm'], variants: ['harness'], slugs: ['to-human-mini'] }]);
+  assert.ok(entries(outputs, 'e2e_vm').every((entry) => !entry.copy));
+  assert.ok(entries(outputs, 'e2e_build').includes('harness'));
+  // Every copy is in `e2e` too, beside its original, for the alert check and the pool hint.
+  assert.deepEqual(entries(outputs, 'e2e').filter((entry) => entry.copy).map((entry) => [entry.group, JSON.parse(entry.runner)]), [['to-human', ['ci-kit-mac-vm']], ['lane-a', ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home']]]);
+  assert.match(stdout, /^Mini copy: e2e:to-human in the guest, \[ci-kit-mac-vm\], as e2e: mini copy \(to-human\) \(e2e\/to-human\.spec\.ts\)\.$/m);
+  assert.match(stdout, /^Mini copy: e2e:lane-a on the home host, \[self-hosted, macOS, ARM64, ci-kit-mac-home\] \(e2e\/support\/lane\.ts, e2e\/lane-a\.spec\.ts\)\.$/m);
+  assert.match(stdout, /^Mini copy kept off: e2e:daemon-unit, LAUNCHD_E2E and not guest-eligible, so never in the home account \(e2e\/support\/lane\.ts\)\.$/m);
+  assert.match(stdout, /^Mini copy kept off: e2e:panel, already on the mini \(e2e\/panel\.spec\.ts\)\.$/m);
+  assert.match(stdout, /^Mini copy kept off: e2e:desk-web, never on a Mac /m);
+  // A group the run did not ask for is never copied, nor named.
+  assert.doesNotMatch(stdout, /c12/);
+  assert.match(summary, /\nMini copy: e2e:lane-a on the home host, \[self-hosted, macOS, ARM64, ci-kit-mac-home\] \(e2e\/support\/lane\.ts, e2e\/lane-a\.spec\.ts\)\.\n/);
+});
+
+test("guest copies share as few jobs as their bounds fit under ci-kit's VM job bound, each group in a slot gate.yml has", () => {
+  const groups = ['to-human', 'c12', 'side', 'widgets', 'code'];
+  const { outputs } = copyPlan(groups, groups.map((group) => `${group} e2e/${group}.spec.ts`));
+  const jobs = entries(outputs, 'e2e_copy');
+  assert.deepEqual(jobs.map(({ groups: names, timeout, variants }) => [names, timeout, variants]), [['to-human, c12, side', 80, ['harness', 'plain']], ['widgets, code', 65, ['harness', 'plain']]]);
+  assert.deepEqual(jobs[0].copies.map((step) => step.minutes), [15, 15, 15]);
+  // A group's own minutes bound its step, and a job that would pass 90 minutes takes a job of its own.
+  const own = entries(copyPlan(groups, groups.map((group) => `${group} e2e/${group}.spec.ts`), { E2E_MINUTES: 'c12=40' }).outputs, 'e2e_copy');
+  assert.deepEqual(own.map(({ groups: names, timeout }) => [names, timeout]), [['to-human, c12', 90], ['side, widgets, code', 80]]);
+  const alone = entries(copyPlan(groups, groups.map((group) => `${group} e2e/${group}.spec.ts`), { E2E_MINUTES: 'c12=50' }).outputs, 'e2e_copy');
+  assert.deepEqual(alone.map(({ groups: names, timeout }) => [names, timeout]), [['to-human, side, widgets', 80], ['c12', 85], ['code', 50]]);
+  // The job's slots are gate.yml's: one step and one upload per group, and the verdict reading each slot's outcome.
+  const job = jobBody(readWorkflow(), 'e2e-copy');
+  const slots = [...job.matchAll(/\n {6}- id: copy(\d+)\n {8}if: matrix\.copies\[(\d+)\]\n/g)].map(([, id, index]) => [Number(id), Number(index)]);
+  assert.deepEqual(slots, [[1, 0], [2, 1], [3, 2]]);
+  assert.ok(Math.max(...[...jobs, ...own, ...alone].map((entry) => entry.copies.length)) <= slots.length);
+  for (const [id, index] of slots) {
+    assert.match(job, new RegExp(`\\n {8}timeout-minutes: \\$\\{\\{ matrix\\.copies\\[${index}\\]\\.minutes \\|\\| 15 \\}\\}\\n {8}env:\\n {10}MAWS_E2E_GROUP: \\$\\{\\{ matrix\\.copies\\[${index}\\]\\.group \\}\\}\\n`));
+    assert.match(job, new RegExp(`steps\\.copy${id}\\.outcome == 'failure'[^\\n]*\\n {8}uses: actions/upload-artifact@v7\\n {8}with:\\n {10}name: e2e-\\$\\{\\{ matrix\\.copies\\[${index}\\]\\.slug \\}\\}\\n`));
+  }
+  assert.match(job, new RegExp(`\\n {10}OUTCOMES: ${slots.map(([id]) => `\\$\\{\\{ steps\\.copy${id}\\.outcome \\}\\}`).join(' ')}\\n`));
+  assert.match(job, /\n {4}name: 'e2e: mini copy \(\$\{\{ matrix\.groups \}\}\)'\n/);
+  assert.match(jobBody(readWorkflow(), 'e2e'), /\n {4}name: e2e:\$\{\{ matrix\.group \}\}\$\{\{ matrix\.copy && ' \(mini copy\)' \|\| /);
+});
+
+test('a host copy stays on the home host under a Lane: and on the direct route, and a Lane: names the groups it leaves off the mini', () => {
+  for (const extra of [{ trailers: '\nLane: vm' }, { trailers: '\nLane: vm-trial' }, { HOSTED_MAC_ROUTE: 'direct' }, { HOSTED_MAC_ROUTE: 'direct', trailers: '\nLane: vm' }]) {
+    const { outputs, stdout } = copyPlan(['to-human', 'lane-a'], ['to-human e2e/to-human.spec.ts', 'lane-a e2e/lane-a.spec.ts'], extra);
+    const copy = entries(outputs, 'e2e_host').find((entry) => entry.copy);
+    assert.deepEqual([copy.group, JSON.parse(copy.runner)], ['lane-a', ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home']], JSON.stringify(extra));
+    const lane = /Lane: (vm(?:-trial)?)/.exec(extra.trailers ?? '')?.[1];
+    if (lane) {
+      // The lane put to-human in the guest itself, so it needs no copy; lane-a stayed hosted, and the summary says so.
+      assert.match(stdout, /^Mini copy kept off: e2e:to-human, already on the mini /m);
+      assert.match(stdout, new RegExp(`Lane: ${lane} moves only the MAC_VM_E2E groups, so off the mini: e2e:lane-a \\(a hosted Mac\\)\\.`));
+    } else assert.doesNotMatch(stdout, /moves only the MAC_VM_E2E groups/);
+  }
+  // An EC2 placement is named as EC2.
+  const ec2 = copyPlan(['daemon-unit', 'to-human'], [], { HOSTED_MAC_E2E: 'to-human', trailers: '\nLane: vm' });
+  assert.match(ec2.stdout, /Lane: vm moves only the MAC_VM_E2E groups, so off the mini: e2e:daemon-unit \(EC2\)\./);
+});
+
+test('an EC2 overflow is copied as a hosted original is; a mini overflow is already on the mini', () => {
+  const sample = (overrides) => JSON.stringify({ v: 2, at: new Date().toISOString(), lanesAt: new Date().toISOString(), hostedQueued: 20, hostedRunning: 5, ec2: 'idle', ec2Queued: 0, partial: [], mini: 'idle', miniQueued: 0, miniRunning: 0, miniHost: 'free', miniVm: 'free', ...overrides });
+  for (const [overrides, expected] of [[{ mini: 'offline' }, 'guest'], [{}, 'already']]) {
+    const { outputs, stdout } = copyPlan(['to-human'], ['to-human e2e/to-human.spec.ts'], { HOSTED_MAC_ROUTE: 'direct', trailers: `\nMac-Backlog: ${sample(overrides)}` });
+    const original = entries(outputs, 'e2e')[0];
+    assert.equal(original.overflow, expected === 'guest' ? 'ec2' : 'mini');
+    assert.equal(entries(outputs, 'e2e_copy').length, expected === 'guest' ? 1 : 0);
+    if (expected === 'already') assert.match(stdout, /^Mini copy kept off: e2e:to-human, already on the mini /m);
+  }
+});
+
+test('MiniCopy: none (<reason>) copies nothing and says why; a dispatch and a reserved final ref copy nothing', () => {
+  const optedOut = copyPlan(['to-human', 'lane-a'], ['none (the copies stand on 0123abcd)', 'to-human e2e/to-human.spec.ts']);
+  assert.ok(entries(optedOut.outputs, 'e2e').every((entry) => !entry.copy));
+  assert.equal(optedOut.outputs.e2e_copy, '[]');
+  assert.match(optedOut.summary, /\nMini copies: none \(the copies stand on 0123abcd\)\.\n/);
+  assert.doesNotMatch(optedOut.stdout, /Mini copy:/);
+  // A dispatch reads no trailer.
+  const dispatched = copyPlan(['to-human'], ['to-human e2e/to-human.spec.ts'], { EVENT: 'workflow_dispatch', INPUT_GATES: 'e2e:to-human', INPUT_RUNNER: 'macos' });
+  assert.ok(entries(dispatched.outputs, 'e2e').every((entry) => !entry.copy));
+  assert.doesNotMatch(dispatched.stdout, /Mini cop/);
+  // A reserved final ref hosts nothing, so every candidate is already on the mini.
+  const final = copyPlan(['lane-a'], ['lane-a e2e/lane-a.spec.ts'], { GITHUB_REF: 'refs/heads/ci/h-final-0123abcd' });
+  assert.ok(entries(final.outputs, 'e2e').every((entry) => !entry.copy && !entry.hosted));
+  assert.match(final.stdout, /^Mini copy kept off: e2e:lane-a, already on the mini /m);
+});
+
+test("a guest copy whose own bound would pass a guest job's 90 minutes takes the home host, or no copy when it is LAUNCHD_E2E", () => {
+  const { outputs, stdout } = copyPlan(['to-human', 'c12'], ['to-human e2e/to-human.spec.ts', 'c12 e2e/c12.spec.ts'], { E2E_MINUTES: 'to-human=70 c12=55' });
+  // 35 + 55 = 90 fits; 35 + 70 does not.
+  assert.deepEqual(entries(outputs, 'e2e_copy').map(({ groups, timeout }) => [groups, timeout]), [['c12', 90]]);
+  const host = entries(outputs, 'e2e_host').find((entry) => entry.copy);
+  assert.deepEqual([host.group, JSON.parse(host.runner), host.timeout, host.variant], ['to-human', ['self-hosted', 'macOS', 'ARM64', 'ci-kit-mac-home'], 80, undefined]);
+  assert.match(stdout, /^Mini copy: e2e:to-human on the home host, \[self-hosted, macOS, ARM64, ci-kit-mac-home\] \(its 70 minutes pass a guest job's 90\) \(e2e\/to-human\.spec\.ts\)\.$/m);
+  assert.ok(Math.max(...entries(outputs, 'e2e_copy').map((job) => job.timeout)) <= 90);
+  const daemon = copyPlan(['to-human'], ['to-human e2e/to-human.spec.ts'], { E2E_MINUTES: 'to-human=70', LAUNCHD_E2E: 'daemon-unit to-human' });
+  assert.ok(entries(daemon.outputs, 'e2e').every((entry) => !entry.copy));
+  assert.match(daemon.stdout, /^Mini copy kept off: e2e:to-human, its 70 minutes pass a guest job's 90, and LAUNCHD_E2E never runs in the home account /m);
+});
+
+// The mini's scheduled holds (MAC_MINI_LANES `windows`): one line, in the summary, the step's stdout and `mini_window`,
+// when a window in force or starting within three hours holds a lane a job of this run takes; never a move.
+const windowNow = Date.parse('2026-11-08T22:50:00Z');
+const quiet = { from: '2026-11-08T23:00Z', until: '2026-11-08T23:50Z', lanes: ['host', 'vm'], why: 'quiet window 23:00Z 23:50Z semis' };
+const vmPause = { ...quiet, lanes: ['vm'], why: 'VM paused' };
+const lanesValue = (windows, extra = {}) => JSON.stringify({ v: 1, at: '2026-11-08T21:00:00Z', host: 'free', vm: 'free', why: '', windows, ...extra });
+const windowScripts = { e2e: 'playwright test', 'e2e:guest': 'scripts/e2e-build.sh plain && playwright test', 'e2e:host': 'playwright test', 'e2e:desk-web': 'pnpm --filter desk-web e2e' };
+const windowPlan = (lanes, { gates = 'e2e:guest,e2e:host,unit:darwin', now = windowNow, trailers = '', ...extra } = {}) =>
+  planOf({ MAC_VM_E2E: 'guest', POOL_E2E: 'desk-web', LINUX_E2E: 'desk-web', MAC_MINI_LANES: lanes, ...extra, HEAD_MESSAGE: `ci-gate: test\n\nGates: ${gates}\nRunner: macos${trailers}` }, windowScripts, now);
+const withoutWindow = (outputs) => Object.fromEntries(Object.entries(outputs).filter(([key]) => key !== 'mini_window'));
+
+test('a hold in force or starting within three hours is said once; one ended or further off says nothing', () => {
+  const upcoming = windowPlan(lanesValue([quiet]));
+  const line = "Mac mini: the host and VM lanes are held 23:00Z-23:50Z (quiet window 23:00Z 23:50Z semis), so this run's jobs there not started by 23:00Z wait until 23:50Z: unit:darwin, e2e:guest, e2e:host.";
+  assert.equal(upcoming.outputs.mini_window, line);
+  assert.equal(upcoming.summary.split(line).length, 2);
+  assert.equal(upcoming.stdout.split(line).length, 2);
+  const active = windowPlan(lanesValue([quiet]), { now: Date.parse('2026-11-08T23:00:00Z') });
+  assert.equal(active.outputs.mini_window, "Mac mini: the host and VM lanes are held until 23:50Z (quiet window 23:00Z 23:50Z semis), so this run's jobs there wait until then: unit:darwin, e2e:guest, e2e:host.");
+  // Three hours ahead is inside, a minute more is not; the end is exclusive.
+  assert.match(windowPlan(lanesValue([quiet]), { now: Date.parse('2026-11-08T20:00:00Z') }).outputs.mini_window, /held 23:00Z-23:50Z/);
+  for (const now of ['2026-11-08T19:59:00Z', '2026-11-08T23:50:00Z', '2026-11-09T01:00:00Z']) {
+    const quietPlan = windowPlan(lanesValue([quiet]), { now: Date.parse(now) });
+    assert.equal(quietPlan.outputs.mini_window, undefined, now);
+    assert.doesNotMatch(quietPlan.summary + quietPlan.stdout, /Mac mini:/, now);
+  }
+  // Absolute times: a window across midnight needs nothing of its own.
+  const wrap = windowPlan(lanesValue([{ ...quiet, from: '2026-11-08T23:30Z', until: '2026-11-09T00:20Z' }]));
+  assert.match(wrap.outputs.mini_window, /held 23:30Z-00:20Z .* not started by 23:30Z wait until 00:20Z: /);
+  // A window too far off to say as a clock time says its date.
+  const long = windowPlan(lanesValue([{ ...quiet, until: '2026-11-10T09:00Z' }]), { now: Date.parse('2026-11-08T23:10:00Z') });
+  assert.match(long.outputs.mini_window, /held until 2026-11-10T09:00Z \(/);
+});
+
+test('a VM pause names only the jobs that can take the guest, and is silent for a run whose Mac jobs take the host alone', () => {
+  // e2e:guest is on [ci-kit-mac-solo], which ci-kit admits only while both lanes are free; under Lane: vm, the guest alone.
+  for (const trailers of ['', '\nLane: vm']) {
+    assert.equal(windowPlan(lanesValue([vmPause]), { trailers }).outputs.mini_window,
+      "Mac mini: the VM lane is held 23:00Z-23:50Z (VM paused), so this run's jobs there not started by 23:00Z wait until 23:50Z: e2e:guest.", trailers);
+  }
+  assert.equal(windowPlan(lanesValue([vmPause]), { gates: 'e2e:host,unit:darwin' }).outputs.mini_window, undefined);
+  // An earlier hold that touches no job of the run gives way to the next one that does.
+  assert.match(windowPlan(lanesValue([{ ...vmPause, until: '2026-11-08T23:10Z' }, quiet]), { gates: 'e2e:host' }).outputs.mini_window, /^Mac mini: the host and VM lanes are held 23:00Z-23:50Z .*: e2e:host\.$/);
+  // Class 1a, unit:darwin and packaged on the mini's labels count; a reason left empty says none.
+  assert.equal(windowPlan(lanesValue([{ ...quiet, why: '' }]), { gates: 'static,unit,probes,packaged', GATE_RUNNER: 'macos' }).outputs.mini_window,
+    "Mac mini: the host and VM lanes are held 23:00Z-23:50Z, so this run's jobs there not started by 23:00Z wait until 23:50Z: static, unit, probes, packaged.");
+});
+
+test('a run with no job on the mini says nothing of its holds', () => {
+  for (const extra of [
+    { gates: 'static,unit,probes,e2e:desk-web' },
+    { gates: 'e2e:guest,e2e:host', HOSTED_MAC_ROUTE: 'direct', HOSTED_MAC_E2E: 'guest host' },
+    { gates: 'e2e:host', LAUNCHD_E2E: 'host' },
+  ]) assert.equal(windowPlan(lanesValue([quiet]), extra).outputs.mini_window, undefined, JSON.stringify(extra));
+});
+
+test('an absent, unreadable or malformed value, or a malformed window, says nothing and changes no other output', () => {
+  const original = windowPlan('').outputs;
+  assert.equal(original.mini_window, undefined);
+  assert.deepEqual(withoutWindow(windowPlan(lanesValue([quiet])).outputs), original);
+  for (const value of [
+    'not json', 'null', '[]', lanesValue([quiet], { v: 2 }), lanesValue(quiet), lanesValue([null]),
+    lanesValue([{ ...quiet, from: '2026-11-08T23:00:00Z' }]), lanesValue([{ ...quiet, until: '2026-11-08 23:50Z' }]),
+    lanesValue([{ ...quiet, from: '2026-11-08T24:00Z' }]), lanesValue([{ ...quiet, until: quiet.from }]),
+    lanesValue([{ ...quiet, lanes: [] }]), lanesValue([{ ...quiet, lanes: ['host', 'gpu'] }]), lanesValue([{ ...quiet, lanes: 'host vm' }]),
+    lanesValue([{ ...quiet, why: 7 }]),
+  ]) {
+    const result = windowPlan(value);
+    assert.deepEqual(result.outputs, original, value);
+    assert.doesNotMatch(result.summary + result.stdout, /Mac mini:/, value);
+  }
+  // A malformed entry leaves the well-formed ones beside it; a stale publication's windows still count.
+  assert.match(windowPlan(lanesValue([{ ...quiet, lanes: ['gpu'] }, quiet], { at: '2026-11-01T00:00:00Z' })).outputs.mini_window, /^Mac mini: /);
+  // planOf without a clock (an old caller) says nothing.
+  assert.equal(planOf({ MAC_MINI_LANES: lanesValue([quiet]), HEAD_MESSAGE: 'Gates: unit:darwin\nRunner: macos' }, windowScripts).outputs.mini_window, undefined);
+});
+
+test('the workflow entry point writes the hold to its output on one line and escapes it in the summary', () => {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  const stamp = (time) => `${new Date(time).toISOString().slice(0, 16)}Z`;
+  const window = { from: stamp(minute + 3_600_000), until: stamp(minute + 7_200_000), lanes: ['host', 'vm'], why: 'quiet <night> & day\nGates: all' };
+  const { outputs, raw, summary, stdout } = plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos', MAC_MINI_LANES: lanesValue([window]) });
+  assert.match(outputs.mini_window, /^Mac mini: the host and VM lanes are held \S+ \(quiet <night> & day Gates: all\), so this run's jobs there not started by \S+ wait until \S+: unit:darwin\.$/);
+  assert.equal(raw.split('\n').filter((line) => line.startsWith('mini_window=')).length, 1);
+  assert.doesNotMatch(raw, /^Gates: all/m);
+  assert.match(summary, /\(quiet &lt;night&gt; &amp; day Gates: all\)/);
+  assert.match(stdout, /^Mac mini: .*\(quiet <night> & day Gates: all\)/m);
+  assert.equal(plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos' }).raw, plan({ HEAD_MESSAGE: 'ci-gate: test\n\nGates: unit:darwin\nRunner: macos', MAC_MINI_LANES: lanesValue([]) }).raw);
+  // The plan step reads the variable at plan time.
+  assert.match(jobBody(readWorkflow(), 'plan'), /^ {10}MAC_MINI_LANES: \$\{\{ vars\.MAC_MINI_LANES \}\}$/m);
 });

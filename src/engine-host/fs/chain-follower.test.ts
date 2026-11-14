@@ -6,6 +6,9 @@ import type { AgentId, MessageUuid, SessionId } from '@shared/graph/ids';
 import { currentChain } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadSyntheticTranscript, loadTranscriptFixture, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../test/support/memory-reader';
+import { rowsOf, staysInView, withAllExpanded } from '../../renderer/src/transcript/model/derive';
+import { applyEvents, createState } from '../../renderer/src/transcript/model/reduce';
+import type { Row } from '../../renderer/src/transcript/model/rows';
 import { ChainFollower, type FollowerEvent } from './chain-follower';
 import { ownsTranscriptRecord } from './holders';
 
@@ -716,14 +719,15 @@ describe('a holder-less transcript whose last turn never ended', () => {
     expect((await follow(joined(terminal), 'a76ad588-e4b4-4a99-bf4e-69287514916f' as SessionId, 1)).out.of('process.exited')).toEqual([]);
   });
 
-  it('emits nothing when the last turn ended, or when no turn ever started', async () => {
+  // X-168: a terminal's process ends after its turn, so an ended last turn is no sign the process is still there.
+  it('ends a backfill whose last turn ended too, at the last record; emits nothing when no turn ever started', async () => {
     const ended = joined([
       line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: at(0), message: { role: 'user', content: 'go' } }),
       line({ type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: at(1), message: { id: 'm1', model: 'x', content: [{ type: 'text', text: 'ok' }] } }),
       line({ type: 'system', subtype: 'turn_duration', uuid: 's1', parentUuid: 'a1', durationMs: 5, timestamp: at(2) }),
       line({ type: 'attachment', uuid: 'x1', parentUuid: 's1', timestamp: at(3), attachment: { type: 'prompt_snapshot' } }),
     ]);
-    expect((await follow(ended, 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
+    expect((await follow(ended, 'S' as SessionId, 0)).out.of('process.exited').map((e) => [e.id, e.at, e.reason, e.seq])).toEqual([['session:S:exited', at(3), 'unknown', null]]);
     const noTurn = joined([line({ type: 'attachment', uuid: 'x1', parentUuid: null, cwd: '/d', timestamp: at(0), attachment: { type: 'environment' } })]);
     expect((await follow(noTurn, 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
     expect((await follow(Buffer.alloc(0), 'S' as SessionId, 0)).out.of('process.exited')).toEqual([]);
@@ -757,6 +761,198 @@ describe('a holder-less transcript whose last turn never ended', () => {
     const { out } = await follow(joined(SDK_LINES), SDK, 0, { agentId: 'a1' as AgentId, parentToolUseId: null });
     expect(out.of('turn.started')).toHaveLength(1);
     expect(out.of('process.exited')).toEqual([]);
+  });
+});
+
+// X-168: a terminal session's process goes after its turn ended, a background agent it started still running, and its
+// transcript holds no exit. The follower supplies one when the registry's last live process of the session goes, in its
+// own order, once for each process that goes. Hand-written, invented data.
+describe('the exit a gone terminal leaves (X-168)', () => {
+  const TERM = '5b0c7e4a-2d1f-4c8e-9a3b-7f6e5d4c3b2a' as SessionId;
+  const EXIT = `session:${TERM}:exited`;
+  const record = (fields: object) => line({ sessionId: TERM, cwd: '/work/demo', entrypoint: 'cli', isSidechain: false, ...fields });
+  // One turn of the terminal: a prompt, a background agent launched, a reply, the turn's end.
+  const backgroundTurn = (n: number, parentUuid: string | null, s: number) => [
+    record({ type: 'user', uuid: `u${n}`, parentUuid, timestamp: at(s), message: { role: 'user', content: `Start helper ${n}.` } }),
+    record({ type: 'assistant', uuid: `a${n}`, parentUuid: `u${n}`, timestamp: at(s + 1), message: { id: `m${n}`, role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: `toolu-${n}`, name: 'Agent', input: { description: `Helper ${n}`, prompt: 'Read the sample notes', subagent_type: 'general-purpose', run_in_background: true } }] } }),
+    record({ type: 'user', uuid: `r${n}`, parentUuid: `a${n}`, timestamp: at(s + 2), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: `toolu-${n}`, content: 'Async agent launched successfully.' }] }, toolUseResult: { status: 'async_launched' } }),
+    record({ type: 'assistant', uuid: `t${n}`, parentUuid: `r${n}`, timestamp: at(s + 3), message: { id: `m${n}b`, role: 'assistant', model: 'example-model', content: [{ type: 'text', text: 'Started it.' }] } }),
+    record({ type: 'system', subtype: 'turn_duration', uuid: `d${n}`, parentUuid: `t${n}`, durationMs: 40, timestamp: at(s + 4) }),
+  ];
+  const TURN_ONE = backgroundTurn(1, null, 0);
+  const TURN_TWO = backgroundTurn(2, 'd1', 10);
+
+  async function terminal(live: { n: number }, reader: MemoryFileReader = new MemoryFileReader(joined(TURN_ONE))) {
+    const out = new Collector();
+    const follower = new ChainFollower(reader, TERM, null, out.sink, { holders: () => live.n });
+    await follower.start();
+    return { reader, out, follower };
+  }
+  // The transcript's agents rows as MAWS's reducer draws the delivered events, by whether each stays in view as working.
+  const agentsInView = (events: SessionEvent[]) =>
+    rowsOf(withAllExpanded(applyEvents(createState(TERM, null), events)))
+      .filter((row): row is Extract<Row, { kind: 'subagent' }> => row.kind === 'subagent')
+      .map((row) => [staysInView(row), row.status]);
+  const exits = (out: Collector) => out.of('process.exited').map((e) => [e.id, e.at, e.reason, e.seq, e.agentId]);
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+
+  it('a terminal whose turn ended with a background agent running, then goes: one exit, and its agents row leaves the view', async () => {
+    const live = { n: 1 };
+    const { out, follower } = await terminal(live);
+    expect(exits(out)).toEqual([]);
+    expect(agentsInView(out.events())).toEqual([[true, 'started']]); // today: in view as working, for good
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+    expect(out.events().at(-1)).toMatchObject({ kind: 'process.exited', code: null, signal: null, lostAttentionCount: 0, budget: null, parentToolUseId: null });
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped']]);
+    expectWellFormed(out.events());
+    // a second change of the holders with nothing written between delivers nothing, nor does a read of the file
+    await follower.refold();
+    await follower.poke();
+    expect(exits(out)).toHaveLength(1);
+  });
+
+  it('exit, resume, a new background agent, exit: a second exit, which ends the new agent', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live);
+    live.n = 0;
+    await follower.refold();
+    live.n = 1; // `claude --resume` in a terminal
+    reader.append(joined(TURN_TWO));
+    await follower.poke();
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped'], [true, 'started']]);
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null], [`${EXIT}@2`, at(14), 'unknown', null, null]]);
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped'], [false, 'stopped']]);
+    expectWellFormed(out.events());
+  });
+
+  // UX wave U4a (the architect's ruling on M8's first concern, 2026-11-13): the same exit reaches a call a Send now
+  // moved to the background (its result's flag, as u4p1-a-seeded-1.jsonl seq 45 carries it), so neither row kind reads
+  // running in a holder-less read of a chain whose last turn ended.
+  it('a holder-less chain whose last turn ended with a moved shell call and a background agent: the exit, and the model reads both stopped; held, both run', async () => {
+    const MOVED = [
+      ...TURN_ONE.slice(0, 4),
+      record({ type: 'assistant', uuid: 'b1', parentUuid: 't1', timestamp: at(4), message: { id: 'm1c', role: 'assistant', model: 'example-model', content: [{ type: 'tool_use', id: 'toolu-moved', name: 'Bash', input: { command: 'node wait.cjs w1 40' } }] } }),
+      record({ type: 'user', uuid: 'c1', parentUuid: 'b1', timestamp: at(5), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu-moved', content: 'Command was moved to the background' }] }, toolUseResult: { stdout: '', stderr: '', interrupted: false, isImage: false, noOutputExpected: false, backgroundedToDeliverMessage: true } }),
+      record({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'c1', durationMs: 40, timestamp: at(6) }),
+    ];
+    const movedCall = (events: SessionEvent[]) => {
+      const rows = rowsOf(withAllExpanded(applyEvents(createState(TERM, null), events)));
+      const cells = rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+      return cells.find((cell) => cell.toolUseId === 'toolu-moved');
+    };
+    const gone = await terminal({ n: 0 }, new MemoryFileReader(joined(MOVED)));
+    expect(exits(gone.out)).toEqual([[EXIT, at(6), 'unknown', null, null]]);
+    expect(movedCall(gone.out.events())).toMatchObject({ label: expect.stringMatching(/^Moved `node wait\.cjs w1 40` to the background after /), status: 'stopped' });
+    expect(agentsInView(gone.out.events())).toEqual([[false, 'stopped']]);
+    const held = await terminal({ n: 1 }, new MemoryFileReader(joined(MOVED)));
+    expect(exits(held.out)).toEqual([]);
+    expect(movedCall(held.out.events())).toMatchObject({ status: 'running' });
+    expect(agentsInView(held.out.events())).toEqual([[true, 'started']]);
+  });
+
+  it('a holder that returns arms the exit again, though it wrote nothing', async () => {
+    const live = { n: 1 };
+    const { out, follower } = await terminal(live);
+    live.n = 0;
+    await follower.refold();
+    live.n = 1;
+    await follower.poke(); // the registry's holder came back: the service has the follower read it
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out).map(([id]) => id)).toEqual([EXIT, `${EXIT}@2`]);
+  });
+
+  it('a row still unread when the count falls is read before the decision, and the exit is at it', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live, new MemoryFileReader(joined(TURN_ONE.slice(0, 3))));
+    reader.append(joined(TURN_ONE.slice(3))); // written as the process went; no watcher poke reached the follower yet
+    live.n = 0;
+    await follower.refold();
+    const kinds = out.events().slice(-2).map((e) => e.kind);
+    expect(kinds).toEqual(['turn.ended', 'process.exited']);
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+  });
+
+  it('a holder that returns while the final drain is queued makes no exit', async () => {
+    const live = { n: 1 };
+    const reader = new GatedReader(joined(TURN_ONE));
+    const { out, follower } = await terminal(live, reader);
+    reader.append(joined(TURN_TWO.slice(0, 1)));
+    reader.hold();
+    const poking = follower.poke(); // a read still pending
+    await settle();
+    live.n = 0;
+    const deciding = follower.refold(); // queued behind it
+    await settle();
+    live.n = 1; // back before the follower decides
+    reader.open();
+    await Promise.all([poking, deciding]);
+    expect(exits(out)).toEqual([]);
+    expect(out.of('turn.started')).toHaveLength(2); // the pending read was read first
+    // it goes again: now there is an exit, after what the returned process wrote
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out)).toEqual([[EXIT, at(10), 'unknown', null, null]]);
+  });
+
+  // The follower review (M6 round 3): a final drain that could not read the file keeps the decision owed, and the next
+  // read that completes makes it, the registry asked again then.
+  it('a final drain that finds no file keeps the decision owed; the next complete read makes it', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live);
+    reader.remove(); // the transcript away for a moment (a move, a rewrite under way)
+    live.n = 0;
+    await follower.refold();
+    expect(exits(out)).toEqual([]);
+    reader.append('');
+    await follower.poke();
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped']]);
+    await follower.poke(); // decided: a later read makes no second one
+    expect(exits(out)).toHaveLength(1);
+  });
+
+  it('an owed decision made when a holder has returned makes no exit, and a plain poke decides none', async () => {
+    const live = { n: 1 };
+    const { reader, out, follower } = await terminal(live);
+    await follower.poke(); // nothing owed: no decision
+    reader.remove();
+    live.n = 0;
+    await follower.refold();
+    live.n = 1; // back before the file is
+    reader.append('');
+    await follower.poke();
+    expect(exits(out)).toEqual([]);
+    live.n = 0;
+    await follower.poke(); // the decision was made, with a holder live; a poke decides nothing more
+    expect(exits(out)).toEqual([]);
+    await follower.refold(); // its going is told: now the exit
+    expect(exits(out)).toEqual([[EXIT, at(4), 'unknown', null, null]]);
+  });
+
+  it('a session read from disk after its terminal closed ends its agents alike', async () => {
+    const { out } = await terminal({ n: 0 }, new MemoryFileReader(joined([...TURN_ONE, ...TURN_TWO])));
+    expect(exits(out)).toEqual([[EXIT, at(14), 'unknown', null, null]]);
+    expect(agentsInView(out.events())).toEqual([[false, 'stopped'], [false, 'stopped']]);
+  });
+
+  it("no exit while a live process remains (MAWS's own counts), and none on an agent's own transcript", async () => {
+    const live = { n: 2 };
+    const { out, follower } = await terminal(live);
+    live.n = 1; // the foreign holder went; another process of the session, MAWS's own, still runs it
+    await follower.refold();
+    expect(exits(out)).toEqual([]);
+    const agentOut = new Collector();
+    const agent = new ChainFollower(new MemoryFileReader(joined(TURN_ONE)), TERM, { agentId: 'a1' as AgentId, parentToolUseId: null }, agentOut.sink, { holders: () => 0 });
+    await agent.start();
+    await agent.refold();
+    expect(agentOut.of('process.exited')).toEqual([]);
   });
 });
 

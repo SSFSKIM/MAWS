@@ -183,7 +183,13 @@ export class SessionStatusTracker {
     // P5 O16 M2 (D48): the Stop's `background_tasks` is a task list too (`id`, `type`, `description`; no `ambient` on the
     // engines measured, so an entry is ambient only when it says so); absent, the tasks stay as the last snapshot left them
     if (Array.isArray(input.background_tasks)) {
-      this.backgroundTasks = list(input.background_tasks).map((t) => ({ taskId: String(t.id) as TaskId, taskType: String(t.type), description: String(t.description ?? ''), ambient: t.ambient === true }));
+      // The UX wave's U8b (M5): the Stop's entries name no starter, so a task keeps the one the last listing named
+      const starters = new Map(this.backgroundTasks.flatMap((t) => (t.parentTaskId === undefined ? [] : [[t.taskId, t.parentTaskId] as const])));
+      this.backgroundTasks = list(input.background_tasks).map((t) => {
+        const taskId = String(t.id) as TaskId;
+        const parentTaskId = starters.get(taskId);
+        return { taskId, taskType: String(t.type), description: String(t.description ?? ''), ambient: t.ambient === true, ...(parentTaskId !== undefined && { parentTaskId }) };
+      });
       this.work.tasksChanged();
     }
     this.record();
@@ -304,7 +310,10 @@ export class SessionStatusTracker {
         if (typeof frame.content === 'string' && /classifier/i.test(frame.content)) this.observeLocalLane(frame, at); // the engine's own classifier lane and its billing notice (§19)
         return;
       case 'background_tasks_changed':
-        this.backgroundTasks = list(frame.tasks).map((t) => ({ taskId: String(t.task_id) as TaskId, taskType: String(t.task_type), description: String(t.description ?? ''), ambient: t.ambient === true }));
+        this.backgroundTasks = list(frame.tasks).map((t) => ({
+          taskId: String(t.task_id) as TaskId, taskType: String(t.task_type), description: String(t.description ?? ''), ambient: t.ambient === true,
+          ...(typeof t.parent_task_id === 'string' && t.parent_task_id.length > 0 && { parentTaskId: t.parent_task_id as TaskId }), // the UX wave's U8b (M5)
+        }));
         this.work.tasksChanged(); // P5 O2 M2
         return;
       case 'peer_message_hold':

@@ -6,10 +6,10 @@
 // (1) show_pane, links and window.open, the browser preload once per page and never in a subframe, a main tab and the one
 // owner, a popup closing itself; (2) error pages; (3) refused addresses; (4) the cover; (5) placement under resizes;
 // (6) a relaunch restores tabs suspended; (7) permissions, the clipboard, a download, find, Esc; (8) the chrome in both
-// themes (shots under MAWS_E4A_SHOTS=1).
+// themes (shots under MAWS_E4A_SHOTS=1); (9) U12a: show_pane on a page already open, device sizes, Copy screenshot.
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
-import { closeSurface, openSurface, surfaceRow, usagePill } from './support/shell';
+import { hideSurface, openSurface, sideGroup, surfaceRow, usageRing } from './support/shell';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -23,7 +23,7 @@ import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
 import {
-  address, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
+  address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
   preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
@@ -167,8 +167,9 @@ test('show_pane opens one tab for two windows’ worth of one request; links and
       await expectOnPane(s, a, paneIn(panel), 'panel');
       await expect(paneIn(main).locator('[data-browser-page="elsewhere"]')).toBeVisible();
     }
-    // Closing the optional Browser surface unmounts its pane; the main tab takes the view back.
-    await closeSurface(s.page, 'Browser');
+    // Hiding the side column with Browser in view unmounts its pane (its tab stays in the strip); the main tab takes the
+    // view back.
+    await hideSurface(s.page, 'Browser');
     await expectOnPane(s, a, paneIn(main), 'main');
     expect((await viewOf(s, a))?.owner?.surface).toBe('main');
 
@@ -408,15 +409,19 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     await s.page.keyboard.press('Escape');
     await expect(s.page.getByRole('dialog', { name: 'Model and effort' })).toHaveCount(0);
 
-    // UX2-L moved Usage to the left sidebar footer, away from the right Browser pane: no cover.
-    await usagePill(s.page).click();
-    const usage = s.page.getByRole('dialog', { name: 'Claude Usage' });
+    // UX wave U7b (O-47): Usage is the title bar's ring, and its compact popover opens under it at its right edge. With a
+    // side surface open the title bar ends where the side column begins (the column spans the window's height), so the
+    // popover stands left of the Browser pane: a popover elsewhere, no cover. The pane's own menu above is the one that
+    // overlaps and covers.
+    await usageRing(s.page).click();
+    const usage = s.page.getByRole('dialog', { name: 'Usage', exact: true });
     await expect(usage).toBeVisible();
     await s.page.waitForTimeout(300); // past the popper's two-frame measure, as for the composer popover above
     const [usageBox, browserBox] = [(await usage.boundingBox())!, (await pane.boundingBox())!];
-    expect(usageBox.x + usageBox.width).toBeLessThanOrEqual(browserBox.x);
-    await covered(false, 'the sidebar Usage popover');
+    expect(usageBox.x + usageBox.width, 'the usage popover ends left of the Browser page').toBeLessThanOrEqual(browserBox.x);
+    await covered(false, 'the title bar\'s Usage popover');
     await s.page.keyboard.press('Escape');
+    await expect(usage).toHaveCount(0);
     await covered(false, 'the usage popover closed');
 
     // the Rename sheet
@@ -630,7 +635,8 @@ test('P3-G acceptance 11: Mark up freezes the page to a still under the overlay;
     const dom = () => page.evaluate(() => document.documentElement.outerHTML);
     const before = await dom();
 
-    const markUp = s.panel.locator('[data-editor-header]').getByRole('button', { name: 'Mark up' });
+    // UX wave U8b (M2): the Browser registers no header row, so its Mark up sits at the end of its group's strip
+    const markUp = sideGroup(s.page, 'upper').locator('[data-side-strip]').getByRole('button', { name: 'Mark up', exact: true });
     const layer = s.page.getByRole('region', { name: 'Mark-up' });
     const marks = layer.locator('[data-markup-canvas] > *');
     const strip = s.pane.getByRole('list', { name: 'attachments' });
@@ -899,7 +905,7 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
     const [id] = s.ids as [AppSessionId];
     await show(s, id);
     const panel = await openBrowser(s);
-    // Keep this regression at its original 379 px chrome width despite UX2-L's wider content-sized default.
+    // Keep this regression at its original 379 px chrome width despite the Browser's wide default (60 % of the room).
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
     const chromeBox = (await panel.locator('[data-browser-chrome]').boundingBox())!;
     const handle = (await resizer.boundingBox())!;
@@ -981,4 +987,430 @@ test('cua #103: human control in a 380 px panel keeps the icon, Hand back and ev
     rmSync(scratch.root, { recursive: true, force: true });
     rmSync(scratch.userData, { recursive: true, force: true });
   }
+});
+
+// ---- (9) U12a: the in-app browser as the agent's browser, device sizes, Copy screenshot -------------------------------
+// (the UX wave's U12a execution document, docs/doperpowers/plans/2026-11-12-ux-wave-U12a-browser-computer-use-delivery.md, M5)
+
+// The person's hands on a tab, through the e2e seam's stand-in (src/main/browser/agent/index.ts `sendInput`): input sent
+// to the page as the OS sends it, so main's input seam reads it as the person's, as the takeover scenes of
+// e2e/browser-cua.spec.ts make it.
+interface U12aSeam {
+  __maws_browser: {
+    agent: {
+      control(tabId: string): { control: string } | null;
+      lastInputs(tabId: string): { kind: string; source: string }[];
+      sendInput(tabId: string, event: Record<string, unknown>): boolean;
+    };
+    cua: { socketPathFor(id: string): string; trustRoot(pid: number): boolean };
+  };
+}
+const controlOf = (s: Scene, tabId: string) => s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as U12aSeam).__maws_browser.agent.control(tab)?.control ?? null, tabId);
+const humanInputs = async (s: Scene, tabId: string) =>
+  (await s.maws.app.evaluate((_electron, tab) => (globalThis as unknown as U12aSeam).__maws_browser.agent.lastInputs(tab), tabId)).filter((input) => input.source === 'human').length;
+
+// A click at `at` (the page's own coordinates) and `text` typed, one key at a time, in one call into main.
+async function personTypes(s: Scene, tabId: string, at: { x: number; y: number }, text: string): Promise<void> {
+  const sent = await s.maws.app.evaluate(
+    (_electron, [tab, x, y, keys]) => {
+      const { sendInput } = (globalThis as unknown as U12aSeam).__maws_browser.agent;
+      const results = [sendInput(tab, { type: 'mouseDown', x, y, button: 'left', clickCount: 1 }), sendInput(tab, { type: 'mouseUp', x, y, button: 'left', clickCount: 1 })];
+      for (const keyCode of keys) for (const type of ['keyDown', 'char', 'keyUp']) results.push(sendInput(tab, { type, keyCode }));
+      return results.every(Boolean);
+    },
+    [tabId, at.x, at.y, [...text]] as const,
+  );
+  expect(sent, 'the tab has a page to type in').toBe(true);
+}
+
+// What main decided for a `show_pane` request, read as a second window's handling of the same request reads it: the
+// open repeated under the request's id answers the first call's tab and `page` and does nothing else (Interfaces §B).
+// Only after the window's own call has been seen to land (a selection, a load), so this read never makes the decision.
+async function pageFor(s: Scene, appSessionId: AppSessionId, url: string, requestId: string): Promise<string | undefined> {
+  return value(await invoke(s.page, 'browser.tabs.open', { appSessionId, url, select: true, reuse: 'url', reload: true, requestId })).page;
+}
+
+const KEPT_TRIES = 3; // the reload scene's tries at a show_pane within 3 s of the person's typing
+
+test('U12a (reload, A2): show_pane on a page already open selects and reloads it, never as the person’s input; a tab the person typed in within 3 s is kept with its text; after 3 s it is reloaded and the field is empty; a link’s open of the address reloads nothing', async () => {
+  await browserScene(['U12a: show the fix'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const M = s.server.url('/marker.html');
+    const A = s.server.url('/a.html');
+    const selected = async () => (await tabsOf(s, id)).selected;
+
+    // the page opened by show_pane: a new tab, `opened`
+    await showPane(s, { appSessionId: id, requestId: 'u12a-reload-1', target: M });
+    const panel = browserIn(s, 'panel');
+    await expect(panel).toBeVisible();
+    const m = await tabAt(s, id, M);
+    const pageM = await pageAt(s, M);
+    const marker = pageM.locator('#marker');
+    const field = pageM.locator('#field');
+    await expect(marker).toHaveText('marker-1');
+    expect(await pageFor(s, id, M, 'u12a-reload-1')).toBe('opened');
+
+    // the person moves to another tab; show_pane for the same address under a new request: the tab is selected and
+    // shows the next marker, `reloaded`, and the reload is not the person's (no "You have the page", no input recorded)
+    value(await invoke(s.page, 'browser.tabs.open', { appSessionId: id, url: A, select: true }));
+    const a = await tabAt(s, id, A);
+    await expect.poll(selected).toBe(a);
+    const inputsBefore = await humanInputs(s, m);
+    await showPane(s, { appSessionId: id, requestId: 'u12a-reload-2', target: M });
+    await expect.poll(selected).toBe(m);
+    await expect(marker).toHaveText('marker-2');
+    expect(await pageFor(s, id, M, 'u12a-reload-2')).toBe('reloaded');
+    await expectOnPane(s, m, paneIn(panel), 'panel');
+    expect(await controlOf(s, m)).toBe('idle');
+    expect(await humanInputs(s, m)).toBe(inputsBefore);
+    await expect(panel.locator('[data-browser-control="human"]')).toHaveCount(0);
+    await expect(panel.getByText('You have the page')).toHaveCount(0);
+
+    // the person types in the page's field; show_pane comes again within 3 s: kept, the marker and the text unchanged.
+    // The 3 s is the product's rule, which the scene stages and does not bound: a try is inside it when the time from
+    // before the first key to main's answer is under 3 s, so main decided under 3 s after the last input. A try outside
+    // is no sample of the rule and asserts nothing: past the window the page is reloaded (its field empty, the person's
+    // input stale) and the try made again, up to KEPT_TRIES; when none lands inside, the runner's load kept the scene
+    // from staging it, and the case is skipped.
+    const tookMs: number[] = [];
+    let typedAt: number;
+    for (let attempt = 1; ; attempt++) {
+      const loads = s.server.hits('/marker.html');
+      const box = (await field.boundingBox())!;
+      const startedAt = Date.now();
+      await personTypes(s, m, { x: box.x + box.width / 2, y: box.y + box.height / 2 }, 'draft');
+      await expect.poll(() => field.inputValue()).not.toBe('');
+      typedAt = Date.now();
+      const typed = await field.inputValue();
+      expect(await humanInputs(s, m), 'main read the typing as the person’s input').toBeGreaterThan(inputsBefore);
+      value(await invoke(s.page, 'browser.tabs.select', { appSessionId: id, tabId: a }));
+      await expect.poll(selected).toBe(a);
+      await showPane(s, { appSessionId: id, requestId: `u12a-reload-3-${attempt}`, target: M });
+      await expect.poll(selected).toBe(m);
+      const answer = await pageFor(s, id, M, `u12a-reload-3-${attempt}`);
+      const took = Date.now() - startedAt;
+      tookMs.push(took);
+      if (took < 3_000) {
+        expect(answer).toBe('kept');
+        await expect(marker).toHaveText(`marker-${loads}`);
+        expect(await field.inputValue()).toBe(typed);
+        expect(s.server.hits('/marker.html')).toBe(loads);
+        break;
+      }
+      test.skip(attempt === KEPT_TRIES, `no try's show_pane was answered within 3 s of the person's typing (ms from the first key to the answer, per try: ${tookMs.join(', ')}): the runner's load, not the product's rule`);
+      await s.page.waitForTimeout(Math.max(0, 3_200 - (Date.now() - typedAt)));
+      value(await invoke(s.page, 'browser.tabs.select', { appSessionId: id, tabId: a }));
+      await expect.poll(selected).toBe(a);
+      const reloads = s.server.hits('/marker.html');
+      await showPane(s, { appSessionId: id, requestId: `u12a-reload-3-${attempt}-reset`, target: M });
+      await expect(marker).toHaveText(`marker-${reloads + 1}`);
+      await expect(field).toHaveValue('');
+    }
+    const loadsKept = s.server.hits('/marker.html');
+
+    // more than 3 s after the last input: reloaded like any page, the field empty (the limit M1 states)
+    await s.page.waitForTimeout(Math.max(0, 3_200 - (Date.now() - typedAt)));
+    await showPane(s, { appSessionId: id, requestId: 'u12a-reload-4', target: M });
+    await expect(marker).toHaveText(`marker-${loadsKept + 1}`);
+    expect(await pageFor(s, id, M, 'u12a-reload-4')).toBe('reloaded');
+    await expect(field).toHaveValue('');
+    await expectOnPane(s, m, paneIn(panel), 'panel');
+
+    // a transcript-style link to the same address: the open the Browser tool makes for a link's target (BrowserTool.tsx
+    // `BrowserHandle.open`: `reuse: 'url'`, no `reload`) selects the tab and answers no `page`; nothing is loaded again
+    value(await invoke(s.page, 'browser.tabs.select', { appSessionId: id, tabId: a }));
+    await expect.poll(selected).toBe(a);
+    const linked = value(await invoke(s.page, 'browser.tabs.open', { appSessionId: id, url: M, select: true, reuse: 'url' }));
+    expect(linked).toMatchObject({ reused: true, tab: { tabId: m } });
+    expect(linked.page).toBeUndefined();
+    await expect.poll(selected).toBe(m);
+    await s.page.waitForTimeout(500);
+    await expect(marker).toHaveText(`marker-${loadsKept + 1}`);
+    expect(s.server.hits('/marker.html')).toBe(loadsKept + 1);
+  });
+});
+
+// Browser options › Viewport, opened: the submenu's item for a size (`data-viewport`, Interfaces §D).
+async function viewportItem(s: Scene, view: Locator, id: 'responsive' | 'mobile' | 'tablet'): Promise<Locator> {
+  await view.getByRole('button', { name: 'Browser options' }).click();
+  await s.page.getByRole('menuitem', { name: 'Viewport', exact: true }).click();
+  const item = s.page.locator(`[data-viewport="${id}"]`);
+  await expect(item).toBeVisible();
+  return item;
+}
+async function closeMenus(s: Scene): Promise<void> {
+  for (let k = 0; k < 3 && (await s.page.getByRole('menu').count()) > 0; k++) await s.page.keyboard.press('Escape');
+  await expect(s.page.getByRole('menu')).toHaveCount(0);
+}
+const rectOf = async (target: Locator) => {
+  const r = (await target.boundingBox())!;
+  return { x: r.x, y: r.y, width: r.width, height: r.height };
+};
+const near = (a: number, b: number, slack = 1) => Math.abs(a - b) <= slack;
+
+test('U12a (device sizes, A3 and probe 4): Viewport › Mobile draws the page 375 wide, centred and top-aligned under a chip reading 375 × 812; the frozen picture is the page’s box; at 125% innerWidth stays 375; the comment strip docks under the page; the floating card’s column stands beside; Tablet is disabled in a pane under 768; an agent’s device-metrics override set and cleared leaves 375; the chip opens the three choices and Responsive removes it', async () => {
+  const scratch = scratchProject({ titles: ['U12a: device sizes'] });
+  scratch.userData = mkdtempSync('/tmp/mvp-'); // a short Unix socket path for the fake plugin host's lease
+  const server = await startBrowserServer();
+  const s = await launchBrowserScene(scratch, server);
+  try {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
+    const pane = paneIn(panel); // the page element: what the placement measures, and the view's box
+    const box = panel.locator('[data-browser-page-box]'); // its room
+    await expectOnPane(s, t, pane, 'panel');
+    const innerWidth = () => pageA.evaluate(() => window.innerWidth);
+
+    // a pane at least 812 points tall (the window grown by what the room lacks) and 600 wide in the chrome: Mobile fits
+    // at 125% (469 points), Tablet (768) does not
+    const lacking = Math.max(0, 816 - Math.floor((await rectOf(box)).height));
+    await s.maws.app.evaluate(
+      ({ BrowserWindow }, [dw, dh]) => {
+        const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+        const [width, height] = win.getContentSize();
+        win.setContentSize(width! + dw!, height! + dh!);
+      },
+      [200, lacking] as const,
+    );
+    await expect.poll(async () => (await rectOf(box)).height, { message: 'the window grew to give the pane 812 points (a display at least that tall is needed)' }).toBeGreaterThanOrEqual(812);
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    const chrome = panel.locator('[data-browser-chrome]');
+    const handle = await rectOf(resizer);
+    const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
+    await s.page.mouse.move(hx, hy);
+    await s.page.mouse.down();
+    await s.page.mouse.move(hx + (await rectOf(chrome)).width - 600, hy, { steps: 4 });
+    await s.page.mouse.up();
+    await expect.poll(async () => Math.round((await rectOf(chrome)).width)).toBe(600);
+    const room = await rectOf(box);
+    expect(room.width, 'the room fits Mobile at 125%').toBeGreaterThanOrEqual(469);
+    expect(room.width, 'the room is narrower than Tablet').toBeLessThan(768);
+    await expectOnPane(s, t, pane, 'panel');
+
+    // Mobile: the page element 375 × 812, centred and top-aligned in its room; the page reads 375; the chip
+    await (await viewportItem(s, panel, 'mobile')).click();
+    await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
+    const chip = panel.locator('[data-browser-viewport-chip]');
+    await expect(chip).toHaveText('375 × 812');
+    await expect(chip).toHaveAccessibleName('Viewport: 375 × 812');
+    await expectOnPane(s, t, pane, 'panel');
+    const sized = await rectOf(pane);
+    expect({ width: Math.round(sized.width), height: Math.round(sized.height) }).toEqual({ width: 375, height: 812 });
+    expect(near(sized.x + sized.width / 2, room.x + room.width / 2), JSON.stringify({ sized, room })).toBe(true);
+    expect(near(sized.y, room.y), 'top-aligned').toBe(true);
+    await expect.poll(innerWidth).toBe(375);
+    await attachShot(s, 'u12a-device-size-mobile', pane, pageA);
+
+    // the options menu over the page: the view yields to its frozen picture, which lies on the page element's box
+    await panel.getByRole('button', { name: 'Browser options', exact: true }).click();
+    await expect(s.page.getByRole('menuitem', { name: 'Copy screenshot', exact: true })).toBeVisible();
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered, { message: 'covered under the Browser options menu' }).toBe(true);
+    const still = pane.locator('img');
+    await expect(still).toBeVisible();
+    const picture = await rectOf(still);
+    for (const key of ['x', 'y', 'width', 'height'] as const) expect(near(picture[key], sized[key]), `the picture's ${key} on the page's: ${JSON.stringify({ picture, sized })}`).toBe(true);
+    await closeMenus(s);
+    await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+    await expectOnPane(s, t, pane, 'panel');
+
+    // page zoom at 125%: the element grows to 469 wide and the page still reads 375; back to 100%
+    await overflow(s, panel, 'Zoom in');
+    await overflow(s, panel, 'Zoom in');
+    await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1.25);
+    await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(469);
+    await expectOnPane(s, t, pane, 'panel');
+    await expect.poll(innerWidth).toBe(375);
+    // the chip reads what the page reads (the view's real size, Interfaces §D): at 125% Mobile's 1,015 points of height
+    // fit this room only on a tall enough window, so its height is the page's own, read from the page, not a constant
+    const reads = () => pageA.evaluate(() => `${window.innerWidth} × ${window.innerHeight}`);
+    const chipAgainstPage = async () => {
+      const [text, page] = [(await chip.textContent())?.trim(), await reads()];
+      return text === page ? 'the same' : `chip ${text}, page ${page}`;
+    };
+    await expect.poll(chipAgainstPage, { message: 'the chip reads the page’s innerWidth × innerHeight' }).toBe('the same');
+    expect(await chip.textContent()).toMatch(/^375 × \d+$/);
+    await overflow(s, panel, 'Reset zoom');
+    await expect.poll(async () => (await tabState(s, t)).tab?.zoom).toBe(1);
+    await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
+    await expect(chip).toHaveText('375 × 812'); // at 100% the room made above holds the whole size again
+
+    // Tablet does not fit this pane: disabled, its hint in place of its numbers
+    const tablet = await viewportItem(s, panel, 'tablet');
+    await expect(tablet).toHaveAttribute('aria-disabled', 'true');
+    await expect(tablet).toContainText('Wider than this pane');
+    await expect(s.page.locator('[data-viewport="mobile"]')).toHaveAttribute('aria-checked', 'true');
+    await closeMenus(s);
+
+    // a comment card: its strip docks under the page in the column, the room shorter by the strip, the page within it
+    const toggle = panel.locator('[data-browser-comment]');
+    const roomBefore = await rectOf(box);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+    await expect(pageA.locator('maws-comment-shield')).toBeAttached();
+    const heading = (await pageA.locator('#heading').boundingBox())!;
+    await pageA.mouse.move(heading.x + heading.width / 2, heading.y + heading.height / 2);
+    await pageA.mouse.down();
+    await pageA.mouse.up();
+    const card = s.page.locator('[data-card-dock] [data-comment-card]');
+    await expect(card).toBeVisible();
+    const dock = await rectOf(panel.locator('[data-card-dock]'));
+    await expectOnPane(s, t, pane, 'panel');
+    const [roomWith, pageWith] = [await rectOf(box), await rectOf(pane)];
+    expect(near(roomBefore.height - roomWith.height, dock.height, 2), `the room gave the strip its height: ${JSON.stringify({ roomBefore, roomWith, dock })}`).toBe(true);
+    expect(dock.y, 'the strip under the page').toBeGreaterThanOrEqual(pageWith.y + pageWith.height - 1);
+    expect(near(pageWith.height, Math.min(812, Math.floor(roomWith.height))), `the page within the shorter room: ${JSON.stringify({ pageWith, roomWith })}`).toBe(true);
+    expect(Math.round(pageWith.width)).toBe(375);
+    await attachShot(s, 'u12a-device-size-comment-strip', pane, pageA);
+    await card.getByRole('button', { name: 'Close' }).click();
+    await expect(card).toHaveCount(0);
+    if ((await toggle.getAttribute('aria-pressed')) === 'true') await toggle.click();
+    await expect.poll(async () => Math.round((await rectOf(pane)).height)).toBe(812);
+    await expectOnPane(s, t, pane, 'panel');
+
+    // the floating session card: its column stands beside the pane's column, the view on the page element, never under it
+    const session = s.panel.getByRole('region', { name: 'Session card' });
+    await menu(s.maws.app, 'panel.float');
+    await expect(session).toHaveAttribute('data-floating-card', 'column');
+    await expectOnPane(s, t, pane, 'panel');
+    const [reserved, column] = [await rectOf(s.panel.locator('[data-browser-reserved-column]')), await rectOf(panel.locator('[data-browser-column]'))];
+    expect(reserved.x, 'the card’s column beside the pane’s').toBeGreaterThanOrEqual(column.x + column.width - 1);
+    const view = (await viewOf(s, t))!.bounds!;
+    expect(view.x + view.width, 'the view left of the card’s column').toBeLessThanOrEqual(reserved.x + 1);
+    await menu(s.maws.app, 'panel.float');
+    await expect(session).toHaveCount(0);
+    await expectOnPane(s, t, pane, 'panel');
+    await expect.poll(async () => Math.round((await rectOf(pane)).width)).toBe(375);
+
+    // a fake plugin host leases the tab and sets, then clears, a device-metrics override of its own: the page reads it,
+    // then 375 again; set again and the lease let go, MAWS's undo leaves 375 too
+    const socket = await s.maws.app.evaluate((_electron, session) => (globalThis as unknown as U12aSeam).__maws_browser.cua.socketPathFor(session), id);
+    expect(await s.maws.app.evaluate((_electron, pid) => (globalThis as unknown as U12aSeam).__maws_browser.cua.trustRoot(pid), process.pid)).toBe(true);
+    const host = await connectFakeHost(socket);
+    try {
+      const native = (await host.request<{ id: number; url: string }[]>('tabs.query')).find((tab) => tab.url === A)!;
+      await host.request('debugger.attach', { tabId: native.id });
+      const send = (method: string, params: Record<string, unknown> = {}) => host.request('debugger.sendCommand', { debuggee: { tabId: native.id }, method, params });
+      const override = { width: 640, height: 480, deviceScaleFactor: 1, mobile: false };
+      await send('Emulation.setDeviceMetricsOverride', override);
+      await expect.poll(innerWidth).toBe(640);
+      await send('Emulation.clearDeviceMetricsOverride');
+      await expect.poll(innerWidth).toBe(375);
+      await send('Emulation.setDeviceMetricsOverride', override);
+      await expect.poll(innerWidth).toBe(640);
+      await host.request('debugger.detach', { tabId: native.id });
+      await expect.poll(innerWidth).toBe(375);
+    } finally {
+      await host.close();
+    }
+    await expectOnPane(s, t, pane, 'panel');
+
+    // the chip opens the same three choices; Responsive takes the size away and the page fills its room again
+    await chip.click();
+    await expect(s.page.locator('[data-viewport]')).toHaveCount(3);
+    await s.page.locator('[data-viewport="responsive"]').click();
+    await expect(chip).toHaveCount(0);
+    await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toBeNull();
+    await expectOnPane(s, t, pane, 'panel');
+    const full = await rectOf(pane);
+    const roomAfter = await rectOf(box);
+    expect(near(full.width, roomAfter.width) && near(full.height, roomAfter.height), JSON.stringify({ full, roomAfter })).toBe(true);
+    await expect.poll(async () => near(await innerWidth(), roomAfter.width), { message: `the page reads its room's width, ${roomAfter.width}` }).toBe(true);
+  } finally {
+    await closeScene(s);
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+    rmSync(scratch.userData, { recursive: true, force: true });
+  }
+});
+
+// What the Mac's pasteboard holds after Copy screenshot, read back in main: the kinds of its first item, the PNG's own
+// size from its header, the size of the image Electron decodes from it, and whether the pasteboard reports macOS's own
+// PNG type (what another app's paste reads).
+interface CopiedImage {
+  types: string[];
+  png: { signature: string; width: number; height: number } | null;
+  decoded: { width: number; height: number } | null;
+  pasteboardPng: boolean | string;
+}
+// On the pasteboard before the click, and again once the case is done with the image it copied, so `withNativeClipboard`
+// writes back what the pasteboard held before the scene whether or not the copy happened. Written the second time only
+// while the pasteboard still holds that image's bytes: a copy by anything else since is left alone, and so is an image
+// whose bytes cannot be read, which the case cannot tell from another's.
+const SCREENSHOT_SCENE_MARK = 'u12a-copy-screenshot-scene';
+
+test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows on the clipboard as a PNG image at the view’s device pixels, and the chrome says so', async () => {
+  await browserScene(['U12a: copy screenshot'], async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const A = s.server.url('/a.html');
+    await address(panel, A);
+    const t = await tabAt(s, id, A);
+    const pageA = await pageAt(s, A);
+    await expectOnPane(s, t, paneIn(panel), 'panel');
+    const bounds = (await viewOf(s, t))!.bounds!;
+    const dpr = await pageA.evaluate(() => window.devicePixelRatio);
+    const expected = { width: Math.round(bounds.width * dpr), height: Math.round(bounds.height * dpr) };
+
+    await withNativeClipboard(s.maws.app, [SCREENSHOT_SCENE_MARK], async () => {
+      await s.maws.app.evaluate(({ clipboard }, mark) => clipboard.writeText(mark), SCREENSHOT_SCENE_MARK);
+      await overflow(s, panel, 'Copy screenshot');
+      try {
+        // The image is read off the pasteboard on its own, not after the notice, so a build that copies without saying so
+        // still leaves the case knowing which bytes are its own.
+        const arrived = () =>
+          s.maws.app.evaluate(async ({ clipboard }, mark) => {
+            if ((await clipboard.readText()) === mark) return 'waiting';
+            const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
+            if (!item) return 'no image';
+            (globalThis as { __u12aCopiedPng?: Buffer }).__u12aCopiedPng = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
+            return 'image';
+          }, SCREENSHOT_SCENE_MARK);
+        await expect.poll(arrived, { message: 'Copy screenshot replaces the pasteboard with an image' }).toBe('image');
+        await expect(noticesIn(panel).filter({ hasText: 'Screenshot copied to clipboard' })).toBeVisible();
+        const copied: CopiedImage = await s.maws.app.evaluate(async ({ clipboard, nativeImage }) => {
+          const items = await clipboard.read();
+          const types = items.flatMap((item) => item.types);
+          const item = items.find((candidate) => candidate.types.includes('image/png'));
+          const pasteboardPng = await clipboard.has('electron application/osclipboard;format="public.png"').catch((error: unknown) => String(error));
+          if (!item) return { types, png: null, decoded: null, pasteboardPng };
+          const bytes = Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer());
+          const image = nativeImage.createFromBuffer(bytes);
+          return {
+            types,
+            png: { signature: bytes.subarray(0, 8).toString('hex'), width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) },
+            decoded: image.isEmpty() ? null : image.getSize(),
+            pasteboardPng,
+          };
+        });
+        test.info().annotations.push({ type: 'the pasteboard after Copy screenshot', description: JSON.stringify(copied) });
+        expect(copied.types).toContain('image/png');
+        expect(copied.png?.signature, 'a PNG').toBe('89504e470d0a1a0a');
+        expect(copied.decoded, 'Electron reads the item back as an image').not.toBeNull();
+        for (const read of [copied.png!, copied.decoded!]) {
+          expect(near(read.width, expected.width) && near(read.height, expected.height), `${JSON.stringify(read)} is the view at device pixels, ${JSON.stringify(expected)}`).toBe(true);
+        }
+      } finally {
+        // Checked and written in one call into main, so nothing else's copy lands between the two. Best-effort: a failure
+        // here is reported on its own and leaves the case's first failure the one that stands.
+        await s.maws.app
+          .evaluate(async ({ clipboard }, mark) => {
+            const store = globalThis as { __u12aCopiedPng?: Buffer };
+            const wrote = store.__u12aCopiedPng;
+            delete store.__u12aCopiedPng;
+            if (!wrote) return;
+            const item = (await clipboard.read()).find((candidate) => candidate.types.includes('image/png'));
+            const now = item ? Buffer.from(await ((await item.getType('image/png')) as Blob).arrayBuffer()) : null;
+            if (now?.equals(wrote)) await clipboard.writeText(mark);
+          }, SCREENSHOT_SCENE_MARK)
+          .catch((error: unknown) => console.warn(`[e2e] could not tell whether the pasteboard still holds the copied screenshot; left as it is: ${String(error)}`));
+      }
+    });
+  });
 });

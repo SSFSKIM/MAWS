@@ -37,6 +37,7 @@ const STEER_NEXT = `${FIXTURES}/pass3/steer-next.jsonl`;
 const SIDE_QUESTIONS = `${FIXTURES}/pass3/p1-side-question-session.jsonl`;
 const MAWS_ARTIFACTS = `${FIXTURES}/pass3/p1-maws-artifacts.jsonl`; // P2-E1 (M5)
 const SUBAGENT = `${FIXTURES}/subagent.jsonl`; // a background agent's call, its own rows and its end
+const QUEUE_INTERRUPT = `${FIXTURES}/queue-and-interrupt.jsonl`; // the UX wave, U9: an interrupted turn's end
 
 // The recorded ids each borrowed frame carries, re-addressed to the journal's.
 const RECORDED = {
@@ -48,6 +49,8 @@ const RECORDED = {
   maws: { session: '2269c353-97d9-4e4f-a868-5aab4cf2b0c4', toolUse: 'toolu_01DDpRYFhNCCo2pJdJN3gNmg', permission: '7da4b64b-8f26-49fb-a725-9797b1f5bf38', call: '068847a0-9b35-4703-af19-3952813273c6' },
   // the recording's first background agent: its start (seq 169 to 174), its Read (223 to 225), a reply of its own (332)
   // and its end (333 to 335)
+  // the UX wave, U9: the recording's interrupted turn (its prompt at seq 4, its end at seq 197 and 198)
+  interrupted: { session: '5f314089-07b2-4c5e-b250-248619107e38', prompt: 'a5bf8381-f5c0-4394-88a8-4b04c12e4911' },
   agent: { session: '9a1d4262-0b43-46ad-acb9-5982f31d209c', toolUse: 'toolu_01CYiK6ncgQLFUQ2iqC1b4oB', id: 'ad286defbc77bc090', description: 'Read and report one.txt content', read: 'toolu_01WHcNPsuUXRb5uAumPGpTyF' },
 } as const;
 
@@ -162,6 +165,27 @@ export class SideJournal {
     this.reply(uuid, text, deltas);
     this.completed(uuid);
     return uuid;
+  }
+
+  // The UX wave, U9 (A11): a turn that streams `deltas` and then runs until MAWS stops it. The replay holds at the plain
+  // stop's interrupt as the engine host writes it (`queue-and-interrupt.jsonl` seq 190 with `reason: 'user-cancel'` and
+  // nothing of the engine's queue cancelled), answered as seq 192 is with nothing queued; then the engine ends the turn as
+  // it ends an interrupted one: the "[Request interrupted by user]" row (seq 197), the turn's `error_during_execution`
+  // result (seq 198), and the prompt's `cancelled` (seq 200). Answers the prompt's uuid.
+  stoppedTurn(deltas: readonly string[]): string {
+    const prompt = this.prompt();
+    const recorded = swapped(frameOf(ECHOED, 26), { [RECORDED.echoed.session]: this.sessionId, [RECORDED.echoed.prompt]: prompt }) as Frame & { message: Frame };
+    const stream = (event: Frame) => this.push('in', { type: 'stream_event', event, session_id: this.sessionId, parent_tool_use_id: null, uuid: this.uuid() });
+    stream({ type: 'message_start', message: { ...recorded.message, id: `msg_e2e${this.uuid().replace(/-/g, '')}`, content: [], stop_reason: null } });
+    stream({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } });
+    for (const chunk of deltas) stream({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: chunk } });
+    this.read({ subtype: 'interrupt', reason: 'user-cancel', cancel_queued: false }, { still_queued: [], cancelled: [] });
+    const swap = { [RECORDED.interrupted.session]: this.sessionId, [RECORDED.interrupted.prompt]: prompt };
+    this.push('in', { ...swapped(frameOf(QUEUE_INTERRUPT, 197), swap), uuid: this.uuid(), timestamp: AT });
+    this.push('in', { ...swapped(frameOf(QUEUE_INTERRUPT, 198), swap), uuid: this.uuid(), user_message_uuid: prompt, user_message_uuids: [prompt] });
+    this.status();
+    this.push('in', { type: 'command_lifecycle', command_uuid: prompt, state: 'cancelled', uuid: this.uuid(), session_id: this.sessionId });
+    return prompt;
   }
 
   // `finishBinding`'s write for a side thread, exactly (the host adds `source: 'host'`), and the engine's success.

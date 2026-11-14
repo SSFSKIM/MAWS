@@ -9,11 +9,12 @@ import { registerAction, runAction } from '../keymap/actions-runtime';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../stores/sessions';
 import { useLayout } from '../stores/layout';
-import { activeTab, currentSet } from '../stores/layout-model';
+import { activeTab, allTabs, currentSet } from '../stores/layout-model';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
+import type { OrgKey } from '@shared/machine/org-key';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { record, remoteRow } from '../../../../test/support/builders';
@@ -77,7 +78,9 @@ describe('command palette', () => {
     const newSession = actions.find((o) => o.dataset.value === 'action:session.new')!;
     expect(newSession.getAttribute('aria-disabled')).toBe('true');
     expect(newSession.textContent).toContain('Not available here');
-    expect(actions.find((o) => o.dataset.value === 'action:composer.send')!.textContent).toContain('Keyboard only, in the composer');
+    // UX wave U4a: ⌘Enter's two composer rows and Ctrl+R's search wait for the composer's focus; its fixed keys are not listed
+    for (const id of ['composer.queue', 'composer.send', 'composer.historySearch']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in the composer');
+    for (const id of ['composer.submit', 'composer.newLine', 'composer.newLineOption']) expect(actions.find((o) => o.dataset.value === `action:${id}`), id).toBeUndefined();
     // UX wave U1a (§D): a permission prompt's two allow keys wait for a focused request, as Enter and Esc do
     for (const id of ['request.allowOnce', 'request.allowLasting']) expect(actions.find((o) => o.dataset.value === `action:${id}`)!.textContent, id).toContain('Keyboard only, in a focused request');
     expect(actions.find((o) => o.dataset.value === 'action:tab.close')!.getAttribute('aria-disabled')).toBe('false');
@@ -271,6 +274,74 @@ describe('palette entries', () => {
     expect(actions).not.toContain(sample('sample.fixed'));
     expect(actions).toEqual(expect.arrayContaining([sample('sample.menu'), sample('sample.shared')]));
     expect(paletteEntries('sample', empty, EXTENDED_TABLE).actions).toEqual([sample('sample.menu'), sample('sample.shared')]);
+  });
+});
+
+// UX wave U11a M5 (S-10; Interfaces §F, "The Channel's entries"): "<project> · channel" for each project that has one,
+// with "N waiting" from its Channel's own waiting list; Enter opens the tab, or brings it forward.
+describe('the Channel entries', () => {
+  const SMNS = '1f0e2d3c-4b5a-4968-8776-a5b4c3d2e1f0';
+  const USAGE = '2a3b4c5d-6e7f-4081-9293-a4b5c6d7e8f9';
+  const named = (name: string) => [...useSessions.getState().projects.values()].find((p) => p.name === name)!;
+  // MAWS and claude-usage-menubar become hub projects; codex_somersault stays a plain folder
+  const withChannels = () => {
+    const projects = new Map(useSessions.getState().projects);
+    for (const [name, smnsId] of [['MAWS', SMNS], ['claude-usage-menubar', USAGE]] as const) {
+      const project = named(name);
+      projects.set(project.id, { ...project, org: { key: `smns:${smnsId}` as OrgKey, name, source: 'smns', smnsId } });
+    }
+    useSessions.setState({ projects });
+  };
+  const channelOptions = () => (group('Channels') ? within(group('Channels')!).getAllByRole('option') : []);
+  const labelOf = (option: HTMLElement) => option.querySelector('[data-channel-name]')?.textContent ?? null;
+  const detailOf = (option: HTMLElement) => option.querySelector('[data-channel-count]')?.textContent ?? null;
+
+  beforeEach(withChannels);
+
+  it('lists an entry per project that has a channel, with an empty query, in a group after Projects and before Actions', async () => {
+    await openAndType('');
+    expect(channelOptions().map(labelOf)).toEqual(['claude-usage-menubar · channel', 'MAWS · channel']);
+    const before = (a: string, b: string) => Boolean(group(a)!.compareDocumentPosition(group(b)!) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(before('Projects', 'Channels')).toBe(true);
+    expect(before('Channels', 'Actions')).toBe(true);
+  });
+
+  it('says how many requests wait in the project, from its Channel’s waiting list, and no count at zero', async () => {
+    await openAndType('');
+    const [usage, maws] = channelOptions();
+    expect(detailOf(maws)).toBe('2 waiting'); // the permission and the question of MAWS's sessions
+    expect(detailOf(usage)).toBeNull();
+  });
+
+  it('matches by the project’s name and by “channel”, case ignored', async () => {
+    const user = await openAndType('maws');
+    expect(channelOptions().map(labelOf)).toEqual(['MAWS · channel']);
+    await user.clear(within(dialog()).getByRole('combobox'));
+    await user.keyboard('CHANNEL');
+    expect(channelOptions().map(labelOf)).toEqual(['claude-usage-menubar · channel', 'MAWS · channel']);
+    await user.clear(within(dialog()).getByRole('combobox'));
+    await user.keyboard('somersault');
+    expect(group('Channels')).toBeNull();
+  });
+
+  it('⏎ opens the Channel tab; with it open, brings it forward without a second tab', async () => {
+    const user = await openAndType('channel');
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'channel', project: USAGE });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    act(() => useLayout.getState().openSession(idOf('Charter + research'), { how: 'tab' }));
+    act(() => runAction('palette.open'));
+    await user.keyboard('channel');
+    await user.keyboard('{Enter}');
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'channel', project: USAGE });
+    expect(allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'channel')).toHaveLength(1);
+  });
+
+  it('greys Project channel with its sentence while the tab in front has no project with a channel', async () => {
+    await openAndType('project channel');
+    const option = within(group('Actions')!).getAllByRole('option').find((o) => o.dataset.value === 'action:channel.open')!;
+    expect(option.getAttribute('aria-disabled')).toBe('true');
+    expect(option.textContent).toContain('This project has no channel');
   });
 });
 

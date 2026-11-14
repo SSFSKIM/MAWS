@@ -22,7 +22,7 @@ export function GatewaySection({ settings }: { settings: Settings }) {
   const route = useMachineDefaultRoute(settings);
   return (
     <>
-      <Setting label={GATEWAY.defaultRoute} note={route.value === 'machine' ? `${GATEWAY.defaultRouteNote} ${GATEWAY.machineRouteNote}` : GATEWAY.defaultRouteNote}>
+      <Setting row="gateway.defaultRoute" state={route.value === 'machine' ? 'machine' : 'default'}>
         {route.value === null ? (
           <Segment label={GATEWAY.defaultRoute} value={defaultRoute} options={LEGACY_ROUTES} onChange={(next) => writeSettings({ gateway: { defaultRoute: next } })} />
         ) : (
@@ -30,7 +30,7 @@ export function GatewaySection({ settings }: { settings: Settings }) {
         )}
         <span className="text-ui-sm text-fg-muted">127.0.0.1:8641</span>
       </Setting>
-      <Setting label={GATEWAY.policy} note={relayUnreachable === 'direct' ? GATEWAY.policyDirectNote : undefined}>
+      <Setting row="gateway.policy" state={relayUnreachable === 'direct' ? 'direct' : 'default'}>
         <select
           aria-label={GATEWAY.policy}
           value={relayUnreachable}
@@ -44,7 +44,7 @@ export function GatewaySection({ settings }: { settings: Settings }) {
           ))}
         </select>
       </Setting>
-      <Setting label={GATEWAY.offerDirect} note={GATEWAY.offerDirectNote}>
+      <Setting row="gateway.offerDirect">
         <Switch checked={offerDirect} label={GATEWAY.offerDirectLabel} onChange={(next) => void writeSettings({ gateway: { offerDirect: next } })} />
         <span>{GATEWAY.offerDirectLabel}</span>
       </Setting>
@@ -89,11 +89,12 @@ function DirectLogin() {
     }
   };
   return (
+    // U11a M9: the sign-in and its Copy stay on the row's line, after its sentence and before More
     <Setting
-      label={GATEWAY.directLogin}
-      note={
+      row="gateway.directLogin"
+      lineEnd={
         <>
-          {GATEWAY.directLoginNote} <span className="text-fg">{GATEWAY.signIn}</span>
+          <span className="text-fg">{GATEWAY.signIn}</span>
           <button type="button" className={`${TEXT_ACTION} ml-1`} onClick={() => void copy()}>
             {copied ? GATEWAY.copied : GATEWAY.copy}
           </button>
@@ -116,7 +117,7 @@ function Relay() {
       .catch((error: unknown) => console.warn('[settings] relay check failed', error));
   }, []);
   return (
-    <Setting label={GATEWAY.relay}>
+    <Setting row="gateway.relay">
       <span className={relay && !relay.ok ? 'text-warning' : ''}>{relayLine(relay, now)}</span>
       <button type="button" className={TEXT_ACTION} onClick={() => runAction('gateway.openClaudeUsage')}>
         {GATEWAY.openClaudeUsage}

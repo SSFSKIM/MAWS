@@ -23,10 +23,13 @@ import { useMachines } from '../../stores/machines'; // 2026-11-06
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
 import { useTaskGraph } from '../../tools/agents/store';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
+import { chunksSettled } from '../lazy'; // the U4a landing's unit shard
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
 import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board 525
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures'; // UX wave U4a
+import { journalToEvents } from '../dev/journal'; // UX wave U4a
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -41,12 +44,14 @@ beforeAll(() => {
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 // No case waits on a clock (L79). The slot renders through its lazy chunk (`lazy.tsx`), whose first import is real
-// module loading that the machine's load can stretch past any poll's deadline, so the chunk is loaded before the cases.
+// module loading that the machine's load can stretch past any poll's deadline, so the chunk is loaded before the cases:
+// the hook waits on lazy.tsx's own `chunksSettled`, since an import of the chunk's modules can resolve with a module
+// still evaluating (lazy.tsx's comment), and the slot then drew nothing in any case (the U4a landing's unit shard).
 // After that, everything a render or an event sets off is promise-chained (the fake IPC's answers, the store's batches,
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
+  await Promise.all([chunksSettled, import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
@@ -146,7 +151,7 @@ describe('TranscriptSlot', () => {
     b.result('t1', 'a', { structured: BASH_RESULT('a') });
     b.end(['u1']);
     const records = useSessions.getState().records;
-    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
+    act(() => useSessions.setState({ records: new Map([[id, { directory: '/w/project-wt', worktree: { path: '/w/project-wt', branch: 'wt' }, holder: { kind: 'self' } } as unknown as SessionRecord]]) }));
     onTestFinished(() => useSessions.setState({ records }));
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
@@ -156,6 +161,49 @@ describe('TranscriptSlot', () => {
     act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
     await settle();
     expect(document.querySelector('.transcript-shell-meta')?.textContent).toBe('Session directory /w/project-wt');
+  });
+
+  // UX wave U8c-2 (M5, §K): the slot hands down the selector's launch folder and the agent's folder while the session is
+  // in its launch folder, and neither while it reads moved. A call whose event carries no folder (live) then names the
+  // launch folder, or no folder; a call read from rows names its own unless it ran in one of the two. Invented folders.
+  it('hands down the launch folder and the agent’s folder while the session is there, and neither while it reads moved', async () => {
+    const shells = () => {
+      const b = builder();
+      b.turn('u1', 'List it');
+      b.toolUse('t1', 'Bash', { command: 'ls' }); // live: no folder
+      b.result('t1', 'a', { structured: BASH_RESULT('a') });
+      b.toolUse('t2', 'Bash', { command: 'git status' });
+      Object.assign(b.events.at(-1)!, { cwd: '/repo/packages/app' }); // read from rows: the agent's sub-folder
+      b.result('t2', 'b', { structured: BASH_RESULT('b') });
+      b.toolUse('t3', 'Bash', { command: 'pwd' });
+      Object.assign(b.events.at(-1)!, { cwd: '/repo' }); // read from rows: the launch folder
+      b.result('t3', 'c', { structured: BASH_RESULT('c') });
+      b.end(['u1']);
+      return b.events;
+    };
+    const lines = async (key: string, record: Partial<SessionRecord>) => {
+      const id = at(key as AppSessionId);
+      const events = shells();
+      const records = useSessions.getState().records;
+      act(() => useSessions.setState({ records: new Map([[id, { directory: '/repo', worktree: null, holder: { kind: 'self' }, ...record } as unknown as SessionRecord]]) }));
+      onTestFinished(() => useSessions.setState({ records }));
+      const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events, lastSeq: events.length, complete: true } }));
+      window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+      const view = render(<TranscriptSlot appSessionId={id} />);
+      await settle();
+      expect(useTranscriptStore.getState().entries[id]?.phase).toBe('live');
+      act(() => useTranscriptStore.getState().expandAll(id, { cells: true }));
+      await settle();
+      const shown = [...document.querySelectorAll('.transcript-shell')].map((shell) => shell.querySelector('.transcript-shell-meta')?.textContent ?? null);
+      view.unmount();
+      return shown;
+    };
+    // in the launch folder, the agent in a sub-folder of its checkout (not a move)
+    const there = { agentFolder: { checkout: '/repo', cwd: '/repo/packages/app', branch: 'main', linked: false } };
+    expect(await lines('app-slot-shell-there', there)).toEqual(['Session directory /repo', 'Session directory /repo', 'Session directory /repo']);
+    // moved by `cd` into a worktree: the live call names no folder, each row its own
+    const moved = { agentFolder: { checkout: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', branch: 'w1', linked: true } };
+    expect(await lines('app-slot-shell-moved', moved)).toEqual([null, 'cwd /repo/packages/app', 'cwd /repo']);
   });
 
   // A child agent's shell may have run in its own worktree, so its transcript names no directory it cannot vouch for.
@@ -266,6 +314,40 @@ describe('TranscriptSlot', () => {
     expect(listeners.size).toBe(0); // the last attachment let the queue go
   });
 
+  // UX wave U4a (decision 12): a mount with a stack draws the held messages there, so the slot draws none at its tail,
+  // while it still attaches the queue and follows its events.
+  it('with a stack (waiting="stacked"), attaches the queue but draws no held bubble at any of its events', async () => {
+    const id = at('app-slot-queue-stacked' as AppSessionId);
+    const b = builder();
+    b.turn('u1', 'Start the work');
+    b.text('m1', 0, 'Working on it.');
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const listeners = new Set<(payload: unknown) => void>();
+    const invoke = vi.fn((name: string) =>
+      Promise.resolve({
+        ok: true,
+        value: name === 'session.queue.list' ? { ...EMPTY, entries: [held('q-1', 'Then run the tests')] } : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true },
+      }),
+    );
+    const on = vi.fn((name: string, listener: (payload: unknown) => void) => {
+      if (name !== 'session.queue') return () => {};
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    });
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    const { unmount } = render(<TranscriptSlot appSessionId={id} waiting="stacked" />);
+    await settle();
+    expect(invoke).toHaveBeenCalledWith('session.queue.list', { appSessionId: bareOf(id) }, TEST_MACHINE);
+    expect(screen.getAllByRole('region', { name: 'Your message' })).toHaveLength(1); // the turn's own prompt
+    expect(document.querySelectorAll('[data-pending="held"]')).toHaveLength(0);
+    act(() => listeners.forEach((listener) => listener({ appSessionId: bareOf(id), ...EMPTY, entries: [held('q-1', 'Then run the tests'), held('q-2', 'And commit')] })));
+    await settle();
+    expect(document.querySelectorAll('[data-pending="held"]')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('Then run the tests');
+    unmount();
+    expect(listeners.size).toBe(0);
+  });
+
   // L276: an async ask's answer goes out as a `next` steer, which a Stop while it waits for the turn's next tool
   // boundary holds back into MAWS's queue. The steer reached the transcript, so the ask's capsule reads Answered and
   // derive draws no bubble for it; the queued envelope is none at the tail either (it stays queued and sends as it is).
@@ -293,6 +375,99 @@ describe('TranscriptSlot', () => {
     expect(heldTexts[0]).toBe('Then run the tests');
     expect(heldTexts[1]).toContain('[MAWS ask toolu_other]');
     expect(document.body.textContent).not.toContain('[MAWS ask toolu_a]');
+  });
+
+  it('with a stack (waiting="stacked"), draws no held bubble for an ask’s answer held back into the queue, nor for any other held message', async () => {
+    const id = at('app-slot-ask-held-stacked' as AppSessionId);
+    const questions: AskQuestion[] = [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+    const answers: AskAnswer[] = [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }];
+    const envelope = askSteerText('toolu_a', questions, answers);
+    const b = builder();
+    b.turn('u1', 'Set it up');
+    b.toolUse('toolu_a', 'mcp__maws__ask', { blocking: false, questions });
+    b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
+    b.toolUse('t1', 'Bash', { command: 'sleep 1' });
+    b.emit('user.message', { messageUuid: uuid('u2'), content: envelope, isReplay: false, isSynthetic: false, origin: 'human', bash: null }); // the answer's steer
+    const held = (queueId: string, content: string) => ({ queueId, appSessionId: bareOf(id), content, createdAt: '2026-10-01T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+    const queue = { ...EMPTY, entries: [held('q-1', envelope), held('q-2', 'Then run the tests'), held('q-3', askSteerText('toolu_other', questions, answers))], withdrawn: ['u2'] };
+    const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? queue : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 9, complete: true } }));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={id} waiting="stacked" />);
+    await settle();
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    expect(document.querySelectorAll('[data-pending="held"]')).toHaveLength(0);
+    expect(document.body.textContent).not.toContain('Then run the tests');
+    expect(document.body.textContent).not.toContain('[MAWS ask');
+  });
+
+  // UX wave U4a (decision 12; Acceptance 7): the session's pane mounts the slot with a stack, which draws a message while
+  // it is unread; the transcript then draws it once it starts, at its place. Over the probes' recorded sessions.
+  describe('with a stack (waiting="stacked"), a message is drawn once it is no longer unread', () => {
+    const through = (name: string, seq: number) => journalToEvents(loadUxwaveJournal(name).filter((row) => row.seq <= seq));
+    let mounts = 0;
+    async function mount(events: SessionEvent[], waiting?: 'stacked') {
+      const id = at(`app-slot-stacked-${++mounts}` as AppSessionId);
+      const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events, lastSeq: events.at(-1)?.seq ?? null, complete: true } }));
+      window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+      const view = waiting === undefined ? render(<TranscriptSlot appSessionId={id} />) : render(<TranscriptSlot appSessionId={id} waiting={waiting} />);
+      await settle();
+      return view;
+    }
+    const bubbles = () =>
+      [...document.querySelectorAll('section.transcript-user')].map((section) => ({
+        text: section.querySelector('[data-bubble]')?.textContent ?? '',
+        caption: section.querySelector('.transcript-user-caption')?.textContent ?? null,
+      }));
+    const saying = (word: string) => bubbles().filter((bubble) => bubble.text.includes(word));
+
+    it('u4p1-a-seeded-1: after the cut turn closes (46, 47) the waiting message draws no bubble; once it starts (48), one; without a stack, today’s bubble', async () => {
+      for (const seq of [40, 46, 47]) {
+        const view = await mount(through('u4p1-a-seeded-1', seq), 'stacked');
+        expect(saying('PINEAPPLE')).toEqual([]);
+        expect(saying('node wait.cjs a1 40')).toHaveLength(1); // the prompt that ran
+        view.unmount();
+      }
+      const started = await mount(through('u4p1-a-seeded-1', 48), 'stacked');
+      expect(saying('PINEAPPLE')).toHaveLength(1);
+      started.unmount();
+      const today = await mount(through('u4p1-a-seeded-1', 47));
+      expect(saying('PINEAPPLE')).toHaveLength(1);
+      today.unmount();
+    });
+
+    it('u4p2-two-1-1: after 51 neither message is drawn; after 55 both, the second as a steer at its place reading “Sent during this turn”; at 60 one bubble with both texts', async () => {
+      const ended = await mount(through('u4p2-two-1-1', 51), 'stacked');
+      expect([saying('PINEAPPLE'), saying('MANGO')]).toEqual([[], []]);
+      ended.unmount();
+      const started = await mount(through('u4p2-two-1-1', 55), 'stacked');
+      expect(saying('PINEAPPLE')).toHaveLength(1);
+      expect(saying('MANGO')).toEqual([{ text: expect.stringContaining('MANGO'), caption: 'Sent during this turn' }]);
+      const order = bubbles().map((bubble) => bubble.text);
+      expect(order.findIndex((text) => text.includes('PINEAPPLE'))).toBeLessThan(order.findIndex((text) => text.includes('MANGO')));
+      started.unmount();
+      await mount(through('u4p2-two-1-1', 60), 'stacked');
+      const joined = saying('PINEAPPLE');
+      expect(joined).toHaveLength(1);
+      expect(joined[0]!.text).toContain('MANGO');
+      expect(saying('MANGO')).toHaveLength(1);
+    });
+
+    it('a steer the engine took into the running turn draws at its place reading “Sent during this turn”, never before it started', async () => {
+      const b = builder();
+      b.turn('u1', 'Count slowly');
+      b.text('m1', 0, 'One, two.');
+      b.emit('user.message', { messageUuid: uuid('s1'), content: 'Look at b too', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+      const waiting = await mount([...b.events], 'stacked');
+      expect(saying('Look at b too')).toEqual([]);
+      waiting.unmount();
+      b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'started' });
+      b.text('m2', 0, 'Three, and b.');
+      await mount(b.events, 'stacked');
+      expect(saying('Look at b too')).toEqual([{ text: 'Look at b too', caption: 'Sent during this turn' }]);
+      const texts = [...document.querySelectorAll('[data-kind]')].map((row) => row.textContent ?? '');
+      const where = (text: string) => texts.findIndex((row) => row.includes(text));
+      expect([where('One, two.') < where('Look at b too'), where('Look at b too') < where('Three, and b.')]).toEqual([true, true]); // where the engine took it
+    });
   });
 
   it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {

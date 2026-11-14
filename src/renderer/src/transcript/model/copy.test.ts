@@ -109,6 +109,10 @@ describe('cell lines', () => {
 
   it('other cells', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'mcp__docs__search', category: 'mcp' as ToolCategory })).toBe('Used docs · search');
+    // UX wave U12a: the computer-use plugin's call reads as what it is, under both names the engine gives its tool
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__plugin_cua_cua_repl__js', category: 'mcp' as ToolCategory })).toBe('Used computer use');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__cua_repl__js', category: 'mcp' as ToolCategory })).toBe('Used computer use');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__plugin_cua_cua_repl__js_reset', category: 'mcp' as ToolCategory })).toBe('Used plugin_cua_cua_repl · js_reset');
     expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: 'tdd' })).toBe('Ran /tdd'); // UX wave U2 (decision 5): the row's words, once the view's
     expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: '/release-notes' })).toBe('Ran /release-notes');
     expect(cellLabel({ kind: 'generic', toolName: 'Skill', category: 'skills', detail: null })).toBe('Ran a skill');

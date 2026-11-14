@@ -120,7 +120,9 @@ export type Spawner = Pick<LaunchedBy, 'member'>;
  * P5 O7 M5a: `artifact`, how the `artifact` rule places an artifact by its id (the asking channel's cache, artifacts.ts);
  * absent, `placeArtifact` reads it afresh.
  */
-export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames; members?: RecordMembers };
+// UX wave U9 (M1): `byRecord`, a lane B session with a recorded engine session is placed by its record alone, no status
+// read: a completion's act (a pane's answer), which a handover's drain must not hold for the successor (actions.ts).
+export type Placing = { dispatch: EndpointServices['dispatch']; log(line: string): void; live?: boolean; byRecord?: boolean; artifact?(artifactId: string): Promise<Resolved>; held?: HeldNames; members?: RecordMembers };
 
 /**
  * P5 O8 M6b: the member a lane B app session's record acts go to, as RL10's members join places it (rl10/members.ts'
@@ -227,7 +229,7 @@ export function resolveSubscription(session: { lane: 'A' | 'B'; id: string }, pl
  *     record is what the machine says the session is, and a caller below it learns nothing of a lag).
  *   - Without a recorded engine session the live row is the only placement, else `unknown` (`grade`).
  */
-async function laneB(appSessionId: string, { dispatch, log, live = true }: Placing): Promise<Resolved> {
+async function laneB(appSessionId: string, { dispatch, log, live = true, byRecord = false }: Placing): Promise<Resolved> {
   const unavailable: Resolved = { kind: 'refused', reason: 'unavailable' };
   const record = await dispatch('machine', 'session.get', { appSessionId }).catch((error: unknown) => ({ ok: false as const, error: { code: 'internal', message: (error as Error).message } }));
   if (!record.ok) {
@@ -238,6 +240,7 @@ async function laneB(appSessionId: string, { dispatch, log, live = true }: Placi
   const launchedBy = isId(spawner) ? { launchedBy: { member: spawner } } : {};
   const placed = (engine: string): Extract<Resolved, { kind: 'session' }> => ({ kind: 'session', target: { lane: 'B', session: engine, appSessionId }, ...launchedBy });
   const recorded = field(record.value, 'engineSessionId');
+  if (byRecord && isId(recorded)) return placed(recorded);
   const status = await dispatch('engine-host', 'session.status', { appSessionId });
   if (!status.ok && (status.error.code === 'host_unavailable' || status.error.code === 'timeout')) return unavailable;
   const running = status.ok ? field(status.value, 'engineSessionId') : undefined;
@@ -415,8 +418,38 @@ export class CheckoutBounds {
     return coversHome(real, this.homes());
   }
 
-  /** The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`. */
+  /**
+   * The bounds of `record` (`session.get`'s answer), read on the machine through `dispatch`: its own roots' (kept per set
+   * of roots), then the launch folder and the working folder where one of the record's facts names them, each admitted
+   * for this request alone (UX wave U8c-2, `admittedFacts`). An admitted folder is a root, bounds git's reads with its
+   * work tree, and, as the working folder, is the checkout Source control's output is judged by; each under the home rule.
+   */
   async of(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
+    const own = await this.#own(record, dispatch);
+    const facts = await admittedFacts(record, dispatch);
+    if (facts.length === 0) return own;
+    const homes = this.homes();
+    const roots = [...own.roots];
+    const dropped = [...own.dropped];
+    const within = new Set(own.within);
+    let checkoutCovers = own.checkoutCovers;
+    if (facts.some((fact) => fact.which === 'path')) checkoutCovers = true; // until the working folder is admitted below
+    for (const fact of facts) {
+      const covered = coversHome(fact.toplevel, homes) || coversHome(fact.main, homes); // a home's repository: a file root alone
+      if (fact.which === 'path' && fact.real !== null) checkoutCovers = coversHome(fact.real, homes) || covered;
+      if (fact.real === null) continue;
+      if (coversHome(fact.real, homes)) {
+        if (!dropped.includes(fact.real)) dropped.push(fact.real);
+        continue;
+      }
+      if (!roots.includes(fact.real)) roots.push(fact.real);
+      if (!covered) within.add(fact.real).add(fact.toplevel);
+    }
+    return { within: [...within], roots, dropped, checkoutCovers };
+  }
+
+  /** The bounds of the record's own roots: its directory, additional directories and worktree, kept per set of roots. */
+  async #own(record: unknown, dispatch: EndpointServices['dispatch']): Promise<Bounds> {
     const homes = this.homes();
     const declared = rootsOf(record);
     const resolved = await Promise.all(declared.map((root) => realpathOf(root)));
@@ -450,6 +483,62 @@ export class CheckoutBounds {
     }
     return bounds;
   }
+}
+
+/**
+ * UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, M3 decision 5, §G): the launch
+ * folder and the working folder `record` names through one of its facts (the selector's `launch` and `path` where they
+ * are not its directory or its worktree's path), each with whether it is admitted for this request: the work tree git
+ * finds for its realpath (`git.worktree.list`'s `toplevel` there) is the path of one of the work trees the machine lists
+ * at the record's directory, in the same common git directory: the directory a listed path names, found by its NFC
+ * spelling (the service names paths as realpaths in NFC where that spelling is git's directory) and admitted by its
+ * device and inode, so a sibling spelled in the other Unicode form is not the registered worktree. The files
+ * service reads the same predicate from git's own files (src/services/files/allowlist.ts' `admittedFolder`); one table of
+ * cases holds both. Nothing is kept: two calls of the machine per request while a record carries a fact, none otherwise.
+ * `real` null: not admitted (gone, unanswered, not listed); its `toplevel` and `main` are then empty.
+ */
+async function admittedFacts(record: unknown, dispatch: EndpointServices['dispatch']): Promise<{ which: 'launch' | 'path'; real: string | null; toplevel: string; main: string }[]> {
+  if (!folderReadable(record)) return [];
+  const folder = workingFolder(record);
+  const own = new Set([record.directory, ...(record.worktree ? [record.worktree.path] : [])]);
+  const asked = (['launch', 'path'] as const).filter((which) => !own.has(folder[which]) && isAbsolute(folder[which]));
+  if (asked.length === 0) return [];
+  const anchor = await realpathOf(record.directory);
+  const listed = anchor === null ? null : await worktreesAt(anchor, dispatch);
+  return Promise.all(
+    asked.map(async (which) => {
+      const refused = { which, real: null, toplevel: '', main: '' };
+      const real = await realpathOf(folder[which]);
+      if (real === null || listed === null) return refused;
+      const at = await worktreesAt(real, dispatch);
+      if (at === null || at.commonDir !== listed.commonDir) return refused;
+      const toplevel = ancestorsOf(real).find((path) => path.normalize('NFC') === at.toplevel.normalize('NFC'));
+      if (toplevel === undefined) return refused;
+      // the folded spelling finds a listed work tree; only the directory it names admits (a sibling spelled in the other
+      // Unicode form, holding a copy of a registered worktree's pointer, is another directory: the branch review's P1)
+      const candidates = listed.paths.filter((path) => path.normalize('NFC') === at.toplevel.normalize('NFC'));
+      const member = (await Promise.all(candidates.map((path) => sameDirectory(path, toplevel)))).includes(true);
+      return member ? { which, real, toplevel, main: at.main } : refused;
+    }),
+  );
+}
+
+/** What the machine's `git.worktree.list` answers at `real` (a realpath): its top level, main checkout, common dir and work trees (as the service names them), or null. */
+async function worktreesAt(real: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string; commonDir: string; paths: string[] } | null> {
+  const folded = real.normalize('NFC'); // the service answers for the NFC spelling (repositoryOf, round 4)
+  if (folded !== real && !(await sameDirectory(real, folded))) return null;
+  const answer = await dispatch('machine', 'git.worktree.list', { repoRoot: real }).catch(() => null);
+  if (answer === null || !answer.ok) return null;
+  const toplevel = field(answer.value, 'toplevel');
+  const main = field(answer.value, 'repoRoot');
+  const commonDir = field(answer.value, 'commonDir');
+  const worktrees = field(answer.value, 'worktrees');
+  if (typeof toplevel !== 'string' || !isAbsolute(toplevel) || typeof main !== 'string' || typeof commonDir !== 'string' || !Array.isArray(worktrees)) return null;
+  const paths = worktrees.flatMap((entry) => {
+    const path = field(entry, 'path');
+    return typeof path === 'string' ? [path] : [];
+  });
+  return { toplevel, main, commonDir, paths };
 }
 
 /** The failure a git read of a directory in no repository answers (src/services/git/runner.ts' NotARepositoryError). */
@@ -532,10 +621,21 @@ function checkoutOf(record: unknown): string | null {
   return isAbsolute(checkout) ? checkout : null;
 }
 
-/** Whether `value` holds the fields `workingFolder` reads, as a `SessionRecord` holds them. */
-function folderReadable(value: unknown): value is Pick<SessionRecord, 'directory' | 'worktree'> {
+/**
+ * Whether `value` holds the fields `workingFolder` reads, as a `SessionRecord` holds them. UX wave U8c-2: its launch
+ * folder, when present, only as a string, and its agent's folder only as an object with a string checkout and cwd (the
+ * two the selector reads); any other shape names no folder, as any value that is no record.
+ */
+function folderReadable(value: unknown): value is Pick<SessionRecord, 'directory' | 'worktree'> & Partial<Pick<SessionRecord, 'launchFolder' | 'agentFolder'>> {
   const worktree = field(value, 'worktree');
-  return typeof field(value, 'directory') === 'string' && (worktree === null || worktree === undefined || (typeof worktree === 'object' && typeof field(worktree, 'path') === 'string'));
+  const launch = field(value, 'launchFolder');
+  const agent = field(value, 'agentFolder');
+  return (
+    typeof field(value, 'directory') === 'string' &&
+    (worktree === null || worktree === undefined || (typeof worktree === 'object' && typeof field(worktree, 'path') === 'string')) &&
+    (launch === undefined || typeof launch === 'string') &&
+    (agent === undefined || (typeof agent === 'object' && agent !== null && typeof field(agent, 'checkout') === 'string' && typeof field(agent, 'cwd') === 'string'))
+  );
 }
 
 /** A record's roots, as the files service reads them: its directory, its additional directories and its worktree. */

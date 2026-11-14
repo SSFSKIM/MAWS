@@ -4,10 +4,13 @@
 // binary MAWS will not open reads its size and nothing more.
 // P5 O7 M4: for a lane B session on another machine it would open the file on that machine's desktop. P5 O7 M5a (A10):
 // it opens a copy of the file here (lane-b/open-copy.ts), and says where the file is ("on <machine>").
+// UX wave U6c (M3 decision 1): a session on this Mac asks with `named`, so a file outside its folders that its transcript
+// links opens too; a session on another machine is asked as before.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ipc } from '../../../ipc/client';
+import { machineFor } from '../../../ipc/machine';
 import { COPY_WORDS, openSessionFile } from '../../../lane-b/open-copy';
 import { ELSEWHERE_WORDS, useElsewhereMachine } from '../../../lane-b/remote-session';
 import { formatSize, VIEWER_COPY } from '../copy';
@@ -20,7 +23,7 @@ export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessio
   const [problem, setProblem] = useState<string | null>(null);
   const elsewhere = useElsewhereMachine(appSessionId);
   const open = async () => {
-    const result = await openSessionFile(appSessionId, path, ipc);
+    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true }) : await openSessionFile(appSessionId, path, ipc);
     if (!result.ok) setProblem(VIEWER_COPY.refused(result.error.message));
     else setProblem(result.value.opened ? null : VIEWER_COPY.notOpened(result.value.message ?? ''));
   };

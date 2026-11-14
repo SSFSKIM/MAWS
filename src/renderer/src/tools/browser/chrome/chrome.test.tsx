@@ -17,7 +17,7 @@ import { useFloatingCard } from '../../../shell/floating';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { browserTab, T1, T2 } from '../../../test-support/browser';
-import { installFakeMain, ok, type Handler } from '../../../test-support/code';
+import { deferred, installFakeMain, ok, type Handler } from '../../../test-support/code';
 import { mainShowing } from '../../../test-support/panel';
 import { BROWSER_COPY } from '../copy';
 import { coverPane, resetCovering } from '../covering';
@@ -37,6 +37,8 @@ const SEARCH = SETTINGS_DEFAULTS_V21.browser.searchUrl;
 let main: ReturnType<typeof installFakeMain>;
 let disconnect: () => void;
 let suggest: Handler = () => ok({ suggestions: [] });
+let copyScreenshot: Handler = () => ok({ copied: true }); // U12a
+let setViewport: Handler = () => ok(); // U12a
 const calls = (name: Parameters<typeof main.callsOf>[0]) => main.callsOf(name);
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 
@@ -45,8 +47,14 @@ beforeEach(() => {
   resetCovering();
   useLayout.setState({ regions: LAYOUT_DEFAULTS.regions, main: LAYOUT_DEFAULTS.main, overviewOpen: false });
   suggest = () => ok({ suggestions: [] });
+  copyScreenshot = () => ok({ copied: true });
+  setViewport = () => ok();
   main = installFakeMain((name, input) => {
     switch (name) {
+      case 'browser.view.copyScreenshot': // U12a
+        return copyScreenshot(name, input);
+      case 'browser.tabs.setViewport': // U12a
+        return setViewport(name, input);
       case 'browser.tabs.list':
         return ok({ tabs: [], selected: {} });
       case 'browser.history.suggest':
@@ -75,6 +83,7 @@ afterEach(() => {
 });
 
 const tab = (over: Partial<BrowserTab> = {}) => browserTab(T1, A, over);
+const ROOM = { width: 1000, height: 900 }; // U12a: the room of the pane that holds the view
 const show = (props: Partial<ChromeProps> & { tab: BrowserTab | null }) =>
   render(<Chrome appSessionId={A} surface="panel" tabs={props.tab ? [props.tab] : []} {...props} />);
 
@@ -371,6 +380,7 @@ describe('the address field', () => {
     useLayout.setState({ main: mainShowing(A), panelPinned: [], panelBySession: new Map(), panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} } });
     // UX2 opens the region only for an actual surface; floating alone does not create a panel column.
     useLayout.getState().setPanelTabs(A, { tabs: [{ id: 'browser:chrome', toolId: 'browser', pinned: false }], activeTabId: 'browser:chrome' });
+    useLayout.getState().showSurfaceTab(A, 'browser:chrome'); // UX wave U8b: a write of refs shows nothing
     useLayout.getState().setPanel({ collapsed: false, floating: true });
     render(<PanelRegion />);
     const region = document.querySelector('[data-region="panel"]')!;
@@ -625,16 +635,16 @@ describe('the overflow menu', () => {
   it('a chrome whose pane does not hold the view offers neither find nor zoom (they act on the page it does not show)', async () => {
     const user = userEvent.setup();
     const { rerender } = show({ tab: tab({ zoom: 1.25 }), owns: false });
-    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom]);
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot]);
     await user.keyboard('{Escape}');
-    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns />);
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns room={ROOM} />);
     expect(await disabledItems(user)).toEqual([]);
   });
 
   it('a suspended tab offers no page actions; Find in page opens the bar on a live one', async () => {
     const user = userEvent.setup();
     const { rerender } = show({ tab: tab({ suspended: true }), owns: true });
-    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.inspect]);
+    expect(await disabledItems(user)).toEqual([BROWSER_COPY.menu.find, BROWSER_COPY.menu.zoomIn, BROWSER_COPY.menu.zoomOut, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyScreenshot, BROWSER_COPY.menu.inspect]);
     await user.keyboard('{Escape}');
     rerender(<Chrome appSessionId={A} surface="panel" tab={tab()} tabs={[]} owns />);
     await menu(user);
@@ -642,6 +652,136 @@ describe('the overflow menu', () => {
     await wait(10);
     expect(screen.getByRole('search', { name: BROWSER_COPY.find.label })).toBeTruthy();
     expect(calls('browser.tabs.find')).toEqual([{ tabId: T1, text: '' }]);
+  });
+});
+
+// U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D, §G): Browser options › Viewport, the chip in the
+// navigation row, and Copy screenshot
+describe('device sizes and Copy screenshot (U12a)', () => {
+  const MOBILE = { width: 375, height: 812 };
+  const V = BROWSER_COPY.viewport;
+  const options = async (user: ReturnType<typeof userEvent.setup>) => {
+    await user.click(screen.getByRole('button', { name: BROWSER_COPY.options }));
+    await user.click(await screen.findByRole('menuitem', { name: BROWSER_COPY.menu.viewport }));
+    return screen.findAllByRole('menuitemradio');
+  };
+  const read = (items: HTMLElement[]) =>
+    items.map((item) => ({ viewport: item.getAttribute('data-viewport'), text: item.textContent, checked: item.getAttribute('aria-checked'), disabled: item.getAttribute('aria-disabled') === 'true' }));
+  const chip = () => document.querySelector<HTMLElement>('[data-browser-viewport-chip]');
+
+  it('Viewport offers Responsive, Mobile and Tablet with the section’s hints, the mark on the tab’s own choice', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab(), owns: true, room: ROOM });
+    expect(read(await options(user))).toEqual([
+      { viewport: 'responsive', text: V.responsive, checked: 'true', disabled: false },
+      { viewport: 'mobile', text: `${V.mobile}375 × 812`, checked: 'false', disabled: false },
+      { viewport: 'tablet', text: `${V.tablet}768 × 1024`, checked: 'false', disabled: false },
+    ]);
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={ROOM} />);
+    expect(read(await options(user)).map((item) => item.checked)).toEqual(['false', 'true', 'false']);
+  });
+
+  it('a size wider than the pane, at the page’s zoom, is disabled with “Wider than this pane”', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab(), owns: true, room: { width: 767, height: 900 } });
+    expect(read(await options(user)).map(({ text, disabled }) => [text, disabled])).toEqual([
+      [V.responsive, false],
+      [`${V.mobile}375 × 812`, false],
+      [`${V.tablet}${V.tooWide}`, true],
+    ]);
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns room={{ width: 959, height: 900 }} />);
+    expect(read(await options(user)).map(({ disabled }) => disabled)).toEqual([false, false, true]);
+    await user.keyboard('{Escape}');
+    await user.keyboard('{Escape}');
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ zoom: 1.25 })} tabs={[]} owns room={{ width: 960, height: 900 }} />);
+    expect(read(await options(user)).map(({ disabled }) => disabled)).toEqual([false, false, false]);
+  });
+
+  it('a choice sends main the tab’s size, and the mark moves only when main’s change arrives', async () => {
+    const user = userEvent.setup();
+    const held = deferred<ReturnType<typeof ok>>();
+    setViewport = () => held.promise;
+    const { rerender } = show({ tab: tab(), owns: true, room: ROOM });
+    const mobile = (await options(user)).find((item) => item.getAttribute('data-viewport') === 'mobile')!;
+    fireEvent.click(mobile); // happy-dom lays out no submenu, so a pointer's way into it is not modelled: the item's own click
+    await wait(0);
+    expect(calls('browser.tabs.setViewport')).toEqual([{ tabId: T1, viewport: MOBILE }]);
+    expect(read(await options(user)).map((item) => item.checked)).toEqual(['true', 'false', 'false']); // unanswered: no change yet
+    await act(async () => held.resolve(ok()));
+    expect(read(screen.getAllByRole('menuitemradio')).map((item) => item.checked)).toEqual(['true', 'false', 'false']); // answered, but main has not listed it
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={ROOM} />);
+    expect(read(screen.getAllByRole('menuitemradio')).map((item) => item.checked)).toEqual(['false', 'true', 'false']);
+    fireEvent.click(screen.getAllByRole('menuitemradio')[0]!);
+    expect(calls('browser.tabs.setViewport').at(-1)).toEqual({ tabId: T1, viewport: null });
+  });
+
+  it('offers no size in a chrome with no room, nor on an extension’s options tab; Copy screenshot is offered where find is', async () => {
+    const user = userEvent.setup();
+    const disabled = async () => {
+      await user.click(screen.getByRole('button', { name: BROWSER_COPY.options }));
+      const items = await screen.findAllByRole('menuitem');
+      const names = items.filter((item) => item.getAttribute('aria-disabled') === 'true').map((item) => item.textContent);
+      await user.keyboard('{Escape}');
+      return names;
+    };
+    const { rerender } = show({ tab: tab(), owns: true, room: null });
+    expect(await disabled()).toEqual([BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport]); // at 100%: nothing to reset
+    const internal = { kind: 'extension' as const, extensionId: 'nenbjdahllkkbfanbpfmmdacjencdfpg', title: 'Probe · Options' };
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ url: `chrome-extension://${internal.extensionId}/options.html`, internal })} tabs={[]} owns room={ROOM} />);
+    expect(await disabled()).toEqual([BROWSER_COPY.menu.openExternal, BROWSER_COPY.menu.resetZoom, BROWSER_COPY.menu.viewport, BROWSER_COPY.menu.copyUrl]);
+  });
+
+  it('the chip: absent in Responsive and without room; with a size, the page’s real size, before the options menu, opening the three choices', async () => {
+    const user = userEvent.setup();
+    const { rerender } = show({ tab: tab(), owns: true, room: ROOM });
+    expect(chip()).toBeNull();
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={null} />);
+    expect(chip()).toBeNull();
+    rerender(<Chrome appSessionId={A} surface="panel" tab={tab({ viewport: MOBILE })} tabs={[]} owns room={{ width: 1000, height: 600 }} />);
+    expect(chip()!.textContent).toBe('375 × 600'); // a pane under 812 tall: the view's real size
+    expect(chip()!.getAttribute('aria-label')).toBe('Viewport: 375 × 600');
+    const trigger = screen.getByRole('button', { name: BROWSER_COPY.options });
+    expect(chip()!.compareDocumentPosition(trigger) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chip()!.closest('[data-browser-nav]')).not.toBeNull();
+    await user.click(chip()!);
+    const items = await screen.findAllByRole('menuitemradio');
+    expect(read(items).map(({ viewport, checked }) => [viewport, checked])).toEqual([['responsive', 'false'], ['mobile', 'true'], ['tablet', 'false']]);
+    await user.click(items[0]!);
+    expect(calls('browser.tabs.setViewport')).toEqual([{ tabId: T1, viewport: null }]);
+  });
+
+  it('Copy screenshot asks main for the tab, and says what came of it once main answers', async () => {
+    const user = userEvent.setup();
+    const held = deferred<ReturnType<typeof ok>>();
+    copyScreenshot = () => held.promise;
+    show({ tab: tab(), owns: true, room: ROOM });
+    const kinds = () => browser.getState().notices.map((notice) => notice.kind);
+    const copy = async () => {
+      await user.click(screen.getByRole('button', { name: BROWSER_COPY.options }));
+      await user.click(await screen.findByRole('menuitem', { name: BROWSER_COPY.menu.copyScreenshot }));
+    };
+    await copy();
+    expect(calls('browser.view.copyScreenshot')).toEqual([{ tabId: T1 }]);
+    await wait(0);
+    expect(kinds()).toEqual([]); // unanswered: nothing said
+    await act(async () => held.resolve(ok({ copied: true })));
+    expect(kinds()).toEqual(['screenshotCopied']);
+    expect(screen.getByText(BROWSER_COPY.screenshotCopied).closest('[data-browser-notice]')!.className).toContain('border-l-info');
+    copyScreenshot = () => ok({ copied: false });
+    await copy();
+    await wait(0);
+    expect(kinds()).toEqual(['screenshotCopied', 'screenshotFailed']);
+    expect(screen.getByText(BROWSER_COPY.screenshotFailed).closest('[data-browser-notice]')!.className).toContain('border-l-warning');
+    copyScreenshot = () => ({ ok: false, error: { code: 'invalid_input', message: 'browser tab b_000000000001 is not placed in this window' } });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await copy();
+    await wait(0);
+    expect(kinds()).toEqual(['screenshotCopied', 'screenshotFailed', 'screenshotFailed']);
+    expect(warn).toHaveBeenCalled();
   });
 });
 

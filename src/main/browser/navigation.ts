@@ -105,23 +105,8 @@ export class Navigator {
         else history.goForward();
         return true;
       }
-      case 'reload': {
-        const { loadError, crashed, url } = entry.tab;
-        // the failed URL, or the tab's own when there is no live document to reload (crashed, or no view at all)
-        const again = loadError?.url ?? (crashed !== null || !wc ? url : null);
-        if (again !== null) {
-          const checked = validateBrowserUrl(again);
-          if (checked.ok) {
-            this.typed.delete(entry);
-            return store.load(tabId, checked.url);
-          }
-          if (!wc) return false;
-        }
-        this.typed.delete(entry);
-        store.beginNavigation(tabId);
-        wc!.reload();
-        return true;
-      }
+      case 'reload':
+        return this.reload(entry);
       case 'stop': {
         if (!wc) return false;
         if (entry.tab.unresponsive) {
@@ -136,6 +121,15 @@ export class Navigator {
         return true;
       }
     }
+  }
+
+  /** U12a (Interfaces §B; review finding 2): the reload `show_pane` asks for (the store's `reloadForAgent`): what
+   *  `navigate(tabId, 'reload')` does after its stamp (the failed address after a load error, the tab's own after a crash
+   *  or with no view, else the document's reload), without the stamp. It is not the person's input: `lastHumanAt` and the
+   *  tab's control are left as they are, so a tab the agent controls stays the agent's and the reload it starts reads as
+   *  the agent's navigation. */
+  reloadForAgent(tabId: string): boolean {
+    return this.reload(this.deps.store.require(tabId));
   }
 
   // `browser.tabs.zoom`: Chrome's next preset. Chromium keeps zoom per host within a partition, so the partition's other
@@ -195,6 +189,27 @@ export class Navigator {
   // `browser.tabs.devtools`: the human's Inspect, detached.
   devtools(tabId: string): void {
     this.deps.store.require(tabId).view?.webContents.openDevTools({ mode: 'detach' });
+  }
+
+  // The reload's body, the person's (`navigate`, after its stamp) and the agent's (`reloadForAgent`) alike: the failed URL,
+  // or the tab's own when there is no live document to reload (crashed, or no view at all), else the document's reload.
+  private reload(entry: TabEntry): boolean {
+    const { store } = this.deps;
+    const { tabId, loadError, crashed, url } = entry.tab;
+    const wc = entry.view?.webContents ?? null;
+    const again = loadError?.url ?? (crashed !== null || !wc ? url : null);
+    if (again !== null) {
+      const checked = validateBrowserUrl(again);
+      if (checked.ok) {
+        this.typed.delete(entry);
+        return store.load(tabId, checked.url);
+      }
+      if (!wc) return false;
+    }
+    this.typed.delete(entry);
+    store.beginNavigation(tabId);
+    wc!.reload();
+    return true;
   }
 
   // ---- the view's events ----------------------------------------------------------------------------------------------

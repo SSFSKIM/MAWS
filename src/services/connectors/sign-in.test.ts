@@ -8,7 +8,7 @@ import { listenLoopback } from './oauth-callback';
 import { ALREADY_CONNECTED, createSignIn, startSignIn, type SignInDeps, type SignInHost } from './sign-in';
 import { endableClientRef } from '@shared/ipc/client'; // P5 O7 M5c
 import { createRelayedCallbacks } from './relayed-callback'; // P5 O7 M5c
-import { validateCommandInput } from '@shared/ipc/validate'; // P5 O7 M8
+import { validateCommandInput, validateEventPayload } from '@shared/ipc/validate'; // P5 O7 M8; U11a M8: the event
 
 const SESSION = 'app-session-1';
 const GLOBAL = '/cfg/.claude.json';
@@ -731,5 +731,207 @@ describe('a remote asker’s sign-in through the relayed callback (P5 O7 M5c)', 
     later.device.end();
     await later.ended(past);
     expect(later.last(past)).toMatchObject({ state: 'done' });
+  });
+});
+
+// UX wave U11a M8 (§A): a dynamic connector's sign-in, `connectors.signInDynamicServer`. A plugin's server
+// (`plugin:<plugin>:<server>`) and a server of MAWS's own list (passed with --mcp-config) are both listed by the
+// session's mcp_status with scope `dynamic` (P1's second run); both take MAWS's redirect (P1's verdict). The check runs
+// in the operation, on the status of the session it drives, and for a press from a row of MAWS's own list on one read of
+// the entries the engine host answers now, whose revision must be the press's. The servers and addresses are invented.
+describe('a dynamic connector’s sign-in (UX wave U11a, §A)', () => {
+  const PLUGIN = 'plugin:fx-plugin:fx-oauth';
+  const OWN = 'fx-own';
+  const OWN_URL = 'https://own.example.test/mcp';
+  const NEW_URL = 'https://own-moved.example.test/mcp';
+  const SECOND = 'app-session-2';
+  const CHANGED = 'MAWS’s fx-own server changed since this page read it; refresh the page, then sign in';
+  type Held = { name: string; scope: string; transport: string; config: { type: string; url: string } };
+  const dynamic = (name: string, url = OWN_URL): Held => ({ name, scope: 'dynamic', transport: 'http', config: { type: 'http', url } });
+  const entry = (revision: string | null, url = OWN_URL) => ({ name: OWN, scope: 'app', path: '/maws/machine-settings.json', transport: 'http', url, revision });
+  type Status = { appSessionId: string; status: { process: string; cwd: string } };
+
+  function serve(setup: { held?: Held[]; own?: unknown[] } = {}) {
+    const handlers = new Map<string, (input: unknown, ctx: unknown) => unknown>();
+    const events: ConnectorSignInChanged[] = [];
+    const statuses = new Set<(payload: Status) => void>();
+    const opened: string[] = [];
+    const host = fakeHost();
+    const t = {
+      held: setup.held ?? [dynamic(PLUGIN), dynamic(OWN)], // what the sessions' engines hold
+      own: setup.own ?? [], // MAWS's own entries, as the engine host answers them now
+      endpoints: null as null | (() => Promise<unknown[]>), // a read held open
+    };
+    host.status = new Map(t.held.map((server) => [server.name, 'needs-auth']));
+    const call = host.call.bind(host);
+    host.call = (async (name: string, input: unknown) => {
+      if (name === 'session.mcpStatus') {
+        host.asked.push({ name, input });
+        return { ok: true, value: { mcpServers: t.held.map((server) => ({ ...server, status: host.status.get(server.name) ?? 'needs-auth' })) } };
+      }
+      if (name === 'customization.serverEndpoints') {
+        host.asked.push({ name, input });
+        return { ok: true, value: { servers: t.endpoints ? await t.endpoints() : t.own } };
+      }
+      return call(name as never, input as never);
+    }) as never;
+    const service = startSignIn({
+      bus: { register: ((name: string, handler: (input: unknown, ctx: unknown) => unknown) => handlers.set(name, handler)) as never, emit: ((_name: string, event: ConnectorSignInChanged) => events.push(event)) as never },
+      host,
+      onSessionStatus: (listener) => (statuses.add(listener), () => statuses.delete(listener)),
+      onHostLost: () => () => {},
+      sessions: async () => [],
+      hostStreaming: () => true,
+      onHostStreaming: () => () => {},
+      port: { openExternal: async (_client, target) => (opened.push((target as { url: string }).url), { opened: true }) },
+      listen: listenLoopback,
+      relayed: createRelayedCallbacks(),
+      machine: 'this-mac',
+    });
+    stop = () => service.stop();
+    const status = (payload: Status) => statuses.forEach((listener) => listener(payload));
+    status({ appSessionId: SESSION, status: { process: 'ready', cwd: '/p' } });
+    status({ appSessionId: SECOND, status: { process: 'ready', cwd: '/q' } });
+    const signIn = (input: Record<string, unknown>, appSessionId = SESSION) => (handlers.get('connectors.signInDynamicServer')!({ appSessionId, ...input }, { client: null }) as { opId: string }).opId;
+    const cancel = (opId: string) => handlers.get('connectors.signInCancel')!({ opId }, { client: null });
+    const of = (opId: string) => events.filter((e) => e.opId === opId);
+    const last = (opId: string) => of(opId).at(-1);
+    const until = async (check: () => boolean, what: string) => {
+      for (let i = 0; i < 400 && !check(); i += 1) await new Promise((r) => setTimeout(r, 5));
+      if (!check()) throw new Error(`timed out waiting for ${what}`);
+    };
+    const ended = (opId: string) => until(() => ['done', 'failed', 'cancelled'].includes(last(opId)?.state ?? ''), `${opId} to end`);
+    const authenticated = () => host.asked.filter((a) => a.name === 'session.mcpAuthenticate').map((a) => a.input as { appSessionId: string; serverName: string; redirectUri: string | null });
+    const reads = () => host.asked.filter((a) => a.name === 'customization.serverEndpoints');
+    const redirect = () => new URL(new URL(opened.at(-1)!).searchParams.get('redirect_uri')!);
+    const holdEndpoints = () => {
+      let answer!: (servers: unknown[]) => void;
+      const asked = new Promise<void>((noticed) => (t.endpoints = () => (noticed(), new Promise((resolve) => (answer = resolve)))));
+      return { asked, answer: (servers: unknown[]) => answer(servers) };
+    };
+    return { t, host, events, opened, signIn, cancel, states: (opId: string) => of(opId).map((e) => e.state), last, until, ended, authenticated, reads, redirect, holdEndpoints, status };
+  }
+
+  it('takes the name as the session’s status reports it, up to 128 characters, and an entry’s revision for a press from MAWS’s own list', () => {
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: PLUGIN, appSessionId: SESSION }).ok).toBe(true);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: OWN, appSessionId: SESSION, entry: { revision: 'rev-1' } }).ok).toBe(true);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: 'x'.repeat(128), appSessionId: SESSION }).ok).toBe(true);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: 'x'.repeat(129), appSessionId: SESSION }).ok).toBe(false);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: '', appSessionId: SESSION }).ok).toBe(false);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: OWN, appSessionId: SESSION, entry: { revision: '' } }).ok).toBe(false);
+    expect(validateCommandInput('connectors.signInDynamicServer', { name: OWN, appSessionId: SESSION, scope: 'user' }).ok).toBe(false);
+    // the progress event carries such a name; the two file-scope sign-ins keep the configured-name rule
+    expect(validateEventPayload('connectors.signInChanged', { opId: 'op', name: PLUGIN, state: 'starting', reason: null, message: null, where: null }).ok).toBe(true);
+    expect(validateEventPayload('connectors.signInChanged', { opId: 'op', name: 'x'.repeat(129), state: 'starting', reason: null, message: null, where: null }).ok).toBe(false);
+    expect(validateCommandInput('connectors.signInServer', { name: PLUGIN, scope: 'user', cwd: null, appSessionId: SESSION }).ok).toBe(false);
+  });
+
+  it('signs a plugin’s connector, and one of MAWS’s own list from the dialog, through MAWS’s redirect, through every state to connected here', async () => {
+    const s = serve();
+    for (const name of [PLUGIN, OWN]) {
+      const opId = s.signIn({ name });
+      await s.until(() => s.last(opId)?.state === 'waiting_callback', `${name} waiting_callback`);
+      const redirect = s.redirect();
+      expect(redirect.hostname).toBe('127.0.0.1'); // MAWS's loopback listener (P1: both kinds take it)
+      expect(s.authenticated().at(-1)).toEqual({ appSessionId: SESSION, serverName: name, redirectUri: `${redirect.origin}/callback` });
+      expect((await fetch(`${redirect.origin}/callback?code=the-code&state=engine-state`)).status).toBe(200);
+      await s.ended(opId);
+      expect(s.states(opId)).toEqual(['starting', 'waiting_browser', 'waiting_callback', 'submitting', 'watching_status', 'done']);
+      expect(s.last(opId)).toEqual({ opId, name, state: 'done', reason: null, message: null, where: 'here' });
+      expect(s.host.asked.filter((a) => a.name === 'session.mcpReconnect').at(-1)!.input).toEqual({ appSessionId: SESSION, serverName: name });
+    }
+    expect(s.reads()).toEqual([]); // a press from the dialog names no entry: MAWS's list is not read
+  });
+
+  it('refuses before the engine is asked when the session does not hold the server, or holds a file-configured one of the name', async () => {
+    const s = serve({ held: [{ ...dynamic(OWN), scope: 'user' }] });
+    const missing = s.signIn({ name: PLUGIN });
+    const file = s.signIn({ name: OWN });
+    for (const opId of [missing, file]) await s.ended(opId);
+    expect(s.last(missing)).toMatchObject({ state: 'failed', reason: 'other_entry', message: `that session has no ${PLUGIN} server` });
+    expect(s.last(file)).toMatchObject({ state: 'failed', reason: 'other_entry', message: 'this session uses a different fx-own; start a new session to sign in' });
+    expect(s.authenticated()).toEqual([]);
+    expect(s.opened).toEqual([]);
+  });
+
+  // a dynamic server is never read from a file later, so the wait for a just-added one does not apply
+  it('fails at once in the engine’s words when the engine answers that it does not know the server', async () => {
+    const s = serve();
+    s.host.authenticate = () => ({ ok: false, message: `Server not found: ${PLUGIN}` });
+    const opId = s.signIn({ name: PLUGIN });
+    await s.ended(opId);
+    expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'engine', message: `Server not found: ${PLUGIN}` });
+    expect(s.authenticated()).toHaveLength(1);
+  });
+
+  it('one at a time across two sessions: a press from another session while the first waits for its callback cancels the first, and the second goes on', async () => {
+    const s = serve();
+    const first = s.signIn({ name: PLUGIN });
+    await s.until(() => s.last(first)?.state === 'waiting_callback', 'the first waiting');
+    const abandoned = s.redirect();
+    const second = s.signIn({ name: PLUGIN }, SECOND);
+    expect(s.last(first)?.state).toBe('cancelled');
+    await s.until(() => s.last(second)?.state === 'waiting_callback', 'the second waiting');
+    await expect(fetch(`${abandoned.origin}/callback?code=c&state=engine-state`)).rejects.toThrow();
+    await fetch(`${s.redirect().origin}/callback?code=c&state=engine-state`);
+    await s.ended(second);
+    expect(s.last(second)).toMatchObject({ state: 'done', where: 'here' });
+    expect(s.authenticated().map((a) => a.appSessionId)).toEqual([SESSION, SECOND]);
+  });
+
+  it('a press from MAWS’s own list whose revision is the entry’s passes and authenticates, on one read of the list', async () => {
+    const s = serve({ own: [entry('rev-1')] });
+    const opId = s.signIn({ name: OWN, entry: { revision: 'rev-1' } });
+    await s.until(() => s.last(opId)?.state === 'waiting_callback', 'waiting_callback');
+    expect(s.authenticated()).toHaveLength(1);
+    expect(s.reads()).toHaveLength(1);
+  });
+
+  it('a press whose revision is not the entry’s, the entry and the session both holding the replacement, ends other_entry and authenticates nothing', async () => {
+    const s = serve({ held: [dynamic(OWN, NEW_URL)], own: [entry('rev-2', NEW_URL)] });
+    const opId = s.signIn({ name: OWN, entry: { revision: 'rev-1' } });
+    await s.ended(opId);
+    expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: CHANGED });
+    expect(s.authenticated()).toEqual([]);
+    expect(s.opened).toEqual([]);
+  });
+
+  it('held open: the entry replaced under the same name while the operation reads it, the read answering the replacement, is refused', async () => {
+    const s = serve({ own: [entry('rev-1')] });
+    const read = s.holdEndpoints();
+    const opId = s.signIn({ name: OWN, entry: { revision: 'rev-1' } });
+    await read.asked;
+    s.t.held = [dynamic(OWN, NEW_URL)]; // the list changed and a session started since holds the replacement
+    read.answer([entry('rev-2', NEW_URL)]);
+    await s.ended(opId);
+    expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: CHANGED });
+    expect(s.authenticated()).toEqual([]);
+  });
+
+  it('held open: a cancel while the check’s read is out sends no mcp_authenticate', async () => {
+    const s = serve({ own: [entry('rev-1')] });
+    const read = s.holdEndpoints();
+    const opId = s.signIn({ name: OWN, entry: { revision: 'rev-1' } });
+    await read.asked;
+    s.cancel(opId);
+    expect(s.last(opId)?.state).toBe('cancelled');
+    read.answer([entry('rev-1')]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(s.states(opId)).toEqual(['starting', 'cancelled']);
+    expect(s.authenticated()).toEqual([]);
+  });
+
+  it('held open: the session leaving while the entry is read ends session_exited, and nothing is sent', async () => {
+    const s = serve({ own: [entry('rev-1')] });
+    const read = s.holdEndpoints();
+    const opId = s.signIn({ name: OWN, entry: { revision: 'rev-1' } });
+    await read.asked;
+    s.status({ appSessionId: SESSION, status: { process: 'exited', cwd: '/p' } });
+    expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'session_exited' });
+    read.answer([entry('rev-1')]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(s.states(opId)).toEqual(['starting', 'failed']);
+    expect(s.authenticated()).toEqual([]);
+    expect(s.opened).toEqual([]);
   });
 });

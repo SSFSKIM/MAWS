@@ -17,9 +17,15 @@
 // an artifact link's fragment is; with no target there is no artifact to place, and the list opens.
 //
 // E4a (E4a execution document, Interfaces "The renderer"; Decision Log 7): the `browser` pane checks its target as main
-// will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise the
-// Browser tool opens with the parsed URL, the session and the request's own id (main makes one tab of a request two
-// windows both handle).
+// will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise main
+// opens the parsed URL with the request's own id (main makes one tab of a request two windows both handle). U12a: the
+// window makes that open itself, asking main to reload a page already open, and opens the Browser tool on its answer.
+//
+// UX wave U7b (its execution document, Interfaces §F, "Not the person's act"; M6, decision 5): what an agent shows is not
+// the person's act, so it closes neither a page nor the Settings dialog, and what it brings to the front is in front of
+// the strip behind them. The calls that reach the layout store run inside `quietly`; every `addTool` says `asked`, which
+// the host keeps across its own deferral, and the ones made after an await (the artifact's lookup, the browser's open)
+// carry it across theirs, where no `quietly` scope reaches.
 import * as z from 'zod';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import { validateBrowserUrl } from '@shared/browser/url'; // E4a
@@ -34,7 +40,7 @@ import { ipc } from '../../../ipc/client';
 import { machineFor } from '../../../ipc/machine';
 import { panelHost, shownSession } from '../../../panel/host';
 import type { PanelTool } from '../../../panel/tool';
-import { useLayout } from '../../../stores/layout';
+import { quietly, useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { normalizeLexically, openFile } from '../../code/open-file';
 
@@ -51,7 +57,7 @@ function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSess
   const layout = useLayout.getState();
   const existing = layout.panelBySession.get(appSessionId)?.tabs.find((tab) => tab.toolId === tool.id);
   if (!existing) return null;
-  if (shownSession(layout.main) !== appSessionId) layout.openSession(appSessionId);
+  if (shownSession(layout.main) !== appSessionId) quietly(() => layout.openSession(appSessionId));
   panelHost.selectTab(existing.id);
   return existing.id;
 }
@@ -60,15 +66,15 @@ export function showPane({ appSessionId, requestId, pane, target, line, at }: Ma
   const where = PANES[pane];
   if ('mainTab' in where || pane === 'file') {
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
-    openFile(appSessionId, target, line);
+    quietly(() => openFile(appSessionId, target, line));
     const path = normalizeLexically(target);
     return { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path, line, appSessionId, machine: machineFor(appSessionId) }), path, line } };
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
   if (pane === 'artifact') return showArtifact(tool, appSessionId, target, at, client); // E2; P3-L M6b; P4-B4: at
-  if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target); // E4a
-  const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true });
+  if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target, client); // E4a; U12a: client
+  const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true, asked: 'agent' });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
 }
 
@@ -129,7 +135,7 @@ async function artifactOf(client: MawsBridge, appSessionId: AppSessionId, target
 
 async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, at: ArtifactLocation | undefined, client: MawsBridge): Promise<MawsPaneAnswerResult> {
   const open = (params: { target?: string; location?: ArtifactLocation }): MawsPaneAnswerResult => {
-    const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
+    const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true, asked: 'agent' });
     return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
   };
   if (target === null) return open({});
@@ -140,16 +146,22 @@ async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: App
 }
 // E2 end
 
-// E4a start: the `browser` pane.
-function showBrowser(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, requestId: string, target: string | null): MawsPaneAnswerResult {
-  let url: string | null = null;
-  if (target !== null) {
-    const checked = validateBrowserUrl(target);
-    if (!checked.ok) return { ok: false, error: TOOL_ERRORS.navigationRefused(target) };
-    url = checked.url;
-  }
-  const params = { ...(url !== null && { target: url }), appSessionId, requestId };
-  const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true });
-  return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
+// E4a start: the `browser` pane. U12a (M1; Interfaces §B): a target is opened by the window itself, through main's
+// `browser.tabs.open` with `reload` and the request's own id, before the Browser tool opens, so the panel mounts on the
+// tab main has just selected and the answer carries main's `page`. While main has not answered nothing is opened and
+// nothing answered (the bridge's own 8 s stand). An open main refuses is a refusal, and nothing opens (ruling R9). With
+// no target the tool opens on the session's own state, as before, and the answer has no `page`.
+async function showBrowser(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, requestId: string, target: string | null, client: MawsBridge): Promise<MawsPaneAnswerResult> {
+  const openTool = () => {
+    const tabId = panelHost.addTool(tool.id, { appSessionId, params: { appSessionId }, activate: true, asked: 'agent' });
+    return { kind: 'panel-tool' as const, toolId: tool.id, tabId, title: tool.title };
+  };
+  if (target === null) return { ok: true, opened: openTool() };
+  const checked = validateBrowserUrl(target);
+  if (!checked.ok) return { ok: false, error: TOOL_ERRORS.navigationRefused(target) };
+  const open = await client.invoke('browser.tabs.open', { appSessionId, url: checked.url, select: true, reuse: 'url', reload: true, requestId });
+  if (!open.ok) return { ok: false, error: TOOL_ERRORS.browserOpenFailed(target, open.error.message) };
+  const { page } = open.value;
+  return { ok: true, opened: openTool(), ...(page !== undefined && { page }) };
 }
 // E4a end

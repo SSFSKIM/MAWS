@@ -29,13 +29,14 @@ export interface AgentRowView {
   elapsed: string;
   waiting: boolean;
   line: string;
+  under: { count: string; expanded: boolean } | null; // the UX wave's U8b: the row's disclosure, `(+N)` ('' with no count)
 }
 
 export interface SubagentsView {
-  agents: AgentRowView[]; // E7: the tree's Agents section (its agent rows; `tree()` reads its folds and team rows too)
-  done: AgentRowView[]; // the rows shown: none while Done is collapsed, its default (E7)
-  disk: AgentRowView[];
-  headings: string[]; // the sections' headings as shown (`Agents · 2 running`, `Done · 1`)
+  agents: AgentRowView[]; // the UX wave's U8b: the Running section's agent rows (`tree()` reads its folds and team rows too)
+  done: AgentRowView[]; // the rows shown: none while Done is folded, its default (E7)
+  disk: AgentRowView[]; // none while On disk is folded, its default (the UX wave's U8b)
+  headings: string[]; // the sections' headings as shown (`Running 2`, `Done 1 · 1 failed`)
   notes: string[]; // the lines above the sections (the disk-only header line, an unavailable read)
   drillIn: {
     agentId: string;
@@ -53,16 +54,17 @@ export interface BackgroundView {
   workflows: { taskId: string; title: string; line: string; status: string; summary: string; stopping: boolean; error: string | null }[];
   shells: { taskId: string; line: string; output: 'enabled' | 'disabled'; stopping: boolean; error: string | null }[];
   monitors: { taskId: string; line: string }[];
+  others: { taskId: string; line: string }[]; // the UX wave's U8b: tasks of another kind
   tasks: { heading: string; label: string | null; rows: string[]; earlier: number; unavailable: string | null };
   notes: string[]; // the disk-only sentence, `Nothing running`, an unavailable read
-  headings: string[];
+  headings: string[]; // the UX wave's U8b: `Running N`, `Scheduled N`, `Tasks`, `Done N · …`; a row of a folded section is not read
 }
 
 // E7 start: the Subagents tree as shown (E7 execution document, Interfaces *Harness and e2e*): the Agents and Done
 // sections' rows in order. An agent row by its id; a running parent's `Done · N` fold by that parent's id, with its
 // count and whether it is open; the team header, and a roster teammate (no agent of its own) by its name in `title`.
 export interface TreeRowView {
-  section: 'agents' | 'done';
+  section: 'running' | 'done'; // the UX wave's U8b: Running (was Agents) and Done
   kind: 'agent' | 'done-fold' | 'team' | 'roster';
   agentId: string | null;
   title: string;
@@ -70,6 +72,7 @@ export interface TreeRowView {
   count: number | null;
   expanded: boolean | null;
   orphan: boolean;
+  under: AgentRowView['under']; // an agent row's disclosure
 }
 
 // the workflow widget as shown (E7 execution document, Interfaces *Harness and e2e*): the run's header, its
@@ -107,7 +110,7 @@ export interface ScheduledRowView {
   link: boolean; // `Open creating turn` offered
 }
 export interface ScheduledView {
-  heading: string | null; // `Scheduled · N`, null when the section is not shown
+  heading: string | null; // `Scheduled N`, null when the section is not shown
   rows: ScheduledRowView[];
   error: string | null; // `Scheduled jobs unavailable: <message>`
 }
@@ -164,6 +167,8 @@ export interface AgentsHarnessApi {
   clearStatus(id: AgentsFakeId): void; // a disk-only session: no status, its task graph started over on disk
   selectPhase(n: number): void; // the widget's n-th phase option (0 is `All phases`)
   toggleFold(parentId: string): void; // the Subagents tree's `Done · N` fold under that parent
+  toggleUnder(agentId: string): void; // the UX wave's U8b: an agent row's disclosure, `(+N)` and its arrow
+  toggleSection(tool: 'subagents' | 'background', section: string): void; // the UX wave's U8b: a section's heading, folding or unfolding it
   reply(n: number, text: string): Promise<void>; // the n-th (1-based) Reply of the column: opened, typed, sent; resolves once the steer is answered
   openCreatingTurn(id: string): void; // the Scheduled row's `Open creating turn`
   setColumnWidth(px: number): number; // the debug strip (C5's sidebar column, clamped as C5 clamps it) holding the column; answers the width it had

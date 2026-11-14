@@ -10,7 +10,7 @@ export const GWS_INSTALL = 'npm install -g @googleworkspace/cli';
 export const GWS_SETUP = 'gws auth setup --login';
 
 const scopeWords = (scope: NotionSource['scope']) => (scope === 'app' ? 'MAWS settings' : scope === 'user' ? 'your user settings' : 'this project’s local settings');
-const NOTION_NOT_FOUND = 'Add Notion’s MCP server (https://mcp.notion.com/mcp) in Settings › Engine › MCP servers, then check again. No session is needed.';
+const NOTION_NOT_FOUND = 'Add Notion’s MCP server (https://mcp.notion.com/mcp) in Settings › Sessions › MCP servers, then check again. No session is needed.';
 
 export const SEND_TO_COPY = {
   item: (service: string) => `Send to ${service}…`, // the library's Export menu

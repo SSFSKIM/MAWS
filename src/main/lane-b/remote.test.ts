@@ -11,11 +11,13 @@ import { REMOTE_UPLOAD_REFUSED_WORDS } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
 import { validateEventPayload } from '@shared/ipc/validate';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import type { CallResult } from '../machines/remote/link';
 import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
 import { startNotifier } from '../attention/notifier';
@@ -36,7 +38,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[] } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -44,7 +46,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
   let tabs: unknown = tabsOf(...(options.tabs ?? [APP]));
   const emitted: Array<{ machine: MachineRef; name: EventName; payload: Record<string, unknown> }> = [];
   const logs: string[] = [];
-  link.answers.set('session.get', (input) => ({ ok: true, output: record(String(input.appSessionId)) }));
+  link.answers.set('session.get', options.record ?? ((input) => ({ ok: true, output: record(String(input.appSessionId)) })));
   const adapter: RemoteLaneB = createRemoteLaneB({
     local: LOCAL,
     layout: { get: (key) => (key === 'main.tabs' ? tabs : null), onChange: (listener) => (layoutListeners.add(listener), () => void layoutListeners.delete(listener)) },
@@ -107,7 +109,7 @@ describe('routeLaneB', () => {
       expect(l.adapter.handles(name), name).toBe(true);
     }
     expect(l.adapter.handles('session.events')).toBe(true); // read in pages the channel carries
-    for (const name of ['session.status', 'session.get', 'session.update', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
+    for (const name of ['session.status', 'session.get', 'session.drafts.get', 'laneA.send'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(false);
   });
 
   // The project registry's M11: a harness build's e2e fixture (src/main/org/registry-fixture.ts) stands in for a machine
@@ -297,7 +299,7 @@ describe('sends', () => {
     await vi.advanceTimersByTimeAsync(59_999);
     expect(answered).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
-    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'offline' } } });
   });
 
   it('keeps a resumed send inside the original bound: the resume’s time is not given back, and a send made at the bound is not made', async () => {
@@ -317,7 +319,7 @@ describe('sends', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(l.link.acts[1].request).toMatchObject({ action: 'session.send', sendBy: made + 1000 });
     await vi.advanceTimersByTimeAsync(100);
-    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'offline' } } });
     expect(l.link.acts[1].settled).toEqual({ state: 'refused', reason: 'offline' });
 
     // A resume whose first status comes only at the bound: the send is not made at all.
@@ -425,8 +427,8 @@ describe('the tabs and the links', () => {
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, { queue: { entries: [], paused: false, pauseReason: null }, pendingItems: [], catalog: { commands: [], agents: [], skills: [], terminalSlashCommands: [], revision: 1 } });
     const said = l.emitted.length;
     expect(await l.cmd('session.get', { appSessionId: APP })).toEqual({ ok: true, value: 'base' }); // the read itself is the manager's
-    expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session']);
-    expect(l.emitted.at(-1)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
+    expect(l.emitted.slice(said).map((e) => e.name)).toEqual(['session.changed', 'session.status', 'session.queue', 'session.catalogChanged', 'attention.changed', 'remote.session', 'remote.settled']); // U9 M5: the generation settled
+    expect(l.emitted.at(-2)!.payload).toMatchObject({ address: APP, stream: 'live', reason: null });
     // Nothing for a session this app doesn't hold, or another machine's.
     const before = l.emitted.length;
     await l.cmd('session.get', { appSessionId: 'app-elsewhere' });
@@ -860,6 +862,7 @@ describe('the attention feed beside a session’s stream', () => {
     feed.sink.ended('not-offered');
     sub.sink.snapshot({ epoch: 'L1', seq: 0 }, parts([asked]));
     l.link.set('down', null);
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS); // U9 M5: greyed once the machine reads offline
     expect(l.of('remote.attention').at(-1)).toEqual({ machine: MINI, items: [asked], greyed: true });
     l.link.peers = ['rl2.executor.machine']; // the next channel's peer reads no feeds: the streams stay the machine's
     l.link.set('up');
@@ -1319,6 +1322,197 @@ describe('the project acts (the project registry)', () => {
   });
 });
 
+// The UX wave (U9, M1; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1 and §3): the session
+// acts go only to a machine whose endpoint lists `rl2.session-acts`. With a current channel that lacks it an act answers
+// at once and nothing is sent; with no channel current it waits under the link's hold, carrying the capability as
+// `requires` for the channel it goes on to judge. The machine acts work with no tab open and resume nothing; the two
+// engine-host acts need the session's tab, and a pane's answer never resumes a session. A refused act says UC-7.5's
+// sentence, its code in `issues.refusal`.
+describe('the session acts (`rl2.session-acts`)', () => {
+  const SESSION_ACTS = ['rl2.executor.machine', 'rl2.session-acts'];
+  const machineActs: Array<[string, Record<string, unknown>]> = [
+    ['session.archive', { appSessionId: APP }],
+    ['session.update', { appSessionId: APP, patch: { archived: false } }],
+    ['session.rename', { appSessionId: APP, title: 'Loft notes' }],
+    ['attention.acknowledge', { appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }],
+  ];
+
+  it('are taken by the adapter, the archived read among them', () => {
+    const l = lab();
+    for (const name of ['session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.list'] as CommandName[]) expect(l.adapter.handles(name), name).toBe(true);
+  });
+
+  it('build the machine acts with no session and no context, carrying the capability, on a session no tab holds, resuming nothing', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = settleWith({ state: 'done', result: null });
+    l.link.answers.set('session.list', () => ({ ok: true, output: { sessions: [], revision: 1 } }));
+    for (const [name, input] of machineActs) await l.cmd(name, input);
+    expect(l.link.acts.map((a) => a.request)).toEqual(machineActs.map(([action, args]) => ({ action, args, executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.session-acts' })));
+    expect(await l.cmd('session.list', { includeArchived: true })).toEqual({ ok: true, value: { sessions: [], revision: 1 } });
+    expect(l.link.calls.filter((c) => c.name === 'session.list')).toEqual([{ name: 'session.list', input: { includeArchived: true } }]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('build taking back a waiting message and a pane’s answer as engine-host acts on the open session, carrying the capability', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    await live(l);
+    l.link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'session.steer.cancel' ? { outcome: 'cancelled' } : { outcome: 'delivered' } });
+    expect(await l.cmd('session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' })).toEqual({ ok: true, value: { outcome: 'cancelled' } });
+    expect(await l.cmd('maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } })).toEqual({ ok: true, value: { outcome: 'delivered' } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([
+      { action: 'session.steer.cancel', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, messageUuid: 'm2' }, executor: 'engine-host', sendBy: expect.any(Number), requires: 'rl2.session-acts' },
+      { action: 'maws.pane.answer', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } }, executor: 'engine-host', sendBy: expect.any(Number), requires: 'rl2.session-acts' },
+    ]);
+  });
+
+  it('never resume a released session for a pane’s answer: the request it answers died with its launch', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open()[0].sink.ended('unavailable'); // released: no live launch
+    expect(await l.cmd('maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } })).toMatchObject({ ok: false, error: { code: 'internal' } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('need the session’s tab for the engine-host acts', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    expect(await l.cmd('session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' })).toMatchObject({ ok: false, error: { issues: { refusal: 'not-open' } } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('are sent nothing of to a peer whose handshake lacks the capability, answered at once in UC-7.5’s words', async () => {
+    const l = lab();
+    await live(l); // the peer lists rl2.executor.machine alone, as build F's
+    l.link.answers.set('session.list', () => ({ ok: true, output: { sessions: [], revision: 1 } }));
+    expect(await l.cmd('session.archive', { appSessionId: APP })).toEqual({ ok: false, error: { code: 'internal', message: 'Not archived: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(await l.cmd('session.rename', { appSessionId: APP, title: 'Loft notes' })).toMatchObject({ ok: false, error: { message: 'Not renamed: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(await l.cmd('attention.acknowledge', machineActs[3][1])).toMatchObject({ ok: false, error: { message: 'Not dismissed: update MAWS on mini and try again' } });
+    for (const [name, input] of [['session.update', machineActs[1][1]], ['session.steer.cancel', { appSessionId: APP, messageUuid: 'm2' }], ['maws.pane.answer', { appSessionId: APP, requestId: 'req-1', result: { ok: false, error: 'closed' } }], ['session.list', { includeArchived: true }]] as const) {
+      expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { issues: { refusal: 'not-offered' } } }]);
+    }
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name === 'session.list')).toEqual([]);
+  });
+
+  it('wait under the link’s hold with no channel current, never answered `host_unavailable`, and end in the offline sentence', async () => {
+    const l = lab({ tabs: [] });
+    l.link.lose(); // still `up` for the grace: no channel current, no peer known
+    l.link.onAct = (act) => act.move('waiting');
+    const made = Date.now();
+    const archiving = l.cmd('session.archive', { appSessionId: APP });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.archive', args: { appSessionId: APP }, executor: 'machine', sendBy: made + 60_000, requires: 'rl2.session-acts' }]);
+    let answered = false;
+    void archiving.then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(59_999);
+    expect(answered).toBe(false);
+    l.link.acts[0].settle({ state: 'refused', reason: 'offline' });
+    expect(await archiving).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not archived: mini is offline', issues: { refusal: 'offline' } } });
+  });
+
+  it('word a machine’s refusal and a failure by UC-7.5, the code riding in `issues.refusal`', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    const outcomes: Array<[Parameters<FakeAct['settle']>[0], unknown]> = [
+      [{ state: 'refused', reason: 'grade' }, { code: 'internal', message: 'Not renamed: only the session’s owners can', issues: { refusal: 'grade' } }],
+      [{ state: 'refused', reason: 'read-only' }, { code: 'internal', message: 'Not renamed: mini is in read-only mode', issues: { refusal: 'read-only' } }],
+      [{ state: 'refused', reason: 'unavailable' }, { code: 'host_unavailable', message: 'Not renamed: mini is busy; try again in a moment', issues: { refusal: 'unavailable' } }],
+      [{ state: 'not-sent' }, { code: 'host_unavailable', message: 'Not renamed: mini is offline', issues: { refusal: 'not-sent' } }],
+      [{ state: 'failed', error: { code: 'internal', message: 'unknown app session: app-1' } }, { code: 'internal', message: 'Not renamed: unknown app session: app-1' }],
+    ];
+    for (const [outcome, error] of outcomes) {
+      l.link.onAct = settleWith(outcome);
+      expect(await l.cmd('session.rename', { appSessionId: APP, title: 'Loft notes' }), JSON.stringify(outcome)).toEqual({ ok: false, error });
+    }
+  });
+
+  it('keep the pending sentence for an act the channel carried whose outcome hasn’t come by the bound', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = (act) => act.move('sent');
+    const archiving = l.cmd('session.archive', { appSessionId: APP });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await archiving).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+});
+
+// The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1, M2's Decisions): a
+// fork in place is a `machine` act, signed before its first copy goes, carrying the capability, made from a tab or with
+// none, and not through the spawn table: two forks from one tab are two forks. Its answer is waited for within the fork's
+// command budget on the machine, past the pending bound; a machine's `ceiling` refusal of it names the mode it refused.
+describe('the fork (`rl2.session-acts`)', () => {
+  const SESSION_ACTS = ['rl2.executor.machine', 'rl2.session-acts'];
+  const FORK = { appSessionId: APP, target: { kind: 'inPlace' }, message: { content: 'go on', display: 'go on' }, rewindTo: 'u-1' };
+  const STARTING = { status: 'starting', appSessionId: 'fork-1' };
+
+  it('is a `machine` act on the machine, stepped up before it goes, carrying the capability, on a session no tab holds', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    l.link.onAct = settleWith({ state: 'done', result: STARTING });
+    expect(l.adapter.handles('session.fork')).toBe(true);
+    expect(await l.cmd('session.fork', FORK)).toEqual({ ok: true, value: STARTING });
+    expect(l.link.acts.map((a) => a.request)).toEqual([{ action: 'session.fork', args: FORK, executor: 'machine', sendBy: expect.any(Number), stepUp: 'required', requires: 'rl2.session-acts' }]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('makes two forks of two presses in one tab', async () => {
+    const l = lab();
+    l.link.relink(SESSION_ACTS);
+    let n = 0;
+    l.link.onAct = (act) => act.settle({ state: 'done', result: { status: 'starting', appSessionId: `fork-${++n}` } });
+    expect(await l.cmdFrom('session.fork', FORK, APP)).toEqual({ ok: true, value: { status: 'starting', appSessionId: 'fork-1' } });
+    expect(await l.cmdFrom('session.fork', FORK, APP)).toEqual({ ok: true, value: { status: 'starting', appSessionId: 'fork-2' } });
+    expect(l.link.acts).toHaveLength(2);
+  });
+
+  it('waits for its answer within the fork’s budget past the pending bound, where another act reads pending', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    Object.assign(l.link, { budgets: { 'session.fork': 30_000 } });
+    l.link.onAct = (act) => act.move('accepted');
+    const forking = l.cmd('session.fork', FORK);
+    let answered = false;
+    void forking.then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(60_000 + 30_000); // the pending bound and the budget, short of the round trip's margin
+    expect(answered).toBe(false);
+    l.link.acts[0].settle({ state: 'done', result: STARTING });
+    expect(await forking).toEqual({ ok: true, value: STARTING });
+
+    const late = l.cmd('session.fork', FORK);
+    await vi.advanceTimersByTimeAsync(60_000 + 31_000);
+    expect(await late).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+
+  it('is sent nothing of to a peer whose handshake lacks the capability, answered at once in UC-7.5’s words', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(['rl2.executor.machine']); // build F's
+    expect(await l.cmd('session.fork', FORK)).toEqual({ ok: false, error: { code: 'internal', message: 'Not forked: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('words the machine’s refusals by UC-7.5, a `ceiling` failure naming the mode it refused', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SESSION_ACTS);
+    const outcomes: Array<[Parameters<FakeAct['settle']>[0], unknown]> = [
+      [{ state: 'refused', reason: 'owners-only' }, { code: 'internal', message: 'Not forked: only mini’s owners can', issues: { refusal: 'owners-only' } }],
+      [{ state: 'refused', reason: 'step-up' }, { code: 'internal', message: 'Not forked: the confirmation was cancelled', issues: { refusal: 'step-up' } }],
+      [{ state: 'refused', reason: 'read-only' }, { code: 'internal', message: 'Not forked: mini is in read-only mode', issues: { refusal: 'read-only' } }],
+      [
+        { state: 'failed', error: { code: 'internal', message: 'the source’s permission mode bypassPermissions is above this machine’s ceiling', issues: { refusal: 'ceiling', mode: 'bypassPermissions' } } },
+        { code: 'internal', message: 'Not forked: mini doesn’t start sessions in bypassPermissions from another machine', issues: { refusal: 'ceiling' } },
+      ],
+      [{ state: 'failed', error: { code: 'internal', message: 'engine-unconfigured: the engine is not configured yet' } }, { code: 'internal', message: 'Not forked: engine-unconfigured: the engine is not configured yet' }],
+    ];
+    for (const [outcome, error] of outcomes) {
+      l.link.onAct = settleWith(outcome);
+      expect(await l.cmd('session.fork', FORK), JSON.stringify(outcome)).toEqual({ ok: false, error });
+    }
+  });
+});
+
 // P5 O15 M2b (the panel's finding 2): the adapter keeps each session's count of its stream's answers, so a record made
 // again for a new link object goes on from it, and a page's armed `answer.n` is passed by the new record's first answer
 describe('the stream’s answer across records', () => {
@@ -1335,5 +1529,115 @@ describe('the stream’s answer across records', () => {
     sub.sink.subbed('snapshot', { epoch: 'L2', seq: 0 });
     expect(said()).toEqual({ n: 2, mode: 'snapshot' });
     l.adapter.stop();
+  });
+});
+
+// The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §9):
+// one round per machine and generation of its link. The word is said once, on the session's queue of events, when no
+// lane is placing and none awaiting, after the `remote.session` that carried the round's last answer. Each case is in
+// main's order of words.
+describe('the settled word', () => {
+  /** Each word main said, in order: its name, a `remote.session`'s answer, a word's generation. */
+  const words = (l: ReturnType<typeof lab>) =>
+    l.emitted.map(({ name, payload }) => (name === 'remote.settled' ? `settled ${String(payload.generation)}` : name === 'remote.session' ? `session ${JSON.stringify(payload.answer)}` : name));
+  const settledAt = (l: ReturnType<typeof lab>) => words(l).findIndex((w) => w.startsWith('settled'));
+
+  it('holds the word through a transient refusal of the record and its retry, the record, its subscription, and says it after that subscription’s answer', async () => {
+    const answers: CallResult[] = [{ ok: false, error: { code: 'offline' } }];
+    const l = lab({ record: (input) => answers.shift() ?? { ok: true, output: record(String(input.appSessionId)) } });
+    await vi.advanceTimersByTimeAsync(0); // the refusal: a back-off, placing
+    expect(l.of('remote.settled')).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1_000); // the retry: the record, and its subscription in the same step
+    expect(l.of('session.changed')).toHaveLength(1);
+    const sub = l.link.open().find((s) => s.request.session?.id === APP)!;
+    expect(sub).toBeDefined();
+    expect(l.of('remote.settled'), 'nothing between the record and its subscription’s answer').toEqual([]);
+    sub.sink.subbed('snapshot', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    const said = words(l);
+    expect(said.slice(settledAt(l) - 1, settledAt(l) + 1)).toEqual(['session {"n":1,"mode":"snapshot"}', 'settled 1']);
+  });
+
+  it('says nothing between a record read that succeeds and its subscription, and the word after the answer', async () => {
+    const l = lab();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('session.changed')).toHaveLength(1);
+    expect(l.link.open()).toHaveLength(1);
+    expect(l.of('remote.settled')).toEqual([]);
+    l.link.open()[0].sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    expect(words(l)[settledAt(l) - 1]).toBe('session {"n":1,"mode":"replay"}');
+  });
+
+  it('holds the next generation’s word for a subscription kept across a loss until its `subbed`, and says it once', async () => {
+    const l = lab();
+    const sub = await live(l);
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    l.link.set('down', null);
+    l.link.set('up');
+    expect(l.of('remote.settled'), 'the kept subscription has not answered').toHaveLength(1);
+    sub.sink.subbed('replay', { epoch: 'L1', seq: 0 });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 2 }]);
+    const said = words(l);
+    expect(said.indexOf('session {"n":2,"mode":"replay"}'), 'after the answer that carried the round').toBeLessThan(said.indexOf('settled 2'));
+    // said once per generation, whatever opens later
+    l.setTabs(APP, 'app-2');
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open().find((s) => s.request.session?.id === 'app-2')!.sink.subbed('snapshot', { epoch: 'L9', seq: 0 });
+    expect(l.of('remote.settled')).toHaveLength(2);
+  });
+
+  it('says it at `up` when the machine has no lane at all, and a round that had not settled says nothing at `down`', async () => {
+    const l = lab({ tabs: [] });
+    l.setLinks(new Map([[MINI, l.link]]));
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }]);
+    l.link.set('down', null);
+    l.link.set('up');
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 2 }]);
+    l.setTabs(APP); // a lane placing: generation 3's round waits for it, and the loss ends that round unsaid
+    l.link.set('down', null);
+    l.link.set('up');
+    l.link.set('down', null);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.of('remote.settled')).toHaveLength(2);
+  });
+
+  it('is said again to a page that has just subscribed, for the generation settled', async () => {
+    const l = lab();
+    await live(l);
+    await l.cmd('session.get', { appSessionId: APP });
+    expect(l.of('remote.settled')).toEqual([{ machine: MINI, generation: 1 }, { machine: MINI, generation: 1 }]);
+  });
+});
+
+// The UX wave, U9 (M5, "The three lines share one prefix"; A15): a remote tab's open, counted from the moment the tab's
+// interest opens the session; the New chat chooser's two reads of one machine, as one line once both answered
+describe('the timing lines', () => {
+  const timing = (l: ReturnType<typeof lab>) => l.logs.filter((line) => line.startsWith('lane B: timing '));
+
+  it('logs a remote tab’s open once: the link up, its record, its history asked and its first rows, each from the open', async () => {
+    const l = lab();
+    l.link.answers.set('session.events', () => ({ ok: true, output: { events: [], lastSeq: 0, complete: true } }));
+    await vi.advanceTimersByTimeAsync(5);
+    await vi.advanceTimersByTimeAsync(20);
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    await l.cmd('session.events', { appSessionId: APP, afterSeq: null, limit: null });
+    expect(timing(l).filter((line) => line.startsWith('lane B: timing open'))).toEqual([`lane B: timing open mini/${APP}: link up +0, record +0, history asked +25, first rows +25`]);
+  });
+
+  it('logs the chooser’s two reads of a machine, started together, as one line once both answered, and a lone read not at all', async () => {
+    const l = lab({ tabs: [] });
+    l.link.answers.set('machine.folders.list', () => new Promise((resolve) => setTimeout(() => resolve({ ok: true, output: { entries: [], cursor: null } }), 30)));
+    const both = Promise.all([l.cmd('session.projects.list', undefined), l.cmd('machine.folders.list', {})]);
+    await vi.advanceTimersByTimeAsync(30);
+    await both;
+    expect(timing(l)).toEqual(['lane B: timing chooser mini: session.projects.list 0 ms, machine.folders.list 30 ms']);
+    const alone = l.cmd('machine.folders.list', {});
+    await vi.advanceTimersByTimeAsync(1_000);
+    await alone;
+    const sheet = Promise.all([l.cmd('session.projects.list', undefined), l.cmd('machine.folders.list', { path: '/srv/a' })]); // a folder of the sheet
+    await vi.advanceTimersByTimeAsync(30);
+    await sheet;
+    expect(timing(l)).toHaveLength(1);
   });
 });

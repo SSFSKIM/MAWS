@@ -32,6 +32,13 @@ const WORK = new Set<SessionEvent['kind']>([
   'turn.ended',
 ]);
 
+// The prompt that opens a turn names it by its uuid; the one message the engine wrote from several waiting prompts
+// (`joined`, UX wave U4a decision 32 c) opens the first one's turn, where that one stood.
+export function opensTurn(event: Extract<SessionEvent, { kind: 'user.message' }>, turn: TurnId): boolean {
+  if (event.messageUuid === null) return false;
+  return turnIdOf.ofMessage(event.joined?.[0] ?? event.messageUuid) === turn;
+}
+
 export function headRole(event: SessionEvent, turn: TurnId): HeadRole {
   switch (event.kind) {
     case 'user.message': {
@@ -41,7 +48,7 @@ export function headRole(event: SessionEvent, turn: TurnId): HeadRole {
       if (event.origin === INTERRUPT_CUT || event.bash !== null || (isLocalCommand(event.origin, event.content) && !event.isSynthetic)) return 'work';
       if (event.isSynthetic || isInterruptionMarker(event.origin, event.content) || (event.origin !== null && event.origin !== 'human' && event.origin !== 'peer')) return 'silent';
       if (event.origin === 'peer') return 'quiet'; // its companion draws it, or it keeps its bubble
-      const own = (event.messageUuid !== null && turnIdOf.ofMessage(event.messageUuid) === turn) || turnIdOf.ofEvent(event.id) === turn;
+      const own = opensTurn(event, turn) || turnIdOf.ofEvent(event.id) === turn;
       return own ? 'quiet' : 'work'; // the turn's prompt stands above its divider; any other is a steer
     }
     case 'peer.message':

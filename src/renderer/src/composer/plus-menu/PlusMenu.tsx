@@ -17,6 +17,7 @@ import { toast } from '../../stores/notices';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useSessions } from '../../stores/sessions';
 import { openCustomize } from '../../customize/open';
+import { useConnectorMenu } from '../../widgets/connector-menu'; // UX wave U11a: the Connectors submenu's rows and line
 
 const ITEM = 'flex cursor-default flex-col rounded-sm px-2 py-1 outline-none select-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 const NO_DIRECTORIES: ChipBinding<string[]> = { value: [], options: [], disabled: 'No session to add a directory to', set: async () => ({ ok: false, error: 'No session to add a directory to' }) };
@@ -34,6 +35,7 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
   const status = useSessions((s) => appSessionId ? s.engine.get(appSessionId) : undefined);
   const projectId = useSessions((s) => (appSessionId ? s.records.get(appSessionId)?.projectId : null) ?? [...s.projects.values()].find((project) => project.directory === cwd)?.id ?? null);
   const addDirectory = useAddDirectory(directories ?? NO_DIRECTORIES, cwd);
+  const connectors = useConnectorMenu(appSessionId, { enabled: open });
   const pick = async (kind: 'files' | 'photos') => {
     const result = await ipc.invoke('layout.pickFiles', { kind, directory: cwd === '' ? null : cwd, multiple: true });
     if (!result.ok) return void toast({ level: 'warning', text: result.error.message, actions: [], dismissible: true });
@@ -41,14 +43,15 @@ export function PlusMenu({ appSessionId, cwd, editor, directories }: PlusMenuPro
   };
   const widgetItem = (label: string, name: Extract<WidgetCommandName, 'mcp' | 'plugins'>) => {
     const ready = status?.process === 'ready';
-    const rows = !ready ? [] : name === 'mcp' ? status.mcpServers.map((server) => ({ name: server.name, detail: server.status })) : status.plugins.map((plugin) => ({ name: plugin.name, detail: 'Loaded' }));
+    const rows = name === 'mcp' ? connectors.rows : !ready ? [] : status.plugins.map((plugin) => ({ name: plugin.name, detail: 'Loaded' }));
+    const empty = name === 'mcp' ? connectors.empty : ready ? 'No plugins reported by this session' : null;
     return <DropdownMenu.Sub>
       <DropdownMenu.SubTrigger className={`${ITEM} flex-row items-center justify-between gap-3`}><span>{label}</span><span aria-hidden>›</span></DropdownMenu.SubTrigger>
       <DropdownMenu.Portal><DropdownMenu.SubContent sideOffset={4} className="z-50 max-h-[60vh] min-w-56 max-w-80 overflow-y-auto rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float">
         {rows.map((row, index) => <DropdownMenu.Item key={`${row.name}:${index}`} onSelect={() => editor.current?.openWidget(name)} disabled={!widgets.has(name)} className={`${ITEM} flex-row items-center justify-between gap-3`}><span className="min-w-0 truncate">{row.name}</span><span className="shrink-0 text-ui-sm text-fg-muted">{row.detail}</span></DropdownMenu.Item>)}
-        {rows.length === 0 && <DropdownMenu.Label className="max-w-64 px-2 py-2 text-ui-sm text-fg-muted">{ready ? name === 'mcp' ? 'No connectors reported by this session' : 'No plugins reported by this session' : 'Live details are unavailable until this session is running'}</DropdownMenu.Label>}
+        {rows.length === 0 && empty !== null && <DropdownMenu.Label className="max-w-64 px-2 py-2 text-ui-sm text-fg-muted">{empty}</DropdownMenu.Label>}
         <DropdownMenu.Item disabled={!widgets.has(name)} onSelect={() => editor.current?.openWidget(name)} className={ITEM}>
-          <span>{name === 'mcp' ? 'Session connector controls…' : 'Session plugin details…'}</span>
+          <span>{name === 'mcp' ? 'Connectors in this chat…' : 'Plugins in this chat…'}</span>
           {widgets.has(name) ? null : <span className="text-ui-sm">{UNAVAILABLE_HINT}</span>}
         </DropdownMenu.Item>
         <DropdownMenu.Separator className="my-1 h-px bg-border" />

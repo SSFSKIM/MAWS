@@ -1,11 +1,12 @@
-// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; W3, charter §5.4 as amended
-// 2026-10-01): the chip reads `<alias> <effort>` (the binding's label, @shared/sessions/model-label.ts) and opens Codex's selector, one
-// 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast` widgets with
-// the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from the palette or
-// typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it hands the
-// keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model. A model
-// asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for its
-// checked row, "setting…" (P2-F wave S, the sitting's A1.6).
+// The toolbar's model with effort (C7 execution document, "Composer frame" Model · effort; UX wave U4, l3-input-14):
+// the chip reads the model's name, then "Fast" and the effort muted ("Opus 5.5 Fast High", the binding's `name` from
+// `modelName`, @shared/sessions/model-label.ts), its tooltip the whole display name and the alias, and opens Codex's
+// selector, one 254px menu anchored above the chip in a portal, which C11 registers as the `effort`, `model` and `fast`
+// widgets with the `modelChip` placement. The chip opens it on its effort view; `/effort`, `/model` and `/fast` from
+// the palette or typed open it here too (the editor puts the ask in the composer store). Esc or a choice that closes it
+// hands the keyboard back to the editor. With nothing registered (a harness without C11) the chip only names the model.
+// A model asked for and not yet reported running (the binding's `requested`) is marked with the selector's own word for
+// its checked row, "setting…" (P2-F wave S, the sitting's A1.6).
 import { Popover } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -15,6 +16,9 @@ import { slashWidget, useRegisteredWidgets } from '../mentions/widgets';
 import type { ModelBinding } from './bindings';
 import { CHIP } from './chip-style';
 import { useDraftShown } from './draft-shown';
+
+// The tooltip: the row's whole display name and the alias ("Opus 5.5 (1M context) · opus"), once where they are one.
+const tooltipOf = ({ name }: ModelBinding): string => (name === null ? 'Model and effort' : name.alias === null || name.alias === name.display ? name.display : `${name.display} · ${name.alias}`);
 
 const chipWidget = (name: string) => {
   const widget = slashWidget(name);
@@ -38,6 +42,7 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
   }, [shown, appSessionId]);
 
   const Widget = open ? chipWidget(open.name)?.component : undefined;
+  const muted = [binding.name?.fast ? 'Fast' : null, binding.name?.effort ?? null].filter((part) => part !== null).join(' ');
   return (
     <Popover.Root
       open={shown && open !== null && Widget !== undefined}
@@ -46,9 +51,10 @@ export function ModelChip({ appSessionId, binding, onOpen, onClosed }: { appSess
         else if (chipWidget('effort')) requestChipWidget(appSessionId, 'effort', '');
       }}
     >
-      <Popover.Trigger aria-label={`Model ${binding.label}${binding.requested ? `, ${SELECTOR.setting}` : ''}`} title={binding.disabled ?? 'Model and effort'} className={`${CHIP} shrink-0`}>
+      <Popover.Trigger aria-label={`Model ${binding.label}${binding.requested ? `, ${SELECTOR.setting}` : ''}`} title={binding.disabled ?? tooltipOf(binding)} className={`${CHIP} shrink-0`}>
         {/* E3: whole and on one line in a narrow pane (the Side pane's thread): the location's label gives way first */}
-        <span className="truncate">{binding.label}</span>
+        <span className="truncate">{binding.name?.name ?? binding.label}</span>
+        {muted !== '' && <span className="shrink-0 text-fg-muted">{muted}</span>}
         {binding.requested && (
           <span aria-hidden className="shrink-0 text-fg-faint">
             {SELECTOR.setting}

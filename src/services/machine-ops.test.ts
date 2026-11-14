@@ -97,7 +97,7 @@ describe('machine.op', () => {
   it('claims the connectors’ and delivery’s acts, and none graded list, view or internal', () => {
     const acts = [
       'connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh', 'connectors.visibility', 'connectors.close',
-      'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer' /* P5 O7 M8 */,
+      'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', 'connectors.signIn', 'connectors.signInCancel', 'connectors.signInServer' /* P5 O7 M8 */, 'connectors.signInDynamicServer' /* UX wave U11a M8 */,
       'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool',
       'delivery.connect', 'delivery.send', 'delivery.cancel',
     ];

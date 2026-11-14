@@ -4,8 +4,8 @@ import { EMPTY_STRIP, EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, ty
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE as M } from '../../../../test/support/machine';
-import { createLayoutStore, frontOf, registerReplaceGuard, type ReplaceVerdict } from './layout';
-import { surfaceSession } from '../panel/surface-model';
+import { createLayoutStore, frontOf, pageOpen, placeOf, quietly, registerReplaceGuard, tabOnScreen, type ReplaceVerdict } from './layout';
+import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { allTabs, currentSet, type RekeyOf } from './layout-model';
 
 const A = at('app-a' as AppSessionId);
@@ -119,13 +119,18 @@ describe('layout store actions', () => {
     expect(store.getState().panelBySession.get(A)?.tabs).toEqual([{ id: 't1', toolId: 'files', pinned: false }]);
   });
 
-  it('clears the no-session selection when setPanelTabs(null, …) asks for none (the panel home glyph with no session shown)', () => {
+  // UX wave U8b (M2): a write of the pins never chooses what is in view; showing and hiding the column for no session do.
+  it('shows the no-session pin it is asked for and hides it, keeping the selection to show again', () => {
     const store = createLayoutStore();
     const pin = { id: 't1', toolId: 'files', pinned: true };
     store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: 't1' });
-    expect(store.getState().panelActiveNoSession).toBe('t1');
-    store.getState().setPanelTabs(null, { tabs: [pin], activeTabId: null });
     expect(store.getState().panelActiveNoSession).toBeNull();
+    store.getState().showSurfaceTab(null, 't1');
+    expect(store.getState().panelActiveNoSession).toBe('t1');
+    expect(surfaceTabs(store.getState(), null)).toEqual([pin]);
+    store.getState().hideSurfaces(null);
+    expect(store.getState().panelActiveNoSession).toBe('t1');
+    expect(surfaceTabs(store.getState(), null)).toEqual([]);
   });
 
   it('patches the regions', () => {
@@ -232,12 +237,13 @@ describe('layout store actions', () => {
   it('keeps the split card’s size per open main tab, and drops a closed tab’s', () => {
     const store = createLayoutStore();
     store.getState().openTab({ kind: 'diagnostics' });
-    store.getState().openTab({ kind: 'settings', section: null });
+    store.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: M });
+    const notes = `file:${M}:/invented/notes.md`;
     store.getState().setFloatingCardSize('main:diagnostics', { w: 400, h: 300 });
-    store.getState().setFloatingCardSize('main:settings', { w: 440, h: 320 });
+    store.getState().setFloatingCardSize(`main:${notes}`, { w: 440, h: 320 });
     store.getState().setFloatingCardSize('main:gone', { w: 500, h: 400 });
-    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'main:settings', 'main:gone']);
-    store.getState().closeTab('settings');
+    expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', `main:${notes}`, 'main:gone']);
+    store.getState().closeTab(notes);
     store.getState().setFloatingCardSize('summary', { w: 420, h: 380 });
     expect(Object.keys(store.getState().regions.floatingCard)).toEqual(['main:diagnostics', 'summary']);
   });
@@ -396,10 +402,10 @@ describe('replacing a tab of any kind', () => {
     return { discard, announce, off };
   }
 
-  it('a clean file, Settings or Diagnostics gives its place, remembered for ⌘⇧T, and nothing is said', () => {
+  it('a clean file or Diagnostics gives its place, remembered for ⌘⇧T, and nothing is said', () => {
     const { announce, off } = guarded({});
     try {
-      for (const target of [FILE, { kind: 'settings', section: null } as const, { kind: 'diagnostics' } as const]) {
+      for (const target of [FILE, { kind: 'diagnostics' } as const]) {
         const store = createLayoutStore();
         store.getState().openSession(A);
         store.getState().openTab(target);
@@ -573,6 +579,195 @@ describe('one strip', () => {
     expect(frontOf(store.getState())).toBe(`session:${A}`);
     store.getState().focusPane(1);
     expect(frontOf(store.getState())).toBe(`session:${B}`);
+  });
+});
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F): the page
+// and the Settings dialog beside the strip, and U13a's table of acts with the effect `commitShown` now has.
+describe('the page and the Settings dialog', () => {
+  const B = at('app-b' as AppSessionId);
+  const C = at('app-c' as AppSessionId);
+  const PAGE = { kind: 'customize', view: 'mine', show: 'skills' } as const;
+  // A store showing A, B and C in one pane (C in front), with a closed tab to reopen, a page and the dialog open, and the
+  // number of writes counted from here.
+  function opened() {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    s().openSession(B, { how: 'tab' });
+    s().openSession(C, { how: 'tab' });
+    s().openSession(at('app-d' as AppSessionId), { how: 'tab' });
+    s().closeTab(`session:${at('app-d' as AppSessionId)}`);
+    s().openDestination(PAGE);
+    s().openSettings('engine');
+    let writes = 0;
+    store.subscribe(() => (writes += 1));
+    return { store, s, writes: () => writes };
+  }
+
+  const shows: [string, (s: ReturnType<typeof createLayoutStore>['getState']) => void][] = [
+    ['openTab', (s) => s().openTab({ kind: 'diagnostics' })],
+    ['openSession', (s) => s().openSession(B)],
+    ['activateTab', (s) => s().activateTab(`session:${A}`)],
+    ['activateTab of the tab in front', (s) => s().activateTab(`session:${C}`)],
+    ['selectTab', (s) => s().selectTab(1)],
+    ['cycleTab', (s) => s().cycleTab(1)],
+    ['reopenClosed', (s) => s().reopenClosed()],
+    ['moveTab', (s) => s().moveTab(`session:${A}`, 0, 2)],
+    ['reorderTab', (s) => s().reorderTab(`session:${A}`, 2)],
+    ['splitWithActive', (s) => s().splitWithActive()],
+    ['showPane', (s) => s().showPane(0)],
+  ];
+  for (const [name, act] of shows) {
+    it(`${name} closes the page and the dialog in the write that lands it`, () => {
+      const { store, writes } = opened();
+      act(store.getState);
+      expect([store.getState().destination, store.getState().settings]).toEqual([null, null]);
+      expect(writes()).toBe(1);
+    });
+  }
+
+  const keeps: [string, (s: ReturnType<typeof createLayoutStore>['getState']) => void][] = [
+    ['focusPane', (s) => s().focusPane(0)],
+    ['openTab with activate: false', (s) => s().openTab({ kind: 'diagnostics' }, { activate: false })],
+    ['closeTab', (s) => s().closeTab(`session:${A}`)],
+    ['togglePinned', (s) => s().togglePinned(`session:${A}`)],
+    ['setSplitRatio', (s) => s().setSplitRatio(0.3)],
+    ['dropSession', (s) => s().dropSession(A)],
+    ['refreshTabTitles', (s) => s().refreshTabTitles()],
+  ];
+  for (const [name, act] of keeps) {
+    it(`${name} closes neither`, () => {
+      const { store } = opened();
+      act(store.getState);
+      expect([store.getState().destination, store.getState().settings]).toEqual([PAGE, { section: 'engine' }]);
+    });
+  }
+
+  it('openDestination closes the dialog and leaves the strip equal by reference; the same kind again changes only its fields', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    const strip = s().main;
+    s().openSettings();
+    s().openDestination(PAGE);
+    expect([s().destination, s().settings, s().main]).toEqual([PAGE, null, strip]);
+    expect(s().main).toBe(strip);
+    s().openDestination({ ...PAGE, view: 'discover', show: 'all' });
+    expect(s().destination).toEqual({ kind: 'customize', view: 'discover', show: 'all' });
+    const held = s().destination;
+    s().openDestination({ kind: 'customize', view: 'discover', show: 'all' });
+    expect(s().destination, 'the same page again writes nothing').toBe(held);
+    s().openDestination({ kind: 'library' });
+    expect(s().destination).toEqual({ kind: 'library' });
+    expect(s().main).toBe(strip);
+  });
+
+  it('closeDestination and closeSettings leave the strip equal by reference', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A);
+    const strip = s().main;
+    s().openDestination({ kind: 'projects' });
+    s().openSettings('voice');
+    s().closeSettings();
+    expect([s().settings, s().destination]).toEqual([null, { kind: 'projects' }]);
+    s().closeDestination();
+    expect(s().destination).toBeNull();
+    expect(s().main).toBe(strip);
+  });
+
+  it('openSettings over a page keeps it; open already, only a section that is given changes', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openDestination({ kind: 'projects' });
+    s().openSettings('voice');
+    expect([s().destination, s().settings]).toEqual([{ kind: 'projects' }, { section: 'voice' }]);
+    s().openSettings();
+    expect(s().settings).toEqual({ section: 'voice' });
+    s().openSettings('engine');
+    expect(s().settings).toEqual({ section: 'engine' });
+  });
+
+  it('closeFront closes the dialog and keeps the page, then closes the page, then answers false', () => {
+    const { s } = opened();
+    expect(s().closeFront()).toBe(true);
+    expect([s().destination, s().settings]).toEqual([PAGE, null]);
+    expect(s().closeFront()).toBe(true);
+    expect(s().destination).toBeNull();
+    const strip = s().main;
+    expect(s().closeFront()).toBe(false);
+    expect(s().main).toBe(strip);
+  });
+
+  it('setOverviewOpen(true) closes the dialog and keeps the page', () => {
+    const { s } = opened();
+    s().setOverviewOpen(true);
+    expect([s().overviewOpen, s().destination, s().settings]).toEqual([true, PAGE, null]);
+  });
+
+  // The architect's ruling on M5: while the Overview is over the main region the side column is docked; over a page it
+  // docks nothing until the page closes under it.
+  describe('the Overview over a page, with the side column maximized', () => {
+    function maximized() {
+      const store = createLayoutStore();
+      const s = () => store.getState();
+      s().setPanel({ maximized: true, collapsed: false });
+      s().openDestination(PAGE);
+      return s;
+    }
+
+    it('opened, closed, then Back: the column is maximized as it was, its regions the same object', () => {
+      const s = maximized();
+      const regions = s().regions;
+      s().setOverviewOpen(true);
+      expect(s().regions).toBe(regions);
+      s().setOverviewOpen(false);
+      s().closeDestination();
+      expect(s().regions).toBe(regions);
+      expect(s().regions.panel.maximized).toBe(true);
+    });
+
+    it('the page left with the Overview still open: the column is docked in the write that closes the page', () => {
+      const s = maximized();
+      const strip = s().main;
+      s().setOverviewOpen(true);
+      s().closeDestination();
+      expect([s().destination, s().overviewOpen]).toEqual([null, true]);
+      expect(s().regions.panel).toMatchObject({ maximized: false, floating: false, collapsed: false });
+      expect(s().main).toEqual(strip);
+    });
+
+    it('a tab shown with the Overview open over the page docks the column too', () => {
+      const s = maximized();
+      s().setOverviewOpen(true);
+      s().openSession(B);
+      expect([s().destination, s().overviewOpen, s().regions.panel.maximized]).toEqual([null, true, false]);
+    });
+
+    it('with no page, opening the Overview docks the column at once, as before', () => {
+      const store = createLayoutStore();
+      store.getState().setPanel({ maximized: true, collapsed: false });
+      store.getState().setOverviewOpen(true);
+      expect(store.getState().regions.panel.maximized).toBe(false);
+    });
+  });
+
+  it('inside quietly an activating openTab closes neither; outside it, the same call does', () => {
+    const { s } = opened();
+    expect(quietly(() => { s().openTab({ kind: 'diagnostics' }); return frontOf(s()); })).toBe('diagnostics');
+    expect([s().destination, s().settings]).toEqual([PAGE, { section: 'engine' }]);
+    s().openTab({ kind: 'diagnostics' });
+    expect([s().destination, s().settings]).toEqual([null, null]);
+  });
+
+  it('the selectors: pageOpen, placeOf, tabOnScreen', () => {
+    const { s } = opened();
+    expect([pageOpen(s()), placeOf(s()), tabOnScreen(s())]).toEqual([true, 'settings', null]);
+    s().closeSettings();
+    expect(placeOf(s())).toBe('page:customize');
+    s().closeDestination();
+    expect([pageOpen(s()), placeOf(s()), tabOnScreen(s())?.id]).toEqual([false, `session:${C}`, `session:${C}`]);
   });
 });
 

@@ -112,12 +112,12 @@ describe('submitState covers Send, Stop, Resume and the unstarted rows (W10: one
     }
   });
 
-  it('decides only Send, Stop and Resume (W10: no hold, no queue primary, no menu, no Stop beside it)', () => {
+  it('decides only Send, Stop and Resume, with a glyph and whether ⌘Enter queues (W10: no hold, no queue primary, no menu, no Stop beside it)', () => {
     const cases: Partial<SubmitInput>[] = [{}, { empty: true }, { status: turning }, { status: turning, empty: true }, { queue: { entries: [entry('queued')], paused: true } }, { queue: { entries: [entry('queued')], paused: true }, empty: true }, { mode: 'bash', status: turning }];
     for (const c of cases) {
       const d = submitState(input(c));
       expect(['send', 'stop', 'resume']).toContain(d.primary);
-      expect(Object.keys(d).sort()).toEqual(['detail', 'enabled', 'label', 'primary', 'reason', 'steer']);
+      expect(Object.keys(d).sort()).toEqual(['detail', 'enabled', 'glyph', 'label', 'primary', 'queues', 'reason', 'steer']); // UX wave U4a: the glyph and ⌘Enter's queue
     }
   });
 
@@ -275,5 +275,89 @@ describe('a send carrying documents while a turn runs', () => {
     expect(submitState(input({ sendsDocuments: true })).detail).toBeNull();
     expect(submitState(input({ status: turning, empty: true, sendsDocuments: true })).primary).toBe('stop');
     expect(submitState(input({ status: turning })).steer).toBe(true);
+  });
+});
+
+// The UX wave, U9 (S-01 and the ticket on a pane kept through a link's loss; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a Stop out for
+// more than 300 ms reads "Stopping…" and is disabled until it settles, whatever the draft; in its machine's offline phase
+// Send and Stop are disabled with UC-7.5's sentence (while it connects or reconnects nothing here changes: main holds the act).
+describe('Stopping…, and the offline phase of another machine', () => {
+  const offline = { send: 'Send is unavailable while mini is offline.', stop: 'Stop is unavailable while mini is offline.' };
+
+  it('reads Stopping…, disabled, while a Stop is on its way, whatever the turn or the draft', () => {
+    expect(row({ status: turning, empty: true, stopping: true })).toEqual(['stop', 'Stopping…', false, 'Stopping…', false]);
+    expect(row({ status: turning, empty: false, stopping: true })[1]).toBe('Stopping…');
+    expect(row({ status: idle, empty: true, stopping: true })[1], 'the turn ended before the act settled').toBe('Stopping…');
+    expect(row({ status: turning, empty: true, stopping: true, offline })[1], 'a Stop held into the offline phase still reads Stopping…').toBe('Stopping…');
+  });
+
+  it('closes Stop and Send with the phase’s sentence while the machine is offline', () => {
+    expect(row({ status: turning, empty: true, offline })).toEqual(['stop', 'Stop', false, offline.stop, false]);
+    expect(row({ status: turning, empty: false, offline })).toEqual(['send', 'Send', false, offline.send, false]);
+    expect(row({ status: idle, empty: false, offline })).toEqual(['send', 'Send', false, offline.send, false]);
+    expect(row({ status: null, availability: 'usable', empty: false, offline }), 'a released session, which a Send would start there').toEqual(['send', 'Send', false, offline.send, false]);
+    const driven = { running: true, send: { available: true } as const, stop: { available: true } as const };
+    expect(row({ status: null, availability: 'foreign_held', heldBy: 'terminal · 42', driven, empty: true, offline }), 'a terminal session there').toEqual(['stop', 'Stop', false, offline.stop, false]);
+  });
+
+  it('changes nothing without either', () => {
+    expect(row({ status: turning, empty: true, stopping: false, offline: null })).toEqual(['stop', 'Stop', true, null, false]);
+  });
+});
+
+// UX wave U4a (l3-input-15, l3-input-03; the execution document's Interfaces E): the glyph the one button draws, and
+// whether ⌘Enter differs from Enter, decided in the same table. The label stays the button's word as before.
+describe('the glyph and whether ⌘Enter queues', () => {
+  const drawn = (over: Partial<SubmitInput>) => {
+    const d = submitState(input(over));
+    return [d.glyph, d.label, d.queues];
+  };
+  const paused = { entries: [entry('queued')], paused: true };
+
+  it('draws the arrow to send, the square to stop, the queue mark for text while a turn runs, play to resume', () => {
+    expect(drawn({})).toEqual(['arrow', 'Send', false]);
+    expect(drawn({ empty: true })).toEqual(['arrow', 'Send', false]); // nothing to send: the same arrow, greyed
+    expect(drawn({ status: turning, empty: true })).toEqual(['square', 'Stop', true]);
+    expect(drawn({ status: turning })).toEqual(['queue', 'Send', true]);
+    expect(drawn({ queue: { entries: [entry('submitting')], paused: false } })).toEqual(['queue', 'Send', true]); // busy before the turn opens
+    expect(drawn({ queue: paused, empty: true })).toEqual(['play', 'Resume', false]);
+    expect(drawn({ queue: paused })).toEqual(['arrow', 'Send', false]);
+    expect(drawn({ status: turning, queue: paused })).toEqual(['queue', 'Send', true]); // a paused queue holds a ⌘Enter too
+  });
+
+  it('keeps the arrow for `!` and `#`, which ⌘Enter does not queue', () => {
+    expect(drawn({ mode: 'bash', status: turning })).toEqual(['arrow', 'Run', false]);
+    expect(drawn({ mode: 'memory', status: turning })).toEqual(['arrow', 'Save to memory', false]);
+    expect(drawn({ mode: 'bash' })).toEqual(['arrow', 'Run', false]);
+  });
+
+  it('spins while the session starts or re-attaches, and squares the re-attaching Stop', () => {
+    const intent = { starting: true, messageHeld: false };
+    expect(drawn({ status: null, intent })).toEqual(['spinner', 'Starting…', false]);
+    expect(drawn({ status: null, intent: { starting: false, messageHeld: true, phase: 'Creating worktree one…' } })).toEqual(['spinner', 'Starting…', false]);
+    expect(drawn({ status: null, intent: { starting: false, messageHeld: false } })).toEqual(['arrow', 'Send', false]);
+    expect(drawn({ status: null, availability: 'starting' })).toEqual(['spinner', 'Starting…', false]);
+    const adopting = { ...idle, process: 'initializing' as const, holder: { pid: 4100, holderId: 'L-1', adopted: true } };
+    expect(drawn({ status: adopting, availability: 'starting' })).toEqual(['spinner', 'Re-attaching…', false]);
+    expect(drawn({ status: adopting, availability: 'starting', empty: true })).toEqual(['square', 'Stop', false]);
+    expect(drawn({ status: null, availability: 'resumable' })).toEqual(['arrow', 'Send', false]);
+  });
+
+  it('marks a remote send naming documents during a turn with the queue mark: it waits too', () => {
+    expect(drawn({ status: turning, sendsDocuments: true })).toEqual(['queue', 'Send', true]);
+  });
+
+  it('draws a terminal session’s send during its turn with the queue mark, and never queues ⌘Enter there', () => {
+    const open = { available: true } as const;
+    const driven = (running: boolean) => ({ running, send: open, stop: open });
+    const terminal = (over: Partial<SubmitInput>) => drawn({ status: null, availability: 'foreign_held', heldBy: 'terminal · 42', ...over });
+    expect(terminal({ driven: driven(true) })).toEqual(['queue', 'Send', false]);
+    expect(terminal({ driven: driven(true), empty: true })).toEqual(['square', 'Stop', false]);
+    expect(terminal({ driven: driven(false) })).toEqual(['arrow', 'Send', false]);
+    expect(terminal({ driven: { ...driven(true), send: { available: false, reason: 'Not in this session’s sminos' } } })).toEqual(['arrow', 'Send', false]); // closed: greyed, not the mark
+  });
+
+  it('closes both on a session the member may only read', () => {
+    expect(drawn({ status: turning, closed: 'You can read this session but not talk to its agent.' })).toEqual(['arrow', 'Send', false]);
   });
 });

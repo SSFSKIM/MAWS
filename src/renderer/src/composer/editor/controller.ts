@@ -23,7 +23,7 @@ import { closeInterim, dictationStart, inlineFragment, interimOf, needsLeadingSp
 import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type DraftWriter } from './drafts';
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
-import { historyNavigation, recallDoc, recallEntries, type HistoryNav, type Recall } from './history';
+import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
 import { classifyFile, classifyText, mentionPath, type FileAction } from './paste';
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
@@ -33,7 +33,9 @@ import { submitSerialized } from './submit';
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
 export interface DraftPort {
   load(): Promise<Draft | null>;
-  save(draft: Draft | null): void;
+  // UX wave U4a (decision 13; Interfaces D): `replaces`, when given, names what the save replaces (a take-back's settle
+  // form, which the writer names until one save is acknowledged); the answer is whether the store took it
+  save(draft: Draft | null, replaces?: string | null): Promise<boolean>;
   // Whether an accepted submission clears the stored draft (C4's drafts: yes). C10's intent while unstarted: no, the
   // accepted first message is C10's to hold and the intent refuses a patch while its start runs (M4).
   clearsOnSend?(): boolean;
@@ -46,10 +48,11 @@ export interface InsertOptions {
 }
 
 // A submission is asked for one way (W10): Enter and ⌘Enter, and the Composer's Send, reach the caller's `onSubmit`
-// through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer).
+// through the same path, which decides what it does (while a turn runs the Composer makes it a `next` steer). UX wave
+// U4a (l3-input-03): ⌘Enter names `when: 'after'`, which keeps the message for after a running turn.
 export interface EditorHandle {
   focus(): void;
-  submit(): void; // the submit control: as a key would (refused while one is in flight)
+  submit(when?: 'after'): void; // the submit control: as a key would (refused while one is in flight)
   insertText(text: string, options?: InsertOptions): void; // at the caret, the one it left when not focused, else at the end (C11's insertComposerText)
   doc(): ComposerDoc;
   serialize(): Serialized;
@@ -69,6 +72,12 @@ export interface EditorHandle {
   promptBox(): { text: string; cursor: number };
   fill(text: string, mode: 'replace' | 'append' | 'insert'): boolean; // false while the draft is locked or disabled
   refreshPlaceholder(): void;
+  // UX wave U4a (M3; Interfaces F): an empty box takes the document, the caret at its end; false, and nothing changed,
+  // when the box holds text or a submission is in flight (the composer refuses it while a card holds the box)
+  load(doc: ComposerDoc): boolean;
+  replaceDoc(doc: ComposerDoc | null): void; // after a take-back's settle answered stale: what is kept, in place of this copy
+  settleWith(replaces: string, taken: () => void): void; // a take-back's settle form, which the writer names until a save of it is acknowledged (`taken`)
+  clearSettle(): void; // the take-back settled otherwise: the writer names the form no more
   // E9: a dictation's words at the caret (Design §7); null while busy or disabled. `onEnded` fires once when the editor
   // ends the sink itself (an edit inside the words, a submission, a replaced document, disabled, unmounted, or
   // `settleDictation`); the sink's own `final` and `cancel` do not fire it.
@@ -93,13 +102,19 @@ export interface ControllerInputs {
   catalog: SessionCatalog;
   widgets: ReadonlySet<string>;
   followUp: boolean;
-  onSubmit?(s: Serialized): Promise<boolean>;
+  onSubmit?(s: Serialized, when?: 'after'): Promise<boolean>;
   onPrefill?(prefill: Prefill): void;
   onDocChange?(doc: ComposerDoc): void;
   onEscape?(): boolean;
   onRestore?(doc: ComposerDoc): void; // a draft was restored into the editor
   suggestion?: string | null; // R2: a plugin's suggested prompt, the empty box's placeholder; Tab takes it
   onSuggestionTaken?(): void;
+  placeholder?: string | null; // UX wave U4a: the empty box's words while a turn runs; a plugin's suggestion still wins
+  // UX wave U4a M3 (l3-input-04): ↑ in an empty box, not recalling: true when the composer took the key (a take-back began,
+  // or was refused with its sentence); false lets history walk
+  onTakeBack?(): boolean;
+  // UX wave U4a M3 (decision 13, step 5): a restored draft that is a take-back's stage is handed over, not loaded
+  onStage?(draft: Draft): void;
   // P5 O7 M4: the machine a lane B session on another machine runs on (by name), whose files go up to it at the send
   // (remote-uploads.ts); null or absent: this Mac's, where a file is mentioned by its path
   uploadsTo?: string | null;
@@ -115,6 +130,7 @@ export interface ControllerView {
   setMode(mode: Serialized['mode']): void;
   setCommandEmpty(empty: boolean): void;
   setBusy(busy: boolean): void;
+  setHistory(line: string | null): void; // UX wave U4a M6: the line under the text while recalling or searching, else null
 }
 
 const HISTORY_LIMIT = 200;
@@ -134,12 +150,14 @@ export function ipcDrafts(client: MawsBridge, appSessionId: AppSessionId): Draft
       const result = await client.invoke('session.drafts.get', { appSessionId });
       return result.ok ? result.value : null;
     },
-    save: (draft) =>
-      void client.invoke('session.drafts.set', { appSessionId, draft }).then((result) => {
-        if (result.ok || warned) return;
+    save: async (draft, replaces) => {
+      const result = await client.invoke('session.drafts.set', { appSessionId, draft, ...(replaces != null && { replaces }) });
+      if (!result.ok && !warned) {
         warned = true;
         console.warn('[composer] session.drafts.set failed; the draft is not kept', result.error.message);
-      }),
+      }
+      return result.ok;
+    },
   };
 }
 
@@ -178,11 +196,19 @@ export class EditorController {
   private nav: HistoryNav = { index: null, draft: null };
   private recalls: Recall[] = [];
   private listed: HistoryEntry[] = [];
+  // UX wave U4a M6 (decision 22): Ctrl+R's search, beside the recall and excluding it: what is typed, the match shown
+  // (an index into `texts`, the recalls newest first, read when it began; null while the draft shows) and the draft it
+  // puts back
+  private search: { query: string; at: number | null; texts: string[]; draft: ComposerDoc } | null = null;
   private dictation: Dictation | null = null; // E9: the open sink, if any
   // P2-B M6: whether the selection is a caret the human left: the editor lost focus since its document was last set
   // while unfocused. A dialog widget's insertion (C11's insertComposerText, "Use in chat") runs while the dialog holds
   // the keyboard, and lands there, not at the end.
   private caretLeft = false;
+  // UX wave U4a M3 (decision 14): what the last fresh Escape answered; its auto-repeats answer the same and reach no one
+  private escapeTaken = false;
+  // UX wave U4a M3 (decision 13, step 4): a take-back's settle form, named at each save until one is acknowledged
+  private settleForm: { replaces: string; taken: () => void } | null = null;
 
   constructor(
     private readonly client: MawsBridge,
@@ -191,7 +217,34 @@ export class EditorController {
     inputs: ControllerInputs,
   ) {
     this.inputs = inputs;
-    this.writer = createDraftWriter((draft) => this.drafts.save(draft));
+    this.writer = createDraftWriter((draft) => this.saveDraft(draft));
+  }
+
+  // Every save of this mount's draft: one that a take-back left to settle names its settle form until acknowledged.
+  private saveDraft(draft: Draft | null): void {
+    const form = this.settleForm;
+    if (form === null) {
+      void this.drafts.save(draft);
+      return;
+    }
+    void this.drafts.save(draft, form.replaces).then((taken) => {
+      if (!taken || this.settleForm !== form) return;
+      this.settleForm = null;
+      form.taken();
+    });
+  }
+
+  /** UX wave U4a M3: a take-back could not have its settling save acknowledged: this writer names it from now on. */
+  settleWith(replaces: string, taken: () => void): void {
+    this.settleForm = { replaces, taken };
+  }
+
+  /** UX wave U4a M3: what is kept, in place of this mount's copy, after a take-back's settle was answered stale. */
+  replaceDoc(doc: ComposerDoc | null): void {
+    if (this.busy) return;
+    this.revision += 1;
+    this.writer.cancel(); // the copy it replaces had a write pending: superseded (the panel's finding 1)
+    this.setDoc(doc ?? emptyDoc(), { silently: true, caret: null });
   }
 
   update(inputs: ControllerInputs): void {
@@ -220,7 +273,7 @@ export class EditorController {
       catalog: catalog ?? EMPTY_CATALOG,
       widgets,
       searchesFiles: this.inputs.searchesFiles ?? true, // P5 O7 M4
-      placeholder: this.inputs.suggestion ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion
+      placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion; UX wave U4a: the turn's
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
       openWidget: (name, args) => void this.openWidget(name, args),
@@ -247,6 +300,7 @@ export class EditorController {
 
   blurred(): void {
     this.caretLeft = true; // ProseMirror keeps the selection across the blur
+    this.endSearch(); // UX wave U4a M6: a search ends where the keyboard leaves it, the match kept (Desktop's dismissal)
   }
 
   updated(editor: TiptapEditor, transaction: Transaction): void {
@@ -257,33 +311,58 @@ export class EditorController {
     this.view.setMode(mode);
     this.view.setCommandEmpty(mode === 'send' || serializeDraft(doc, { sessionId: null, cwd: '' }).empty);
     this.inputs.onDocChange?.(doc);
+    if (!this.silent && transaction.docChanged) {
+      if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
+      this.search = null; // UX wave U4a M6: an edit ends a search as it ends a recall, the box keeping what it shows
+    }
+    this.publishHistory(); // UX wave U4a M6: the line follows every document set (a send's clear, a load, a prefill)
     if (this.silent || !transaction.docChanged) return;
     this.revision += 1;
-    if (this.nav.index !== null) this.nav = historyNavigation(this.nav, 'edit', 0, doc).nav;
     this.writer.change(doc);
   }
 
   keyDown(view: EditorView, event: KeyboardEvent): boolean {
     const editor = this.editor;
     if (!editor) return false;
-    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter)
+    if (event.defaultPrevented) return true; // C5's dispatcher ran a composer chord for this key (⌘Enter, Ctrl+R)
+    // UX wave U4a M6 (decision 22): while searching, the keys are the search's; a fresh Esc it took answers its repeats
+    if (this.search !== null) {
+      if (view.composing) {
+        this.endSearch(); // a composition goes on in the box, the match kept (as `yield`)
+        return false;
+      }
+      const taken = this.searchKey(event);
+      if (event.key === 'Escape' && !event.repeat) this.escapeTaken = taken;
+      return taken;
+    }
     if (event.isComposing || view.composing) return false;
     if (suggesting(editor) && popupTakesKeys(editor)) return false; // an open list takes Enter and the arrows
     const plain = !event.shiftKey && !event.altKey && !event.metaKey && !event.ctrlKey;
+    // UX wave U4a (l3-input-08): Enter sends whatever the line count; Shift+Enter (the hard break's own key) and ⌥Enter
+    // break the line; ⌘Enter reached the dispatcher as `composer.queue` above
     if (event.key === 'Enter' && plain) {
-      if (isMultiline(editor.getJSON())) return false; // the line breaks (ProseMirror's own Enter); ⌘Enter sends
-      void this.submit();
+      // a held Enter's repeats are consumed and send nothing: the press may have been one that took a search's match
+      // (the panel's finding 6), and no send is made by holding the key
+      if (!event.repeat) void this.submit();
       return true;
     }
+    if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) return editor.commands.setHardBreak();
     // R2: Tab takes a plugin's suggestion into the empty box
     if (event.key === 'Tab' && plain && !this.busy && !submissions.has(this.inputs.appSessionId) && this.inputs.disabled === null && this.inputs.suggestion && isEmptyDoc(editor.getJSON())) {
       this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
       this.inputs.onSuggestionTaken?.();
       return true;
     }
+    // UX wave U4a M3 (l3-input-04): ↑ in an empty box, not recalling, is the composer's take-back first
+    if (event.key === 'ArrowUp' && plain && this.nav.index === null && isEmptyDoc(editor.getJSON()) && this.inputs.onTakeBack?.()) return true;
     if (event.key === 'ArrowUp' && plain) return this.history('up');
     if (event.key === 'ArrowDown' && plain) return this.history('down');
-    if (event.key === 'Escape') return this.inputs.onEscape?.() ?? false;
+    // UX wave U4a M3 (decision 14): only a fresh press acts; a held key's repeats answer what that press answered
+    if (event.key === 'Escape') {
+      if (event.repeat) return this.escapeTaken;
+      this.escapeTaken = this.inputs.onEscape?.() ?? false;
+      return this.escapeTaken;
+    }
     return false;
   }
 
@@ -302,6 +381,11 @@ export class EditorController {
     }
     this.restoring = this.drafts.load().then((draft) => {
       if (!this.live || this.lifetime !== lifetime) return;
+      // UX wave U4a M3 (decision 13, step 5): a stage is the take-back's to carry forward, never a draft to load
+      if (draft !== null && (draft.doc as ComposerDoc | null)?.attrs?.takeBack !== undefined) {
+        this.loaded = true;
+        return this.inputs.onStage?.(draft);
+      }
       const doc = docOfDraft(draft);
       if (this.revision === revision && !this.busy && doc && this.editor && isEmptyDoc(this.editor.getJSON())) {
         this.setDoc(doc, { silently: true, caret: null });
@@ -326,6 +410,7 @@ export class EditorController {
     const taken = takePrefill(this.inputs.appSessionId);
     if (!taken) return;
     this.nav = { index: null, draft: null };
+    this.search = null;
     this.setDoc(prefillToDoc(taken), { silently: false, caret: 'end' });
     this.inputs.onPrefill?.(taken);
   }
@@ -333,11 +418,24 @@ export class EditorController {
   setDisabled(disabled: string | null): void {
     if (disabled !== null) this.endDictation('keep'); // E9: the words heard so far stay
     if (!this.busy) this.editor?.setEditable(disabled === null);
+    if (disabled === null) this.payFocusOwed();
+  }
+
+  // UX wave U4a (the panel's finding 5): a load asks for the focus, which a held (read-only) view cannot take; the hold
+  // ending gives it, unless the focus has gone somewhere since (a dialog, another field), which is the person's
+  private focusOwed: { from: Element | null } | null = null;
+  private payFocusOwed(): void {
+    const owed = this.focusOwed;
+    const editor = this.editor;
+    this.focusOwed = null;
+    if (owed === null || !editor || !editor.isEditable || document.activeElement !== owed.from) return;
+    editor.view.focus();
+    if (editor.view.hasFocus()) editor.view.dispatch(editor.state.tr.scrollIntoView());
   }
 
   // ---- behaviour ------------------------------------------------------------------------------------------------
 
-  async submit(): Promise<void> {
+  async submit(when?: 'after'): Promise<void> {
     // M4c fix wave 2: a local drop's conversion to its upload under way: the submission waits for it
     const converting = this.converting;
     if (converting !== null) {
@@ -348,11 +446,12 @@ export class EditorController {
       } finally {
         this.submitAfterConverting = false;
       }
-      return this.submit();
+      return this.submit(when);
     }
     const editor = this.editor;
     const { appSessionId, sessionId, cwd, disabled } = this.inputs;
     if (!editor || disabled !== null || this.busy || submissions.has(appSessionId)) return;
+    this.endSearch(); // UX wave U4a M6: a send from a search (⌘Enter, the button) sends the match it shows
     // E9: what is on screen is what is sent (and what a refused send keeps): the interim words settle first
     this.endDictation('keep');
     const s = serializeDraft(editor.getJSON(), { sessionId, cwd });
@@ -384,7 +483,7 @@ export class EditorController {
     const widget = typed ? this.widgetFor(typed[1]) : null;
     if (typed && widget) {
       this.writer.cancel();
-      this.drafts.save(null);
+      this.saveDraft(null);
       this.setDoc(emptyDoc(), { silently: true, caret: null });
       const args = typed[2] ?? '';
       const open = () => void this.openWidget(typed[1], args);
@@ -423,12 +522,13 @@ export class EditorController {
     let accepted = false;
     try {
       // Keep C10's synchronous start gate: it owns the first message before another event can close the tab.
-      accepted = await (onSubmit ? onSubmit(s) : submitSerialized(this.client, appSessionId, s, 'send', target));
+      // a caller that names no `when` is called as before
+      accepted = await (onSubmit ? (when === undefined ? onSubmit(s) : onSubmit(s, when)) : submitSerialized(this.client, appSessionId, s, 'send', target));
     } catch (error) {
       warn(error instanceof Error ? error.message : String(error));
     }
     if (accepted) {
-      if (this.drafts.clearsOnSend?.() ?? true) this.drafts.save(null);
+      if (this.drafts.clearsOnSend?.() ?? true) this.saveDraft(null);
     } else {
       this.writer.change(doc);
       if (!this.live) this.writer.flush();
@@ -518,7 +618,102 @@ export class EditorController {
     // The caret sits at the end of what is shown, where a recalled `/compact` would open the palette and take the next
     // arrow and Enter from the walk: a recall opens no popup.
     if (next.show) closeSuggestions(editor);
+    this.publishHistory();
     return next.show !== null || navigating;
+  }
+
+  // ---- UX wave U4a M6 (l3-input-12; decision 22): the history line and Ctrl+R's search --------------------------------
+
+  private publishHistory(): void {
+    const s = this.search;
+    if (s !== null) this.view.setHistory(searchLine(s.query, matchPlace(s.texts, s.query, s.at)));
+    else this.view.setHistory(this.nav.index !== null ? recallLine(this.nav.index, this.recalls.length) : null);
+  }
+
+  /** Ctrl+R (`composer.historySearch`): starts a search of the list ↑ walks, or, while searching, goes to an older match. */
+  searchHistory(): void {
+    const editor = this.editor;
+    if (!editor || this.inputs.disabled !== null || this.busy || submissions.has(this.inputs.appSessionId) || !editor.isEditable) return;
+    if (this.search !== null) return this.searchMove(1);
+    // A search begun while recalling starts from the recalled entry's place and puts back the draft the recall began from
+    const recalling = this.nav.index;
+    if (recalling === null) {
+      const transcript = useTranscriptStore.getState();
+      this.recalls = recallEntries(transcript.rows(this.inputs.appSessionId), transcript.activity(this.inputs.appSessionId), this.listed);
+    }
+    const draft = recalling === null ? editor.getJSON() : (this.nav.draft ?? emptyDoc());
+    this.nav = { index: null, draft: null };
+    this.search = { query: '', at: recalling === null ? null : this.recalls.length - 1 - recalling, texts: this.recalls.map(recallText).reverse(), draft };
+    closeSuggestions(editor);
+    this.publishHistory();
+  }
+
+  // One key while searching; whether the search took it (a `yield`ed key ends the search and goes to the editor).
+  private searchKey(event: KeyboardEvent): boolean {
+    const key = searchKeyOf(event);
+    const s = this.search!;
+    switch (key.kind) {
+      case 'older':
+      case 'newer':
+        this.searchMove(key.kind === 'older' ? 1 : -1);
+        return true;
+      case 'restore':
+        this.endSearch(s.draft);
+        return true;
+      case 'erase':
+        if (s.query === '') this.endSearch(s.draft);
+        else this.searchFor(s.query.slice(0, -1));
+        return true;
+      case 'take':
+        this.endSearch();
+        return true;
+      case 'yield':
+        this.endSearch();
+        return false;
+      case 'type':
+        this.searchFor(s.query + key.char);
+        return true;
+      case 'ignore':
+        return true;
+    }
+  }
+
+  // The next match older (+1) or newer (-1) than the one shown; with none, what is shown stays.
+  private searchMove(step: 1 | -1): void {
+    const s = this.search!;
+    const at = findMatch(s.texts, s.query, (s.at ?? -1) + step, step);
+    if (at !== null) this.showMatch(at);
+  }
+
+  // The typed text changed: the match is the first from the one shown, older, that holds it, else the newest that does;
+  // nothing typed shows the draft; with no match, what is shown stays and the line says so.
+  private searchFor(query: string): void {
+    const s = this.search!;
+    s.query = query;
+    if (query === '') {
+      s.at = null;
+      this.setDoc(s.draft, { silently: true, caret: 'end' });
+    } else {
+      const at = findMatch(s.texts, query, s.at ?? 0, 1) ?? findMatch(s.texts, query, 0, 1);
+      if (at !== null) return this.showMatch(at);
+    }
+    this.publishHistory();
+  }
+
+  private showMatch(at: number): void {
+    const s = this.search!;
+    s.at = at;
+    this.setDoc(recallDoc(this.recalls[this.recalls.length - 1 - at]), { silently: true, caret: 'end' });
+    if (this.editor) closeSuggestions(this.editor);
+    this.publishHistory();
+  }
+
+  // The search ends: the box keeps what it shows, or takes `restore` (the draft put back).
+  private endSearch(restore?: ComposerDoc): void {
+    if (this.search === null) return;
+    this.search = null;
+    if (restore) this.setDoc(restore, { silently: true, caret: 'end' });
+    this.publishHistory();
   }
 
   private pasteText(text: string): boolean {
@@ -750,7 +945,7 @@ export class EditorController {
     const editor = () => this.editor!;
     return {
       focus: () => void editor().commands.focus(),
-      submit: () => void this.submit(),
+      submit: (when) => void this.submit(when),
       insertText: (text, options) => {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
@@ -805,6 +1000,30 @@ export class EditorController {
         const view = editor().view;
         view.dispatch(view.state.tr.setMeta('placeholder', true)); // the placeholder's decoration is read again
       },
+      // UX wave U4a M3 (Interfaces F): a take-back's document into an empty box; its own read-only hold does not refuse it
+      load: (doc) => {
+        const current = this.editor;
+        if (!current || this.busy || submissions.has(this.inputs.appSessionId) || !isEmptyDoc(current.getJSON())) return false;
+        this.revision += 1; // supersedes a pending draft restore
+        // and every pending write of the document it replaces, the timer's and the unmount flush's: an emptied box's
+        // write landing after the settle would save nothing over the message (the panel's finding 1)
+        this.writer.cancel();
+        this.nav = { index: null, draft: null };
+        this.search = null;
+        if (current.isEditable) {
+          this.setDoc(doc, { silently: true, caret: 'end' });
+          return true;
+        }
+        // held: a view that is not editable takes no focus, and Tiptap's deferred focus would take it later from wherever
+        // it went meanwhile; the caret goes to the end and the focus is owed to the hold's end
+        this.setDoc(doc, { silently: true, caret: null });
+        current.view.dispatch(current.state.tr.setSelection(Selection.atEnd(current.state.doc)));
+        this.focusOwed = { from: document.activeElement };
+        return true;
+      },
+      replaceDoc: (doc) => this.replaceDoc(doc),
+      settleWith: (replaces, taken) => this.settleWith(replaces, taken),
+      clearSettle: () => void (this.settleForm = null),
       beginDictation: (onEnded) => this.beginDictation(onEnded), // E9
       settleDictation: () => this.endDictation('keep'), // E9
     };

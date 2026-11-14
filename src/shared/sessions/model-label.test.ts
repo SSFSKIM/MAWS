@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest';
 import { BUILTIN_MODELS } from '@shared/sessions/models';
 import type { ListModelsResponse } from '@shared/wire/control';
 import { fixtureLine, RESPONSES } from '../../../test/support/widget-backend';
-import { aliasOf, chipLabel, defaultTarget, modelAsk, reportsRequested, rowFor, shortAlias } from './model-label';
+import { aliasOf, defaultTarget, modelAsk, modelName, reportsRequested, rowFor, shortAlias } from './model-label';
 
 const ROOT = join(__dirname, '../../..');
 const CATALOGUE = (fixtureLine(ROOT, RESPONSES.list_models) as ListModelsResponse).models; // pass2/auto-routed seq 143: default and opus share claude-opus-5-5[1m]
 
-describe('the model chip says `<alias> <effort>`', () => {
+describe('the alias a model id reads', () => {
   it('names a resolved id by the first named row, never by `default`', () => {
     expect(CATALOGUE[0].value).toBe('default');
     expect(rowFor(CATALOGUE, 'claude-opus-5-5[1m]')?.value).toBe('opus');
@@ -34,13 +34,43 @@ describe('the model chip says `<alias> <effort>`', () => {
     expect(shortAlias('claude-opus-5-5[1m]')).toBe('opus');
     expect(shortAlias('some-model')).toBe('some-model');
   });
+});
 
-  it('joins the effort, leaves it out when there is none, and never says Default', () => {
-    expect(chipLabel('opus', 'high')).toBe('opus high');
-    expect(chipLabel('sonnet', 'xhigh')).toBe('sonnet xhigh');
-    expect(chipLabel('haiku', null)).toBe('haiku');
-    expect(chipLabel(null, null)).toBe('Model');
-    expect(chipLabel(aliasOf('default', CATALOGUE), 'high')).not.toMatch(/default/i);
+// UX wave U4a (decision 19; Interfaces I): the model's name, the catalogue row's display name without a qualifier at its
+// end, then "Fast" while fast mode is on and the effort in words; one function for the chip, the Environment card and
+// Session info.
+describe('the model is named as Claude Desktop names it', () => {
+  const text = (id: string | null, state?: Parameters<typeof modelName>[2], rows: Parameters<typeof modelName>[1] = CATALOGUE) => modelName(id, rows, state)?.text ?? null;
+
+  it('reads the display name without its qualifier, then Fast, then the effort in words', () => {
+    expect(text('opus', { effort: 'high' })).toBe('Opus 5.5 High');
+    expect(text('claude-opus-5-5[1m]', { effort: 'high', fast: true })).toBe('Opus 5.5 Fast High');
+    expect(text('fable', { effort: 'xhigh' })).toBe('Fable 5.1 Extra high');
+    expect(text('claude/astra', { effort: 'high' })).toBe('astra High');
+    expect(text('haiku', { effort: null })).toBe('Haiku');
+    expect(text('claude/deepseek/deepseek-v4.1-flash[1m]', { effort: 'max' })).toBe('DeepSeek V4.1 Flash Max'); // "(OpenRouter)" is a qualifier too
+    expect(text('opus', { effort: 'turbo' })).toBe('Opus 5.5 turbo'); // a value outside the table as it is
+    expect(text('opus', { fast: false })).toBe('Opus 5.5');
+  });
+
+  it('gives the parts the chip draws and the tooltip reads', () => {
+    expect(modelName('claude-opus-5-5[1m]', CATALOGUE, { effort: 'high', fast: true })).toEqual({ name: 'Opus 5.5', fast: true, effort: 'High', text: 'Opus 5.5 Fast High', display: 'Opus 5.5 (1M context)', alias: 'opus' });
+  });
+
+  it('names `default` by the row it runs, and nothing where the catalogue cannot say', () => {
+    expect(text('default', { effort: 'high' })).toBe('Opus 5.5 High');
+    expect(text('default', { effort: 'high' }, [])).toBeNull();
+    expect(text(null)).toBeNull();
+    expect(text('default', {}, BUILTIN_MODELS)).toBe('Opus 5.5');
+  });
+
+  it('keeps the alias for a row whose display name is its own value or empty, and for an id no row lists', () => {
+    const terminal = [{ value: 'opus', displayName: 'opus' }, { value: 'sonnet', displayName: '' }, { value: 'haiku', displayName: 'haiku', resolvedModel: 'claude-haiku-5-5' }];
+    expect(text('opus', { effort: 'high' }, terminal)).toBe('opus High');
+    expect(text('sonnet', {}, terminal)).toBe('sonnet');
+    expect(text('claude-haiku-5-5', { effort: 'low' }, terminal)).toBe('haiku Low');
+    expect(text('claude-haiku-4-5-20251001', {}, [])).toBe('haiku');
+    expect(modelName('opus', terminal)).toMatchObject({ display: 'opus', alias: 'opus' });
   });
 });
 

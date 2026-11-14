@@ -335,8 +335,7 @@
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: var(--bg);
-  opacity: 0.6;
+  background: var(--bg-active); /* board 523 (UX wave U11a): the one scrim's value (src/renderer/src/sessions/ui.ts's SCRIM) */
 }
 .doc-confirm {
   position: fixed;
@@ -529,6 +528,28 @@
   background: none;
   border-bottom-color: transparent;
   outline-color: transparent;
+}
+/* UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7; A17): the passage an agent's answer
+   reached, drawn once in the active passage's tint and faded to its own over ANSWER_FLASH_MS (plugins.ts, 1.5 s); under
+   reduced motion it shows and goes with no fade. Hide draws it plain, as it draws every passage */
+.ds-doc .doc-answered {
+  animation: doc-answered 1.5s ease-out;
+}
+@keyframes doc-answered {
+  from {
+    background-color: color-mix(in oklab, var(--warning) 45%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ds-doc .doc-answered,
+  .ds-doc .doc-atom.doc-answered {
+    animation: none;
+    background-color: color-mix(in oklab, var(--warning) 45%, transparent);
+  }
+}
+[data-comments-view='hide'] .ds-doc .doc-answered {
+  animation: none;
+  background: none;
 }
 .doc-rail {
   display: flex;

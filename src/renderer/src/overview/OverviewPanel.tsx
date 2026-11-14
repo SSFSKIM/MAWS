@@ -86,7 +86,12 @@ function OverviewPanel({ bounds }: { bounds: { width: number; height: number } }
     return () => {
       if (!restoreFocus.current) return;
       const back = opener.current;
-      if (back instanceof HTMLElement && back.isConnected && back !== document.body) back.focus();
+      const usable = back instanceof HTMLElement && back.isConnected && back !== document.body;
+      // UX wave U7b (the branch review): what a page opened meanwhile covers, the opener or the panes, cannot take the
+      // keyboard; the page does.
+      const page = document.querySelector<HTMLElement>('[data-region="page"]');
+      if (page !== null && !(usable && back.closest('[inert], [hidden], [aria-hidden="true"]') === null)) page.focus({ preventScroll: true });
+      else if (usable) back.focus();
       else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
     };
   }, []);

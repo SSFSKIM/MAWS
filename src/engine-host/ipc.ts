@@ -18,7 +18,7 @@ import type { HandlerContext } from '@shared/ipc/client'; // P5 O10 M7
 import { captureShellEnvironment, SHELL_CAPTURE_GRACE_MS, SHELL_CAPTURE_TIMEOUT_MS } from '@shared/host/shell-env';
 import type { CommandInput, CommandName, CommandOutput } from '@shared/ipc/schema';
 import type { C3_ENGINE_COMMANDS, O10_ENGINE_COMMANDS /* P5 O10 */ } from '@shared/ipc/schema/engine';
-import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS } from '@shared/ipc/schema/session';
+import type { C3_SESSION_COMMANDS, E8_SESSION_COMMANDS, O10_SESSION_COMMANDS /* P5 O10 M8 */, O7M8_SESSION_COMMANDS /* P5 O7 M8 */, P2C_SESSION_COMMANDS /* P2-C */, P5O2_SESSION_COMMANDS /* P5 O2 M2 */, R2_SESSION_COMMANDS, U4A_SESSION_COMMANDS /* UX wave U4a */ } from '@shared/ipc/schema/session';
 import { SURFACE_CLIENT_ID } from '@shared/engine/surface'; // R2
 import { binaryInfoOf, createBinaryProbe, PROBE_BOUND_MS, type BinaryCheck } from './binary-info';
 import { TESTED_ENGINE_VERSION } from './engine-compat'; // W13
@@ -126,6 +126,8 @@ export const E8_DEADLINE_SHAPES: Record<(typeof E8_SESSION_COMMANDS)[number], De
 // P2-C start (2026-10-09): the steer cancel is one `cancel_async_message` round trip, bounded as `session.queue.hold`
 // is; the prompt record's read answers from the host's own journals on disk, as `session.events` does past its ring
 export const P2C_DEADLINE_SHAPES: Record<(typeof P2C_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.cancel': 'bounded', 'session.promptHistory': 'immediate' };
+// UX wave U4a: Send now is one `interrupt { send_now }` round trip, bounded as the steer cancel is
+export const U4A_DEADLINE_SHAPES: Record<(typeof U4A_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.steer.sendNow': 'bounded' };
 // P5 O2 M2: the keep mark, one state-file write
 export const P5O2_DEADLINE_SHAPES: Record<(typeof P5O2_SESSION_COMMANDS)[number], DeadlineShape> = { 'session.setKeep': 'immediate' };
 // P5 O10 M8: the broker's items, answered from the session's own list; every session's at once, from each session's
@@ -535,6 +537,7 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // P2-C start (2026-10-09; the P2-C document, Design §6): a pending steer withdrawn and dropped; the prompt record read
   // back from the session's retained journals, whether or not this host holds the session now
   on('session.steer.cancel', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).queue.cancelSteer(messageUuid as MessageUuid)));
+  on('session.steer.sendNow', async ({ appSessionId, messageUuid }) => bounded(() => sessionOf(appSessionId).sendNow(messageUuid as MessageUuid))); // UX wave U4a
   on('session.promptHistory', async ({ appSessionId, since }) => {
     assertSafeAppSessionId(appSessionId); // it names a directory
     const live = table.get(appSessionId as AppSessionId);

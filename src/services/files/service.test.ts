@@ -8,11 +8,15 @@ import fs, { appendFileSync, chmodSync, linkSync, mkdirSync, mkdtempSync, readFi
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_LIST_MAX_ENTRIES, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged } from '@shared/ipc/schema/files';
+import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { NO_LINK } from '../fs/no-link';
+import { StoreFixture } from '../../../test/support/store-fixture';
+import { createNamedPaths, type NamedPathsOptions } from './named';
 import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 
 const OUT = "path outside the session's directories";
@@ -1117,6 +1121,296 @@ describe('files admission of delivered files', () => {
 });
 // E2 end
 
+// UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, M2; Interfaces §C): a file outside the
+// session's directories that the session's own transcript links, read (and opened outside) read-only for a request of
+// this machine that carries `named`. The transcript decides through the real search over a scratch store, in invented
+// records; the boundary's cases take a reader that always answers yes.
+describe('files admission of named files', () => {
+  let store: StoreFixture;
+  let transcripts: Map<AppSessionId, string>;
+  let located: AppSessionId[]; // the reader's spy: whose transcript was looked for
+  let serial: number;
+  const said = (text: string) => ({ type: 'assistant', uuid: `a-${++serial}`, message: { role: 'assistant', content: [{ type: 'text', text }] } });
+  const called = (id: string, name: string, input: object) => ({ type: 'assistant', uuid: `a-${++serial}`, message: { role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const typed = (content: string | object[]) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content } });
+  const answered = (id: string, content: string | object[], extra: object = {}) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content }] }, ...extra });
+  const queuedPrompt = (prompt: string) => ({ type: 'attachment', uuid: `q-${++serial}`, attachment: { type: 'queued_command', prompt, source_uuid: `s-${serial}`, commandMode: 'prompt', origin: { kind: 'human' } } });
+  const queueRecord = (content: string) => ({ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-11-13T10:00:00.000Z', sessionId: 'engine-a', content });
+  const link = (path: string) => `See [the file](${path}).`;
+  const out = (...parts: string[]) => join(outside, ...parts);
+
+  async function transcriptOf(appSessionId: AppSessionId, rows: object[]): Promise<void> {
+    transcripts.set(appSessionId, await store.addTranscript(root, `engine-${appSessionId}`, rows.map((row) => JSON.stringify(row))));
+  }
+  // The real search over the scratch store, as the daemon builds it (`createNamedPaths`), with the reader's spy
+  function namedService(extra: Partial<FilesServiceOptions> = {}, bounds?: NamedPathsOptions['bounds'], hooks?: NamedPathsOptions['hooks']) {
+    const paths = createNamedPaths({ transcript: async (appSessionId) => (located.push(appSessionId), transcripts.get(appSessionId) ?? null), bounds, hooks });
+    return service({ named: paths.names, env: {}, ...extra });
+  }
+  // The paths the service opened (the transcript's own open is the search's, by its own import)
+  const opens = () => vi.spyOn(fs.promises, 'open');
+  const openedAt = (spy: ReturnType<typeof opens>, path: string) => spy.mock.calls.filter(([opened]) => String(opened) === path).length;
+
+  beforeEach(async () => {
+    store = await StoreFixture.create();
+    transcripts = new Map();
+    located = [];
+    serial = 0;
+    write(out('notes.txt'), 'outside notes\n');
+    write(out('report.pdf'), '%PDF-1.4\n%%EOF\n');
+    write(out('unnamed.txt'), 'not linked\n');
+  });
+  afterEach(async () => {
+    await store.dispose();
+  });
+
+  it('reads a file the transcript names in each counted form, with `named` in the answer', async () => {
+    const forms: [string, (path: string) => object[]][] = [
+      ['the agent’s text', (path) => [said(link(path))]],
+      ['the person’s message', (path) => [typed(link(path))]],
+      ['the person’s text block', (path) => [typed([{ type: 'text', text: link(path) }])]],
+      ['a queued prompt’s record', (path) => [queuedPrompt(link(path))]],
+      ['a plan', (path) => [called('t-plan', 'ExitPlanMode', { plan: `## Plan\n\n1. Edit ${link(path)}` })]],
+      ['an MCP call’s result', (path) => [called('t-mcp', 'mcp__docs__find', { query: 'notes' }), answered('t-mcp', [{ type: 'text', text: link(path) }])]],
+      ['a read’s chip', (path) => [called('t-read', 'Read', { file_path: path })]],
+      ['an edit’s chip, by its input', (path) => [called('t-edit', 'Edit', { file_path: path, old_string: 'a', new_string: 'b' })]],
+      ['an edit’s chip, by its result’s filePath', (path) => [called('t-write', 'Write', { file_path: out('elsewhere.txt'), content: 'x' }), answered('t-write', 'written', { toolUseResult: { type: 'create', filePath: path, content: 'x' } })]],
+      ['an anchored comment', (path) => [typed(anchoredMessage({ anchor: { kind: 'file-line', label: 'form.txt', locator: `${path}:1`, path, line: 1 }, text: 'Look here', destination: 'main', screenshot: false }))]],
+    ];
+    const files = namedService();
+    for (const [index, [form, rows]] of forms.entries()) {
+      const session = `S${index}` as AppSessionId;
+      const path = out(`form-${index}.txt`);
+      write(path, `form ${index}\n`);
+      records.set(session, record(root));
+      await transcriptOf(session, rows(path));
+      expect(await files.read({ appSessionId: session, path, named: true }), form).toMatchObject({ content: `form ${index}\n`, named: true });
+    }
+  });
+
+  it('refuses a path the transcript does not write whole as a link or a chip, and opens nothing of it', async () => {
+    write(out('.env'), 'TOKEN=invented\n');
+    write(out('.env backup'), 'old\n');
+    write(out('key'), 'invented key\n');
+    write(out('key,backup'), 'b\n');
+    write(out('key:backup'), 'c\n');
+    write(out('prose.txt'), 'p\n');
+    write(out('shell.txt'), 's\n');
+    write(out('typed-only.txt'), 't\n');
+    write(out('theirs.txt'), 'o\n');
+    records.set(B, record(root));
+    await transcriptOf(A, [
+      said(`[e](<${out('.env backup')}>)`),
+      said(`[k](${out('key,backup')}) and [k](${out('key:backup')})`),
+      said(`The key is at host:${out('key')}, also [k](host:${out('key')}).`),
+      said(`I wrote ${out('prose.txt')} for you.`),
+      called('t-bash', 'Bash', { command: 'ls' }),
+      answered('t-bash', link(out('shell.txt')), { toolUseResult: { stdout: link(out('shell.txt')), stderr: '' } }),
+      queueRecord(link(out('typed-only.txt'))),
+    ]);
+    await transcriptOf(B, [said(link(out('theirs.txt')))]);
+    const files = namedService();
+    const spy = opens();
+    for (const path of [out('.env'), out('key'), out('prose.txt'), out('shell.txt'), out('typed-only.txt'), out('theirs.txt'), out('unnamed.txt')]) {
+      await expect(files.read({ appSessionId: A, path, named: true }), path).rejects.toThrow(new Error(OUT));
+      expect(openedAt(spy, path), path).toBe(0);
+    }
+    expect(located.every((id) => id === A)).toBe(true); // another session's transcript was never looked for
+  });
+
+  it('asks nothing of the transcript for a path inside the roots, or a delivered file, and answers them as today', async () => {
+    const admitted = vi.fn(async (_appSessionId: AppSessionId, real: string) => real === out('report.pdf'));
+    await transcriptOf(A, [said(link(inRoot('README.md'))), said(link(out('report.pdf')))]);
+    const files = namedService({ admitted });
+    const inside = await files.read({ appSessionId: A, path: inRoot('README.md'), named: true });
+    expect(inside).toMatchObject({ content: '# readme\n' });
+    expect(inside).not.toHaveProperty('named');
+    const delivered = await files.read({ appSessionId: A, path: out('report.pdf'), named: true });
+    expect(delivered).toMatchObject({ encoding: 'base64' });
+    expect(delivered).not.toHaveProperty('named');
+    expect(located).toEqual([]);
+  });
+
+  it('refuses a request without the key though the transcript names the path, and admits nothing without a reader', async () => {
+    await transcriptOf(A, [said(link(out('notes.txt')))]);
+    await expect(namedService().read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(OUT);
+    expect(located).toEqual([]);
+    await expect(service({ env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true })).rejects.toThrow(OUT);
+  });
+
+  it('refuses a remote request that carries the key, before the transcript is looked for', async () => {
+    await transcriptOf(A, [said(link(out('notes.txt'))), said(link(out('report.pdf')))]);
+    const log = at('open.log');
+    const files = namedService({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(OUT);
+    await expect(files.openExternal(A, out('report.pdf'), null, { named: true, remote: true })).rejects.toThrow(OUT);
+    expect(located).toEqual([]);
+    expect(fs.existsSync(log)).toBe(false);
+  });
+
+  // Decision Log 14(b): a session none of whose folders resolve still reads a file its transcript links, and nothing else
+  it('admits a named file for a session whose folders no longer resolve, and nothing else at that point', async () => {
+    write(at('gone-repo', 'a.ts'), 'x');
+    write(at('gone-worktree', 'a.ts'), 'x');
+    records.set(A, record(at('gone-repo'), [], at('gone-worktree')));
+    rmSync(at('gone-repo'), { recursive: true });
+    rmSync(at('gone-worktree'), { recursive: true });
+    await transcriptOf(A, [said(link(out('notes.txt')))]);
+    const files = namedService();
+    const spy = opens();
+    expect(await files.read({ appSessionId: A, path: out('notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
+    located.length = 0;
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true }, true)).rejects.toThrow(new Error(OUT));
+    expect(located, 'a remote caller never reaches the transcript').toEqual([]);
+    await expect(files.read({ appSessionId: A, path: out('notes.txt') })).rejects.toThrow(new Error(OUT));
+    expect(located, 'nor does a request without the key').toEqual([]);
+    await expect(files.read({ appSessionId: A, path: out('unnamed.txt'), named: true })).rejects.toThrow(new Error(OUT));
+    expect(openedAt(spy, out('unnamed.txt'))).toBe(0);
+  });
+
+  it('answers `named` with every chunk and with the hashed read', async () => {
+    write(out('long.txt'), 'abcdefghij');
+    await transcriptOf(A, [said(link(out('long.txt')))]);
+    const files = namedService();
+    expect(await files.read({ appSessionId: A, path: out('long.txt'), named: true, length: 4 })).toMatchObject({ content: 'abcd', truncated: true, named: true });
+    expect(await files.read({ appSessionId: A, path: out('long.txt'), named: true, offset: 4, length: 4 })).toMatchObject({ content: 'efgh', named: true });
+    expect(await files.read({ appSessionId: A, path: out('long.txt'), named: true, hash: true })).toMatchObject({ content: 'abcdefghij', hash: expect.stringMatching(/^[0-9a-f]{64}$/), utf8: true, named: true });
+  });
+
+  it('never writes, lists, watches or reveals the named file, nor reads its neighbour', async () => {
+    await transcriptOf(A, [said(link(out('notes.txt')))]);
+    const files = namedService();
+    const { hash } = await files.read({ appSessionId: A, path: out('notes.txt'), named: true, hash: true });
+    await expect(files.write({ appSessionId: A, path: out('notes.txt'), content: 'changed', expectedHash: hash! })).rejects.toThrow(OUT);
+    expect(readFileSync(out('notes.txt'), 'utf8')).toBe('outside notes\n');
+    await expect(files.list({ appSessionId: A, path: outside })).rejects.toThrow(OUT);
+    await expect(files.watch(A, outside, 'p1')).rejects.toThrow(OUT);
+    expect(files.watching()).toEqual([]);
+    expect(await files.reveal(A, out('notes.txt'), null)).toEqual({ revealed: false, message: OUT });
+    await expect(files.read({ appSessionId: A, path: out('unnamed.txt'), named: true })).rejects.toThrow(OUT);
+  });
+
+  it('opens outside a named document of an allowed kind, and keeps openExternal’s own refusals for it', async () => {
+    write(out('run.sh'), '#!/bin/sh\necho hi\n');
+    fs.chmodSync(out('run.sh'), 0o755);
+    await transcriptOf(A, [said(`${link(out('report.pdf'))} ${link(out('run.sh'))}`)]);
+    const log = at('open.log');
+    const files = namedService({ env: { MAWS_E2E: '1', MAWS_E2E_OPEN_LOG: log } });
+    await expect(files.openExternal(A, out('report.pdf'), null)).rejects.toThrow(OUT); // no key: today's refusal
+    expect(await files.openExternal(A, out('report.pdf'), null, { named: true })).toEqual({ opened: true, message: null });
+    await expect(files.openExternal(A, out('run.sh'), null, { named: true })).rejects.toThrow(new Error(`not opened outside MAWS: ${out('run.sh')}`));
+    await expect(files.openExternal(A, out('unnamed.txt'), null, { named: true })).rejects.toThrow(OUT);
+    expect(readFileSync(log, 'utf8')).toBe(`${out('report.pdf')}\n`);
+  });
+
+  it('reads a named file through a folder that is a link, and refuses one whose last component is a link', async () => {
+    symlinkSync(outside, at('via'));
+    symlinkSync(out('notes.txt'), out('alias.txt'));
+    await transcriptOf(A, [said(link(at('via', 'notes.txt'))), said(link(out('alias.txt')))]);
+    const files = namedService();
+    expect(await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
+    await expect(files.read({ appSessionId: A, path: out('alias.txt'), named: true })).rejects.toThrow(OUT);
+  });
+
+  it('answers not found for a named path that is gone and not a regular file for a named directory; the refusal for an unnamed one', async () => {
+    mkdirSync(out('folder'));
+    await transcriptOf(A, [said(link(out('gone.txt'))), said(link(out('folder'))), said(link(join(outside, 'missing', 'deeper.txt')))]);
+    const files = namedService();
+    await expect(files.read({ appSessionId: A, path: out('gone.txt'), named: true })).rejects.toThrow(new Error(`not found: ${out('gone.txt')}`));
+    await expect(files.read({ appSessionId: A, path: join(outside, 'missing', 'deeper.txt'), named: true })).rejects.toThrow(new Error(`not found: ${join(outside, 'missing', 'deeper.txt')}`));
+    await expect(files.read({ appSessionId: A, path: out('folder'), named: true })).rejects.toThrow(new Error(`not a regular file: ${out('folder')}`));
+    await expect(files.read({ appSessionId: A, path: out('also-gone.txt'), named: true })).rejects.toThrow(new Error(OUT));
+    await expect(files.read({ appSessionId: A, path: out('gone.txt') })).rejects.toThrow(new Error(OUT)); // no key
+  });
+
+  it('answers the refusal for a session with no transcript, or one that is not on disk', async () => {
+    const files = namedService();
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true })).rejects.toThrow(OUT);
+    transcripts.set(A, join(store.paths.projects, 'nowhere', 'engine-A.jsonl'));
+    await expect(files.read({ appSessionId: A, path: out('notes.txt'), named: true })).rejects.toThrow(OUT);
+    expect(located).toEqual([A, A]);
+  });
+
+  it('answers the refusal at once to a search past the queue’s bound, and the others as they would be', async () => {
+    write(out('second.txt'), 'second\n');
+    write(out('third.txt'), 'third\n');
+    await transcriptOf(A, [said(link(out('notes.txt'))), said(link(out('second.txt'))), said(link(out('third.txt')))]);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let reached!: () => void;
+    const opened = new Promise<void>((resolve) => (reached = resolve));
+    let first = true;
+    const files = namedService({}, { waiting: 1 }, {
+      at: async (point) => {
+        if (point !== 'opened' || !first) return;
+        first = false;
+        reached();
+        await held;
+      },
+    });
+    const running = files.read({ appSessionId: A, path: out('notes.txt'), named: true });
+    await opened;
+    const waiting = files.read({ appSessionId: A, path: out('second.txt'), named: true });
+    // the second is queued before the third is made: each request resolves its path on the disk before it asks, and two
+    // such resolutions in flight may finish in either order
+    await vi.waitFor(() => expect(located).toHaveLength(2));
+    await expect(within(files.read({ appSessionId: A, path: out('third.txt'), named: true }), 1000)).rejects.toThrow(OUT);
+    release();
+    expect(await running).toMatchObject({ content: 'outside notes\n', named: true });
+    expect(await waiting).toMatchObject({ content: 'second\n', named: true });
+  });
+
+  it('asks the reader once, with the path as the request gave it and the caller’s signal', async () => {
+    symlinkSync(outside, at('via'));
+    const named = vi.fn(async () => true);
+    const signal = new AbortController().signal;
+    const files = service({ named, env: {} });
+    await files.read({ appSessionId: A, path: at('via', 'notes.txt'), named: true }, false, signal);
+    expect(named.mock.calls).toEqual([[A, at('via', 'notes.txt'), signal]]);
+  });
+
+  describe('the boundary holds for a named file (S1 to S3)', () => {
+    it('refuses a path whose last component becomes a link after the search answered, and reads nothing (S1)', async () => {
+      points['before-open'] = () => {
+        unlinkSync(out('notes.txt'));
+        symlinkSync(out('unnamed.txt'), out('notes.txt'));
+      };
+      const answer = service({ named: async () => true, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true });
+      await expect(answer).rejects.toThrow(OUT);
+    });
+
+    it('refuses a path whose folder is swapped for a link to another place after the search answered (S2)', async () => {
+      write(at('far', 'dir', 'notes.txt'), 'far notes\n');
+      write(at('elsewhere', 'notes.txt'), 'elsewhere notes\n');
+      points['before-open'] = () => swapToLink(at('far', 'dir'), at('elsewhere'));
+      const answer = service({ named: async () => true, env: {} }).read({ appSessionId: A, path: at('far', 'dir', 'notes.txt'), named: true });
+      await expect(answer).rejects.toThrow(OUT);
+    });
+
+    it('reads what the path names at the open when the file is replaced while the search runs (S3)', async () => {
+      write(at('replacement'), 'replaced notes\n');
+      points['before-named'] = () => renameSync(at('replacement'), out('notes.txt'));
+      expect(await service({ named: async () => true, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true })).toMatchObject({ content: 'replaced notes\n', named: true });
+    });
+
+    it('refuses a file replaced by a link while the search runs (S3)', async () => {
+      points['before-named'] = () => {
+        unlinkSync(out('notes.txt'));
+        symlinkSync(out('unnamed.txt'), out('notes.txt'));
+      };
+      await expect(service({ named: async () => true, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true })).rejects.toThrow(OUT);
+    });
+  });
+
+  // APFS ignores case: the transcript's spelling is compared, the disk's is read
+  it.skipIf(process.platform !== 'darwin')('reads a path the transcript writes in another case than the disk’s, and refuses a case it does not write', async () => {
+    await transcriptOf(A, [said(link(out('Notes.txt')))]);
+    const files = namedService();
+    expect(await files.read({ appSessionId: A, path: out('Notes.txt'), named: true })).toMatchObject({ content: 'outside notes\n', named: true });
+    await expect(files.read({ appSessionId: A, path: out('NOTES.txt'), named: true })).rejects.toThrow(OUT);
+  });
+});
+
 // P3-L (M6b fix wave 2): a path main resolved itself (a File artifact's stored file, `library.read`), read with no session
 // and no roots, as `read` answers; a directory or a missing path is refused.
 describe('readResolved', () => {
@@ -1193,5 +1487,74 @@ describe.runIf(process.platform === 'linux')('files service on Linux: no link on
         restore(inRoot('src'));
       }
     });
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §G and B-4): the launch folder
+// and the working folder, where a fact names them, are roots of `files.*` while the admission holds at the call, for this
+// machine's caller and for one on another machine (the home rule then applies to them as to any root).
+describe('files service: the folders the record’s two facts name', () => {
+  let repos: Awaited<ReturnType<typeof admissionRepos>>;
+  let p: AdmissionPaths;
+  beforeAll(async () => {
+    repos = await admissionRepos();
+    p = repos.paths;
+  });
+  afterAll(() => repos.dispose());
+  const HOMES = () => ['/nonexistent-home-of-this-suite'];
+  const rootNames = async (svc: ReturnType<typeof service>, remote: boolean) => (await svc.list({ appSessionId: A }, remote)).entries.map((entry) => entry.path);
+
+  it('lists and reads a registered worktree outside the launch folder while a fact names it, here and for a remote caller, and not once it is deregistered', async () => {
+    records.set(A, { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } });
+    const svc = service({ homes: HOMES });
+    for (const remote of [false, true]) {
+      expect(await rootNames(svc, remote), `remote ${remote}`).toEqual([p.main, p.beside]);
+      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, remote)).content, `remote ${remote}`).toBe('hello\n');
+      expect((await svc.list({ appSessionId: A, path: join(p.beside, 'packages') }, remote)).root, `remote ${remote}`).toBe(p.beside);
+    }
+    const away = join(p.base, 'beside-registration');
+    renameSync(join(p.main, '.git/worktrees/beside'), away);
+    try {
+      expect(await rootNames(svc, false)).toEqual([p.main]);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') })).rejects.toThrow(OUT);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+    } finally {
+      renameSync(away, join(p.main, '.git/worktrees/beside'));
+    }
+  });
+
+  it('keeps the launch folder a root while the record is filed in a worktree, and refuses it once the record’s directory is in another repository', async () => {
+    records.set(A, { directory: p.beside, additionalDirectories: [], worktree: { path: p.beside, branch: 'beside' }, launchFolder: p.main });
+    const svc = service({ homes: HOMES });
+    expect(await rootNames(svc, false)).toEqual([p.beside, p.main]);
+    expect((await svc.read({ appSessionId: A, path: join(p.main, 'README.md') })).content).toBe('hello\n');
+    records.set(A, { directory: p.other, additionalDirectories: [], worktree: null, launchFolder: p.main });
+    expect(await rootNames(svc, false)).toEqual([p.other]);
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') })).rejects.toThrow(OUT);
+  });
+
+  it('admits the sub-folder a session was launched in, and not its repository’s root', async () => {
+    const app = join(p.main, 'packages/app');
+    records.set(A, { directory: p.w1, additionalDirectories: [], worktree: { path: p.w1, branch: 'w1' }, launchFolder: app });
+    const svc = service({ homes: HOMES });
+    expect(await rootNames(svc, true)).toEqual([p.w1, app]);
+    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, true)).content).toBe('hello\n');
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, true)).rejects.toThrow(OUT);
+  });
+
+  it('drops an admitted folder that is a home of the machine for a remote caller, and keeps it for this machine’s', async () => {
+    records.set(A, { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } });
+    const svc = service({ homes: () => [p.beside] });
+    expect(await rootNames(svc, false)).toEqual([p.main, p.beside]);
+    expect(await rootNames(svc, true)).toEqual([p.main]);
+    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+  });
+
+  it.each(ADMISSION_CASES)('reads under a fact’s folder only where the table admits it: %s', async (_name, make) => {
+    const { record, admitted } = make(p);
+    records.set(A, record);
+    const svc = service({ homes: HOMES });
+    const roots = await rootNames(svc, true);
+    expect(roots.slice(1)).toEqual(admitted === null || admitted === roots[0] ? [] : [admitted]);
   });
 });

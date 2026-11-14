@@ -63,7 +63,7 @@ async function lab() {
         return value;
       }) as typeof handler),
   };
-  const checkouts = startCheckouts({ view: fakeSpineView({ records: [record(APP, { directory: repository })] }), bus, clientPort: front.port, engineEnv: Promise.resolve({}), env: {}, uploadRoots: null });
+  const checkouts = startCheckouts({ view: fakeSpineView({ records: [record(APP, { directory: repository })] }), bus, clientPort: front.port, engineEnv: Promise.resolve({}), env: {}, uploadRoots: null, transcript: async () => null });
   const server: Server = createServer();
   serveSocketClients(server, {
     many: { runtimeFor: (client) => front.runtimeFor(client) },

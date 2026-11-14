@@ -5,6 +5,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { useLayout } from '../stores/layout';
+import { surfaceTabs } from '../panel/surface-model';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectVisibility } from './visibility';
@@ -23,9 +24,12 @@ let focused = true;
 let visibility: DocumentVisibilityState = 'visible';
 
 const sent = () => fake.invoked('session.setVisible');
+// A surface opened beside the chat: the first in view, a second in the lower group (UX wave U8b: one tab in view per group).
 const showSurface = (appSessionId: AppSessionId, toolId: string) => {
   const tab = { id: `${toolId}:probe`, toolId, pinned: false };
   useLayout.getState().setPanelTabs(appSessionId, { tabs: [...useLayout.getState().effectivePanelTabs(appSessionId), tab], activeTabId: tab.id });
+  if (surfaceTabs(useLayout.getState(), appSessionId).length === 0) useLayout.getState().showSurfaceTab(appSessionId, tab.id);
+  else useLayout.getState().moveSurfaceTab(appSessionId, tab.id, 'lower');
   return tab.id;
 };
 
@@ -58,9 +62,10 @@ describe('session visibility', () => {
     showSideChild(A, CHILD);
     expect(sent().at(-1)).toEqual({ appSessionId: CHILD, visible: true });
     const before = sent().length;
-    useLayout.getState().setSurfaceStack(A, [terminal]);
+    useLayout.getState().moveSurfaceTab(A, terminal, 'upper'); // the terminal alone in view
     expect(sent().slice(before)).toEqual([{ appSessionId: CHILD, visible: false }]);
-    useLayout.getState().setSurfaceStack(A, [side, terminal]);
+    useLayout.getState().moveSurfaceTab(A, terminal, 'lower'); // Side above, the terminal below
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual([side, terminal]);
     expect(sent().at(-1)).toEqual({ appSessionId: CHILD, visible: true });
   });
 
@@ -139,6 +144,21 @@ describe('session visibility', () => {
       { appSessionId: A, visible: true },
       { appSessionId: A, visible: false },
     ]);
+  });
+
+  // UX wave U7b (§N): behind a page nothing is on screen; behind the Settings dialog everything stays on screen.
+  it('a page opening sends false and viewing none; Back sends them true again; the Settings dialog sends nothing', () => {
+    useLayout.getState().openSession(A);
+    const viewing = () => fake.invoked('attention.viewing');
+    expect([sent(), viewing().at(-1)]).toEqual([[{ appSessionId: A, visible: true }], { appSessionId: A }]);
+    useLayout.getState().openDestination({ kind: 'projects' });
+    expect([sent().at(-1), viewing().at(-1)]).toEqual([{ appSessionId: A, visible: false }, { appSessionId: null }]);
+    useLayout.getState().closeDestination();
+    expect([sent().at(-1), viewing().at(-1)]).toEqual([{ appSessionId: A, visible: true }, { appSessionId: A }]);
+    const [sentBefore, viewingBefore] = [sent().length, viewing().length];
+    useLayout.getState().openSettings();
+    useLayout.getState().closeSettings();
+    expect([sent().length, viewing().length]).toEqual([sentBefore, viewingBefore]);
   });
 
   it('is false while the right panel is maximized over the main region', () => {

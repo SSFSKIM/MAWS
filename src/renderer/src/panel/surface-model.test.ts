@@ -4,63 +4,71 @@ import { EMPTY_STRIP, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, type LayoutMain, 
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout } from '../stores/layout';
-import { surfaceSession, surfaceTabs } from './surface-model';
+import { sideGroups, surfaceSession, surfaceTabs } from './surface-model';
 
 const A = at('app-a' as AppSessionId);
 const files = { id: 'files-1', toolId: 'files', pinned: false };
 const terminal = { id: 'terminal-1', toolId: 'terminal', pinned: false };
 const browser = { id: 'browser-1', toolId: 'browser', pinned: false };
 
-// Dropping the old refs when a third surface replaces the bottom would lose its tool state.
-describe('surface stacks', () => {
-  it('appends a second tool and replaces only the bottom surface with a third, retaining every ref and params', () => {
+// UX wave U8b (M2): what is in view changes by the store's acts alone, one tab per group; a write of refs maintains them.
+// Dropping the refs of a tool taken out of view would lose its state.
+describe('the tabs in view', () => {
+  it('a second and a third tool shown take the place of the one in view, retaining every ref and params', () => {
     const store = createLayoutStore();
     const s = () => store.getState();
     s().setPanelTabs(A, { tabs: [files], activeTabId: files.id });
+    s().showSurfaceTab(A, files.id);
     expect(s().panelSurfaces.stacks[A]).toEqual([files.id]);
     s().setPanelParams(files.id, { path: '/repo' });
     s().setPanelTabs(A, { tabs: [files, terminal], activeTabId: terminal.id });
-    expect(s().panelSurfaces.stacks[A]).toEqual([files.id, terminal.id]);
+    expect(s().panelSurfaces.stacks[A]).toEqual([files.id]); // a write of refs chooses nothing
+    s().showSurfaceTab(A, terminal.id);
+    expect(s().panelSurfaces.stacks[A]).toEqual([terminal.id]);
     s().setPanelTabs(A, { tabs: [files, terminal, browser], activeTabId: browser.id });
-    expect(s().panelSurfaces.stacks[A]).toEqual([files.id, browser.id]);
+    s().showSurfaceTab(A, browser.id);
+    expect(s().panelSurfaces.stacks[A]).toEqual([browser.id]);
     expect(s().effectivePanelTabs(A)).toEqual([files, terminal, browser]);
     expect(s().panelParams).toEqual({ [files.id]: { path: '/repo' } });
   });
 
-  it('changes tabs of the same tool in place, removes closed ids and explicitly clears to the summary', () => {
+  it('a tab in view that closes gives way to its right-hand neighbour, else the last; hiding keeps every ref', () => {
     const store = createLayoutStore();
     const s = () => store.getState();
     const another = { ...files, id: 'files-2' };
-    const tabs = [files, terminal, another];
-    s().setPanelTabs(A, { tabs, activeTabId: files.id });
-    s().setPanelTabs(A, { tabs, activeTabId: terminal.id });
-    s().setPanelTabs(A, { tabs, activeTabId: another.id });
-    expect(surfaceTabs(s(), A)).toEqual([another, terminal]);
-    s().setPanelTabs(A, { tabs: [files, another], activeTabId: another.id });
-    expect(s().panelSurfaces.stacks[A]).toEqual([another.id]);
-    s().setPanelTabs(A, { tabs: [files, another], activeTabId: null });
+    s().setPanelTabs(A, { tabs: [files, terminal, another], activeTabId: null });
+    s().showSurfaceTab(A, terminal.id);
+    s().setPanelTabs(A, { tabs: [files, another], activeTabId: terminal.id });
+    expect(surfaceTabs(s(), A)).toEqual([another]);
+    s().setPanelTabs(A, { tabs: [files], activeTabId: another.id });
+    expect(surfaceTabs(s(), A)).toEqual([files]);
+    s().hideSurfaces(A);
     expect(surfaceTabs(s(), A)).toEqual([]);
-    expect(s().effectivePanelTabs(A)).toEqual([files, another]);
+    expect(s().panelBySession.get(A)?.activeTabId).toBe(files.id); // shown again with the column
+    expect(s().effectivePanelTabs(A)).toEqual([files]);
   });
 
-  it('keeps a tool in its slot when closing its selected tab activates another tab of that same tool', () => {
+  it('closing the tab in view in the lower group shows the lower group’s next tab, another of its tool', () => {
     const store = createLayoutStore();
     const another = { ...files, id: 'files-2' };
-    store.getState().setPanelTabs(A, { tabs: [files, another, terminal], activeTabId: files.id });
-    store.getState().setPanelTabs(A, { tabs: [files, another, terminal], activeTabId: terminal.id });
-    store.getState().setPanelTabs(A, { tabs: [another, terminal], activeTabId: another.id });
-    expect(surfaceTabs(store.getState(), A)).toEqual([another, terminal]);
+    store.getState().setPanelTabs(A, { tabs: [terminal, files, another], activeTabId: null });
+    store.getState().showSurfaceTab(A, terminal.id);
+    store.getState().moveSurfaceTab(A, another.id, 'lower');
+    store.getState().moveSurfaceTab(A, files.id, 'lower');
+    expect(surfaceTabs(store.getState(), A)).toEqual([terminal, files]);
+    store.getState().setPanelTabs(A, { tabs: [terminal, another], activeTabId: terminal.id });
+    expect(surfaceTabs(store.getState(), A)).toEqual([terminal, another]);
   });
 
-  it('sets a bounded, distinct-tool stack without closing refs and keeps icon preferences separate from tab pins', () => {
+  it('two groups in view at most, a pin keeping its place, icon preferences apart from tab pins, and a hide that keeps both', () => {
     const store = createLayoutStore();
     const s = () => store.getState();
     const another = { ...files, id: 'files-2' };
-    const tabs = [files, another, terminal, browser];
-    s().setPanelTabs(A, { tabs, activeTabId: files.id });
-    s().setSurfaceStack(A, ['gone', another.id, files.id, terminal.id, browser.id]);
+    s().setPanelTabs(A, { tabs: [files, another, terminal, browser], activeTabId: null });
+    s().showSurfaceTab(A, another.id);
+    s().moveSurfaceTab(A, terminal.id, 'lower');
     expect(surfaceTabs(s(), A)).toEqual([another, terminal]);
-    expect(s().panelBySession.get(A)?.activeTabId).toBe(terminal.id);
+    expect(s().panelBySession.get(A)?.activeTabId).toBe(another.id);
     s().toggleSurfacePin('files');
     expect(s().panelSurfaces.pinnedTools).toEqual(['files']);
     expect(s().panelPinned).toEqual([]);
@@ -69,9 +77,9 @@ describe('surface stacks', () => {
     expect(s().panelSurfaces.pinnedTools).toEqual(['files']);
     s().toggleSurfacePin('files');
     expect(s().panelSurfaces.pinnedTools).toEqual([]);
-    s().setSurfaceStack(A, []);
+    s().hideSurfaces(A);
     expect(surfaceTabs(s(), A)).toEqual([]);
-    expect(s().panelBySession.get(A)?.activeTabId).toBeNull();
+    expect(sideGroups(s(), A)).toMatchObject({ hidden: true, upper: { shown: { id: another.id } }, lower: { shown: { id: terminal.id } } });
     expect(s().effectivePanelTabs(A)).toHaveLength(4);
   });
 });
@@ -150,7 +158,7 @@ describe('surface context and restore', () => {
     expect(surfaceSession(store.getState())).toBe(A);
   });
 
-  it('deduplicates restored tools without altering their saved ids and follows live known-session changes', async () => {
+  it('two tabs of one tool stored in view read as two groups without altering their saved ids, and follow live known-session changes', async () => {
     const another = { ...files, id: 'files-2' };
     let live = true;
     const saved: PanelSurfaces = { version: 2, stacks: { [A]: [files.id, another.id] }, pinnedTools: [], contexts: { [NO_PROJECT]: A } };
@@ -159,7 +167,8 @@ describe('surface context and restore', () => {
       [`panel.${A}`]: { tabs: [files, another], activeTabId: another.id },
       'panelTools.surfaces': saved,
     }, () => live);
-    expect(surfaceTabs(store.getState(), A)).toEqual([files]);
+    expect(surfaceTabs(store.getState(), A)).toEqual([files, another]);
+    expect(sideGroups(store.getState(), A).lower?.tabs).toEqual([another]);
     expect(surfaceSession(store.getState())).toBe(A);
     live = false;
     expect(surfaceSession(store.getState())).toBeNull();
@@ -182,7 +191,7 @@ describe('surface context and restore', () => {
     expect(fake.invoked('layout.set')).toContainEqual({ key: 'panelTools.surfaces', value: replayed });
   });
 
-  it('writes and restores stack order, summary, tool preferences and project context through the new key', async () => {
+  it('writes and restores two groups in view, a hidden column, tool preferences and project context', async () => {
     vi.useFakeTimers();
     let stop: (() => void) | undefined;
     try {
@@ -191,9 +200,10 @@ describe('surface context and restore', () => {
       const s = () => store.getState();
       s().openSession(A);
       s().setPanelTabs(A, { tabs: [files, terminal, browser], activeTabId: files.id });
-      s().setPanelTabs(A, { tabs: s().effectivePanelTabs(A), activeTabId: terminal.id });
+      s().showSurfaceTab(A, files.id);
+      s().moveSurfaceTab(A, terminal.id, 'lower');
       s().toggleSurfacePin('browser');
-      s().setSurfaceStack(null, []);
+      s().hideSurfaces(null);
       await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
       const writes = fake.invoked('layout.set') as { key: string; value: unknown }[];
       const surfaces = writes.filter((write) => write.key === 'panelTools.surfaces');

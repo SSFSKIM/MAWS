@@ -175,6 +175,20 @@ describe('terminal tool state', () => {
     ]);
   });
 
+  // UX wave U8c-2 (M4 decision 7): with a record whose agent moved, a new terminal starts in the working folder, and an
+  // open one keeps its shell while its bar says where the session now runs.
+  it('starts a new terminal in the working folder of a session whose agent moved, and tells an open one so', () => {
+    const moved = { ...SESSION_A, agentFolder: { checkout: '/tmp/maws-harness/a-wt', cwd: '/tmp/maws-harness/a-wt/src', branch: 'w', linked: true } } as SessionRecord;
+    const open = newState();
+    newState({ session: moved, instanceId: 'terminal:4' });
+    expect(registry.terminals.open.mock.calls.map(([init]) => init)).toEqual([
+      { appSessionId: A, label: 'terminal:1', cwd: '/tmp/maws-harness/a' },
+      { appSessionId: A, label: 'terminal:4', cwd: '/tmp/maws-harness/a-wt' },
+    ]);
+    render(<View state={open} ctx={context({ session: moved })} />);
+    expect(screen.getByRole('status', { name: 'worktree warning' }).textContent).toBe('This terminal is in /tmp/maws-harness/a; the session now runs in /tmp/maws-harness/a-wt.New terminal here');
+  });
+
   it('takes over a re-adopted terminal whose label is the tab id instead of opening another', () => {
     const adopted = registry.terminals.open({ appSessionId: B, label: 'terminal:9', cwd: '/tmp/maws-harness/b' });
     registry.terminals.open.mockClear();
@@ -750,6 +764,18 @@ describe('terminal view', () => {
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
   });
 
+  // UX wave U7b (§N): a page covering the side column makes its tools not visible (`ctx.visible`, panel/ToolBody.tsx);
+  // the terminal then detaches its renderer, and mounts it again at Back.
+  it('detaches the renderer when it stops being visible, as behind a page, and mounts it again when it is visible again', () => {
+    const state = newState();
+    const { rerender } = render(<View state={state} ctx={context()} />);
+    expect(registry.terminals.mount).toHaveBeenCalledTimes(1);
+    rerender(<View state={state} ctx={context({ visible: false })} />);
+    expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
+    rerender(<View state={state} ctx={context()} />);
+    expect(registry.terminals.mount).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps a selected tab’s focus through StrictMode’s simulated remount', () => {
     const state = newState();
     render(
@@ -965,7 +991,10 @@ it.each([620, 1280])('lets only the terminal menu consume its Escape before the 
   useLayout.getState().setOverviewOpen(true);
   try {
     render(<QueryClientProvider client={queryClient}><Shell /></QueryClientProvider>);
-    act(() => useLayout.getState().setPanelTabs(SHELL_A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }));
+    act(() => {
+      useLayout.getState().setPanelTabs(SHELL_A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' });
+      useLayout.getState().showSurfaceTab(SHELL_A, 'terminal:aaaaaaaa'); // UX wave U8b: a write of refs shows nothing
+    });
     const surface = screen.getByTestId('terminal-surface');
     fireEvent.contextMenu(surface, { clientX: 20, clientY: 30 });
     const copy = screen.getByRole('menuitem', { name: 'Copy' });

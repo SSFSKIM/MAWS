@@ -1,5 +1,6 @@
-// Settings › Engine › Background supervisor (E10 execution document, §Design 11; Interfaces "Settings version 10" and
-// "Renderer and copy"): a group inside the Engine section, so X14's `settings` enum is untouched. The status line reads
+// The Background supervisor (E10 execution document, §Design 11; Interfaces "Settings version 10" and "Renderer and
+// copy"): a group of rows, first in Settings › Supervisor since U11a M9 (Engine's before), named "Background supervisor"
+// and drawn under the section's heading, which takes the keyboard when a pressed control leaves. The status line reads
 // main's `host.status` (the hosts store, connected while the group is shown); while an incompatible supervisor is
 // waited for, or none is running, it offers Restart now (Decision Log, Task 2.3a's re-review). The idle time writes
 // settings version 10's `supervisor` section; main pushes it to the supervisor (`host.configure`). Stop all asks
@@ -21,7 +22,7 @@ import { useHosts } from '../stores/hosts';
 import { toast, useNotices } from '../stores/notices';
 import { SUPERVISOR } from './copy';
 import { ENGINE_HOST_UPDATE } from '../app/copy'; // P5 O16 M3c fix wave 2
-import { INPUT, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
+import { INPUT, sectionHeadingId, Setting, TEXT_ACTION, useCommittedDraft, writeSettings } from './parts';
 
 // Whole minutes from 1 to MAX_IDLE_MINUTES as typed, or null when the text is not one.
 function idleMinutesOf(text: string): number | null {
@@ -30,13 +31,14 @@ function idleMinutesOf(text: string): number | null {
   return minutes >= 1 && minutes <= MAX_IDLE_MINUTES ? minutes : null;
 }
 
-// What the status line says, whether the way back (Restart now) is offered, and its note: what the background process
-// is for, once main has answered.
-function describe(status: HostStatus | null): { text: string; restart: boolean; note?: string } {
-  if (status === null) return { text: SUPERVISOR.reading, restart: false };
-  const note = SUPERVISOR.statusNote;
+// What the status line says, whether the way back (Restart now) is offered, and the state its note shows: what the
+// background process is for, once main has answered; while an incompatible supervisor is waited for, why, whole.
+type StatusNote = keyof typeof SUPERVISOR.statusNotes;
+function describe(status: HostStatus | null): { text: string; restart: boolean; note: StatusNote } {
+  if (status === null) return { text: SUPERVISOR.reading, restart: false, note: 'reading' };
+  const note = 'default';
   if (status.state === 'crashed') {
-    if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: SUPERVISOR.waitingNote };
+    if (status.reason === 'incompatible') return { text: SUPERVISOR.waiting(status.waitingLiveSessions ?? 0), restart: true, note: 'waiting' };
     return { text: status.reason === 'held_lock' ? SUPERVISOR.heldLock : SUPERVISOR.notRunning, restart: true, note };
   }
   // P5 O16 M3c fix wave 2 (D63): an update that waits for MAWS tool calls, served or deferred, says what it waits for
@@ -53,15 +55,16 @@ function describe(status: HostStatus | null): { text: string; restart: boolean; 
 const restart = (failed?: (why: string) => string) => restartSupervisor(ipc, useNotices, failed);
 
 // After an action removes or disables the control that had focus, focus would fall to the page: it goes to `preferred`
-// when that is still there and enabled, else to the group's heading. Focus the owner moved elsewhere is left alone.
+// when that is still there and enabled, else to the section's heading (U11a M9: the group's own heading is gone).
+// Focus the owner moved elsewhere is left alone.
 type KeepFocus = (preferred: HTMLButtonElement | null) => void;
 // E11 W-D: a refused action leaves its control offered and enabled again: the focus the heading held meanwhile (or
 // that fell to the page) goes back to it.
 type ReturnFocus = (control: HTMLButtonElement | null) => void;
 
+const sectionHeading = () => document.getElementById(sectionHeadingId('supervisor'));
+
 export function SupervisorSettings({ settings }: { settings: Settings }) {
-  const headingId = useId();
-  const heading = useRef<HTMLHeadingElement>(null);
   const status = useHosts((s) => s.supervisor);
   useEffect(() => useHosts.getState().connect(), []);
   const keepFocus = useCallback<KeepFocus>((preferred) => {
@@ -69,18 +72,15 @@ export function SupervisorSettings({ settings }: { settings: Settings }) {
     const lost = active === null || active === document.body || (active instanceof HTMLButtonElement && active.disabled);
     if (!lost) return;
     if (preferred?.isConnected && !preferred.disabled) preferred.focus();
-    else heading.current?.focus({ preventScroll: true });
+    else sectionHeading()?.focus({ preventScroll: true });
   }, []);
   const returnFocus = useCallback<ReturnFocus>((control) => {
     const active = document.activeElement;
-    const held = active === null || active === document.body || active === heading.current;
+    const held = active === null || active === document.body || active === sectionHeading();
     if (held && control?.isConnected && !control.disabled) control.focus();
   }, []);
   return (
-    <div role="group" aria-labelledby={headingId} className="mt-3">
-      <h4 id={headingId} ref={heading} tabIndex={-1} className="m-0 mb-0.5 text-ui-sm font-semibold text-fg outline-accent focus-visible:outline-2">
-        {SUPERVISOR.title}
-      </h4>
+    <div role="group" aria-label={SUPERVISOR.title}>
       <StatusRow status={status} keepFocus={keepFocus} returnFocus={returnFocus} />
       <DaemonLine status={status} />
       <IdleExit settings={settings} />
@@ -114,7 +114,7 @@ function StatusRow({ status, keepFocus, returnFocus }: { status: HostStatus | nu
       .finally(() => setBusy(false));
   };
   return (
-    <Setting label={SUPERVISOR.status} note={note}>
+    <Setting row="supervisor.status" state={note}>
       <span role="status" className="min-w-0 text-ui-sm text-fg tabular-nums">
         {text}
       </span>
@@ -136,7 +136,7 @@ function daemonText(status: HostStatus | null): string {
 // A plain line, not a second status: the group's one live line is the supervisor's
 function DaemonLine({ status }: { status: HostStatus | null }) {
   return (
-    <Setting label={SUPERVISOR.daemon}>
+    <Setting row="supervisor.daemon">
       <span data-daemon-line className="min-w-0 text-ui-sm text-fg tabular-nums">
         {daemonText(status)}
       </span>
@@ -156,7 +156,7 @@ function IdleExit({ settings }: { settings: Settings }) {
     return writeSettings({ supervisor: { idleExitMinutes: minutes } });
   });
   return (
-    <Setting label={SUPERVISOR.idle} note={saved === null ? SUPERVISOR.idleNeverNote : SUPERVISOR.idleNote(saved)}>
+    <Setting row="supervisor.idleExit" state={saved === null ? 'never' : 'minutes'} values={{ minutes: saved === null ? null : String(saved) }}>
       <input aria-label={SUPERVISOR.idleField} inputMode="numeric" placeholder={SUPERVISOR.idleNever} {...field} className={`${INPUT} max-w-[90px] tabular-nums`} />
       <span className="text-ui-sm text-fg-muted">{SUPERVISOR.idleUnit}</span>
     </Setting>
@@ -166,7 +166,8 @@ function IdleExit({ settings }: { settings: Settings }) {
 // The action, then in its place the question naming the live count (it follows the status while asked), Stop all and
 // Cancel. The question ends when the supervisor stops being ready (it never reopens by itself) and as soon as the owner
 // confirms (the action then reads Stopping… until main answers). Focus moves to Cancel when asked and, when the
-// question closes, back to the action if it is enabled, else to the group's heading.
+// question closes, back to the action if it is enabled, else to the section's heading. UX wave U7b: Esc on the question
+// is its own (`data-escape-own`), so the Settings dialog around it stays.
 function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: KeepFocus }) {
   const questionId = useId();
   const [asking, setAsking] = useState(false);
@@ -191,16 +192,16 @@ function StopAll({ status, keepFocus }: { status: HostStatus | null; keepFocus: 
     void restart(SUPERVISOR.stopFailed).finally(() => setBusy(false));
   };
   return (
-    <Setting label={SUPERVISOR.stopAll} note={SUPERVISOR.stopAllNote}>
+    <Setting row="supervisor.stopAll">
       {open ? (
         <>
           <span id={questionId} className="text-ui-sm text-fg">
             {SUPERVISOR.confirm(status?.supervisor?.liveSessions ?? 0)}
           </span>
-          <button type="button" aria-describedby={questionId} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
+          <button type="button" data-escape-own aria-describedby={questionId} className={`${DANGER} text-ui-sm`} onClick={stop} onKeyDown={onEscape}>
             {SUPERVISOR.confirmAction}
           </button>
-          <button ref={cancel} type="button" aria-describedby={questionId} className={TEXT_ACTION} onClick={() => setAsking(false)} onKeyDown={onEscape}>
+          <button ref={cancel} type="button" data-escape-own aria-describedby={questionId} className={TEXT_ACTION} onClick={() => setAsking(false)} onKeyDown={onEscape}>
             {SUPERVISOR.cancel}
           </button>
         </>

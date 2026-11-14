@@ -1,6 +1,7 @@
+import { QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { PreloadBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
@@ -19,6 +20,8 @@ import { allTabs } from '../stores/layout-model';
 import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell, ONE_STRIP_NOTICE } from './events';
+import { queryClient } from './query';
+import { prStateKey, refreshPrState, scmStatusKey } from '../tools/scm/queries';
 import { useNotices } from '../stores/notices';
 import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
 import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
@@ -66,7 +69,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.projects.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.projects.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'remote.settled', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);
@@ -112,6 +115,62 @@ describe('shell event subscription', () => {
     fake.event('session.changed', { record: record('a', { projectId: 'p2' as ProjectId }), cause: 'update', revision: 2 });
     expect(stores.layout.getState().main).toBe(before);
     expect(tabIds(stores)).toEqual([`session:${A}`]);
+  });
+
+  // UX wave U8c-2 (M4 decision 2): the card's pull-request row reads `scm.status` and `scm.pr.state` keyed by the session
+  // alone, so a change of the session's working folder drops both answers (they were the checkout's it left) and asks
+  // again; a change that leaves the folder keeps both.
+  const MOVED = { agentFolder: { checkout: '/work/a/.claude/worktrees/w1', cwd: '/work/a/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+  it('drops the pull-request row’s two answers when a record’s working folder changes, and for no other change', async () => {
+    const { fake } = setup();
+    await answerSnapshots(fake);
+    try {
+      for (const key of [prStateKey(A, '/work/a'), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      const kept = () => [prStateKey(A, '/work/a'), scmStatusKey(A)].map((key) => queryClient.getQueryData(key) !== undefined);
+      fake.event('session.changed', { record: record('a', { title: { text: 'renamed', source: 'user' } }), cause: 'update', revision: 2 });
+      expect(kept()).toEqual([true, true]);
+      fake.event('session.changed', { record: record('a', MOVED), cause: 'facts', revision: 3 });
+      expect(kept()).toEqual([false, false]);
+      for (const key of [prStateKey(A, '/work/a'), scmStatusKey(A)]) queryClient.setQueryData(key, { kept: true });
+      fake.event('session.changed', { record: record('a', { agentFolder: { ...MOVED.agentFolder, cwd: '/work/a/.claude/worktrees/w1/lib' } }), cause: 'facts', revision: 4 });
+      expect(kept()).toEqual([true, true]); // the agent's folder alone: the checkout is the same
+      fake.event('session.changed', { record: record('a'), cause: 'facts', revision: 5 }); // back at the launch folder
+      expect(kept()).toEqual([false, false]);
+    } finally {
+      queryClient.clear();
+    }
+  });
+
+  // Held open (fix wave 1): the first `scm.status` read, asked in the launch folder, is still out when the agent moves.
+  // The new folder is asked, and the launch folder's answer, landing late, is never the query's.
+  it('asks the new folder when the first scm.status read is still out at a move, and never keeps the left folder’s answer', async () => {
+    const { fake } = setup();
+    await answerSnapshots(fake);
+    const answers: { folder: string; release(): void; promise: Promise<{ folder: string }> }[] = [];
+    const ask = (folder: string) => {
+      let release!: () => void;
+      const promise = new Promise<{ folder: string }>((resolve) => (release = () => resolve({ folder })));
+      answers.push({ folder, release, promise });
+      return promise;
+    };
+    let folder = 'launch'; // what main answers for: the record it holds at the call
+    const observer = new QueryObserver(queryClient, { queryKey: scmStatusKey(A), queryFn: () => ask(folder) });
+    const off = observer.subscribe(() => {});
+    try {
+      expect(answers.map((a) => a.folder)).toEqual(['launch']);
+      folder = 'worktree';
+      fake.event('session.changed', { record: record('a', MOVED), cause: 'facts', revision: 2 });
+      await vi.waitFor(() => expect(answers.map((a) => a.folder)).toEqual(['launch', 'worktree']));
+      answers[0].release();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(queryClient.getQueryData(scmStatusKey(A))).toBeUndefined();
+      answers[1].release();
+      await vi.waitFor(() => expect(queryClient.getQueryData(scmStatusKey(A))).toEqual({ folder: 'worktree' }));
+      expect(observer.getCurrentResult().data).toEqual({ folder: 'worktree' });
+    } finally {
+      off();
+      queryClient.clear();
+    }
   });
 
   // U13a (its plan's §G): a read that merged a stored value's sets into the one strip says so, once per such read.
@@ -600,6 +659,35 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('read again');
     fake.event('session.changed', { record: titledB('b1', 'renamed'), cause: 'update', revision: 2 }, OTHER_MACHINE);
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('renamed');
+  });
+
+  // UX wave U8c-2 (the branch review, finding 7): a machine's snapshot that replaces a record whose working folder moved
+  // (the agent moved while the link was down) resets the session's two scm reads as a change does, so a Refresh still out
+  // for the folder it left writes nothing; a snapshot that leaves the folder keeps them.
+  it('resets a session’s scm reads when a new generation’s snapshot replaces its record with another working folder', async () => {
+    const { fake } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1')], 5);
+    const b1 = onB('b1');
+    const keys = [prStateKey(b1, '/work/b1'), scmStatusKey(b1)];
+    const kept = () => keys.map((key) => queryClient.getQueryData(key) !== undefined);
+    try {
+      for (const key of keys) queryClient.setQueryData(key, { kept: true });
+      fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] });
+      await answerOther(fake, [titledB('b1', 'read again')], 1); // the same folder
+      expect(kept()).toEqual([true, true]);
+      let release!: () => void;
+      const held = { invoke: () => new Promise((resolve) => (release = () => resolve({ ok: true, value: { branch: 'main', pr: { number: 1 } } }))) } as unknown as MawsBridge;
+      const refreshing = refreshPrState(b1, '/work/b1', held); // the summary's Refresh, asked of the folder the agent then left
+      fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 3)] });
+      await answerOther(fake, [record('b1', { agentFolder: { checkout: '/work/b1/.claude/worktrees/w1', cwd: '/work/b1/.claude/worktrees/w1', branch: 'w1', linked: true } })], 1);
+      expect(kept()).toEqual([false, false]);
+      release();
+      await refreshing;
+      expect(queryClient.getQueryData(prStateKey(b1, '/work/b1'))).toBeUndefined();
+    } finally {
+      queryClient.clear();
+    }
   });
 
   // P5 O7 M2 (the overlay rule): a lane B session main holds on B keeps the status this page last heard through B's link

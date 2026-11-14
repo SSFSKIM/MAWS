@@ -253,6 +253,18 @@ describe('the owner channel’s launch-spec keys are not stored (P2-C)', () => {
 });
 // P2-C end
 
+// UX wave U12a (the execution document's §H): a resume's spec carries the session's title for the computer-use plugin's
+// cursor in `extraSettings.env`, an open record here as at build F; the state file keeps it, and it reads back whole
+describe('the cursor label in a stored launch spec (UX wave U12a)', () => {
+  it('saves a spec whose settings environment carries CUA_CURSOR_LABEL and reads it back equal, through a new instance', async () => {
+    const labelled = { ...spec, extraSettings: { env: { CUA_BROWSER_BACKENDS: '/u/browser/cua/app.sock', CUA_CURSOR_LABEL: 'Fix the login form' } } };
+    await new FileSessionStateStore(userData).saveLaunchSpec(ID, labelled);
+    const file = JSON.parse(await readFile(join(userData, 'engine-host', 'state', `${ID}.json`), 'utf8')) as { launchSpec: Record<string, unknown> };
+    expect(file.launchSpec.extraSettings).toEqual(labelled.extraSettings);
+    expect(await new FileSessionStateStore(userData).loadLaunchSpec(ID)).toEqual(labelled);
+  });
+});
+
 describe('FileSessionStateStore: the keep mark and the engine session ids (P5 O2 M2)', () => {
   it('round-trips both through a new instance beside the queue, keeps them across the other saves, and reads an older file without them', async () => {
     const dir = join(userData, 'engine-host', 'state');

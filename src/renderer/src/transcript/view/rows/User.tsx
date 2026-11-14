@@ -12,11 +12,13 @@
 // opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
 // Board 525: a prompt someone else wrote (the context's `promptAuthor`: a session another member owns) is named by its
 // author, as a line above the bubble and in the region's name; the reader's own reads "Your message". UX wave U3: MAWS's
-// "Approve and retry" prompt (`consent`) is the person's act, drawn as one line and never as a bubble.
+// "Approve and retry" prompt (`consent`) is the person's act, drawn as one line and never as a bubble. UX wave U5a (M5;
+// decision 13): a message of several comments draws each comment's chip over its own text and its own screenshot, in the
+// order made, and after them the attachments no comment claimed.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { Anchor } from '@shared/anchor/anchor'; // E3
 import { CONSENT, NOT_SENT, PENDING_CAPTION, STEERED_CAPTION } from '../../model/copy';
-import type { Attachment, Row } from '../../model/rows';
+import type { Attachment, Row, UserComment } from '../../model/rows';
 import { copiedUserText, placeholdersOf } from '../../model/user-text';
 import { useActions, useDisclosure, useTranscriptContext } from '../context';
 // E4d start
@@ -71,7 +73,8 @@ function UserBubble({ row }: { row: UserRowData }) {
   const [open, toggle] = useDisclosure(`bubble:${row.id}`);
   const content = useRef<HTMLDivElement>(null);
   const [overflows, setOverflows] = useState(false);
-  const files = row.attachments.filter((a) => a.kind !== 'text');
+  const claimed = new Set(row.comments?.flatMap((comment) => (comment.attachment === undefined ? [] : [comment.attachment]))); // UX wave U5a
+  const files = row.attachments.filter((a, i) => a.kind !== 'text' && !claimed.has(i));
   // P2-F L121: the mount's own mark (the card's "Sent to Claude") stands where no caption already says the row's state
   const caption = row.pending ? PENDING_CAPTION[row.pending] : row.steer ? STEERED_CAPTION : row.dropped ? null : (actions.userRowMark?.(row) ?? null);
   const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
@@ -96,7 +99,8 @@ function UserBubble({ row }: { row: UserRowData }) {
         <div ref={content} className="transcript-user-content" data-user-content="">
           <div>
             {row.anchor && <AnchorChip anchor={row.anchor} /> /* E3 */}
-            {segmentsOf(row).map((segment, i) =>
+            {row.comments?.map((comment, i) => <CommentParts key={`comment-${i}`} comment={comment} image={comment.attachment === undefined ? undefined : row.attachments[comment.attachment]} />) /* UX wave U5a */}
+            {!row.comments && segmentsOf(row).map((segment, i) =>
               segment.kind === 'text' ? (
                 <Markdown key={i} markdown={segment.text} live={false} />
               ) : (
@@ -148,6 +152,28 @@ function UserBubble({ row }: { row: UserRowData }) {
         </div>
       )}
     </section>
+  );
+}
+
+// UX wave U5a (decision 13): one comment of several, as the bubble's direct children so they keep its spacing: its chip,
+// its text, and the screenshot paired with it (drawn as the attachments below draw an image).
+function CommentParts({ comment, image }: { comment: UserComment; image: Attachment | undefined }) {
+  return (
+    <>
+      <AnchorChip anchor={comment.anchor} />
+      {comment.text.trim().length > 0 && <Markdown markdown={comment.text} live={false} />}
+      {image && (
+        <div className="transcript-attachments">
+          {image.dataUrl ? (
+            <img className="transcript-attachment-image" src={image.dataUrl} alt={image.name} />
+          ) : (
+            <span className="transcript-chip" data-chip="file" title={image.mediaType ?? undefined}>
+              {image.name}
+            </span>
+          )}
+        </div>
+      )}
+    </>
   );
 }
 

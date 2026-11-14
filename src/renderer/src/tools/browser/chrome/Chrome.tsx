@@ -33,6 +33,7 @@ import { NavRow } from './NavRow';
 import { Notices } from './Notices';
 import { TabStrip } from './TabStrip';
 import { ZoomBanner } from './ZoomBanner';
+import type { Room } from '../viewport'; // U12a
 
 export interface ChromeProps {
   appSessionId: AppSessionId;
@@ -40,6 +41,7 @@ export interface ChromeProps {
   tab: BrowserTab | null; // the tab the pane shows; null for the empty state
   tabs: BrowserTab[]; // the session's tabs, in main's order
   owns?: boolean; // this surface's pane holds the page's view, so main's chrome commands are this chrome's
+  room?: Room | null; // U12a: that pane's page box, the room a device size has to fit; none: no size is offered
   agent?: ReactNode; // P5 O17 M10: the agent's tabs on another machine's session, in the strip after the person's
   onLocal?(): void; // P5 O17 M10: a chip of the person's (or "+") was chosen
 }
@@ -49,7 +51,7 @@ type Finding = { tabId: string; focus: number };
 // The find bar opened for a tab, or asked for again while open (its input takes the keyboard back).
 const findOpened = (tabId: string) => (open: Finding | null) => ({ tabId, focus: (open?.tabId === tabId ? open.focus : 0) + 1 });
 
-export function Chrome({ appSessionId, surface, tab, tabs, owns = false, agent, onLocal }: ChromeProps) {
+export function Chrome({ appSessionId, surface, tab, tabs, owns = false, room = null, agent, onLocal }: ChromeProps) {
   const addressRef = useRef<HTMLInputElement>(null);
   const [finding, setFinding] = useState<Finding | null>(null); // the open find bar
   const tabId = tab?.tabId ?? null;
@@ -80,7 +82,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false, agent, 
     if (tabId === null) return;
     return onExtensionReveal(({ tabId: from, show }) => {
       if (from !== tabId) return;
-      if (show.kind === 'settings') return useLayout.getState().openTab({ kind: 'settings', section: 'browser' });
+      if (show.kind === 'settings') return useLayout.getState().openSettings('browser'); // UX wave U7b: the Settings dialog
       if (show.kind !== 'tab') return; // a replacement never reaches here (`connectBrowser`)
       tabOpened(show.tab);
       if (surface === 'main') openMainTab(appSessionId, show.tab.tabId);
@@ -97,7 +99,7 @@ export function Chrome({ appSessionId, surface, tab, tabs, owns = false, agent, 
   return (
     <div data-browser-chrome="" onKeyDown={onKeyDown} className="relative z-10 flex shrink-0 flex-col border-b border-border bg-bg-raised has-[[data-address-suggestions]]:z-30">
       <TabStrip appSessionId={appSessionId} surface={surface} tabs={tabs} shownId={tabId} trailing={owns ? <ChromePill surface={surface} /> : null} agent={agent} onLocal={onLocal} />
-      <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} onFind={openFind} />
+      <NavRow appSessionId={appSessionId} surface={surface} tab={tab} addressRef={addressRef} owns={owns} room={room} onFind={openFind} />
       {tab?.control === 'human' && <ControlSlot tab={tab} />}
       {tab && tab.partition !== DEFAULT_PARTITION && <BookmarksBar tab={tab} /> /* cua #90 */}
       {tab && tab.zoom !== 1 && <ZoomBanner tab={tab} owns={owns} />}

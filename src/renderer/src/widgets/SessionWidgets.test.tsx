@@ -5,7 +5,8 @@ import { join } from 'node:path';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
+import type { OrgKey } from '@shared/machine/org-key';
 import { ProjectRecordSchema, type SessionDigest } from '@shared/ipc/schema';
 import { EngineSessionStatusSchema } from '@shared/engine/status';
 import { SessionRecordSchema } from '@shared/graph/session';
@@ -13,10 +14,11 @@ import { compileAddressing } from '@shared/machine/address';
 import { loadScenario, ScenarioDigestSchema } from '../../../../test/support/scenario';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { remoteRow } from '../../../../test/support/builders';
+import { record, remoteRow } from '../../../../test/support/builders';
+import { EMPTY_REGISTRY, type OrgProjects } from '../stores/registry';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { registerSessionAction } from '../app/session-actions';
+import { useMachines } from '../stores/machines';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { RenameWidget } from './RenameWidget';
@@ -90,11 +92,12 @@ describe('rename widget', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Settings probe, renamed'));
   });
 
-  // P5 O7 M8 ("The offer audit and its contract"): `session.rename` is declared not offered on another machine
-  // (REMOTE_UNAVAILABLE): nothing is asked, no dialog opens, and the field and Rename are greyed with the declared words
-  // (a lane A session there too: its adapter takes only laneA.*)
-  it.each(['B', 'A'] as const)('for a lane %s session on another machine, renames nothing and opens no dialog: Rename greyed with the declared reason', async (lane) => {
+  // P5 O7 M8 declared `session.rename` not offered on another machine; the UX wave, U9 (M1, M4) offers it behind
+  // `rl2.session-acts`: on a machine whose build doesn't list it, nothing is asked, no dialog opens, and the field and
+  // Rename are greyed with the update sentence (A14) (a lane A session there too: the helper reads the machine)
+  it.each(['B', 'A'] as const)('for a lane %s session on a machine that doesn’t serve the acts, renames nothing and opens no dialog: Rename greyed with the update sentence', async (lane) => {
     const remote = addressOf(OTHER_MACHINE, READY_ID);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities: ['rl2.project-acts'], owner: true }]);
     useSessions.setState({ records: new Map(useSessions.getState().records).set(remote, { ...useSessions.getState().records.get(READY)!, appId: remote }), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, READY_ID, { lane }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
     const dialog = vi.fn();
     const off = registerSessionAction('rename', dialog);
@@ -102,7 +105,7 @@ describe('rename widget', () => {
       mount(RenameWidget, remote, 'Over there');
       mount(RenameWidget, remote);
       expect(dialog).not.toHaveBeenCalled();
-      const words = REMOTE_UNAVAILABLE['session.rename']!;
+      const words = 'Can’t rename on Studio yet. Update MAWS on Studio and try again.';
       expect(screen.getAllByRole('status').map((s) => s.textContent)).toEqual([words, words]);
       const rename = screen.getByRole('button', { name: 'Rename' });
       expect(rename).toHaveProperty('disabled', true);
@@ -113,6 +116,7 @@ describe('rename widget', () => {
     } finally {
       off();
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+      useMachines.setState({ roster: 'unread', machines: new Map() });
     }
   });
 });
@@ -159,6 +163,33 @@ describe('resume widget', () => {
     fireEvent.keyDown(search, { key: 'Enter', metaKey: true });
     expect(openTab).toHaveBeenCalledWith({ kind: 'session', appSessionId: at('app-bdb23713') });
     useLayout.setState({ openSession: layout.openSession, openTab: layout.openTab });
+  });
+
+  // ticket 644: `/resume` on another machine's session opens on the row the sidebar files it under, by its listing, though
+  // the registry places its project on that machine, so it lists the sessions that row holds
+  it('opens on the row the sidebar files another machine’s session under, by its listing, though the registry knows its project', () => {
+    const ID = '11111111-2222-4333-8444-555555555555';
+    const KEY = 'remote:example.org/app' as OrgKey;
+    const registry: OrgProjects = {
+      ...EMPTY_REGISTRY,
+      projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [{ machine: OTHER_MACHINE, pid: 'app', path: '/srv/app', key: KEY, name: 'app', source: 'remote', acts: true }] }],
+      keys: { [ID]: KEY },
+    };
+    const [b1, b2] = ['b1', 'b2'].map((id) => addressOf(OTHER_MACHINE, id) as AppSessionId);
+    const held = (appId: AppSessionId, text: string) => record(appId, { projectId: addressOf(OTHER_MACHINE, 'app') as ProjectId, title: { text, source: 'user' } });
+    useSessions.getState().applyRegistry(registry, TEST_MACHINE);
+    useSessions.setState({
+      records: new Map([[b1, held(b1, 'First on B')], [b2, held(b2, 'Second on B')]]),
+      listed: new Map([[b1, 'b1'], [b2, 'b2']].map(([appId, bare]) => [appId as AppSessionId, { ...remoteRow(OTHER_MACHINE, bare), appId: appId as AppSessionId }])),
+    });
+    try {
+      mount(ResumeWidget, b1);
+      expect(screen.getByTestId('resume-scope').textContent, 'its machine’s row').toBe(OTHER_MACHINE);
+      expect(screen.queryAllByRole('option').map((o) => o.querySelector('[data-title]')!.textContent)).toEqual(['Second on B']);
+    } finally {
+      useSessions.setState({ listed: new Map() });
+      useSessions.getState().applyRegistry(EMPTY_REGISTRY, TEST_MACHINE);
+    }
   });
 
   it('a session without a project opens on every project', () => {

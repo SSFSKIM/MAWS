@@ -20,7 +20,7 @@ import { A, B, DIR, OTHER_TOKEN, planOf, refusal, statusOf, TOKEN } from '../../
 import { REVIEW_SCOPE_BYTES_CAP, splitPatch } from '../code/review/review-model';
 import { prStateKey, scmStatusKey } from './queries';
 import { connectScmRunEnds, createScmStore, diffOf, fileDiffOf, SCM_REFRESH_MS, type ScmDiffTarget } from './store';
-import { createScmUi, forSession } from './view-state';
+import { createScmUi, forFolder, forSession } from './view-state';
 
 const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
 // The renderer's validating client over the fake, so every answer and event the cases script is held to its schema.
@@ -455,6 +455,45 @@ describe('source control store applies no status of its own and resumes a run fr
     expect(ui.getState().notice).toBeNull();
   });
 
+  // UX wave U8c-2 (fix wave 1): an answer is for the folder it was asked in as well. A stage asked in the launch folder
+  // and refused after the agent moved writes nothing on the page that now shows the worktree.
+  it('applies an answer only to the working folder it was asked in', async () => {
+    let release!: () => void;
+    const main = scmMain(async (name) => {
+      if (name !== 'scm.stage') return ok();
+      await new Promise<void>((resolve) => (release = resolve));
+      return ok(refusal('git_failed', 'index.lock exists', 'fatal: Unable to create index.lock\n'));
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A), directory: DIR });
+    const done = store.getState().stage(ui, at(A), DIR, ['a.ts']);
+    await tick();
+    ui.setState(forFolder(ui.getState(), `${DIR}/.claude/worktrees/w1`));
+    release();
+    await done;
+    expect(ui.getState().notice).toBeNull();
+  });
+
+  // The commit's draft is the session's, wherever the page is: a commit that lands after a move clears the draft it took
+  // and Skip hooks, and records no last commit on the page of the folder the agent is in now.
+  it('clears the committed draft when the commit lands after a move, and records its commit on no other folder’s page', async () => {
+    let release!: () => void;
+    const main = scmMain(async (name) => {
+      if (name !== 'scm.commit') return ok();
+      await new Promise<void>((resolve) => (release = resolve));
+      return ok(committed);
+    });
+    const store = createScmStore(validated(main.bridge));
+    const ui = createScmUi({ session: at(A), directory: DIR });
+    ui.setState({ message: 'Fix', noVerify: true });
+    const done = store.getState().commit(ui, at(A));
+    await tick();
+    ui.setState(forFolder(ui.getState(), `${DIR}/.claude/worktrees/w1`));
+    release();
+    await done;
+    expect(ui.getState()).toMatchObject({ message: '', noVerify: false, lastCommit: null, notice: null });
+  });
+
   const out = (seq: number, text: string, token = TOKEN): ScmRemoteOutput => ({ appSessionId: A, token, seq, kind: 'stdout', text });
   const exit = (seq: number, exitCode: number, token = TOKEN): ScmRemoteOutput => ({ appSessionId: A, token, seq, kind: 'exit', exitCode, signal: null });
   const snapshot = (over: Record<string, unknown> = {}) => ({
@@ -525,6 +564,37 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
   });
 
+  // The branch review (finding 6): on the page of a folder that is not the session's launch folder (no act runs there,
+  // so no run of the session does), an event is taken only for the run that checkout's snapshot named.
+  it('takes no event of the session by its id alone where its own runs do not run, before the snapshot or after it', async () => {
+    let answer!: (value: unknown) => void;
+    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(at(A), { ownRuns: false });
+    await tick();
+    main.emit('scm.remote.output', out(4, 'the launch folder’s push\n')); // before the snapshot answers
+    answer(null);
+    await tick();
+    expect(store.getState().runs.get(at(A))).toBeNull();
+    main.emit('scm.remote.output', out(5, 'still the launch folder’s\n')); // after it
+    expect(store.getState().runs.get(at(A))).toBeNull();
+    release();
+  });
+
+  it('follows the run its checkout’s snapshot named where the session’s own runs do not run', async () => {
+    const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(at(A), { ownRuns: false }); // the checkout's latest run is another session's
+    await tick();
+    main.emit('scm.remote.output', { ...out(4, 'four\n'), appSessionId: B });
+    main.emit('scm.remote.output', out(1, 'the launch folder’s\n', OTHER_TOKEN));
+    main.emit('scm.remote.output', { ...exit(5, 0), appSessionId: B });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false });
+    main.emit('scm.remote.output', out(1, 'the launch folder’s next\n', OTHER_TOKEN)); // the held run ended: still not this checkout's
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, seq: 5 });
+    release();
+  });
+
   it('follows the run it holds from another session on the same checkout, and nothing else of that session', async () => {
     const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
     const store = createScmStore(validated(main.bridge));
@@ -544,8 +614,8 @@ describe('source control store applies no status of its own and resumes a run fr
   it('reads every PR state again when any run ends, mounted or not; output chunks and a disconnected listener do not', async () => {
     const main = scmMain();
     const client = validated(main.bridge);
-    const prA = prStateKey(at(A));
-    const prB = prStateKey(at(B));
+    const prA = prStateKey(at(A), DIR);
+    const prB = prStateKey(at(B), '/repo-b');
     const statusA = scmStatusKey(at(A));
     queryClient.clear();
     for (const key of [prA, prB, statusA]) queryClient.setQueryData(key, {});

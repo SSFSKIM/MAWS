@@ -1,6 +1,6 @@
 // C8b's agent tools end to end (C8b execution document, acceptance item 3), run by `pnpm e2e:agents` over the harness
 // build: the `#panel` page under the harness scenario (main knows sessions A and B, so `layout.set` takes their panel
-// keys), with C8b's block installed: the real Subagents, Background work and Log tools, the fake agent-work client whose
+// keys), with C8b's block installed: the real Subagents, Background tasks and Log tools, the fake agent-work client whose
 // wire half `agents.feed` binds to the loaded fixture's player, and the column's transcript with the real hand-offs.
 // Every frame a case reacts to is in a fixture file (a recorded journal, or a derived one with a recorded pass-3 tail)
 // and released through `panel.transcript('A').release(n)` with counts the fixture measures, never guessed. Every case
@@ -23,7 +23,7 @@ import { addressed } from './support/address';
 import { REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { otherThemeColours } from './support/panel-support';
-import { hideSurfaces, openSurface, showSessionCards, surface } from './support/shell';
+import { hideSurfaces, openSurface, sessionCard, sessionCards, showSessionCards, sideColumn, surface } from './support/shell';
 
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' };
@@ -38,6 +38,25 @@ const listed = (taskId: string, taskType: string, description: string) => ({ tas
 const WORKFLOW = listed(AGENTS_STOP_WORKFLOW_TAIL.taskId, 'local_workflow', 'Two echo agents in one phase');
 const SHELL = listed(AGENTS_STOP_SHELL_TAIL.taskId, 'local_bash', 'Sleep 30s then write BG_DONE to bg.txt');
 const OPEN_TURN: EngineSessionStatus['turn'] = { id: 'harness-turn' as never, origin: 'human', startedAt: '2026-09-29T10:00:00.000Z', acceptedAt: '2026-09-29T10:00:00.000Z', userMessageUuids: [] };
+// The UX wave's U8b start: a task a subagent started, as the engine's background list names it while it runs (its
+// `parent_task_id`, which the U8 probe recorded on every shell and monitor a subagent started); the process's exit, which
+// ends what still runs ("ended with the session"); pass3/stop-task's three tasks, each stopped in the recording.
+const startedBy = (starter: string, taskId: string, description: string): BackgroundTask => ({ ...listed(taskId, 'local_bash', description), parentTaskId: starter as BackgroundTask['parentTaskId'] });
+const exitAt = (at: string): Partial<EngineSessionStatus> => ({ process: 'exited', exit: { code: 0, signal: null, reason: 'unknown', at, release: null }, backgroundTasks: [] });
+const SIBLING = listed('e2e-sibling-agent', 'local_agent', 'A sibling the main loop dispatched');
+const STOP_TASK = { shell: 'ba3cr5gnx', agent: 'ac2bd8a00d8e492f4', workflow: 'wkmzd07jp' };
+// The card column: the record's three cards, above the two for running work; the cards by title in order (the column's
+// scrolling list); the three's boxes, read once the Environment card's own read has answered (a read that lands redraws
+// the card, which is no move a card below it made). Session A's directory is no repository, so git's answer says so in
+// the card's heading and no push or pull request row follows it.
+const ABOVE = ['Environment', 'Context', 'Connectors'] as const;
+const cardTitles = (page: Page) => sessionCards(page).locator('div[aria-label="Session cards"] > section').evaluateAll((cards) => cards.map((card) => card.getAttribute('aria-label')));
+const boxesOf = (page: Page) => Promise.all(ABOVE.map((name) => sessionCard(page, name).boundingBox()));
+async function settledBoxes(page: Page): Promise<Awaited<ReturnType<typeof boxesOf>>> {
+  await expect(sessionCard(page, 'Environment').locator('h3'), 'the Environment card’s git read has answered').toHaveText(/Not a git repository|Git unavailable/);
+  return boxesOf(page);
+}
+// The UX wave's U8b end
 
 type HarnessWindow = { __maws_harness?: { page?: string; panel?: PanelHarnessApi; agents?: AgentsHarnessApi } };
 type Fn<T> = { [M in keyof T]: T[M] extends (...args: never[]) => unknown ? M : never }[keyof T];
@@ -79,14 +98,21 @@ class Harness {
   background = () => this.agents('background');
   log = () => this.agents('log');
   drillIn = async () => (await this.subagents())?.drillIn ?? null;
-  // E7: the tree's Done section is collapsed by default; this opens it (once it is listed) unless it is open already.
-  async expandDone(): Promise<void> {
-    const toggle = this.region.locator('section[data-section="done"] > h3 button');
-    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await toggle.click();
+  // A panel's section unfolded (once it is listed) unless it is open already: Done (E7, and the UX wave's U8b for
+  // Background tasks) and On disk (U8b) are folded at first.
+  async unfold(tool: 'subagents' | 'background', section: string): Promise<void> {
+    const toggle = surface(this.page, tool).locator(`section[data-section="${section}"] h3 > button`);
+    if ((await toggle.getAttribute('aria-expanded')) !== 'true') await this.agents('toggleSection', tool, section);
+  }
+  expandDone = () => this.unfold('subagents', 'done');
+  // The UX wave's U8b: what is under a Subagents row shown (its disclosure, `(+N)` and the arrow) unless it is already.
+  async openUnder(agentId: string): Promise<void> {
+    const disclosure = surface(this.page, 'subagents').locator(`[data-agent-row="${agentId}"] > [data-part="under"]`);
+    if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await this.agents('toggleUnder', agentId);
   }
   // Show the real surface, returning from a drill-in through its own Back control when needed.
   async open(toolId: 'subagents' | 'background'): Promise<void> {
-    const name = toolId === 'subagents' ? 'Subagents' : 'Background work';
+    const name = toolId === 'subagents' ? 'Subagents' : 'Background tasks';
     await hideSurfaces(this.page);
     await openSurface(this.page, name);
     const back = surface(this.page, toolId).getByRole('button', { name: `‹ ${name}`, exact: true });
@@ -110,7 +136,7 @@ test.describe('the #panel harness: the agent tools', () => {
   test.use({ mawsEnv: HARNESS_ENV });
   test.beforeAll(() => mkdirSync(DIR_A, { recursive: true }));
 
-  test('two agents show under Agents and move to Done', async ({ maws }) => {
+  test('two agents show under Running and move to Done', async ({ maws }) => {
     test.setTimeout(120_000); // one wait of up to a minute: replayed starts are hours old, so the count moves by the minute
     const h = await Harness.open(maws);
     await h.load('A', 'pass1/subagent', { releaseTo: PASS1.firstStart });
@@ -119,7 +145,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.subagents())?.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, elapsed: 'elapsed unavailable' })]);
 
     await h.agents('releaseThrough', 'A', PASS1.secondStart);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 2 running']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Running 2']);
     const active = (await h.subagents())!.agents;
     expect(titles(active)).toEqual([FIRST.title, SECOND.title]);
     for (const row of active) expect(row.elapsed, `${row.title}: a live count`).toMatch(/^(\d+h \d{2}m|\d+m \d{2}s|\d+s)$/);
@@ -128,11 +154,12 @@ test.describe('the #panel harness: the agent tools', () => {
     await expect.poll(async () => (await h.subagents())?.agents[0]?.elapsed, { timeout: 65_000, intervals: [1_000] }).not.toBe(before);
 
     await h.agents('releaseThrough', 'A', PASS1.firstFinish);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 1 running', 'Done · 1']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Running 1', 'Done 1']);
+    expect((await h.subagents())!.done, 'Done is folded at first').toEqual([]);
     await h.expandDone();
     expect((await h.subagents())!.done).toEqual([expect.objectContaining({ title: FIRST.title, status: 'completed', line: expect.stringMatching(/^finished · .+ · ONE$/) })]);
     await h.agents('releaseThrough', 'A', PASS1.secondFinish);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 2']);
     const done = (await h.subagents())!.done;
     expect(done.map((row) => row.line)).toEqual([expect.stringMatching(/^finished · .+ · TWO$/), expect.stringMatching(/^finished · .+ · ONE$/)]); // newest end first
     h.expectQuietConsole();
@@ -143,7 +170,7 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.panel('loadTranscript', 'A', 'pass1/subagent'); // everything released at load
     await h.agents('feed', 'A', 'pass1/subagent');
     await h.open('subagents');
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 2']);
     await h.expandDone();
     expect(titles((await h.subagents())!.done)).toEqual([SECOND.title, FIRST.title]);
     h.expectQuietConsole();
@@ -191,7 +218,7 @@ test.describe('the #panel harness: the agent tools', () => {
     for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
     await h.open('subagents');
     await expect.poll(async () => (await h.subagents())?.agents.find((row) => row.agentId === FIRST.agentId)?.waiting, 'the row waits on its approval').toBe(true);
-    expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line).toMatch(/^Approval needed · /);
+    expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line, 'the row says it, in place of its state').toBe('Approval needed');
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.requestCards).toBe(1);
     const card = h.region.locator('[data-view="agent"] [data-request-card]');
@@ -266,6 +293,9 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.load('A', 'pass3/nested-agents');
     await h.open('subagents');
     await h.expandDone(); // both finished: the tree lists them under Done (E7)
+    // The UX wave's U8b: Done lists the first-level agent; its row's disclosure shows the inner one beneath it.
+    await expect.poll(rows, 'the first level alone until its row is opened').toEqual(nested.slice(0, 1));
+    await h.openUnder(nested[0].agentId);
     // R5 promoted live nesting: from the wire alone (the inner start's issuing Agent call), before any sidecar is read.
     await expect.poll(rows, 'nested from the wire').toEqual(nested);
     await h.agents('fixtureFs', 'nested-agents-sidecars');
@@ -348,6 +378,17 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('patchStatus', 'A', { backgroundTasks: [ghost] }); // a snapshot-born node
     await h.open('background');
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId)).toEqual([ghost.taskId]);
+    // The UX wave's U8b (the branch review's finding 7): at the column's 280 px minimum the untimed shell's state text stays
+    // inside its row's line, clear of the Output and Stop buttons.
+    await h.panel('setWidth', 280);
+    await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), 'the column at 280 px').toBe(280);
+    const row = surface(h.page, 'background').locator(`[data-shell="${ghost.taskId}"]`);
+    await expect(row.locator('[data-part="state"]')).toHaveText(/· running · elapsed unavailable$/);
+    const state = (await row.locator('[data-part="state"]').boundingBox())!;
+    for (const name of ['Output', 'Stop']) {
+      const button = (await row.getByRole('button', { name, exact: true }).boundingBox())!;
+      expect(state.x + state.width <= button.x || button.x + button.width <= state.x, `the state text clear of ${name}`).toBe(true);
+    }
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
     // A snapshot's silence never removes a node: the ghost stays until the stop resolves.
     await expect.poll(async () => (await h.background())?.shells.map((s) => s.taskId), 'kept after the status drops it').toEqual([ghost.taskId]);
@@ -394,6 +435,9 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('patchStatus', 'A', { backgroundTasks: [] });
     await h.release(AGENTS_STOP_SHELL_TAIL.batches[1]);
     await h.release(AGENTS_STOP_SHELL_TAIL.batches[2]);
+    // The UX wave's U8b: an ended task is under Done, folded at first.
+    await expect.poll(async () => (await h.background())?.headings).toEqual(['Done 1 · 1 shell']);
+    await h.unfold('background', 'done');
     await expect.poll(async () => (await h.background())?.shells[0]?.line).toMatch(new RegExp(`^${SHELL.description} · stopped `));
     h.expectQuietConsole();
   });
@@ -409,7 +453,8 @@ test.describe('the #panel harness: the agent tools', () => {
     const [first] = await logs();
     await showSessionCards(h.page);
     await h.agents('clickTranscriptFullLog', 1);
-    await expect(surface(h.page, 'log').locator(`[data-tab-id="${first.id}"]`).getByRole('tab'), 'the same tab, selected').toHaveAttribute('aria-selected', 'true');
+    await expect(surface(h.page, 'log'), 'the Log in view').toBeVisible();
+    await expect(sideColumn(h.page).locator(`[data-side-strip] [data-tab-id="${first.id}"]`).getByRole('tab'), 'the same tab, selected').toHaveAttribute('aria-selected', 'true');
     expect(await logs()).toHaveLength(1);
 
     const reads = (await h.agents('calls')).readSpill.length;
@@ -454,7 +499,8 @@ test.describe('the #panel harness: the agent tools', () => {
     await showSessionCards(h.page);
     await h.open('background');
     await h.agents('output', AGENTS_STOP_SHELL_TAIL.taskId);
-    await expect(surface(h.page, 'log').locator(`[data-tab-id="${fresh}"]`).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
+    await expect(surface(h.page, 'log'), 'the Log in view').toBeVisible();
+    await expect(sideColumn(h.page).locator(`[data-side-strip] [data-tab-id="${fresh}"]`).getByRole('tab')).toHaveAttribute('aria-selected', 'true');
     await h.panel('switchSession', 'B');
     await h.panel('switchSession', 'A');
     expect((await h.tabs()).map((tab) => tab.id)).toContain(fresh);
@@ -472,15 +518,18 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.open('background');
     const tasks = async () => (await h.background())?.tasks;
 
+    // The UX wave's U8b (M7 decision 3): headed `Tasks`, drawn only while the list holds a task; the sentences for a list
+    // not known yet are the Tasks panel's alone.
     await h.agents('patchStatus', 'A', { taskListId: 'sess-1' });
-    await expect.poll(tasks).toEqual({ heading: 'Tasks · 4/7', label: null, rows: ['Working on task 5', 'Task 6', 'Task 7'], earlier: 4, unavailable: null });
+    await expect.poll(tasks).toEqual({ heading: 'Tasks', label: null, rows: ['Working on task 5', 'Task 6', 'Task 7'], earlier: 4, unavailable: null });
     await h.agents('patchStatus', 'A', { taskListId: 'team-list' });
-    await expect.poll(tasks).toMatchObject({ heading: 'Tasks · 1/2', rows: ['Task 2'], earlier: 1 });
+    await expect.poll(tasks).toMatchObject({ heading: 'Tasks', rows: ['Task 2'], earlier: 1 });
     await h.agents('patchStatus', 'A', { taskListId: null });
-    await expect.poll(tasks).toMatchObject({ heading: 'Tasks', rows: [], unavailable: 'Tasks unavailable until the engine reports its list' });
+    await expect.poll(tasks, 'no list known: no Tasks section').toEqual({ heading: '', label: null, rows: [], earlier: 0, unavailable: null });
+    expect((await h.background())!.notes, 'and no line about it').not.toContain('Tasks unavailable until the engine reports its list');
     await h.panel('setStatus', 'A', null);
     await h.panel('setSession', 'A', { engineSessionId: 'sess-1' as never });
-    await expect.poll(tasks).toMatchObject({ heading: 'Tasks · 4/7', label: 'session list' });
+    await expect.poll(tasks).toMatchObject({ heading: 'Tasks', label: 'session list', rows: ['Working on task 5', 'Task 6', 'Task 7'] });
     expect(existsSync(join(homedir(), '.claude', 'tasks', 'sess-1')), 'the real task store is never read or written').toBe(false);
     h.expectQuietConsole();
   });
@@ -492,21 +541,25 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.agents('fixtureFs', 'subagent-sidecars');
     await h.agents('fixtureFs', 'workflow-disk');
     await h.open('subagents');
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['On disk · 2']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['On disk 2']);
     const lists = (await h.subagents())!;
     expect(lists.notes).toContain('Status is known only while the session runs here');
-    expect(lists.disk.map((row) => [row.agentId, row.line])).toEqual([
+    expect(lists.disk, 'On disk is folded at first (the UX wave\'s U8b)').toEqual([]);
+    await h.unfold('subagents', 'disk');
+    await expect.poll(async () => (await h.subagents())?.disk.map((row) => [row.agentId, row.line])).toEqual([
       [FIRST.agentId, 'status unavailable'],
       [SECOND.agentId, 'status unavailable'],
     ]);
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.relay.disabled).toBe('Known only from disk');
 
+    // The UX wave's U8b (M7 decision 2): the past run is under Done, the shells' note at the top, nothing running.
     await h.open('background');
-    await expect.poll(async () => (await h.background())?.headings).toContain('Workflow runs on disk · 1');
+    await expect.poll(async () => (await h.background())?.headings).toEqual(['Done 1 · 1 workflow']);
+    expect((await h.background())!.notes).toEqual(['Shells and monitors are known only while the session runs here', 'Nothing running']);
+    await h.unfold('background', 'done');
+    await expect.poll(async () => (await h.background())?.workflows).toEqual([expect.objectContaining({ status: 'completed', summary: 'Done' })]);
     const view = (await h.background())!;
-    expect(view.notes).toContain('Shells and monitors are known only while the session runs here');
-    expect(view.workflows).toEqual([expect.objectContaining({ status: 'completed', summary: 'Done' })]);
     // E7: the run's widget lists the agents the card's table did, each opening its sidecar transcript.
     await surface(h.page, 'background').locator(`[data-workflow="${view.workflows[0].taskId}"] h4 button`).click();
     await expect.poll(async () => (await h.agents('widget'))?.agents.map((row) => [row.label, row.openable])).toEqual([
@@ -521,10 +574,10 @@ test.describe('the #panel harness: the agent tools', () => {
     await h.load('A', 'pass1/subagent', { releaseTo: PASS1.firstStart });
     await h.open('subagents');
     await h.agents('releaseThrough', 'A', PASS1.secondStart);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Agents · 2 running']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Running 2']);
     await expect.poll(async () => (await h.subagents())?.agents).toHaveLength(2);
     await h.agents('releaseThrough', 'A', PASS1.secondFinish);
-    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done · 2']);
+    await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 2']);
     await h.expandDone();
     expect((await h.subagents())!.agents).toEqual([]);
     expect((await h.subagents())!.done).toHaveLength(2);
@@ -538,12 +591,177 @@ test.describe('the #panel harness: the agent tools', () => {
     h.expectQuietConsole();
   });
 
+  // The UX wave's U8b start (its execution document, M7 and M8; the child's A2, A4 and A7): the two panels by state and the
+  // card column's two cards for running work, over the harness.
+
+  // A4. pass3/stop-task's recorded session stopped a background shell, an agent and a workflow; the engine's background
+  // list then names a shell and a monitor while they run, which the process's exit ends, and a shell that still runs.
+  test('A4: Background tasks reads Running with the running shell on top and one folded Done counted by kind, then Nothing running', async ({ maws }) => {
+    const h = await Harness.open(maws);
+    await h.load('A', 'pass3/stop-task');
+    await test.step('the Subagents panel: the stopped agent under a folded Done that names its outcome', async () => {
+      await h.open('subagents');
+      await expect.poll(async () => (await h.subagents())?.headings).toEqual(['Done 1 · 1 stopped']);
+      expect((await h.subagents())!.done, 'Done is folded at first').toEqual([]);
+      await h.expandDone();
+      await expect.poll(async () => (await h.subagents())?.done.map((row) => [row.agentId, row.line])).toEqual([[STOP_TASK.agent, expect.stringMatching(/^stopped · /)]]);
+    });
+    const ended = [listed('e2e-shell-ended', 'local_bash', 'A shell the exit ends'), listed('e2e-monitor-ended', 'monitor', 'A monitor the exit ends')];
+    const running = listed('e2e-shell-running', 'local_bash', 'A shell still running');
+    await h.agents('patchStatus', 'A', { backgroundTasks: ended });
+    await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z'));
+    await h.agents('patchStatus', 'A', { process: 'ready', exit: null, backgroundTasks: [running] });
+    await h.open('background');
+    const view = () => h.background();
+    const aboutLists = (notes: string[]) => notes.filter((note) => /task lists|Tasks unavailable|Nothing running/.test(note));
+    await expect.poll(async () => (await view())?.headings, 'no heading reads 0 running').toEqual(['Running 1', 'Done 4 · 1 workflow · 2 shells · 1 monitor']);
+    let shown = (await view())!;
+    expect(shown.shells.map((row) => [row.taskId, row.line])).toEqual([[running.taskId, expect.stringMatching(/^A shell still running · running/)]]);
+    expect(await surface(h.page, 'background').locator('section[data-section] [data-task-id]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-task-id'))), 'the running shell on top, Done folded').toEqual([running.taskId]);
+    expect([shown.workflows, shown.monitors], 'nothing else is drawn while Done is folded').toEqual([[], []]);
+    expect(shown.tasks.heading, 'the session has no task list: no Tasks section').toBe('');
+    expect(aboutLists(shown.notes), 'no line about task lists').toEqual([]);
+
+    await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:05:00.000Z')); // the last one ends with the process
+    await expect.poll(async () => (await view())?.headings).toEqual(['Done 5 · 1 workflow · 3 shells · 1 monitor']);
+    shown = (await view())!;
+    expect(aboutLists(shown.notes)).toEqual(['Nothing running']);
+    expect(shown.shells, 'Done is still folded').toEqual([]);
+    await h.unfold('background', 'done');
+    await expect.poll(async () => (await view())?.shells.map((row) => row.taskId), 'newest end first').toEqual([running.taskId, ended[0].taskId, STOP_TASK.shell]);
+    shown = (await view())!;
+    expect(shown.shells.map((row) => row.line)).toEqual([`${running.description} · ended with the session`, `${ended[0].description} · ended with the session`, expect.stringMatching(/^Sleep then write DONE to bg\.txt · stopped /)]);
+    expect(shown.monitors).toEqual([{ taskId: ended[1].taskId, line: `${ended[1].description} · ended with the session` }]);
+    expect(shown.workflows.map((card) => [card.taskId, card.status])).toEqual([[STOP_TASK.workflow, 'stopped']]);
+    h.expectQuietConsole();
+  });
+
+  // A7 (item 359): an agent whose own run has ended while shells it started still run stays under Running with its
+  // outcome word and how many run, and is under Done once the last of them ends. No agent runs, so no Subagents card;
+  // its shells are rows of the Background tasks card.
+  test('A7: an ended agent kept under Running by its shells reads finished · N background tasks running, then moves to Done', async ({ maws }) => {
+    const h = await Harness.open(maws);
+    await h.load('A', 'pass1/subagent'); // both agents finished
+    await h.open('subagents');
+    const lists = () => h.subagents();
+    await expect.poll(async () => (await lists())?.headings).toEqual(['Done 2']);
+    const shells = [startedBy(FIRST.agentId, 'e2e-under-first-1', 'A shell the first agent started'), startedBy(FIRST.agentId, 'e2e-under-first-2', 'A second shell it started')];
+    await h.agents('patchStatus', 'A', { backgroundTasks: shells.slice(0, 1) });
+    await expect.poll(async () => (await lists())?.headings, 'no agent runs: Running with no number').toEqual(['Running', 'Done 1']);
+    expect((await lists())!.agents).toEqual([expect.objectContaining({ agentId: FIRST.agentId, line: 'finished · 1 background task running', elapsed: '', under: null })]);
+    await h.agents('patchStatus', 'A', { backgroundTasks: shells });
+    await expect.poll(async () => (await lists())?.agents.map((row) => row.line)).toEqual(['finished · 2 background tasks running']);
+
+    await test.step('the column: the Background tasks card lists the two shells, and there is no Subagents card', async () => {
+      await showSessionCards(h.page);
+      const card = sessionCard(h.page, 'Background tasks');
+      await expect(card.locator('h3')).toHaveText('Background tasks 2 running');
+      await expect(card.locator('[data-task-id]')).toHaveCount(2);
+      await expect(sessionCard(h.page, 'Subagents')).toHaveCount(0);
+      await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z')); // the shells end with the process
+      await expect(card, 'the card leaves with the last running task').toHaveCount(0);
+    });
+    await h.open('subagents');
+    await expect.poll(async () => (await lists())?.headings).toEqual(['Done 2']);
+    await h.expandDone();
+    await expect.poll(async () => (await lists())?.done.find((row) => row.agentId === FIRST.agentId)?.line).toMatch(/^finished · .+ · ONE$/);
+    h.expectQuietConsole();
+  });
+
+  // A2, the Background tasks card: drawn last while a task runs, so its coming and going moves nothing above it.
+  test('A2: a running shell draws the Background tasks card last in the column; it leaves when the shell ends and nothing above it moves', async ({ maws }) => {
+    const h = await Harness.open(maws);
+    const { taskId } = AGENTS_STOP_SHELL_TAIL;
+    await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first }); // the shell runs
+    await showSessionCards(h.page);
+    const card = sessionCard(h.page, 'Background tasks');
+    await expect(card.locator('h3')).toHaveText('Background tasks 1 running');
+    await expect(card.locator('[data-task-id]')).toHaveCount(1);
+    await expect(card.locator(`[data-task-id="${taskId}"] [data-part="description"]`)).toHaveText(SHELL.description);
+    await expect(sessionCard(h.page, 'Subagents'), 'no agent runs').toHaveCount(0);
+    expect(await cardTitles(h.page), 'the card stands last').toEqual([...ABOVE, 'Background tasks']);
+
+    await test.step('a press on its row opens the panel at that shell, and the column gives way', async () => {
+      await card.locator(`[data-task-id="${taskId}"]`).click();
+      await expect(surface(h.page, 'background').locator(`[data-shell="${taskId}"]`)).toHaveAttribute('data-selected', 'true');
+      await expect(sessionCards(h.page)).toBeHidden();
+    });
+
+    await showSessionCards(h.page);
+    await expect(card).toBeVisible();
+    const nodes = await Promise.all(ABOVE.map((name) => sessionCard(h.page, name).elementHandle()));
+    const before = await settledBoxes(h.page);
+    for (const n of AGENTS_STOP_SHELL_TAIL.batches) await h.release(n); // the recorded stop's frames: the shell ends
+    await expect(card, 'the card leaves with the shell').toHaveCount(0);
+    expect(await cardTitles(h.page)).toEqual([...ABOVE]);
+    expect(await boxesOf(h.page), 'nothing above it moved').toEqual(before);
+    expect(await Promise.all(nodes.map((node) => node!.evaluate((el) => el.isConnected))), 'the cards above are the same nodes').toEqual([true, true, true]);
+    h.expectQuietConsole();
+  });
+
+  // A2, the Subagents card: two first-level agents, the outer one running the inner one, and a sibling the status lists.
+  test('A2: the Subagents card opens the agent under a row from its (+1), its sibling keeping its place, and a press on a row opens that agent in the panel', async ({ maws }) => {
+    const h = await Harness.open(maws);
+    const { outer, inner } = E7_NESTED_AGENTS;
+    await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
+    await h.agents('patchStatus', 'A', { backgroundTasks: [SIBLING] }); // a second first-level agent, running
+    await showSessionCards(h.page);
+    const card = sessionCard(h.page, 'Subagents');
+    const rowsOf = () => card.locator('[data-agent-row]').evaluateAll((rows) => rows.map((row) => `${(row as HTMLElement).dataset.depth}:${(row as HTMLElement).dataset.agentRow}`));
+    await expect(card.locator('h3'), 'every running agent, the nested one too').toHaveText('Subagents 3 running');
+    await expect(card.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(2);
+    const firstLevel = await rowsOf();
+    expect([...firstLevel].sort(), 'the two roots, each at depth 0').toEqual([`0:${outer}`, `0:${SIBLING.taskId}`].sort());
+    await expect(card.locator(`[data-agent-row="${SIBLING.taskId}"] [data-part="under"]`), 'nothing runs under the sibling').toHaveCount(0);
+    await expect(sessionCard(h.page, 'Background tasks'), 'no background task runs').toHaveCount(0);
+    const outerRow = card.locator(`[data-agent-row="${outer}"]`);
+    const title = await outerRow.locator('[data-part="title"]').innerText();
+    const disclosure = outerRow.locator('[data-part="under"]');
+    await expect(disclosure).toHaveText('(+1)');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+    await expect(disclosure).toHaveAccessibleName(`1 agent running under ${title}`);
+    await outerRow.locator('[data-part="open"]').focus();
+    await h.page.keyboard.press('Tab');
+    await expect(disclosure, 'two keyboard stops, the row first').toBeFocused();
+    await disclosure.click();
+    await expect(card.locator(`[data-agent-row="${inner}"]`), 'the inner agent beneath the row').toHaveAttribute('data-depth', '1');
+    await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+    await expect(disclosure, 'opened: the arrow turned and no count').toHaveText('');
+    await expect(disclosure).toHaveAccessibleName(`Agents under ${title}`);
+    expect(await rowsOf(), 'the inner agent comes in under its row; the sibling keeps its place').toEqual(firstLevel.flatMap((row) => (row === `0:${outer}` ? [row, `1:${inner}`] : [row])));
+
+    await test.step('a press on the nested row opens that agent; the panel shows the same row opened', async () => {
+      await card.locator(`[data-agent-row="${inner}"] > [data-part="open"]`).click();
+      await expect.poll(async () => (await h.drillIn())?.agentId).toBe(inner);
+      await expect(sessionCards(h.page), 'the column gives way').toBeHidden();
+      await h.agents('back');
+      await expect.poll(async () => (await h.agents('tree'))?.filter(({ agentId }) => agentId !== SIBLING.taskId).map(({ agentId, depth, under }) => ({ agentId, depth, under }))).toEqual([
+        { agentId: outer, depth: 0, under: { count: '', expanded: true } },
+        { agentId: inner, depth: 1, under: null },
+      ]);
+      expect((await h.subagents())!.headings, 'the card\'s number').toEqual(['Running 3']);
+    });
+
+    await showSessionCards(h.page);
+    await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.innerFinish);
+    await expect(card.locator('h3')).toHaveText('Subagents 2 running');
+    await expect(card.locator('[data-agent-row]')).toHaveCount(2);
+    await expect(outerRow.locator('[data-part="under"]'), 'no agent runs under it: neither count nor arrow').toHaveCount(0);
+    await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.outerFinish);
+    await expect(card.locator('h3')).toHaveText('Subagents 1 running');
+    expect(await rowsOf(), 'the sibling alone').toEqual([`0:${SIBLING.taskId}`]);
+    await h.agents('patchStatus', 'A', exitAt('2026-10-01T10:00:00.000Z')); // the sibling ends with the process
+    await expect(card, 'the card leaves with the last running agent').toHaveCount(0);
+    h.expectQuietConsole();
+  });
+  // The UX wave's U8b end
+
   test('both themes use tokens only', async ({ maws }) => {
     test.setTimeout(120_000);
     const h = await Harness.open(maws);
     const views: [string, () => Promise<void>][] = [
       [
-        'the lists with a waiting badge',
+        'the lists with an agent whose approval is needed', // the UX wave's U8b: on its row, where the badge was
         async () => {
           await h.load('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
           for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
@@ -558,6 +776,7 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.agents('fixtureFs', 'nested-agents-sidecars');
           await h.open('subagents');
           await h.expandDone(); // E7: both finished, under Done
+          await h.openUnder(E7_NESTED_AGENTS.outer); // the UX wave's U8b: the inner one beneath its row
           await expect.poll(async () => {
             const view = await h.subagents();
             return [...(view?.agents ?? []), ...(view?.done ?? [])].some((row) => row.depth === 1);
@@ -586,7 +805,7 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.open('background');
           await h.agents('stop', WORKFLOW.taskId);
           await expect.poll(async () => (await h.background())?.workflows[0]?.stopping).toBe(true);
-          await expect.poll(async () => (await h.background())?.tasks.heading).toBe('Tasks · 0/1');
+          await expect.poll(async () => (await h.background())?.tasks.rows).toEqual(['Scanning the themes']);
         },
       ],
       [
@@ -623,6 +842,26 @@ test.describe('the #panel harness: the agent tools', () => {
           await h.agents('fakeFs', { spills: { '/private/tmp/claude-501/theme/tasks/theme.output': 'themed output\n'.repeat(200) } });
           await h.panel('addTool', 'log', { params: { path: '/private/tmp/claude-501/theme/tasks/theme.output', title: 'Theme' } });
           await expect.poll(async () => (await h.log())?.pages).toBe(1);
+        },
+      ],
+      // The UX wave's U8b (A2): the card column's two cards for running work.
+      [
+        'the Subagents card with a row opened',
+        async () => {
+          await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
+          await showSessionCards(h.page);
+          const card = sessionCard(h.page, 'Subagents');
+          const disclosure = card.locator(`[data-agent-row="${E7_NESTED_AGENTS.outer}"] > [data-part="under"]`);
+          if ((await disclosure.getAttribute('aria-expanded')) !== 'true') await disclosure.click();
+          await expect(card.locator(`[data-agent-row="${E7_NESTED_AGENTS.inner}"]`)).toBeVisible();
+        },
+      ],
+      [
+        'the Background tasks card',
+        async () => {
+          await h.load('A', 'events/agents-stop-shell', { releaseTo: AGENTS_STOP_SHELL_TAIL.first });
+          await showSessionCards(h.page);
+          await expect(sessionCard(h.page, 'Background tasks').locator('[data-task-id]')).toHaveCount(1);
         },
       ],
     ];
@@ -740,39 +979,45 @@ test.describe('E7: the orchestration views', () => {
     h.expectQuietConsole();
   });
 
-  test('G2: the Subagents tree nests the inner agent, folds it once done, and lists finished roots under Done', async ({ maws }) => {
+  // The UX wave's U8b (M7 decision 4): first-level rows only, a row's `(+N)` and arrow showing what is under it one level
+  // at a time; under an opened parent that runs, its finished children fold into `Done · N` as E7 drew them.
+  test('G2: the Subagents tree opens the inner agent from its parent\'s (+1), folds it once done, and lists the finished root under Done', async ({ maws }) => {
     const h = await Harness.open(maws);
     const { outer, inner } = E7_NESTED_AGENTS;
-    const tree = async () => (await h.agents('tree'))?.map(({ kind, agentId, depth, count, expanded, section }) => ({ kind, agentId, depth, count, expanded, section }));
+    const tree = async () => (await h.agents('tree'))?.map(({ kind, agentId, depth, count, expanded, section, under }) => ({ kind, agentId, depth, count, expanded, section, under }));
+    const row = (agentId: string, depth: number, section: 'running' | 'done', under: { count: string; expanded: boolean } | null) => ({ kind: 'agent', agentId, depth, count: null, expanded: null, section, under });
     await h.load('A', 'pass3/nested-agents', { releaseTo: E7_NESTED_AGENTS.innerStart + 1 });
     await h.open('subagents');
-    await expect.poll(tree, 'running: the inner agent at depth 1 under the outer').toEqual([
-      { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'agents' },
-      { kind: 'agent', agentId: inner, depth: 1, count: null, expanded: null, section: 'agents' },
+    await expect.poll(tree, 'running: the outer agent alone, (+1) for the inner one under it').toEqual([row(outer, 0, 'running', { count: '(+1)', expanded: false })]);
+    expect((await h.subagents())!.headings, 'every running agent, the nested one too').toEqual(['Running 2']);
+    await h.agents('toggleUnder', outer);
+    await expect.poll(tree, 'opened: the inner agent at depth 1, the arrow turned and no count').toEqual([
+      row(outer, 0, 'running', { count: '', expanded: true }),
+      row(inner, 1, 'running', null),
     ]);
-    expect((await h.subagents())!.headings).toEqual(['Agents · 2 running']);
 
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.innerFinish);
     await expect.poll(tree, 'the finished inner agent folds under the running outer').toEqual([
-      { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'agents' },
-      { kind: 'done-fold', agentId: outer, depth: 1, count: 1, expanded: false, section: 'agents' },
+      row(outer, 0, 'running', { count: '', expanded: true }),
+      { kind: 'done-fold', agentId: outer, depth: 1, count: 1, expanded: false, section: 'running', under: null },
     ]);
+    expect((await h.subagents())!.headings).toEqual(['Running 1']);
     await h.agents('setClock', new Date(Date.parse(E7_NESTED_AGENTS.innerFinishAt) + 3_000).toISOString()); // the run's own time
     await h.agents('toggleFold', outer);
     await expect.poll(tree).toEqual([
-      { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'agents' },
-      { kind: 'done-fold', agentId: outer, depth: 1, count: 1, expanded: true, section: 'agents' },
-      { kind: 'agent', agentId: inner, depth: 1, count: null, expanded: null, section: 'agents' },
+      row(outer, 0, 'running', { count: '', expanded: true }),
+      { kind: 'done-fold', agentId: outer, depth: 1, count: 1, expanded: true, section: 'running', under: null },
+      row(inner, 1, 'running', null),
     ]);
     await bothThemes(h, 'g2-tree', h.region);
 
     await h.agents('releaseThrough', 'A', E7_NESTED_AGENTS.outerFinish);
-    await expect.poll(async () => (await h.subagents())?.headings, 'both finished: one root under Done').toEqual(['Done · 2']);
+    await expect.poll(async () => (await h.subagents())?.headings, 'both finished: Done counts the one first-level agent').toEqual(['Done 1']);
     expect(await tree(), 'Done is collapsed by default').toEqual([]);
     await h.expandDone();
-    await expect.poll(tree).toEqual([
-      { kind: 'agent', agentId: outer, depth: 0, count: null, expanded: null, section: 'done' },
-      { kind: 'agent', agentId: inner, depth: 1, count: null, expanded: null, section: 'done' },
+    await expect.poll(tree, 'the root still open lists its finished child beneath it').toEqual([
+      row(outer, 0, 'done', { count: '', expanded: true }),
+      row(inner, 1, 'done', null),
     ]);
     await h.agents('clickRow', inner);
     await expect.poll(async () => (await h.drillIn())?.agentId).toBe(inner);
@@ -957,7 +1202,7 @@ test.describe('E7: the orchestration views', () => {
 
     await test.step('after the resume the session-only job is still listed and still opens its creating turn', async () => {
       await h.agents('releaseThrough', 'A', Number.MAX_SAFE_INTEGER); // e7-cron-resume's launch
-      await expect.poll(async () => (await scheduled())?.heading).toBe('Scheduled · 2');
+      await expect.poll(async () => (await scheduled())?.heading).toBe('Scheduled 2');
       const now = Date.parse('2026-10-06T11:20:00.000Z');
       expect((await scheduled())!.rows.find((row) => row.id === jobs.nightly.id)!.when).toMatch(new RegExp(`^Next ≈ .+ \\(${nextIn(jobs.nightly, true, now)}\\) · Expires .+$`));
       await bothThemes(h, 'g5-scheduled', h.region);

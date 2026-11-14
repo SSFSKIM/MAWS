@@ -10,6 +10,7 @@ import { ContextWidget } from './ContextWidget';
 import { WIDGET_TITLE } from './copy';
 import { DiffWidget } from './DiffWidget';
 import { ExportWidget } from './ExportWidget';
+import { ForkWidget } from './ForkWidget'; // UX wave U4a
 import { HooksWidget } from './HooksWidget';
 import { McpWidget } from './McpWidget';
 import { MemoryWidget } from './MemoryWidget';
@@ -48,6 +49,7 @@ export const WIDGETS: Record<WidgetCommandName, SlashWidget['component']> = {
   export: ExportWidget,
   diff: DiffWidget,
   rewind: RewindWidget, // W3 (B7)
+  fork: ForkWidget, // UX wave U4a (decision 18): its typed apply is `applyFork` (TYPED_APPLY)
   btw: BtwWidget, // E3: registered here alone; its typed apply is `applyBtw` (TYPED_APPLY)
   'reload-plugins': ReloadPluginsWidget, // E11 §2.2
 };

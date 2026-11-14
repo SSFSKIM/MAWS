@@ -2,9 +2,10 @@
 // or installation. The graph does NOT cover Electron's src/ -> build -> out/ dependency: that is the lander's rule.
 // CLI stdout is E2E-Coverage trailers for gate-plan's summary; stderr is one warning per missing group plus notes.
 // Usage (dry, no push): node scripts/ci-gate-e2e-coverage.mjs --git-dir <checkout> --sha <commit> --gates static
+// With --mini-copy, the same graph decides the run's mini copies instead (miniCopyAt, below).
 import { execFileSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
@@ -14,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { importGraph } from './ci-gate-e2e-imports.mjs';
 import { discoverGroups } from './ci-gate-e2e-specs.mjs';
+import { workflowEnv } from './ci-gate-alerts.mjs';
 
 export { importGraph, discoverGroups };
 const words = (text) => text.split(/[\s,]+/).filter(Boolean);
@@ -46,14 +48,15 @@ function typescript(gitDir, git) {
   return null;
 }
 
-export function coverageAt({ gitDir, sha, gates }) {
-  if (wholeSet(gates)) return { missing: [], notes: [] };
+// The tested commit's change (the merge-base diff with origin/master) handed to `check` with the commit's tree and
+// TypeScript: check({ root, ts, changed }). `wanted` narrows the change first; nothing wanted, and check is not called.
+function atCommit({ gitDir, sha, wanted = () => true, check, none }) {
   const git = (...args) => execFileSync('git', ['-C', gitDir, ...args], { maxBuffer: 128 << 20, stdio: ['pipe', 'pipe', 'pipe'] });
   const base = git('merge-base', 'origin/master', sha).toString().trim();
-  const changed = git('diff', '--name-only', '--no-renames', '-z', base, sha).toString().split('\0').filter(Boolean);
-  if (changed.length === 0) return { missing: [], notes: [] };
+  const changed = git('diff', '--name-only', '--no-renames', '-z', base, sha).toString().split('\0').filter(Boolean).filter(wanted);
+  if (changed.length === 0) return none;
   const ts = typescript(gitDir, git);
-  if (!ts) return checkCoverage({ root: '', ts, gates, changed });
+  if (!ts) return check({ root: '', ts, changed });
   const root = mkdtempSync(join(tmpdir(), 'maws-e2e-coverage-'));
   try {
     // Read the tested commit, never a worktree's dirty files (and support a bare sha). Only source/config files;
@@ -62,8 +65,60 @@ export function coverageAt({ gitDir, sha, gates }) {
     const extensions = ['ts', 'tsx', 'mts', 'cts', 'js', 'jsx', 'mjs', 'cjs', 'json'].filter((ext) => files.some((file) => file.endsWith(`.${ext}`)));
     const archive = git('archive', sha, '--', ...extensions.map((ext) => `*.${ext}`), ...files.filter((file) => file === 'pnpm-workspace.yaml'));
     execFileSync('tar', ['-xf', '-', '-C', root], { input: archive, stdio: ['pipe', 'pipe', 'pipe'] });
-    return checkCoverage({ root, ts, gates, changed });
+    return check({ root, ts, changed });
   } finally { rmSync(root, { recursive: true, force: true }); }
+}
+
+export function coverageAt({ gitDir, sha, gates }) {
+  if (wholeSet(gates)) return { missing: [], notes: [] };
+  return atCommit({ gitDir, sha, none: { missing: [], notes: [] }, check: ({ root, ts, changed }) => checkCoverage({ root, ts, gates, changed }) });
+}
+
+// Mini copies (gate-plan.mjs): of the e2e groups `groups` names, those whose specs reach a changed path under e2e/
+// (a spec or e2e/support), each with those paths. A group whose specs cannot be read is named in the notes.
+export function miniCopies({ root, ts, groups, changed }) {
+  if (groups.length === 0 || changed.length === 0) return { copies: [], notes: [] };
+  if (!ts) throw new Error('TypeScript unavailable (no dependencies installed)');
+  const discovered = discoverGroups(root, ts);
+  const graph = importGraph(root, ts);
+  const copies = [];
+  for (const group of new Set(groups)) {
+    const specs = discovered.groups.get(`e2e:${group}`);
+    if (!specs) continue;
+    const reached = graph.reachable(specs);
+    const paths = [...new Set(changed)].filter((path) => reached.has(path)).sort();
+    if (paths.length > 0) copies.push({ group, paths });
+  }
+  return { copies, notes: discovered.notes.filter((note) => groups.some((group) => note.startsWith(`skipped e2e:${group}:`))) };
+}
+
+// The e2e groups a run asks for: its `e2e:` gates, or for the whole set (`all`, or no list) the tested commit's class-1
+// list (gate.yml's CLASS1_E2E), which the plan runs on a macOS lane; a group the plan does not run is never copied.
+export function requestedGroups({ gitDir, sha, gates }) {
+  if (!wholeSet(gates)) return words(gates).filter((gate) => gate.startsWith('e2e:')).map((gate) => gate.slice(4));
+  const workflow = execFileSync('git', ['-C', gitDir, 'show', `${sha}:.github/workflows/gate.yml`], { encoding: 'utf8', maxBuffer: 16 << 20, stdio: ['pipe', 'pipe', 'pipe'] });
+  return words(workflowEnv(workflow).CLASS1_E2E ?? '');
+}
+
+export function miniCopyAt({ gitDir, sha, gates }) {
+  const groups = requestedGroups({ gitDir, sha, gates });
+  if (groups.length === 0) return { copies: [], notes: [] };
+  return atCommit({ gitDir, sha, wanted: (path) => path.startsWith('e2e/'), none: { copies: [], notes: [] }, check: ({ root, ts, changed }) => miniCopies({ root, ts, groups, changed }) });
+}
+
+// One `MiniCopy: <group> <paths>` trailer per group, which gate-plan.mjs places and names in its summary. The group is
+// never cut, so the plan copies every one: at most three paths follow it, `(+n more)` for the rest, a path with a space
+// or a markup character quoted, and the line is cut at 508 bytes as advisoryTrailers cuts. One line per e2e group of the
+// run (CLASS1_E2E's 43 on 2026-11-13: under 22 KiB) stays far within commit-tree's 128 KiB argument.
+export function miniCopyTrailers(copies) {
+  return copies.map(({ group, paths }) => {
+    const shown = paths.slice(0, 3).map((path) => (/[\s`<>]/.test(path) ? JSON.stringify(path) : path)).join(', ');
+    const line = Buffer.from(`MiniCopy: ${group} ${shown}${paths.length > 3 ? ` (+${paths.length - 3} more)` : ''}`.replace(/[\r\n]+/g, ' '));
+    if (line.length <= 508) return `${line.toString()}\n`;
+    let end = 508;
+    while ((line[end] & 0xc0) === 0x80) end--;
+    return `${line.subarray(0, end).toString()}...\n`;
+  }).join('');
 }
 
 // commit-tree receives these in one -m argument (Linux caps each argument at 128 KiB). Budget the complete UTF-8
@@ -89,7 +144,28 @@ export function advisoryTrailers(lines) {
   return output + (truncated ? note : '');
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+// --mini-copy: the MiniCopy trailers instead (ci-gate.sh, before its alert check, whose plan they change), the copies
+// also on stderr. Not computed (no merge base, no TypeScript), the run has no copy and its summary an E2E-Coverage note
+// saying so; a push never waits on it.
+// Real paths on both sides: a script reached through a symlinked directory (macOS's /var) is still run as the CLI.
+const main = process.argv[1] && realpathSync(resolve(process.argv[1])) === realpathSync(fileURLToPath(import.meta.url));
+if (main && process.argv.includes('--mini-copy')) {
+  let output;
+  try {
+    const { values } = parseArgs({ options: { 'mini-copy': { type: 'boolean' }, 'git-dir': { type: 'string' }, sha: { type: 'string' }, gates: { type: 'string', default: '' } } });
+    if (!values['git-dir'] || !values.sha) throw new Error('--git-dir and --sha are required');
+    const { copies, notes } = miniCopyAt({ gitDir: values['git-dir'], sha: values.sha, gates: values.gates });
+    output = miniCopyTrailers(copies);
+    for (const line of output.split('\n').filter(Boolean)) process.stderr.write(`ci-gate: mini copy: e2e:${line.slice('MiniCopy: '.length)}\n`);
+    for (const note of notes) process.stderr.write(`ci-gate: mini copy note: ${note.replace(/[\r\n]+/g, ' ')}\n`);
+    output += advisoryTrailers(notes.map((note) => `note: mini copies: ${note}`));
+  } catch (error) {
+    const line = `mini copies not computed: ${error.message.split('\n')[0]}`;
+    process.stderr.write(`ci-gate: warning: ${line}; going ahead without them\n`);
+    output = advisoryTrailers([`note: ${line}`]);
+  }
+  process.stdout.write(output);
+} else if (main) {
   const started = performance.now();
   const advice = [];
   try {

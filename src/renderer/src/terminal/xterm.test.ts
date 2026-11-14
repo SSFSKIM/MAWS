@@ -84,6 +84,21 @@ describe('xterm adapter', () => {
     renderer.dispose();
   });
 
+  // UX wave U8b (Addendum 5): the probe says which rows continue the row above them, so an e2e scene can read a command
+  // the terminal soft-wrapped as one line, at any prompt length.
+  it('tells a soft-wrapped row from a row that starts a line', async () => {
+    const renderer = createXtermRenderer(options);
+    renderer.resize(10, 5);
+    await new Promise<void>((resolve) => renderer.write('abcdefghijklmno\r\nxyz', resolve));
+    const probe = renderer.probe();
+    expect([0, 1, 2].map((row) => [probe.line(row), probe.wrapped(row)])).toEqual([
+      ['abcdefghij', false],
+      ['klmno', true],
+      ['xyz', false],
+    ]);
+    renderer.dispose();
+  });
+
   // C1 (P2-F wave S): the IME's composing text is drawn in the terminal's tokens, never xterm's stock white text on black.
   // The sheets are the ones xterm.ts imports (happy-dom applies no imported CSS), in the bundle's order.
   it.each(['light', 'dark'])('draws the composition view in the terminal tokens in %s', (theme) => {

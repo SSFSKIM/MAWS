@@ -36,6 +36,7 @@ import {
   SendFileResultSchema,
   ShowPaneInputSchema,
   ShowPaneResultSchema,
+  SHOW_PANE_NOTES, // U12a
   TOOL_ERRORS,
 } from './tools';
 import { ArtifactUpdateInputSchema, ArtifactUpdateResultSchema } from './artifact-update';
@@ -69,7 +70,7 @@ describe('X9: the maws server and its twelve tools', () => {
       'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     );
   });
 
@@ -414,6 +415,30 @@ describe('E4a: the browser refusal', () => {
   });
 });
 // E4a end
+// U12a start (M1; Interfaces §A): what a browser answer adds, and the refusal for a page MAWS could not open
+describe('U12a: the browser answer’s page and note, and the refusal for an open main refused', () => {
+  const shown = { status: 'shown', pane: 'browser', opened: { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' } } as const;
+
+  it('the result takes an optional page of the three outcomes and an optional note, and nothing else', () => {
+    for (const page of ['opened', 'reloaded', 'kept']) expect(ShowPaneResultSchema.safeParse({ ...shown, page, note: SHOW_PANE_NOTES.browser }).success, page).toBe(true);
+    expect(ShowPaneResultSchema.safeParse({ ...shown, page: 'reloaded' }).success).toBe(true);
+    expect(ShowPaneResultSchema.safeParse({ ...shown, note: SHOW_PANE_NOTES.browser }).success).toBe(true);
+    expect(ShowPaneResultSchema.safeParse({ ...shown, page: 'stale' }).success).toBe(false);
+    expect(ShowPaneResultSchema.safeParse({ ...shown, held: true }).success).toBe(false);
+  });
+
+  it('the two notes, word for word', () => {
+    expect(SHOW_PANE_NOTES).toEqual({
+      browser: "This page is in the session's in-app browser, which the user sees. To act on it, use cua_repl's js tool: cua.getBrowser() with no id is this browser.",
+      browserKept: "The user is using this tab, so it was shown without reloading. To act on it, use cua_repl's js tool: cua.getBrowser() with no id is this browser.",
+    });
+  });
+
+  it('the refusal names the target as the agent gave it and main’s message', () => {
+    expect(TOOL_ERRORS.browserOpenFailed('http://localhost:5173', 'unknown session')).toBe('show_pane: MAWS could not open "http://localhost:5173" in its browser: unknown session');
+  });
+});
+// U12a end
 // P3-D start: the `design_system` modality (docs/doperpowers/plans/2026-10-12-p3-d-design-systems.md D13; ledger X25)
 describe('P3-D: the design_system ask', () => {
   const ok = (question: Record<string, unknown>) => AskInputSchema.safeParse({ questions: [{ question: 'Q?', ...question }] }).success;
@@ -451,5 +476,27 @@ describe('an export’s file name', () => {
     expect(artifactExportName(7, 'claude')).toBe('7-claude.zip');
     expect(artifactExportName(4, 'pdf', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).toBe('4-pdf-0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a.pdf');
     expect(artifactExportName(3, 'pptx', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).not.toBe(artifactExportName(3, 'pptx'));
+  });
+});
+
+// UX wave U5 (l6-artifacts-20, A18; the U5a execution document's Interfaces §I and R6): `artifact_edit`'s `reply`, the
+// agent's own words posted into the thread it answers, and the one sentence that asks for it, placed as probe P4 ran it
+describe('artifact_edit’s reply', () => {
+  const edit = { artifact: 'brief', baseRevision: 3, ops: [{ op: 'delete', id: 'p1' }], answering: 't1' };
+
+  it('takes a reply of 1 to 2,000 characters and refuses an empty or a longer one', () => {
+    const schema = MAWS_TOOLS.artifact_edit.input;
+    for (const reply of ['x', 'y'.repeat(2000)]) expect(schema.safeParse({ ...edit, reply }).success, String(reply.length)).toBe(true);
+    for (const reply of ['', 'y'.repeat(2001)]) expect(schema.safeParse({ ...edit, reply }).success, String(reply.length)).toBe(false);
+    expect(schema.safeParse(edit).success).toBe(true); // an older call, without one
+  });
+
+  it('asks for it in one sentence right after the answering sentence, every other word as it was', () => {
+    const answering = 'answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it).';
+    const sentence = 'With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread.';
+    const { description } = MAWS_TOOLS.artifact_edit;
+    expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
+    expect(description.split(sentence)).toHaveLength(2);
+    expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
   });
 });

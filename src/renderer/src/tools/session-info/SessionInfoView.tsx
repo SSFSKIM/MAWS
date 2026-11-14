@@ -15,6 +15,9 @@ import { useDirectFallback } from '../../statusline/direct-fallback';
 import { POPOVER_TICK_MS, useNow } from '../../statusline/use-now';
 import { listedModelsOf, openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
+import { routeOf, useModelCatalogue } from '../../composer/list-models'; // UX wave U4a M5
+import { machineOf } from '@shared/machine/address';
+import { workingFolder } from '@shared/sessions/working-folder';
 import { useSettings } from '../../stores/settings';
 import { useTranscriptStore } from '../../stores/transcript';
 import { useSessionWindows, useUsage } from '../../stores/usage';
@@ -97,6 +100,10 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   // the model's catalogue entry, when C7 listed the session's models (the lane reads only its value, which the status
   // names anyway)
   const models = useComposerStore((s) => listedModelsOf(s, appSessionId));
+  // UX wave U4a (decision 19): the catalogue the composer's chip names the model from before any menu has listed the
+  // engine's models (C10's `engine.models` for the session's route and folder), so the Main row reads the chip's name
+  const live = status?.process === 'ready';
+  const modelNames = useModelCatalogue(machineOf(appSessionId), routeOf(status, record), live, status?.cwd ?? workingFolder(record).cwd);
   const held = useModelRequests((s) => heldModel(s, appSessionId, status)) ?? null; // the request the chip and the selector read
   // the transcript's state only while it holds rows for the session (the reviews count is omitted otherwise)
   const transcript = useTranscriptStore((s) => (s.entries[appSessionId]?.rows.length ? s.entries[appSessionId].state : undefined));
@@ -107,7 +114,6 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
   useDirectFallback(appSessionId, visible ? status : null); // W2: a Direct session's windows, read while the tab is shown
   // P2-A (X17): with no live process the sections show what the engine last reported, labelled with when; a read, never
   // a start (the 30 s reads above stay enabled only while the process is ready)
-  const live = status?.process === 'ready';
   const controls = useSessionControls(appSessionId); // P5 O9 M5
   const driven = controls !== null && controls.turn() !== null ? controls : null;
   const observed = useObservedFacts(appSessionId, { enabled: visible && !live });
@@ -133,6 +139,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
     directLogin,
     lane,
     models: models ?? null,
+    modelNames,
     held,
     windows,
     budget, // C12
@@ -163,7 +170,7 @@ function SessionInfoBody({ appSessionId, visible, record }: { appSessionId: AppS
 function Value({ appSessionId, row }: { appSessionId: AppSessionId; row: InfoRow }) {
   return (
     <>
-      <span>{row.value}</span>
+      <span title={row.title}>{row.value}</span>
       {row.note && <span className="text-fg-muted"> · {row.note}</span>}
       {row.action === 'permissions' && (
         <button

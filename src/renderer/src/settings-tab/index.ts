@@ -4,7 +4,8 @@
 import { registerSlot } from '../app/slots';
 import { SettingsView } from './SettingsView';
 
-export { SettingsView } from './SettingsView';
+export { SECTION_TABLE, SETTINGS_SECTIONS, SettingsView, type SettingsSection } from './SettingsView';
+export { SETTINGS_ROWS, type SettingsRow } from './rows'; // U11a M9: the row table, for M10's search and U7's dialog
 export { connectMonoFont } from './mono-font';
 export { connectTranscriptWidth } from './transcript-width'; // W2
 

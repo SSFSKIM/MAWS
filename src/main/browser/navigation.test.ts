@@ -6,6 +6,7 @@ import { DEFAULT_PARTITION } from '@shared/browser/tab';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { Navigator, ZOOM_PRESETS, stepZoom } from './navigation';
 import { TabStore, type TabEntry } from './tabs';
+import { TabControls } from './agent/control'; // U12a
 import { WINDOW_OPEN_BURST, WINDOW_OPEN_INPUT_MS } from './window-open';
 
 const A = 'App-A' as AppSessionId;
@@ -39,6 +40,7 @@ class FakeWebContents extends EventEmitter {
   readonly stopFindInPage = vi.fn();
   readonly openDevTools = vi.fn();
   readonly forcefullyCrashRenderer = vi.fn();
+  readonly setBackgroundThrottling = vi.fn(); // U12a: the agent's control turns it off
 }
 
 // A cancellable Electron event.
@@ -50,7 +52,7 @@ function harness(options: { historyThrows?: boolean } = {}) {
   const contents: FakeWebContents[] = [];
   let ids = 0;
   let clock = 1_000_000;
-  const store = new TabStore({
+  const store: TabStore = new TabStore({
     emit,
     createView: () => {
       const webContents = new FakeWebContents();
@@ -60,6 +62,7 @@ function harness(options: { historyThrows?: boolean } = {}) {
     resolvePartition: () => DEFAULT_PARTITION,
     newTabId: () => `b_${(++ids).toString(16).padStart(12, '0')}`,
     schedule: () => {},
+    reloadForAgent: (tabId) => navigator.reloadForAgent(tabId), // U12a: show_pane's reload, as index.ts wires it
   });
   const fail = () => {
     throw new Error('index unavailable: busy');
@@ -335,6 +338,86 @@ describe('navigation: the load-error lifecycle (E4a Design §5, Decision Log 23)
     expect(h.navigator.navigate(id, 'reload')).toBe(true);
     expect(wc.reload).toHaveBeenCalledTimes(1);
     expect(h.tab(id).loading).toBe(true);
+  });
+});
+
+// U12a (M1; Interfaces §B, review finding 2): the reload `show_pane` asks for is the reload's body without the stamp on
+// the input seam, so it is never the person's input: a tab the agent controls stays the agent's, and the next request
+// is not `kept` because of the one before.
+describe('navigation: the agent’s reload (reloadForAgent, U12a)', () => {
+  const show = (h: ReturnType<typeof harness>, url: string, requestId: string) => h.store.open({ appSessionId: A, url, select: true, reuse: 'url', reload: true, requestId });
+
+  it('reloads a live document as Reload does, and leaves lastHumanAt and the control as they were, on an idle tab and one the agent controls', () => {
+    const h = harness();
+    const controls = new TabControls({ store: h.store, now: () => 1_000_000 });
+    const id = h.open();
+    const wc = h.wc(id);
+    commit(wc, 'https://a.test/');
+    const heard: unknown[] = [];
+    h.entry(id).input.on((emission) => heard.push(emission));
+    expect(h.navigator.reloadForAgent(id)).toBe(true);
+    expect(wc.reload).toHaveBeenCalledTimes(1);
+    expect(h.tab(id)).toMatchObject({ loading: true, control: 'idle' });
+    controls.markActing(h.entry(id));
+    expect(h.navigator.reloadForAgent(id)).toBe(true);
+    expect(h.tab(id).control).toBe('agent');
+    expect(heard).toEqual([]);
+    expect(h.entry(id).input.lastHumanAt).toBeNull();
+    // the person's Reload, for contrast: stamped as theirs, which takes the page from the agent
+    expect(h.navigator.navigate(id, 'reload')).toBe(true);
+    expect(h.entry(id).input.lastHumanAt).toBe(1_000_000);
+    expect(h.tab(id).control).toBe('human');
+    controls.dispose();
+  });
+
+  it('after a load error loads the failed address again; after a crash, and with no view, the tab’s own', () => {
+    const h = harness();
+    const id = h.open('http://127.0.0.1:1/');
+    const wc = h.wc(id);
+    fail(wc, 'http://127.0.0.1:1/', -102, 'ERR_CONNECTION_REFUSED');
+    wc.loadURL.mockClear();
+    expect(h.navigator.reloadForAgent(id)).toBe(true);
+    expect(wc.loadURL).toHaveBeenCalledWith('http://127.0.0.1:1/');
+    expect(wc.reload).not.toHaveBeenCalled();
+    commit(wc, 'https://a.test/');
+    wc.emit('render-process-gone', {}, { reason: 'crashed', exitCode: 11 });
+    wc.loadURL.mockClear();
+    expect(h.navigator.reloadForAgent(id)).toBe(true);
+    expect(wc.loadURL).toHaveBeenCalledWith('https://a.test/');
+    expect(h.tab(id).crashed).toBeNull();
+    h.store.suspend(id);
+    expect(h.navigator.reloadForAgent(id)).toBe(true);
+    expect(h.wc(id).loadURL).toHaveBeenCalledWith('https://a.test/');
+    expect(h.entry(id).input.lastHumanAt).toBeNull();
+  });
+
+  it('through show_pane’s open: a crashed tab and a tab whose load failed at the address are loaded again and read reloaded', () => {
+    const h = harness();
+    const crashed = h.open('https://a.test/');
+    commit(h.wc(crashed), 'https://a.test/');
+    h.wc(crashed).emit('render-process-gone', {}, { reason: 'crashed', exitCode: 11 });
+    h.wc(crashed).loadURL.mockClear();
+    expect(show(h, 'https://a.test/', 'r1')).toMatchObject({ reused: true, page: 'reloaded', tab: { tabId: crashed, crashed: null } });
+    expect(h.wc(crashed).loadURL).toHaveBeenCalledWith('https://a.test/');
+
+    const failed = h.open('http://127.0.0.1:1/');
+    fail(h.wc(failed), 'http://127.0.0.1:1/', -102, 'ERR_CONNECTION_REFUSED');
+    h.wc(failed).loadURL.mockClear();
+    expect(show(h, 'http://127.0.0.1:1/', 'r2')).toMatchObject({ reused: true, page: 'reloaded', tab: { tabId: failed, loadError: null } });
+    expect(h.wc(failed).loadURL).toHaveBeenCalledWith('http://127.0.0.1:1/');
+  });
+
+  it('two show_pane requests under different ids, one after the other, on a tab the agent controls both read reloaded', () => {
+    const h = harness();
+    const controls = new TabControls({ store: h.store, now: () => 1_000_000 });
+    const id = h.open();
+    commit(h.wc(id), 'https://a.test/');
+    controls.markActing(h.entry(id));
+    expect(show(h, 'https://a.test/', 'r1').page).toBe('reloaded');
+    expect(show(h, 'https://a.test/', 'r2').page).toBe('reloaded');
+    expect(h.wc(id).reload).toHaveBeenCalledTimes(2);
+    expect(h.tab(id).control).toBe('agent');
+    controls.dispose();
   });
 });
 

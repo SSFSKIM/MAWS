@@ -30,6 +30,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('shell'), command: z.string(), description: nullable(z.string()), cwd: nullable(z.string()), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()),
     interrupted: z.boolean(), backgroundTaskId: nullable(z.string()), truncated: nullable(TruncationSchema), spill: nullable(SpillSchema),
+    rowCwd: z.string().optional(), // UX wave U8c-2
   }),
   z.strictObject({ kind: z.literal('edit'), filePath: z.string(), change: z.enum(['create', 'update', 'delete']), hunks: z.array(HunkSchema), added: z.number(), removed: z.number() }),
   z.strictObject({ kind: z.literal('read'), files: z.array(z.strictObject({ path: z.string(), range: nullable(z.tuple([z.number(), z.number()])) })), preview: nullable(z.string()), truncated: nullable(TruncationSchema) }),
@@ -48,7 +49,7 @@ const SubagentRefSchema = z.strictObject({
 
 const cellShape = {
   id: z.string(), toolUseId: nullable(z.string()), toolName: z.string(), category, classification: ToolClassificationSchema,
-  status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
+  status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), moved: z.literal(true).optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
   background: z.boolean(), doneLabel: z.string().optional(), error: z.string().optional(), // UX wave U2
 };
@@ -74,10 +75,10 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), unread: z.literal(true).optional() /* U4a */, anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, comments: z.array(z.strictObject({ anchor: AnchorSchema, text: z.string(), attachment: z.number().int().nonnegative().optional() })).optional() /* UX wave U5a */, commentsTo: z.literal('thread').optional() /* UX wave U5a */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()), cut: z.literal(true).optional(), partway: z.literal(true).optional() }),
   z.strictObject({
-    ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.literal('crash').optional() /* E11 */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
+    ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.enum(['crash', 'message']).optional() /* E11; UX wave U4a */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
     toolCalls: z.number(), denied: z.number(), autoDenied: z.number(), firstDeniedCell: nullable(z.string()), expanded: z.boolean(), summary: TurnSummarySchema,
     files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })).optional(),
     opener: z.strictObject({ class: z.enum(ARRIVAL_CLASSES), line: z.string() }).optional(), // U3

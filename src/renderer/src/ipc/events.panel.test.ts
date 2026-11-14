@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { PR_STATE_POLL, prStateKey } from '../tools/scm/queries';
+import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useGit } from '../stores/git';
+import { useSessions } from '../stores/sessions';
 import { connectPanelEvents } from './events';
 import { queryClient } from './query';
 
@@ -62,6 +64,11 @@ describe('panel events', () => {
     error: null,
   });
   const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
+  // The session's record, whose working folder names the checkout its PR state is (UX wave U8c-2), and that state's key.
+  const held = (id: AppSessionId) => {
+    useSessions.setState((s) => ({ records: new Map(s.records).set(id, record(id)) }));
+    return prStateKey(id, `/work/${id}`);
+  };
 
   // A published change moves no ref the watcher sees: when its time moves, a PR state a surface holds is asked of gh
   // again at once, past main's kept answer, as the row's Refresh asks. The same publish seen again, a session whose PR
@@ -71,7 +78,8 @@ describe('panel events', () => {
     const disconnect = connectPanelEvents(fake.client);
     const A = 'A' as AppSessionId;
     const answer = prState('later');
-    queryClient.setQueryData(prStateKey(A), prState('earlier'));
+    const key = held(A);
+    queryClient.setQueryData(key, prState('earlier'));
     const now = new Date().toISOString();
     const stale = new Date(Date.now() - PR_STATE_POLL.refetchInterval - 1000).toISOString();
 
@@ -84,7 +92,7 @@ describe('panel events', () => {
     fake.event('session.status', sessionStatus(A, now));
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: A, refresh: true }]);
     await fake.reply('scm.pr.state', answer);
-    expect(queryClient.getQueryData(prStateKey(A))).toEqual(answer);
+    expect(queryClient.getQueryData(key)).toEqual(answer);
 
     disconnect();
     fake.event('session.status', sessionStatus(A, new Date(Date.now() + 1000).toISOString()));
@@ -98,15 +106,16 @@ describe('panel events', () => {
     const fake = fakeClient();
     const disconnect = connectPanelEvents(fake.client);
     const C = 'C' as AppSessionId;
-    queryClient.setQueryData(prStateKey(C), prState('before'));
+    const key = held(C);
+    queryClient.setQueryData(key, prState('before'));
 
     fake.event('session.status', sessionStatus(C, ago(2000), 'created'));
     fake.event('session.status', sessionStatus(C, ago(1000), 'merged'));
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: C, refresh: true }, { appSessionId: C, refresh: true }]);
     await fake.reply('scm.pr.state', prState('second', 'MERGED'), 1);
-    expect(queryClient.getQueryData(prStateKey(C))).toEqual(prState('second', 'MERGED'));
+    expect(queryClient.getQueryData(key)).toEqual(prState('second', 'MERGED'));
     await fake.reply('scm.pr.state', prState('first', 'OPEN'));
-    expect(queryClient.getQueryData(prStateKey(C))).toEqual(prState('second', 'MERGED'));
+    expect(queryClient.getQueryData(key)).toEqual(prState('second', 'MERGED'));
 
     disconnect();
     queryClient.clear();
@@ -119,30 +128,31 @@ describe('panel events', () => {
     const fake = fakeClient();
     const disconnect = connectPanelEvents(fake.client);
     const E = 'E' as AppSessionId;
+    const key = held(E);
     const ordinaryRead = () =>
       void queryClient.prefetchQuery({
-        queryKey: prStateKey(E),
+        queryKey: key,
         queryFn: async () => {
           const result = await fake.client.invoke('scm.pr.state', { appSessionId: E, refresh: false });
           if (!result.ok) throw new Error(result.error.message);
           return result.value;
         },
       });
-    queryClient.setQueryData(prStateKey(E), prState('before'));
+    queryClient.setQueryData(key, prState('before'));
 
     ordinaryRead();
     fake.event('session.status', sessionStatus(E, ago(2000), 'created'));
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: E, refresh: false }, { appSessionId: E, refresh: true }]);
     await fake.reply('scm.pr.state', prState('created', 'OPEN'), 1);
     await fake.reply('scm.pr.state', prState('before'));
-    expect(queryClient.getQueryData(prStateKey(E))).toEqual(prState('created', 'OPEN'));
+    expect(queryClient.getQueryData(key)).toEqual(prState('created', 'OPEN'));
 
     fake.event('session.status', sessionStatus(E, ago(1000), 'merged'));
     ordinaryRead();
     expect(fake.invoked('scm.pr.state').slice(2)).toEqual([{ appSessionId: E, refresh: true }, { appSessionId: E, refresh: false }]);
     await fake.reply('scm.pr.state', prState('merged', 'MERGED'));
     await fake.reply('scm.pr.state', prState('created', 'OPEN'));
-    expect(queryClient.getQueryData(prStateKey(E))).toEqual(prState('merged', 'MERGED'));
+    expect(queryClient.getQueryData(key)).toEqual(prState('merged', 'MERGED'));
 
     disconnect();
     queryClient.clear();
@@ -155,14 +165,15 @@ describe('panel events', () => {
     const disconnect = connectPanelEvents(fake.client);
     const D = 'D' as AppSessionId;
     const at = ago(1000);
+    const key = held(D);
 
     fake.event('session.status', sessionStatus(D, at));
     expect(fake.invoked('scm.pr.state')).toEqual([]);
-    queryClient.setQueryData(prStateKey(D), prState('kept'));
+    queryClient.setQueryData(key, prState('kept'));
     fake.event('session.status', sessionStatus(D, at));
     expect(fake.invoked('scm.pr.state')).toEqual([{ appSessionId: D, refresh: true }]);
     await fake.reply('scm.pr.state', prState('fresh', 'OPEN'));
-    expect(queryClient.getQueryData(prStateKey(D))).toEqual(prState('fresh', 'OPEN'));
+    expect(queryClient.getQueryData(key)).toEqual(prState('fresh', 'OPEN'));
     fake.event('session.status', sessionStatus(D, at));
     expect(fake.invoked('scm.pr.state')).toHaveLength(1);
 

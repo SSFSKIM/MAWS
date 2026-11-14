@@ -5,6 +5,9 @@
 // addressed and answered, the hub's refusal of the project, signed out drawn "as of", and the cache written through the
 // commit queue, last at `close()`. A fake socket and an in-memory store, over real signed states and events.
 //
+// UX wave U11a M4 (S-09; the execution document's Interfaces §F): the channel's own reach while it is not live and the
+// hub's refusal of it while that stands, each sequence held open with a held attestations promise and the fake socket.
+//
 // `org.channel.changed` is a delta: the harness folds the open answer and each change after it as a renderer does
 // (`latest()`), so every case checks what a tab would draw; `told()` is the last change as sent.
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,7 +80,10 @@ async function until<T>(check: () => T | null | undefined | false, what: string,
 }
 
 /** What a tab draws: the open answer, each change folded onto it by offset, `reset` replacing it. */
-type Drawn = { project: string; ok: true; events: ChannelEvent[]; sessions: ChannelSession[]; pending: ChannelWord[]; unverified: number; asOf: string | null; live: boolean } | { project: string; ok: false; reason: string };
+type Open = Extract<ChannelAnswer, { ok: true }>;
+type Drawn =
+  | { project: string; ok: true; events: ChannelEvent[]; sessions: ChannelSession[]; pending: ChannelWord[]; unverified: number; asOf: string | null; live: boolean; reach?: Open['reach']; refused?: Open['refused'] }
+  | { project: string; ok: false; reason: string };
 
 function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefined {
   if (!change.ok) return change;
@@ -85,8 +91,9 @@ function fold(base: Drawn | undefined, change: ChannelChanged): Drawn | undefine
   const byOffset = new Map((change.reset === true || base === undefined || !base.ok ? [] : base.events).map((e) => [e.offset, e]));
   for (const offset of change.removed ?? []) byOffset.delete(offset);
   for (const event of change.upserts) byOffset.set(event.offset, event);
-  const { project, sessions, pending, unverified, asOf, live } = change;
-  return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), sessions, pending, unverified, asOf, live };
+  const { project, sessions, pending, unverified, asOf, live, reach, refused } = change;
+  const standing = { ...(reach === undefined ? {} : { reach }), ...(refused === undefined ? {} : { refused }) }; // told whole, as the rest
+  return { project, ok: true, events: [...byOffset.values()].sort((a, b) => a.offset - b.offset), sessions, pending, unverified, asOf, live, ...standing };
 }
 
 const opened = (answer: ChannelAnswer | Drawn | undefined) => {
@@ -117,6 +124,10 @@ async function harness(
     machines?: ChannelMachines;
     wake?: WakeSource;
     reach?: Reach;
+    /** The project's history attestations, for a case that holds or fails them; `records` at once by default. */
+    attestations?: () => Promise<Signed<HistoryAttestation>[] | null>;
+    /** The socket's reconnect waits (FEED_BACKOFF_MS); the feed's own by default. */
+    backoff?: number[];
   } = {},
 ) {
   const o = await ChannelOrg.make();
@@ -159,7 +170,7 @@ async function harness(
     commit,
     attestations: async () => {
       reads++;
-      return options.records ?? [];
+      return options.attestations === undefined ? (options.records ?? []) : options.attestations();
     },
     socket: (url) => {
       const socket = new FakeSocket(url);
@@ -170,7 +181,13 @@ async function harness(
     ...(options.machines === undefined ? {} : { machines: options.machines }),
     ...(options.wake === undefined ? {} : { wake: options.wake }),
     ...(options.reach === undefined ? {} : { reach: options.reach }),
-    timing: { CHANNEL_RELEASE_MS: 60, CHANNEL_WRITE_MS: 5, CHANNEL_COALESCE_MS: options.coalesce ?? 5, ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }) },
+    timing: {
+      CHANNEL_RELEASE_MS: 60,
+      CHANNEL_WRITE_MS: 5,
+      CHANNEL_COALESCE_MS: options.coalesce ?? 5,
+      ...(options.events === undefined ? {} : { CHANNEL_CACHE_EVENTS: options.events }),
+      ...(options.backoff === undefined ? {} : { FEED_BACKOFF_MS: options.backoff }),
+    },
     random: () => 0.5,
     log: () => {},
   });
@@ -827,5 +844,217 @@ describe('the machines’ to-human entries', () => {
     expect(opened(await h.channels.open(PROJECT))).toMatchObject({ live: false, events: [], hosts: [host('a', 1)] });
     h.channels.release(PROJECT);
     await until(() => m.closed() === 1, 'the machines closed');
+  });
+});
+
+// UX wave U11a M4 (S-09; Interfaces §F's table of transitions): the channel tells its own reach while it is not live, and
+// the hub's refusal of it while that stands, with every open answer and as a change whenever either moves.
+describe('the channel’s reach and refusal', () => {
+  /** A cache of one event, caught up an hour before: what a Mac that read the channel once holds. */
+  const cached = async (o: ChannelOrg) => {
+    const log = emptyLog({ org: ORG, member: o.A }, PROJECT, { events: 5000, bytes: 1 << 23 });
+    await log.add([{ offset: 1, event: await o.say(o.mini, 1, 'from the cache') }], { ctx: { org: ORG, project: PROJECT }, state: o.head().state, certificates: NO_CERTIFICATES, now: new Date(NOW) });
+    log.caughtUp(1, '2026-11-06T11:00:00.000Z');
+    return log.file();
+  };
+  /** An attestations read the case answers, or fails (null), when it chooses. */
+  const heldRead = () => {
+    let answer!: (records: Signed<HistoryAttestation>[] | null) => void;
+    const read = new Promise<Signed<HistoryAttestation>[] | null>((resolve) => (answer = resolve));
+    return { read: () => read, answer };
+  };
+  type Harness = Awaited<ReturnType<typeof harness>>;
+  const standing = (h: Harness) => {
+    const c = opened(h.latest());
+    return { live: c.live, reach: c.reach, refused: c.refused };
+  };
+  /** Each reach the changes told for the project, in order, a live one as `live`. */
+  const reachesTold = (h: Harness) => h.changes.filter((c) => c.project === PROJECT && c.ok).map((c) => (c.ok && c.live ? 'live' : c.ok ? c.reach : null));
+  const live = async (h: Harness, socket = h.last(), offset = 1) => {
+    socket.welcome();
+    socket.frame({ t: 'caught-up', offset });
+    await until(() => opened(h.latest()).live, 'live');
+  };
+
+  it('(a) answers at once from the cache while the attestations hang, reading connecting', async () => {
+    const attest = heldRead();
+    const h = await harness({ seed: cached, attestations: attest.read });
+    const answer = await Promise.race([h.channels.open(PROJECT), sleep(1_000).then(() => 'late' as const)]);
+    expect(answer).not.toBe('late');
+    expect(opened(answer as ChannelAnswer)).toMatchObject({ live: false, reach: 'connecting', asOf: '2026-11-06T11:00:00.000Z' });
+    expect(opened(answer as ChannelAnswer)).not.toHaveProperty('refused');
+    expect(opened(answer as ChannelAnswer).events.map((e) => e.event.text)).toEqual(['from the cache']);
+    expect(h.sockets).toHaveLength(0); // the socket waits on the attestations
+    attest.answer([]);
+    await until(() => h.last(), 'a socket');
+  });
+
+  it('(b) turns unreachable when the attestations fail, stays so through a socket error before the welcome, and is live with no reach after caught-up', async () => {
+    const attest = heldRead();
+    const h = await harness({ seed: cached, attestations: attest.read, backoff: [20] });
+    expect(opened(await h.channels.open(PROJECT)).reach).toBe('connecting');
+    attest.answer(null);
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    const first = await until(() => h.last(), 'a socket');
+    first.emit('error', new Error('getaddrinfo ENOTFOUND'));
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'the retry');
+    expect(standing(h)).toEqual({ live: false, reach: 'unreachable', refused: undefined });
+    second.welcome(); // welcomed, not caught up: unchanged
+    await sleep(20);
+    expect(standing(h).reach).toBe('unreachable');
+    second.frame({ t: 'caught-up', offset: 1 });
+    await until(() => opened(h.latest()).live, 'live');
+    expect(opened(h.latest())).not.toHaveProperty('reach');
+    expect(reachesTold(h)).toEqual(['unreachable', 'live']); // no flicker to connecting at the retry
+  });
+
+  it('(c) reads connecting when a live channel loses its socket, and unreachable when the next fails before its welcome', async () => {
+    const h = await harness({ seed: cached, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    const first = await until(() => h.last(), 'a socket');
+    await live(h, first);
+    first.emit('close', 1006, '');
+    await until(() => !opened(h.latest()).live, 'not live');
+    expect(standing(h)).toEqual({ live: false, reach: 'connecting', refused: undefined });
+    const second = await until(() => (h.sockets.length === 2 ? h.last() : null), 'the retry');
+    second.emit('close', 1006, '');
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+  });
+
+  it('(d) answers a second open during an outage unreachable, and opens no second socket', async () => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [5_000] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    const socket = await until(() => h.last(), 'a socket');
+    socket.emit('error', new Error('offline'));
+    const again = opened(await h.channels.open(PROJECT));
+    expect(again).toMatchObject({ live: false, reach: 'unreachable' });
+    await sleep(30);
+    expect(h.sockets).toHaveLength(1);
+  });
+
+  it('(e) starts again at connecting when the member signs out, and again when they sign back in', async () => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [5_000] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    const ours = h.signedIn();
+    h.session.set(null);
+    await until(() => standing(h).reach === 'connecting', 'connecting, signed out');
+    expect(h.last().closed).toBe(true);
+    h.session.set(ours);
+    const next = await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket at the sign-in');
+    expect(standing(h)).toEqual({ live: false, reach: 'connecting', refused: undefined });
+    next.emit('error', new Error('offline'));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable again');
+    expect(reachesTold(h)).toEqual(['unreachable', 'connecting', 'unreachable']);
+  });
+
+  it('(f) opens no socket once released during the backoff', async () => {
+    const h = await harness({ seed: cached, backoff: [200] });
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.emit('error', new Error('offline'));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    h.channels.release(PROJECT); // CHANNEL_RELEASE_MS (60) before the retry's 200
+    await sleep(400);
+    expect(h.sockets).toHaveLength(1);
+  });
+
+  it('(g) from connecting, a close with the sign-in’s code reads refused credentials and opens no socket afterwards', async () => {
+    const h = await harness({ seed: cached, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    const socket = await until(() => h.last(), 'a socket');
+    socket.emit('refused', 302, {}); // Access answered the upgrade, not the Worker
+    await until(() => standing(h).refused === 'credentials', 'the refusal');
+    expect(standing(h)).toEqual({ live: false, reach: 'connecting', refused: 'credentials' });
+    await sleep(100);
+    expect(h.sockets).toHaveLength(1);
+    expect(await h.channels.send(PROJECT, 'hello')).toMatchObject({ ok: false, reason: 'unreadable' });
+  });
+
+  it('(h) reads connecting when a wake drops a live socket', async () => {
+    const wake = fakeWake();
+    const reach = fakeReach();
+    const h = await harness({ seed: cached, wake: wake.source, reach: reach.reach });
+    opened(await h.channels.open(PROJECT));
+    await live(h, await until(() => h.last(), 'a socket'));
+    wake.wake(3_600_000);
+    await until(() => !opened(h.latest()).live, 'not live');
+    expect(standing(h)).toEqual({ live: false, reach: 'connecting', refused: undefined });
+  });
+
+  it('(i) after unreachable, a close with the sign-in’s code is told as refused beside the unchanged reach; nothing is retried until the session changes, which reads connecting and opens one', async () => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    const socket = await until(() => h.last(), 'a socket');
+    socket.emit('refused', 401, {}); // the hub sign-in has ended; the org's hub status is another component's and may read connected
+    await until(() => standing(h).refused === 'credentials', 'the refusal');
+    expect(standing(h)).toEqual({ live: false, reach: 'unreachable', refused: 'credentials' });
+    expect(delta(h.told())).toMatchObject({ reach: 'unreachable', refused: 'credentials' });
+    await sleep(100);
+    expect(h.sockets).toHaveLength(1);
+    h.session.changed(); // the session's next change (here a head adopted)
+    await until(() => standing(h).refused === undefined, 'the refusal cleared');
+    expect(standing(h).reach).toBe('connecting');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+  });
+
+  // M4's review: a refusal stands until the session changes; another tab's open of the channel while it is held keeps it,
+  // and only a released channel opened again starts it over
+  const refusals = [
+    ['credentials', (socket: FakeSocket) => socket.emit('refused', 401, {})],
+    ['removed', (socket: FakeSocket) => socket.emit('close', 4403, '')],
+  ] as const;
+  const refusedHarness = async (refuse: (socket: FakeSocket) => void, refused: 'credentials' | 'removed') => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    refuse(await until(() => h.last(), 'a socket'));
+    await until(() => standing(h).refused === refused, 'the refusal');
+    return h;
+  };
+
+  it.each(refusals)('keeps a %s refusal and its reach through another open while the channel is held, opening no socket', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    const before = h.changes.length;
+    expect(opened(await h.channels.open(PROJECT))).toMatchObject({ live: false, reach: 'unreachable', refused });
+    await sleep(100);
+    expect(h.sockets).toHaveLength(1);
+    expect(standing(h)).toEqual({ live: false, reach: 'unreachable', refused });
+    expect(h.changes.length).toBe(before); // the tabs already open are told nothing: the refusal stands for them
+    expect(await h.channels.send(PROJECT, 'hello')).toMatchObject({ ok: false, reason: 'unreadable' });
+  });
+
+  it.each(refusals)('clears a %s refusal at the session’s next change, reading connecting and opening a socket', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    h.session.changed();
+    await until(() => standing(h).refused === undefined, 'the refusal cleared');
+    expect(standing(h).reach).toBe('connecting');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+  });
+
+  it.each(refusals)('clears a %s refusal when the channel, released, is opened again', async (refused, refuse) => {
+    const h = await refusedHarness(refuse, refused);
+    h.channels.release(PROJECT); // inside CHANNEL_RELEASE_MS: the channel is kept, with no tab
+    const again = opened(await h.channels.open(PROJECT));
+    expect(again).toMatchObject({ live: false, reach: 'connecting' });
+    expect(again).not.toHaveProperty('refused');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
+  });
+
+  it('(j) the same with the code of a member the hub no longer admits: refused removed', async () => {
+    const h = await harness({ seed: cached, attestations: async () => null, backoff: [20] });
+    opened(await h.channels.open(PROJECT));
+    await until(() => standing(h).reach === 'unreachable', 'unreachable');
+    const socket = await until(() => h.last(), 'a socket');
+    socket.emit('close', 4403, '');
+    await until(() => standing(h).refused === 'removed', 'the refusal');
+    expect(standing(h)).toEqual({ live: false, reach: 'unreachable', refused: 'removed' });
+    await sleep(100);
+    expect(h.sockets).toHaveLength(1);
+    h.session.changed();
+    await until(() => standing(h).refused === undefined && standing(h).reach === 'connecting', 'started again');
+    await until(() => (h.sockets.length === 2 ? h.last() : null), 'a socket again');
   });
 });

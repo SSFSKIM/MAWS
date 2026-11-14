@@ -1,26 +1,29 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProjectId } from '@shared/graph/ids';
-import type { LibraryRow } from '@shared/ipc/schema/library';
+import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import type { SessionRecord } from '@shared/graph/session';
 import { addressOf, bareOf } from '@shared/machine/address';
-import { digest, project, record, status } from '../../../../../test/support/builders';
+import { digest, item, project, record, remoteRow, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { registerSlot, resetSlots } from '../../app/slots';
 import { queryClient } from '../../ipc/query';
-import { resetLibrary } from '../../library/store';
-import { useLibraryView } from '../../library/view';
+import { useAttention } from '../../stores/attention';
 import { useComposerStore } from '../../stores/composer';
-import { useLayout } from '../../stores/layout';
+import { useGit } from '../../stores/git';
+import { storedLayout, useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
 import { loadSyntheticJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../../transcript/dev/journal';
 import type { SessionEvent } from '@shared/graph/events';
 import { A, B, probeTool, resetPanelStores } from '../../test-support/panel';
+import { SUMMARY_COPY } from '../copy';
 import { panelHost, registerPanelTool } from '../host';
+import { useHasSources } from './Sources';
 import { Summary } from './Summary';
 import { preloadOf } from '../../test-support/preload-of';
 
@@ -34,26 +37,29 @@ const GIT: GitStatus = {
   remoteUrl: 'git@github.com:o/maws.git', ahead: 1, behind: 0, dirty: true, stashCount: 0, checkedAt: '2026-09-29T10:00:00.000Z',
   files: [{ path: 'a.ts', oldPath: null, index: '.', worktree: 'M', untracked: false }],
 };
-const artifact: LibraryRow = {
-  id: '00000000-0000-4000-8000-000000000001', kind: 'document', title: 'Input errors plan', createdBy: { kind: 'human' },
-  createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1,
-  lastEditor: { kind: 'human' }, lastEditedAt: 2, sessions: [], project: { id: MAIN.P, name: 'Project A' },
-};
 let fake: FakeClient;
 const offs: (() => void)[] = [];
 const region = (name: string) => screen.getByRole('region', { name });
 const open = async (name: string) => userEvent.setup().click(within(region(name)).getByRole('button', { expanded: false }));
-const mount = () => render(<QueryClientProvider client={queryClient}><Summary appSessionId={A} /></QueryClientProvider>);
+const fold = async (name: string) => userEvent.setup().click(within(region(name)).getByRole('button', { expanded: true }));
+const isOpen = (name: string) => within(region(name)).getAllByRole('button').find((button) => button.hasAttribute('aria-expanded'))!.getAttribute('aria-expanded') === 'true';
+const cardNames = () => screen.queryAllByRole('region').filter((r) => r.tagName === 'SECTION').map((r) => r.getAttribute('aria-label'));
+const list = () => screen.getByLabelText('Session cards');
+const summaryOf = (id: AppSessionId) => <QueryClientProvider client={queryClient}><Summary appSessionId={id} /></QueryClientProvider>;
+const mount = () => render(summaryOf(A));
+// UX wave U8b (M4, §C.1): a request of the session that waits on its answer, and an open item that asks for none
+const waiting = (id: AppSessionId, requestId: string | null = 'req-1') => item(id, 'permission', T0, { request: { requestId: requestId as never, toolUseId: null, taskId: null, agentId: null } });
+const setAttention = (items: ReturnType<typeof item>[]) => act(() => useAttention.setState((s) => ({ bySession: new Map(items.length ? [[items[0]!.appSessionId, items]] : []), version: s.version + 1 })));
 
 beforeEach(() => {
   resetPanelStores();
-  resetLibrary();
+  resetSlots();
+  useAttention.setState((s) => ({ bySession: new Map(), version: s.version + 1 }));
   useSessions.setState({ projects: new Map([[P, project(P, 0, { name: 'Project A' })], [Q, project(Q, 1, { name: 'Project B' })]]), records: new Map([[A, record(A, { projectId: P })], [B, record(B, { projectId: Q })]]) });
   useComposerStore.setState({ focusTargets: new Map() });
   fake = fakeClient({
     'git.watch': GIT, 'git.diff': { patch: '', files: [{ path: 'a.ts', oldPath: null, insertions: 3, deletions: 1, binary: false }] }, 'git.unwatch': undefined,
     'layout.get': { value: null }, 'layout.set': undefined, 'layout.openExternal': undefined,
-    'library.list': { rows: [artifact], counts: { document: 1, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 } },
     'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
   });
   window.maws = preloadOf(fake);
@@ -61,30 +67,62 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   offs.splice(0).forEach((off) => off());
-  resetLibrary();
+  resetSlots();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   queryClient.clear();
   vi.restoreAllMocks();
 });
 
 describe('floating session cards', () => {
-  it('starts folded without mounting expensive detail reads, then opens only the requested card', async () => {
+  // UX wave U8b (A1, UC-9): the column's cards, their order and their folds.
+  it('holds Environment open, then Context and Connectors folded, in that order, and no Artifacts card', async () => {
     mount();
     await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: DIR }]));
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(4);
-    expect(screen.queryByText('This Mac')).toBeNull();
-    expect(fake.invoked('scm.pr.state')).toEqual([]);
-    await open('Environment');
+    expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
+    expect(['Environment', 'Context', 'Connectors'].map(isOpen)).toEqual([true, false, false]);
     expect(within(region('Environment')).getByText('This Mac')).toBeTruthy();
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(3);
+    expect(fake.invoked('library.list')).toEqual([]);
   });
 
+  it('a folded card mounts none of its detail and makes no read; opening one opens only it', async () => {
+    act(() => useLayout.setState({ cardsOpen: [] }));
+    mount();
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: DIR }]));
+    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(3);
+    expect(screen.queryByText('This Mac')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Details…' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Manage connectors…' })).toBeNull();
+    expect(fake.invoked('scm.pr.state')).toEqual([]);
+    await open('Context');
+    expect(within(region('Context')).getByRole('button', { name: 'Details…' })).toBeTruthy();
+    expect(['Environment', 'Context', 'Connectors'].map(isOpen)).toEqual([false, true, false]);
+    expect(useLayout.getState().cardsOpen).toEqual(['context']);
+  });
+
+  it('a fold is kept across a change of session and a relaunch', async () => {
+    const view = mount();
+    await fold('Environment');
+    expect(useLayout.getState().cardsOpen).toEqual([]);
+    view.rerender(summaryOf(B));
+    expect(isOpen('Environment')).toBe(false);
+    view.rerender(summaryOf(A));
+    expect(isOpen('Environment')).toBe(false);
+    // a relaunch: the store hydrates from what it would write, over a store that holds the default again
+    const values = Object.fromEntries(storedLayout(useLayout.getState()));
+    expect(values['cards.open']).toEqual({ version: 1, open: [] });
+    act(() => useLayout.setState({ cardsOpen: ['environment'] }));
+    expect(isOpen('Environment')).toBe(true);
+    const bridge = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }), 'layout.set': undefined });
+    await act(() => useLayout.getState().hydrate(bridge.client, () => true));
+    expect(isOpen('Environment')).toBe(false);
+  });
+
+  // UX wave U8b (A8, l5-code-16): no Review button on the branch row and no Claude Code version row.
   it('combines checkout, changes, push and real navigation in Environment', async () => {
     const addTool = vi.spyOn(panelHost, 'addTool').mockReturnValue('summary-test-tool');
     offs.push(registerPanelTool(probeTool('review', { title: 'Review' }).tool));
     offs.push(registerPanelTool(probeTool('source-control', { title: 'Source control' }).tool));
     mount();
-    await open('Environment');
     const env = region('Environment');
     expect(await within(env).findByText('⎇ main')).toBeTruthy();
     expect(within(env).getByText(DIR)).toBeTruthy();
@@ -93,9 +131,88 @@ describe('floating session cards', () => {
     expect(addTool).toHaveBeenCalledWith('source-control', { appSessionId: A });
     await userEvent.setup().click(within(env).getByRole('button', { name: 'Open on GitHub' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://github.com/o/maws/tree/main' }]);
-    await userEvent.setup().click(within(env).getByRole('button', { name: 'Review' }));
-    expect(addTool).toHaveBeenCalledWith('review', { appSessionId: A });
+    expect(within(env).queryByRole('button', { name: 'Review' })).toBeNull();
+    expect(within(within(env).getByText('⎇ main').closest('div')!.parentElement!).queryByRole('button')).toBeNull(); // the branch row
+    expect(within(env).queryByText(/Claude Code/)).toBeNull();
     expect(within(env).queryByRole('switch')).toBeNull();
+  });
+
+  // UX wave U8b (A6, O-10): Details… alone, and Sources only when there is a source to list.
+  it('the opened Context card has Details… and no other button, and no Sources part while there is no source', async () => {
+    mount();
+    await open('Context');
+    const context = region('Context');
+    expect(within(context).getAllByRole('button').filter((button) => !button.hasAttribute('aria-expanded')).map((button) => button.textContent)).toEqual(['Details…']);
+    expect(within(context).queryByLabelText('Sources')).toBeNull();
+    expect(within(context).queryByText(SUMMARY_COPY.openSession)).toBeNull();
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve([]) }));
+    expect(within(context).queryByLabelText('Sources')).toBeNull(); // a transcript with nothing to list
+  });
+
+  it('useHasSources holds exactly when the session’s transcript lists a source', async () => {
+    const { result } = renderHook(() => useHasSources(A));
+    expect(result.current).toBe(false); // no transcript on this page
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(journalToEvents(loadSyntheticJournal('exploration-and-web')) as SessionEvent[]) }));
+    expect(result.current).toBe(true);
+  });
+
+  // UX wave U8b (UC-9, §C.1): the two slots, first in the column and at its foot.
+  it('draws the waiting card first only while a request of the session waits, and the foot under the last card', async () => {
+    registerSlot('sessionCardWaiting', ({ appSessionId }) => <section aria-label="Waiting requests">{appSessionId}</section>);
+    registerSlot('sessionCardFoot', ({ appSessionId }) => <div data-testid="card-foot">{appSessionId}</div>);
+    mount();
+    expect(screen.queryByRole('region', { name: 'Waiting requests' })).toBeNull();
+    const foot = screen.getByTestId('card-foot');
+    expect(list().contains(foot)).toBe(false); // outside the scrolling list
+    expect(list().nextElementSibling).toBe(foot);
+    setAttention([waiting(A, null)]); // open, but it asks for no answer
+    expect(screen.queryByRole('region', { name: 'Waiting requests' })).toBeNull();
+    setAttention([waiting(B)]); // another session's
+    expect(screen.queryByRole('region', { name: 'Waiting requests' })).toBeNull();
+    setAttention([waiting(A)]);
+    expect(list().firstElementChild).toBe(screen.getByRole('region', { name: 'Waiting requests' }));
+    expect(cardNames()).toEqual(['Waiting requests', 'Environment', 'Context', 'Connectors']);
+    setAttention([{ ...waiting(A), state: 'confirmed' as const }]);
+    expect(screen.queryByRole('region', { name: 'Waiting requests' })).toBeNull();
+  });
+
+  it('with nothing registered in the two slots, neither draws an element', () => {
+    setAttention([waiting(A)]);
+    mount();
+    expect(list().parentElement!.children).toHaveLength(1);
+    expect([...list().children].map((child) => child.getAttribute('aria-label'))).toEqual(['Environment', 'Context', 'Connectors']);
+  });
+
+  // UX wave U8b (UC-9): another machine's terminal session that is only listed has no record, so no record card.
+  it('gives a listed terminal session without a record the column and its slots, and no record card', () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    const LANE_B = addressOf(OTHER_MACHINE, 'eng-b' as AppSessionId);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A' }), appId: REMOTE }], [LANE_B, { ...remoteRow(OTHER_MACHINE, 'eng-b'), appId: LANE_B }]]) });
+    registerSlot('sessionCardFoot', ({ appSessionId }) => <div data-testid="card-foot">{appSessionId}</div>);
+    const view = render(summaryOf(REMOTE));
+    expect(list()).toBeTruthy();
+    expect(cardNames()).toEqual([]);
+    expect(screen.getByTestId('card-foot').textContent).toBe(REMOTE);
+    expect(fake.invoked('git.watch')).toEqual([]);
+    view.rerender(summaryOf(LANE_B)); // a listed session of the other lane has its record or nothing
+    expect(screen.queryByLabelText('Session cards')).toBeNull();
+    useSessions.setState({ listed: new Map() });
+  });
+
+  // UX wave U4a (decision 19): the model row reads the chip's name over the route's catalogue, the raw id as its title;
+  // the record carries no fast-mode state, so it never says Fast
+  it('names the model as the composer’s chip does, with the engine’s id in the tooltip, and Fast only from a live status', async () => {
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { projectId: P, model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: 'high' })) }));
+    mount(); // Environment is held open (U8b)
+    await waitFor(() => expect(fake.pending('engine.models')).toBeGreaterThan(0));
+    await act(() => fake.reply('engine.models', { models: [{ value: 'default', displayName: 'Default (recommended)', resolvedModel: 'claude-opus-5-5[1m]' }, { value: 'opus', displayName: 'Opus 5.5 (1M context)', resolvedModel: 'claude-opus-5-5[1m]' }], source: 'live', at: null }));
+    const line = await within(region('Environment')).findByText('Opus 5.5 High');
+    expect(line.getAttribute('title')).toBe('claude-opus-5-5[1m]');
+    // a live process whose status has fast mode on says Fast, as the chip does; once the process has exited, none
+    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A), fastMode: { state: 'on', disabledReason: null } }]]) }));
+    expect(within(region('Environment')).getByText('Opus 5.5 Fast High')).toBeTruthy();
+    act(() => useSessions.setState({ engine: new Map([[A, { ...status(A, { process: 'exited' }), fastMode: { state: 'on', disabledReason: null } }]]) }));
+    expect(within(region('Environment')).getByText('Opus 5.5 High')).toBeTruthy();
   });
 
   it('reads sampled context without presenting an unknown sample as zero', async () => {
@@ -106,17 +223,6 @@ describe('floating session cards', () => {
     expect(within(region('Context')).getByText('42,812 of 200,000 tokens')).toBeTruthy();
     expect(within(region('Context')).getByText('Autocompacts at 167,000 tokens')).toBeTruthy();
     expect(within(region('Context')).getByRole('button', { expanded: true }).textContent).toContain('21%');
-  });
-
-  it('opens the guarded compact widget only when a composer is available', async () => {
-    mount();
-    await open('Context');
-    expect(within(region('Context')).getByRole('button', { name: 'Compact…' }).hasAttribute('disabled')).toBe(true);
-    const openWidget = vi.fn(() => true);
-    act(() => useComposerStore.setState({ focusTargets: new Map([[A, { openWidget } as never]]) }));
-    await userEvent.setup().click(within(region('Context')).getByRole('button', { name: 'Compact…' }));
-    expect(openWidget).toHaveBeenCalledWith('compact', '');
-    expect(fake.invoked('session.send')).toEqual([]);
   });
 
   it('shows the reported MCP states, never guesses that every listed connector is connected', async () => {
@@ -141,71 +247,6 @@ describe('floating session cards', () => {
     expect(within(connectors).getByText('Connector status not reported')).toBeTruthy();
     expect(within(connectors).getByRole('button', { expanded: true }).textContent).toContain('Not reported');
     expect(within(connectors).queryByText('No MCP servers reported')).toBeNull();
-  });
-
-  it('queries this project, switches projects, and opens real artifact tabs', async () => {
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
-    mount();
-    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: MAIN.P } }]));
-    await open('Artifacts');
-    await userEvent.setup().click(await within(region('Artifacts')).findByRole('button', { name: 'Input errors plan' }));
-    expect(openTab).toHaveBeenCalledWith({ kind: 'artifact', artifactId: artifact.id, machine: TEST_MACHINE });
-    await userEvent.setup().selectOptions(within(region('Artifacts')).getByRole('combobox', { name: 'Artifacts project' }), Q);
-    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: MAIN.P } }, { filter: { projectId: MAIN.Q } }]));
-  });
-
-  it('does not leak the entire Library when the session has no project', async () => {
-    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A)) })));
-    mount();
-    await open('Artifacts');
-    expect(within(region('Artifacts')).getByText('Choose a project to see its artifacts')).toBeTruthy();
-    expect(fake.invoked('library.list')).toEqual([]);
-  });
-
-  it('All in Library clears stale filters and opens the main Library, not the old session tool', async () => {
-    useLibraryView.setState({ view: 'pinned', query: 'invisible', kind: 'presentation', spaceId: 'old' });
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
-    mount();
-    await open('Artifacts');
-    await userEvent.setup().click(within(region('Artifacts')).getByRole('button', { name: 'All in Library' }));
-    expect(useLibraryView.getState()).toMatchObject({ view: 'all', query: '', kind: null, spaceId: null });
-    expect(openTab).toHaveBeenCalledWith({ kind: 'artifacts' });
-  });
-
-  // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M5): a remote session's card is its machine's:
-  // its project's artifacts read there, its picker offers that machine's projects, and its rows and Library open there.
-  it('reads a remote session’s project on its machine and opens its artifacts and Library there', async () => {
-    const R = addressOf(OTHER_MACHINE, 'project-r' as ProjectId);
-    const S = addressOf(OTHER_MACHINE, 'project-s' as ProjectId);
-    const REMOTE = addressOf(OTHER_MACHINE, bareOf(A));
-    act(() => useSessions.setState((s) => ({
-      projects: new Map(s.projects).set(R, project(R, 2, { name: 'Studio R' })).set(S, project(S, 3, { name: 'Studio S' })),
-      records: new Map(s.records).set(REMOTE, record(REMOTE, { projectId: R })),
-    })));
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
-    render(<QueryClientProvider client={queryClient}><Summary appSessionId={REMOTE} /></QueryClientProvider>);
-    await waitFor(() => expect(fake.invoked('library.list')).toEqual([{ filter: { projectId: bareOf(R) } }]));
-    expect(fake.machines('library.list')).toEqual([OTHER_MACHINE]);
-    await open('Artifacts');
-    const picker = within(region('Artifacts')).getByRole('combobox', { name: 'Artifacts project' }) as HTMLSelectElement;
-    expect(picker.value).toBe(R);
-    expect(within(picker).getAllByRole('option').map((option) => option.textContent)).toEqual(['Choose a project', 'Studio R', 'Studio S']);
-    await userEvent.setup().click(await within(region('Artifacts')).findByRole('button', { name: 'Input errors plan' }));
-    expect(openTab).toHaveBeenCalledWith({ kind: 'artifact', artifactId: artifact.id, machine: OTHER_MACHINE });
-    await userEvent.setup().click(within(region('Artifacts')).getByRole('button', { name: 'All in Library' }));
-    expect(useLibraryView.getState().machine).toBe(OTHER_MACHINE);
-    expect(openTab).toHaveBeenCalledWith({ kind: 'artifacts' });
-  });
-
-  it('switching sessions resets disclosures and project scope rather than leaking the previous session’s choice', async () => {
-    const view = mount();
-    await open('Artifacts');
-    await userEvent.setup().selectOptions(within(region('Artifacts')).getByRole('combobox', { name: 'Artifacts project' }), Q);
-    view.rerender(<QueryClientProvider client={queryClient}><Summary appSessionId={B} /></QueryClientProvider>);
-    expect(screen.getAllByRole('button', { expanded: false })).toHaveLength(4);
-    view.rerender(<QueryClientProvider client={queryClient}><Summary appSessionId={A} /></QueryClientProvider>);
-    await open('Artifacts');
-    expect((within(region('Artifacts')).getByRole('combobox') as HTMLSelectElement).value).toBe(P);
   });
 
   it('keeps transcript Sources actionable inside Context instead of losing them with the old section', async () => {
@@ -247,5 +288,76 @@ describe('floating session cards', () => {
     expect(screen.queryByRole('region', { name: 'Environment' })).toBeNull();
     expect(fake.invoked('git.watch')).toEqual([]);
     expect(fake.invoked('library.list')).toEqual([]);
+  });
+});
+
+// UX wave U8c-2 (M4, §H; the owner's answers, Decision Log 14): the card says where the agent is. The folder row shows the
+// agent's own folder (the selector's `cwd`), cut at its start when it does not fit, whole in its tooltip; while the
+// working folder is not the launch folder, one muted line "moved from <the launch folder's name>" sits directly under it.
+describe('the Environment card follows the agent', () => {
+  const REPO = '/repo';
+  const W1 = '/repo/.claude/worktrees/w1';
+  const put = (over: Partial<SessionRecord>) => act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { projectId: P, directory: REPO, ...over })) })));
+  const byCd: Partial<SessionRecord> = { agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } };
+  const byTool: Partial<SessionRecord> = { directory: `${W1}/src`, worktree: { path: W1, branch: 'w1' }, launchFolder: REPO };
+  const env = () => region('Environment');
+  const folderRow = () => within(env()).getByTestId('card-folder');
+  const movedFrom = () => within(env()).queryByTestId('moved-from');
+  const header = () => within(env()).getByRole('button', { expanded: true }).textContent;
+
+  it.each([['a cd', byCd], ['the worktree tool', byTool]])('after a move by %s: the agent’s folder in the row, cut at its start, and "moved from" directly under it', async (_how, over) => {
+    put(over);
+    mount();
+    expect(await within(env()).findByText('⎇ main')).toBeTruthy();
+    expect(fake.invoked('git.watch')).toEqual([{ directory: W1 }]); // git at the working folder
+    expect(folderRow().textContent).toBe(`${W1}/src`);
+    expect(folderRow().title).toBe(`${W1}/src`);
+    expect(folderRow().getAttribute('dir')).toBe('rtl'); // the browser's ellipsis at the path's start; the text itself runs left to right
+    const line = movedFrom()!;
+    expect(line.textContent).toBe('moved from repo');
+    expect(line.title).toBe(REPO);
+    expect(line.previousElementSibling?.contains(folderRow())).toBe(true); // directly under the folder row
+    expect(line.nextElementSibling?.textContent).toBe('⎇ main'); // above the branch row
+  });
+
+  it('draws no "moved from" at the launch folder nor in a sub-folder of it, and a change of sub-folder changes the row in place', async () => {
+    put({});
+    mount();
+    await within(env()).findByText('⎇ main');
+    expect(folderRow().textContent).toBe(REPO);
+    expect(folderRow().getAttribute('dir')).toBe('rtl'); // every session's card, moved or not
+    expect(movedFrom()).toBeNull();
+    const row = folderRow();
+    put({ agentFolder: { checkout: REPO, cwd: `${REPO}/packages/app`, branch: 'main', linked: false } });
+    await waitFor(() => expect(folderRow().textContent).toBe(`${REPO}/packages/app`));
+    expect(folderRow()).toBe(row); // the same row, its text changed
+    expect(movedFrom()).toBeNull();
+    expect(within(env()).getByText('⎇ main')).toBeTruthy();
+    expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }]); // a change of the agent's folder alone starts no watch
+  });
+
+  it('after a move, shows the new folder and the pending copy until git answers there; the old folder’s late answer changes nothing', async () => {
+    fake = fakeClient({
+      'git.diff': { patch: '', files: [{ path: 'a.ts', oldPath: null, insertions: 3, deletions: 1, binary: false }] }, 'git.unwatch': undefined,
+      'layout.get': { value: null }, 'layout.set': undefined,
+      'session.observedFacts': { version: 1, appSessionId: MAIN.A, engineSessionId: null, writtenAt: '2026-10-01T00:00:00Z', source: 'journal', launches: [], engineVersion: null, model: null, effort: null, mode: null, outputStyle: null, plugins: null, contextUsage: null, complete: true },
+    });
+    window.maws = preloadOf(fake);
+    useGit.setState({ entries: new Map() });
+    put({});
+    mount();
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }])); // unanswered
+    put(byCd);
+    await waitFor(() => expect(fake.invoked('git.watch')).toEqual([{ directory: REPO }, { directory: W1 }]));
+    expect(folderRow().textContent).toBe(`${W1}/src`);
+    await act(() => fake.reply('git.watch', { ...GIT, repoRoot: REPO }, 0)); // the launch folder's answer, late
+    expect(within(env()).queryByText('⎇ main')).toBeNull();
+    expect(within(env()).queryByTestId('change-line')).toBeNull();
+    expect(within(env()).getAllByText(SUMMARY_COPY.pending).length).toBeGreaterThan(0); // the one pending row
+    expect(header()).toContain(SUMMARY_COPY.pending);
+    await act(() => fake.reply('git.watch', { ...GIT, repoRoot: W1, branch: 'w1' }, 0));
+    expect(await within(env()).findByText('⎇ w1')).toBeTruthy();
+    expect(header()).toContain('w1');
+    expect(movedFrom()?.textContent).toBe('moved from repo');
   });
 });

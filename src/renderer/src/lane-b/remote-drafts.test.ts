@@ -12,7 +12,7 @@ import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { docOf, paragraph, textNode } from '../composer/editor/doc';
 import { rememberingRemoteDrafts, rememberRemoteDraft, resetRemoteDrafts } from '../composer/editor/drafts';
 import { readerRowsOf, resetReaderRows } from './reader-rows';
-import { REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS } from './remote-drafts';
+import { dropRemoteDraftSaves, REMOTE_DRAFT_RETRIES, REMOTE_DRAFT_RETRY_MS, REMOTE_DRAFT_WORDS, unsavedRemoteDraft } from './remote-drafts';
 import { WITHHELD_ATTACHMENTS } from '@shared/sessions/draft-fit';
 import { useNotices } from '../stores/notices';
 import { useMachines } from '../stores/machines';
@@ -407,5 +407,133 @@ describe('a machine older than M6a, which offers no drafts', () => {
     expect(own.save).toHaveBeenCalledOnce();
     expect(own.load).toHaveBeenCalledOnce();
     expect(fake.calls).toEqual([]);
+  });
+});
+
+// UX wave U4a (decision 13; M3's review, finding 1): a take-back's save goes once, in the session's order with its
+// ordinary saves: after those handed before it, before those handed after it, and never waiting on one handed after it
+describe('a take-back’s save among the session’s ordinary saves', () => {
+  const CLAIM = 'claim:no-document';
+  const sent = (fake: FakeClient) => (fake.invoked('session.drafts.set') as Saved[]).map((input) => (input.replaces === CLAIM ? `claim ${textOf(input.draft)}` : textOf(input.draft)));
+  const portThere = (fake: FakeClient) => rememberingRemoteDrafts(local(), REMOTE, () => true, fake.client);
+
+  it('goes at once with nothing out, and an ordinary save handed in the same tick goes after it', async () => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = portThere(fake);
+    const claim = port.save(draft('staged'), CLAIM);
+    port.save(draft('typed after'));
+    await flush();
+    expect(sent(fake)).toEqual(['claim staged']);
+    await fake.reply('session.drafts.set', undefined);
+    expect(await claim).toBe(true);
+    await flush();
+    expect(sent(fake)).toEqual(['claim staged', 'typed after']);
+  });
+
+  it('two queued take-back saves and an ordinary one handed in one tick go in the order handed', async () => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = portThere(fake);
+    const first = port.save(draft('first stage'), CLAIM);
+    const second = port.save(draft('second stage'), CLAIM);
+    port.save(draft('typed'));
+    await flush();
+    expect(sent(fake)).toEqual(['claim first stage']);
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    expect(sent(fake)).toEqual(['claim first stage', 'claim second stage']);
+    await fake.fail('session.drafts.set', 'kept');
+    await flush();
+    expect(sent(fake)).toEqual(['claim first stage', 'claim second stage', 'typed']);
+    expect(await first).toBe(true);
+    expect(await second).toBe(false);
+  });
+
+  it('waits for an ordinary save out, and goes before one handed after it', async () => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = portThere(fake);
+    port.save(draft('typed'));
+    await flush();
+    const claim = port.save(draft('staged'), CLAIM);
+    port.save(draft('typed more'));
+    await flush();
+    expect(sent(fake)).toEqual(['typed']);
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    expect(sent(fake)).toEqual(['typed', 'claim staged']);
+    await fake.reply('session.drafts.set', undefined);
+    await flush();
+    expect(await claim).toBe(true);
+    expect(sent(fake)).toEqual(['typed', 'claim staged', 'typed more']);
+  });
+
+  it.each([
+    ['refused (the machine offers no drafts)', async (fake: FakeClient) => fake.fail('session.drafts.set', 'refused', 'internal', NOT_OFFERED)],
+    ['dropped (a newer save went to memory)', async (fake: FakeClient) => {
+      dropRemoteDraftSaves(REMOTE);
+      await fake.reply('session.drafts.set', undefined);
+    }],
+  ])('goes once the ordinary save before it ends %s', async (_name, end) => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = portThere(fake);
+    port.save(draft('typed'));
+    await flush();
+    const claim = port.save(draft('staged'), CLAIM);
+    await flush();
+    expect(sent(fake)).toEqual(['typed']);
+    await end(fake);
+    await flush();
+    expect(sent(fake)).toEqual(['typed', 'claim staged']);
+    await fake.reply('session.drafts.set', undefined);
+    expect(await claim).toBe(true);
+  });
+});
+
+// the branch panel's finding 2: a take-back's save that is taken supersedes this window's older save still pending, and
+// its sending again, so the older one never lands over the message it put there
+describe('a take-back’s save taken over an older save past main’s bound', () => {
+  it('retires the older save and its retry: the settled message stays', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true }); // the fake client's settling, on real time
+    try {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fake = fakeClient({ 'session.drafts.get': null });
+      const port = rememberingRemoteDrafts(local(), REMOTE, () => true, fake.client);
+      port.save(null); // the emptied box
+      await flush();
+      await fake.fail('session.drafts.set', 'mini took the request but hasn’t confirmed it', 'timeout');
+      await flush();
+      const stage = draft('the message');
+      const claim = port.save(stage, 'claim:no-document');
+      await flush();
+      await fake.reply('session.drafts.set', undefined);
+      expect(await claim).toBe(true);
+      const settled = draft('the message');
+      const settle = port.save(settled, `settle:${stage.updatedAt}`);
+      await flush();
+      await fake.reply('session.drafts.set', undefined);
+      expect(await settle).toBe(true);
+      const sent = fake.invoked('session.drafts.set').length;
+      await vi.advanceTimersByTimeAsync(2 * REMOTE_DRAFT_RETRY_MS);
+      expect(fake.invoked('session.drafts.set')).toHaveLength(sent); // the older null is not sent again
+      expect(unsavedRemoteDraft(REMOTE)).not.toBeNull(); // no older save stands for this session's draft
+      warn.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a save handed after it: that one is newer', async () => {
+    const fake = fakeClient({ 'session.drafts.get': null });
+    const port = rememberingRemoteDrafts(local(), REMOTE, () => true, fake.client);
+    port.save(draft('typed'));
+    await flush();
+    const claim = port.save(draft('staged'), 'claim:no-document');
+    port.save(draft('typed after'));
+    await flush();
+    await fake.reply('session.drafts.set', undefined); // 'typed'
+    await flush();
+    await fake.reply('session.drafts.set', undefined); // the claim
+    expect(await claim).toBe(true);
+    await flush();
+    expect((fake.invoked('session.drafts.set') as Saved[]).map((input) => textOf(input.draft))).toEqual(['typed', 'staged', 'typed after']);
   });
 });

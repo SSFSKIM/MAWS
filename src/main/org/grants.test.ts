@@ -491,7 +491,7 @@ describe('signing', () => {
       // the machine's owners change while the person is asked
       head = { ...head, version: 8, machines: head.machines.map((m) => (m.ref === MINI ? { ...m, owners: [C] } : m)) };
     };
-    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toMatchObject({ ok: false, reason: 'refused' });
+    expect(await h.grants.set({ ref: MINI, member: B, rights: ['spawn'] })).toEqual({ ok: false, reason: 'refused', detail: 'unknown-signer' }); // the verdict's code alone: the sheet's line says the rest (U11a board 540)
     expect(h.prompts).toHaveLength(1);
     expect(h.issued(MINI, B)).toBeUndefined();
     expect(h.mini.acts).toEqual([]);
@@ -642,7 +642,7 @@ describe('delivery', () => {
     head = { ...head, version: 8 };
     const answer = await h.grants.set({ ref: HOME, member: B, rights: ['spawn'] });
     expect(answer).toMatchObject({ ok: false, reason: 'ledger-unread' });
-    expect(!answer.ok && answer.detail).toMatch(/hasn’t seen this member yet/);
+    expect(answer).toEqual({ ok: false, reason: 'ledger-unread', detail: 'this Mac’s own endpoint hasn’t seen this member yet' }); // the sheet's line says to try again (U11a board 540)
     expect(h.prompts).toEqual([]);
   });
 

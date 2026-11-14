@@ -1,4 +1,4 @@
-// P4-R8 (settings version 16): Settings › Engine › MCP servers adds an HTTP server by name and URL and removes one, each
+// P4-R8 (settings version 16): Settings › Sessions › MCP servers (Engine's until U11a M9) adds an HTTP server by name and URL and removes one, each
 // a write of the whole list through `settings.set`; an entry the schema refuses is said beside the fields and nothing is
 // written.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
@@ -39,10 +39,10 @@ afterEach(() => {
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
-describe('Settings › Engine › MCP servers', () => {
+describe('Settings › Sessions › MCP servers', () => {
   it('starts empty, says where the servers load, and adds the owner\'s Notion entry by name and URL, trimmed', async () => {
     renderRow();
-    expect(within(row()).getByText(MCP_SERVERS.note)).toBeTruthy();
+    expect(within(row()).getByText(MCP_SERVERS.notes.default.line)).toBeTruthy(); // U11a M9: the note's line
     const add = within(row()).getByRole('button', { name: MCP_SERVERS.add }) as HTMLButtonElement;
     expect(add.disabled).toBe(true);
     type(MCP_SERVERS.name, ' notion ');

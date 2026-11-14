@@ -1212,7 +1212,7 @@ One pairing at a time, and none while a rekey runs, since both are the session's
 A failure at 4 or 5 leaves the slot held, with the reason under the delegation row. "Write the code again" retries 4 and 5 while this run holds the key pair. Once the app has quit, the key pair is gone, and the row offers only Discard (M3's), since a delegation whose private key nobody holds must not be published. The key pair and the code live only in main's memory and the child's stdin, and are dropped at publish, discard, sign-out or quit.
 
 *The destination.* `org.provisioningSecret {project, secret, account}` is a machine setting, set once in the Delegations section. Nothing is read from devcloud's files.
-- Production's is project `ytdownload-505811`, secret `desk-provisioning-v2` and account `cli-owner@ytdownload-505811.iam.gserviceaccount.com`. These are the secret B4 step 6 versions, and the account O14 names as the MacBook's gcloud identity with Secret Manager access (O14's Dependencies).
+- Production's is the owner's Google Cloud project (not recorded in this repository), secret `desk-provisioning-v2` and the owner's CLI service account. These are the secret B4 step 6 versions, and the account O14 names as the MacBook's gcloud identity with Secret Manager access (O14's Dependencies).
 - Devcloud's boot reads `latest` (B4 step 6), so the new version is what the next VM uses, provided the profile's `[desk] delegation_id` names the new delegation. The sheet says so for a delegation that isn't the profile's.
 
 *gcloud.* A GUI app's `PATH` lacks Homebrew, so main resolves `gcloud` explicitly:
@@ -1358,7 +1358,7 @@ Rejected:
   - their tests.
 - `src/shared/spine/` or wherever the router's command context is typed: `context.reader: 'owner' | MemberId`, absent meaning `'owner'`.
 - **`src/endpoint`** (desk-track reviewed):
-  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`;
+  - offer rows for `session.reader.update` (revised 2026-11-07, in place of `session.update`; `title` and `archived` stay the owner's), `session.drafts.get` and `session.drafts.set`; *2026-11-13 (UTC):* Amended by the UX wave (U9; O-48, S-02; `docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md`), on the owner's words: the observation behind O-48 ("I cannot create a fork session from the remote machine …") and "Approve and start", 2026-11-12. From the UX wave (U9), behind `rl2.session-acts`: a fork in place (the machine's owners), archive, unarchive, rename, the owner's read of archived sessions, dismissing an attention item, taking back a waiting message and a pane's answer are offered. Launch, start, the setup of a new session, delete, take over and replays stay unoffered.
   - the dispatch sets `context.reader`: `'owner'` when the caller is one of the machine's owners (`machineOwners`), else the caller's member id;
   - `remote-unavailable.ts` drops the three rows;
   - tests.
@@ -1370,7 +1370,7 @@ Rejected:
 - **Reading.** A member's reader fields are their own row's, with no row reading `pinned: false`, `unread: false`, `lastSeen: null`. An `'owner'` reader reads the session row as today.
 - **Unread.** When a new turn ends, the index sets `unread` on the session row and on every `reader_state` row of the session. A member's first sight of a session is not unread. Only `markSeen` clears a member's own.
 - **Grades.** `session.update` (reader fields) is graded `list`, `session.drafts.get` and `.set` `converse`, and `title` and `archived` stay `manage`. A patch mixing reader fields with others is refused `malformed` remotely.
-- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. A reader's update goes through a new machine command, `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}}`, which answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`; `WIRE_MINOR` 31). The renderer's remote path applies that projection to the record it holds. `session.update` stays local, answers as today, and is refused with any reader in the context (revised 2026-11-07, Decision Log "M6a Task 1's fork").
+- **What a remote reader update answers.** Never the record: `applyPatch` returns the whole `SessionRecord` (`register.ts:38-46`), which holds checkout paths, settings and `launchedBy.action` (a spawn's signed act, its brief included; `src/services/sessions/spawn.ts:51-53,75`), and a `list` caller must not read those. A reader's update goes through a new machine command, `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}}`, which answers `ReaderState {appSessionId, pinned, lastSeen, unread}` (a new schema beside `SessionRecordSchema`; `WIRE_MINOR` 31). The renderer's remote path applies that projection to the record it holds. `session.update` stays local, answers as today, and is refused with any reader in the context (revised 2026-11-07, Decision Log "M6a Task 1's fork"). *2026-11-13 (UTC):* Amended by the UX wave (U9; S-02): a reader's `session.update` whose patch is exactly `{archived: false}` is taken, at `manage`, and answered with the record as `session.get` answers that reader: `index.sessions.get(id, reader)`, the call `session.get` makes, and `session.get` is offered to another machine as a call (`src/endpoint/offers.ts`), so the answer is no wider than a read that reader may already make. `session.rename` under a reader answers its record the same way. Every other patch under a reader, `{archived: true}` included, is refused as before.
 - **Co-owners share.** Two members who both own a machine share its owners' reading. The index can't tell which owner sits at a device, and the case is rare. It is written in the Surprises, not hidden. Rejected: keying the local app by its signed-in member, which strands the state of a profile that signs in later, or signs out.
 - **No migration of data.** Existing rows stay the owners'. Rejected: copying them to the signed-in member, which needs an identity the daemon doesn't hold.
 - The document channel's member attribution (O7's §T, `stream-document.ts`) is outside M6a. Drafts here are the composer's.
@@ -1560,6 +1560,7 @@ The door adds no authority. An act through it is authenticated by its step-up si
   - A sent message shows "sending" until `human-ack`. A refusal shows under it ("not reachable" for a session hidden from you, P5 Decision Log 224).
   - B3 has moved the last machine (P5 Decision Log 154), so words no longer wait.
 - **Offline.** With the hub unreachable or signed out, the tab draws the cached stream with "As of <time>", the time of its last `caught-up`, and the composer is withdrawn.
+  - Amended 2026-11-13: UX wave U11 (S-09): the Channel's footer reads the channel's own reach first.
 - **What it leaves out.** Withheld tombstones, `unlisted` notices and lifecycle events draw nothing. Lifecycle events give the stream its sessions' titles and machines. An event that doesn't verify draws nothing and is counted ("2 events didn't verify"), then tried again at the next head.
 
 **Touches.**
@@ -2002,7 +2003,7 @@ Recorded in both documents' Outcomes: each item, with a transcript line, a scree
     npx vitest run --project node src/main/org/edits.test.ts
     npx vitest run --project node-timing test/org/org-page.local.test.ts
 
-The live check is the owner's, on staging first. In the Delegations section the owner names staging's secret (a scratch secret in `ytdownload-505811`, which the owner creates), creates a delegation, then checks the secret's new version by metadata alone (`gcloud secrets versions list <secret>`). A VM provisioned from it (`devcloud vm up` with the profile naming it, or the endpoint harness) lists. Then the owner renews and drops it. Production's first app-created delegation is the owner's, after M8.
+The live check is the owner's, on staging first. In the Delegations section the owner names staging's secret (a scratch secret in the owner's Google Cloud project, which the owner creates), creates a delegation, then checks the secret's new version by metadata alone (`gcloud secrets versions list <secret>`). A VM provisioned from it (`devcloud vm up` with the profile naming it, or the endpoint harness) lists. Then the owner renews and drops it. Production's first app-created delegation is the owner's, after M8.
 
 **M5b.**
 
@@ -2505,7 +2506,7 @@ The socket is `ws` to `ws(s)://<hub>/api/registry/socket?app=1` with `session.cu
     // the router's command context gains reader?: 'owner' | MemberId   (absent: 'owner')
     // revised 2026-11-07: a new machine command, never the record (WIRE_MINOR 31)
     session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState {appSessionId, pinned, lastSeen, unread}
-    // session.update stays local and is refused with any reader
+    // session.update stays local and is refused with any reader (amended 2026-11-13 by the UX wave, U9: an unarchive alone is taken; Decision Log "M6a Task 1's fork", 5)
     // src/endpoint/offers.ts: 'session.reader.update' (list), 'session.drafts.get' and '.set' (converse)
     // a non-owner's device never receives the owners' reader fields: every record the endpoint sends them, answer or event, carries their own
 
@@ -3228,7 +3229,7 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   - The code lives only in main's memory and the child's stdin. It is never logged, put on the clipboard, written to disk or sent to the renderer.
   - gcloud is resolved explicitly, and a missing or signed-out one, or a missing secret, refuses before anything is minted.
   - A failure after signing leaves the slot unsent with the reason.
-  - The destination (`project`, `secret`, `account`) is a machine setting. Production's is `ytdownload-505811` / `desk-provisioning-v2` / `cli-owner@ytdownload-505811.iam.gserviceaccount.com`, O14's.
+  - The destination (`project`, `secret`, `account`) is a machine setting. Production's is the owner's Google Cloud project / `desk-provisioning-v2` / the owner's CLI service account (not recorded in this repository), O14's.
   - A fake gcloud on a scratch `PATH` proves the custody.
   Rationale: P5 Decision Log 75 (1) already binds the custody (no code is ever a file on a Mac; it goes to Secret Manager), and after M8 the app is the only signer that can create a delegation. Rejected: (b) showing the code once with Copy, which breaks that rule; (c) a CLI helper over a pipe, the same custody with another process.
   Date/Author: 2026-11-06, the architect's ruling 1 (the architect's to decide, not the owner's), recorded by O8's executor.
@@ -3515,7 +3516,8 @@ Findings on P5 for its writer (things in P5 that are wrong or missing):
   2. **What's built.** `session.reader.update {appSessionId, patch: {pinned?, lastSeen?, unread?}} -> ReaderState`, graded `list`, is an additive command (`WIRE_MINOR` 31). The endpoint offers it in place of `session.update`, which stays local-only and is refused with any reader. A patch can't carry `title` or `archived`, because the schema has no place for them, which covers the `malformed` refusal of a mixed patch on the wire. §P, M6a's Touches and Decisions, and the notes on the rest's wire changes are revised to match. Rejected: a redacted `SessionRecord` with reader fields, which would invent paths and settings to satisfy the schema; and an endpoint-side projection, which the device's strict check of `session.update` refuses.
   3. **The owners' reader fields on remote feeds.** Task 1 found that the endpoint forwards `session.changed`, whose records carry the owners' `pinned`, `unread` and `last_seen_*`, to remote feeds. M6a's intent is that each member's reading is kept apart, so a non-owner's device never receives the owners' reader fields. Every record the endpoint sends them, an answer or an event, carries their own, or nothing where they have no row. The mechanism is Task 2's, in its desk-track commits; its test sits in `test/endpoint/reader-state.test.ts`.
   4. **A member's write** sends no `session.changed` and takes no revision. Their own device learns the change from the `ReaderState` answer, and the owners' views don't move.
-  Date/Author: 2026-11-07, O8's executor (controller), on Task 1's NEEDS_CONTEXT.
+  5. **Amended 2026-11-13 (UTC)**, as the session that keeps master ruled (the UX wave's R9; `docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md`). Amended by the UX wave (U9; S-02): a reader's `session.update` whose patch is exactly `{archived: false}` is taken, at `manage`, and answered with the record as `session.get` answers that reader: `index.sessions.get(id, reader)`, the call `session.get` makes, and `session.get` is offered to another machine as a call (`src/endpoint/offers.ts`), so the answer is no wider than a read that reader may already make. `session.rename` under a reader answers its record the same way. Every other patch under a reader, `{archived: true}` included, is refused as before. The handler checks the patch's own keys itself, whatever the endpoint admitted, and the stored answer the ledger replays for a duplicate or a query is that same reading.
+  Date/Author: 2026-11-07, O8's executor (controller), on Task 1's NEEDS_CONTEXT; item 5 by the UX wave's U9 executor (M1), 2026-11-13.
 
 - Decision: The architect's rulings on `session.reader.update` (2026-11-07), binding on Tasks 1–3.
   1. **Whose row it writes.** The command writes only the caller's own reader row, and the member comes from the channel's authenticated member, never from the request (the schema has no member field). "Co-owners share" stands: an owner's write lands on the owners' row, the session row's columns, and never on a member row. A non-owner's write lands on that member's own row and never reaches the owners' row or another member's. A test pins both directions.

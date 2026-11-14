@@ -17,6 +17,7 @@ import { effortBasis, resetEffectiveEfforts, useEffectiveEfforts } from '../comp
 import { GatewayDialogs } from '../gateway/SwitchSheet';
 import { ipc } from '../ipc/client';
 import { useSetup } from '../sessions/store';
+import { useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
 import { useUsage } from '../stores/usage';
 import { ID as INTENT_ID, intent } from '../test-support/setup-intents';
@@ -42,6 +43,9 @@ let offs: (() => void)[] = [];
 
 beforeEach(() => {
   backend = createWidgetBackend({ root: ROOT, statuses: loadScenario(join(ROOT, 'test/fixtures/shell/nine-sessions.json')).engine });
+  // the machine's default route, as main answers it (the intent binding reads it on every mount); unanswered, each
+  // mount warned on stderr
+  backend.script('machineSettings.get', () => ({ settings: machineSettingsDefaults(), version: 1, defaultRoute: 'machine' }));
   window.maws = backend.bridge();
   useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
   offs = [ipc.on('session.status', (event) => useSessions.getState().applyStatus(event, TEST_MACHINE))];
@@ -110,7 +114,9 @@ describe('the effort view: the effort in words over the model, a slider over its
     expect(effortLevelsOf(undefined)).toHaveLength(5);
   });
 
-  it('the lightning asks first: the lane warning, then Turn on fast mode sends apply_flag_settings once', async () => {
+  // UX wave U4a (O-32, decision 20): no lightning; where the model offers fast mode, a "Fast mode" row at the foot of the
+  // effort view, its state in a muted line and a switch at the right; turning it on still asks first
+  it('the fast-mode row asks first: the lane warning, then Turn on fast mode sends apply_flag_settings once', async () => {
     setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } });
     mount('fast', 'on');
     const fast = await screen.findByRole('switch', { name: 'Fast mode' });
@@ -120,9 +126,35 @@ describe('the effort view: the effort in words over the model, a slider over its
     await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, settings: { fastMode: true } }]));
   });
 
-  // P5 O7 M8: `session.applyFlagSettings` is declared not offered on another machine (REMOTE_UNAVAILABLE): the lightning
-  // is greyed with the declared words, and `/fast on` opens no warning
-  it('greys the lightning for a session on another machine, with the declared reason', async () => {
+  it('draws no lightning; the row sits at the foot with its state in words, and is absent for a model without fast mode', async () => {
+    setStatus({ model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, fastMode: { state: 'off', disabledReason: null } });
+    mount('effort');
+    const fast = await screen.findByRole('switch', { name: 'Fast mode' });
+    expect(document.body.textContent).not.toContain('⚡');
+    const row = fast.closest('[data-fast-row]') as HTMLElement;
+    expect(row.textContent).toBe('Fast modeOff');
+    const view = screen.getByRole('group', { name: 'Effort' });
+    expect(view.lastElementChild).toBe(row); // the foot of the effort view
+    setStatus({ fastMode: { state: 'on', disabledReason: null } });
+    await waitFor(() => expect(row.textContent).toBe('Fast modeOn'));
+    expect(fast.getAttribute('aria-checked')).toBe('true');
+    setStatus({ fastMode: { state: 'cooldown', disabledReason: null } });
+    await waitFor(() => expect(row.textContent).toBe('Fast modeon · cooling down'));
+    setStatus({ fastMode: { state: 'off', disabledReason: 'sdk_opt_in_required' } });
+    await waitFor(() => expect(row.textContent).toBe('Fast modeOff until turned on here'));
+    fireEvent.click(fast);
+    expect(screen.getByRole('button', { name: 'Turn on fast mode' })).toBeTruthy(); // the switch still asks first
+    cleanup();
+    setStatus({ model: { requested: 'sonnet', resolved: 'claude-sonnet-5[1m]' }, fastMode: { state: 'off', disabledReason: null } });
+    mount('effort');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Sonnet 5 · Select model' })).toBeTruthy());
+    expect(screen.queryByRole('switch')).toBeNull(); // Sonnet has no fast mode: no row
+    expect(document.querySelector('[data-fast-row]')).toBeNull();
+  });
+
+  // P5 O7 M8: `session.applyFlagSettings` is declared not offered on another machine (REMOTE_UNAVAILABLE): the row's
+  // switch is closed with the declared words, which its line says too, and `/fast on` opens no warning
+  it('closes the fast-mode row for a session on another machine, with the declared reason', async () => {
     const remote = addressOf(OTHER_MACHINE, BARE);
     useSessions.setState({ engine: new Map([[remote, { ...backend.status(BARE), model: { ...backend.status(BARE).model, requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, appSessionId: remote }]]), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, BARE), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
     try {
@@ -130,10 +162,107 @@ describe('the effort view: the effort in words over the model, a slider over its
       const fast = await screen.findByRole('switch', { name: 'Fast mode' });
       expect(fast).toHaveProperty('disabled', true);
       expect(fast.title).toBe(REMOTE_UNAVAILABLE['session.applyFlagSettings']);
+      expect(fast.closest('[data-fast-row]')?.textContent).toBe(`Fast mode${REMOTE_UNAVAILABLE['session.applyFlagSettings']}`);
       expect(screen.queryByRole('button', { name: 'Turn on fast mode' })).toBeNull();
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }
+  });
+
+  // UX wave U4a (O-32, decision 20): the track is the target; a press picks the nearest level and a drag follows it,
+  // committing once where it is released; the dots stay marks
+  describe('the effort track takes the pointer', () => {
+    const track = () => {
+      const slider = screen.getByRole('slider', { name: 'Effort' });
+      slider.getBoundingClientRect = () => ({ left: 100, width: 200, right: 300, top: 0, bottom: 28, height: 28, x: 100, y: 0, toJSON: () => ({}) });
+      return slider;
+    };
+    const press = (slider: HTMLElement, x: number) => fireEvent.pointerDown(slider, { clientX: x, pointerId: 1, button: 0 });
+
+    it('is 28 px tall, keeps its dots as marks, and a press between two dots picks the nearer at release', async () => {
+      knowEffort('high');
+      mount('effort');
+      const slider = track();
+      expect(slider.className).toContain('h-7');
+      expect([...slider.querySelectorAll('[data-level]')].map((d) => d.getAttribute('data-level'))).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      press(slider, 160); // 30 % along: nearer medium (25 %) than high (50 %)
+      expect(slider.getAttribute('aria-valuetext')).toBe('Medium, 2 of 5');
+      expect(calls('apply_flag_settings')).toHaveLength(0); // not before release
+      fireEvent.pointerUp(slider, { clientX: 160, pointerId: 1 });
+      await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, effort: 'medium' }]));
+    });
+
+    it('a drag follows the pointer and commits once, where it is released; a press on the current level sends nothing', async () => {
+      knowEffort('high');
+      mount('effort');
+      const slider = track();
+      press(slider, 105);
+      expect(slider.getAttribute('aria-valuetext')).toBe('Low, 1 of 5');
+      fireEvent.pointerMove(slider, { clientX: 255, pointerId: 1 });
+      expect(slider.getAttribute('aria-valuetext')).toBe('Extra high, 4 of 5');
+      fireEvent.pointerMove(slider, { clientX: 320, pointerId: 1 }); // past the end: the last level
+      expect(slider.getAttribute('aria-valuetext')).toBe('Max, 5 of 5');
+      fireEvent.pointerUp(slider, { clientX: 320, pointerId: 1 });
+      await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, effort: 'max' }]));
+      cleanup();
+      backend.calls.length = 0;
+      knowEffort('high');
+      mount('effort');
+      const again = track();
+      press(again, 200);
+      fireEvent.pointerUp(again, { clientX: 200, pointerId: 1 });
+      fireEvent.pointerMove(again, { clientX: 290, pointerId: 1 }); // no press held: nothing follows
+      expect(again.getAttribute('aria-valuetext')).toBe('High, 3 of 5');
+      await act(async () => void (await Promise.resolve()));
+      expect(calls('apply_flag_settings')).toHaveLength(0);
+    });
+
+    it('the keyboard moves it as before', async () => {
+      knowEffort('high');
+      mount('effort');
+      const slider = track();
+      fireEvent.keyDown(slider, { key: 'Home' });
+      await waitFor(() => expect(calls('apply_flag_settings').map((c) => c.input)).toEqual([{ appSessionId: BARE, effort: 'low' }]));
+    });
+  });
+
+  // UX wave U4a (decision 21): ⇧⌘E asks for the effort view with the keyboard on the slider
+  it('puts the keyboard on the slider when the request asks for it, and only then', async () => {
+    knowEffort('high');
+    useComposerStore.setState({ chipWidgets: new Map([[ID, { name: 'effort', args: '', nonce: 1, focus: 'slider' }]]) });
+    try {
+      mount('effort');
+      expect(document.activeElement).toBe(screen.getByRole('slider', { name: 'Effort' }));
+      cleanup();
+      useComposerStore.setState({ chipWidgets: new Map([[ID, { name: 'effort', args: '', nonce: 2 }]]) });
+      mount('effort');
+      expect(document.activeElement).not.toBe(screen.getByRole('slider', { name: 'Effort' }));
+    } finally {
+      useComposerStore.setState({ chipWidgets: new Map() });
+    }
+  });
+});
+
+// UX wave U4a (l3-input-12, decision 21): in the open model list a digit 1 to 9 picks the row drawn at that place,
+// Default first; a disabled row is not picked
+describe('the digits in the model list', () => {
+  it('a digit picks the row at that place; none while the rows are disabled, none with a modifier, none in the effort view', async () => {
+    mount('model');
+    await screen.findByRole('group', { name: 'Claude models' });
+    const back = screen.getByRole('button', { name: SELECTOR_BACK });
+    fireEvent.keyDown(back, { key: '3', metaKey: true });
+    fireEvent.keyDown(back, { key: '0' });
+    expect(calls('set_model')).toHaveLength(0);
+    fireEvent.keyDown(back, { key: '3' }); // Default, Opus, then Fable
+    fireEvent.keyDown(back, { key: '4' }); // the rows are disabled while that change is with the engine
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'fable' }]));
+    await waitFor(() => expect(view()).toBe('effort')); // a choice returns to the effort view, as a click's does
+    fireEvent.keyDown(screen.getByRole('slider', { name: 'Effort' }), { key: '1' });
+    await act(async () => void (await Promise.resolve()));
+    expect(calls('set_model')).toHaveLength(1);
+    fireEvent.click(screen.getByRole('button', { name: /Select model/ }));
+    fireEvent.keyDown(screen.getByRole('button', { name: SELECTOR_BACK }), { key: '1' }); // Default
+    await waitFor(() => expect(calls('set_model').map((c) => c.input)).toEqual([{ appSessionId: BARE, model: 'fable' }, { appSessionId: BARE, model: null }]));
   });
 });
 

@@ -4,7 +4,7 @@ import { record, status } from '../../../../../test/support/builders';
 import type { SetupIntentHook, SetupProject } from '../setup-intent';
 import { MESSAGE_HELD, STARTING } from '../submit/submit-state';
 import { gitAnswerOf } from '../../sessions/branch-label';
-import { intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf, type LiveReads } from './bindings';
+import { endedBindings, intentBindings, liveBindings, LOCATION_FIXED, workspaceDirectoriesOf, type LiveReads } from './bindings';
 
 const APP = 'app-1';
 
@@ -91,6 +91,19 @@ describe('the frame binds its chips to the setup intent or to the live session',
     ]);
     expect(refresh).toHaveBeenCalledTimes(1); // the chip re-reads the rules afterwards
     expect(b.mode.value).toBe('auto');
+  });
+
+  // UX wave U8c-2 (M4 decisions 1, 3 and 10): a live session's chip names the selector's working folder (the checkout, not
+  // the folder inside it) and the branch recorded for it, ahead of the engine's status folder, which counts only while the
+  // window holds no record.
+  it('names the working folder and its recorded branch from the record, the status folder only without one', () => {
+    const s = { ...status(APP), cwd: '/somewhere/else' };
+    const W1 = '/repo/.claude/worktrees/w1';
+    const moved = record(APP, { directory: '/repo', branch: 'main', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } });
+    expect(liveBindings(s, moved, {}).location).toMatchObject({ path: W1, branch: 'w1' });
+    const inside = record(APP, { directory: `${W1}/src`, branch: 'w1', worktree: { path: W1, branch: 'w1' } });
+    expect(liveBindings(s, inside, {}).location.path).toBe(W1); // a terminal session's chip names the same
+    expect(liveBindings(s, null, {}).location.path).toBe('/somewhere/else');
   });
 
   // W9 (H2): the record's branch only until git has answered; git's answer after, the record never again
@@ -184,7 +197,8 @@ describe('the frame binds its chips to the setup intent or to the live session',
   });
 });
 
-// W3 (charter §5.4 as amended 2026-10-01): the chip reads `<alias> <effort>`, never "Default"
+// UX wave U4a (l3-input-14, decision 19): the chip reads the model's name, then Fast while fast mode is on and the
+// effort in words (`modelName`), never "Default"
 describe('the model chip names the model and the effort the engine uses', () => {
   const catalogue = [
     { value: 'default', resolvedModel: 'claude-opus-5-5[1m]', displayName: 'Default (recommended)' },
@@ -196,12 +210,12 @@ describe('the model chip names the model and the effort the engine uses', () => 
   it('an unstarted tab: the intent first, then the user’s settings, then what `default` runs', () => {
     const h = hook();
     h.options.models = catalogue;
-    expect(intentBindings(h, { starting: false }).model.label).toBe('opus');
-    expect(intentBindings(h, { starting: false }, { model: null, effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('opus xhigh');
-    expect(intentBindings(h, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: 'auto' }).model.label).toBe('fable xhigh');
+    expect(intentBindings(h, { starting: false }).model.label).toBe('Opus 5.5');
+    expect(intentBindings(h, { starting: false }, { model: null, effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('Opus 5.5 Extra high');
+    expect(intentBindings(h, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: 'auto' }).model.label).toBe('Fable 5.1 Extra high');
     const chosen = hook({ model: 'claude/sol', effort: 'high' });
     chosen.options.models = catalogue;
-    expect(intentBindings(chosen, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('sol high');
+    expect(intentBindings(chosen, { starting: false }, { model: 'fable', effortLevel: 'xhigh', defaultMode: null }).model.label).toBe('sol High');
   });
 
   it('an unstarted mode is the intent’s, else the user’s defaultMode, else auto; auto is off for a row that does not say it holds auto', () => {
@@ -215,11 +229,22 @@ describe('the model chip names the model and the effort the engine uses', () => 
 
   it('a live session: the resolved model by its named row, with the effort get_settings applied, else the requested one', () => {
     const s = { ...status(APP), model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, effort: null };
-    expect(liveBindings(s, record(APP), { modelNames: catalogue, effort: 'high' }).model.label).toBe('opus high');
-    expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.label).toBe('opus');
-    expect(liveBindings({ ...s, effort: 'max' }, record(APP), { modelNames: catalogue }).model.label).toBe('opus max');
-    expect(liveBindings({ ...s, model: { requested: 'claude/sol', resolved: 'claude/sol' } }, record(APP), { modelNames: catalogue, effort: 'xhigh' }).model.label).toBe('sol xhigh');
+    expect(liveBindings(s, record(APP), { modelNames: catalogue, effort: 'high' }).model.label).toBe('Opus 5.5 High');
+    expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.label).toBe('Opus 5.5');
+    expect(liveBindings({ ...s, effort: 'max' }, record(APP), { modelNames: catalogue }).model.label).toBe('Opus 5.5 Max');
+    expect(liveBindings({ ...s, model: { requested: 'claude/sol', resolved: 'claude/sol' } }, record(APP), { modelNames: catalogue, effort: 'xhigh' }).model.label).toBe('sol Extra high');
     expect(liveBindings({ ...s, model: { requested: 'haiku', resolved: 'claude-haiku-4-5-20251001' } }, record(APP), { modelNames: catalogue, effort: null }).model.label).toBe('haiku');
+  });
+
+  it('a live session says Fast while the engine’s status has fast mode on, and gives the chip its parts', () => {
+    const s = { ...status(APP), model: { requested: null, resolved: 'claude-opus-5-5[1m]' }, effort: null };
+    const on = liveBindings({ ...s, fastMode: { state: 'on', disabledReason: null } }, record(APP), { modelNames: catalogue, effort: 'high' }).model;
+    expect(on.label).toBe('Opus 5.5 Fast High');
+    expect(on.name).toEqual({ name: 'Opus 5.5', fast: true, effort: 'High', text: 'Opus 5.5 Fast High', display: 'Opus 5.5 (1M context)', alias: 'opus' });
+    expect(liveBindings({ ...s, fastMode: { state: 'cooldown', disabledReason: null } }, record(APP), { modelNames: catalogue, effort: 'high' }).model.label).toBe('Opus 5.5 High');
+    expect(liveBindings(null, record(APP, { model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model.name?.fast).toBe(false); // no status: none
+    expect(liveBindings({ ...s, model: { requested: null, resolved: null } }, record(APP, { model: { requested: null, resolved: null } }), { modelNames: catalogue }).model.name).toBeNull();
+    expect(endedBindings().model).toMatchObject({ label: 'Model', name: null });
   });
 
   // The sitting's A1.6 (P2-F wave S, S-chip): on a live session the closed chip kept the init frame's model after a
@@ -228,10 +253,10 @@ describe('the model chip names the model and the effort the engine uses', () => 
   it('a live session names the model asked for, marked as requested, until an init frame reports it', () => {
     const s = { ...status(APP), model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: null };
     const asked = { ...s, model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }; // set_model accepted, no turn since
-    expect(liveBindings(asked, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'fable medium', requested: true });
+    expect(liveBindings(asked, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'Fable 5.1 Medium', requested: true });
     expect(liveBindings(asked, record(APP), { modelNames: catalogue, effort: 'medium' }).model.value.model).toBe('fable');
     // the next init frame runs it: no longer marked
-    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: 'claude-fable-5-1[1m]' } }, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'fable medium', requested: false });
+    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: 'claude-fable-5-1[1m]' } }, record(APP), { modelNames: catalogue, effort: 'medium' }).model).toMatchObject({ label: 'Fable 5.1 Medium', requested: false });
     // an alias and the id it resolves to, `default` and what it runs, a family id with no row: the same model, unmarked
     expect(liveBindings(s, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
     expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: catalogue }).model.requested).toBe(false);
@@ -239,12 +264,12 @@ describe('the model chip names the model and the effort the engine uses', () => 
     // `default` with no catalogue to say what it runs: nothing to compare, so the reported model, unmarked (never "default")
     expect(liveBindings({ ...s, model: { requested: 'default', resolved: 'claude-opus-5-5[1m]' } }, record(APP), {}).model).toMatchObject({ label: 'opus', requested: false });
     // nothing reported yet (a launch before its first turn): the model asked for, marked until the engine reports it
-    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
+    expect(liveBindings({ ...s, model: { requested: 'fable', resolved: null } }, record(APP), { modelNames: catalogue }).model).toMatchObject({ label: 'Fable 5.1', requested: true });
     // nothing asked and nothing reported: no model to name, nothing marked
     const none = { requested: null, resolved: null };
     expect(liveBindings({ ...s, model: none }, record(APP, { model: none }), { modelNames: catalogue }).model).toMatchObject({ label: 'Model', requested: false });
     // a record with no process reads the same way: what it asked for, marked while its last run reported another
-    expect(liveBindings(null, record(APP, { model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model).toMatchObject({ label: 'fable', requested: true });
+    expect(liveBindings(null, record(APP, { model: { requested: 'fable', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: catalogue }).model).toMatchObject({ label: 'Fable 5.1', requested: true });
   });
 
   // The review of S-chip: the chip reads the request the selector holds (widgets/model.ts), so a choice in flight and an
@@ -253,16 +278,16 @@ describe('the model chip names the model and the effort the engine uses', () => 
     const rows = [...catalogue, { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku' }];
     const exited = { ...status(APP), process: 'exited' as const, model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' }, effort: null };
     // the session is still starting for the choice: no status names it yet
-    expect(liveBindings(exited, record(APP), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'fable', requested: true });
-    expect(liveBindings(null, record(APP, { model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'fable', requested: true });
+    expect(liveBindings(exited, record(APP), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'Fable 5.1', requested: true });
+    expect(liveBindings(null, record(APP, { model: { requested: 'opus', resolved: 'claude-opus-5-5[1m]' } }), { modelNames: rows, asked: { value: 'fable' } }).model).toMatchObject({ label: 'Fable 5.1', requested: true });
     // Default asked for while Haiku runs: the status's requested is null either way; the held request tells them apart
     const onHaiku = { ...status(APP), model: { requested: null, resolved: 'claude-haiku-5-5' }, effort: null };
-    expect(liveBindings(onHaiku, record(APP), { modelNames: rows }).model).toMatchObject({ label: 'haiku', requested: false });
+    expect(liveBindings(onHaiku, record(APP), { modelNames: rows }).model).toMatchObject({ label: 'Haiku', requested: false });
     const asked = liveBindings(onHaiku, record(APP), { modelNames: rows, asked: { value: null } }).model;
-    expect(asked).toMatchObject({ label: 'opus', requested: true }); // what Default runs, never "default"
+    expect(asked).toMatchObject({ label: 'Opus 5.5', requested: true }); // what Default runs, never "default"
     expect(asked.value.model).toBeNull();
     // the engine reports what Default runs: no longer marked
-    expect(liveBindings({ ...onHaiku, model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: rows, asked: { value: null } }).model).toMatchObject({ label: 'opus', requested: false });
+    expect(liveBindings({ ...onHaiku, model: { requested: null, resolved: 'claude-opus-5-5[1m]' } }, record(APP), { modelNames: rows, asked: { value: null } }).model).toMatchObject({ label: 'Opus 5.5', requested: false });
     // Default with no catalogue to say what it runs: marked, and named by no model rather than by "default"
     expect(liveBindings(onHaiku, record(APP), { asked: { value: null } }).model).toMatchObject({ label: 'Model', requested: true });
   });
@@ -275,9 +300,9 @@ describe('the model chip names the model and the effort the engine uses', () => 
       { value: 'claude/vendor-b/glm', resolvedModel: 'claude/vendor-b/glm', displayName: 'GLM (B)' },
     ];
     const chip = (requested: string, resolved: string) => liveBindings({ ...status(APP), model: { requested, resolved }, effort: null }, record(APP), { modelNames: rows }).model;
-    expect(chip('haiku', 'claude-haiku-4-5-20251001')).toMatchObject({ label: 'haiku', requested: true }); // Haiku 5.5 asked for, 4.5 still running
-    expect(chip('claude/vendor-a/glm', 'claude/vendor-b/glm')).toMatchObject({ label: 'glm', requested: true }); // two providers' glm
-    expect(chip('haiku', 'claude-haiku-5-5')).toMatchObject({ label: 'haiku', requested: false });
+    expect(chip('haiku', 'claude-haiku-4-5-20251001')).toMatchObject({ label: 'Haiku 5.5', requested: true }); // Haiku 5.5 asked for, 4.5 still running
+    expect(chip('claude/vendor-a/glm', 'claude/vendor-b/glm')).toMatchObject({ label: 'GLM', requested: true }); // two providers' GLM
+    expect(chip('haiku', 'claude-haiku-5-5')).toMatchObject({ label: 'Haiku 5.5', requested: false });
   });
 
   it('re-picking the running model while another is asked for switches back to it', async () => {

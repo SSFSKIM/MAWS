@@ -35,7 +35,7 @@ export function VoiceSection({ settings, showKeyboard }: { settings: Settings; s
   const chord = effectiveChord('composer.dictate', settings.keymap);
   return (
     <>
-      <Setting label={VOICE.shortcut} note={VOICE.shortcutNote}>
+      <Setting row="voice.shortcut" state={chord === null ? 'unbound' : 'bound'}>
         <kbd className={`rounded-sm border px-1.5 py-0.5 font-ui text-ui-sm whitespace-nowrap ${chord === null ? 'border-border text-fg-muted' : 'border-border-strong bg-bg text-fg'}`}>
           {chord === null ? KEYBOARD.unbound : formatChord(chord)}
         </kbd>
@@ -43,15 +43,15 @@ export function VoiceSection({ settings, showKeyboard }: { settings: Settings; s
           {VOICE.changeInKeyboard}
         </button>
       </Setting>
-      <Setting label={VOICE.language} note={VOICE.languageNote}>
+      <Setting row="voice.language">
         <LanguageSelect chosen={chosen} status={status} />
       </Setting>
-      <Setting label={VOICE.helper} note={status?.helper.state === 'missing' && import.meta.env.DEV ? VOICE.helperBuild : undefined}>
+      <Setting row="voice.helper" state={status?.helper.state === 'missing' && import.meta.env.DEV ? 'build' : 'default'}>
         <HelperState status={status} error={probe.isError ? probe.error.message : null} />
       </Setting>
-      <Permission label={VOICE.microphone} pane="microphone" status={status} />
-      <Permission label={VOICE.speech} pane="speech" status={status} />
-      <Setting label={VOICE.recognition}>
+      <Permission row="voice.microphone" pane="microphone" status={status} />
+      <Permission row="voice.speech" pane="speech" status={status} />
+      <Setting row="voice.recognition">
         <span className={status?.supportsOnDevice === false ? 'text-warning' : status?.supportsOnDevice ? '' : 'text-fg-muted'}>
           {status === null ? VOICE.reading : status.supportsOnDevice === null ? VOICE.permissionUnknown : status.supportsOnDevice ? VOICE.onDevice : VOICE.noOnDevice}
         </span>
@@ -102,7 +102,7 @@ function HelperState({ status, error }: { status: VoiceStatus | null; error: str
 
 const OFF: readonly PermissionState[] = ['denied', 'restricted'];
 
-function Permission({ label, pane, status }: { label: string; pane: VoicePrivacyPane; status: VoiceStatus | null }) {
+function Permission({ row, pane, status }: { row: 'voice.microphone' | 'voice.speech'; pane: VoicePrivacyPane; status: VoiceStatus | null }) {
   const state = status?.permission?.[pane] ?? null;
   const off = state !== null && OFF.includes(state);
   const open = () =>
@@ -110,7 +110,7 @@ function Permission({ label, pane, status }: { label: string; pane: VoicePrivacy
       if (!result.ok) toast({ level: 'warning', text: VOICE.openFailed(result.error.message, VOICE.paneByHand[pane]), actions: [], dismissible: true });
     });
   return (
-    <Setting label={label}>
+    <Setting row={row}>
       <span className={off ? 'text-warning' : state === 'authorized' ? '' : 'text-fg-muted'}>{status === null ? VOICE.reading : state === null ? VOICE.permissionUnknown : VOICE.permission[state]}</span>
       {off && (
         <button type="button" className={TEXT_ACTION} onClick={open}>

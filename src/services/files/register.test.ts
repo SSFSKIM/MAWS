@@ -9,7 +9,7 @@ import { endableClientRef, type EndableClientRef } from '@shared/ipc/client';
 import type { CommandName } from '@shared/ipc/schema';
 import { fakeBus, type FakeBus } from '../../../test/support/fake-bus';
 import type { AllowlistRecord } from './allowlist';
-import { registerFilesHandlers } from './register';
+import { registerFilesHandlers, type FilesHandlerDeps } from './register';
 
 // The asking page, as main's router hands a handler its ClientRef (src/main/ipc/clients.ts): a reload ends this
 // document's ref and the page asks with the next generation's; a close ends it.
@@ -43,10 +43,10 @@ describe('main answers files.* on the services bus', () => {
   });
 
   // The client port's open and reveal, asked through the invoking page's client
-  async function install(openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true })), reveal = vi.fn<ClientPort['reveal']>(async () => ({ revealed: true }))) {
+  async function install(openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true })), reveal = vi.fn<ClientPort['reveal']>(async () => ({ revealed: true })), extra: Partial<FilesHandlerDeps> = {}) {
     const records = new Map<string, AllowlistRecord>([['A', { directory: join(root, 'repo'), additionalDirectories: [], worktree: null }]]);
     const emit = vi.fn();
-    const files = registerFilesHandlers((id) => records.get(id) ?? null, { bus, emit, port: { openExternal, reveal }, env: {} });
+    const files = registerFilesHandlers((id) => records.get(id) ?? null, { bus, emit, port: { openExternal, reveal }, env: {}, ...extra });
     dispose = () => files.dispose();
     return { files, emit, openExternal, followed: files.followed };
   }
@@ -179,6 +179,63 @@ describe('main answers files.* on the services bus', () => {
     expect(showItemInFolder).toHaveBeenCalledWith(expect.objectContaining({ id: expect.stringMatching(/^page:7\./) }), join(root, 'repo', 'src', 'a.ts'));
     expect(await invoke('files.reveal', { appSessionId: 'A', path: '/etc/hosts' })).toEqual({ ok: true, value: { revealed: false, message: OUT } });
     expect(showItemInFolder).toHaveBeenCalledTimes(1);
+  });
+
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, M2 decision 4; Interfaces §C): a read or an
+  // open outside the folders that asks by name waits as its client does, and a request from another machine never asks
+  describe('a file the transcript names', () => {
+    const outside = () => join(root, 'outside');
+    beforeEach(() => {
+      mkdirSync(outside());
+      writeFileSync(join(outside(), 'notes.txt'), 'outside notes\n');
+      writeFileSync(join(outside(), 'doc.pdf'), '%PDF-1.4\n');
+    });
+
+    it('asks with a signal of the asking client that ends when the client does, one per client', async () => {
+      const signals: (AbortSignal | undefined)[] = [];
+      const named = vi.fn(async (_appSessionId: string, _path: string, signal?: AbortSignal) => (signals.push(signal), true));
+      const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
+      await install(openExternal, undefined, { named });
+      const path = join(outside(), 'notes.txt');
+      expect(await invoke('files.read', { appSessionId: 'A', path, named: true })).toEqual({
+        ok: true,
+        value: expect.objectContaining({ content: 'outside notes\n', named: true }),
+      });
+      expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(outside(), 'doc.pdf'), named: true })).toEqual({ ok: true, value: { opened: true, message: null } });
+      expect(openExternal).toHaveBeenCalledWith(expect.objectContaining({ id: 'page:7.1' }), { path: join(outside(), 'doc.pdf') });
+      expect(named.mock.calls.map(([appSessionId, asked]) => [appSessionId, asked])).toEqual([['A', path], ['A', join(outside(), 'doc.pdf')]]);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      expect(signals[1]).toBe(signals[0]);
+      expect(signals[0]!.aborted).toBe(false);
+      navigate();
+      expect(signals[0]!.aborted).toBe(true);
+      await invoke('files.read', { appSessionId: 'A', path, named: true }); // the reloaded page's
+      expect(signals[2]).not.toBe(signals[0]);
+      expect(signals[2]!.aborted).toBe(false);
+    });
+
+    it('answers the refusal to a named read whose client ends while it waits', async () => {
+      const named = vi.fn((_appSessionId: string, _path: string, signal?: AbortSignal) => new Promise<boolean>((resolve) => signal!.addEventListener('abort', () => resolve(false))));
+      await install(undefined, undefined, { named });
+      const answer = invoke('files.read', { appSessionId: 'A', path: join(outside(), 'notes.txt'), named: true });
+      await vi.waitFor(() => expect(named).toHaveBeenCalledOnce());
+      close();
+      expect(await answer).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+    });
+
+    it('never asks for a request without the key, nor for one from another machine', async () => {
+      const named = vi.fn(async () => true);
+      const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
+      await install(openExternal, undefined, { named });
+      const remote = { client: page, remote: true as const };
+      const refused = { ok: false, error: { code: 'internal', message: OUT } };
+      expect(await invoke('files.read', { appSessionId: 'A', path: join(outside(), 'notes.txt') })).toEqual(refused);
+      expect(await invoke('files.openExternal', { appSessionId: 'A', path: join(outside(), 'doc.pdf') })).toEqual(refused);
+      expect(await bus.invoke('files.read', { appSessionId: 'A', path: join(outside(), 'notes.txt'), named: true }, remote)).toEqual(refused);
+      expect(await bus.invoke('files.openExternal', { appSessionId: 'A', path: join(outside(), 'doc.pdf'), named: true }, remote)).toEqual(refused);
+      expect(named).not.toHaveBeenCalled();
+      expect(openExternal).not.toHaveBeenCalled();
+    });
   });
 
   it('forgets an ended client: it is no longer followed once its page closes', async () => {

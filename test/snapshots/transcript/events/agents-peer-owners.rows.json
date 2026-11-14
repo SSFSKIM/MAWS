@@ -461,6 +461,7 @@
       "exitCode": 0,
       "interrupted": false,
       "kind": "shell",
+      "rowCwd": "/private/tmp/maws-e0a-e7-peer-OYWZsQ/repo-h6xOoi",
       "spill": null,
       "stderr": "",
       "stdout": "SLEPT_OK",

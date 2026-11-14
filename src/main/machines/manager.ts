@@ -89,6 +89,8 @@ interface Entry {
   name: string;
   state: LinkState;
   since: string;
+  /** U9: whether the signed-in member owns the machine, as the roster says (an RL2 machine's alone); undefined when unsaid. */
+  owner?: boolean | undefined;
 }
 
 export function createConnectionManager(deps: ConnectionManagerDeps): ConnectionManager {
@@ -141,6 +143,7 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
         ...(refusal === undefined ? {} : { refusal }),
         ...(grades === null ? {} : { rights: MACHINE_RIGHTS.filter((right) => grades.includes(right)) }),
         ...(capabilities === null ? {} : { capabilities: [...capabilities] }),
+        ...(entry.dir === null && entry.owner !== undefined ? { owner: entry.owner } : {}), // U9: an RL2 machine's alone
       });
     }
     return machines;
@@ -228,11 +231,15 @@ export function createConnectionManager(deps: ConnectionManagerDeps): Connection
           held.name = machine.name;
           differs = true;
         }
+        if (held.owner !== machine.owner) {
+          held.owner = machine.owner;
+          differs = true;
+        }
         continue;
       }
       if (machine.ref === local) continue;
       const link = remote.connect(machine) as Described;
-      const entry: Entry = { dir: null, link, ref: machine.ref, name: machine.name, state: 'connecting', since: new Date().toISOString() };
+      const entry: Entry = { dir: null, link, ref: machine.ref, name: machine.name, state: 'connecting', since: new Date().toISOString(), ...(machine.owner === undefined ? {} : { owner: machine.owner }) };
       remoteEntries.set(machine.ref, entry);
       differs = true;
       let described = '';

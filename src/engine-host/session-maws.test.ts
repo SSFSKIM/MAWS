@@ -13,10 +13,11 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
-import { MAWS_TOOL_ANNOTATIONS, mawsToolList, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
-import { MAWS_SERVER_INSTRUCTIONS } from '@shared/maws/instructions'; // P4-B4
+import { MAWS_TOOL_ANNOTATIONS, mawsToolList, SHOW_PANE_NOTES /* U12a */, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
+import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions'; // P4-B4; U12a: the join
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
+import type { LaunchSpec } from '@shared/engine/launch-spec'; // U12a
 import { loadJournal } from '../../test/support/fixtures';
 import { ENGINE_BIN, FIXTURE_ENGINE_VERSION } from '../../test/support/engine-pin';
 import { handshakePrelude } from './conformance/harness';
@@ -54,8 +55,9 @@ afterEach(() => {
 type Rpc = { jsonrpc: string; id: unknown; result?: { content?: { text: string }[]; isError?: boolean; tools?: unknown[] } & Record<string, unknown>; error?: { code: number; message: string } };
 
 // A scripted session whose engine sends the `maws` server JSON-RPC messages, as 2.1.290 does (E0a Q1).
-async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}, session: Partial<EngineSessionOptions> = {} /* P2-E1 */) {
-  const run = scriptedSession({ spec: { cwd }, session: { appVersion: '0.9.0', ...session }, transport });
+// U12a: `spec` adds to the launch spec (a browser backend in its settings environment).
+async function mawsSession(transport: NonNullable<Parameters<typeof scriptedSession>[0]>['transport'] = {}, session: Partial<EngineSessionOptions> = {} /* P2-E1 */, spec: Partial<LaunchSpec> = {}) {
+  const run = scriptedSession({ spec: { cwd, ...spec }, session: { appVersion: '0.9.0', ...session }, transport });
   const shows: unknown[] = [];
   run.session.on('paneShow', (request) => shows.push(request));
   // E2: the capture requests
@@ -136,6 +138,43 @@ describe('the maws server on an EngineSession (scripted)', () => {
     await run.session.exited;
     expect(run.rebuilt()).toEqual(run.events);
     documents.close();
+  });
+
+  // U12a (M1; A1's test that fails before): the launch spec's browser backend decides the instructions at the handshake,
+  // and the note a browser answer carries
+  describe('a session launched with MAWS’s in-app browser as its backend (U12a)', () => {
+    const BACKEND = { extraSettings: { env: { CUA_BROWSER_BACKENDS: '/tmp/maws-u12a/app-s.sock' } } };
+    const initialize = { id: 0, method: 'initialize', params: { protocolVersion: '2025-11-25', capabilities: {}, clientInfo: { name: 'claude-code', version: '2.1.290' } } };
+    const instructionsOf = async (spec: Partial<LaunchSpec>) => {
+      const run = await mawsSession({}, {}, spec);
+      return ((await run.answered(run.mcp(initialize))).result as { instructions: string }).instructions;
+    };
+
+    it('is given both paragraphs at initialize; a session without one, an empty one or other settings is given the first alone', async () => {
+      expect(await instructionsOf(BACKEND)).toBe(mawsServerInstructions({ inAppBrowser: true }));
+      expect(await instructionsOf({})).toBe(MAWS_SERVER_INSTRUCTIONS);
+      expect(await instructionsOf({ extraSettings: { env: { CUA_BROWSER_BACKENDS: '' } } })).toBe(MAWS_SERVER_INSTRUCTIONS);
+      expect(await instructionsOf({ extraSettings: { env: { OTHER: 'x' }, permissions: { allow: [] } } })).toBe(MAWS_SERVER_INSTRUCTIONS);
+    });
+
+    it('a browser answer carries the window’s page and the note; another pane’s answer neither', async () => {
+      const run = await mawsSession({}, {}, BACKEND);
+      const opened = { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' } as const;
+      const page = run.call('show_pane', { pane: 'browser', target: 'http://localhost:4173/' }, 'toolu_page');
+      await until(() => run.shows.length === 1, 'the pane request');
+      run.session.answerPane(page, { ok: true, opened, page: 'reloaded' });
+      expect((await run.answered(page)).result!.content![0]!.text).toBe(JSON.stringify({ status: 'shown', pane: 'browser', opened, page: 'reloaded', note: SHOW_PANE_NOTES.browser }, null, 2)); // the key order the agent reads
+      const terminal = run.call('show_pane', { pane: 'terminal' }, 'toolu_term');
+      await until(() => run.shows.length === 2, 'the second pane request');
+      const term = { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' } as const;
+      run.session.answerPane(terminal, { ok: true, opened: term });
+      expect(JSON.parse((await run.answered(terminal)).result!.content![0]!.text)).toEqual({ status: 'shown', pane: 'terminal', opened: term });
+      await until(() => run.maws().length === 2, 'the pane events');
+      const [shown] = run.maws();
+      expect(shown).toMatchObject({ kind: 'maws.pane.shown', toolUseId: 'toolu_page', pane: 'browser', target: 'http://localhost:4173/', opened, error: null }); // the journaled event's shape, unchanged
+      expect(Object.keys(shown!)).not.toContain('page');
+      expect(Object.keys(shown!)).not.toContain('note');
+    });
   });
 
   it('show_pane asks the windows, answers what opened and yields maws.pane.shown; a refusal and an unknown pane too', async () => {

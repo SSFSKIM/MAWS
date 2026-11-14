@@ -143,3 +143,16 @@ export const ImportIcon = ({ className }: Glyph) => (
   </Icon>
 );
 // cua #90 end
+
+// U12a: the Viewport submenu's mark and its trigger's arrow
+export const CheckIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="m3.5 8.5 3 3 6-7" />
+  </Icon>
+);
+
+export const ChevronRightIcon = ({ className }: Glyph) => (
+  <Icon className={className}>
+    <path d="m6 4 4 4-4 4" />
+  </Icon>
+);

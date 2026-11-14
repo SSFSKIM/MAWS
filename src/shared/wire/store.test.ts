@@ -114,4 +114,20 @@ describe('store record schemas accept the owner\'s shapes', () => {
     expect(TranscriptSummarySchema.safeParse({ ...summary, extra: 1 }).success).toBe(false);
     expect(TranscriptSummarySchema.safeParse({ ...summary, sessionKind: 'interactive' }).success).toBe(false);
   });
+
+  // UX wave U8c-2 (§A): the newest row's folder is optional, since the summary is sent between builds and kept as JSON
+  // in the index; null is a tail window that holds no row with a folder.
+  it("takes the newest row's folder as an optional key: a string, null, or absent", () => {
+    const summary = {
+      sessionId: '9a1d4262-0b43-46ad-acb9-5982f31d209c', transcriptPath: '/p/x.jsonl', slug: '-p',
+      directory: '/p', relocatedCwd: null, size: 10, mtimeMs: 1,
+      firstRecordAt: null, lastRecordAt: null, customTitle: null, aiTitle: null, firstPrompt: null, lastAssistantText: null,
+      gitBranch: null, engineVersion: null, entrypoint: null, sessionKind: null, hasMessages: false, leafUuid: null,
+      rootUuid: null, birthtimeMs: 0,
+    };
+    expect(TranscriptSummarySchema.parse({ ...summary, newestCwd: '/p/sub' }).newestCwd).toBe('/p/sub');
+    expect(TranscriptSummarySchema.parse({ ...summary, newestCwd: null }).newestCwd).toBeNull();
+    expect('newestCwd' in TranscriptSummarySchema.parse(summary)).toBe(false);
+    expect(TranscriptSummarySchema.safeParse({ ...summary, newestCwd: 3 }).success).toBe(false);
+  });
 });

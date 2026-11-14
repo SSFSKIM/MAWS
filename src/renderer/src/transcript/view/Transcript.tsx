@@ -15,6 +15,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION, OLDER, REACH } from '../model/copy';
+import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
@@ -458,6 +459,7 @@ export interface TranscriptProps {
   className?: string;
   handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
   sessionDirectory?: string | null; // additive: the session's directory, shown on a shell call whose input names no cwd
+  sessionCwd?: string | null; // additive (UX wave U8c-2, §K): the agent's folder while the session is in its launch folder
   // W1, additive: rows after the derived ones (the messages held in MAWS's queue, as dimmed bubbles), and the uuids of
   // prompts whose waiting or dropped bubble is not shown (held back into that queue)
   tail?: readonly Row[];
@@ -480,9 +482,13 @@ export interface TranscriptProps {
   placed?: readonly Row[];
   // board 525, additive: who wrote a prompt, as the reader names them (null: theirs); absent, every prompt is theirs
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
+  // UX wave U4a (decision 12), additive: the mount has a stack that draws a waiting message while it is unread, so the
+  // transcript draws no row marked unread (`withQueueTail`); absent, every row as before
+  waiting?: 'stacked';
 }
 
 const NO_ROWS: Row[] = [];
+export const LOADING_AFTER_MS = 300; // the UX wave, U9 (A3): how long a read with nothing to draw is out before the pane says so
 const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
 
 // The store key of a source: its own (`ipcSource` names the app session and agent), else one per source object.
@@ -509,7 +515,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -523,7 +529,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
-  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail), [derived, activity, withdrawn, tail]);
+  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail, waiting), [derived, activity, withdrawn, tail, waiting]);
   // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane, when the mount knows it,
   // told to the store (a marked commentary then stays in view when its turn folds), and while the lane is on and the
   // reader has not chosen the transcript, the report projection of the rows: a marked turn's work in one working record
@@ -550,6 +556,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
+  // The UX wave, U9 (O-39, A3): a read with nothing to draw says so once it has been out 300 ms, on every route
+  const reading = useTranscriptStore((state) => state.entries[storeKey] === undefined || state.entries[storeKey].phase === 'hydrating');
+  const loading = useAfter(reading && rows.length === 0, LOADING_AFTER_MS);
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
@@ -637,13 +646,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort, motion, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort, motion, presentation, promptAuthor],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, presentation, promptAuthor],
   );
 
   return (
     <TranscriptProvider value={context}>
-      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
+      {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
+      <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
         <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
         {reach !== null ? (
           // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
@@ -669,9 +679,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
             </button>
           </div>
         )}
+        {loading && (
+          <p role="status" className="pointer-events-none absolute inset-0 m-0 flex items-center justify-center text-ui text-fg-muted">
+            {HYDRATION.loading}
+          </p>
+        )}
         {failed !== null && (
-          <div className="transcript-failed" role="alert">
-            <span>{HYDRATION.failed(failed)}</span>
+          <div className="transcript-failed" role="alert" title={failed}>
+            <span>{HYDRATION.failed}</span>
             <button type="button" className="transcript-button" onClick={() => void useTranscriptStore.getState().retry(storeKey)}>
               {HYDRATION.retry}
             </button>

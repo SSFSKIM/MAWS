@@ -6,7 +6,8 @@ import type { IpcError } from '@shared/ipc/schema';
 import type { DiscardResult, OrgRefusal, OrgStatus, OrgView, SignResult } from '@shared/ipc/schema/org';
 import { toast } from '../../stores/notices';
 import { ORG } from '../copy';
-import { Chip, INPUT, Setting, TEXT_ACTION } from '../parts';
+import { useDrawnGroup } from '../drawn';
+import { Chip, INPUT, LANDING, Setting, TEXT_ACTION } from '../parts';
 
 export type Registered = Extract<OrgStatus, { state: 'registered' }>;
 export type Member = OrgView['members'][number];
@@ -24,10 +25,12 @@ export function failed(error: IpcError) {
   toast({ level: 'warning', text: ORG.failed(error.message), actions: [], dismissible: true });
 }
 
-/** One of Q1's four groups: its heading, then its rows. */
+/** One of Q1's four groups: its heading, then its rows. U11a M10: it tells the view it is drawn, for the search, and
+ * takes the keyboard when the search lands on it. */
 export function Group({ id, title, children }: { id: 'you' | 'people' | 'machines' | 'org'; title: string; children: ReactNode }) {
+  useDrawnGroup(id);
   return (
-    <div data-org-group={id} className="mt-3 first:mt-1">
+    <div data-org-group={id} tabIndex={-1} className={`mt-3 first:mt-1 ${LANDING}`}>
       <h4 className="m-0 mb-0.5 text-ui-sm font-semibold text-fg">{title}</h4>
       {children}
     </div>

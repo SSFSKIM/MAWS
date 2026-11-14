@@ -83,6 +83,7 @@ describe('who it offers', () => {
     await within(sheet).findByRole('combobox', { name: OWNER.person });
     expect(fake.invoked('org.policy.get')).toEqual([{ address: ADDRESS }]);
     expect(sheet.querySelector('[data-share-session]')!.textContent).toBe('Nightly import · studio-mini');
+    expect(sheet.querySelector('[data-share-session]')!.getAttribute('title')).toBe('Nightly import · studio-mini'); // board 523: the whole title and machine on hover
     expect(within(sheet).getByText(OWNER.line)).toBeTruthy();
     expect(offered(sheet)).toEqual([BEN, CHEN]);
     expect([...picker(sheet).options].find((o) => o.value === BEN)!.textContent).toBe('Ben · ben@northwind.example');

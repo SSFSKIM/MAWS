@@ -220,8 +220,9 @@ describe('a long transcript is read in windows', () => {
     expect(firstFive.events).toHaveLength(5);
     expect(firstFive.events[0]!.kind).toBe('session.started');
     expect(firstFive.earlier).toBeUndefined();
-    // The transcript has no agents: the slice is the parent's exits alone (none: its last turn ended)
-    expect((await fs.eventsSnapshot(APP, null, { agentId: 'agent-1' as AgentId })).events).toEqual([]);
+    // The transcript has no agents: the slice is the parent's exits alone, the one its backfill supplies (nothing holds
+    // the session, so its process is gone; X-168, whether or not the last turn ended)
+    expect((await fs.eventsSnapshot(APP, null, { agentId: 'agent-1' as AgentId })).events.map((e) => [e.kind, e.agentId, e.seq])).toEqual([['process.exited', null, null]]);
     await expect(fs.eventsSnapshot(APP, null, { before: 'nowhere' as EventId })).rejects.toThrow(UNKNOWN_CURSOR);
   });
 

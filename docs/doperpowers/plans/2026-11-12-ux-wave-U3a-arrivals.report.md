@@ -139,4 +139,4 @@ On the VM at `c5d6efa3d`:
 
 The whole suite's six failed files are all on the VM's known list.
 
-Two tracker rows were added: an end carrier with no uuid (handover-only, deferred by the closing rule), and the reload race of M3. The IPC store's not rebuilding on a host change got no row: no fault of its own was found.
+One tracker row was added: an end carrier with no uuid (handover-only, deferred by the closing rule). The reload race of M3 is not the fix wave's: its row was written at M6 (`d86d784dd`), with the rows for O-28 and the `answer` notice. The IPC store's not rebuilding on a host change got no row: no fault of its own was found.

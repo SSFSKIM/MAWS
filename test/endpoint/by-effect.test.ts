@@ -38,7 +38,13 @@ describe('the table', () => {
   });
 
   it('says `no-rule` for the commands whose effect nobody has read for remote use yet', () => {
-    for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select', 'session.applyFlagSettings', 'session.update']) expect(BY_EFFECT[name], name).toBe(NO_RULE);
+    for (const name of ['session.ui.press', 'session.ui.input', 'session.ui.select', 'session.applyFlagSettings']) expect(BY_EFFECT[name], name).toBe(NO_RULE);
+  });
+
+  // The UX wave (U9, M1): `session.update` is offered as an unarchive alone (its row's `accepts`); its rule never grades a
+  // patch below the record's owners, whatever the patch.
+  it('grades every `session.update` `manage`', async () => {
+    for (const patch of [{ archived: false }, { archived: true }, { pinned: true }, { lastSeen: { messageUuid: null, at: 'x' } }]) expect(await grade('session.update', { appSessionId: 'app-1', patch }), JSON.stringify(patch)).toBe('manage');
   });
 });
 

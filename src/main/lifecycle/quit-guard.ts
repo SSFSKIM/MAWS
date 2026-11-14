@@ -176,6 +176,7 @@ export interface QuitGuardDeps {
 // The banner's surface (`layout.quitWait`, `layout.quitWaitAnswer`). P5 O15 M2: no quit waits any more, so there is
 // never a waiting report and nothing to cancel; Quit now still quits.
 export interface QuitGuard {
+  report(): Promise<BusyReport>; // the report a quit would read now (the e2e reads it through app.ts's seam)
   waiting(): null;
   quitNow(): void; // the banner's Quit now
   cancelWait(): void; // the banner's Cancel
@@ -234,6 +235,7 @@ export function installQuitGuard(model: Pick<SpineView, 'midTurnCount' | 'engine
   });
 
   return {
+    report,
     waiting: () => null,
     quitNow: quit,
     cancelWait: () => {},

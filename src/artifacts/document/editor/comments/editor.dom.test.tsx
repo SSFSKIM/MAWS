@@ -434,7 +434,7 @@ describe('a remote resolve', () => {
 // last open thread takes its dot away.
 describe('the tab strip’s comment dot', () => {
   it('marks each tab with open threads by their count', async () => {
-    const { editor, handle } = await mount(content());
+    const { editor, handle, opened } = await mount(content());
     world!.host.write((d) => addTab(d, { title: 'Appendix', id: 'tab2', body: schemaFor().nodeFromJSON(doc(para('a1', 'Appendix text.'))) }));
     await until(() => screen.queryByRole('tab', { name: 'Appendix' }) !== null, 'the second tab');
     const dot = (title: string) => screen.getByRole('tab', { name: title }).querySelector('.doc-tab-dot');
@@ -443,7 +443,9 @@ describe('the tab strip’s comment dot', () => {
     act(() => fireEvent.click(commentButton()));
     act(() => void select(editor(), 'Owners'));
     act(() => fireEvent.click(commentButton()));
-    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { kind: 'block' }, by: SESSION, at: Date.now() + 1 }));
+    // UX wave U5a (M7; A3): a comment counts once it holds a message, as the card's send records it
+    for (const { threadId } of opened) act(() => reply(handle.doc, threadId, { id: `${threadId}:m1`, by: { kind: 'human' }, at: Date.now(), body: 'Why?' }));
+    act(() => void addThread(handle.doc, { threadId: 'zz000001', tabId: 'tab2', blockId: 'a1', quote: 'Appendix', anchor: { kind: 'block' }, by: SESSION, at: Date.now() + 1, body: 'Expanded the appendix.' }));
     await until(() => dot('Appendix') !== null, 'the dots');
     expect(dot('Main')?.getAttribute('aria-label')).toBe('2 open comments');
     expect(dot('Appendix')?.getAttribute('aria-label')).toBe('1 open comment');

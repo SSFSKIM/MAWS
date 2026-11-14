@@ -144,7 +144,7 @@ export const commands = {
   // the entry is in (the inventory's own), so two project files configuring one name are told apart
   'catalog.postures': main(
     z.strictObject({ cwd: CwdSchema }),
-    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable() })) }),
+    z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable(), revision: z.string().max(64).nullable() /* UX wave U11a M8: the engine host's, null when it answered none */ })) }),
   ),
   // P5 O4 M3: the machine's half. One cwd's engine view, held until an invalidation, with the generation of the
   // machine's reads when it was asked for (moved by every invalidation) and the serial of the read behind it (new for

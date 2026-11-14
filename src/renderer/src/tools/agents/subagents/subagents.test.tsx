@@ -28,6 +28,7 @@ import { agentTranscriptActions, registerAgentTools } from '../index';
 import { relayText } from '../model/relay';
 import { useRelays } from '../relay-store';
 import { useTaskGraph } from '../store';
+import { useOpenAgents } from '../open-agents';
 import { SubagentsSummary } from './SubagentsSummary';
 import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
@@ -137,8 +138,15 @@ async function mount(opts: MountOptions = {}) {
   return { handle, ...view };
 }
 
+// A second mount in one test: the first tab's watch released and the store emptied, as a fresh session would find it.
+function unmountAll(): void {
+  cleanup();
+  handles.splice(0).forEach((handle) => subagentsTool.dispose(handle));
+  useTaskGraph.setState({ entries: new Map() });
+}
+
 const push = (events: SessionEvent[]) => act(() => fake.batch(A, events));
-type Section = 'agents' | 'done' | 'disk'; // E7: the tree's Agents and Done, and On disk
+type Section = 'running' | 'done' | 'disk'; // the UX wave's U8b (M7): Running, Done and On disk
 const section = (name: Section) => document.querySelector<HTMLElement>(`[data-section="${name}"]`);
 const rowsOf = (name: Section) =>
   Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-agent-row]') ?? []).map((row) => ({
@@ -148,27 +156,46 @@ const rowsOf = (name: Section) =>
     line: row.querySelector('[data-part="line"]')?.textContent,
     elapsed: row.querySelector('[data-part="elapsed"]')?.textContent,
     nested: row.querySelector<HTMLElement>('[data-part="nested"]')?.title ?? null,
-    waiting: row.querySelector('[data-part="waiting"]') !== null,
+    waiting: row.dataset.waiting !== undefined,
+    under: underOf(row.dataset.agentRow!),
   }));
 const heading = (name: Section) => section(name)?.querySelector('h3')?.textContent;
-// E7: every row of a section as shown, by kind: agents by id and depth, a fold by its count and whether it is open, the
-// team header and a roster teammate by their text.
+// E7: every row of a section as shown, by kind: agents by id and depth (the UX wave's U8b: with its disclosure's text,
+// `▸` closed and `▾` open), a fold by its count and whether it is open, the team header and a roster teammate by their
+// text.
 const treeOf = (name: Section) =>
   Array.from(section(name)?.querySelectorAll<HTMLElement>('[data-agent-row], [data-fold], [data-team], [data-roster]') ?? []).map((el) =>
     el.dataset.agentRow !== undefined
-      ? `${'  '.repeat(Number(el.dataset.depth))}${el.dataset.agentRow}`
+      ? `${'  '.repeat(Number(el.dataset.depth))}${el.dataset.agentRow}${underText(el.dataset.agentRow)}`
       : el.dataset.fold !== undefined
         ? `${'  '.repeat(Number(el.dataset.depth))}[${el.textContent}${el.getAttribute('aria-expanded') === 'true' ? ' open' : ''}]`
         : `${'  '.repeat(Number(el.dataset.depth))}${el.textContent}`,
   );
-const expandDone = () => fireEvent.click(within(section('done')!).getByRole('button', { name: /^Done · \d+$/ })); // Done is collapsed by default
+const expandDone = () => fireEvent.click(within(section('done')!).getByRole('button', { name: /^Done \d+/ })); // Done is folded by default
 const row = (id: string) => document.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
+const openRow = (id: string) => fireEvent.click(row(id).querySelector<HTMLElement>(':scope > [data-part="open"]')!);
+// The UX wave's U8b (M7 decision 4): a row's disclosure, `(+N)` and its arrow, a control of its own.
+const disclosure = (id: string) => row(id).querySelector<HTMLButtonElement>(':scope > [data-part="under"]');
+const underOf = (id: string) => {
+  const under = disclosure(id);
+  return under === null ? null : { count: under.querySelector('[data-part="under-count"]')?.textContent ?? '', expanded: under.getAttribute('aria-expanded') === 'true' };
+};
+const underText = (id: string) => {
+  const under = underOf(id);
+  return under === null ? '' : ` ${under.count}${under.expanded ? '▾' : '▸'}`;
+};
+const toggleUnder = (id: string) => fireEvent.click(disclosure(id)!);
+// a shell an agent started (the engine's `parent_task_id`, M5)
+const shellOf = (taskId: string, starter: string | null, seq: number) =>
+  event('task.started', { taskId, toolUseId: `toolu_${taskId}`, taskType: 'local_bash', description: `Shell ${taskId}`, isBackground: true, ...(starter === null ? {} : { parentTaskId: starter }) }, { seq, at: at(0) });
+const shellEnds = (taskId: string, seq: number) => event('task.notification', { taskId, status: 'completed' }, { seq, at: at(40) });
 
 beforeEach(() => {
   fake = fakeAgentWorkClient();
   setAgentWorkClient(fake.client);
   useTaskGraph.setState({ entries: new Map() });
   useAttention.setState((s) => ({ bySession: new Map(), version: s.version + 1 }));
+  useOpenAgents.setState({ open: new Map() });
   installBridge([]); // C6's child source reads main through the validated bridge; a drill-in test installs its own stream
 });
 
@@ -182,82 +209,178 @@ afterEach(() => {
 });
 
 describe('subagents lists', () => {
-  // E7 (Design §3; Decision Log 13): the tree's Agents section and the folded Done section replace Active and Done.
-  it('heads the tree Agents · N running, eight rows shown; Done collapsed by default, ten shown once opened; Show N more', async () => {
+  // The UX wave's U8b (M7; Interfaces §F): Running N, Done N folded, On disk N folded.
+  it('heads Running N, eight rows shown; Done folded by default, ten shown once opened; Show N more', async () => {
     const running = Array.from({ length: 10 }, (_, i) => started(`r${i}`, i + 1));
     const ended = Array.from({ length: 12 }, (_, i) => [started(`d${i}`, 20 + 2 * i), finished(`d${i}`, 21 + 2 * i, {}, at(100 + i))]).flat();
     await mount({ events: [...running, ...ended] });
-    expect(heading('agents')).toBe('Agents · 10 running');
-    expect(rowsOf('agents').map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
-    expect(heading('done')).toBe('Done · 12');
-    expect(within(section('done')!).getByRole('button', { name: 'Done · 12' }).getAttribute('aria-expanded')).toBe('false');
+    expect(heading('running')).toBe('Running 10');
+    expect(section('running')!.querySelector('h3 [data-part="detail"]')?.className).toContain('text-fg-muted'); // the count muted, the label the heading's weight
+    expect(rowsOf('running').map((r) => r.id)).toEqual(['r0', 'r1', 'r2', 'r3', 'r4', 'r5', 'r6', 'r7']);
+    expect(heading('done')).toBe('Done 12');
+    expect(within(section('done')!).getByRole('button', { name: 'Done 12' }).getAttribute('aria-expanded')).toBe('false');
     expect(rowsOf('done')).toEqual([]);
     expandDone();
     expect(rowsOf('done')).toHaveLength(10);
     expect(rowsOf('done')[0].id).toBe('d11'); // newest end first
-    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Show 2 more' }));
-    expect(rowsOf('agents')).toHaveLength(10);
+    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Show 2 more' }));
+    expect(rowsOf('running')).toHaveLength(10);
     fireEvent.click(within(section('done')!).getByRole('button', { name: 'Show 2 more' }));
     expect(rowsOf('done')).toHaveLength(12);
     expect(screen.getByText('Live activity · includes nested agents')).toBeTruthy();
   });
 
-  it('nests a child at depth 1 under its running parent, folds it under the parent’s Done · 1 once it finishes, and lists both under Done when both have', async () => {
+  it('lists first-level agents only; (+1) opens the child beneath its parent, the arrow turned and the count gone, and a second press hides it', async () => {
     const { handle } = await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
-    expect(rowsOf('agents').map((r) => [r.id, r.depth, r.nested])).toEqual([['p', 0, null], ['c', 1, null]]);
+    expect(heading('running')).toBe('Running 2'); // every running agent, the nested one included
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    expect(disclosure('p')!.getAttribute('aria-label')).toBe('1 agent running under Agent p');
+    toggleUnder('p');
+    expect(treeOf('running')).toEqual(['p ▾', '  c']);
+    expect(disclosure('p')!.getAttribute('aria-label')).toBe('Agents under Agent p');
+    expect(rowsOf('running')[1]).toMatchObject({ id: 'c', depth: 1, nested: null, line: 'Working', under: null });
+    toggleUnder('p');
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    toggleUnder('p');
+    // the child finishes: folded under its running parent's Done · 1, as before
     push([finished('c', 4, {}, at(20))]);
-    expect(heading('agents')).toBe('Agents · 1 running');
-    expect(treeOf('agents')).toEqual(['p', '  [Done · 1]']);
-    expect(section('done')).toBeNull();
-    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Done · 1 under Agent p' }));
-    expect(treeOf('agents')).toEqual(['p', '  [Done · 1 open]', '  c']);
-    expect(rowsOf('agents')[1]).toMatchObject({ id: 'c', depth: 1, nested: null, line: expect.stringMatching(/^finished · /), elapsed: '' });
+    expect(heading('running')).toBe('Running 1');
+    expect(treeOf('running')).toEqual(['p ▾', '  [Done · 1]']);
+    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Done · 1 under Agent p' }));
+    expect(treeOf('running')).toEqual(['p ▾', '  [Done · 1 open]', '  c']);
+    expect(rowsOf('running')[1]).toMatchObject({ id: 'c', depth: 1, line: expect.stringMatching(/^finished · /), elapsed: '' });
     expect(handle.snapshot().expandedFolds).toEqual(new Set(['p']));
+    // both finished: Done lists the first level, the child reached by opening its parent
     push([finished('p', 5, {}, at(30))]);
-    expect(section('agents')).toBeNull();
-    expect(heading('done')).toBe('Done · 2');
+    expect(section('running')).toBeNull();
+    expect(heading('done')).toBe('Done 1');
     expandDone();
-    expect(rowsOf('done').map((r) => [r.id, r.depth])).toEqual([['p', 0], ['c', 1]]);
+    expect(treeOf('done')).toEqual(['p ▾', '  c']);
+    toggleUnder('p');
+    expect(treeOf('done')).toEqual(['p ▸']); // all finished: the arrow alone, no count
   });
 
-  it('keeps a finished parent of a running agent under Agents, its children unfolded and each row read by its own status', async () => {
+  it('opens the same rows in a second mounted reader: the open parents are one set per session', async () => {
+    await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
+    const second = create(undefined);
+    const other = render(<Mounted state={second} />);
+    const both = () => Array.from(document.querySelectorAll<HTMLElement>('[data-agent-row]')).map((el) => el.dataset.agentRow);
+    expect(both()).toEqual(['p', 'p']);
+    fireEvent.click(document.querySelector<HTMLElement>('[data-agent-row="p"] > [data-part="under"]')!);
+    expect(both()).toEqual(['p', 'c', 'p', 'c']);
+    expect(useOpenAgents.getState().open.get(A)).toEqual(new Set(['p']));
+    other.unmount();
+  });
+
+  it('a press on the row opens its drill-in and nothing beneath it; the row and its disclosure are two tab stops, the row first', async () => {
+    const { handle } = await mount({ events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3)] });
+    const stops = Array.from(row('p').querySelectorAll('button'));
+    expect(stops.map((b) => b.dataset.part)).toEqual(['open', 'under']);
+    expect(stops.every((b) => b.getAttribute('tabindex') === null && b.parentElement === row('p'))).toBe(true); // siblings, neither inside the other, both in the tab order
+    openRow('p');
+    expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'p' });
+    expect(useOpenAgents.getState().open.get(A)).toBeUndefined();
+  });
+
+  it('keeps an agent whose own run has ended under Running while an agent under it runs, its outcome word without a time beside (+1)', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse(at(60)));
     await mount({
       events: [started('p', 1), dispatch('p', 'tu-c', 2), started('c', 3), dispatch('p', 'tu-d', 4), started('d', 5), finished('d', 6, {}, at(20)), finished('p', 7, {}, at(30))],
     });
-    expect(treeOf('agents')).toEqual(['p', '  c', '  d']);
-    expect(rowsOf('agents').map((r) => [r.id, r.elapsed, r.line])).toEqual([
-      ['p', '', `finished · ${REL.now}`],
+    expect(heading('running')).toBe('Running 1');
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    expect(rowsOf('running')[0]).toMatchObject({ line: 'finished', elapsed: '' });
+    toggleUnder('p');
+    expect(treeOf('running')).toEqual(['p ▾', '  c', '  d']); // a parent that does not run lists its finished children
+    expect(rowsOf('running').map((r) => [r.id, r.elapsed, r.line])).toEqual([
+      ['p', '', 'finished'],
       ['c', '1m 00s', 'Working'],
       ['d', '', `finished · ${REL.now}`],
     ]);
     expect(section('done')).toBeNull();
   });
 
-  it('nests On disk over the nested-agents sidecars of a disk-only session, with status unavailable and the header line', async () => {
+  // Item 359 (M7 decision 5): a task the agent started keeps it under Running, said in words; the heading counts
+  // agents only.
+  it('keeps an ended agent under Running by its shell: finished · 1 background task running, the heading with no number, until the shell ends', async () => {
+    await mount({ events: [started('p', 1), shellOf('s1', 'p', 2), finished('p', 3, {}, at(30))] });
+    expect(heading('running')).toBe('Running'); // no agent runs: no number, never "Running 0"
+    expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'p', line: 'finished · 1 background task running', elapsed: '', under: null })]);
+    expect(row('p').querySelector('[data-part="tasks"]')?.className).toContain('shrink-0'); // the words about its tasks are never the part cut
+    expect(row('p').querySelector('[data-part="state"]')?.className).not.toContain('truncate');
+    push([shellOf('s2', 'p', 4)]);
+    expect(rowsOf('running')[0].line).toBe('finished · 2 background tasks running');
+    // two agents run beside it: the heading counts them, the card's number
+    push([started('x', 5), started('y', 6)]);
+    expect(heading('running')).toBe('Running 2');
+    expect(rowsOf('running').map((r) => r.id)).toEqual(['p', 'x', 'y']);
+    // a nested agent runs under it as well: the same words beside (+1)
+    push([dispatch('p', 'tu-n', 7), started('n', 8)]);
+    expect(treeOf('running')[0]).toBe('p (+1)▸');
+    expect(rowsOf('running')[0].line).toBe('finished · 2 background tasks running');
+    push([finished('n', 9, {}, at(35)), shellEnds('s1', 10), shellEnds('s2', 11)]);
+    expect(rowsOf('running').map((r) => r.id)).toEqual(['x', 'y']);
+    expect(heading('done')).toBe('Done 1');
+    expect(document.body.textContent).not.toMatch(/running under it|nested ·|\d+ nested/);
+  });
+
+  it('reads a running agent with a shell and a nested agent running as (+1), and no word about the shell', async () => {
+    await mount({ events: [started('p', 1), shellOf('s1', 'p', 2), dispatch('p', 'tu-c', 3), started('c', 4)] });
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    expect(rowsOf('running')[0].line).toBe('Working');
+  });
+
+  it('an ended agent kept under Running reads finished with errors in the danger colour, or stopped', async () => {
+    await mount({ events: [started('bad', 1), shellOf('s1', 'bad', 2), finished('bad', 3, { status: 'failed' }), started('halt', 4), shellOf('s2', 'halt', 5), finished('halt', 6, { status: 'stopped' })] });
+    expect(rowsOf('running').map((r) => r.line)).toEqual(['finished with errors · 1 background task running', 'stopped · 1 background task running']);
+    expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
+    expect(row('bad').querySelector('[data-part="tasks"]')?.className ?? '').not.toContain('text-danger');
+    expect(row('halt').querySelector('[data-part="state"]')?.className).toContain('text-fg-muted');
+  });
+
+  it('heads Done with what did not complete: Done 3 · 1 failed · 1 stopped; a kind of zero is left out', async () => {
+    await mount({ events: [started('ok', 1), finished('ok', 2), started('bad', 3), finished('bad', 4, { status: 'failed' }), started('halt', 5), finished('halt', 6, { status: 'stopped' })] });
+    expect(heading('done')).toBe('Done 3 · 1 failed · 1 stopped');
+    unmountAll();
+    await mount({ events: [started('ok', 1), finished('ok', 2), started('bad', 3), finished('bad', 4, { status: 'failed' })] });
+    expect(heading('done')).toBe('Done 2 · 1 failed');
+  });
+
+  it('open({ section: "done" }) shows the lists with Done unfolded and changes no other fold', async () => {
+    const { handle } = await mount({ events: [started('a1', 1), started('ok', 2), finished('ok', 3)], params: { agentId: 'a1' as AgentId } });
+    act(() => handle.toggle('running')); // folded by the person
+    act(() => subagentsTool.open!(handle, { section: 'done' }));
+    expect(handle.snapshot()).toMatchObject({ view: { kind: 'lists' }, expanded: { running: false, done: true, disk: false } });
+    expect(rowsOf('done').map((r) => r.id)).toEqual(['ok']);
+  });
+
+  it('folds On disk over the nested-agents sidecars of a disk-only session, with status unavailable and the header line', async () => {
     await mount({ status: null, sidecars: sidecarsOf('pass3/nested-agents-sidecars') });
-    expect(heading('disk')).toBe('On disk · 2');
-    expect(rowsOf('disk').map((r) => [r.title, r.depth, r.line])).toEqual([
-      ['Outer agent dispatching inner', 0, 'status unavailable'],
-      ['Inner reads one.txt', 1, 'status unavailable'],
+    expect(heading('disk')).toBe('On disk 2');
+    expect(rowsOf('disk')).toEqual([]);
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 2' }));
+    expect(rowsOf('disk').map((r) => [r.title, r.depth, r.line, r.under])).toEqual([
+      ['Outer agent dispatching inner', 0, 'status unavailable', null],
+      ['Inner reads one.txt', 1, 'status unavailable', null],
     ]);
     expect(screen.getByText('Status is known only while the session runs here')).toBeTruthy();
-    expect(section('agents')).toBeNull();
+    expect(section('running')).toBeNull();
     expect(screen.queryByText('Live activity · includes nested agents')).toBeNull();
   });
 
   it('marks a child whose parent is known only on disk as an orphan root, its tooltip naming the parent (Decision Log 19)', async () => {
     const [outer] = sidecarsOf('pass3/nested-agents-sidecars');
     await mount({ events: [dispatch(outer.agentId, 'tu-c', 1), started('c', 2)], sidecars: [outer] });
-    expect(rowsOf('agents')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of Outer agent dispatching inner' })]);
+    expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of Outer agent dispatching inner' })]);
     expect(row('c').querySelector('[data-part="nested"]')?.textContent).toBe('· nested');
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 1' }));
     expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: outer.agentId, depth: 0, nested: null })]);
   });
 
   it('marks a child of an agent the session does not list', async () => {
     await mount({ events: [dispatch('ghost', 'tu-c', 1), started('c', 2)] });
-    expect(rowsOf('agents')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of an agent this session does not list' })]);
+    expect(rowsOf('running')).toEqual([expect.objectContaining({ id: 'c', depth: 0, nested: 'Child of an agent this session does not list' })]);
   });
 
   // E7 (Design §5; Decision Log 7, 24): a hand-built roster, for what the one recorded team (below) does not hold: a
@@ -277,9 +400,9 @@ describe('subagents lists', () => {
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'researcher' } }] });
     // E11 W-D (tracker row E7 "teammate joined extra frozen"): the listing's joined age, frozen at its time, is dropped
-    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, `  testergeneral-purpose · idle · listed ${REL.agoNarrow(2, 'minute')}`, 'solo']);
-    expect(heading('agents')).toBe('Agents · 2 running');
-    const group = within(section('agents')!).getByRole('group', { name: 'Team · led by this session' });
+    expect(treeOf('running')).toEqual(['Team · led by this session', `  ${one.agentId}`, `  testergeneral-purpose · idle · listed ${REL.agoNarrow(2, 'minute')}`, 'solo']);
+    expect(heading('running')).toBe('Running 2');
+    const group = within(section('running')!).getByRole('group', { name: 'Team · led by this session' });
     expect(Array.from(group.querySelectorAll<HTMLElement>('[data-agent-row], [data-roster]')).map((el) => el.dataset.agentRow ?? el.dataset.roster)).toEqual([one.agentId, 'tester']);
     expect(row('solo').closest('[role="group"]')).toBeNull();
     const roster = document.querySelector<HTMLElement>('[data-roster="tester"]')!;
@@ -297,8 +420,8 @@ describe('subagents lists', () => {
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
     const [one] = sidecarsOf('subagent-sidecars');
     await mount({ events: [started('solo', 1), started(one.agentId, 2)], sidecars: [{ ...one, meta: { ...one.meta!, name: 'scout' } }] });
-    expect(treeOf('agents')).toEqual(['Team · led by this session', `  ${one.agentId}`, 'solo']);
-    expect(heading('agents')).toBe('Agents · 2 running');
+    expect(treeOf('running')).toEqual(['Team · led by this session', `  ${one.agentId}`, 'solo']);
+    expect(heading('running')).toBe('Running 2');
   });
 
   it('titles a row by the sidecar’s name, else the dispatch description, and the second line by summary, activity, else Working', async () => {
@@ -308,31 +431,30 @@ describe('subagents lists', () => {
       events: [started(one.agentId, 1, { description: 'Read one' }), started(two.agentId, 2, { description: 'Read two' })],
       sidecars: [named, two],
     });
-    expect(rowsOf('agents').map((r) => [r.title, r.line])).toEqual([
+    expect(rowsOf('running').map((r) => [r.title, r.line])).toEqual([
       ['scout', 'Read one'],
       ['Read two', 'Working'],
     ]);
     push([event('subagent.progress', { taskId: two.agentId, description: 'Reading two.txt', usage: { totalTokens: 10, toolUses: 1, durationMs: 900 } }, { seq: 3 })]);
-    expect(rowsOf('agents')[1]).toMatchObject({ title: 'Read two', line: 'Reading two.txt' });
+    expect(rowsOf('running')[1]).toMatchObject({ title: 'Read two', line: 'Reading two.txt' });
   });
 
   it('lists a workflow’s agents in no section, though the graph holds them from the run’s sidecars', async () => {
     const runs = workflowRunsOf();
     await mount({ status: null, sidecars: sidecarsOf('pass2/workflow-disk', runs[0].runId), runs });
-    expect(section('agents') ?? section('done') ?? section('disk')).toBeNull();
+    expect(section('running') ?? section('done') ?? section('disk')).toBeNull();
     expect(screen.getByText('No subagents yet')).toBeTruthy();
     const nodes = [...useTaskGraph.getState().entries.get(A)!.graph.tasks.values()].filter((n) => n.kind === 'agent');
     expect(nodes.map((n) => n.agent?.runId)).toEqual([runs[0].runId, runs[0].runId]);
   });
 
-  it('badges an agent with an open request of its own: waiting and Approval needed', async () => {
+  it('reads Approval needed in the warning colour for an agent with an open request of its own', async () => {
     await mount({ events: [started('a1', 1), started('a2', 2)] });
     act(() =>
       useAttention.getState().applySnapshot([item(A, 'permission', T, { request: { requestId: 'r1' as RequestId, toolUseId: null, taskId: null, agentId: 'a1' as AgentId } })], TEST_MACHINE),
     );
-    expect(rowsOf('agents').map((r) => [r.id, r.waiting])).toEqual([['a1', true], ['a2', false]]);
-    expect(row('a1').querySelector('[data-part="waiting"]')?.textContent).toBe('waiting');
-    expect(rowsOf('agents')[0].line).toContain('Approval needed');
+    expect(rowsOf('running').map((r) => [r.id, r.waiting, r.line])).toEqual([['a1', true, 'Approval needed'], ['a2', false, 'Working']]);
+    expect(row('a1').querySelector('[data-part="state"]')?.className).toContain('text-warning');
   });
 
   it('ticks elapsed once a second, and reads elapsed unavailable for an agent known only from the snapshot', async () => {
@@ -340,17 +462,18 @@ describe('subagents lists', () => {
     vi.setSystemTime(Date.parse(at(5)));
     const snapshotBorn = { taskId: 'snap' as TaskId, taskType: 'local_agent', description: 'From the snapshot', ambient: false };
     await mount({ status: live({ backgroundTasks: [snapshotBorn] }), events: [started('a1', 1)] });
-    expect(rowsOf('agents').map((r) => [r.id, r.elapsed])).toEqual([['snap', 'elapsed unavailable'], ['a1', '5s']]);
+    expect(rowsOf('running').map((r) => [r.id, r.elapsed])).toEqual([['snap', 'elapsed unavailable'], ['a1', '5s']]);
     act(() => vi.advanceTimersByTime(3000));
-    expect(rowsOf('agents')[1].elapsed).toBe('8s');
+    expect(rowsOf('running')[1].elapsed).toBe('8s');
   });
 
-  it('a disk-only session: On disk with status unavailable, a stoppedByUser sidecar under Done as stopped, never Active', async () => {
+  it('a disk-only session: On disk with status unavailable, a stoppedByUser sidecar under Done as stopped, never Running', async () => {
     const [one, two] = sidecarsOf('subagent-sidecars');
     await mount({ status: null, sidecars: [one, { ...two, meta: { ...two.meta!, stoppedByUser: true } }] });
-    expect(section('agents')).toBeNull();
+    expect(section('running')).toBeNull();
     expandDone();
     expect(rowsOf('done')).toEqual([expect.objectContaining({ id: two.agentId, line: 'stopped' })]);
+    fireEvent.click(within(section('disk')!).getByRole('button', { name: 'On disk 1' }));
     expect(rowsOf('disk')).toEqual([expect.objectContaining({ id: one.agentId, line: 'status unavailable' })]);
   });
 
@@ -379,6 +502,7 @@ describe('subagents lists', () => {
     expandDone();
     const lines = Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
     expect(lines).toEqual({ ok: `finished · ${M3} · Read both files`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, gone: 'ended with the session' });
+    expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
   });
 
   it('a handed-back agent’s Done row shows its report’s first line, never the engine’s pointer (2.1.283 wording)', async () => {
@@ -399,7 +523,7 @@ describe('subagents lists', () => {
 
   it('clicking a row opens its drill-in', async () => {
     const { handle } = await mount({ events: [started('a1', 1)] });
-    fireEvent.click(row('a1'));
+    openRow('a1');
     expect(handle.snapshot().view).toEqual({ kind: 'agent', agentId: 'a1' });
   });
 });
@@ -506,7 +630,7 @@ describe('drill-in', () => {
     const lists = document.querySelector<HTMLElement>('[data-view="lists"]')!;
     lists.scrollTop = 120;
     fireEvent.scroll(lists);
-    fireEvent.click(row('a2'));
+    openRow('a2');
     expect(document.querySelector('[data-view="lists"]')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: '‹ Subagents' }));
     expect(handle.snapshot().view).toEqual({ kind: 'lists' });
@@ -895,9 +1019,9 @@ describe('subagents tool', () => {
     expect(vi.getTimerCount()).toBe(0);
     rerender(<Mounted state={handle} visible />);
     expect(vi.getTimerCount()).toBe(1);
-    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Agents · 1 running' })); // collapsed
+    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Running 1' })); // folded
     expect(vi.getTimerCount()).toBe(0);
-    fireEvent.click(within(section('agents')!).getByRole('button', { name: 'Agents · 1 running' }));
+    fireEvent.click(within(section('running')!).getByRole('button', { name: 'Running 1' }));
     expect(vi.getTimerCount()).toBe(1);
     push([finished('a1', 2, {}, at(2))]);
     expect(vi.getTimerCount()).toBe(0); // E7: the finished agent sits in the collapsed Done section: nothing shown ticks

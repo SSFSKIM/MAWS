@@ -417,7 +417,7 @@ All keys are P-256: ECDSA for signatures, ECDH for channel keys. Node, WebCrypto
   - changing shares or owners;
   - machine-admin changes;
   - a `shell` request by a member who isn't one of the machine's owners. An owner's own terminal on their machine needs none, as their routine approvals don't (§10.5).
-- **What is signed.** Main builds the action from typed fields, renders the exact text the person confirms, and signs that action's canonical form. The renderer can ask for an action, but it never supplies the bytes that are signed.
+- **What is signed.** Main builds the action from typed fields, renders the exact text the person confirms, and signs that action's canonical form. The renderer can ask for an action, but it never supplies the bytes that are signed. *2026-11-13 (UTC):* Amended by the UX wave (U9; S-13; `docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md`), on the owner's words: "Approve and start", 2026-11-12. The sheet's message is a person's sentence naming the machine by its name from the held org state; the detail still shows every signed field, the machine as name and ref.
 - **Approvals are bound** to the digest of the request as displayed: session, tool-use id, tool name, SHA-256 of the input. The machine executes only if the digest matches the request still pending (desk §6, kept).
 - **Routine approvals** on the member's own session from an unlocked app need no step-up by default. The owner can require it for every approval (§10.5).
 

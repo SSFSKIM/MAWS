@@ -24,6 +24,12 @@ import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board 525
+import { useTranscriptStore } from '../stores/transcript'; // UX wave U12a
+import { applyEvents, createState } from '../transcript/model/reduce'; // UX wave U12a
+import { builder } from '../transcript/model/test-events'; // UX wave U12a
+import { COMPUTER_USE_COPY } from '../computer-use/copy'; // UX wave U12a
+import { COMPUTER_USE_SETTLE_MS } from '../computer-use/strip-state'; // UX wave U12a
+import { openBtwCard, resetSideQuestions } from '../side/store'; // UX wave U4a
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -38,6 +44,7 @@ afterEach(() => {
   cleanup();
   delete (window as { maws?: PreloadBridge }).maws;
   resetSlots();
+  resetSideQuestions(); // UX wave U4a: the /btw cards too
   // C7 start: a failing assertion must not leave the fake clock or the windows to the next test
   vi.useRealTimers();
   useUsage.setState({ windows: null });
@@ -45,6 +52,30 @@ afterEach(() => {
 });
 
 describe('session pane', () => {
+  // UX wave U12a: the computer-use strip is mounted in the full pane only, directly above the transcript's wrapper
+  it('draws the computer-use line above the transcript in the full pane, and none in the compact one', () => {
+    vi.useFakeTimers();
+    const id = idOf('Fix sidebar drag');
+    registerSlot('transcript', () => <p>transcript</p>);
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('j1', 'mcp__plugin_cua_cua_repl__js', { code: 'await cua.click()' });
+    const state = applyEvents(createState(null, null), b.events);
+    useTranscriptStore.setState({ entries: { [id]: { state, rows: [], phase: 'live', error: null, following: true, sendFollowRequest: 0, working: true, clock: null, jump: null } } });
+    try {
+      const { unmount } = render(<SessionPane appSessionId={id} paneIndex={0} />);
+      act(() => void vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS));
+      const line = screen.getByText(COMPUTER_USE_COPY.running);
+      expect(line.compareDocumentPosition(screen.getByText('transcript')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      unmount();
+      render(<SessionPane appSessionId={id} paneIndex={0} compact />);
+      act(() => void vi.advanceTimersByTime(COMPUTER_USE_SETTLE_MS));
+      expect(screen.queryByText(COMPUTER_USE_COPY.running)).toBeNull();
+    } finally {
+      useTranscriptStore.setState({ entries: {} });
+    }
+  });
+
   it('shows the transcript slot and the docked request above the composer, and nothing under it (W2: no status line)', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
@@ -90,6 +121,44 @@ describe('session pane', () => {
     expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
     expect(screen.queryByText('Composer unavailable')).toBeNull();
     expect(screen.queryByText('request')).toBeNull();
+  });
+
+  // UX wave U4a (decision 12): where the pane mounts the composer, which draws a waiting message in its stack, the
+  // transcript is told so; in place of the holder notice it is not, and draws its held bubbles as before.
+  it('tells the transcript slot there is a stack where it mounts the composer, and not where the holder notice stands', () => {
+    registerSlot('transcript', ({ waiting }) => <p>transcript waiting {waiting ?? 'none'}</p>);
+    const { unmount } = render(<SessionPane appSessionId={idOf('Charter + research')} paneIndex={0} />);
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.getByText('transcript waiting stacked')).toBeTruthy();
+    unmount();
+    render(<SessionPane appSessionId={idOf('Somersault terminal run')} paneIndex={0} />);
+    expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
+    expect(screen.getByText('transcript waiting none')).toBeTruthy();
+  });
+
+  // UX wave U4a (M7; decision 26 a): the `/btw` card is a layer of the pane over the transcript's bottom right corner,
+  // beside the transcript's scroller and never inside it; the compact pill, which draws no transcript, has it in the flow
+  // directly above the composer's frame
+  it('draws the session’s /btw card over the transcript’s corner, a layer of the pane and not of the scroller', () => {
+    const id = idOf('Charter + research');
+    registerSlot('transcript', () => <p>transcript</p>);
+    act(() => openBtwCard(id));
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    const card = document.querySelector<HTMLElement>('[data-btw-card]')!;
+    expect(card.getAttribute('data-btw-card')).toBe('corner');
+    const scroller = screen.getByText('transcript').parentElement!;
+    expect(scroller.contains(card)).toBe(false);
+    expect(card.parentElement).toBe(scroller.parentElement);
+    expect(card.contains(screen.getByText('Composer unavailable'))).toBe(false);
+  });
+
+  it('in the compact pill, which draws no transcript, the /btw card stands directly above the composer’s frame', () => {
+    const id = idOf('Charter + research');
+    act(() => openBtwCard(id));
+    render(<SessionPane appSessionId={id} paneIndex={0} compact />);
+    const card = document.querySelector<HTMLElement>('[data-btw-card]')!;
+    expect(card.getAttribute('data-btw-card')).toBe('flow');
+    expect(card.compareDocumentPosition(screen.getByText('Composer unavailable')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // C10 (M5): the notice's actions are C10's HolderActions, pinned in `sessions/HolderActions.test.tsx`

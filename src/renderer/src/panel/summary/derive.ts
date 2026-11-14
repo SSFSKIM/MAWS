@@ -1,10 +1,9 @@
 // The summary's pure derivations (C8a execution document, Interfaces *Summary derivations*): the change line from C4's
-// status and uncommitted diff, the push state and its GitHub link, background work by kind, and the Sources list and
-// Subagents glyph line over C6's disclosure-independent `turnActivity` (never the disclosed rows, which change as the
-// reader collapses turns).
-import type { EngineSessionStatus } from '@shared/engine/status';
+// status and uncommitted diff, the push state and its GitHub link, and the Sources list over C6's
+// disclosure-independent `turnActivity` (never the disclosed rows, which change as the reader collapses turns). The
+// cards for running work read the task graph's readings instead (`tools/agents/model/task-graph.ts`; UX wave U8b).
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
-import type { SubagentRef, TurnActivity } from '../../transcript';
+import type { TurnActivity } from '../../transcript';
 
 export type ChangeLine =
   | { kind: 'clean' }
@@ -51,27 +50,6 @@ export function githubUrl(remoteUrl: string | null, upstream: string | null): st
   return `${repo}/tree/${branch.split('/').map(encodeURIComponent).join('/')}`;
 }
 
-export interface BackgroundCounts {
-  shells: number;
-  workflows: number;
-  monitors: number;
-  other: number;
-}
-
-// Agents are Subagents' to count; a monitor is matched by prefix and anything unnamed kept as `other` rather than
-// guessed (the fixtures show `local_bash`, `local_workflow` and `local_agent` only).
-export function backgroundCounts(tasks: EngineSessionStatus['backgroundTasks']): BackgroundCounts {
-  const counts: BackgroundCounts = { shells: 0, workflows: 0, monitors: 0, other: 0 };
-  for (const { taskType } of tasks) {
-    if (taskType === 'local_agent') continue;
-    if (taskType === 'local_bash') counts.shells += 1;
-    else if (taskType === 'local_workflow') counts.workflows += 1;
-    else if (taskType.startsWith('monitor')) counts.monitors += 1;
-    else counts.other += 1;
-  }
-  return counts;
-}
-
 export type Source =
   | { kind: 'file'; path: string; at: string }
   | { kind: 'web'; url: string; host: string; at: string }
@@ -104,8 +82,6 @@ export function sourcesOf(turns: TurnActivity[], limit = 10): Source[] {
   return [...byKey.values()].sort((a, b) => (a.at < b.at ? 1 : a.at > b.at ? -1 : 0)).slice(0, limit);
 }
 
-const TERMINAL = new Set(['finished', 'finished_with_errors', 'stopped']);
-
 // A source's path as the card shows it: relative to the session's directory when it lies inside it.
 export function displayPath(path: string, directory: string): string {
   const base = directory.endsWith('/') ? directory : `${directory}/`;
@@ -115,11 +91,4 @@ export function displayPath(path: string, directory: string): string {
 // A source's path as a file tab opens it: a relative one (a Grep or Glob over `src`) resolved against the directory.
 export function absolutePath(path: string, directory: string): string {
   return path.startsWith('/') ? path : `${directory.replace(/\/$/, '')}/${path}`;
-}
-
-// The activity's children, those still running before the finished, bounded. Each entry is the ref itself (with its
-// status), so the glyph line hands it to C6's `SubagentGlyph` as the transcript does.
-export function agentGlyphs(turns: TurnActivity[], limit = 4): (SubagentRef & { status: TurnActivity['subagents'][number]['status'] })[] {
-  const all = turns.flatMap((turn) => turn.subagents);
-  return [...all.filter((a) => !TERMINAL.has(a.status)), ...all.filter((a) => TERMINAL.has(a.status))].slice(0, limit);
 }

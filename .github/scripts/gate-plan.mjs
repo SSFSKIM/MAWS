@@ -32,6 +32,10 @@
 // It adds `selection` and `related` (the paths for vitest related as JSON, or empty for the full suite) to the outputs
 // and one line saying which to the summary; a run without the trailer writes neither. Such a run is never landing
 // evidence.
+// `MiniCopy:` (a push only; ci-gate.sh): the run's e2e groups whose specs reach a changed path under e2e/, each run once
+// more on the mini when this run puts it off it (hosted or on EC2), or `none (<reason>)` (--no-mini-copy). The copies
+// join `e2e` and e2e_host (host copies) or `e2e_copy`, the e2e-copy job's matrix (guest copies, several to a job), and the
+// summary names each with its runner and paths, and each candidate kept off with why (see the copies' placement below).
 // The Mac runners (ci-kit's mac-lane concurrency spec, M2): on the macOS lane a MEASURED_E2E group, a MAC_HOME_E2E group and
 // every group of a live run (LIVE_E2E and LIVE_GUARD_E2E) ask for [self-hosted, macOS, ARM64, ci-kit-mac-home], the mini's
 // exclusive instance alone: measured bounds were calibrated there, and only it holds the engine login and ClaudeUsage's
@@ -89,6 +93,8 @@
 // placement's timeout and self-hosted setup, and carries overflow: 'ec2' or 'mini' (the job name and ci-gate tail identify it). No sample: no change.
 // MAC_MINI_OVERFLOW=off disables mini moves. Its normal placement's lanes must be free in MAC_MINI_LANES,
 // published by the mini: absent, unreadable or stale publication holds both lanes, so no mini overflow before deployment.
+// The variable itself (the plan step's env, read at plan time) carries `windows`, the mini's scheduled holds: one in force
+// or starting within three hours that holds a lane this run's jobs take adds one advisory line (`mini_window`), never a move.
 // The old full-round rule runs in shadow with independent queues. The entry point emits its count as the plan check's
 // `EC2 overflow shadow` notice, `old_rule_count=<n>`, readable through the Checks annotations API for EC2 release accounting.
 // The peer groups (PEER_E2E; the two-build check, e2e/cross-build.spec.ts): each runs this tree's app against another
@@ -417,6 +423,23 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     }
     return target;
   };
+  // A group's minutes before its runner's start wait: its own on E2E_MINUTES, else its class's.
+  const minutesOf = (group) => ownMinutes.get(group) ?? (measured.has(group) ? (variantOf(group) ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30);
+  // One e2e matrix entry: the group on `where`, as hosting and overflow left it.
+  const entryOf = (group, where, { eligible = false, hosted = false, overflow = false } = {}) => {
+    const runner = JSON.stringify(where);
+    const onGuest = GUEST.includes(where);
+    const guest = onGuest ? { variant: variantOf(group) } : {};
+    // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
+    const prebuild = measured.has(group) ? variantOf(group) : undefined;
+    const minutes = minutesOf(group);
+    const testTimeout = timeoutOn(where, minutes);
+    const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : testTimeout + (onGuest ? UPLINK_MARGIN_MINUTES : 0);
+    // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
+    // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
+    const cached = hosted && direct ? variantOf(group) : undefined;
+    return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default' && !onGuest, libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+  };
   const e2e = [...gates]
     .filter((gate) => gate.startsWith('e2e:'))
     .map((gate) => {
@@ -430,23 +453,78 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
       }
       const where = overflow === 'ec2' ? RUNNERS.macEc2 : hosted ? (direct ? RUNNERS.macHosted : HOSTED_WAITER) : placed(group);
       if (launchd.has(group) && where === RUNNERS.macEc2 && ec2Off) refuse(`LAUNCHD_E2E group ${group} needs EC2, but MAC_EC2 is off; it must never run in the home account`);
-      const runner = JSON.stringify(where);
-      const onGuest = GUEST.includes(where);
-      const guest = onGuest ? { variant: variantOf(group) } : {};
-      // A measured group's guard may wait 15 minutes, and a second after its build when its script builds out/ (gate.yml).
-      const prebuild = measured.has(group) ? variantOf(group) : undefined;
-      const minutes = ownMinutes.get(group) ?? (measured.has(group) ? (prebuild ? 60 : 45) : peerGroups.has(group) ? PEER_MINUTES : 30);
-      const testTimeout = timeoutOn(where, minutes);
-      const timeout = hosted ? (direct ? minutes + HOSTED_MARGIN_MINUTES : HOSTED_TIMEOUT_MINUTES) : testTimeout + (onGuest ? UPLINK_MARGIN_MINUTES : 0);
-      // The build took 39% of the direct Macs' job time (23 jobs, 2026-10-28: 140 s of 368 s at the median), and a set larger
-      // than the account's 5 Macs runs in rounds, whose later jobs can restore what the first ones built.
-      const cached = hosted && direct ? variantOf(group) : undefined;
-      return { group, script: scriptOf(group), slug: group.replace(/[^\w-]/g, '-'), build: group === 'default' && !onGuest, libreoffice: libreoffice.has(group), poppler: poppler.has(group), measured: measured.has(group), ...(launchd.has(group) && { launchd: true }), ...(prebuild && { prebuild }), ...(hosted && { hosted }), ...(overflow && { overflow }), ...(eligible && direct && notHosted(group).length === 0 && { retry: true }), ...(cached && { cached }), runner, timeout, ...(onGuest && { test_timeout: testTimeout }), ...guest, ...(peerGroups.has(group) && peer && { peer }) };
+      return entryOf(group, where, { eligible, hosted, overflow });
     });
+
+  // Mini copies (a push only): scripts/ci-gate.sh writes one `MiniCopy: <group> <paths>` trailer for each e2e group it
+  // asked for whose specs reach a path under e2e/ the change edits (its spec-import graph, ci-gate-e2e-coverage.mjs), or
+  // `MiniCopy: none (<reason>)` under --no-mini-copy. Scenes went green on GitHub's hosted Macs and red on the mini, so a
+  // group this run puts off the mini, hosted or on EC2, runs once more on it: in the guest when it is guest-eligible
+  // (MAC_VM_E2E, never a peer group) and its bound fits a guest job (below), else on the mini's exclusive instance,
+  // `RUNNERS.macHome` (today's three labels alone also match the EC2 Mac, where a copy would prove nothing), unless it is
+  // LAUNCHD_E2E, which never runs in the home account. A group already on the mini, or never on a Mac (POOL_E2E, a Linux
+  // lane), gets none; a
+  // reserved final ref hosts nothing, so it copies nothing. A copy is the group's entry on that runner with `copy: true`,
+  // slug `<slug>-mini` (its artifacts beside the original's), no retry (as the group runs on the mini when nothing hosts
+  // it) and its runner's timeout. Host copies join e2e_host, named `e2e:<group> (mini copy)`. Guest copies share guest
+  // jobs, e2e_copy, since each guest job boots a VM of its own (13-18 minutes before its first test): as few as hold
+  // them, each running its groups one after another in a step of their own (gate.yml's e2e-copy).
+  const miniCopyLines = dispatched ? [] : (env.HEAD_MESSAGE ?? '').split('\n').map((line) => /^MiniCopy:(.*)$/i.exec(line.trim())?.[1].trim()).filter((value) => value !== undefined);
+  const optOut = miniCopyLines.map((value) => /^none(?:\s+\((.*)\))?$/i.exec(value)).find(Boolean);
+  const candidates = optOut ? [] : miniCopyLines.map((value) => /^([A-Za-z0-9._:-]+)\s*(.*)$/.exec(value)).filter(Boolean).map(([, group, paths]) => ({ group, paths }));
+  const onTheMini = [RUNNERS.macos, RUNNERS.macHome, RUNNERS.macShared, ...GUEST].map((runner) => JSON.stringify(runner));
+  // The guest copies' jobs. ci-kit's VM lane ends a guest job 100 minutes after it took it (CI_KIT_VM_JOB_BOUND on the
+  // mini), and its own rule for that bound is a job's longest timeout plus 10, so a copy job's timeout stays within 90:
+  // the uplink's margin once (checkout, setup and the out/ downloads), then each group's step in turn. A step is bounded
+  // by its group's E2E_MINUTES, else COPY_STEP_MINUTES: the slowest hosted-eligible guest groups' test steps took 7
+  // minutes on a hosted Mac and 5 in the guest (120 runs to 2026-11-13), and a group's class minutes, 30, would leave
+  // one group to a job. A job holds at most COPY_STEPS groups, gate.yml's step slots. A group whose own step alone
+  // would pass the 90 takes the home host instead, or no copy when it is LAUNCHD_E2E.
+  const COPY_JOB_MINUTES = 90;
+  const COPY_STEP_MINUTES = 15;
+  const COPY_STEPS = 3;
+  const copyStepMinutes = (group) => ownMinutes.get(group) ?? COPY_STEP_MINUTES;
+  const copies = [];
+  const copiesKept = [];
+  for (const { group, paths } of candidates) {
+    const original = e2e.find((entry) => entry.group === group);
+    if (!original || copies.some((copy) => copy.group === group) || copiesKept.some((kept) => kept.group === group)) continue;
+    const offMini = original.hosted || original.runner === JSON.stringify(RUNNERS.macEc2);
+    const why = onTheMini.includes(original.runner) ? 'already on the mini' : !offMini ? 'never on a Mac' : '';
+    const guestEligible = !why && macVm.has(group) && !peerGroups.has(group);
+    const tooLong = guestEligible && UPLINK_MARGIN_MINUTES + copyStepMinutes(group) > COPY_JOB_MINUTES ? `its ${copyStepMinutes(group)} minutes pass a guest job's ${COPY_JOB_MINUTES}` : '';
+    const guestCopy = guestEligible && !tooLong;
+    if (why || (!guestCopy && launchd.has(group))) {
+      copiesKept.push({ group, paths, why: why || (tooLong ? `${tooLong}, and LAUNCHD_E2E never runs in the home account` : 'LAUNCHD_E2E and not guest-eligible, so never in the home account') });
+      continue;
+    }
+    copies.push({ ...entryOf(group, guestCopy ? RUNNERS.macVm : RUNNERS.macHome), slug: `${original.slug}-mini`, copy: true, paths, ...(tooLong && { tooLong }) });
+  }
+  const e2eCopy = [];
+  for (const copy of copies.filter((entry) => entry.variant !== undefined)) {
+    const minutes = copyStepMinutes(copy.group);
+    const step = { group: copy.group, script: copy.script, slug: copy.slug, minutes, ...(copy.launchd && { launchd: true }) };
+    const job = e2eCopy.find((held) => held.copies.length < COPY_STEPS && held.timeout + minutes <= COPY_JOB_MINUTES);
+    if (job) {
+      job.copies.push(step);
+      job.timeout += minutes;
+      job.variants = [...new Set([...job.variants, copy.variant])].sort();
+      job.libreoffice ||= copy.libreoffice;
+      job.poppler ||= copy.poppler;
+      job.launchd ||= Boolean(copy.launchd);
+    } else e2eCopy.push({ copies: [step], runner: copy.runner, timeout: UPLINK_MARGIN_MINUTES + minutes, variants: [copy.variant], libreoffice: copy.libreoffice, poppler: copy.poppler, launchd: Boolean(copy.launchd) });
+  }
+  // A guest copy's entry in `e2e` carries its job's bounds, the job's timeout and its own step's.
+  for (const job of e2eCopy) {
+    job.groups = job.copies.map((step) => step.group).join(', ');
+    for (const step of job.copies) Object.assign(copies.find((copy) => copy.group === step.group), { timeout: job.timeout, test_timeout: step.minutes });
+  }
+  // The copies' matrix entries, without the paths the summary names.
+  const planned = [...e2e, ...copies.map((copy) => Object.fromEntries(Object.entries(copy).filter(([key]) => key !== 'paths' && key !== 'tooLong')))];
   const e2eHosted = e2e.filter((entry) => entry.hosted && !direct);
-  const e2eHost = e2e.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
+  const e2eHost = planned.filter((entry) => entry.variant === undefined && (!entry.hosted || direct));
   const e2eVm = e2e.filter((entry) => entry.variant !== undefined);
-  const e2eBuild = [...new Set(e2eVm.map((entry) => entry.variant))].sort();
+  const e2eBuild = [...new Set([...e2eVm, ...planned.filter((entry) => entry.copy && entry.variant !== undefined)].map((entry) => entry.variant))].sort();
   const unitDarwinRunner = unitDarwinHosted ? RUNNERS.macHosted : onMac('unit:darwin');
 
   // Group names; an `e2e:` prefix, as --gates writes them, is read as the group.
@@ -469,12 +547,12 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   // The jobs' minutes outside the e2e matrix (whose entries carry their own); packaged's hosted bound is set below.
   const timeouts = { static: timeoutOn(runners.static, 30), unit: timeoutOn(runners.unit, 30), probes: timeoutOn(runners.probes, 30), unit_darwin: unitDarwinHosted ? 30 + HOSTED_MARGIN_MINUTES : timeoutOn(unitDarwinRunner, 30) };
   const outputs = {
-    static: has('static'), unit: has('unit'), unit_darwin: has('unit:darwin'), probes: has('probes'), e2e: JSON.stringify(e2e),
+    static: has('static'), unit: has('unit'), unit_darwin: has('unit:darwin'), probes: has('probes'), e2e: JSON.stringify(planned),
     static_runner: JSON.stringify(runners.static), unit_runner: JSON.stringify(runners.unit), probes_runner: JSON.stringify(runners.probes), pool: String(pool),
     packaged: has('packaged'), evidence: String(evidence), live: String(live), default_beside: JSON.stringify(defaultBeside),
     unit_shards: JSON.stringify(unitShards), unit_darwin_runner: JSON.stringify(unitDarwinRunner), timeouts: JSON.stringify(timeouts),
     e2e_host: JSON.stringify(e2eHost), e2e_vm: JSON.stringify(e2eVm), e2e_build: JSON.stringify(e2eBuild), e2e_build_runner: JSON.stringify(E2E_BUILD_BOX),
-    e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait),
+    e2e_hosted: JSON.stringify(e2eHosted), peer_wait: JSON.stringify(peerWait), e2e_copy: JSON.stringify(e2eCopy),
   };
   // Each hosted shard builds once. The first owns the small checks; keeping them together preserves their order
   // and leaves the other shard bare-only. Self-hosted routes keep one build and every check on the one Mac.
@@ -507,7 +585,10 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
     (keptOffHosted.length > 0 ? ` Lane: hosted, but never on a hosted Mac, so where it would be: ${named(keptOffHosted, 'e2e:')}.` : '') +
     (laneAsked === 'hosted' && !e2e.some((entry) => entry.hosted) && keptOffHosted.length === 0 && !keptForFinal ? ' Lane: hosted, but no e2e group of this run is hosted.' : '') +
     (laneAsked === 'no-hosted' ? ' Lane: no-hosted, so no group of this run is hosted.' : '');
-  const laneNote = !vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`;
+  // A Lane: moves the MAC_VM_E2E groups alone; the run's other groups stay where they would be, which can be off the mini.
+  const offMiniUnderLane = vmLane ? e2e.filter((entry) => entry.hosted || entry.runner === JSON.stringify(RUNNERS.macEc2)).map((entry) => `e2e:${entry.group} (${entry.hosted ? 'a hosted Mac' : 'EC2'})`) : [];
+  const laneNote = (!vmLane ? '' : laneJobs.length > 0 ? said(`Lane: ${vmLane}, on [${LANES[vmLane]}] alone`, laneJobs) : ` Lane: ${vmLane}, but no job of this run is on MAC_VM_E2E.`) +
+    said(`Lane: ${vmLane} moves only the MAC_VM_E2E groups, so off the mini`, offMiniUnderLane);
   const macNote =
     said('EC2 overflow (ci-kit-mac-ec2)', e2e.filter((entry) => entry.overflow === 'ec2').map((entry) => `e2e:${entry.group}`)) +
     said('mini overflow', e2e.filter((entry) => entry.overflow === 'mini').map((entry) => `e2e:${entry.group}`)) +
@@ -527,11 +608,70 @@ export function planOf(env, scripts, now, { docsOnly = false } = {}) {
   // The peer, when a trailer names one, and the groups its minor brought in.
   const peerLine = peer === '' ? '' : `Peer: ${peer.slice(0, 8)}${peerWire ? `, wire ${peerWire.text}` : ''}${treeWire ? `; this tree's ${treeWire.text}` : ''}${minorApart ? ', a minor apart' : ''}${heldBy && peerAdditions.length > 0 ? `; ${peerAdditions.map((group) => `e2e:${group}`).join(', ')} ${peerAdditions.length === 1 ? 'is' : 'are'} checked in run ${heldBy[1]} (${heldBy[2]}), so not here` : peerJoined.length > 0 ? `, so ${peerJoined.map((group) => `e2e:${group}`).join(', ')} joined` : minorApart && !testsCode ? ', but the peer groups join only a run with unit or an e2e group' : ''}.`;
   const peerWaitLine = peerWait.length > 0 ? 'The peer verdict is awaited on hosted Linux; this run fails if its holder does not pass the check.' : '';
+  // The mini's scheduled holds (ci-kit's MAC_MINI_LANES `windows`: each active or starting within six hours, UTC to the
+  // minute, start inclusive, end exclusive). When one in force now or starting within MINI_WINDOW_AHEAD holds a lane a
+  // job of this run takes, the summary says so, once, and `mini_window` carries the line for ci-gate.sh to print at
+  // launch. Advisory: an absent or unreadable value or a malformed entry says nothing and moves no job, and a window is
+  // an absolute time, so the value's own age does not matter. A host job takes the host lane, a guest-only job the VM
+  // lane, and a solo job either (ci-kit admits a solo placement only while both are free).
+  const MINI_WINDOW_AHEAD = 3 * 3600_000;
+  const minuteOf = (value) => {
+    if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z$/.test(value)) return NaN;
+    const time = Date.parse(value);
+    return Number.isFinite(time) && new Date(time).toISOString().slice(0, 16) === value.slice(0, 16) ? time : NaN;
+  };
+  const windows = (() => {
+    try {
+      const lanes = JSON.parse(env.MAC_MINI_LANES ?? '');
+      return lanes?.v === 1 && Array.isArray(lanes.windows) ? lanes.windows : [];
+    } catch {
+      return [];
+    }
+  })().flatMap((window) => {
+    const [from, until] = [minuteOf(window?.from), minuteOf(window?.until)];
+    const lanes = window?.lanes;
+    const ok = from < until && Array.isArray(lanes) && lanes.length > 0 && lanes.every((name) => name === 'host' || name === 'vm') && typeof window.why === 'string';
+    return ok ? [{ from, until, lanes, why: window.why.replace(/\p{Cc}+/gu, ' ').trim() }] : [];
+  }).filter(({ from, until }) => Number.isFinite(now) && until > now && from <= now + MINI_WINDOW_AHEAD).sort((a, b) => a.from - b.from);
+  const lanesOf = (json) => (!onTheMini.includes(json) ? [] : json === JSON.stringify(RUNNERS.macSolo) ? ['host', 'vm'] : GUEST.some((runner) => JSON.stringify(runner) === json) ? ['vm'] : ['host']);
+  const miniJobs = [
+    ...['static', 'unit', 'probes'].filter((gate) => gates.has(gate)).map((gate) => [gate, JSON.stringify(runners[gate])]),
+    ...(gates.has('unit:darwin') ? [['unit:darwin', JSON.stringify(unitDarwinRunner)]] : []),
+    ...(gates.has('packaged') && !packagedHosted ? [['packaged', JSON.stringify(RUNNERS.macos)]] : []),
+    ...planned.map((entry) => [`e2e:${entry.group}${entry.copy ? ' (mini copy)' : ''}`, entry.runner]),
+  ].map(([name, json]) => ({ name, lanes: lanesOf(json) }));
+  const held = windows.map((window) => ({ window, jobs: miniJobs.filter((job) => job.lanes.some((lane) => window.lanes.includes(lane))).map((job) => job.name) })).find(({ jobs }) => jobs.length > 0);
+  const clock = (time) => `${new Date(time).toISOString().slice(time - now < 86_400_000 ? 11 : 0, 16)}Z`;
+  const miniWindowLine = !held ? '' : (() => {
+    const { window: { from, until, lanes, why }, jobs } = held;
+    const heldLanes = lanes.includes('host') ? (lanes.includes('vm') ? 'the host and VM lanes are' : 'the host lane is') : 'the VM lane is';
+    const reason = why ? ` (${why})` : '';
+    return from <= now
+      ? `Mac mini: ${heldLanes} held until ${clock(until)}${reason}, so this run's jobs there wait until then: ${jobs.join(', ')}.`
+      : `Mac mini: ${heldLanes} held ${clock(from)}-${clock(until)}${reason}, so this run's jobs there not started by ${clock(from)} wait until ${clock(until)}: ${jobs.join(', ')}.`;
+  })();
+  if (miniWindowLine) outputs.mini_window = miniWindowLine;
   let summary = `### Gates\n\n${[...gates].map((gate) => `- \`${gate}\``).join('\n')}\n\nFrom: ${from}. Class 1a: ${class1a}. E2e lane: ${lane}${pooledNote}.${evidence ? ' Evidence: yes.' : ''}${live ? ' Live: yes (every live group\'s run flag at 1).' : ''}${beside}${macNote}${peerLine && ` ${peerLine}`}\n`;
   let stdout = `${[...gates].join('\n')}\nclass 1a: ${class1a}\nlane: ${lane}${pooledNote}\n${live ? 'live: yes\n' : ''}${defaultBeside.length > 0 ? `default beside: ${defaultBeside.join(' ')}\n` : ''}${macNote ? `${macNote.trim()}\n` : ''}${peerLine && `${peerLine}\n`}`;
+  if (miniWindowLine) {
+    summary += `\n${miniWindowLine.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}\n`;
+    stdout += `${miniWindowLine}\n`;
+  }
   if (peerWaitLine) {
     summary += `\n${peerWaitLine}\n`;
     stdout += `${peerWaitLine}\n`;
+  }
+  // The mini copies, each with its runner and the changed paths that brought it in, and the candidates kept off, with why.
+  const pathsOf = ({ paths }) => (paths ? ` (${paths})` : '');
+  const copyLines = optOut
+    ? [`Mini copies: none (${optOut[1]?.trim() || 'no reason given'}).`]
+    : [
+      ...copies.map((copy) => `Mini copy: e2e:${copy.group} ${copy.variant === undefined ? `on the home host, [self-hosted, macOS, ARM64, ci-kit-mac-home]${copy.tooLong ? ` (${copy.tooLong})` : ''}` : `in the guest, [ci-kit-mac-vm], as e2e: mini copy (${e2eCopy.find((job) => job.copies.some((step) => step.group === copy.group)).groups})`}${pathsOf(copy)}.`),
+      ...copiesKept.map((kept) => `Mini copy kept off: e2e:${kept.group}, ${kept.why}${pathsOf(kept)}.`),
+    ];
+  for (const line of copyLines) {
+    summary += `\n${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}\n`;
+    stdout += `${line}\n`;
   }
   if (selection) {
     const line = selection.related

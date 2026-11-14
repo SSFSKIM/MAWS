@@ -159,7 +159,7 @@
     {
       "name": "show_pane",
       "title": "Show pane",
-      "description": "Open a MAWS pane for the user: \"diff\", \"file\", \"terminal\", \"tasks\", \"artifact\", \"browser\" or \"source-control\"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.",
+      "description": "Open a MAWS pane for the user: \"diff\", \"file\", \"terminal\", \"tasks\", \"artifact\", \"browser\" or \"source-control\"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -820,7 +820,7 @@
     {
       "name": "artifact_edit",
       "title": "Edit document",
-      "description": "Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.",
+      "description": "Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1025,6 +1025,11 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 64
+          },
+          "reply": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 2000
           }
         },
         "required": [

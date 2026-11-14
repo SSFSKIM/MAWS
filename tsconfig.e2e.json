@@ -87,6 +87,7 @@
     "src/services/index/replay-fixtures.ts",
     "src/services/index/session-search.ts",
     "src/services/index/sessions.ts",
+    "src/services/index/folder-facts.ts", // UX wave U8c-2 (M2): the record's two facts, which sessions.ts imports
     "src/services/index/side-threads.ts",
     // P5 registry M8: the stored statements, which index.ts, projects.ts and statements.ts import
     "src/services/index/add-folder.ts",
@@ -103,6 +104,9 @@
     "test/support/index-fixture.ts",
     "test/support/spine-fixture.ts",
     "src/renderer/src/app/date-format.ts",
+    // the UX wave, U9: e2e:remote reads a listed row's acts over the link by their own labels and order, and the module's registry
+    "src/renderer/src/app/session-actions.ts",
+    "src/renderer/src/keymap/registry.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
     "src/renderer/src/harness/api.ts",
@@ -187,6 +191,7 @@
     "test/support/store-fixture.ts",
     "test/support/stub-engine-bin.ts", // P5 O16 M2b: the hosted supervisor scenes' engine (e2e/support/stub-engine.ts)
     "test/support/synth-transcript.ts",
+    "test/support/terminal-lines.ts", // UX wave U8b (Addendum 5): the terminal spec reads soft-wrapped rows joined
     "test/support/to-human-plugin.ts", // P4-R7z: the to-human spec installs the plugin's style and the plugin in its scratch home
     "test/support/widget-backend.ts",
     // P3-B: e2e/support/document-seed.ts writes the 200-page document through the binding module and the schema module

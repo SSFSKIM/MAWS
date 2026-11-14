@@ -21,7 +21,7 @@ import { addressed } from './address';
 import { invoke, launchReady, value } from './c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './launch';
 import { sidebarRow } from './sidebar';
-import { openArtifactInPanel, openSurface, surface, surfaceRow } from './shell';
+import { openSurface } from './shell';
 
 export const PASS3 = 'spikes/protocol-probe/fixtures/pass3';
 
@@ -74,7 +74,7 @@ const firstPrompt = (fixture: string) => ((fixtureRows(fixture).find((r) => r.di
 export const recordedCwd = (fixture: string) => (fixtureRows(fixture).find((r) => r.direction === 'meta' && (r.frame as Frame).event === 'spawn')!.frame as { cwd: string }).cwd;
 
 // Every row the session's launches journaled (one file per launch, in the session's journal directory).
-function journalOf(userData: string, id: string): JournalRow[] {
+export function journalOf(userData: string, id: string): JournalRow[] {
   const dir = join(userData, 'engine-host', 'journal', id);
   if (!existsSync(dir)) return [];
   return readdirSync(dir)
@@ -352,28 +352,12 @@ export const listOf = (s: Scene) => s.panel.locator('[data-artifacts-list]');
 export const viewerOf = (root: Locator) => root.locator('[data-artifact-viewer]');
 export const rowOf = (root: Locator, record: { id: string }) => root.locator(`[data-artifact-row][data-artifact-id="${record.id}"]`);
 
-// Legacy list behavior remains covered through a real Library record transfer and Back, not a removed launcher.
-// Each scene has its own profile. A fixture without artifacts gets a temporary real document, deleted at the list.
+// The Artifacts tool on its list (UX wave U8b, A3): the "More surfaces" menu's Artifacts entry opens it as a tab of the
+// side column, or brings its tab back into view; a record it was left on goes Back to the list.
 export async function openArtifacts(s: Scene): Promise<void> {
-  let retained = await surface(s.page, 'artifacts').count() > 0 || await surfaceRow(s.page).getByRole('button', { name: 'Artifacts', exact: true }).count() > 0;
-  if (!retained) {
-    await surfaceRow(s.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    retained = await s.page.getByRole('menuitem', { name: 'Open saved artifact', exact: true }).or(s.page.getByRole('menuitem', { name: 'Artifacts', exact: true })).count() > 0;
-    await s.page.keyboard.press('Escape');
-  }
-  if (retained) {
-    await openSurface(s.page, 'Artifacts');
-    const back = s.panel.getByRole('button', { name: 'Back', exact: true });
-    if (await back.count()) await back.click();
-  } else {
-    const rows = value(await invoke(s.page, 'library.list', {})).rows;
-    let artifactId = rows.find((row) => row.kind !== 'design_system')?.id;
-    const temporary = artifactId === undefined;
-    if (!artifactId) artifactId = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Artifact list navigation fixture' })).artifact.id;
-    const record = await openArtifactInPanel(s.page, artifactId);
-    await record.getByRole('button', { name: 'Back', exact: true }).click();
-    if (temporary) value(await invoke(s.page, 'artifacts.delete', { artifactId }));
-  }
+  await openSurface(s.page, 'Artifacts');
+  const back = s.panel.getByRole('button', { name: 'Back', exact: true });
+  if (await back.count()) await back.click();
   await expect(listOf(s)).toBeVisible();
 }
 

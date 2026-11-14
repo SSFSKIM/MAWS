@@ -9,9 +9,11 @@ import {
   BROWSER_PLACEHOLDER_MAX_BYTES,
   BROWSER_SUGGESTIONS_MAX,
   BrowserControlSchema,
+  BrowserOpenPageSchema, // U12a
   BrowserPartitionSchema,
   BrowserTabIdSchema,
   BrowserTabSchema,
+  BrowserViewportSchema, // U12a
 } from '../../browser/tab';
 import { validateBrowserUrl } from '../../browser/url';
 // E4c start
@@ -170,7 +172,9 @@ export const commands = {
     owner: 'main',
   },
   // `url: null` opens an empty tab. `reuse: 'url'` selects the session's tab already at the same normalised URL (show_pane);
-  // a `requestId` repeated within 10 s answers the first call's tab (two windows handling one `maws.pane.show`).
+  // a `requestId` repeated within 10 s answers the first call's tab (two windows handling one `maws.pane.show`). U12a:
+  // `reload`, which show_pane's path alone sets, loads that tab again unless the person is using it, and the answer's
+  // `page` says what was done (present exactly when `reload` was asked; a repeated id answers the first call's).
   'browser.tabs.open': {
     input: z.strictObject({
       appSessionId: AppSessionIdSchema,
@@ -178,8 +182,9 @@ export const commands = {
       select: z.boolean(),
       reuse: z.literal('url').optional(),
       requestId: z.string().min(1).optional(),
+      reload: z.literal(true).optional(), // U12a
     }),
-    output: z.strictObject({ tab: BrowserTabSchema, reused: z.boolean() }),
+    output: z.strictObject({ tab: BrowserTabSchema, reused: z.boolean(), page: BrowserOpenPageSchema.optional() /* U12a */ }),
     owner: 'main',
   },
   'browser.tabs.close': { input: TabOnly, output: z.void(), owner: 'main' },
@@ -241,6 +246,14 @@ export const commands = {
   },
   // E4d start
   'browser.comment.set': { input: z.strictObject({ tabId: BrowserTabIdSchema, on: z.boolean() }), output: BrowserCommentSetResultSchema, owner: 'main' },
+  // UX wave U5a (X-216; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §B.4 and §G): the tab's
+  // comment card opened on a comment (`css`, the css of its element) or closed (null); main forwards it to the tab's own
+  // page, and does nothing for a tab it does not hold or whose view is gone
+  'browser.comment.card': {
+    input: z.strictObject({ tabId: BrowserTabIdSchema, open: z.strictObject({ css: z.string().min(1).max(2000) }).nullable() }),
+    output: z.void(),
+    owner: 'main',
+  },
   // E4d end
   // E4b start: the import. One inspection and one run at a time, app-wide; `start` while one runs answers invalid_input.
   // `userDataDir: null` lists Chrome's default folder (under e2e, MAWS_E2E_CHROME_USER_DATA).
@@ -295,6 +308,19 @@ export const commands = {
     owner: 'main',
   },
   // E13 end
+  // U12a (the UX wave's U12 execution document, Interfaces §C; ruling R2, and the branch review's ruling 7): a window
+  // about to open the Browser by itself because the agent started acting asks main to bring the acting tab forward; main
+  // reads the session from the tab's own record, selects the tab there unless the person uses the selected tab or a panel
+  // shows a tab of the session, and answers with the session's selected tab then (null: none), whole, so the window can
+  // list the selection before its panel mounts on it. Named by tab, as `browser.tabs.zoom` is. Between main and the
+  // windows only: not on the engine host's wire.
+  'browser.agent.show': { input: TabOnly, output: z.strictObject({ selected: BrowserTabSchema.nullable() }), owner: 'main' },
+  // U12a (Interfaces §D, §K): the Browser options' Viewport, the tab's device size (null: Responsive), set by any window
+  // by tab id as `browser.tabs.zoom` is and told back in the tab list; refused for an extension's options tab. Copy
+  // screenshot: the view captured at device pixels and written to this Mac's clipboard whole, for the window the tab is
+  // placed in only (as `browser.view.capture`); `copied: false` when no picture could be taken.
+  'browser.tabs.setViewport': { input: z.strictObject({ tabId: BrowserTabIdSchema, viewport: BrowserViewportSchema.nullable() }), output: z.void(), owner: 'main' },
+  'browser.view.copyScreenshot': { input: TabOnly, output: z.strictObject({ copied: z.boolean() }), owner: 'main' },
   // cua #90 start: an imported profile's bookmarks (cua board #90's spec, Interfaces "IPC"). `tree` answers the rows the
   // index holds for the partition (empty roots when none, or when the index is read-only); `sync` re-reads the profile's
   // `Bookmarks` file now and answers what it wrote, or why it wrote nothing (`refused`: an import or a removal is

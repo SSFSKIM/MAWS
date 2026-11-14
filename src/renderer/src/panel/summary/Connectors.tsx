@@ -1,11 +1,11 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { openComposerWidget, useComposerStore } from '../../stores/composer';
 import { useSessions } from '../../stores/sessions';
-import { FloatingCard } from './FloatingCard';
+import { FloatingCard, type CardFold } from './FloatingCard';
 import { Plugins } from './Plugins';
 import { actionClass } from './Section';
 
-export function Connectors({ appSessionId }: { appSessionId: AppSessionId }) {
+export function Connectors({ appSessionId, fold }: { appSessionId: AppSessionId; fold: CardFold }) {
   const status = useSessions((s) => s.engine.get(appSessionId));
   const hasComposer = useComposerStore((s) => !!s.focusTargets.get(appSessionId)?.openWidget);
   const servers = status?.mcpServers ?? [];
@@ -15,7 +15,7 @@ export function Connectors({ appSessionId }: { appSessionId: AppSessionId }) {
   const connected = servers.filter((s) => s.status === 'connected').length;
   const summary = !reported ? 'Not reported' : live ? `${connected} connected` : `${servers.length} last reported`;
   return (
-    <FloatingCard title="Connectors" summary={summary}>
+    <FloatingCard title="Connectors" summary={summary} {...fold}>
       {!reported ? <p className="text-ui-sm text-fg-muted">Connector status not reported</p> : (
         <>
           {!live && <p className="text-ui-sm text-fg-muted">Last reported by this session</p>}

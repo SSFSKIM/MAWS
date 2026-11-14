@@ -1,4 +1,4 @@
-// P4-A2 (settings version 17): Settings › Engine's launch profile, drawn inside the Engine section as the owner finds it:
+// P4-A2 (settings version 17): the launch profile, drawn inside its section as the owner finds it (Sessions since U11a M9):
 // the user's plugins with a switch each and the hooks (version 19: no output style row, the user's style always); each
 // change writes the whole profile through `settings.set`, and the user scope (nothing written) is what an untouched page
 // holds.
@@ -13,7 +13,7 @@ import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { settingsBridge, type SettingsBridge } from '../test-support/settings-bridge';
 import { LAUNCH_PROFILE } from './copy';
-import { EngineSection } from './EngineSection';
+import { SessionsSection } from './SessionsSection';
 import { listedPlugins } from './LaunchProfileSettings';
 
 vi.mock('./engine-update', () => ({ openEngineUpdate: vi.fn() }));
@@ -41,7 +41,7 @@ function renderSection(initial: Settings = SETTINGS_DEFAULTS_V21, installed: Ins
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const view = () => (
     <QueryClientProvider client={client}>
-      <EngineSection settings={current()} />
+      <SessionsSection settings={current()} />
     </QueryClientProvider>
   );
   const rendered = render(view());
@@ -62,7 +62,7 @@ afterEach(() => {
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
-describe('Settings › Engine › the launch profile', () => {
+describe('Settings › Sessions › the launch profile', () => {
   it('shows the user scope untouched: the user’s own plugins each switched on and their hooks, no style choice, nothing written', async () => {
     renderSection();
     expect(await within(row(LAUNCH_PROFILE.plugins)).findByText('ptc@ptc-tool')).toBeTruthy();
@@ -71,7 +71,7 @@ describe('Settings › Engine › the launch profile', () => {
     expect(within(row(LAUNCH_PROFILE.plugins)).queryByText('supabase@claude-plugins-official')).toBeNull();
     expect(radio(LAUNCH_PROFILE.hooks, LAUNCH_PROFILE.hooksYours).checked).toBe(true);
     expect(screen.queryByRole('radiogroup', { name: /style/i })).toBeNull(); // version 19: the user's style always, no choice
-    expect(within(row(LAUNCH_PROFILE.hooks)).getByText(LAUNCH_PROFILE.hooksNote)).toBeTruthy();
+    expect(within(row(LAUNCH_PROFILE.hooks)).getByText(LAUNCH_PROFILE.hooksNotes.default.line)).toBeTruthy(); // U11a M9: the note's line
     expect(b.calls.filter((c) => c.name === 'plugins.list').map((c) => c.input)).toEqual([{ cwd: '/Users/owner/.claude' }]); // in the engine's config home
     expect(b.sets).toEqual([]);
   });

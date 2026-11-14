@@ -1,5 +1,6 @@
-// The summary's Background work section as the tool fills it (X5 `summary`, under C8a's section heading): what runs now
-// by kind, `N shell(s) · N workflow(s) · N monitor(s)` from the task graph's counts (agents are Subagents'), or, for a
+// The summary's Background tasks section as the tool fills it (X5 `summary`, under C8a's section heading): what runs now
+// by kind, `N shell(s) · N workflow(s) · N monitor(s) · N task(s)`, by the panel's own reading of what runs (the UX wave's
+// U8b, M7: `backgroundRunning`, so no second count of running work is drawn; agents are Subagents'), or, for a
 // session with no ready process here (P2-A: an exited one included; "Resumes with the session" stays), its workflow runs on disk (or why they could not be read) with the sentence that shells and
 // monitors are known only while it runs; and Open. The reader sees what C8a's baseline showed; the source is the graph.
 // The section watches the store itself: the tool may not be open. P4: while the session starts (its setup in flight, or
@@ -15,7 +16,7 @@ import { availabilityIn } from '../../../sessions/availability';
 import { isStarting, useSetup } from '../../../sessions/store';
 import { useSessions } from '../../../stores/sessions';
 import { AGENTS_SUMMARY_COPY, BACKGROUND_COPY } from '../copy';
-import { counts, emptyGraph, workflows } from '../model/task-graph';
+import { backgroundRunning, doneByKind, emptyGraph, workflows } from '../model/task-graph';
 import { useTaskGraph } from '../store';
 import type { BackgroundParams } from './BackgroundTool';
 
@@ -42,7 +43,7 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
     <div data-summary="background">
       <Row action={action}>
         {live ? (
-          <span className="block truncate">{AGENTS_SUMMARY_COPY.background(counts(graph))}</span>
+          <span className="block truncate">{AGENTS_SUMMARY_COPY.background(doneByKind(backgroundRunning(graph)))}</span>
         ) : (
           <div className="flex flex-col gap-0.5">
             {launching || settingUp ? (
@@ -53,7 +54,7 @@ export function BackgroundSummary({ appSessionId, open }: { appSessionId: AppSes
               runsLoaded && <span>{AGENTS_SUMMARY_COPY.runsOnDisk(workflows(graph).length)}</span>
             )}
             {jobs !== null ? (
-              <span className="block truncate">{AGENTS_SUMMARY_COPY.background({ shells: running('shell'), workflows: 0, monitors: running('monitor') })}</span>
+              <span className="block truncate">{AGENTS_SUMMARY_COPY.background({ shells: running('shell'), workflows: 0, monitors: running('monitor'), other: 0 })}</span>
             ) : (
               !driven && <span className="text-ui-sm text-fg-muted">{BACKGROUND_COPY.shellsDiskOnly}</span>
             )}

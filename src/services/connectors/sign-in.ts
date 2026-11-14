@@ -45,6 +45,15 @@
 // "sign in on <machine>". An asker whose channel ends before the return ends the operation (no return can reach it under
 // another ref); one past its return finishes.
 //
+// UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a dynamic connector,
+// one a plugin brings (`plugin:<plugin>:<server>`) or one of MAWS's own list (given with --mcp-config), which the
+// session's mcp_status lists with scope `dynamic` (`connectors.signInDynamicServer`). It is its machine and its name: no
+// folder, and apart from a file-scope server of the name. Its check is the session's own server, and for a press from a
+// row of MAWS's own list the entry the engine host answers now, of the revision the row was drawn with
+// (./sign-in-entry.ts `dynamicRefusal`). No file names it, so the engine's "Server not found" ends it at once. Its
+// redirect, per kind, is DYNAMIC_REDIRECT's (P1, spikes/p4-aggregator/findings-m4.txt, part "UX wave U11a, M1": MAWS's
+// listener for both).
+//
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
@@ -55,7 +64,7 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { ServicesBus } from '@shared/spine/bus';
 import { Work, type Settling } from '../work';
-import { entryRefusal } from './sign-in-entry';
+import { dynamicRefusal, entryRefusal } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { createRelayedCallbacks, type RelayedCallbacks, type RelayedReceiver } from './relayed-callback'; // P5 O7 M5c
 
@@ -71,6 +80,11 @@ const NOT_READ_YET = /^Server not found: /;
 // started (no consent page opened), since a connection that was already there is no evidence of one.
 export const ALREADY_CONNECTED = CONNECTOR_ALREADY_CONNECTED;
 const REPLY_FLUSH_MS = 50; // the browser's page written before the listener closes
+// UX wave U11a M8 (§A): whose listener a dynamic connector's redirect reaches, per kind, as P1 answered. `maws`: MAWS's
+// loopback listener, as for a file-scope connector; `engine`: no redirect is given, the engine keeps its own `localhost`
+// listener and the status is watched. A plugin's server is one whose name starts `plugin:`.
+const DYNAMIC_REDIRECT: { plugin: 'maws' | 'engine'; own: 'maws' | 'engine' } = { plugin: 'maws', own: 'maws' };
+const redirectOf = ({ name, configuration }: Pick<Operation, 'name' | 'configuration'>): 'maws' | 'engine' => (configuration.scope !== 'dynamic' ? 'maws' : DYNAMIC_REDIRECT[name.startsWith('plugin:') ? 'plugin' : 'own']);
 
 type SignInCommand = 'session.mcpAuthenticate' | 'session.mcpOAuthCallback' | 'session.mcpReconnect' | 'session.mcpStatus' | 'customization.serverEndpoints';
 export interface SignInHost {
@@ -84,7 +98,7 @@ export interface SignInDeps {
   emit(event: ConnectorSignInChanged): void;
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
-  check(entry: ConnectorConfiguration & { path?: string; appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null (P5 O7 M8: no path, the entry of the name and scope it uses)
+  check(entry: SignInRequest & { appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null (P5 O7 M8: no path, the entry of the name and scope it uses; U11a M8: a dynamic one, the session's server)
   // P5 O7 M5c: a remote asker's relayed receivers (the spine's one registry, shared with the connectors' Connect), and
   // this machine's name, for a sign-in that must be made here. Absent: a registry of its own, and "this machine".
   relayed?: Pick<RelayedCallbacks, 'arm'>;
@@ -98,17 +112,18 @@ export interface SignInDeps {
 }
 
 /** A configured connector: its name and scope, and the directory for a project or local one (a user one is the same
- * from every directory). */
-export interface ConnectorConfiguration {
-  name: string;
-  scope: 'user' | 'project' | 'local';
-  cwd: string | null;
-}
-export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' ? '' : (cwd ?? ''), name].join('\u0000');
+ * from every directory). UX wave U11a M8: `dynamic`, a plugin's or one of MAWS's own list, with no folder (cwd null). */
+export interface ConnectorConfiguration { name: string; scope: 'user' | 'project' | 'local' | 'dynamic'; cwd: string | null }
+// `dynamic` is keyed as `user` is, with no folder
+export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): string => [scope, scope === 'user' || scope === 'dynamic' ? '' : (cwd ?? ''), name].join('\u0000');
+
+/** What a press asks to sign in: a configured connector, by its file (`connectors.signIn`) or not; for a dynamic one
+ * pressed from a row of MAWS's own list, the revision of the configuration that row was drawn with. */
+export type SignInRequest = ConnectorConfiguration & { path?: string; entry?: { revision: string } };
 
 export interface SignIn extends Settling {
   // P5 O7 M5c: `callback`, a remote asker's loopback port (./relayed-callback.ts)
-  start(input: ConnectorConfiguration & { path?: string; appSessionId: string }, client: ClientRef | null, callback?: { port: number }): { opId: string };
+  start(input: SignInRequest & { appSessionId: string }, client: ClientRef | null, callback?: { port: number }): { opId: string };
   cancel(opId: string): boolean;
   stop(): void;
 }
@@ -128,7 +143,7 @@ interface Operation {
   opId: string;
   name: string;
   connector: string; // connectorKey
-  configuration: ConnectorConfiguration & { path?: string }; // the entry asked for (P5 O7 M8: by its file, or by its name and scope alone)
+  configuration: SignInRequest; // the entry asked for (P5 O7 M8: by its file, or by its name and scope alone; U11a M8: a dynamic one)
   appSessionId: string;
   client: ClientRef | null; // who asked: the browser the authorization URL opens in
   state: State;
@@ -274,8 +289,10 @@ export function createSignIn(deps: SignInDeps): SignIn {
     }
     if (!live(op)) return void op.listener?.close();
     port = op.listener.port;
-    const authenticate = () => authenticateInOrder(op, { appSessionId: op.appSessionId, serverName: op.name, redirectUri: `http://${OAUTH_CALLBACK_HOST}:${port}/callback` });
-    const notReadBy = Date.now() + configMs;
+    const redirectUri = redirectOf(op) === 'maws' ? `http://${OAUTH_CALLBACK_HOST}:${port}/callback` : null;
+    const authenticate = () => authenticateInOrder(op, { appSessionId: op.appSessionId, serverName: op.name, redirectUri });
+    // a dynamic server is never read from a file later: the engine not knowing it is the end (U11a M8)
+    const notReadBy = op.configuration.scope === 'dynamic' ? 0 : Date.now() + configMs;
     let auth = await authenticate();
     while (auth !== null && !auth.ok && NOT_READ_YET.test(auth.message) && Date.now() < notReadBy) {
       await new Promise((resolve) => setTimeout(resolve, configPollMs));
@@ -318,7 +335,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
   });
 
   return {
-    start({ name, scope, cwd, path, appSessionId }, client, callback) {
+    start({ name, scope, cwd, path, entry, appSessionId }, client, callback) {
       const connector = connectorKey({ name, scope, cwd });
       // P5 O7 M5c: the remote asker's arming first, so a port it has armed already refuses this one and changes nothing
       // else: the receipt, then the failure; an asker gone before the return ends the operation
@@ -341,7 +358,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       }
       let ended!: () => void;
       void flows.track(new Promise<void>((resolve) => (ended = resolve)));
-      const op: Operation = { opId, name, connector, configuration: { name, scope, cwd, path }, appSessionId, client, state: 'starting', receiver, listener: null, timers: new Set(), ended };
+      const op: Operation = { opId, name, connector, configuration: { name, scope, cwd, path, entry }, appSessionId, client, state: 'starting', receiver, listener: null, timers: new Set(), ended };
       operations.set(op.opId, op);
       if (!refused) {
         byConnector.set(connector, op.opId);
@@ -426,14 +443,17 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
   if (deps.hostStreaming()) void learn();
   const offStreaming = deps.onHostStreaming(() => void learn());
   // the entries the session's engine reads, from its own directory, as the inventory reads them (scalpel-2#1), and the
-  // server it holds, as its mcp_status reports it (fix-D#4)
-  const check: SignInDeps['check'] = async ({ appSessionId, ...requested }) => {
+  // server it holds, as its mcp_status reports it (fix-D#4). U11a M8: a dynamic connector is the session's server, and
+  // for a press that names an entry, MAWS's own entries as the host answers them now, read once: that one read gives the
+  // entry's revision and its address, and both comparisons use it.
+  const check: SignInDeps['check'] = async ({ appSessionId, entry, ...requested }) => {
     const cwd = ready.get(appSessionId);
     if (cwd === undefined) return 'that session is not ready';
-    const [read, status] = await Promise.all([deps.host.call('customization.serverEndpoints', { cwd }), deps.host.call('session.mcpStatus', { appSessionId })]);
-    if (!read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
+    const [read, status] = await Promise.all([requested.scope === 'dynamic' && entry === undefined ? null : deps.host.call('customization.serverEndpoints', { cwd: requested.scope === 'dynamic' ? null : cwd }), deps.host.call('session.mcpStatus', { appSessionId })]);
+    if (read !== null && !read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
     if (!status.ok) return `that session’s servers could not be read: ${status.error.message}`;
-    return entryRefusal(requested, cwd, read.value.servers, status.value.mcpServers);
+    if (requested.scope === 'dynamic') return dynamicRefusal({ name: requested.name, entry }, status.value.mcpServers, read?.value.servers ?? []);
+    return entryRefusal({ ...requested, scope: requested.scope }, cwd, read!.value.servers, status.value.mcpServers);
   };
   const signIn = createSignIn({
     host: deps.host,
@@ -449,6 +469,8 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
   deps.bus.register('connectors.signIn', ({ name, scope, cwd, path, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, path, appSessionId }, client, callback));
   // P5 O7 M8: the server the session's engine uses for the name, of the scope asked, its entry read here (`check`)
   deps.bus.register('connectors.signInServer', ({ name, scope, cwd, appSessionId, callback }, { client }) => signIn.start({ name, scope, cwd, appSessionId }, client, callback));
+  // UX wave U11a M8 (§A): a dynamic connector, the session's own server of the name; nothing at the door decides it
+  deps.bus.register('connectors.signInDynamicServer', ({ name, appSessionId, entry, callback }, { client }) => signIn.start({ name, scope: 'dynamic', cwd: null, appSessionId, entry }, client, callback));
   deps.bus.register('connectors.signInCancel', ({ opId }) => ({ cancelled: signIn.cancel(opId) }));
   return {
     busy: () => signIn.busy(),

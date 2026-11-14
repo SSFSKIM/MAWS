@@ -199,13 +199,12 @@ describe('scm service stages, unstages, discards and commits against a real repo
     mkdirSync(join(repo.root, 'proj'));
     const other = await GitFixture.create();
     try {
-      const ids = ['b1111111-1111-4111-8111-111111111111', 'b2222222-2222-4222-8222-222222222222', 'b3333333-3333-4333-8333-333333333333'] as AppSessionId[];
-      view = fakeSpineView({ records: [at(ids[0], repo.root), at(ids[1], join(repo.root, 'proj')), at(ids[2], other.root)] });
+      // UX wave U8c-2: judged on the folder a request captured (the session's working folder), which the guard hands it
       const scm = service();
-      expect(await scm.coversHome(ids[0], [repo.root])).toBe(true); // the home itself
-      expect(await scm.coversHome(ids[1], [repo.root])).toBe(true); // a folder of the home's repository
-      expect(await scm.coversHome(ids[2], [repo.root])).toBe(false); // a repository of its own
-      expect(await scm.coversHome(ids[1], [other.root])).toBe(false);
+      expect(await scm.coversHomeAt(repo.root, [repo.root])).toBe(true); // the home itself
+      expect(await scm.coversHomeAt(join(repo.root, 'proj'), [repo.root])).toBe(true); // a folder of the home's repository
+      expect(await scm.coversHomeAt(other.root, [repo.root])).toBe(false); // a repository of its own
+      expect(await scm.coversHomeAt(join(repo.root, 'proj'), [other.root])).toBe(false);
     } finally {
       other.dispose();
     }
@@ -219,10 +218,8 @@ describe('scm service stages, unstages, discards and commits against a real repo
       const home = join(parent, 'cafe\u0301'); // "café", decomposed
       mkdirSync(join(home, 'proj'), { recursive: true });
       await runGit(home, ['init', '-q', '-b', 'main']);
-      const id = 'c1111111-1111-4111-8111-111111111111' as AppSessionId;
-      view = fakeSpineView({ records: [at(id, join(home, 'proj'))] });
-      expect(await service().coversHome(id, [realpathSync.native(home)])).toBe(true);
-      expect(await service().coversHome(id, [realpathSync.native(home).normalize('NFC')])).toBe(true);
+      expect(await service().coversHomeAt(join(home, 'proj'), [realpathSync.native(home)])).toBe(true);
+      expect(await service().coversHomeAt(join(home, 'proj'), [realpathSync.native(home).normalize('NFC')])).toBe(true);
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }
@@ -236,10 +233,8 @@ describe('scm service stages, unstages, discards and commits against a real repo
       const home = join(parent, 'home');
       await repo.git('worktree', 'add', '-q', home, '-b', 'home');
       mkdirSync(join(home, 'project'));
-      const id = 'd1111111-1111-4111-8111-111111111111' as AppSessionId;
-      view = fakeSpineView({ records: [at(id, join(home, 'project'))] });
-      expect(await service().coversHome(id, [home])).toBe(true);
-      expect(await service().coversHome(id, [join(parent, 'elsewhere')])).toBe(false);
+      expect(await service().coversHomeAt(join(home, 'project'), [home])).toBe(true);
+      expect(await service().coversHomeAt(join(home, 'project'), [join(parent, 'elsewhere')])).toBe(false);
     } finally {
       rmSync(parent, { recursive: true, force: true });
     }

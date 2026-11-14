@@ -33,7 +33,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V21): Setti
     // C12 start: main is the only sender of engine.configure; the tab awaits main's push and re-reads the binary
     'settings.engineApplied': () => undefined,
     // C12 end
-    'plugins.list': () => ({ plugins: [] }), // P4-A2: Settings › Engine's launch profile lists the user's plugins
+    'plugins.list': () => ({ plugins: [] }), // P4-A2: the launch profile (Settings › Sessions) lists the user's plugins
     'fs.state': () => ({ configHome: '/Users/owner/.claude', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [], lastScanAt: null, lastScan: null }),
     'engine.models': () => ({
       models: [
@@ -60,7 +60,7 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V21): Setti
     }),
     'voice.openPrivacySettings': () => undefined,
     // E9 end
-    // E10 start: Settings › Engine › Background supervisor connects the hosts store (P5 O15 M2: main on `mawsd`, the
+    // E10 start: the Background supervisor (Settings › Supervisor) connects the hosts store (P5 O15 M2: main on `mawsd`, the
     // supervisor not yet reported); a test replaces these to show a running one
     'engine.hostState': () => ({ state: 'ready', pid: 1111, restarts: 0, revision: 1 }),
     'pty.hostState': () => ({ state: 'ready', pid: 2222, restarts: 0, revision: 1 }),
@@ -75,6 +75,9 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V21): Setti
     'library.spaces': () => ({ spaces: [] }),
     // P3-D end
     'org.status': () => ({ state: 'none' }), // P5 O8 M1: Settings › Org reads this Mac's place in the org (none by default)
+    // UX wave U7b (O-47): Settings › Usage, the usage panel, reads ClaudeUsage's status and asks for its control route
+    'settings.claudeUsage.status': () => ({ installed: true, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date().toISOString() }),
+    'settings.usageControls': () => ({ available: false, reason: 'no_route', state: null }),
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

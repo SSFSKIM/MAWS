@@ -6,6 +6,8 @@
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6 "Search"): "Conversations" asks this Mac and each
 // RL2 machine that is up (`search.ts`) and draws each machine's hits under its name ("Sessions" while only this Mac has
 // any); another machine's hit with no record is its listed row. A listed session opens through its lane's opener.
+// UX wave U11a M5 (S-10; its execution document's Interfaces §F): "Channels", after Projects, lists "<project> · channel"
+// for each project that has one, with what waits in it; Enter opens its tab or brings it forward.
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
@@ -35,6 +37,8 @@ import { machineName } from '../stores/org-projects'; // P5 O7 M6
 import type { MachineRef } from '@shared/machine/ref';
 import { conversationSnippet } from './snippet';
 import { searchConversations, searchedMachines, type ConversationSearch } from './search'; // P5 O7 M6
+import { CHANNEL } from '../channel/copy'; // U11a M5
+import { openProjectChannel, usePaletteChannels } from '../channel/open-action'; // U11a M5
 
 export const usePalette = create<{ open: boolean; scope: 'all' | 'sessions'; query: string }>()(() => ({ open: false, scope: 'all', query: '' }));
 export const openPalette = (query = '') => usePalette.setState({ open: true, scope: 'all', query });
@@ -49,12 +53,13 @@ export const openConversationSearch = (query = '') => usePalette.setState({ open
 export interface PaletteEntries {
   sessions: SessionRecord[];
   projects: ProjectRecord[];
+  channels: { project: string; name: string; waiting: number }[]; // U11a M5
   actions: ActionId[];
 }
 
 export function paletteEntries(
   query: string,
-  input: { records: ReadonlyMap<AppSessionId, SessionRecord>; projects: ReadonlyMap<ProjectId, ProjectRecord> },
+  input: { records: ReadonlyMap<AppSessionId, SessionRecord>; projects: ReadonlyMap<ProjectId, ProjectRecord>; channels?: PaletteEntries['channels'] },
   table: ActionTable = ACTIONS,
 ): PaletteEntries {
   const q = query.trim().toLowerCase();
@@ -62,6 +67,7 @@ export function paletteEntries(
   return {
     sessions: [...input.records.values()].filter((r) => !r.archived && matches(r)),
     projects: [...input.projects.values()].filter((p) => !p.hidden && (q === '' || p.name.toLowerCase().includes(q) || p.directory.toLowerCase().includes(q))), // W11: a hidden project is not revealed
+    channels: (input.channels ?? []).filter((c) => CHANNEL.title(c.name).toLowerCase().includes(q)), // U11a M5: "<name> · channel"
     // U6a: a fixed row (a key its own editor handles) is not an act the palette can run
     actions: idsOf(table).filter((id) => !table[id].fixed && (q === '' || table[id].title.toLowerCase().includes(q))),
   };
@@ -75,8 +81,11 @@ const UNAVAILABLE: Partial<Record<ActionId, string>> = {
   'request.decline': 'Keyboard only, in a focused request',
   'request.allowOnce': 'Keyboard only, in a focused request', // UX wave U1a (§D)
   'request.allowLasting': 'Keyboard only, in a focused request',
+  'composer.queue': 'Keyboard only, in the composer', // UX wave U4a
   'composer.send': 'Keyboard only, in the composer',
   'composer.cycleMode': 'Keyboard only, in the composer',
+  'composer.historySearch': 'Keyboard only, in the composer', // UX wave U4a M6
+  'channel.open': 'This project has no channel', // U11a M5: registered while the tab in front has a project with a channel
 };
 
 // Bound item registration and subscriptions; filtering still searches the complete index.
@@ -166,7 +175,8 @@ function Palette({ run }: { run(id: ActionId): void }) {
   const listed = useSessions((s) => s.listed); // P5 O7 M6
   const projects = useSessions((s) => s.projects);
   const machines = useMachines((s) => s.machines); // P5 O7 M6
-  const entries = paletteEntries(query, { records, projects });
+  const channels = usePaletteChannels(); // U11a M5
+  const entries = paletteEntries(query, { records, projects, channels });
   const searching = scope === 'sessions' && content?.query !== query;
   const answered = scope === 'sessions' && !searching && content !== null ? content : null;
   const groups = answered === null ? [] : hitGroups(answered, records, listed);
@@ -184,6 +194,10 @@ function Palette({ run }: { run(id: ActionId): void }) {
   const reveal = (projectId: ProjectId) => {
     close();
     revealProject(projectId);
+  };
+  const openChannelTab = (project: string) => { // U11a M5
+    close();
+    openProjectChannel(project);
   };
   // ⌘⏎ on a session opens it in the split; cmdk leaves a key whose default is already taken.
   const onKeyDown = (event: KeyboardEvent) => {
@@ -212,7 +226,7 @@ function Palette({ run }: { run(id: ActionId): void }) {
       {answered?.incomplete && <p role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Some conversations could not be indexed. Results may be incomplete. Indexing will retry after a restart or when those conversations change.</p>}
       {searching && <p role="status" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Searching conversations…</p>}
       {answered?.errors.map((error) => <p key={error.machine} role="alert" className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{errorOf(error)}</p>)}
-      {(scope === 'sessions' ? groups.some((g) => g.entries.length >= RESULT_LIMIT) : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT) && (
+      {(scope === 'sessions' ? groups.some((g) => g.entries.length >= RESULT_LIMIT) : entries.sessions.length > RESULT_LIMIT || entries.projects.length > RESULT_LIMIT || entries.channels.length > RESULT_LIMIT) && (
         <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">Showing the first {RESULT_LIMIT} matches per group. Type to narrow results.</p>
       )}
       <Command.List className="max-h-[min(420px,60vh)] overflow-y-auto p-1">
@@ -240,6 +254,16 @@ function Palette({ run }: { run(id: ActionId): void }) {
             {entries.projects.slice(0, RESULT_LIMIT).map((project) => (
               <Command.Item key={project.id} value={`project:${project.id}`} onSelect={() => reveal(project.id)} className={ITEM}>
                 <span className="truncate">{project.name}</span>
+              </Command.Item>
+            ))}
+          </Command.Group>
+        )}
+        {scope === 'all' && entries.channels.length > 0 && (
+          <Command.Group heading="Channels" className={GROUP}>
+            {entries.channels.slice(0, RESULT_LIMIT).map((entry) => (
+              <Command.Item key={entry.project} value={`channel:${entry.project}`} onSelect={() => openChannelTab(entry.project)} className={ITEM}>
+                <span data-channel-name className="truncate">{CHANNEL.title(entry.name)}</span>
+                {entry.waiting > 0 && <span data-channel-count className="ml-auto shrink-0 text-ui-sm text-fg-muted">{CHANNEL.waitingCount(entry.waiting)}</span>}
               </Command.Item>
             ))}
           </Command.Group>

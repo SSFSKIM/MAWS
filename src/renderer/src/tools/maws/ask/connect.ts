@@ -17,8 +17,8 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
 import { ipc } from '../../../ipc/client';
 import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
-import { useLayout } from '../../../stores/layout';
-import { surfaceTabs } from '../../../panel/surface-model';
+import { useLayout, type LayoutState } from '../../../stores/layout';
+import { groupOf, sideGroups, surfaceRefs, surfaceTabs, type SideGroupName } from '../../../panel/surface-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskSheetParams } from '../actions';
 import { applyAskEvents, askSheet, reloadAsks } from './store';
@@ -29,31 +29,55 @@ function openSheet(appSessionId: AppSessionId, askId: string): void {
   if (!usePanelHost.getState().tools.has(ASK_SHEET_TOOL_ID)) return;
   const layout = useLayout.getState();
   const visible = layout.regions.panel.collapsed ? [] : surfaceTabs(layout, appSessionId);
-  if (!visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId)) {
-    automatic.set(appSessionId, askSheet(appSessionId).subscribe((state, before) => {
+  const opened = !visible.some((tab) => tab.toolId === ASK_SHEET_TOOL_ID) && !automatic.has(appSessionId) ? { inViewBefore: null as string | null, stop: () => {} } : null;
+  const before = opened && shownBefore(layout, appSessionId);
+  if (opened) {
+    opened.stop = askSheet(appSessionId).subscribe((state, prev) => {
       // Submit and Dismiss change the store without an engine batch. Check after any whole batch has finished too.
-      if (state.asks !== before.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
-    }));
+      if (state.asks !== prev.asks && state.asks.size === 0) queueMicrotask(() => closeEmptyAutomatic(appSessionId));
+    });
+    automatic.set(appSessionId, opened);
   }
-  panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true });
+  // UX wave U7b (Interfaces §F): the sheet opening by itself is not the person's act, and leaves a page or the Settings
+  // dialog open (it opens for the session in front, or once the person has shown it).
+  const tabId = panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId }, activate: true, asked: 'agent' });
+  // The branch review's finding 1: the sheet's group is the one the host put it in (its one resolver, which reads the
+  // keyboard too), read back from where its tab now is; the tab it displaced in that group is the one it gives back.
+  if (opened && before) {
+    const group = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    opened.inViewBefore = group === null ? null : before[group];
+  }
 }
 
 // Asks that opened while their session was not shown, oldest first. One table for the window (App.tsx connects once),
 // so `openAsk` can settle it.
 const waiting = new Map<AppSessionId, string[]>();
 // Only an automatically revealed surface relinquishes its space once all questions and cancellation notices are gone.
-const automatic = new Map<AppSessionId, () => void>();
+// UX wave U8b (M2; the architect's ruling of 2026-11-13, transitional until U1 removes the automatic open, O-17): with one
+// tab in view the sheet takes the place of its group's tab, which it gives back then (null: the column was hidden).
+const automatic = new Map<AppSessionId, { stop: () => void; inViewBefore: string | null }>();
+
+// Each group's tab in view before the sheet opens; null while the column is hidden or the right side collapsed.
+function shownBefore(layout: LayoutState, appSessionId: AppSessionId): Record<SideGroupName, string | null> | null {
+  const groups = sideGroups(layout, appSessionId);
+  if (layout.regions.panel.collapsed || groups.hidden) return null;
+  return { upper: groups.upper.shown?.id ?? null, lower: groups.lower?.shown?.id ?? null };
+}
 
 function stopAutomatic(appSessionId: AppSessionId): void {
-  automatic.get(appSessionId)?.();
+  automatic.get(appSessionId)?.stop();
   automatic.delete(appSessionId);
 }
 
 function closeEmptyAutomatic(appSessionId: AppSessionId): void {
-  if (!automatic.has(appSessionId) || askSheet(appSessionId).getState().asks.size !== 0) return;
+  const opened = automatic.get(appSessionId);
+  if (!opened || askSheet(appSessionId).getState().asks.size !== 0) return;
   stopAutomatic(appSessionId);
   const state = useLayout.getState();
-  state.setSurfaceStack(appSessionId, surfaceTabs(state, appSessionId).filter((tab) => tab.toolId !== ASK_SHEET_TOOL_ID).map((tab) => tab.id));
+  if (!surfaceTabs(state, appSessionId).some((tab) => tab.toolId === ASK_SHEET_TOOL_ID)) return; // the person chose another tab
+  const back = opened.inViewBefore;
+  if (back !== null && surfaceRefs(state, appSessionId).some((tab) => tab.id === back)) state.showSurfaceTab(appSessionId, back);
+  else state.hideSurfaces(appSessionId);
 }
 
 // The person opened the session's sheet themselves (`openAsk`): its waiting asks are theirs now. Called before the open,
@@ -97,7 +121,7 @@ export function connectAsks(client: MawsBridge = ipc): () => void {
   return () => {
     disposed = true; // a deferred open already queued does nothing
     waiting.clear();
-    automatic.forEach((off) => off());
+    automatic.forEach(({ stop }) => stop());
     automatic.clear();
     offs.forEach((off) => off());
   };

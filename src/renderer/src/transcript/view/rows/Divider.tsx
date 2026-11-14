@@ -19,6 +19,7 @@ import { useSpinnerText } from '../../../engine-surface/spinner'; // R2
 import type { CellId, Row, RowId, TurnId } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { Chevron, LineCounts } from './parts';
+import { Backdrop } from '../../../sessions/scrim'; // board 523 (U11a): the one scrim
 
 type DividerRowData = Extract<Row, { kind: 'divider' }>;
 
@@ -214,7 +215,9 @@ function TurnSummary({ row, durationMs }: { row: DividerRowData; durationMs: num
     </Popover.Root>
     <Dialog.Root open={files !== null} onOpenChange={(open) => { if (!open && !busy) { setFiles(null); setError(null); } }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-bg/60" />
+        <Dialog.Overlay asChild>
+          <Backdrop className="fixed inset-0 z-50" />
+        </Dialog.Overlay>
         <Dialog.Content className="transcript-restore-dialog" onOpenAutoFocus={(event) => { event.preventDefault(); document.getElementById(`${storeKey}-${receipt}-cancel`)?.focus(); }}>
           <Dialog.Title>Restore files to before this turn?</Dialog.Title>
           <Dialog.Description>This restores the following files, including changes made in later turns. Conversation history stays unchanged. There is no reapply.</Dialog.Description>

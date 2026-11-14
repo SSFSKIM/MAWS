@@ -622,7 +622,7 @@ export function createGrants(deps: GrantsDeps): Grants {
       if (ledger === null) return refuse('signed-out');
       if (!ledger.ok) return refuse('ledger-unread', `${ref}'s grant ledger can't be read (${ledger.reason}): no version is guessed`);
       const entry = ledger.members.find((m) => m.member === member);
-      if (entry === undefined && ref === deps.local) return refuse('ledger-unread', 'this Mac’s own endpoint hasn’t seen this member yet: try again shortly');
+      if (entry === undefined && ref === deps.local) return refuse('ledger-unread', 'this Mac’s own endpoint hasn’t seen this member yet'); // the sheet's line says to try again
       if (entry === undefined) return refuse('ledger-unread', `${ref}'s grant ledger answered nothing for this member: no version is guessed`);
       // The head held now (the read was an await): the key speaking for the machine, and the judge again below.
       const current = deps.context();
@@ -655,7 +655,7 @@ export function createGrants(deps: GrantsDeps): Grants {
     if (held === null || !stands(at)) return refuse('signed-out');
     for (const s of signed) {
       const verdict = await verifyGrant(held.head, s, held.certificates, new Date(now()));
-      if (!verdict.ok) return refuse('refused', `the signed grant does not verify against the org state held now (${verdict.code}): nothing was kept or sent`);
+      if (!verdict.ok) return refuse('refused', verdict.code); // the verdict's code alone: the sheet's line says the rest
     }
     const kept = await keep(store, at, signed, held);
     if (kept === 'kept') return { ok: true, headVersion: held.head.version };

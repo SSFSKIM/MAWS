@@ -100,8 +100,9 @@ export const BY_EFFECT: Readonly<Record<string, EffectRule | typeof NO_RULE>> = 
   'session.ui.input': NO_RULE,
   'session.ui.select': NO_RULE,
   'session.applyFlagSettings': NO_RULE,
-  // Its reader fields are the owner's own row's until O8 keeps them per member, and it is main-owned until O3.
-  'session.update': NO_RULE,
+  // The UX wave (U9, M1): offered as an unarchive alone (its row's `accepts`, offers.ts); whatever the patch, it takes the
+  // record's owners' rank, never lower (a reader's own fields are `session.reader.update`, offered at `list`).
+  'session.update': () => 'manage',
   // Lane A: the slash command the bridge runs, and a person's message graded by its text (sminos refuses a `/` text
   // itself, but the endpoint grades it right on its own; a text that is no string is graded as the most it could be).
   'sminos.command': (input) => (typeof input.name === 'string' ? slashGrade(input.name) : 'manage'),

@@ -15,6 +15,9 @@
 //   endpoint that can't carry it), or the machine paused it before anything came (main asks again); what the plane
 //   delivers next clears it. Where the machine's endpoint lists no `rl2.agent-scope` the drill-in shows the port's gap
 //   and builds none.
+// - The session's presence (its snapshot's, and each `presence` message the main watch carries) goes to the transcript
+//   too (`sessionPresence`): no live record there is the session's process gone, which ends the agents it left running
+//   (X-168). Only a machine that is up publishes one; a link down pauses the watch and says nothing of the process.
 // - One transcript per session, and one per subagent drilled into, for the page, held while a view shows it
 //   (`useRemoteTranscript`, `useRemoteAgentTranscript`): opened at its first holder, closed at its last.
 import { useEffect, useMemo } from 'react';
@@ -40,7 +43,7 @@ export type Unserved = { kind: 'refused' | 'paused'; reason: string };
  * The plane of other machines' terminal sessions, as this page's watches carry it. `unserved`: told why a subscription
  * shows nothing (a subagent's watch refused or paused), and null once the plane delivers.
  */
-export function remotePlane(client: MawsBridge = ipc, hooks: { unserved?(why: Unserved | null): void } = {}): SessionPlane {
+export function remotePlane(client: MawsBridge = ipc, hooks: { unserved?(why: Unserved | null): void; presence?(presence: { record?: unknown } | undefined): void } = {}): SessionPlane {
   return {
     subscribe(target, listener) {
       const appSessionId = addressOf(target.machine as MachineRef, target.session as AppSessionId);
@@ -52,7 +55,10 @@ export function remotePlane(client: MawsBridge = ipc, hooks: { unserved?(why: Un
           if (!open) return;
           if (event.kind === 'messages') {
             hooks.unserved?.(null);
-            for (const message of event.messages) if (isTranscriptMessage(message)) listener.message(message);
+            for (const message of event.messages) {
+              if (isTranscriptMessage(message)) listener.message(message);
+              if (agentId === null && (message.kind === 'snapshot' || message.kind === 'presence')) hooks.presence?.(presenceOf(message)); // X-168
+            }
           } else if (event.kind === 'resumed') listener.resumed?.(); // the link is back: nothing lost, no snapshot
           else if (event.kind === 'paused' || event.kind === 'refused') hooks.unserved?.({ kind: event.kind, reason: event.reason });
           else listener.interrupted(); // a reset, or a watch ended and opened again: a fresh snapshot follows
@@ -82,6 +88,13 @@ export function remotePlane(client: MawsBridge = ipc, hooks: { unserved?(why: Un
   };
 }
 
+/** The presence a snapshot or a `presence` message carries. */
+const presenceOf = (message: SessionMessage): { record?: unknown } | undefined => {
+  const body = message.body as { presence?: unknown; record?: unknown } | null;
+  const presence = message.kind === 'snapshot' ? body?.presence : body;
+  return typeof presence === 'object' && presence !== null ? (presence as { record?: unknown }) : undefined;
+};
+
 interface Held {
   transcript: PlaneTranscript;
   holders: number;
@@ -94,7 +107,8 @@ export function remoteTranscriptOf(appSessionId: AppSessionId, client: MawsBridg
   const kept = held.get(appSessionId);
   if (kept) return kept.transcript;
   const target = { machine: machineOf(appSessionId), session: bareOf(appSessionId), agentId: null };
-  const transcript = new PlaneTranscript({ plane: remotePlane(client), target, sessionKey: appSessionId, store: useTranscriptStore });
+  const plane = remotePlane(client, { presence: (presence) => transcript.sessionPresence(presence) });
+  const transcript: PlaneTranscript = new PlaneTranscript({ plane, target, sessionKey: appSessionId, store: useTranscriptStore });
   held.set(appSessionId, { transcript, holders: 0 });
   return transcript;
 }

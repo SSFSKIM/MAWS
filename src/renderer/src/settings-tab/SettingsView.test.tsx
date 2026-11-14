@@ -3,7 +3,8 @@
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { join } from 'node:path';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge, Settings } from '@shared/ipc/schema';
 import { machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { useGateway } from '../gateway/store';
@@ -11,9 +12,11 @@ import { useAttention } from '../stores/attention';
 import { useNotices } from '../stores/notices';
 import { useSettings } from '../stores/settings';
 import { BINARY, settingsBridge, VOICE_HELPER, type SettingsBridge } from '../test-support/settings-bridge';
-import { SettingsView } from './SettingsView';
+import { SECTION_TABLE, SETTINGS_SECTIONS, SettingsView } from './SettingsView';
+import { MCP_SERVERS, SECTIONS } from './copy';
+import { SEND_TO_COPY } from '../delivery/copy';
+import { waitingStatus } from '../test-support/host-status';
 import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 // C12 start
 import type { AppSessionId } from '@shared/graph/ids';
@@ -22,6 +25,9 @@ import { resetBudgetStore, useBudget } from '../budget/store';
 import { useSessions } from '../stores/sessions';
 import { REL } from '../test-support/relative-time';
 // C12 end
+import type { UsageSnapshot } from '@shared/usage/types'; // UX wave U7b (O-47): Settings › Usage
+import { ClaudeUsageReader } from '../../../main/usage/claude-usage-reader';
+import { useUsage } from '../stores/usage';
 
 let b: SettingsBridge;
 
@@ -38,12 +44,26 @@ function renderView(initial: Settings = SETTINGS_DEFAULTS_V21, section: Paramete
 }
 const row = (label: string) => screen.getByRole('group', { name: label });
 const settings = () => useSettings.getState().state!.settings;
+const index = () => screen.getByRole('navigation', { name: 'Settings sections' });
+const region = (name: string) => screen.getByRole('region', { name });
+// U11a M9: a section's rows in the page's order, by their labels (the supervisor's group is named, not labelled, and holds rows)
+const labelsIn = (section: HTMLElement) => [...section.querySelectorAll('[role="group"][aria-labelledby]')].map((g) => document.getElementById(g.getAttribute('aria-labelledby')!)!.textContent);
+const more = (of: HTMLElement) => within(of).getByRole('button', { name: /^(More|Less)$/ });
+// the machine's settings answered (by a daemon before the machine route), so the Gateway section's read does not fail
+const ANSWERED = { 'machineSettings.get': () => ({ settings: machineSettingsDefaults(), version: 1 }) };
 
+let usageFixture: UsageSnapshot;
+beforeAll(async () => {
+  const reader = new ClaudeUsageReader({ dir: join(__dirname, '../../../../test/fixtures/claude-usage'), emit: () => {}, log: () => {}, now: () => Date.parse('2026-09-29T07:36:17Z') });
+  usageFixture = await reader.snapshot([]);
+  reader.stop();
+});
 beforeEach(() => {
   useGateway.setState({ relay: null, directLogin: new Map() });
 });
 afterEach(() => {
   cleanup();
+  useUsage.setState({ snapshot: null, routed: null });
   useSettings.setState({ state: null });
   useNotices.setState({ notices: [] });
   useAttention.setState({ notificationDelivery: null });
@@ -52,24 +72,112 @@ afterEach(() => {
 });
 
 describe('settings tab writes one field per row', () => {
-  it('has the eight sections, the index and its footer', () => {
-    renderView();
-    const index = screen.getByRole('navigation', { name: 'Settings sections' });
-    expect(within(index).getAllByRole('button').map((x) => x.textContent)).toEqual(['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Org', 'Plugins, skills and MCP servers ›']);
-    expect(index.textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
-    for (const name of ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearance', 'Notifications', 'Sessions', 'Browser', 'Artifacts', 'Org']) expect(screen.getByRole('region', { name })).toBeTruthy();
+  // U11a M9 (l8-settings-06, A5): everyday preferences first, the engine last; Org under the rule with no heading of its own.
+  // UX wave U7b (O-47): Usage after Gateway.
+  const ORDER = ['Appearance', 'Notifications', 'Keyboard', 'Voice', 'Browser', 'Artifacts', 'Sessions', 'Gateway', 'Usage', 'Engine', 'Supervisor', 'Org'];
+  it('groups the index under App and Sessions & engine, Org and Customize after them, the footer kept; the body in the same order', () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    expect(within(index()).getAllByRole('button').map((x) => x.textContent)).toEqual([...ORDER, 'Customize ›']);
+    // the headings stand before their sections, and nothing heads Org
+    expect([...index().querySelectorAll('[data-settings-group], button')].map((el) => el.textContent)).toEqual(['App', ...ORDER.slice(0, 6), 'Sessions & engine', ...ORDER.slice(6, 11), 'Org', 'Customize ›']);
+    expect(index().textContent).toContain("Stored in MAWS's own Application Support folder. Nothing here writes into ~/.claude.");
+    const sections = [...document.querySelectorAll('[data-settings-body] section[aria-labelledby^="settings-"]')].map((s) => s.getAttribute('aria-labelledby'));
+    expect(sections).toEqual(SECTION_TABLE.map(({ section }) => `settings-${section}`));
+    expect(SECTION_TABLE.map(({ section }) => SECTIONS[section])).toEqual(ORDER);
+    expect(SECTION_TABLE.map(({ group }) => group)).toEqual(['app', 'app', 'app', 'app', 'app', 'app', 'sessions', 'sessions', 'sessions', 'sessions', 'sessions', null]);
+    expect([...SETTINGS_SECTIONS]).toEqual(SECTION_TABLE.map(({ section }) => section));
   });
 
-  it('opens the Customize destination from the index without changing settings', () => {
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
-    renderView();
-    fireEvent.click(screen.getByRole('button', { name: 'Plugins, skills and MCP servers' }));
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'customize', section: 'plugins' });
+  it('opens at Appearance when no section is asked for', () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    expect(within(index()).getByRole('button', { name: 'Appearance' }).getAttribute('aria-current')).toBe('true');
+    expect(within(index()).getAllByRole('button').filter((x) => x.getAttribute('aria-current') === 'true')).toHaveLength(1);
+  });
+
+  // U11a M9 (A5): each section's rows, in the order of the child's table; Engine's three; no Plugins paragraph
+  it('each section holds the rows of the table, in its order; Engine holds Binary, Update and Config home, and the Plugins paragraph is gone', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
+    expect(labelsIn(region('Appearance'))).toEqual(['Theme', 'Transcript width', 'Monospace font']);
+    expect(labelsIn(region('Notifications'))).toEqual(['Messages to you', 'When a session finishes or needs you', 'For', 'Sound']);
+    expect(within(region('Keyboard')).getByRole('table', { name: 'Key bindings' })).toBeTruthy();
+    expect(within(region('Keyboard')).getByRole('button', { name: 'Reset to defaults' })).toBeTruthy();
+    expect(labelsIn(region('Voice'))).toEqual(['Shortcut', 'Language', 'Helper', 'Microphone', 'Speech recognition', 'Recognition']);
+    expect(labelsIn(region('Browser'))).toEqual(['Profile', 'Bookmarks bar', 'Search engine', 'Links that open a new window', 'Chrome profile']);
+    expect(labelsIn(region('Artifacts'))).toEqual(['Export author name', 'Default design system', 'By Space']);
+    expect(labelsIn(region('Sessions'))).toEqual(['Plugins in sessions', 'Hooks in sessions', 'MCP servers', 'Subagent model', 'When auto mode is unavailable', 'Archive sessions inactive for']);
+    expect(labelsIn(region('Gateway'))).toEqual(['Default route', 'Relay unreachable at launch', 'Per-session Direct', 'Direct login', 'Relay']);
+    expect(labelsIn(region('Engine'))).toEqual(['Binary', 'Update', 'Config home']);
+    expect(labelsIn(region('Supervisor'))).toEqual(['Status', 'Machine daemon', 'Exit when idle', 'Stop all', 'Memory budget', 'Limit', 'Stateful MCP servers']);
+    expect(within(region('Supervisor')).getByRole('group', { name: 'Background supervisor' })).toBeTruthy(); // its rows keep their group, named
+    expect(within(region('Supervisor')).queryByRole('heading', { name: 'Background supervisor' })).toBeNull(); // the section's heading stands in its place
+    expect(screen.queryByRole('group', { name: 'Plugins' })).toBeNull();
+    expect(document.body.textContent).not.toContain('Plugin hooks run in MAWS sessions');
+    expect(document.body.textContent).not.toContain('MAWS reads them and keeps its own index elsewhere'); // the chip says it
+  });
+
+  it('says once under the Sessions heading what every one of its rows would otherwise repeat', () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    const sessions = region('Sessions');
+    const line = within(sessions).getByText('For sessions MAWS runs. Terminal sessions and your Claude Code settings files are not changed.');
+    expect(line.closest('h3')).toBeNull(); // under the heading, not in it
+    expect(screen.getByRole('heading', { name: 'Sessions' })).toBeTruthy();
+    for (const label of labelsIn(sessions)) expect(row(label!).textContent).not.toMatch(/terminal session|settings files are never changed/i);
+  });
+
+  // U11a M9 (A6): a note is one line; More opens the rest in place, under it, and Less closes it again
+  it('a note is one line, and More opens the rest in place and closes it; a closed More is not in the page', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    const update = row('Update');
+    const button = more(update);
+    expect(button.textContent).toBe('More');
+    expect(button.getAttribute('aria-expanded')).toBe('false');
+    expect(update.querySelector('[data-settings-note]')!.textContent).toBe('Runs claude update in a terminal tab.More');
+    expect(update.textContent).not.toContain('New sessions start on the new version');
+    fireEvent.click(button);
+    expect(button.textContent).toBe('Less');
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(within(update).getByText('New sessions start on the new version; running sessions keep theirs.').closest('[data-settings-note]')).toBe(update.querySelector('[data-settings-note]'));
+    fireEvent.click(button);
+    expect(button.textContent).toBe('More');
+    expect(update.textContent).not.toContain('New sessions start on the new version');
     expect(b.sets).toEqual([]);
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
   });
 
-  it('Engine: the binary, the config home, and the subagent model as one field', async () => {
+  it('a state line stays whole: the supervisor waiting on an older version says all of it, with no More', async () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, { ...ANSWERED, 'host.status': () => waitingStatus(2) });
+    const status = row('Status');
+    await vi.waitFor(() => expect(status.querySelector('[data-settings-note="state"]')).not.toBeNull());
+    expect(status.querySelector('[data-settings-note="state"]')!.textContent).toBe("This version of MAWS cannot use it. Restart now stops those sessions and starts this version's supervisor; Send resumes each from its transcript.");
+    expect(within(status).queryByRole('button', { name: 'More' })).toBeNull();
+  });
+
+  it('Direct login keeps its sign-in instruction and its Copy on the row’s line, before More', () => {
+    renderView(SETTINGS_DEFAULTS_V21, null, ANSWERED);
+    const note = row('Direct login').querySelector('[data-settings-note]')! as HTMLElement;
+    expect(note.textContent).toBe('Only Direct sessions use it. Sign in: run claude /login in a terminalCopyMore');
+    expect(within(note).getAllByRole('button').map((x) => x.textContent)).toEqual(['Copy', 'More']);
+    fireEvent.click(more(note));
+    expect(note.textContent).toContain("MAWS never stores a token; ClaudeUsage holds the relay's accounts.");
+  });
+
+  it('copy outside Settings names the MCP servers row where it now is', () => {
+    expect(SEND_TO_COPY.notionNotFound).toContain(`Settings › ${SECTIONS.sessions} › ${MCP_SERVERS.label}`);
+    expect(SEND_TO_COPY.notionNoSession).not.toContain('Settings › Engine');
+  });
+
+  it('opens the Customize page from the index, closing the Settings dialog, without changing settings', () => {
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: { section: null } });
+    renderView();
+    fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().settings).toBeNull();
+    expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
+    expect(b.sets).toEqual([]);
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
+  });
+
+  it('Engine and Sessions: the binary, the config home, and the subagent model as one field', async () => {
     renderView();
     expect(await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287')).toBeTruthy(); // W13: the installed binary, no pin
     expect(await within(row('Config home')).findByText('~/.claude')).toBeTruthy();
@@ -148,6 +256,7 @@ describe('settings tab writes one field per row', () => {
     const radio = (name: string) => within(row('Default route')).getByRole<HTMLInputElement>('radio', { name });
     await vi.waitFor(() => expect(radio('Machine’s own').checked).toBe(true));
     expect(within(row('Default route')).getAllByRole('radio').map((r) => r.parentElement?.textContent)).toEqual(['Machine’s own', 'ClaudeUsage relay', 'Direct']);
+    fireEvent.click(more(row('Default route'))); // U11a M9: the machine route's sentence is behind More
     expect(row('Default route').textContent).toContain('the machine’s own settings, environment and login decide');
     fireEvent.click(radio('ClaudeUsage relay'));
     await vi.waitFor(() => expect(b.calls).toContainEqual({ name: 'machineSettings.set', input: { patch: {}, defaultRoute: 'gateway' } }));
@@ -253,6 +362,8 @@ describe('settings tab writes one field per row', () => {
     const mod = row('Messages to you');
     const toggle = within(mod).getByRole('switch', { name: 'To-human' });
     expect(toggle.getAttribute('aria-checked')).toBe('true');
+    expect(mod.textContent).toContain('Agents message you and ask questions you answer in place; a session reads as their report.');
+    fireEvent.click(more(mod)); // U11a M9: the rest is behind More
     expect(mod.textContent).toContain('the next time each session starts');
     fireEvent.click(toggle);
     await vi.waitFor(() => expect(b.sets.at(-1)).toEqual({ mods: { toHuman: { enabled: false } } }));
@@ -343,6 +454,26 @@ describe('settings tab writes one field per row', () => {
     await vi.waitFor(() => expect(refusals).toBe(2));
   });
 
+  // UX wave U7b (O-47; its execution document, M7 decisions 4 and 7): the whole usage panel as the section's content
+  it('Usage holds the grid with the account actions under the title “Claude accounts”, in the section’s measure', async () => {
+    useUsage.setState({ snapshot: usageFixture });
+    vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {});
+    renderView(SETTINGS_DEFAULTS_V21, 'usage', ANSWERED);
+    expect(within(index()).getByRole('button', { name: 'Usage' }).getAttribute('aria-current')).toBe('true');
+    const usage = region('Usage');
+    expect(within(usage).getByRole('heading', { name: 'Usage' }).id).toBe('settings-usage');
+    expect(within(usage).getByRole('heading', { name: 'Claude accounts' })).toBeTruthy();
+    expect(within(usage).getByRole('heading', { name: 'Codex accounts' })).toBeTruthy();
+    const marked = usage.querySelector<HTMLElement>('[data-settings-row="usage.accounts"]')!;
+    expect(marked.getAttribute('data-settings-state')).toBe('default');
+    const panel = marked.querySelector<HTMLElement>('[data-usage-panel]')!;
+    expect(panel.className).not.toMatch(/(^|\s)(p|px|w)-/);
+    expect(panel.querySelector('[data-columns]')!.getAttribute('data-columns')).toBe('2');
+    expect(within(panel).getAllByRole('button', { name: 'Remove account…' })).toHaveLength(5);
+    expect(within(panel).getByRole('button', { name: 'Add account…' })).toBeTruthy();
+    await vi.waitFor(() => expect(b.calls.map((c) => c.name)).toContain('settings.usageControls'));
+  });
+
   it('opens at the section it is given', () => {
     const scrolled: string[] = [];
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
@@ -353,24 +484,34 @@ describe('settings tab writes one field per row', () => {
     expect(within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name: 'Keyboard' }).getAttribute('aria-current')).toBe('true');
   });
 
-  // W9 (H1): the stacked layout is the `settings` container's (the e2e settings group measures it in a split pane);
-  // here, that no row keeps a fixed column or a second-column note once the view is narrower than 32rem.
-  it('stacks in a narrow view: every fixed column and second-column note gives way under the settings container', async () => {
+  // W9 (H1): the stacked layout is measured in a split pane by the e2e settings group; here, the classes that give way.
+  // U11a M9 (A6): the rows stack by the body's own width (its column is a container of its own) and the index by the view's.
+  it('stacks in a narrow body: every fixed column gives way under the body’s container, and the index under the view’s', async () => {
     const { container } = renderView();
     await within(row('Binary')).findByText('~/.local/share/claude/versions/2.1.287');
     const root = container.firstElementChild!;
-    expect(root.classList.contains('@container/settings')).toBe(true);
     const classes = (el: Element) => [...el.classList];
-    const fixed = [...root.querySelectorAll('*')].filter((el) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c)));
-    // the index beside the body, every Setting row (E10: the Background supervisor group is a group of them, not one), every key binding row
-    const rows = screen.getAllByRole('group').filter((g) => !g.querySelector(':scope > h4'));
-    expect(fixed.length).toBe(1 + rows.length + screen.getAllByRole('row').filter((r) => r.querySelector('[role="cell"]')).length);
-    for (const el of fixed) expect(classes(el).some((c) => c.startsWith('@max-lg/settings:grid-cols-'))).toBe(true);
-    for (const el of root.querySelectorAll('.col-start-2')) expect(el.classList.contains('@max-lg/settings:col-start-1')).toBe(true);
+    const fixedColumns = (el: Element) => classes(el).some((c) => /^grid-cols-\[.*\d+px/.test(c));
+    expect(root.classList.contains('@container/settings')).toBe(true);
+    // the index beside the body: the view's
+    const grid = root.firstElementChild!;
+    expect(fixedColumns(grid)).toBe(true);
+    expect(classes(grid)).toContain('@max-lg/settings:grid-cols-1');
+    expect(classes(index().querySelector('[data-settings-index]')!)).toContain('@max-lg/settings:flex-row');
+    // the body's column is the rows' container: every Setting row and every key binding row gives way under it
+    const column = root.querySelector('[data-settings-column]')!;
+    expect(column.classList.contains('@container/settings-body')).toBe(true);
+    const fixed = [...column.querySelectorAll('*')].filter(fixedColumns);
+    const rows = screen.getAllByRole('group').filter((g) => g.hasAttribute('aria-labelledby'));
+    expect(fixed.length).toBe(rows.length + screen.getAllByRole('row').filter((r) => r.querySelector('[role="cell"]')).length);
+    for (const el of fixed) expect(classes(el).some((c) => c.startsWith('@max-lg/settings-body:grid-cols-')), el.className).toBe(true);
+    for (const el of fixed) expect(classes(el).some((c) => c.startsWith('@max-lg/settings:')), el.className).toBe(false);
+    for (const el of column.querySelectorAll('.col-start-2')) expect(el.classList.contains('@max-lg/settings-body:col-start-1')).toBe(true);
     // label, control, note in reading order, so one column reads label over control over note
     const binary = row('Binary');
     expect([...binary.children].map((c) => c.textContent)).toEqual(['Binary', expect.stringContaining('Change…'), expect.stringContaining('New sessions start on your installed Claude Code')]); // W13's note
-    expect(screen.getByRole('navigation', { name: 'Settings sections' }).classList.contains('@max-lg/settings:flex-row')).toBe(true);
+    // below the index's break its row of links drops the group headings and keeps the order
+    for (const heading of index().querySelectorAll('[data-settings-group]')) expect(heading.classList.contains('@max-lg/settings:hidden')).toBe(true);
   });
 });
 
@@ -392,7 +533,7 @@ describe('settings tab: the memory budget rows', () => {
     const field = within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement; // W7: the row is the limit's
     expect(field.value).toBe('');
     expect(field.placeholder).toBe('8');
-    expect(row('Limit').textContent).toContain('Default · 25% of physical memory (8 GB)');
+    expect(row('Limit').textContent).toContain('Default: 25% of physical memory (8 GB).');
     fireEvent.change(field, { target: { value: '6.5' } });
     fireEvent.keyDown(field, { key: 'Enter' });
     await vi.waitFor(() => expect(b.sets).toEqual([{ engine: { memoryBudgetMiB: 6656 } }]));
@@ -427,7 +568,7 @@ describe('settings tab: the memory budget rows', () => {
     await vi.waitFor(() => expect(toggle.getAttribute('aria-checked')).toBe('false'));
     expect(screen.queryByRole('group', { name: 'Limit' })).toBeNull();
     expect(screen.queryByRole('group', { name: 'Stateful MCP servers' })).toBeNull();
-    expect(row('Memory budget').textContent).toContain('Off · engine processes never exit on their own');
+    expect(row('Memory budget').textContent).toContain('Off: an engine process ends only on archive, quit or stop.');
     fireEvent.click(toggle);
     await vi.waitFor(() => expect(settings().engine.memoryBudget).toEqual({ enabled: true }));
     expect((within(row('Limit')).getByRole('textbox', { name: 'Memory budget' }) as HTMLInputElement).value).toBe('6.0'); // the limit was kept while off
@@ -507,7 +648,7 @@ describe('settings view lists Voice', () => {
     renderView();
     expect(within(row('Shortcut')).getByText('Unbound')).toBeTruthy();
     expect(within(row('Shortcut')).getByRole('button', { name: 'Change in Keyboard' })).toBeTruthy();
-    expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating and again to stop.");
+    expect(row('Shortcut').textContent).toContain("Click the microphone in the composer's toolbar to start dictating, and again to stop.");
     cleanup();
     renderView({ ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.dictate': 'Alt+Space' } });
     expect(within(row('Shortcut')).getByText('⌥Space')).toBeTruthy();
@@ -517,7 +658,9 @@ describe('settings view lists Voice', () => {
     renderView();
     await vi.waitFor(() => expect(optionTexts()).toEqual(['System (ko-KR)', 'English (United States)', 'French (France)', 'Korean (South Korea)']));
     expect(language().value).toBe('');
-    expect(row('Language').textContent).toContain("Dictation runs on this Mac through Apple's speech recognition; MAWS stores no audio and no transcript.");
+    expect(row('Language').textContent).toContain("Recognised on this Mac by Apple's speech recognition.");
+    fireEvent.click(more(row('Language')));
+    expect(row('Language').textContent).toContain('MAWS stores no audio and no transcript.');
     fireEvent.change(language(), { target: { value: 'en-US' } });
     await vi.waitFor(() => expect(b.sets).toEqual([{ voice: { locale: 'en-US' } }]));
     expect(language().value).toBe('en-US');

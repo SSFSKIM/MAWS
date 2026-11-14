@@ -115,20 +115,28 @@
 // O16's merge as the peer.
 // UX wave U7a: (sidebar, both ways), a layout key one build stores and the other does not know, read across the two
 // builds in both directions; its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
+// UX wave U7b: (destinations, both ways), the pages' key and the four retired tab kinds, the same way; its block follows
+// (sidebar, both ways), and its rows are in the same table.
+// UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
+// U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
+import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { DRAFT_CLAIM, type Draft, type TakeBackMark } from '@shared/ipc/schema/session'; // UX wave U4a: a take-back's stage
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { RELAY_URL } from '../src/engine-host/launch'; // P5 O7 M9
+import { slugOf } from '../src/engine-host/fs/paths'; // UX wave U8c-2: the engine's project folder of a path
+import { isolatedGitEnv } from '../test/support/git-env'; // UX wave U8c-2
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -145,12 +153,12 @@ import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { addressed } from './support/address'; // U13a
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, closeSurface, mainTabById, mainTabs, openSurface, surfaceRow } from './support/shell'; // U13a
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
 import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -1130,7 +1138,16 @@ test('(embedded profile, mawsd) a profile the peer made on its embedded shape op
       expect(page.status, `${pass}: the artifact's page loads`).toBe(200);
       expect(page.text).toContain(DATA_MARK);
       expect(JSON.stringify(value(await invoke(run.page, 'session.drafts.get', { appSessionId: id }))), `${pass}: the draft`).toContain(DATA_DRAFT);
-      await expect.poll(async () => tabIdsOf(await mainTabsOf(run.page)), { timeout: 20_000, message: `${pass}: the layout's tabs` }).toEqual(expect.arrayContaining(tabs));
+      // UX wave U7b (O-40): the peer's library tab is a retired kind here, dropped at read from the strip and from what this
+      // build writes back; every other id is kept
+      const kept = tabs.filter((tab) => tab !== 'artifacts');
+      await expect
+        .poll(async () => {
+          const stored = tabIdsOf(await mainTabsOf(run.page));
+          const strip = await stripIds(run.page);
+          return [stored.includes('artifacts') || strip.includes('artifacts'), kept.every((tab) => stored.includes(tab))];
+        }, { timeout: 20_000, message: `${pass}: the layout's tabs, the library's dropped` })
+        .toEqual([false, true]);
       await expect.poll(() => s.daemonLog(), { timeout: 30_000, message: `${pass}: mawsd's spine loaded` }).toMatch(/\[spine\] loaded in \d+ ms/);
       expect(s.daemonLog(), `${pass}: no index rebuild in mawsd.log`).not.toMatch(INDEX_REBUILT);
       expect(s.daemonLog(), `${pass}: the index opened, not refused`).not.toMatch(INDEX_REFUSED);
@@ -1174,6 +1191,80 @@ test('(update, mawsd restart) this build’s app meets the older peer’s mawsd,
     await expect.poll(saved, { timeout: 30_000, message: 'the restored session tab, written back filed and whole' }).toEqual({ version: 3, keeps: true });
     record([`${peer.label}'s mawsd pid ${theirs.pid} (build ${theirs.build.buildId}) restarted onto ${here.label}'s, pid ${ours.pid} (build ${ours.build.buildId}); New chat enabled, the restored tab of ${id} kept`]);
   });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §J; A18 and UC-14): the folder of the last
+// export, main's own layout key `library.exportFolder`, which a build that does not name the key loads with the file and
+// writes back whole with its own keys. This build exports once into a scratch folder; the peer launches on the profile,
+// changes a tab and quits; this build launches again and its export dialog opens in that folder. Skipped unless the
+// peer's LayoutKeySchema lacks the key: a skipped scene is not evidence. The dialog's default path is read from
+// Electron's `dialog.showSaveDialog`, replaced in main as e2e/widgets.spec.ts does; MAWS_E2E_SAVE_PATH stays unset, since
+// it skips the calculation under test.
+const EXPORT_FOLDER_KEY = 'library.exportFolder';
+const namesExportFolder = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts'), 'utf8').includes(`'${EXPORT_FOLDER_KEY}'`);
+// The save dialog replaced in `run`'s main: it records each default path it is opened at and answers `filePath`, or a
+// cancel when null.
+async function replaceSaveDialog(run: Run, filePath: string | null): Promise<void> {
+  await run.maws.app.evaluate(({ dialog }, answer) => {
+    const opened: string[] = [];
+    (globalThis as unknown as { __u5aSaveDialog: string[] }).__u5aSaveDialog = opened;
+    dialog.showSaveDialog = (async (...args: unknown[]) => {
+      opened.push((args.at(-1) as { defaultPath?: string }).defaultPath ?? '');
+      return answer === null ? { canceled: true, filePath: '' } : { canceled: false, filePath: answer };
+    }) as typeof dialog.showSaveDialog;
+  }, filePath);
+}
+const saveDialogOpenedAt = (run: Run) => run.maws.app.evaluate(() => (globalThis as unknown as { __u5aSaveDialog: string[] }).__u5aSaveDialog);
+// The save seam's variable, which skips the dialog's folder under test: neither build may inherit it from the runner
+const SAVE_SEAM = 'MAWS_E2E_SAVE_PATH';
+const seamOf = (run: Run) => run.maws.app.evaluate((_electron, name) => process.env[name] ?? null, SAVE_SEAM);
+const storedExportFolder = (userData: string): unknown => (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as Record<string, unknown>)[EXPORT_FOLDER_KEY];
+
+test('(export folder) the last export’s folder, kept as main’s layout key, survives the peer’s launch on the profile, which does not name the key, and opens this build’s next export dialog there', async () => {
+  const { here, peer } = builds();
+  test.skip(namesExportFolder(peer), `the peer (wire ${wireOf(peer)}) names ${EXPORT_FOLDER_KEY} in its LayoutKeySchema: there is no build that lacks the key to cross`);
+  // the launcher passes the runner's environment on (e2e/support/scratch-env.ts), so the runner's seam goes for the scene
+  const inherited = process.env[SAVE_SEAM];
+  delete process.env[SAVE_SEAM];
+  try {
+    await withScratch('xb-export-folder', async (s) => {
+      const folder = join(s.root, 'exports');
+      mkdirSync(folder, { recursive: true });
+      // this build: one export saved into the scratch folder, through the dialog
+      const first = await s.launch();
+      await s.ready(first.page);
+      expect(await seamOf(first), `${here.label} runs without ${SAVE_SEAM}`).toBeNull();
+      const artifactId = await createHtmlArtifact(first.page, 'Export folder report', 'The quarter in one page.');
+      const target = join(folder, 'Export folder report.html');
+      await replaceSaveDialog(first, target);
+      expect(value(await invoke(first.page, 'library.saveAs', { artifactId, source: { content: {} } })), `${here.label}'s export, saved where the dialog answered`).toEqual({ saved: true, path: target });
+      expect(storedExportFolder(s.userData), `${here.label} kept the export's folder`).toEqual({ path: folder });
+      await s.quit(first);
+
+      // the peer on the same profile: a tab opened, so its layout store writes the file whole, then a quit
+      const old = await s.launch({}, peer.root);
+      await s.ready(old.page);
+      expect(await seamOf(old), `${peer.label} runs without ${SAVE_SEAM}`).toBeNull();
+      await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+      await expect.poll(async () => tabIdsOf(await mainTabsOf(old.page)), { timeout: 20_000, message: `${peer.label} saved its layout with the library's tab` }).toContain('artifacts');
+      await s.quit(old);
+      expect(tabIdsOf((JSON.parse(readFileSync(join(s.userData, 'layout.json'), 'utf8')) as Record<string, unknown>)['main.tabs']), `${peer.label} wrote layout.json`).toContain('artifacts');
+      expect(storedExportFolder(s.userData), `${peer.label} wrote the file back with the key it does not name`).toEqual({ path: folder });
+
+      // this build again: the export dialog opens in the folder of the last export
+      const again = await s.launch();
+      await s.ready(again.page);
+      expect(await seamOf(again), `${here.label} runs without ${SAVE_SEAM}`).toBeNull();
+      await replaceSaveDialog(again, null);
+      expect(value(await invoke(again.page, 'library.saveAs', { artifactId, source: { content: {} } })), 'the dialog cancelled').toEqual({ saved: false });
+      const opened = await saveDialogOpenedAt(again);
+      expect(opened, 'one dialog').toHaveLength(1);
+      expect(dirname(opened[0]!), `${here.label}'s dialog after ${peer.label}'s launch`).toBe(folder);
+      record([`${EXPORT_FOLDER_KEY}: ${here.label} (wire ${wireOf(here)}) kept ${folder}; ${peer.label} (wire ${wireOf(peer)}) wrote layout.json with it kept; ${here.label}'s next dialog opened at ${opened[0]}`]);
+    });
+  } finally {
+    if (inherited !== undefined) process.env[SAVE_SEAM] = inherited;
+  }
 });
 
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
@@ -1646,10 +1737,22 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | `sidebar.hidden` (U7a)                        | (sidebar, both ways): F draws the session it does not | the return of (sidebar, both ways): the row under  |
 //   |                                               | know to be hidden, and the key is in the file F wrote | Hidden. F never writes the key                     |
 //   |                                               | after its act                                         |                                                    |
+//   | `destination` (U7b)                           | (destinations, both ways): F draws its tabs and keeps | the return: not restored after F wrote `main.tabs`,|
+//   |                                               | the key through its write                             | and deleted. F never writes the key                |
+//   | tabs of the four kinds (U7b): Settings,       | not written by this build                             | (destinations, both ways): dropped, the page of the|
+//   | Customize, Projects, the library              |                                                       | one in front opened; and "(embedded profile,       |
+//   |                                               |                                                       | mawsd) …"                                          |
 //   | `settings.json`, `machine-settings.json`      | (settings, both ways)                                 | (settings, both ways)                              |
 //   | `machine-route.json`                          | not covered: written only when the machine's default  | not covered                                        |
 //   |                                               | route is set, which neither this landing nor a scene   |                                                    |
 //   |                                               | does                                                  |                                                    |
+//   | the index: `sessions.launch_folder`,          | (moved, from this build): F shows the session where   | (moved, from this build): this build shows what F  |
+//   | `sessions.agent_folder` (UX wave U8c-2)       | its directory says, finds its transcript there (its   | shows for a session F filed last, and the facts    |
+//   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
+//   | a take-back's stage (U4a): the session's      | (stage, its message waiting), (stage, its message     | the return of each: the stage carried forward      |
+//   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
+//   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
+//   |                                               | build finds                                           | standing beside the message, each said             |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -1663,25 +1766,61 @@ type StoredSets = { version: number; current: string; sets: Record<string, { pan
 type StoredSurfaces = { pinnedTools: string[]; contexts: Record<string, string>; stacks: Record<string, string[]> };
 type StoredRegions = { version: number; sidebar: { width: number; collapsed: boolean } };
 const layoutOf = async <T>(page: Page, key: 'main.tabs' | 'panelTools.surfaces' | 'regions') => value(await invoke(page, 'layout.get', { key })).value as T | null;
-const stripIds = (page: Page) => mainTabs(page).getByRole('tab').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+// The strip's tabs as mounted: under a page this build's strip is invisible, and a role query of it would find none.
+const stripIds = (page: Page) => mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
 const pinnedIn = (stored: StoredSets | null) => Object.values(stored?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.pinned).map((tab) => tab.id)));
 const notice = (page: Page) => page.locator('[data-toast-viewport]').getByText(ONE_STRIP_NOTICE);
 // Every console message the page gave, of every type (Playwright keeps them from the first load: e2e/support/launch.ts)
 const consoleSaid = async (page: Page) => (await page.consoleMessages({ filter: 'all' })).map((message) => `${message.type()}: ${message.text()}`);
 const INVALID_LAYOUT = /\[layout\] \S+ is not a valid value/; // stores/layout.ts in both builds, a warning
 const SETTINGS_REFUSED = /\[settings\] (?:invalid|cannot read) /; // src/shared/settings/file-store.ts in both builds
-// A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
-// tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
-// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx)
-async function openToolMenu(page: Page, name: string): Promise<void> {
+// A tool brought into view from the icon row as a person brings it, in either build: its icon, or its item in "More
+// surfaces" where the row folds it, unless its body is already drawn. Both builds mark that body `[data-surface]` named by
+// the tool's title (build F's stacked section, this build's group body); this build's ./support/shell.ts helpers speak
+// its own side column alone, so a step on the peer's page goes through these.
+const toolBody = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface][aria-label=${JSON.stringify(name)}]`);
+async function chooseTool(page: Page, name: string): Promise<void> {
   const icon = surfaceRow(page).getByRole('button', { name, exact: true });
-  if (await icon.count()) await icon.click({ button: 'right' });
+  if (await icon.count()) await icon.click();
   else {
     await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    const item = page.getByRole('menuitem', { name, exact: true });
-    await item.focus();
-    await item.press('Shift+F10');
+    await page.getByRole('menuitem', { name, exact: true }).click();
   }
+}
+async function showTool(page: Page, name: string): Promise<void> {
+  if (!await toolBody(page, name).count()) await chooseTool(page, name);
+  await expect(toolBody(page, name)).toBeVisible();
+}
+// Build F's side column (f1852de3a: panel/PanelHost.tsx, PanelHeader.tsx): at most two stacked surfaces, each a section
+// named by its tool, its header's "Close surface" taking it out of the stack (its tab stays in the session's list)
+const peerSurface = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface-stack] > section[data-surface][aria-label=${JSON.stringify(name)}]`);
+const peerStack = (page: Page) => page.locator('[data-region="panel"]:not([inert]) [data-surface-stack] > section[data-surface]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('aria-label') ?? ''));
+async function closeOnPeer(page: Page, name: string): Promise<void> {
+  const shown = peerSurface(page, name);
+  if (!await shown.count()) return;
+  await shown.getByRole('button', { name: 'Close surface', exact: true }).click();
+  await expect(shown).toHaveCount(0);
+}
+// A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
+// tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
+// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx).
+// UX wave U8c-2 (M6 decision 5): opened until it is open. `item` is the menu item the caller uses next (a string, or a
+// pattern where the caller accepts either of two); a menu whose item does not show (the open lost to a click or a
+// re-render, as U8b's "(side column, from the peer)" lost one) is closed and opened again.
+async function openToolMenu(page: Page, name: string, item: string | RegExp): Promise<void> {
+  await expect(async () => {
+    if (await page.getByRole('menu').count()) await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+    const icon = surfaceRow(page).getByRole('button', { name, exact: true });
+    if (await icon.count()) await icon.click({ button: 'right' });
+    else {
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+      const entry = page.getByRole('menuitem', { name, exact: true });
+      await entry.focus();
+      await entry.press('Shift+F10');
+    }
+    await expect(page.getByRole('menuitem', { name: item, exact: typeof item === 'string' })).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 async function closeMenus(page: Page): Promise<void> {
   await expect(async () => {
@@ -1692,14 +1831,14 @@ async function closeMenus(page: Page): Promise<void> {
 // A tool pinned to, or unpinned from, the icon row through its menu; opened first for the pin (a tool past the first
 // four is listed only when pinned or open)
 async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
-  if (pin) await openSurface(page, name);
-  await openToolMenu(page, name);
+  if (pin) await showTool(page, name);
+  await openToolMenu(page, name, pin ? 'Pin to toolbar' : 'Unpin from toolbar');
   await page.getByRole('menuitem', { name: pin ? 'Pin to toolbar' : 'Unpin from toolbar', exact: true }).click();
   await closeMenus(page);
 }
 // Whether the tool is pinned as a person sees it at any width: its menu offers to unpin it, or to pin it
 async function expectToolPinned(page: Page, name: string, pinned: boolean, message: string): Promise<void> {
-  await openToolMenu(page, name);
+  await openToolMenu(page, name, /^(?:Pin to|Unpin from) toolbar$/);
   await expect(page.getByRole('menuitem', { name: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', exact: true }), message).toBeVisible();
   await closeMenus(page);
 }
@@ -1735,7 +1874,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     await expect.poll(async () => (front = (await activeMainTab(old.page).getAttribute('data-tab-id')) ?? ''), { timeout: 20_000, message: `${peer.label} shows the session’s tab` }).toMatch(/^session:/);
     await pinTab(old.page, front);
     await pinToToolbar(old.page, PINNED_TOOL, true);
-    await closeSurface(old.page, PINNED_TOOL);
+    await closeOnPeer(old.page, PINNED_TOOL); // the peer's own "Close surface": its stack drops the tool, its tab stays
     let theirs: StoredSets | null = null;
     await expect
       .poll(async () => {
@@ -1743,21 +1882,27 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
         return [Object.keys(theirs?.sets ?? {}).length >= 2, pinnedIn(theirs), (await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces'))?.pinnedTools.includes(PINNED_TOOL_ID)];
       }, { timeout: 20_000, message: `${peer.label} wrote two sets, the pin and the pinned tool` })
       .toEqual([true, [front], true]);
-    const tabs = tabIdsOf(theirs);
+    // UX wave U7b (O-40): the library is a page in this build, so the peer's library tab is a retired kind, dropped at
+    // read; the session's tab was in front, so no page opens. Every other tab is expected as before
+    const peerTabs = tabIdsOf(theirs);
+    expect(peerTabs, `${peer.label} stored its library’s tab`).toContain('artifacts');
+    const tabs = peerTabs.filter((tab) => tab !== 'artifacts');
     const keys = Object.keys(theirs!.sets);
     expect(old.maws.consoleErrors()).toEqual([]);
     await s.quit(old);
     await endProfileProcesses(s.userData); // this build's own mawsd from here
-    said.push(`  ${peer.label} wrote ${keys.length} sets (${keys.map((key) => (key === 'none' ? 'none' : 'a row')).join(', ')}), ${tabs.length} tabs, in front ${front}, pinned ${front}`);
+    said.push(`  ${peer.label} wrote ${keys.length} sets (${keys.map((key) => (key === 'none' ? 'none' : 'a row')).join(', ')}), ${peerTabs.length} tabs, in front ${front}, pinned ${front}`);
 
-    // this build: every tab of every set in the strip once, the pin, the tab in front, the notice; written as one set
+    // this build: every tab of every set in the strip once but the library's, the pin, the tab in front, the notice, and
+    // no page; written as one set
     const run = await s.launch();
     await expect(notice(run.page), 'the notice that the sets became one strip (shown for 6 s, so looked for first)').toBeVisible({ timeout: 30_000 });
     await s.ready(run.page);
-    await expect.poll(async () => (await stripIds(run.page)).sort(), { timeout: 20_000, message: 'every tab of every set in the strip' }).toEqual(tabs);
+    await expect.poll(async () => (await stripIds(run.page)).sort(), { timeout: 20_000, message: 'every tab of every set in the strip, the library’s dropped' }).toEqual(tabs);
     expect(new Set(await stripIds(run.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(run.page, front).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
     await expect(activeMainTab(run.page), 'the tab that was in front').toHaveAttribute('data-tab-id', front);
+    await expect(pageRegion(run.page), 'no page opens: the session’s tab was in front').toHaveCount(0);
     await expectToolPinned(run.page, PINNED_TOOL, true, 'the pinned tool kept in the icon row');
     await expect
       .poll(async () => {
@@ -1769,7 +1914,7 @@ test('(layout, from the peer) a layout the peer filed under two tab sets opens w
     expect(surfaces.pinnedTools, 'the pinned tool kept').toContain(PINNED_TOOL_ID);
     expect(Object.keys(surfaces.contexts).filter((key) => key !== 'none'), 'the side column’s session remembered under none alone').toEqual([]);
     expect(run.maws.consoleErrors()).toEqual([]);
-    said.push(`  ${here.label}: ${tabs.length} tabs in one strip, the pin and the tab in front kept, the notice shown; contexts ${JSON.stringify(Object.keys(surfaces.contexts))}`);
+    said.push(`  ${here.label}: ${tabs.length} tabs in one strip (the library’s dropped, no page), the pin and the tab in front kept, the notice shown; contexts ${JSON.stringify(Object.keys(surfaces.contexts))}`);
     await s.quit(run);
 
     // a relaunch of this build reads the one set it wrote: no notice. A notice lasts 6 s and the launch helper hands the
@@ -1808,9 +1953,9 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
   test.skip(!keepsSets(peer), keepsSetsWhy(peer));
   await withScratch('xb-layout-to', async (s) => {
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) stores one strip; ${peer.label} (wire ${wireOf(peer)}) reads it, acts and writes it on`];
-    // this build: the seeded session's tab, the library's and an artifact's; the artifact's pinned; the session split
-    // into the other pane, Files open beside it and a tool pinned to the icon row; then the library's tab in front and
-    // the sidebar 40 px wider than its default
+    // this build: the seeded session's tab and an artifact's (opened from the library, a page here: UX wave U7b); the
+    // artifact's pinned; the session split into the other pane, Files open beside it and a tool pinned to the icon row;
+    // then Diagnostics' tab, a tab of no session the peer knows, in front, and the sidebar 40 px wider than its default
     const run = await s.launch();
     await s.ready(run.page);
     const id = await s.record(run.page);
@@ -1825,9 +1970,9 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await expect.poll(() => run.page.getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab').evaluateAll((t) => t.map((e) => e.getAttribute('data-tab-id'))), { message: 'the split' }).toEqual([session]);
     await openSurface(run.page, 'Files');
     await pinToToolbar(run.page, PINNED_TOOL, true);
-    await closeSurface(run.page, PINNED_TOOL);
-    await mainTabById(run.page, 'artifacts').click();
-    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', 'artifacts');
+    await openSurface(run.page, 'Files'); // UX wave U8b: Files back in view, the pinned tool a tab beside it (opening it took Files' place)
+    await menu(run.maws.app, 'diagnostics.open');
+    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', 'diagnostics');
     const resizer = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
     await resizer.focus();
     for (let i = 0; i < 5; i++) await run.page.keyboard.press('ArrowRight');
@@ -1844,7 +1989,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
       }, { timeout: 20_000, message: `${here.label} wrote the strip, the surfaces and the width` })
       .toEqual([['none'], 2, [artifact], true, true, 280]);
     const tabs = tabIdsOf(ours);
-    expect(tabs).toEqual([artifact, 'artifacts', session].sort());
+    expect(tabs).toEqual([artifact, 'diagnostics', session].sort());
     expect(run.maws.consoleErrors()).toEqual([]);
     await s.quit(run);
     await endProfileProcesses(s.userData);
@@ -1864,7 +2009,7 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
         throw new Error(`${peer.label}: ${what}; its strip ${JSON.stringify(strip)}; its main.tabs sets ${JSON.stringify(sets)}`, { cause: error });
       }
     };
-    await onPeer('draws the tab that was in front, selected', () => expect(mainTabById(old.page, 'artifacts')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 }));
+    await onPeer('draws the tab that was in front, selected', () => expect(mainTabById(old.page, 'diagnostics')).toHaveAttribute('aria-selected', 'true', { timeout: 20_000 }));
     await onPeer('draws the pin', () => expect(mainTabById(old.page, artifact).getByRole('img', { name: 'Pinned' })).toBeVisible());
     await onPeer('draws the sidebar at the width written', () => expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' })).toHaveAttribute('aria-valuenow', '280'));
     expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
@@ -1878,10 +2023,11 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
     await onPeer('reads the pinned tool', () => expectToolPinned(old.page, PINNED_TOOL, true, `${peer.label} reads the pinned tool`));
     await onPeer('unpins the tool', () => pinToToolbar(old.page, PINNED_TOOL, false));
     // then the page's tab brought to the front of that set, as the peer does it: a tab of no session belongs to the set
-    // shown, so the sidebar's Artifacts moves the library's tab into the project's set, and the page's row in the
-    // library moves the page's tab there too (with its pin) and selects it (its stores/layout-model.ts, `openTab`; its
-    // library/Row.tsx, the row's click). That selection, saved as the shown set's tab in front, is a write only the
-    // peer makes. Then the sidebar folded
+    // shown, so the sidebar's Artifacts opens the peer's library as a tab in the project's set, and the page's row in
+    // the library moves the page's tab there too (with its pin) and selects it (its stores/layout-model.ts, `openTab`;
+    // its library/Row.tsx, the row's click). That selection, saved as the shown set's tab in front, is a write only the
+    // peer makes. Then the sidebar folded. UX wave U7b: the peer's library tab is one more tab in what it writes, and a
+    // retired kind for this build, which drops it at read
     await onPeer('opens its library', () => old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 }));
     await onPeer('opens the page from its library row', () => old.page.locator(`[data-library] [data-artifact-row="${artifactId}"]`).click({ timeout: 15_000 }));
     await onPeer('shows the page’s tab in front, with its pin', async () => {
@@ -1899,22 +2045,24 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
           surfaces = await layoutOf<StoredSurfaces>(old.page, 'panelTools.surfaces');
           regions = await layoutOf<StoredRegions>(old.page, 'regions');
           // the peer's own write first: the project's set shown, the page's tab its saved tab in front (this build left
-          // the library's tab in front of `none`), so what follows is read from a value the peer wrote; every tab is
-          // collected over every set, and `contexts.none` stays as this build wrote it
+          // Diagnostics' tab in front of `none`), so what follows is read from a value the peer wrote; every tab is
+          // collected over every set, its own library tab among them, and `contexts.none` stays as this build wrote it
           const shown = theirs?.sets[theirs.current];
           return [theirs?.current !== 'none', shown?.panes[shown.focusedPane]?.activeTabId, theirs?.version, tabIdsOf(theirs), pinnedIn(theirs), surfaces?.pinnedTools.includes(PINNED_TOOL_ID), surfaces?.contexts.none, regions?.version, regions?.sidebar.collapsed];
         }, { timeout: 20_000 })
-        .toEqual([true, artifact, 3, tabs, [artifact], false, contextNone, 5, true]),
+        .toEqual([true, artifact, 3, [...tabs, 'artifacts'].sort(), [artifact], false, contextNone, 5, true]),
     );
     expect(old.maws.consoleErrors()).toEqual([]);
     said.push(`  ${peer.label}: drew the tab in front, the pin, the tool and the width; wrote ${Object.keys(theirs!.sets).length} sets, contexts ${JSON.stringify(Object.keys(surfaces!.contexts))}`);
     await s.quit(old);
     await endProfileProcesses(s.userData);
 
-    // this build again: every tab once, the pin, the tool unpinned (read with the session in front), the sidebar folded
+    // this build again: every tab once, the peer's library tab dropped and no page (the page's tab was in front), the pin,
+    // the tool unpinned (read with the session in front), the sidebar folded
     const back = await s.launch();
     await s.ready(back.page);
-    await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: 'every tab back in the strip' }).toEqual(tabs);
+    await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: 'every tab back in the strip, the peer’s library tab dropped' }).toEqual(tabs);
+    await expect(pageRegion(back.page), 'no page: the page’s tab was in front').toHaveCount(0);
     expect(new Set(await stripIds(back.page)).size, 'each once').toBe(tabs.length);
     await expect(mainTabById(back.page, artifact).getByRole('img', { name: 'Pinned' }), 'the pin').toBeVisible();
     await mainTabById(back.page, session).click(); // a tool's menu opens only while a session is in view
@@ -1931,24 +2079,27 @@ test('(layout, to the peer) a split strip this build stored, with a pin, a side 
 
 // The theme lives in `<profile>/settings.json` (the client's half, main's), the engine host's idle time in
 // `<profile>/machine-settings.json` (the machine's half, `mawsd`'s); one act cannot reach both, so each is changed.
-const THEME = (page: Page, name: 'Light' | 'Dark' | 'System') => settingsPanel(page).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name, exact: true });
-const IDLE = (page: Page) => settingsPanel(page).getByRole('textbox', { name: 'Minutes before the supervisor exits when idle' });
-const settingsPanel = (page: Page) => page.locator('[data-region="main"]').getByRole('tabpanel');
+// UX wave U7b (O-40): Settings is read by build. This build draws it as a dialog over the window; the peer, a build that
+// keeps tab sets (build F), as a tab, read through the main pane's tab panel.
+type SettingsBuild = 'here' | 'peer';
+const THEME = (page: Page, build: SettingsBuild, name: 'Light' | 'Dark' | 'System') => settingsPanel(page, build).getByRole('region', { name: 'Appearance' }).getByRole('radio', { name, exact: true });
+const IDLE = (page: Page, build: SettingsBuild) => settingsPanel(page, build).getByRole('textbox', { name: 'Minutes before the supervisor exits when idle' });
+const settingsPanel = (page: Page, build: SettingsBuild) => (build === 'here' ? settingsDialog(page) : page.locator('[data-region="main"]').getByRole('tabpanel'));
 const settingsFile = (s: Scratch, name: 'settings.json' | 'machine-settings.json') => {
   const path = join(s.userData, name);
   return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as { theme?: string; supervisor?: { idleExitMinutes: number | null } }) : null;
 };
-async function changeSettings(run: Run, theme: 'Dark' | 'System', minutes: string): Promise<void> {
+async function changeSettings(run: Run, build: SettingsBuild, theme: 'Dark' | 'System', minutes: string): Promise<void> {
   await menu(run.maws.app, 'settings.open');
-  await THEME(run.page, theme).check();
-  await IDLE(run.page).fill(minutes);
-  await IDLE(run.page).press('Enter');
-  await expect(IDLE(run.page)).toHaveValue(minutes);
+  await THEME(run.page, build, theme).check();
+  await IDLE(run.page, build).fill(minutes);
+  await IDLE(run.page, build).press('Enter');
+  await expect(IDLE(run.page, build)).toHaveValue(minutes);
 }
-async function expectSettings(run: Run, theme: 'Dark' | 'System', minutes: string): Promise<void> {
+async function expectSettings(run: Run, build: SettingsBuild, theme: 'Dark' | 'System', minutes: string): Promise<void> {
   await menu(run.maws.app, 'settings.open');
-  await expect(THEME(run.page, theme), `the theme ${theme} read`).toBeChecked({ timeout: 20_000 });
-  await expect(IDLE(run.page), `the idle time ${minutes} read`).toHaveValue(minutes, { timeout: 20_000 });
+  await expect(THEME(run.page, build, theme), `the theme ${theme} read`).toBeChecked({ timeout: 20_000 });
+  await expect(IDLE(run.page, build), `the idle time ${minutes} read`).toHaveValue(minutes, { timeout: 20_000 });
 }
 const refusals = (run: Run, s: Scratch) => [...run.output().split('\n'), ...s.daemonLog().split('\n')].filter((line) => SETTINGS_REFUSED.test(line));
 
@@ -1959,7 +2110,7 @@ test('(settings, both ways) a theme and an idle time changed through this build�
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) and ${peer.label} (wire ${wireOf(peer)}) take turns on both settings files`];
     const run = await s.launch();
     await s.ready(run.page);
-    await changeSettings(run, 'Dark', '25');
+    await changeSettings(run, 'here', 'Dark', '25');
     await expect(run.page.locator('html')).toHaveAttribute('data-theme', 'dark');
     await expect.poll(() => [settingsFile(s, 'settings.json')?.theme, settingsFile(s, 'machine-settings.json')?.supervisor?.idleExitMinutes], { message: `${here.label} wrote both files` }).toEqual(['dark', 25]);
     expect(refusals(run, s)).toEqual([]);
@@ -1970,8 +2121,8 @@ test('(settings, both ways) a theme and an idle time changed through this build�
     const old = await s.launch({}, peer.root);
     await s.ready(old.page);
     await expect(old.page.locator('html'), `${peer.label} draws the theme`).toHaveAttribute('data-theme', 'dark', { timeout: 20_000 });
-    await expectSettings(old, 'Dark', '25');
-    await changeSettings(old, 'System', '40');
+    await expectSettings(old, 'peer', 'Dark', '25');
+    await changeSettings(old, 'peer', 'System', '40');
     await expect.poll(() => [settingsFile(s, 'settings.json')?.theme, settingsFile(s, 'machine-settings.json')?.supervisor?.idleExitMinutes], { message: `${peer.label} wrote both files` }).toEqual(['system', 40]);
     expect(refusals(old, s), `${peer.label} and its mawsd refused neither file`).toEqual([]);
     await s.quit(old);
@@ -1980,7 +2131,7 @@ test('(settings, both ways) a theme and an idle time changed through this build�
 
     const back = await s.launch();
     await s.ready(back.page);
-    await expectSettings(back, 'System', '40');
+    await expectSettings(back, 'here', 'System', '40');
     expect(refusals(back, s), `${here.label} and its mawsd refused neither file`).toEqual([]);
     await s.quit(back);
     said.push(`  ${here.label} read both of the peer's values`);
@@ -2072,6 +2223,952 @@ test('(sidebar, both ways) this build hides a session and quits; the peer, which
     expect(again.maws.consoleErrors()).toEqual([]);
     await s.quit(again);
     said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
+});
+
+// ---- UX wave U7b: the pages and the retired tab kinds, read across the two builds ---------------------------------------
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M8 and Interfaces §F "At
+// hydration" and §G; the wave's root, UC-14): Settings, Customize, Projects and the library are no tabs here, and an open
+// page is stored under a layout key of its own, `destination`, which build F never asks for and its main keeps in the
+// file. A tab of the four kinds stored by F is dropped at read, and where one of Customize, Projects or the library was
+// in front its page opens. Its rows are in UC-14's coverage table above (U13a's block).
+//   (destinations, both ways) the peer opens the seeded session, then Settings and Customize as tabs, leaves Customize in
+//                             front and quits. This build opens the profile: neither tab is in the strip, every other
+//                             tab is, the Customize page is open and no dialog. It opens Projects as a page and quits.
+//                             The peer opens the profile: it draws its tabs, logs no "[layout] … is not a valid value",
+//                             and after it selects the session's tab, which it files under the session's project,
+//                             layout.json still holds `destination`. This build opens the profile again: no page is open
+//                             (the peer wrote its sets, so the stored strip is no longer this build's form) and the key is
+//                             gone. Skipped for a peer whose layout schema names `destination` (a build from U7b on, which
+//                             has no such tabs to leave) and for a peer that keeps no tab set per project (the return's
+//                             last step rests on the peer writing its sets).
+type StoredDestination = { version: number; destination: { kind: string } };
+const RETIRED = ['settings', 'customize', 'projects', 'artifacts'];
+test('(destinations, both ways) the peer leaves Settings and Customize as tabs, Customize in front; this build drops both and opens the Customize page, then leaves Projects open; the peer keeps the key through its write; this build restores no page over the peer’s sets and deletes the key', async () => {
+  const { here, peer } = builds();
+  test.skip(layoutSchemaNames(peer, 'destination'), `the peer (wire ${wireOf(peer)}) names destination in its layout schema: a build from U7b on, which has no tabs of the four kinds to leave`);
+  test.skip(!keepsSets(peer), keepsSetsWhy(peer));
+  await withScratch('xb-destinations', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) leaves Settings and Customize as tabs; ${here.label} (wire ${wireOf(here)}) opens the profile; then each once more`];
+    const wide = (run: Run) => run.maws.app.evaluate(({ BrowserWindow }, bounds) => BrowserWindow.getAllWindows()[0].setBounds(bounds), WIDE);
+    const frontOfStored = (stored: StoredSets | null) => {
+      const set = stored?.sets[stored.current];
+      return set?.panes[set.focusedPane]?.activeTabId ?? null;
+    };
+
+    // the peer: the seeded session's tab, then Settings and Customize as tabs, Customize in front
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page, () => true, 60_000);
+    await wide(old);
+    const id = await s.record(old.page);
+    await (await sidebarRow(old.page, { appSessionId: id })).click();
+    let session = '';
+    await expect.poll(async () => (session = (await activeMainTab(old.page).getAttribute('data-tab-id')) ?? ''), { timeout: 20_000, message: `${peer.label} shows the session’s tab` }).toMatch(/^session:/);
+    await menu(old.maws.app, 'settings.open');
+    await expect(mainTabById(old.page, 'settings'), `${peer.label} opens Settings as a tab`).toBeVisible({ timeout: 15_000 });
+    await old.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Customize', exact: true }).click();
+    await expect(mainTabById(old.page, 'customize'), `${peer.label} opens Customize as a tab, in front`).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
+    let theirs: StoredSets | null = null;
+    await expect
+      .poll(async () => {
+        theirs = await layoutOf<StoredSets>(old.page, 'main.tabs');
+        const ids = tabIdsOf(theirs);
+        return [ids.includes('settings'), ids.includes('customize'), ids.includes(session), frontOfStored(theirs)];
+      }, { timeout: 20_000, message: `${peer.label} wrote both tabs, Customize in front` })
+      .toEqual([true, true, true, 'customize']);
+    const kept = tabIdsOf(theirs).filter((tab) => !RETIRED.includes(tab));
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // this build's own mawsd from here
+    said.push(`  ${peer.label} wrote ${tabIdsOf(theirs).join(', ')}, customize in front`);
+
+    // this build: neither tab, every other tab, the Customize page and no dialog; then Projects as a page
+    const run = await s.launch();
+    await s.ready(run.page, (st) => st.daemon !== null, 60_000);
+    await wide(run);
+    await expect(pageRegion(run.page), 'the page of the tab that was in front').toHaveAttribute('data-destination', 'customize', { timeout: 20_000 });
+    await expect(settingsDialog(run.page), 'a Settings tab opens no dialog').toHaveCount(0);
+    await expect.poll(async () => (await stripIds(run.page)).sort(), { timeout: 20_000, message: 'every tab but the two retired ones' }).toEqual(kept);
+    await expect
+      .poll(() => {
+        const stored = storedLayout(s.userData);
+        return [tabIdsOf(stored['main.tabs']).some((tab) => RETIRED.includes(tab)), (stored.destination as StoredDestination | undefined)?.destination.kind ?? null];
+      }, { timeout: 20_000, message: 'written back without the two tabs, the page stored' })
+      .toEqual([false, 'customize']);
+    await run.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Projects', exact: true }).click();
+    await expect(pageRegion(run.page)).toHaveAttribute('data-destination', 'projects');
+    await expect.poll(() => (storedLayout(s.userData).destination as StoredDestination | undefined)?.destination.kind ?? null, { timeout: 10_000, message: 'the Projects page stored' }).toBe('projects');
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const ours = storedLayout(s.userData).destination;
+    expect(ours, 'the page stored as this build quit').toEqual({ version: 1, destination: { kind: 'projects' } });
+    said.push(`  ${here.label}: ${kept.length} tabs, the two dropped, the Customize page opened, no dialog; quit on Projects`);
+
+    // the peer: its tabs drawn, no layout value refused, the session's tab filed under its project, the key kept
+    const back = await s.launch({}, peer.root);
+    const messages: string[] = [];
+    back.page.on('console', (message) => messages.push(message.text()));
+    messages.push(...(await back.page.consoleMessages({ filter: 'all' })).map((message) => message.text()));
+    await s.ready(back.page, () => true, 60_000);
+    await wide(back);
+    await expect.poll(async () => (await stripIds(back.page)).sort(), { timeout: 20_000, message: `${peer.label} draws its tabs` }).toEqual(kept);
+    await (await sidebarRow(back.page, { appSessionId: id })).click();
+    await expect(activeMainTab(back.page)).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    await expect
+      .poll(() => (storedLayout(s.userData)['main.tabs'] as StoredSets | undefined)?.current ?? 'none', { timeout: 20_000, message: `${peer.label} filed the session’s tab under its project and wrote its sets` })
+      .not.toBe('none');
+    expect(storedLayout(s.userData).destination, `the key is in the file ${peer.label} wrote after its act`).toEqual(ours);
+    expect(messages.filter((text) => INVALID_LAYOUT.test(text)), `${peer.label} refuses no stored layout value`).toEqual([]);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: its tabs drawn, nothing refused, its sets written, destination kept`);
+
+    // this build again: the stored strip is the peer's sets, so no page is restored, and the key is deleted
+    const again = await s.launch();
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    await expect(activeMainTab(again.page), 'the tabs show').toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    await expect(pageRegion(again.page), 'no page over the peer’s sets').toHaveCount(0);
+    await expect.poll(() => 'destination' in storedLayout(s.userData), { timeout: 20_000, message: 'the key deleted' }).toBe(false);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: no page, destination deleted`);
+    record(said);
+  });
+});
+
+// ---- UX wave U8b: the side column's tabs and groups, build F reads (UC-14) --------------------------------------------
+// U8b (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md: Interfaces §A and §G, M9's decision 3) stores the
+// side column as tabs in one or two groups. The keys build F knows keep their shapes: `panel.<session>` and `panel.pinned`
+// are the strip, `panelTools.surfaces.stacks` the tabs in view (none while the column is hidden), `regions.panel.width`
+// the last width dragged (380 at a reset); three keys are new, which F never reads and its main keeps in the file
+// (`panelTools.groups`, `panelTools.widths`, `cards.open`). Two scenes prove it both ways, each by what the reading build
+// draws or by what it writes after an act; a key the peer never writes is read only after a write of the peer's own is
+// seen, to show that the peer kept it. Each runs only with a peer older than this landing (its
+// src/shared/ipc/schema/layout.ts names no `panelTools.groups`), whose side column is F's: two stacked surfaces, "Close
+// surface", 380 the automatic width, driven here by locators of its own UI (above: chooseTool, showTool, peerSurface,
+// peerStack, closeOnPeer). The run of record is the one whose peer is F (`--peer-exact f1852de3a`).
+//   (side column, from the peer)  the peer stacks Files and Session info, then Review in the lower place, keeps a
+//                                 terminal for every session, shows it with no session shown and drags the column;
+//                                 this build shows that pin selected with no session shown, then the session's two
+//                                 groups, Files above and Review below, the pinned terminal in the strip and no Session
+//                                 info tab (the first read's prune), at the peer's width as its wide width, and writes
+//                                 the three keys; Session info opened again stays a tab across one more launch.
+//   (side column, to the peer)    this build opens Review, keeps two terminals for every session and selects the
+//                                 second with no session shown, opens an artifact beside the session, drags the
+//                                 narrow width to exactly 380, moves Review below, drags the bar, resets the wide width,
+//                                 hides the column and folds Environment; its relaunch shows the hidden column, then both
+//                                 groups on one click, and hides it again; the peer draws its cards, then on a click its
+//                                 surface at its automatic width, its sidebar and tab in front as left, the artifact's
+//                                 record, says nothing of an invalid value, and writes its two surfaces; with no session
+//                                 shown it draws both pins as its terminal's tabs, the second selected; the three keys
+//                                 are as they were; this build shows those two as two groups, the wide width automatic
+//                                 and the narrow one 380.
+// UC-14's coverage for U8b (the rows of the U13a table above that this landing changes or adds):
+//   | stored                                      | F reads this build's value, and writes on      | this build reads F's value                      |
+//   |---------------------------------------------|------------------------------------------------|-------------------------------------------------|
+//   | `panel.<session>`: the strip                | (to the peer): Review and the artifact drawn   | (from the peer): the tabs in view kept, Session |
+//   |                                             | from it on a click                             | info dropped; the return of (to the peer)       |
+//   | `panel.pinned`                              | (to the peer): two pinned terminals drawn as   | (from the peer): the pinned terminal            |
+//   |                                             | its terminal's tabs with no session shown      |                                                 |
+//   | `panelTools.activeNoSession`                | (to the peer): the second pin, not the first,  | (from the peer): the pin selected, no session   |
+//   |                                             | the tab it selects with no session shown       |                                                 |
+//   | `panelTools.surfaces`: `stacks`             | (to the peer): the hidden column's empty entry | (from the peer): two ids as two groups, one as  |
+//   |                                             | drawn as F's cards; F's own two-surface write  | one; the return of (to the peer)                |
+//   | `panelTools.params`                         | (to the peer): the artifact tab on its record  | the return of (to the peer): the record below   |
+//   | `regions.panel.width`                       | (to the peer): 380 drawn as F's automatic one  | (from the peer): F's width as the wide one      |
+//   | `panelTools.groups`, `panelTools.widths`,   | (to the peer): kept by F through its own write | (from the peer): written at the first read;     |
+//   | `cards.open`                                |                                                | the return: the groups and both widths as left  |
+const storesGroups = (build: Build) => {
+  const schema = join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/layout.ts');
+  return existsSync(schema) && readFileSync(schema, 'utf8').includes('panelTools.groups');
+};
+const storesGroupsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names panelTools.groups in its src/shared/ipc/schema/layout.ts: it has this landing's side column, which these scenes do not drive as the peer's; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const F_AUTOMATIC_WIDTH = 380; // build F's automatic width (its app/shell-geometry.ts), which a reset here writes to `regions`
+const NO_SESSION_SCOPE = '@none'; // the `stacks` key of the column while no session is shown, in both builds (schema/layout.ts)
+const NARROW_AUTOMATIC_WIDTH = 360; // this build's automatic width of a column with no reading tool in view (app/shell-geometry.ts)
+type PanelRef = { id: string; toolId: string; pinned: boolean };
+// The side column's keys as main last wrote layout.json (whole, through a rename: a read never sees half a file), for one
+// session: its scope in `stacks` is its address, as its `panel.<session>` key is
+function sideOf(s: Scratch, address: string) {
+  const path = join(s.userData, 'layout.json');
+  const file = (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}) as Record<string, unknown>;
+  const pinned = Array.isArray(file['panel.pinned']) ? (file['panel.pinned'] as PanelRef[]) : [];
+  const own = (file[`panel.${address}`] as { tabs?: PanelRef[]; activeTabId?: string | null } | undefined)?.tabs ?? [];
+  const toolOf = (id: string) => [...pinned, ...own].find((tab) => tab.id === id)?.toolId ?? `(no tab ${id})`;
+  const stacks = (file['panelTools.surfaces'] as StoredSurfaces | undefined)?.stacks ?? {};
+  const noSession = (file['panelTools.activeNoSession'] as { activeTabId?: string | null } | undefined)?.activeTabId ?? null;
+  const lower = (file['panelTools.groups'] as { lower?: Record<string, { tabs: string[]; share: number }> } | undefined)?.lower?.[address];
+  return {
+    pinned: pinned.map((tab) => tab.toolId),
+    pinnedIds: pinned.map((tab) => tab.id),
+    noSession,
+    stackNoSession: stacks[NO_SESSION_SCOPE] ?? null,
+    own: own.map((tab) => tab.toolId),
+    tabOf: (toolId: string) => own.find((tab) => tab.toolId === toolId)?.id,
+    // the tools in view by the stored stack, and with no session shown by F's own rule (its active pin while no stack)
+    inView: (stacks[address] ?? []).map(toolOf),
+    inViewNoSession: (stacks[NO_SESSION_SCOPE] ?? (noSession === null ? [] : [noSession])).map(toolOf),
+    lower: lower === undefined ? null : { tabs: lower.tabs.map(toolOf), share: lower.share },
+    params: (file['panelTools.params'] as { params?: Record<string, unknown> } | undefined)?.params ?? {},
+    width: (file.regions as { panel?: { width?: number } } | undefined)?.panel?.width,
+    added: { 'panelTools.groups': file['panelTools.groups'], 'panelTools.widths': file['panelTools.widths'], 'cards.open': file['cards.open'] },
+  };
+}
+const panelResizer = (page: Page) => page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+const widthOf = async (page: Page) => Number(await panelResizer(page).getAttribute('aria-valuenow'));
+// A group's tabs by their tools' titles, in strip order (a tab's name is its title, then ` · ` and its suffix if any)
+const titlesIn = async (page: Page, group: 'upper' | 'lower') => (await sideTabNames(page, group)).map((name) => name.split(' · ')[0].trim());
+const sortedTitlesIn = async (page: Page, group: 'upper' | 'lower') => (await titlesIn(page, group)).sort();
+// A pointer drag of a resizer by whole pixels from where it is grabbed (each build's app/Resizer.tsx follows the pointer)
+async function dragBy(page: Page, handle: Locator, dx: number, dy = 0): Promise<void> {
+  const box = (await handle.boundingBox())!;
+  const x = Math.round(box.x + box.width / 2);
+  const y = Math.round(box.y + box.height / 2);
+  await page.mouse.move(x, y);
+  await page.mouse.down();
+  await page.mouse.move(x + dx, y + dy, { steps: 4 });
+  await page.mouse.up();
+}
+async function showSession(page: Page, id: AppSessionId, session: string): Promise<void> {
+  await (await sidebarRow(page, { appSessionId: id })).click();
+  await expect(activeMainTab(page), 'the session’s tab in front').toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+}
+
+test('(side column, from the peer) two surfaces the peer stacked open as two groups, its pinned terminal in the strip and selected with no session shown, a tool it had hidden no tab, its width the wide one; the three keys written, and a tool opened again kept as a tab', async () => {
+  const { here, peer } = builds();
+  test.skip(storesGroups(peer), storesGroupsWhy(peer));
+  await withScratch('xb-side-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) stacks surfaces; ${here.label} (wire ${wireOf(here)}) reads them as tabs in groups`];
+    // the peer: the seeded session from its sidebar row; Files, Session info below it, then Review in Session info's
+    // place; a terminal, which takes the lower place in its turn, kept for every session; Review shown below again
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const address = await addressed(old.page, id);
+    const session = `session:${address}`;
+    await showSession(old.page, id, session);
+    await showTool(old.page, 'Files');
+    await showTool(old.page, PINNED_TOOL);
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} stacks ${PINNED_TOOL} below Files` }).toEqual(['Files', PINNED_TOOL]);
+    await showTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: 'Review takes the lower place' }).toEqual(['Files', 'Review']);
+    await showTool(old.page, 'Terminal');
+    await expect.poll(() => peerStack(old.page), { message: 'the terminal takes the lower place' }).toEqual(['Files', 'Terminal']);
+    await openToolMenu(old.page, 'Terminal', 'Keep open for every session');
+    await old.page.getByRole('menuitem', { name: 'Keep open for every session', exact: true }).click();
+    await closeMenus(old.page);
+    await showTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: 'Review below Files again' }).toEqual(['Files', 'Review']);
+    // no session shown (its tab closed): the pin brought into view, and the column dragged 64 px wider
+    await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(old.page, session), 'the session’s tab closed').toHaveCount(0);
+    await showTool(old.page, 'Terminal');
+    await expect.poll(() => peerStack(old.page), { message: 'the pin alone with no session shown' }).toEqual(['Terminal']);
+    const start = await widthOf(old.page);
+    await dragBy(old.page, panelResizer(old.page), -64);
+    const dragged = start + 64;
+    await expect(panelResizer(old.page), `${peer.label}’s column dragged`).toHaveAttribute('aria-valuenow', String(dragged));
+    expect(dragged, 'a width the peer does not take for its automatic one').not.toBe(F_AUTOMATIC_WIDTH);
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        return [side.pinned, [...side.own].sort(), side.inView, side.inViewNoSession, side.width, side.added['panelTools.groups'] ?? null];
+      }, { timeout: 20_000, message: `${peer.label} wrote the pin, the session's tabs, both stacks and the width` })
+      .toEqual([['terminal'], ['files', 'review', 'session-info'], ['files', 'review'], ['terminal'], dragged, null]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData); // this build's own mawsd from here
+    said.push(`  ${peer.label}: Files and Review stacked (${PINNED_TOOL} hidden, its tab kept), the terminal pinned and shown with no session, the column at ${dragged}`);
+
+    // this build: no session shown, the pin selected and alone at the narrow automatic width; the first read wrote the
+    // three keys, the peer's one width the wide one
+    const run = await s.launch();
+    await s.ready(run.page);
+    await expect(sideGroup(run.page, 'upper'), 'the pin in view with no session shown').toHaveAttribute('aria-label', 'Terminal', { timeout: 20_000 });
+    await expect(sideGroup(run.page, 'lower')).toHaveCount(0);
+    await expect(sideTab(sideGroup(run.page, 'upper'), /^Terminal/), 'the pin selected').toHaveAttribute('aria-selected', 'true');
+    // a terminal is wide (UX wave U8b, Addendum 6): the pin in view draws the peer's dragged width, read as the wide one
+    await expect(panelResizer(run.page), 'the pin, a terminal, at the wide width the peer dragged').toHaveAttribute('aria-valuenow', String(dragged));
+    await expect
+      .poll(() => {
+        const { added } = sideOf(s, address);
+        return [(added['panelTools.groups'] as { version?: number } | undefined)?.version, added['panelTools.widths'], added['cards.open']];
+      }, { timeout: 20_000, message: 'the first read wrote the three keys' })
+      .toEqual([1, { version: 1, wide: dragged, narrow: null }, { version: 1, open: ['environment'] }]);
+    // the session: Files above and Review below in view, the pinned terminal in the strip, no Session info tab, at the
+    // peer's width
+    await showSession(run.page, id, session);
+    await expect(sideGroup(run.page, 'upper'), 'Files above').toHaveAttribute('aria-label', 'Files', { timeout: 20_000 });
+    await expect(sideGroup(run.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect.poll(() => titlesIn(run.page, 'upper'), { message: 'the pin first, then Files' }).toEqual(['Terminal', 'Files']);
+    await expect.poll(() => titlesIn(run.page, 'lower')).toEqual(['Review']);
+    await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `no ${PINNED_TOOL} tab in either strip`).toHaveCount(0);
+    await expect(panelResizer(run.page), 'the wide width at the peer’s').toHaveAttribute('aria-valuenow', String(dragged));
+    // Session info opened again on purpose, then its group's other tab brought back into view: a tab not in view
+    await openSurface(run.page, PINNED_TOOL);
+    const holder = (await titlesIn(run.page, 'upper')).includes(PINNED_TOOL) ? 'upper' : 'lower';
+    const other = holder === 'upper' ? 'Files' : 'Review';
+    // a width dragged under the peer is not the narrow one (Addendum 8): with narrow tools alone in view, Session info in
+    // one group and Background tasks brought into the other, the column is at the narrow automatic width; Background
+    // tasks then closed, which gives its group's tab back to view
+    const otherGroup = holder === 'upper' ? 'lower' : 'upper';
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await run.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(run.page, otherGroup), 'Background tasks in the other group').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(sideGroup(run.page, holder), `${PINNED_TOOL} in view`).toHaveAttribute('aria-label', PINNED_TOOL);
+    await expect(panelResizer(run.page), 'a width dragged under the peer is not the narrow one').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    await sideGroup(run.page, otherGroup).getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect(sideTab(sideColumn(run.page), 'Background tasks'), 'Background tasks closed').toHaveCount(0);
+    await sideTab(sideGroup(run.page, holder), other).click();
+    await expect(sideGroup(run.page, holder)).toHaveAttribute('aria-label', other);
+    await expect(sideTab(sideColumn(run.page), PINNED_TOOL), `${PINNED_TOOL} a tab`).toHaveCount(1);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    said.push(`  ${here.label}: the pin with no session, a terminal, drawn at the wide ${dragged}; Files above, Review below, the terminal in the strip, no ${PINNED_TOOL}; wide ${dragged}; ${PINNED_TOOL} opened again, and with Background tasks beside it the column drawn at the narrow ${NARROW_AUTOMATIC_WIDTH}, then Background tasks closed`);
+
+    // one more launch: no first read again, so the tab not in view stands
+    const again = await s.launch();
+    await s.ready(again.page);
+    await showSession(again.page, id, session);
+    await expect(sideTab(sideColumn(again.page), PINNED_TOOL), `${PINNED_TOOL} still a tab`).toHaveCount(1, { timeout: 20_000 });
+    await expect(again.page.locator(`[data-surface="${PINNED_TOOL_ID}"]`), 'and not in view').toHaveCount(0);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: ${PINNED_TOOL} still a tab`);
+    record(said);
+  });
+});
+
+test('(side column, to the peer) two groups, a hidden column, a folded card and the two widths this build stored are drawn by the peer as its cards and then its surfaces, kept through its own write, and read back here as two groups with the widths as left', async () => {
+  const { here, peer } = builds();
+  test.skip(storesGroups(peer), storesGroupsWhy(peer));
+  await withScratch('xb-side-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) stores two groups and two widths; ${peer.label} (wire ${wireOf(peer)}) reads them, acts and writes on`];
+    // this build: the session in front, the sidebar 40 px wider; Review, a terminal and an artifact beside it (the
+    // artifact's tab holds its params), each in view in its turn
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const session = `session:${address}`;
+    await showSession(run.page, id, session);
+    const sidebar = run.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
+    await sidebar.focus();
+    for (let i = 0; i < 5; i++) await run.page.keyboard.press('ArrowRight');
+    await expect(sidebar).toHaveAttribute('aria-valuenow', '280');
+    await openSurface(run.page, 'Review');
+    await openSurface(run.page, 'Terminal');
+    // two terminals kept for every session (`panel.pinned`): the one in view by its icon's menu, a second added by "+"
+    // and pinned by its tab's glyph; with no session shown (the session's tab closed) the second is selected
+    // (`panelTools.activeNoSession`), not the first, and the session is shown again
+    await pinSurfaceForSessions(run.page, 'Terminal');
+    await sideGroup(run.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await run.page.getByRole('menuitem', { name: 'Terminal', exact: true }).click();
+    await sideGroup(run.page, 'upper').locator('[data-side-strip] [data-tab-id]:has([role="tab"][aria-selected="true"])').getByRole('button', { name: 'Pin Terminal', exact: true }).click();
+    await expect.poll(() => sideOf(s, address).pinned, { timeout: 20_000, message: `${here.label} wrote two pinned terminals` }).toEqual(['terminal', 'terminal']);
+    const [firstPin, secondPin] = sideOf(s, address).pinnedIds;
+    await mainTabById(run.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(run.page, session), 'the session’s tab closed: no session shown').toHaveCount(0);
+    if (!await sideGroup(run.page, 'upper').count()) await chooseTool(run.page, 'Terminal');
+    await sideColumn(run.page).locator(`[data-side-strip] [data-tab-id="${secondPin}"] [role="tab"]`).click();
+    await expect(sideColumn(run.page).locator(`[data-side-strip] [data-tab-id="${secondPin}"] [role="tab"]`), 'the second pin in view').toHaveAttribute('aria-selected', 'true');
+    // both readings of the no-session column name the second pin: the selection, and the tab in view (`stacks`), which
+    // the peer draws by its own rule (it falls back to the selection only for a scope with no `stacks` entry)
+    await expect
+      .poll(() => [sideOf(s, address).noSession, sideOf(s, address).stackNoSession], { timeout: 20_000, message: `${here.label} wrote the second pin as the selection and the tab in view with no session shown` })
+      .toEqual([secondPin, [secondPin]]);
+    await showSession(run.page, id, session);
+    const artifactId = await createHtmlArtifact(run.page, LAYOUT_PAGE, 'XB_SIDE_PAGE');
+    await openArtifactInPanel(run.page, artifactId);
+    await mainTabById(run.page, session).click();
+    await expect(activeMainTab(run.page)).toHaveAttribute('data-tab-id', session);
+    await expect(sideGroup(run.page, 'upper'), 'the artifact in view').toHaveAttribute('aria-label', 'Artifacts');
+    await expect.poll(() => sortedTitlesIn(run.page, 'upper'), { message: 'one strip: the two pins and the session’s two tabs' }).toEqual(['Artifacts', 'Review', 'Terminal', 'Terminal']);
+    // the narrow width (no reading tool in view) dragged to exactly 380, which the peer takes for its automatic width
+    await expect(panelResizer(run.page), 'the narrow width automatic').toHaveAttribute('aria-valuenow', String(NARROW_AUTOMATIC_WIDTH));
+    await dragBy(run.page, panelResizer(run.page), NARROW_AUTOMATIC_WIDTH - F_AUTOMATIC_WIDTH);
+    await expect(panelResizer(run.page), 'the narrow width at 380').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    // Review below (the column wide from here), the bar dragged, the wide width dragged and then reset to automatic
+    await moveSideTab(run.page, 'Review', 'below');
+    await expect(sideGroup(run.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect(sideGroup(run.page, 'upper'), 'the artifact above').toHaveAttribute('aria-label', 'Artifacts');
+    await expect(panelResizer(run.page), 'the wide width in use').not.toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    const wide = await widthOf(run.page);
+    const bar = sideColumn(run.page).getByRole('separator', { name: 'Resize groups', exact: true });
+    const half = await bar.getAttribute('aria-valuenow');
+    await dragBy(run.page, bar, 0, -48);
+    await expect(bar, 'the bar dragged').not.toHaveAttribute('aria-valuenow', half ?? '');
+    const share = await bar.getAttribute('aria-valuenow');
+    await dragBy(run.page, panelResizer(run.page), 64);
+    await expect(panelResizer(run.page), 'the wide width dragged').toHaveAttribute('aria-valuenow', String(wide - 64));
+    await panelResizer(run.page).focus();
+    await run.page.keyboard.press('Enter');
+    await expect(panelResizer(run.page), 'the wide width automatic again').toHaveAttribute('aria-valuenow', String(wide));
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        const artifactTab = side.tabOf('artifacts');
+        return [side.added['panelTools.widths'], side.width, side.inView, side.lower?.tabs, side.lower !== null && side.lower.share !== 0.5, artifactTab !== undefined && artifactTab in side.params];
+      }, { timeout: 20_000, message: `${here.label} wrote the widths, the two tabs in view, the lower group and the artifact's params` })
+      .toEqual([{ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH }, F_AUTOMATIC_WIDTH, ['artifacts', 'review'], ['review'], true, true]);
+    // the column hidden (the cards show), Environment folded
+    await sideColumn(run.page).getByRole('button', { name: 'Hide side column', exact: true }).click();
+    await expect(sessionCards(run.page), 'the cards in the hidden column’s place').toBeVisible();
+    await expect(sideGroup(run.page, 'upper')).toHaveCount(0);
+    const environment = sessionCard(run.page, 'Environment').getByRole('button', { name: /^Environment/ });
+    await expect(environment, 'Environment open by default').toHaveAttribute('aria-expanded', 'true');
+    await environment.click();
+    await expect(environment).toHaveAttribute('aria-expanded', 'false');
+    await expect
+      .poll(() => {
+        const side = sideOf(s, address);
+        return [side.inView, side.lower?.tabs, side.added['cards.open']];
+      }, { timeout: 20_000, message: `${here.label} wrote the hidden column and the fold` })
+      .toEqual([[], ['review'], { version: 1, open: [] }]);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    said.push(`  ${here.label}: the artifact and the terminal above, Review below, the bar at ${share} %, narrow 380, wide automatic (${wide}), the column hidden, Environment folded`);
+
+    // this build again: the hidden column (the cards, Environment folded); one click on Review shows both groups with
+    // their tabs as left and the bar where it was; hidden again
+    const relaunch = await s.launch();
+    await s.ready(relaunch.page);
+    await showSession(relaunch.page, id, session);
+    await expect(sessionCards(relaunch.page), 'the column still hidden').toBeVisible({ timeout: 20_000 });
+    await expect(sideGroup(relaunch.page, 'upper')).toHaveCount(0);
+    await expect(sessionCard(relaunch.page, 'Environment').getByRole('button', { name: /^Environment/ }), 'Environment still folded').toHaveAttribute('aria-expanded', 'false');
+    await chooseTool(relaunch.page, 'Review');
+    await expect(sideGroup(relaunch.page, 'upper'), 'the artifact above').toHaveAttribute('aria-label', 'Artifacts', { timeout: 20_000 });
+    await expect(sideGroup(relaunch.page, 'lower'), 'Review below').toHaveAttribute('aria-label', 'Review');
+    await expect.poll(() => sortedTitlesIn(relaunch.page, 'upper')).toEqual(['Artifacts', 'Terminal', 'Terminal']);
+    await expect.poll(() => titlesIn(relaunch.page, 'lower')).toEqual(['Review']);
+    await expect(sideColumn(relaunch.page).getByRole('separator', { name: 'Resize groups', exact: true }), 'the bar where it was').toHaveAttribute('aria-valuenow', share ?? '');
+    await sideColumn(relaunch.page).getByRole('button', { name: 'Hide side column', exact: true }).click();
+    await expect(sessionCards(relaunch.page)).toBeVisible();
+    await expect.poll(() => sideOf(s, address).inView, { message: 'hidden again' }).toEqual([]);
+    expect(relaunch.maws.consoleErrors()).toEqual([]);
+    await s.quit(relaunch);
+    await endProfileProcesses(s.userData);
+    const left = sideOf(s, address).added;
+    said.push(`  ${here.label} again: the hidden column, then both groups on one click, hidden again`);
+
+    // the peer: its cards (the column was hidden), its sidebar and tab in front as left, no word of an invalid value;
+    // then a click on Review draws it at the peer's automatic width (`regions` holds 380), and "Open saved artifact"
+    // draws the artifact's tab on its record below it: two surfaces, which the peer writes
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await expect(activeMainTab(old.page), `${peer.label} shows the session’s tab in front`).toHaveAttribute('data-tab-id', session, { timeout: 20_000 });
+    await expect(old.page.getByRole('complementary', { name: 'Session cards', exact: true }), `${peer.label} draws its cards`).toBeVisible({ timeout: 20_000 });
+    expect(await peerStack(old.page), 'and no surface').toEqual([]);
+    await expect(old.page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' }), 'the sidebar at the width written').toHaveAttribute('aria-valuenow', '280');
+    await chooseTool(old.page, 'Review');
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} draws Review on a click` }).toEqual(['Review']);
+    await expect(panelResizer(old.page), `${peer.label} reads 380 as its automatic width`).toHaveAttribute('aria-valuenow', String(wide));
+    await surfaceRow(old.page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await old.page.getByRole('menuitem', { name: 'Open saved artifact', exact: true }).click();
+    await expect.poll(() => peerStack(old.page), { message: `${peer.label} draws the artifact’s tab below Review` }).toEqual(['Review', 'Artifacts']);
+    await expect(peerSurface(old.page, 'Artifacts').locator(`[data-artifact-record="${artifactId}"]`), 'the artifact’s tab on its record').toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => sideOf(s, address).inView, { timeout: 20_000, message: `${peer.label} writes its two surfaces` }).toEqual(['review', 'artifacts']);
+    // with no session shown (its tab closed), the peer draws this build's pins as its terminal's tabs, the second one
+    // selected, as this build left its no-session column
+    await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(old.page, session), `${peer.label} shows no session`).toHaveCount(0);
+    await expect.poll(() => peerStack(old.page), { timeout: 20_000, message: `${peer.label} draws the pinned terminal with no session shown` }).toEqual(['Terminal']);
+    const peerTerminal = peerSurface(old.page, 'Terminal');
+    await expect(peerTerminal.locator(`[data-tab-id="${firstPin}"] [role="tab"]`), 'the first pin, a tab of its terminal').toHaveAttribute('aria-selected', 'false');
+    await expect(peerTerminal.locator(`[data-tab-id="${secondPin}"] [role="tab"]`), 'the second pin, selected').toHaveAttribute('aria-selected', 'true');
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(sideOf(s, address).added, `the three keys as ${here.label} left them, through ${peer.label}’s write`).toEqual(left);
+    said.push(`  ${peer.label}: its cards, then Review at ${wide} and the artifact on its record; wrote its two surfaces; with no session shown, the two pins with the second selected; the three keys kept`);
+
+    // this build: the peer's two surfaces as two groups, the wide width automatic, the narrow one 380 as stored and as
+    // drawn (the terminal brought into view above, beside the artifact below, keeps the column wide: Addendum 6; a
+    // narrow tool brought into view above draws it at 380: Addendum 8)
+    const back = await s.launch();
+    await s.ready(back.page);
+    await showSession(back.page, id, session);
+    await expect(sideGroup(back.page, 'upper'), 'Review above').toHaveAttribute('aria-label', 'Review', { timeout: 20_000 });
+    await expect(sideGroup(back.page, 'lower'), 'the artifact below').toHaveAttribute('aria-label', 'Artifacts');
+    await expect(sideGroup(back.page, 'lower').locator(`[data-artifact-record="${artifactId}"]`), 'on its record').toBeVisible({ timeout: 20_000 });
+    await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
+    await expect.poll(() => titlesIn(back.page, 'lower')).toEqual(['Artifacts']);
+    await expect(panelResizer(back.page), 'the wide width automatic').toHaveAttribute('aria-valuenow', String(wide));
+    await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
+    await expect(sideGroup(back.page, 'upper'), 'the terminal above').toHaveAttribute('aria-label', 'Terminal');
+    await expect(panelResizer(back.page), 'a terminal in view keeps the column wide (UX wave U8b, Addendum 6)').toHaveAttribute('aria-valuenow', String(wide));
+    expect(sideOf(s, address).added['panelTools.widths'], 'the narrow width still 380').toEqual({ version: 1, wide: null, narrow: F_AUTOMATIC_WIDTH });
+    // drawn, not only stored (Addendum 8): a narrow tool in view above, beside the artifact below, and the column is 380
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+    await back.page.getByRole('menuitem', { name: 'Background tasks', exact: true }).click();
+    await expect(sideGroup(back.page, 'upper'), 'Background tasks above').toHaveAttribute('aria-label', 'Background tasks');
+    await expect(panelResizer(back.page), 'the column drawn at the stored narrow width').toHaveAttribute('aria-valuenow', String(F_AUTOMATIC_WIDTH));
+    // the view put back: Background tasks closed, the terminal in view above and the column wide again
+    await sideGroup(back.page, 'upper').getByRole('button', { name: 'Close Background tasks', exact: true }).click();
+    await expect.poll(() => sortedTitlesIn(back.page, 'upper')).toEqual(['Review', 'Terminal', 'Terminal']);
+    await sideTab(sideGroup(back.page, 'upper'), /^Terminal/).first().click();
+    await expect(sideGroup(back.page, 'upper'), 'the terminal above again').toHaveAttribute('aria-label', 'Terminal');
+    await expect(panelResizer(back.page), 'wide again').toHaveAttribute('aria-valuenow', String(wide));
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too; Background tasks above drawn at the stored narrow 380, then closed`);
+    record(said);
+  });
+});
+
+// ---- UX wave U8c-2: where a session's agent is, build F reads (UC-14) -------------------------------------------------
+// U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §C and §L's scenes 4 and 5) stores where a
+// session's agent is as two columns of the index, `sessions.launch_folder` and `sessions.agent_folder`, beside the
+// columns build F knows, which keep F's rule: a move by the engine's worktree tool re-files the record under the
+// worktree, a `cd` files nothing again. Its row is in U13a's table above. Both scenes run only with a peer older than
+// this landing (its src/services/index/migrations.ts names no `agent_folder`); the run of record is the one whose peer
+// is F (`--peer-exact f1852de3a`). No engine runs but the replay: a session is a transcript of invented rows in the
+// scratch store over the scratch's repository, made a git repository with a worktree under `.claude/worktrees/`; a move
+// by `cd` is rows with the worktree's `cwd`, a move by the tool the transcript and its folder renamed into the worktree's
+// project folder (`slugOf` of its path, as the engine names it) with a `relocated` row and a row there.
+//   (moved, from this build)     this build shows "moved from" for a session moved the tool's way, whose transcript holds
+//                                a prompt snapshot. The peer, before any other row, lists it with its worktree mark, opens
+//                                its transcript and resumes it on the replay: the launch decision it stores holds the
+//                                snapshot's state (`none`), which build F's `recordedOf` (services/owner/launch.ts) finds
+//                                only in the transcript at the path the record's directory gives (`unrecorded` where no
+//                                file is). A row appended while the peer runs is filed by it. This build then shows the
+//                                session with no "moved from" until one more row, and then shows it again.
+//   (build F's app, unit mawsd)  §C's second table: this build's `mawsd` as the profile's unit and the peer's app over it,
+//                                as (pre-O17 app, unit mawsd) stages it, for a session that reached the worktree by `cd`
+//                                and one that entered it by the tool. In the peer's window the Source control panel draws
+//                                its page with no error state, a Stage on a listed file draws M3 decision 8's sentence in
+//                                its notice line, and `git status` reads the same in both checkouts before and after; for
+//                                the first, Files draws the worktree among its roots. The panel's selectors are build
+//                                F's at f1852de3a (tools/scm: ScmShell's header and failed state, FileRow's Stage,
+//                                Notice's text; tools/files: a root's tree item).
+const filesAgentFolder = (build: Build) => {
+  const migrations = join(build.root ?? REPO_ROOT, 'src/services/index/migrations.ts');
+  return existsSync(migrations) && readFileSync(migrations, 'utf8').includes('agent_folder');
+};
+const filesAgentFolderWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names agent_folder in its src/services/index/migrations.ts: it files this landing's facts, not build F's record alone; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const AWAY_SENTENCE = 'The session is working in another folder now, so nothing was changed'; // src/services/scm/service.ts, AWAY_DETAIL (M3 decision 8)
+const gitAt = (cwd: string, ...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
+const transcriptIn = (s: Scratch, folder: string, sid: string) => join(s.userData, 'claude-config', 'projects', slugOf(folder), `${sid}.jsonl`);
+
+// The scratch's repository made a git repository (README.md and notes.txt committed on `main`) with the worktree `w1`
+// under `.claude/worktrees/` on `worktree-w1`, which the repository's own status leaves out; answers its path.
+function movingRepo(s: Scratch): string {
+  writeFileSync(join(s.repo, 'README.md'), 'hello\n');
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  mkdirSync(join(s.repo, '.git', 'info'), { recursive: true });
+  writeFileSync(join(s.repo, '.git', 'info', 'exclude'), '.claude/\n');
+  gitAt(s.repo, 'add', 'README.md', 'notes.txt');
+  gitAt(s.repo, 'commit', '-q', '-m', 'first');
+  gitAt(s.repo, 'worktree', 'add', '-q', '--no-track', '-b', 'worktree-w1', '.claude/worktrees/w1', 'HEAD');
+  return join(s.repo, '.claude', 'worktrees', 'w1');
+}
+// The folders marked trusted in the scratch engine store, as a terminal's first trust dialog would
+function trustIn(s: Scratch, folders: string[]): void {
+  const path = join(s.userData, 'claude-config', '.claude.json');
+  const state = (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}) as { projects?: Record<string, unknown> };
+  writeFileSync(path, `${JSON.stringify({ ...state, projects: { ...state.projects, ...Object.fromEntries(folders.map((folder) => [folder, { hasTrustDialogAccepted: true }])) } }, null, 2)}\n`);
+}
+// One row appended to a transcript, chained to its last: a person's message (`text`), or the engine's prompt snapshot
+function appendTurn(path: string, sid: string, cwd: string, gitBranch: string, text: string | { snapshot: string }): void {
+  const rows = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown }) : [];
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const said = typeof text === 'string' ? { type: 'user', message: { role: 'user', content: text } } : { type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: [text.snapshot] } };
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, ...said, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, gitBranch, sessionId: sid, version: '2.1.283' })}\n`);
+}
+// The engine's worktree tool, as M1's test plays it: the transcript and its folder renamed into `to`'s project folder,
+// then a `relocated` row and a row there; answers the transcript's new path
+function moveByTool(s: Scratch, sid: string, from: string, to: string, gitBranch: string, text: string): string {
+  const source = transcriptIn(s, from, sid);
+  const target = transcriptIn(s, to, sid);
+  mkdirSync(dirname(target), { recursive: true });
+  renameSync(source, target);
+  if (existsSync(join(dirname(source), sid))) renameSync(join(dirname(source), sid), join(dirname(target), sid));
+  appendFileSync(target, `${JSON.stringify({ type: 'relocated', relocatedCwd: to, sessionId: sid })}\n`);
+  appendTurn(target, sid, to, gitBranch, text);
+  return target;
+}
+// A journal of the replay as the seeded session's own: its recorded session id replaced by the scratch's engine id, so
+// the record, its transcript and the resume keep one engine session id (Scratch.asOwnSession, for a written journal)
+function ownJournal(s: Scratch, path: string): string {
+  const text = readFileSync(path, 'utf8');
+  const recorded = text.split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow).find((row) => row.direction === 'in' && typeof row.frame.session_id === 'string')?.frame.session_id as string | undefined;
+  const own = join(s.root, `own-${basename(path)}`);
+  writeFileSync(own, recorded === undefined ? text : text.replaceAll(recorded, s.engineId));
+  return own;
+}
+// One value of the profile's index as the build that wrote it left it (to-human-live's read of the launch decision)
+function indexed(s: Scratch, sql: string): unknown {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'index.sqlite'), sql], { encoding: 'utf8' }).trim();
+  const rows = (out === '' ? [] : JSON.parse(out)) as Record<string, unknown>[];
+  return rows.length === 0 ? null : Object.values(rows[0]!)[0] ?? null;
+}
+// The app id of the session filed for an engine session id, once the index lists it
+async function recordFor(page: Page, sid: string): Promise<AppSessionId> {
+  let id = '';
+  await expect
+    .poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)?.appId ?? ''), { timeout: 20_000, message: `the session ${sid} has a record` })
+    .not.toBe('');
+  return id as AppSessionId;
+}
+// This build's Environment card for the session in view, unfolded
+async function environmentOf(page: Page, id: AppSessionId): Promise<Locator> {
+  await (await sidebarRow(page, { appSessionId: id })).click();
+  await unfoldSessionCard(page, 'Environment');
+  return sessionCard(page, 'Environment');
+}
+
+test('(moved, from this build) a session moved the tool’s way here is listed by the peer with its mark, resumed over the transcript at its directory and filed on; this build then shows what the peer filed, and its facts again after the next row', async () => {
+  const { here, peer } = builds();
+  test.skip(filesAgentFolder(peer), filesAgentFolderWhy(peer));
+  test.setTimeout(300_000);
+  await withScratch('xb-moved', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) moves a session the tool's way; ${peer.label} (wire ${wireOf(peer)}) lists, resumes and files it; ${here.label} opens it again`];
+    const worktree = movingRepo(s);
+    trustIn(s, [s.repo, worktree]);
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', { snapshot: 'An invented system prompt for the cross-build scene.' });
+    const moved = `moved from ${basename(s.repo)}`;
+
+    // this build: the session at the repository, then moved the tool's way into the worktree
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    let card = await environmentOf(ours.page, id);
+    await expect(card.getByTestId('card-folder'), 'the card names the repository').toHaveText(s.repo, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from')).toHaveCount(0);
+    const transcript = moveByTool(s, s.engineId, s.repo, worktree, 'worktree-w1', 'Entered the worktree with the tool');
+    await expect(card.getByTestId('card-folder'), 'the card names the worktree').toHaveText(worktree, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from')).toHaveText(moved);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  ${here.label}: the transcript moved into ${slugOf(worktree)}, the card's folder the worktree, "${moved}"`);
+
+    // the peer, before any other row: listed with its mark, its transcript opened, resumed over the transcript there
+    const journal = ownJournal(s, turnsJournal(s.root, 'xb-moved-resume', 1)); // one turn the resume never sends: it holds at the prompt
+    const theirs = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: journal }, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    const row = await sidebarRow(theirs.page, { appSessionId: id });
+    await expect(row, `${peer.label} lists the session`).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByRole('img', { name: 'Worktree', exact: true }), 'with its worktree mark').toBeVisible({ timeout: 20_000 });
+    await row.click();
+    await expect(theirs.page.getByText('Entered the worktree with the tool', { exact: true }).first(), `${peer.label} opens its transcript`).toBeVisible({ timeout: 20_000 });
+    expect(value(await invoke(theirs.page, 'session.start', { appSessionId: id, message: null, options: { gateway: 'direct', trust: 'accepted' } }))).toMatchObject({ status: 'starting' });
+    const processOf = async () => { const st = await invoke(theirs.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
+    await expect.poll(processOf, { timeout: 60_000, message: `${peer.label} resumes it on the replay` }).toBe('ready');
+    const decision = `select recorded from owner_channel_sessions where app_session_id = '${id}'`;
+    await expect.poll(() => indexed(s, decision), { timeout: 30_000, message: `the launch decision ${peer.label} stored for the resume: the snapshot read at the record's directory` }).toBe('none');
+    value(await invoke(theirs.page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+    await expect.poll(processOf, { timeout: 60_000 }).not.toBe('ready');
+    appendTurn(transcript, s.engineId, worktree, 'worktree-w1', 'A row while the peer runs');
+    await expect.poll(() => indexed(s, `select transcript_size from sessions where app_id = '${id}'`), { timeout: 30_000, message: `${peer.label} files the row` }).toBe(statSync(transcript).size);
+    // Decision 7's own path is staged here (Decision Log 22): a session whose search text is behind its stored stamp is
+    // summarised again at this build's next start, which writes the facts at once. The peer re-indexes a transcript's
+    // text no sooner than 30 s after its last pass (SEARCH_REINDEX_DEBOUNCE_MS), so it quits only once its index holds
+    // the text at the stamp it filed; then nothing is read again, and the record stays as the peer filed it.
+    const textStamped = `select count(*) from session_text_state st join sessions s on s.app_id = st.app_id where st.app_id = '${id}' and st.status = 'ready' and st.size = s.transcript_size and st.mtime_ms = s.transcript_mtime_ms`;
+    await expect.poll(() => indexed(s, textStamped), { timeout: 60_000, message: `${peer.label}'s search text for the session at the stamp it filed (its 30 s re-index debounce)` }).toBe(1);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: listed with its mark, resumed with the recorded state none, the next row filed (${statSync(transcript).size} bytes), its search text at that stamp before it quits`);
+
+    // this build again: what the peer filed, then the facts after one more row
+    const again = await s.launch();
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    card = await environmentOf(again.page, id);
+    await expect(card.getByTestId('card-folder'), 'the folder the peer filed').toHaveText(worktree, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from'), 'no fact for a session the peer filed last').toHaveCount(0);
+    appendTurn(transcript, s.engineId, worktree, 'worktree-w1', 'One more row under this build');
+    await expect(card.getByTestId('moved-from'), 'the facts again after the session’s next row').toHaveText(moved, { timeout: 20_000 });
+    await expect(card.getByTestId('card-folder')).toHaveText(worktree);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the worktree with no "moved from", then "${moved}" after one more row`);
+    record(said);
+  });
+});
+
+test('(build F’s app, unit mawsd) a session whose agent moved: the peer’s Source control draws its page, an act draws the away sentence and changes nothing, and Files lists the worktree; the same for a session moved the tool’s way', async () => {
+  const { here, peer } = builds();
+  test.skip(filesAgentFolder(peer), filesAgentFolderWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  await withScratch('xb-moved-unit', async (s) => {
+    const worktree = movingRepo(s);
+    writeFileSync(join(s.repo, 'README.md'), 'hello\nchanged in the repository\n');
+    writeFileSync(join(worktree, 'notes.txt'), 'notes\nchanged in the worktree\n');
+    trustIn(s, [s.repo, worktree]);
+    // the session that reached the worktree by `cd`: the seeded transcript, its last row in the worktree
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, worktree, 'main', 'Working in the worktree');
+    // the session that entered it through the tool: its transcript under the worktree's project folder
+    const toolSid = randomUUID();
+    appendTurn(transcriptIn(s, s.repo, toolSid), toolSid, s.repo, 'main', 'Started in the repository');
+    moveByTool(s, toolSid, s.repo, worktree, 'worktree-w1', 'Entered the worktree with the tool');
+    const statuses = () => ({ repository: gitAt(s.repo, 'status', '--porcelain'), worktree: gitAt(worktree, 'status', '--porcelain') });
+
+    await withUnit(s, here, 'xb-moved-unit', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const page = run.page;
+      const scm = toolBody(page, 'Source control');
+      // The session selected, its Source control page drawn on `branch` with `listed` and not `other`, and a Stage on
+      // `listed` answered with the sentence, both checkouts' status the same after it
+      const actRefused = async (id: AppSessionId, branch: string, listed: string, other: string) => {
+        await (await sidebarRow(page, { appSessionId: id })).click();
+        await showTool(page, 'Source control');
+        await expect(scm.locator('[data-scm-header]'), 'the page names the branch of the folder the record names').toContainText(`⎇ ${branch}`, { timeout: 20_000 });
+        const row = scm.locator(`li[data-scm-row][data-path=${JSON.stringify(listed)}]`);
+        await expect(row, `${listed} listed`).toBeVisible({ timeout: 20_000 });
+        await expect(scm.locator(`li[data-scm-row][data-path=${JSON.stringify(other)}]`)).toHaveCount(0);
+        await expect(scm.locator('[data-scm-status-failed]'), 'no error state').toHaveCount(0);
+        const before = statuses();
+        await row.hover();
+        await row.getByRole('button', { name: `Stage ${listed}`, exact: true }).click();
+        await expect(scm.locator('[data-scm-notice-text]'), 'the act answered in the notice line').toHaveText(AWAY_SENTENCE, { timeout: 20_000 });
+        expect(statuses(), 'nothing changed in either checkout').toEqual(before);
+      };
+
+      const cd = await s.record(page);
+      await actRefused(cd, 'main', 'README.md', 'notes.txt');
+      await showTool(page, 'Files');
+      await expect(toolBody(page, 'Files').locator(`[role="treeitem"][data-kind="root"][data-path=${JSON.stringify(worktree)}]`), 'Files lists the worktree among its roots').toBeVisible({ timeout: 20_000 });
+      said.push(`  by cd: the page on main with README.md, Stage answered "${AWAY_SENTENCE}", nothing changed; Files lists the worktree`);
+
+      const tool = await recordFor(page, toolSid);
+      await actRefused(tool, 'worktree-w1', 'notes.txt', 'README.md');
+      said.push(`  by the tool: the page on worktree-w1 with notes.txt, Stage answered the same sentence, nothing changed`);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+// ---- UX wave U4a: a take-back's stage, the one stored value build F can meet (UC-14) ---------------------------------
+// U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, decision 13 and Interfaces §J and §K): ↑ or Edit on a
+// waiting message saves the whole message as the session's stored draft before it withdraws it, a document that carries
+// `attrs.takeBack` (the stage), under the claim (`replaces: DRAFT_CLAIM`); for the seconds a take-back lasts that draft
+// is what another build can find. Both scenes write that stage through the page's own `session.drafts.set` as the
+// take-back saves it, and quit: the state a window lost between the save and the withdrawal leaves. The session is
+// kept across the quits (its engine, the stub under a session host, outlives each app), and its turn runs. Each runs
+// only with a peer older than this landing (its src/shared/ipc/schema/session.ts names no `DRAFT_CLAIM`), whose
+// composer knows no stage; the run of record is the one whose peer is F (`--peer-exact f1852de3a`). Neither the peer's
+// composer nor its store fences the stage (Interfaces §J: F's services open the profile here), so what F's unmount
+// leaves is read on F and is what this build finds; each scene says which of its two states it met and fails on any
+// third.
+//   (stage, its message waiting)  the turn paced slowly enough that its request is not reached while the scene looks
+//                                 (a request's card holds the box in both builds; a scene whose turn reaches it
+//                                 skips, its premise gone): a message waits for after the turn and its stage is
+//                                 kept. The peer shows the stage in its box as an ordinary draft and still lists the
+//                                 message. This build again: where the stored draft is still the stage, the composer
+//                                 carries it forward (the message withdrawn, in the box, the stage settled as an
+//                                 ordinary draft); where the peer wrote the draft on, an ordinary draft stands beside
+//                                 the message still listed.
+//   (stage, its message taken)    the same stage, then the request answered: the turn ends and the queue releases
+//                                 the message to the engine, whose own turn is answered to its end, so the session
+//                                 idles. The peer shows as a draft a message its transcript holds.
+//                                 This build again: where the stage is still stored, the record says the agent has
+//                                 the message, the stage is cleared and the stack's line says so; where the peer wrote
+//                                 the draft on, that draft stands, a message that sending the box would send again.
+const knowsStages = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/ipc/schema/session.ts'), 'utf8').includes('DRAFT_CLAIM');
+const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names DRAFT_CLAIM in its src/shared/ipc/schema/session.ts: a build from U4a on, whose composer carries a stage as this one does; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+// the waiting scene's pace: the fixture's request is its 45th row after the prompt, so about 270 s at this pace, past
+// what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
+const STAGE_ROW_MS = 6_000;
+const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
+const STAGE_TAKEN = 'Rename the second fixture once the review is done';
+const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
+const storedDraft = async (page: Page, id: AppSessionId): Promise<Draft | null> => value(await invoke(page, 'session.drafts.get', { appSessionId: id }));
+const stageOf = (draft: Draft | null): TakeBackMark | null => (draft?.doc as { attrs?: { takeBack?: TakeBackMark } } | null | undefined)?.attrs?.takeBack ?? null;
+const holdsText = (draft: Draft | null, text: string) => draft !== null && JSON.stringify(draft.doc).includes(text);
+const queuedIn = async (page: Page, id: AppSessionId, queueId: string) =>
+  value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries.some((entry) => entry.queueId === queueId && entry.state === 'queued');
+const composerBox = (page: Page) => page.locator('[data-region="main"] [data-composer] [contenteditable="true"]');
+const transcriptHolds = (page: Page, text: string) => page.locator('[data-region="main"] [data-transcript-scroller]').getByText(text).first();
+const hasRequest = async (page: Page, id: AppSessionId) => (await pendingPermissions(page, id)).length > 0;
+
+// The kept session's turn, open: the stub plays the permission round trip, its request ahead
+async function openStageTurn(page: Page, s: Scratch, id: AppSessionId): Promise<number> {
+  await s.launchSession(page, id, PERMISSION, { cwd: s.repo });
+  value(await invoke(page, 'session.send', { appSessionId: id, content: PROMPT }));
+  await expect.poll(async () => (await statusOf(page, id)).turn !== null, { timeout: 60_000, message: 'the turn is open' }).toBe(true);
+  const engine = (await statusOf(page, id)).pid;
+  expect(engine, 'the session runs a process (the stub, under a session host)').not.toBeNull();
+  return engine!;
+}
+
+// A message sent while the turn runs, which the queue holds for after it, and its stage saved under the claim as the
+// take-back saves it (composer/queue/take-back.ts: the entry's document with `attrs.takeBack`, every byte kept)
+async function stageWaiting(page: Page, id: AppSessionId, text: string): Promise<{ queueId: string; mark: TakeBackMark }> {
+  const sent = value(await invoke(page, 'session.send', { appSessionId: id, content: text }));
+  expect(sent.disposition, 'the message waits for after the turn: the queue holds it').toBe('queued');
+  let createdAt: string | undefined;
+  await expect
+    .poll(async () => (createdAt = value(await invoke(page, 'session.queue.list', { appSessionId: id })).entries.find((entry) => entry.queueId === sent.queueId && entry.state === 'queued')?.createdAt), { message: 'the queue lists the message' })
+    .toBeDefined();
+  const mark: TakeBackMark = { ref: sent.queueId, kind: 'entry', since: createdAt! };
+  const doc = { type: 'doc', attrs: { attachments: [], takeBack: mark }, content: [{ type: 'paragraph', content: [{ type: 'text', text }] }] };
+  value(await invoke(page, 'session.drafts.set', { appSessionId: id, draft: { doc, attachments: [], updatedAt: new Date().toISOString() }, replaces: DRAFT_CLAIM }));
+  expect(stageOf(await storedDraft(page, id)), 'the stage is kept, taken under the claim').toEqual(mark);
+  return { queueId: sent.queueId, mark };
+}
+
+// A launch of either build on the profile, served, with the kept session's process ready in it (adopted at a handover,
+// or served by the kept engine host of the other build)
+async function launchServed(s: Scratch, id: AppSessionId, root?: string): Promise<Run> {
+  const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, root);
+  await s.ready(run.page, () => true, 90_000);
+  await expect
+    .poll(async () => {
+      const answer = await invoke(run.page, 'session.status', { appSessionId: id });
+      return answer.ok ? answer.value.process : null;
+    }, { timeout: 90_000, message: 'the kept session is served' })
+    .toBe('ready');
+  return run;
+}
+
+// The peer's look: the session's tab from its sidebar row, the message in its box as a draft; then the tab closed (its
+// composer's unmount writes a pending change), and what is stored read on the peer and the peer quit
+async function peerShowsDraft(s: Scratch, old: Run, id: AppSessionId, text: string): Promise<Draft | null> {
+  const session = `session:${await addressed(old.page, id)}`;
+  await showSession(old.page, id, session);
+  await expect(composerBox(old.page), 'the peer’s box holds the message as an ordinary draft').toContainText(text, { timeout: 20_000 });
+  await mainTabById(old.page, session).getByRole('button', { name: /^Close / }).click();
+  await expect(mainTabById(old.page, session), 'the session’s tab closed').toHaveCount(0);
+  await old.page.waitForTimeout(1_000); // past the draft writer's 750 ms: whatever the unmount writes is written
+  const left = await storedDraft(old.page, id);
+  expect(old.maws.consoleErrors()).toEqual([]);
+  await s.quit(old);
+  return left;
+}
+
+test('(stage, its message waiting) a take-back’s stage this build kept for a message that waits after the turn shows in the peer’s box as an ordinary draft beside the message still listed; back here the stage is carried forward, or the peer’s draft stands beside the message, and which is said', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(knowsStages(peer), knowsStagesWhy(peer));
+  await withScratch('xb-stage-waiting', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) keeps a take-back's stage for a waiting message and its window is lost; ${peer.label} (wire ${wireOf(peer)}) opens the session; ${here.label} opens it again`];
+    s.useStub({ rowMs: STAGE_ROW_MS });
+    // this build: the turn open, a message waiting for after it, its stage kept; the app quits, the session kept
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const engine = await openStageTurn(run.page, s, id);
+    const { queueId, mark } = await stageWaiting(run.page, id, STAGE_WAITING);
+    expect(await hasRequest(run.page, id), 'the turn runs, its request ahead').toBe(false);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    expect(isAlive(engine), 'the session’s engine outlives the app, mid-turn').toBe(true);
+    said.push(`  ${here.label}: entry ${queueId} waits after the turn; the stage kept (since ${mark.since})`);
+
+    // the peer: the stage in its box as an ordinary draft, the message still listed
+    const old = await launchServed(s, id, peer.root);
+    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
+    const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
+    said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
+
+    // this build again: the state the peer left, carried forward or standing
+    const back = await launchServed(s, id);
+    const found = await storedDraft(back.page, id);
+    expect(found, 'this build finds what the peer left').toEqual(left);
+    const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
+    expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
+    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
+    if (stageOf(found) !== null) {
+      await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
+      await expect(composerBox(back.page), 'and in the box').toContainText(STAGE_WAITING, { timeout: 20_000 });
+      await expect
+        .poll(async () => {
+          const kept = await storedDraft(back.page, id);
+          return [stageOf(kept), holdsText(kept, STAGE_WAITING)];
+        }, { timeout: 30_000, message: 'the stage settled as the box’s ordinary draft' })
+        .toEqual([null, true]);
+    } else {
+      await expect(composerBox(back.page), 'the peer’s draft in the box').toContainText(STAGE_WAITING, { timeout: 20_000 });
+      expect(await queuedIn(back.page, id, queueId), 'beside the message, still listed').toBe(true);
+      expect(stageOf(await storedDraft(back.page, id)), 'no stage to carry').toBeNull();
+    }
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${outcome}`);
+    record(said);
+  });
+});
+
+test('(stage, its message taken) a take-back’s stage this build kept for a message the queue then released shows in the peer’s box as a draft while its transcript holds the message; back here the record says the agent has it and the stage is cleared, or the peer’s draft stands, and which is said', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(knowsStages(peer), knowsStagesWhy(peer));
+  await withScratch('xb-stage-taken', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) keeps a take-back's stage and the queue then releases the message; ${peer.label} (wire ${wireOf(peer)}) opens the session; ${here.label} opens it again`];
+    s.useStub({ rowMs: Number(ROW_MS) });
+    // this build: the stage kept for a waiting message; then the request answered, the turn's end, the release
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const engine = await openStageTurn(run.page, s, id);
+    const { queueId, mark } = await stageWaiting(run.page, id, STAGE_TAKEN);
+    const requested = await untilRequested(run.page, id);
+    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+    await expect
+      .poll(() => s.journal(id).some((r) => r.direction === 'out' && r.frame.type === 'user' && JSON.stringify(r.frame).includes(STAGE_TAKEN)), { timeout: 60_000, message: 'the turn ended and the queue released the message to the engine' })
+      .toBe(true);
+    expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
+    // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
+    // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
+    // the next prompt and no request's card holds either build's box
+    type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
+    let next: Requested | undefined;
+    await expect
+      .poll(async () => (next = (await eventsOf(run.page, id)).find((e): e is Requested => e.kind === 'permission.requested' && e.requestId !== requested.requestId)), { timeout: 60_000, message: 'the message’s own turn reaches its request' })
+      .toBeDefined();
+    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: next!.requestId, answer: { kind: 'permission', decision: 'deny' } }));
+    await expect.poll(async () => (await statusOf(run.page, id)).turn === null, { timeout: 60_000, message: 'the message’s own turn ended' }).toBe(true);
+    expect(stageOf(await storedDraft(run.page, id)), 'the stage still kept: nothing settled it').toEqual(mark);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    expect(isAlive(engine), 'the session’s engine outlives the app').toBe(true);
+    said.push(`  ${here.label}: entry ${queueId} released to the engine after its stage was kept (since ${mark.since})`);
+
+    // the peer: the message in its transcript, and as a draft in its box
+    const old = await launchServed(s, id, peer.root);
+    await showSession(old.page, id, `session:${await addressed(old.page, id)}`);
+    await expect(transcriptHolds(old.page, STAGE_TAKEN), 'the peer’s transcript holds the message').toBeVisible({ timeout: 20_000 });
+    const left = await peerShowsDraft(s, old, id, STAGE_TAKEN);
+    said.push(`  ${peer.label}: the transcript and the box both showed the message; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
+
+    // this build again: the record read, or the peer's draft standing
+    const back = await launchServed(s, id);
+    const found = await storedDraft(back.page, id);
+    expect(found, 'this build finds what the peer left').toEqual(left);
+    const outcome = stageOf(found) !== null ? 'the record said the agent has it; the stage cleared' : holdsText(found, STAGE_TAKEN) ? 'the peer’s draft stands, a message the agent already has' : null;
+    expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
+    await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
+    if (stageOf(found) !== null) {
+      await expect(back.page.locator('[data-region="main"]').getByRole('status', { name: 'Stack notice' }), 'the stack’s line').toHaveText(READ_ALREADY, { timeout: 30_000 });
+      await expect.poll(() => storedDraft(back.page, id), { timeout: 30_000, message: 'the stage cleared' }).toBeNull();
+      await expect(composerBox(back.page), 'nothing loaded into the box').not.toContainText(STAGE_TAKEN);
+    } else {
+      await expect(composerBox(back.page), 'the peer’s draft in the box').toContainText(STAGE_TAKEN, { timeout: 20_000 });
+      expect(stageOf(await storedDraft(back.page, id)), 'no stage to carry').toBeNull();
+    }
+    await expect(transcriptHolds(back.page, STAGE_TAKEN), 'the transcript holds the message').toBeVisible({ timeout: 20_000 });
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${outcome}`);
     record(said);
   });
 });

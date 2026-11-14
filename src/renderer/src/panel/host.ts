@@ -7,17 +7,19 @@
 // Refs are written only through C5's layout store: the shown session's list through the mounted host's `onChange`,
 // another session's through `updatePanelTabs`, the pins alone through `setPanelTabs(null, …)`. Nothing is written before
 // C5's hydration: an `addTool` made earlier is a pending add, applied when `hydrated` turns true (the barrier), because
-// `hydrate` replaces the panel lists wholesale.
+// `hydrate` replaces the panel lists wholesale. UX wave U8b (M2): a write of refs maintains them and the store repairs
+// every scope it reaches; what is in view changes only by the store's `showSurfaceTab` and `hideSurfaces`, which this
+// host calls where its caller asked for a tab (`activate`, `selectTab`) or for none (`showSummary`).
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef, Strip } from '@shared/ipc/schema/layout';
 import { currentTabRetention } from '../keymap/actions-runtime';
-import { pinSelection, useLayout, type LayoutState } from '../stores/layout';
+import { quietly, useLayout, type LayoutState } from '../stores/layout';
 import { activeTab, foldEnded, sessionOfTab } from '../stores/layout-model'; // P4-B3x: foldEnded
 import { useSessions } from '../stores/sessions';
 import { askEditorHostClose, clearEditorHost } from './editor-host'; // P3-G
 import type { PanelHostProps } from './host-slot';
-import { surfaceSession } from './surface-model';
+import { groupForOpen, sideGroups, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs, type SideGroupName } from './surface-model';
 import type { PanelTool, PanelToolInit } from './tool';
 
 type AnyTool = PanelTool<unknown, unknown>;
@@ -28,6 +30,13 @@ export interface AddToolOptions<P> {
   params?: P;
   pin?: boolean;
   activate?: boolean;
+  // UX wave U8b (M3, decision 3): the group the open comes from, while the column has two (a strip's "+"). Without it the
+  // tab goes where `groupForOpen` says: the group holding a tab of its tool, else the one holding the keyboard, else above.
+  group?: SideGroupName;
+  // UX wave U7b (its execution document, Interfaces §F, "Not the person's act"; M6, decision 5): an agent or a mod asked,
+  // not the person, so a session this add brings to the front closes neither the page nor the Settings dialog. Kept on a
+  // queued add and on each queued open until the open is made (`activateIn`), however late that is.
+  asked?: 'agent';
 }
 
 export interface Instance {
@@ -41,6 +50,7 @@ interface QueuedOpen {
   appSessionId: AppSessionId | null;
   params: unknown;
   activate: boolean;
+  asked: 'agent' | undefined;
 }
 
 export interface PendingAdd {
@@ -50,6 +60,8 @@ export interface PendingAdd {
   params: unknown;
   pin: boolean;
   activate: boolean;
+  group: SideGroupName | undefined;
+  asked: 'agent' | undefined;
   opens: QueuedOpen[]; // later single-instance calls that resolved to this reservation, in call order
 }
 
@@ -90,10 +102,8 @@ const selectionOf = (appSessionId: AppSessionId | null): string | null =>
 
 // The active tab within the panel's visible context, which can remain a session's while a document is in main.
 // This is distinct from `shownSession`: a foreground document supplies no chat for floating or mark-up delivery.
-export const selectedPanelTabId = (state: LayoutState = layout()): string | null => {
-  const shown = surfaceSession(state);
-  return shown === null ? state.panelActiveNoSession : (state.panelBySession.get(shown)?.activeTabId ?? null);
-};
+// UX wave U8b: the upper (or only) group's tab in view; none while the column is hidden.
+export const selectedPanelTabId = (state: LayoutState = layout()): string | null => surfaceTabs(state, surfaceSession(state))[0]?.id ?? null;
 
 // C5's own test for which sessions keep a layout list (`ipc/events.ts`, the predicate handed to `hydrate`).
 const known = (appSessionId: AppSessionId): boolean =>
@@ -188,54 +198,45 @@ function setClosing(tabId: string, on: boolean): void {
 
 // ---- writes through C5's store -----------------------------------------------------------------------------------------
 
-// Writes one list: the pins alone (`null`) or a session's effective list, `fn` mapping it (the pins ride through). The
-// selection becomes `requested` when it survives (null: the summary), else stays, else moves by the close rule.
-function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) => PanelTabRef[], requested?: string | null): void {
+// Writes one list: the pins alone (`null`) or a session's effective list, `fn` mapping it (the pins ride through). It
+// maintains the refs only (UX wave U8b, M2): the store repairs every scope the write reaches, and nothing comes into
+// view by it; the selection passed along is the current one, which the store does not read as a request. M3: refs added
+// for the lower group are written through the store with that group, which the mounted host's `onChange` cannot carry.
+function writeRefs(appSessionId: AppSessionId | null, fn: (refs: PanelTabRef[]) => PanelTabRef[], group: SideGroupName = 'upper'): void {
   const l = layout();
-  const before = appSessionId === null ? l.panelPinned : l.panelTabsOf(appSessionId);
-  const after = fn(before);
-  const current = selectionOf(appSessionId);
-  const activeTabId = requested === null ? null : pinSelection(before, after, current, requested ?? current);
-  if (appSessionId === null) l.setPanelTabs(null, { tabs: after, activeTabId });
-  else if (mounted && mounted.appSessionId === appSessionId && surfaceSession(layout()) === appSessionId) mounted.onChange({ tabs: after, activeTabId });
-  else if (requested === null) l.setPanelTabs(appSessionId, { tabs: after, activeTabId: null });
-  else l.updatePanelTabs(appSessionId, fn, requested ? { activeTabId: requested } : undefined);
+  const activeTabId = selectionOf(appSessionId);
+  const below = group === 'lower' ? { group } : undefined;
+  if (appSessionId === null) l.setPanelTabs(null, { tabs: fn(l.panelPinned), activeTabId }, below);
+  else if (!below && mounted && mounted.appSessionId === appSessionId && surfaceSession(layout()) === appSessionId) mounted.onChange({ tabs: fn(l.panelTabsOf(appSessionId)), activeTabId });
+  else l.updatePanelTabs(appSessionId, fn, below);
 }
 
-// The writer for a change to the pins alone: the shown session's list when it has one (so its selection is written
-// with it), else the pins by themselves; no session gains a list for it.
+// UX wave U8b (M3, decision 3): where the keyboard is in the side column. `menu`: inside a menu drawn in a portal from a
+// group's strip (marked `data-side-group-menu`), whose item is an open from that group, so it counts as the opener's
+// origin even when the item's opener names none (a plugin pane's, `openPaneTab`). `section`: inside a group's section,
+// the weaker fallback after a group that holds the tool.
+function keyboardGroup(): { menu: SideGroupName | null; section: SideGroupName | null } {
+  const at = typeof document === 'undefined' ? null : document.activeElement;
+  const name = (value: string | undefined) => (value === 'upper' || value === 'lower' ? value : null);
+  return {
+    menu: name(at?.closest<HTMLElement>('[data-side-group-menu]')?.dataset.sideGroupMenu),
+    section: name(at?.closest<HTMLElement>('section[data-side-group]')?.dataset.sideGroup),
+  };
+}
+
+// Where a new tab of `toolId` goes in its target's column: the opener's group (said, or the strip menu it was chosen
+// from), else `groupForOpen`'s answer; the keyboard is read only when the target's column is the one on screen.
+function groupFor(target: AppSessionId | null, toolId: string, origin: SideGroupName | undefined): SideGroupName {
+  const state = layout();
+  const keyboard = surfaceSession(state) === target ? keyboardGroup() : { menu: null, section: null };
+  return groupForOpen(sideGroups(state, target), toolId, origin ?? keyboard.menu, keyboard.section);
+}
+
+// The writer for a change to the pins alone: the shown session's list when it has one, else the pins by themselves; no
+// session gains a list for it.
 function pinWriter(): AppSessionId | null {
   const shown = surfaceSession(layout());
   return shown !== null && layout().panelBySession.has(shown) ? shown : null;
-}
-
-// Selection repair (C8a, *The host's state and transitions*): refs leaving a list every session shares (a pin closed,
-// unpinned, unregistered or pruned) or changing id (a restored ref replaced at the barrier) leave other sessions'
-// persisted selections naming them. Before `mutate`, each affected session's replacement is computed (the close rule
-// over its effective list less `removed`, or `replacement`); `mutate` writes what it writes, passing a written
-// session's replacement in that call (`replacementFor`) and returning the sessions it wrote; every other affected
-// session then gets one identity `updatePanelTabs` carrying its replacement. The no-session selection is C5's on a
-// removal (`pins()` revalidates it) and follows a replacement explicitly, since `pins()` would re-seat it on a neighbour.
-function repairSelections(
-  removed: ReadonlySet<string>,
-  mutate: (replacementFor: (appSessionId: AppSessionId) => string | null | undefined) => Iterable<AppSessionId>,
-  replacement?: string,
-): void {
-  const l = layout();
-  const affected = new Map<AppSessionId, string | null>();
-  for (const [appSessionId, state] of l.panelBySession) {
-    if (state.activeTabId === null || !removed.has(state.activeTabId)) continue;
-    const tabs = l.panelTabsOf(appSessionId);
-    affected.set(appSessionId, replacement ?? pinSelection(tabs, tabs.filter((t) => !removed.has(t.id)), state.activeTabId));
-  }
-  const noSessionNamed = replacement !== undefined && l.panelActiveNoSession !== null && removed.has(l.panelActiveNoSession);
-  const written = new Set(mutate((appSessionId) => affected.get(appSessionId)));
-  for (const [appSessionId, next] of affected) {
-    if (!written.has(appSessionId)) layout().updatePanelTabs(appSessionId, (refs) => refs, next === null ? undefined : { activeTabId: next });
-  }
-  if (noSessionNamed && layout().panelPinned.some((t) => t.id === replacement)) {
-    layout().setPanelTabs(null, { tabs: layout().panelPinned, activeTabId: replacement });
-  }
 }
 
 // Where a ref lives: the pins, or one session's own list.
@@ -246,22 +247,15 @@ function locate(tabId: string): { pinned: true } | { pinned: false; appSessionId
   return null;
 }
 
-// Removes refs from wherever each lives (the pins, or one session's own list), inside selection repair.
+// Removes refs from wherever each lives (the pins, or one session's own list); the store repairs every scope that showed
+// one (C8a's selection repair, now the store's `repairScope`).
 function removeRefs(ids: ReadonlySet<string>): void {
   const owners = new Set<AppSessionId | null>();
   for (const id of ids) {
     const at = locate(id);
     if (at) owners.add(at.pinned ? pinWriter() : at.appSessionId);
   }
-  if (owners.size === 0) return;
-  repairSelections(ids, (replacementFor) => {
-    const written: AppSessionId[] = [];
-    for (const owner of owners) {
-      writeRefs(owner, (refs) => refs.filter((t) => !ids.has(t.id)), owner === null ? undefined : replacementFor(owner));
-      if (owner !== null) written.push(owner);
-    }
-    return written;
-  });
+  for (const owner of owners) writeRefs(owner, (refs) => refs.filter((t) => !ids.has(t.id)));
 }
 
 // W4: a tool added with `activate` is put on screen, so a hidden right panel (⌘⇧B) opens: the receipt's Review changes
@@ -271,18 +265,16 @@ function reveal(): void {
   if (layout().regions.panel.collapsed) layout().setPanel({ collapsed: false });
 }
 
-// Selects a tab in the target's list: the no-session selection for `null`; a session not on screen is opened in the
-// main area first, so the panel follows.
-function activateIn(target: AppSessionId | null, tabId: string): void {
-  if (target === null) {
-    writeRefs(null, (refs) => refs, tabId);
-    if (surfaceSession(layout()) === null) requestFocus(tabId);
-    reveal();
-    return;
+// Brings a tab of the target's scope into view (`@none`'s for `null`) in place of its group's; a session not on screen
+// is opened in the main area, so the panel follows. The host's one open of a session: when an agent asked for it, it
+// is not the person's act (`quietly`), and leaves a page or the Settings dialog open (UX wave U7b).
+function activateIn(target: AppSessionId | null, tabId: string, asked?: 'agent'): void {
+  layout().showSurfaceTab(target, tabId);
+  if (target !== null && surfaceSession(layout()) !== target) {
+    if (asked === 'agent') quietly(() => layout().openSession(target));
+    else layout().openSession(target);
   }
-  if (surfaceSession(layout()) !== target) layout().openSession(target);
-  writeRefs(target, (refs) => refs, tabId);
-  requestFocus(tabId);
+  if (target !== null || surfaceSession(layout()) === null) requestFocus(tabId);
   reveal();
 }
 
@@ -311,13 +303,15 @@ interface Add {
   params: unknown;
   pin: boolean;
   activate: boolean;
+  group?: SideGroupName;
+  asked?: 'agent';
 }
 
 // Opens an existing single-instance tab: its state first when it has none, then `open`, then the call's activation.
 function retarget(ref: PanelTabRef, add: Add): string {
   const instance = ensureInstance(ref, add.tool, add.target);
   add.tool.open?.(instance.state, add.params);
-  if (add.activate) activateIn(add.target, ref.id);
+  if (add.activate) activateIn(add.target, ref.id, add.asked);
   return ref.id;
 }
 
@@ -333,30 +327,23 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
   const tabId = id ?? mintTabId(tool.id);
   const ref: PanelTabRef = { id: tabId, toolId: tool.id, pinned: pin };
   createInstance(ref, tool, { appSessionId: target, session: sessionRecord(target), instanceId: tabId, params });
-  // The tab is written before its session is shown, so a synchronous reaction to that switch which adds the same
-  // single-instance tool finds this tab rather than making a second one.
-  writeRefs(target, (refs) => [...refs, ref], activate ? tabId : undefined);
-  if (activate && target !== null && surfaceSession(layout()) !== target) layout().openSession(target);
-  if (activate && (target !== null || surfaceSession(layout()) === null)) requestFocus(tabId);
-  if (activate) reveal();
+  // The tab is written (and, activated, in view) before its session is shown, so a synchronous reaction to that switch
+  // which adds the same single-instance tool finds this tab rather than making a second one. Without `activate` the tab
+  // joins the strip and replaces nothing (a plugin roster's passive add; UX wave U8b, M2, decision 2). With two groups
+  // it joins the one `groupFor` names (M3).
+  writeRefs(target, (refs) => [...refs, ref], groupFor(target, tool.id, add.group));
+  if (activate) activateIn(target, tabId, add.asked);
   return tabId;
 }
 
 // The barrier's in-place replacement: the reservation takes a restored, never-instantiated slot of its tool (position
-// and `pinned` kept; `pin: true` on the call wins), and every selection that named the restored id migrates to it.
+// and `pinned` kept; `pin: true` on the call wins). The store reads the write as a replacement (same position, same tool,
+// a new id) and moves the restored id's place in every scope, in view or remembered, to it.
 function replaceRestored(existing: PanelTabRef, add: Add, id: string): string {
   const ref: PanelTabRef = { id, toolId: add.tool.id, pinned: add.pin || existing.pinned };
   createInstance(ref, add.tool, { appSessionId: add.target, session: sessionRecord(add.target), instanceId: id, params: add.params });
-  const owner = existing.pinned ? pinWriter() : add.target;
-  repairSelections(
-    new Set([existing.id]),
-    (replacementFor) => {
-      writeRefs(owner, (refs) => refs.map((t) => (t.id === existing.id ? ref : t)), owner === null ? undefined : replacementFor(owner));
-      return owner === null ? [] : [owner];
-    },
-    id,
-  );
-  if (add.activate) activateIn(add.target, id);
+  writeRefs(existing.pinned ? pinWriter() : add.target, (refs) => refs.map((t) => (t.id === existing.id ? ref : t)));
+  if (add.activate) activateIn(add.target, id, add.asked);
   return id;
 }
 
@@ -372,15 +359,15 @@ function addTool<P>(toolId: string, opts: AddToolOptions<P>): string {
     if (!tool.multiInstance) {
       const reserved = pending.find((p) => p.toolId === toolId && inPendingScope(p, target));
       if (reserved) {
-        reserved.opens.push({ appSessionId: target, params: opts.params, activate });
+        reserved.opens.push({ appSessionId: target, params: opts.params, activate, asked: opts.asked });
         return reserved.id;
       }
     }
     const id = mintTabId(toolId);
-    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, opens: [] });
+    pending.push({ id, toolId, appSessionId: target, params: opts.params, pin, activate, group: opts.group, asked: opts.asked, opens: [] });
     return id;
   }
-  return applyAdd({ tool, target, params: opts.params, pin, activate });
+  return applyAdd({ tool, target, params: opts.params, pin, activate, group: opts.group, asked: opts.asked });
 }
 
 // ---- the barrier -------------------------------------------------------------------------------------------------------
@@ -397,16 +384,37 @@ function passBarrier(): void {
     if (entry.appSessionId !== null && !known(entry.appSessionId)) continue;
     const tool = usePanelHost.getState().tools.get(entry.toolId);
     if (!tool) continue; // unregistered while it waited
-    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate }, entry.id, restored);
+    const tabId = applyAdd({ tool, target: entry.appSessionId, params: entry.params, pin: entry.pin, activate: entry.activate, group: entry.group, asked: entry.asked }, entry.id, restored);
     if (tabId !== entry.id) aliases.set(entry.id, tabId);
     for (const queued of entry.opens) {
       if (queued.appSessionId !== null && !known(queued.appSessionId)) continue;
       const instance = instances.get(tabId);
       if (!instance) continue;
       tool.open?.(instance.state, queued.params);
-      if (queued.activate) activateIn(queued.appSessionId, tabId);
+      if (queued.activate) activateIn(queued.appSessionId, tabId, queued.asked);
     }
   }
+}
+
+// UX wave U8b (M2, decision 3): the tab of each tool last in view in this run, by scope, which a click on the tool's icon
+// brings back while it is still a ref of that scope (`toggleSurface`). Noted from every change of a scope's stack.
+const lastInView = new Map<string, Map<string, string>>();
+
+function noteInView(state: LayoutState, prev: LayoutState): void {
+  const { stacks } = state.panelSurfaces;
+  if (stacks === prev.panelSurfaces.stacks) return;
+  for (const [scope, ids] of Object.entries(stacks)) {
+    if (ids === prev.panelSurfaces.stacks[scope] || ids.length === 0) continue;
+    const session = scope === surfaceScope(null) ? null : (scope as AppSessionId);
+    const byTool = lastInView.get(scope) ?? new Map<string, string>();
+    for (const tab of surfaceTabs(state, session)) byTool.set(tab.toolId, tab.id);
+    lastInView.set(scope, byTool);
+  }
+}
+
+export function lastInViewOf(appSessionId: AppSessionId | null, toolId: string): PanelTabRef | undefined {
+  const id = lastInView.get(surfaceScope(appSessionId))?.get(toolId);
+  return id === undefined ? undefined : surfaceRefs(layout(), appSessionId).find((t) => t.id === id);
 }
 
 // Reconciliation: an instance whose ref is in no list (a removed session's, through C5's `dropSession`) is disposed
@@ -423,10 +431,11 @@ export function connectPanelHost(): () => void {
   const off = useLayout.subscribe((state, prev) => {
     if (state.hydrated && !prev.hydrated) passBarrier();
     if (state.panelPinned !== prev.panelPinned || state.panelBySession !== prev.panelBySession) reconcile();
+    noteInView(state, prev);
     // P4-B3x: not when the panel opens because an Expand that folded it ended: the dock hands the keyboard to the
     // session's composer (P4-B3's Decision Log 7), which a tool taking it here would undo.
     if (prev.regions.panel.collapsed && !state.regions.panel.collapsed && !foldEnded(prev.main, state.main)) {
-      const selected = selectionOf(surfaceSession(layout()));
+      const selected = selectedPanelTabId();
       if (selected !== null) requestFocus(selected);
     }
   });
@@ -442,17 +451,13 @@ export const isRestoredLog = (tabId: string): boolean => restoredLogs.has(tabId)
 export const restoredLogIds = (): ReadonlySet<string> => restoredLogs;
 
 // Called by the host component with the tabs it is about to show: drops restored Log refs before the strip renders
-// them, written back once through `onChange` with the shown selection moved off them, inside selection repair (a pruned
-// pinned Log leaves every session's list).
-export function pruneRestoredLogs(props: Pick<PanelHostProps, 'appSessionId' | 'tabs' | 'activeTabId' | 'onChange'>): void {
+// them, written back once through `onChange`; the store moves every scope's view off them (a pruned pinned Log leaves
+// every session's list).
+export function pruneRestoredLogs(props: Pick<PanelHostProps, 'tabs' | 'activeTabId' | 'onChange'>): void {
   const pruned = new Set(props.tabs.flatMap((t) => (restoredLogs.has(t.id) ? [t.id] : [])));
   if (pruned.size === 0) return;
   for (const id of pruned) restoredLogs.delete(id);
-  repairSelections(pruned, () => {
-    const tabs = props.tabs.filter((t) => !pruned.has(t.id));
-    props.onChange({ tabs, activeTabId: pinSelection(props.tabs, tabs, props.activeTabId) });
-    return props.appSessionId === null ? [] : [props.appSessionId];
-  });
+  props.onChange({ tabs: props.tabs.filter((t) => !pruned.has(t.id)), activeTabId: props.activeTabId });
 }
 
 // ---- the mounted host ----------------------------------------------------------------------------------------------------
@@ -462,27 +467,17 @@ export function setMountedHost(props: Pick<PanelHostProps, 'appSessionId' | 'onC
   mounted = props;
 }
 
-// The pin glyph: C5 moves the ref between the lists; unpinning takes it out of every other session's list, so their
-// selections are repaired.
+// The pin glyph: C5 moves the ref between the lists; unpinning takes it out of every other session's list, whose views
+// the store repairs.
 export function togglePinned(id: string): void {
   const tabId = resolveId(id);
   const shown = surfaceSession(layout());
   if (shown === null) return;
-  const toggle = () => {
-    if (mounted && mounted.appSessionId === shown) mounted.onTogglePinned(tabId);
-    else {
-      const tab = layout().panelTabsOf(shown).find((t) => t.id === tabId);
-      if (tab) layout().setPanelTabPinned(shown, tabId, !tab.pinned);
-    }
-  };
-  if (!layout().panelPinned.some((t) => t.id === tabId)) {
-    toggle();
-    return;
+  if (mounted && mounted.appSessionId === shown) mounted.onTogglePinned(tabId);
+  else {
+    const tab = layout().panelTabsOf(shown).find((t) => t.id === tabId);
+    if (tab) layout().setPanelTabPinned(shown, tabId, !tab.pinned);
   }
-  repairSelections(new Set([tabId]), () => {
-    toggle();
-    return [shown];
-  });
 }
 
 // ---- registration and the public surface ---------------------------------------------------------------------------------
@@ -512,15 +507,16 @@ export function registerPanelTool<S, P>(tool: PanelTool<S, P>): () => void {
 
 export const panelHost = {
   addTool,
-  // Selects the tab and, on screen, asks it to take the keyboard; `focus: false` selects it alone (a move the person did
-  // not make, which leaves the keyboard where it is).
+  // Shows the tab in place of its group's (UX wave U8b: `showSurfaceTab`, which shows a hidden column) and, on screen,
+  // asks it to take the keyboard; `focus: false` shows it alone (a move the person did not make, which leaves the
+  // keyboard where it is).
   selectTab(id: string, { focus = true }: { focus?: boolean } = {}): void {
     const tabId = resolveId(id);
     const at = locate(tabId);
     if (!at) return;
     const shown = surfaceSession(layout());
     const owner = at.pinned ? shown : at.appSessionId;
-    writeRefs(owner, (refs) => refs, tabId);
+    layout().showSurfaceTab(owner, tabId);
     if (focus && owner === shown) requestFocus(tabId);
     if (focus) reveal(); // opening a collapsed panel itself requests focus; passive roster changes must not do so
   },
@@ -555,9 +551,10 @@ export const panelHost = {
     setClosing(tabId, true);
     return closing;
   },
+  // Hides the side column for the shown scope (the cards show); its tabs and what each group shows are kept.
   showSummary(): void {
     const shown = surfaceSession(layout());
-    if (selectionOf(shown) !== null) writeRefs(shown, (refs) => refs, null);
+    if (surfaceTabs(layout(), shown).length > 0) layout().hideSurfaces(shown);
   },
   tools(): PanelTool<unknown, unknown>[] {
     return [...usePanelHost.getState().tools.values()];
@@ -575,6 +572,7 @@ export function resetPanelHost(): void {
   restoredLogs = new Set();
   barrierPassed = false;
   aliases.clear();
+  lastInView.clear();
   mounted = null;
   usePanelHost.setState(initialState());
 }

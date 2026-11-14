@@ -29,7 +29,7 @@ import { closeDialog } from '../dialogs';
 import { Sheet, SheetForm } from '../Sheet';
 import { displayTitle, listedTitle } from '../title';
 import { CHOICE, PRIMARY, QUIET, SECONDARY } from '../ui';
-import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, type ShareAccess, type ShareGrade } from './copy';
+import { ACCESS_ORDER, GRADE_ORDER, lineWords, outcomeWords, refusalWords, SHARE, subtitleTooltip, type ShareAccess, type ShareGrade } from './copy';
 
 // A select drawn as the sheets' fields are (ui.ts's FIELD), sized by its row rather than taking the row's whole width.
 export const SELECT = 'rounded-sm border border-border-strong bg-bg px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2';
@@ -185,9 +185,9 @@ function ReaderSheet({ address, me }: { address: AppSessionId; me: string | null
   );
 
   return (
-    <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" scrim="bg-bg-active" data-share-sheet={address}>
+    <Sheet title={SHARE.title} width="w-[min(480px,90vw)]" data-share-sheet={address}>
       <SheetForm canSubmit={change !== null && !saving} onSubmit={() => void save()} submitLabel={ready === null ? undefined : saving ? SHARE.saving : SHARE.save} submitClass={PRIMARY} cancelLabel={ready === null || saved !== null ? SHARE.close : undefined}>
-        <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={title}>
+        <div data-share-session className="flex min-w-0 text-ui-sm text-fg-muted" title={subtitleTooltip(title, machine)}>
           <span className="min-w-0 truncate">{title}</span>
           <span className="max-w-[50%] shrink-0 truncate whitespace-pre"> · {machine}</span>
         </div>

@@ -12,7 +12,7 @@ import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
-import { fakeHash, installDisk, type DiskFile } from '../../../test-support/code-disk';
+import { fakeHash, installDisk, type DiskFile, type DiskOptions } from '../../../test-support/code-disk';
 import { useFiles } from '../files/store';
 import { openFile } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
@@ -64,8 +64,8 @@ describe('editor', () => {
   });
 
   // A file tab over the fake disk, its main's events connected, its editor loaded and editable.
-  async function open(files: Record<string, DiskFile>, path = APP) {
-    const disk = installDisk(files);
+  async function open(files: Record<string, DiskFile>, path = APP, options?: DiskOptions) {
+    const disk = installDisk(files, options);
     offs.push(connectCodeEvents());
     openFile(A, path); // the layout holds the tab, so a remount finds its entry
     const shown = render(<FileViewer tab={fileTab(path)} />);
@@ -414,8 +414,35 @@ describe('editor', () => {
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry()).toMatchObject({ theirs: { text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' }, saving: false }));
       expect(disk.callsOf('files.read')).toHaveLength(reads + 1);
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true, named: true });
     });
+
+    // UX wave U6c (Decision Log 15 e): a save's conflict read that answers `named` (the folder left the session's while
+    // the save was in flight, and the transcript links the file) makes the entry named and not editable, the document
+    // standing, so no later save sends the write the service would refuse.
+    for (const disk2 of ['the baseline', 'another version'] as const) {
+      it(`makes the entry named and read-only when a save's conflict read answers named with ${disk2}, the edits standing`, async () => {
+        const names = new Set<string>();
+        const { disk } = await open({ [APP]: 'const a = 1;\n' }, APP, { names: (_, path) => names.has(path) });
+        type('// mine\n');
+        disk.files[APP] = 'const a = 3;\n'; // no event: the save conflicts with 3, its reply held
+        const write = disk.hold('files.write');
+        fireEvent.click(saveButton()!);
+        await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+        if (disk2 === 'the baseline') disk.files[APP] = 'const a = 1;\n';
+        disk.outside.add('/r'); // before the conflict reads the file
+        names.add(APP);
+        await act(async () => write.release());
+        await waitFor(() => expect(entry().saving).toBe(false));
+        expect(disk.callsOf('files.read').at(-1)).toMatchObject({ offset: 0, length: FILES_READ_MAX_LENGTH, hash: true, named: true });
+        expect(entry()).toMatchObject({ named: true, editable: false, dirty: true });
+        expect(entry().theirs).toEqual(disk2 === 'the baseline' ? null : { text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' });
+        expect(doc()).toBe('// mine\nconst a = 1;\n');
+        await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(false));
+        expect(await useViewer.getState().save(FILE(APP))).toBe('noop');
+        expect(disk.callsOf('files.write')).toHaveLength(1);
+      });
+    }
 
     it('withdraws theirs when a save’s conflict read finds the disk back at the baseline; the next save lands', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
@@ -617,7 +644,7 @@ describe('editor', () => {
       disk.files[APP] = 'const a = 3;\n'; // no event
       fireEvent.click(saveButton()!);
       await waitFor(() => expect(entry().theirs).toEqual({ text: 'const a = 3;\n', hash: fakeHash('const a = 3;\n'), view: 'merge' }));
-      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true });
+      expect(disk.callsOf('files.read').at(-1)).toEqual({ appSessionId: MAIN_A, path: APP, offset: 0, length: FILES_READ_MAX_LENGTH, hash: true, named: true });
       expect(entry().saving).toBe(false);
     });
 

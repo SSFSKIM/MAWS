@@ -4,6 +4,11 @@
 // file under src/, suites and comments included, and fails on a file that spells the folder itself outside the
 // exceptions below. It sees the usual forms (a fallback, a conditional either way round); a spelling spread over
 // statements or made through other names it cannot see, and the rule holds there all the same.
+//
+// The second rule (UX wave U8c-2, §F): the record's two facts, `launchFolder` and `agentFolder`, are read only by the
+// selector's module, which answers from them (`workingFolder`, `workingWorktree`, `workingBranch`). Product source outside
+// it, suites and test support aside, holds no member access of either key outside the counted table below. An object
+// literal that sets one (the index builds the record that way) is no read and is not counted.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -32,6 +37,17 @@ const EXCEPTIONS: Record<string, { count: number; why: string }> = {
   'src/renderer/src/sessions/DeleteDialog.tsx': { count: 1, why: 'the folder of the record about to be deleted' },
   'src/renderer/src/resume/ResumeChooser.tsx': { count: 1, why: "the Resume picker's folder badge: where a past session was" },
 };
+
+const FACT_READS = [
+  /(?:\?\.|!\.|\.)\s*(?:agentFolder|launchFolder)\b/g, // record.agentFolder, record?.launchFolder, record!.agentFolder
+  /\[\s*['"](?:agentFolder|launchFolder)['"]\s*\]/g, // record['agentFolder']
+];
+const factReads = (text: string): number => FACT_READS.reduce((n, re) => n + (text.match(re)?.length ?? 0), 0);
+
+// A read outside the selector's module that cannot go through it. Adding one is an edit here, with its count and its reason.
+const FACT_EXCEPTIONS: Record<string, { count: number; why: string }> = {};
+
+const isProductSource = (file: string) => !/\.test\.tsx?$/.test(file) && !file.split('/').includes('test-support');
 
 function sources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -87,6 +103,55 @@ describe('one working folder', () => {
         'through workingFolder (src/shared/sessions/working-folder.ts) or useWorkingFolder (src/renderer/src/sessions/working-folder.ts). ' +
         'An exception is a place about the record and not about where the agent is working; adding one, or changing its count, ' +
         'is an edit to EXCEPTIONS in test/one-working-folder.test.ts with its reason. An entry whose spelling is gone is removed there.',
+    ).toEqual([]);
+  });
+});
+
+describe("the second rule's recogniser (the two facts)", () => {
+  it.each([
+    'record.agentFolder?.checkout',
+    'const at = record?.launchFolder;',
+    'value!.agentFolder',
+    "record['launchFolder']",
+    'record[ "agentFolder" ]',
+    '// the launch folder: record.launchFolder',
+  ])('counts one read in %j', (text) => {
+    expect(factReads(text)).toBe(1);
+  });
+
+  it.each([
+    '{ ...facts, agentFolder: at }',
+    "field(value, 'agentFolder')",
+    'launchFolder: z.string().optional(),',
+    'const launchFolder = folders.launch;',
+    'record.agentFolders',
+    "record['launchFolders']",
+  ])('counts none in %j', (text) => {
+    expect(factReads(text)).toBe(0);
+  });
+});
+
+describe('the two facts are read in one place', () => {
+  it("finds a member access of either fact only in the selector's module and the counted exceptions", () => {
+    const found = new Map(
+      sources(resolve(ROOT, 'src'))
+        .filter((file) => file !== SELECTOR && isProductSource(file))
+        .map((file) => [file, factReads(readFileSync(resolve(ROOT, file), 'utf8'))] as const),
+    );
+    const files = new Set([...[...found].filter(([, n]) => n > 0).map(([file]) => file), ...Object.keys(FACT_EXCEPTIONS)]);
+    const differences = [...files]
+      .sort()
+      .flatMap((file) => {
+        const count = found.get(file) ?? 0;
+        const excepted = FACT_EXCEPTIONS[file]?.count ?? 0;
+        return count === excepted ? [] : [`${file} ${count}${excepted > 0 ? ` (excepted: ${excepted})` : ''}`];
+      });
+    expect(
+      differences,
+      "These files read the record's launchFolder or agentFolder themselves: read where the agent is through workingFolder, " +
+        'workingWorktree or workingBranch (src/shared/sessions/working-folder.ts), or useWorkingFolder (src/renderer/src/sessions/working-folder.ts). ' +
+        'A read that cannot go through them is an edit to FACT_EXCEPTIONS in test/one-working-folder.test.ts with its count and reason. ' +
+        'An entry whose read is gone is removed there.',
     ).toEqual([]);
   });
 });

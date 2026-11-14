@@ -2,13 +2,19 @@
 // named the current title, and, for a live session, "Regenerate" through C3's `session.generateTitle`. A live session
 // is renamed through the engine (its store carries the title); an exited one gets C4's override, which a later
 // terminal `/rename` replaces (C4's title rule).
+// The UX wave, U9 (S-02, A10): a session on another machine is renamed there, from its listing alone where this Mac holds
+// no record (its title the listing's; no provenance and no Regenerate, which read a record and a tab), and what this window
+// did shows in the sidebar at once (the sessions store's `noteRenamed`). While the act can't work there (the window's
+// helper) the sheet says why and its Rename is disabled, whenever that begins.
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3: a linked read is not the prompt's words
 import { ipc } from '../ipc/client';
+import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useSessions } from '../stores/sessions';
 import { closeDialog } from './dialogs';
+import { onAnotherMachine } from './record-ops';
 import { Sheet, SheetForm } from './Sheet';
 import { FIELD, PRIMARY, QUIET } from './ui';
 
@@ -39,10 +45,13 @@ async function describe(appSessionId: AppSessionId, fallback: string): Promise<s
 
 export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);
+  const listing = useSessions((s) => (record === null ? (s.listed.get(appSessionId) ?? null) : null)); // the UX wave, U9
   const live = useSessions((s) => s.engine.get(appSessionId)?.process === 'ready');
-  const [title, setTitle] = useState(record?.title.text ?? '');
+  const current = record?.title.text ?? listing?.title ?? '';
+  const [title, setTitle] = useState(current);
   const [error, setError] = useState<string | null>(null);
   const [regenerating, setRegenerating] = useState<string | null>(null); // the operation in flight
+  const unavailable = useRemoteUnavailable(appSessionId, 'session.rename'); // the UX wave, U9: null on this Mac
 
   useEffect(() => {
     if (regenerating === null) return;
@@ -56,17 +65,18 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
     });
   }, [regenerating]);
 
-  if (record === null) return null;
+  if (record === null && listing === null) return null;
   const trimmed = title.trim();
 
   const submit = async () => {
     const result = await ipc.invoke('session.rename', { appSessionId, title: trimmed });
-    if (!result.ok) setError(result.error.message);
-    else closeDialog();
+    if (!result.ok) return setError(result.error.message);
+    if (onAnotherMachine(appSessionId)) useSessions.getState().noteRenamed(appSessionId, trimmed);
+    closeDialog();
   };
   const regenerate = async () => {
     setError(null);
-    const description = await describe(appSessionId, record.title.text);
+    const description = await describe(appSessionId, current);
     const receipt = await ipc.invoke('session.generateTitle', { appSessionId, description, persist: true });
     if (!receipt.ok) setError(receipt.error.message);
     else setRegenerating(receipt.value.opId);
@@ -74,19 +84,24 @@ export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
 
   return (
     <Sheet title="Rename">
-      <SheetForm canSubmit={trimmed.length > 0 && trimmed !== record.title.text} onSubmit={() => void submit()} submitLabel="Rename" submitClass={PRIMARY}>
+      <SheetForm canSubmit={trimmed.length > 0 && trimmed !== current && unavailable === null} onSubmit={() => void submit()} submitLabel="Rename" submitClass={PRIMARY}>
         <input aria-label="Title" autoFocus value={title} maxLength={200} onChange={(e) => setTitle(e.target.value)} className={FIELD} />
-        <p className="m-0 flex items-center gap-2 text-ui-sm text-fg-muted">
-          <span>{provenanceOf(record.title.source)}</span>
-          {live && (
-            <button type="button" disabled={regenerating !== null} onClick={() => void regenerate()} className={QUIET}>
-              {regenerating === null ? 'Regenerate' : 'Regenerating…'}
-            </button>
-          )}
-        </p>
-        <p className="m-0 text-ui-sm text-fg-muted">
-          {live ? 'The engine records the new title.' : 'Kept in MAWS until the session runs again; a /rename in the terminal replaces it.'}
-        </p>
+        {record !== null && (
+          <>
+            <p className="m-0 flex items-center gap-2 text-ui-sm text-fg-muted">
+              <span>{provenanceOf(record.title.source)}</span>
+              {live && (
+                <button type="button" disabled={regenerating !== null} onClick={() => void regenerate()} className={QUIET}>
+                  {regenerating === null ? 'Regenerate' : 'Regenerating…'}
+                </button>
+              )}
+            </p>
+            <p className="m-0 text-ui-sm text-fg-muted">
+              {live ? 'The engine records the new title.' : 'Kept in MAWS until the session runs again; a /rename in the terminal replaces it.'}
+            </p>
+          </>
+        )}
+        {unavailable !== null && <p className="m-0 text-ui-sm text-fg-muted">{unavailable}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
       </SheetForm>
     </Sheet>

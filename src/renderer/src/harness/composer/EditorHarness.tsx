@@ -7,9 +7,11 @@
 // P5 O6 M2: `show` takes the raw bridge's bare session id, which the page holds as the local machine's address.
 import { WidgetDialogHost } from '../../composer/WidgetDialog'; // W3 (C6)
 import { useEffect, useRef, useState } from 'react';
+import { QueryClientProvider } from '@tanstack/react-query';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
+import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { attachmentsOf, type ComposerDoc } from '../../composer/editor/doc';
 import { Editor, type EditorHandle } from '../../composer/editor/Editor';
@@ -90,7 +92,10 @@ export function EditorHarness() {
             }}
           />
           <div className="flex items-center gap-2 text-ui-sm text-fg-muted">
-            <PlusMenu cwd={pane.cwd} editor={handle} />
+            {/* UX wave U11a: the menu's Connectors rows come from a hook over the query client, as in the app */}
+            <QueryClientProvider client={queryClient}>
+              <PlusMenu cwd={pane.cwd} editor={handle} />
+            </QueryClientProvider>
             <ul aria-label="attachments" className="m-0 flex list-none gap-2 p-0">
               {(doc ? attachmentsOf(doc) : []).map((a) => (
                 <li key={a.id} className="rounded-sm border border-border px-1.5">

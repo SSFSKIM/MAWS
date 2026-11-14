@@ -16,13 +16,17 @@ import { ipc } from '../ipc/client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
 import { instanceOf, panelHost, registerPanelTool, resetPanelHost } from '../panel/host';
 import { HolderNotice } from '../session/HolderNotice';
-import { useLayout } from '../stores/layout';
+import { tabOnScreen, useLayout } from '../stores/layout';
+import { surfaceTabs } from '../panel/surface-model';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import type { TerminalInfo } from '../terminal/registry';
 import { resetPanelStores } from '../test-support/panel';
 import { resetSetupStore } from '../test-support/setup-intents';
 import { preloadOf } from '../test-support/preload-of';
+
+// The tab of A's side column in view (UX wave U8b: hiding the column keeps its selection to show again).
+const inViewOfA = () => surfaceTabs(useLayout.getState(), A)[0]?.id ?? null;
 
 const registry = vi.hoisted(() => {
   let infos: TerminalInfo[] = [];
@@ -151,7 +155,7 @@ describe('held outcomes and the attach command', () => {
     expect(fake.invoked('fs.holders')).toEqual([{ sessionIds: [ENGINE], directories: null }]);
     const tabs = useLayout.getState().panelTabsOf(A);
     expect(tabs.map((t) => [t.id, t.toolId])).toEqual([[init!.label, 'terminal']]); // the pty's label is the tab id
-    expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(init!.label);
+    expect(inViewOfA()).toBe(init!.label);
   });
 
   // The branch review: Attach runs on the session's machine, so the binary it types, and the installed version the notice
@@ -182,9 +186,9 @@ describe('held outcomes and the attach command', () => {
     await waitFor(() => expect(opened()).toHaveLength(1));
     const first = opened()[0]!.label;
     act(() => panelHost.showSummary());
-    expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBeNull();
+    expect(inViewOfA()).toBeNull();
     await userEvent.click(attachButton());
-    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
     expect(opened(), 'no second attach while the first runs').toHaveLength(1);
     expect(fake.invoked('pty.write'), 'nothing typed into a busy terminal').toEqual([]);
 
@@ -192,7 +196,7 @@ describe('held outcomes and the attach command', () => {
     act(() => panelHost.showSummary());
     await userEvent.click(attachButton());
     await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `\x15${COMMAND}\n` }])); // ^U first: whatever was half-typed at the prompt is dropped
-    expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first);
+    expect(inViewOfA()).toBe(first);
     expect(opened(), 'the attach re-ran in the same tab').toHaveLength(1);
 
     registry.exit(registry.terminals.list()[0]!.id);
@@ -221,7 +225,7 @@ describe('held outcomes and the attach command', () => {
     forgetAttachTabs(); // a reload: the key is read again from main
     act(() => panelHost.showSummary());
     await userEvent.click(attachButton());
-    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
     expect(opened()).toHaveLength(1);
     expect(fake.invoked('layout.get')).toEqual([{ key: 'sessions.attachTabs' }, { key: 'sessions.attachTabs' }]);
   });
@@ -239,7 +243,7 @@ describe('held outcomes and the attach command', () => {
     act(() => panelHost.showSummary());
     expect(instanceOf(first)).toBeUndefined();
     await userEvent.click(attachButton());
-    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
     expect(opened(), 'no second attach tab').toHaveLength(1);
     // C9 re-adopts the pty, where `claude attach` still holds the terminal: shown, nothing typed
     act(() => registry.start(first, A));
@@ -261,7 +265,7 @@ describe('held outcomes and the attach command', () => {
     registry.foreground.busy = false; // a fresh login shell at its prompt
     act(() => panelHost.showSummary());
     await userEvent.click(attachButton());
-    await waitFor(() => expect(useLayout.getState().panelBySession.get(A)?.activeTabId).toBe(first));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
     expect(fake.invoked('pty.write'), 'no shell yet').toEqual([]);
     act(() => registry.start(first, A));
     await waitFor(() => expect(fake.invoked('pty.write')).toEqual([{ ptyId: 'pty-t1', data: `\x15${COMMAND}\n` }])); // the fresh shell (the registry's ids restarted with the page)
@@ -383,6 +387,33 @@ describe('held outcomes and the attach command', () => {
     held(JOB);
     act(() => runSessionAction('attach', A));
     await waitFor(() => expect(opened()).toMatchObject([{ appSessionId: A, command: COMMAND }]));
+  });
+
+  // UX wave U7b (the architect's ruling 2): behind a page Attach leaves the page, with the session in front and its tab
+  // shown, whether it opens the terminal or shows the one it remembers.
+  it('the row menu’s Attach behind a page leaves the page for the session in front, its new terminal shown', async () => {
+    held(JOB);
+    act(() => useLayout.getState().openSession(A)); // the session in front: the host would not open it again
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(tabOnScreen(useLayout.getState())).toMatchObject({ kind: 'session', appSessionId: A });
+    expect(inViewOfA()).toBe(opened()[0]!.label);
+  });
+
+  it('a second Attach behind a page leaves it for the session already in front, the remembered tab shown', async () => {
+    held(JOB);
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(opened()).toHaveLength(1));
+    const first = opened()[0]!.label;
+    act(() => panelHost.showSummary());
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    act(() => runSessionAction('attach', A));
+    await waitFor(() => expect(inViewOfA()).toBe(first));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(tabOnScreen(useLayout.getState())).toMatchObject({ kind: 'session', appSessionId: A });
+    expect(opened(), 'the remembered tab, not another').toHaveLength(1);
   });
 
   it("Resume answered held offers the job's Attach in its toast, with the command main named", async () => {

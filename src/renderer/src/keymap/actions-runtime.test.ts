@@ -221,7 +221,7 @@ describe('the current project', () => {
     expect(currentRow(), 'a page in front changes no project').toBe(P);
     front(LOOSE);
     expect(currentRow(), 'a session in no project: its machine’s row').toBe(machineKey(TEST_MACHINE));
-    useLayout.getState().openTab({ kind: 'settings', section: null });
+    useLayout.getState().openTab({ kind: 'diagnostics' }); // a tab of no session in front
     expect(currentRow()).toBe(machineKey(TEST_MACHINE));
   });
 

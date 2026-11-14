@@ -8,6 +8,7 @@ import { LaunchSpecSchema } from '@shared/engine/launch-spec';
 import { ReloadPluginsResponseSchema } from '@shared/wire/control';
 import { SessionStatusTracker } from './session-status';
 
+
 const ROOT = resolve(__dirname, '../..');
 const fixtureRow = (seq: number) =>
   readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/pass3/e8-plugins-reload.jsonl'), 'utf8')
@@ -170,5 +171,34 @@ describe('SessionStatusTracker: activity at a turn’s end', () => {
     expect(tracker.snapshot().activity).toBe('requesting');
     tracker.observe({ type: 'result', subtype: 'success' }, '2026-10-06T02:52:02.000Z');
     expect(tracker.snapshot().activity).toBeNull();
+  });
+});
+
+// The UX wave's U8b, M5 decision 1: the status's list carries each task's starter as the engine's listing names it
+// (pass3/uxwave/uxwave-subagent-tasks-nodelay seq 75), and the Stop's list, which names none, keeps a known one.
+describe('SessionStatusTracker: a background task’s starter', () => {
+  const listing = (tasks: Record<string, unknown>[]) => ({ type: 'system', subtype: 'background_tasks_changed', tasks });
+  const AT = '2026-11-12T10:00:00.000Z';
+
+  it('carries the listing’s parent_task_id as parentTaskId, and none where the entry names none', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe(listing([
+      { task_id: 'a1', run_id: 'r1', task_type: 'local_agent', subagent_type: 'general-purpose', description: 'Probe' },
+      { task_id: 'b1', run_id: 'r2', task_type: 'local_bash', description: 'sleep 30', parent_task_id: 'a1' },
+    ]), AT);
+    expect(tracker.snapshot().backgroundTasks).toEqual([
+      { taskId: 'a1', taskType: 'local_agent', description: 'Probe', ambient: false },
+      { taskId: 'b1', taskType: 'local_bash', description: 'sleep 30', ambient: false, parentTaskId: 'a1' },
+    ]);
+  });
+
+  it('keeps a task’s known starter through the Stop’s list, which names none', () => {
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe(listing([{ task_id: 'b1', task_type: 'local_bash', description: 'sleep 30', parent_task_id: 'a1' }]), AT);
+    tracker.stopped({ hook_event_name: 'Stop', session_crons: [], background_tasks: [{ id: 'b1', type: 'shell', status: 'running', description: 'sleep 30' }, { id: 'b2', type: 'shell', status: 'running', description: 'tail' }] });
+    expect(tracker.snapshot().backgroundTasks).toEqual([
+      { taskId: 'b1', taskType: 'shell', description: 'sleep 30', ambient: false, parentTaskId: 'a1' },
+      { taskId: 'b2', taskType: 'shell', description: 'tail', ambient: false },
+    ]);
   });
 });

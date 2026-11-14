@@ -35,7 +35,7 @@ const draftOf = (doc: ComposerDoc): Draft => ({ doc, attachments: [], updatedAt:
 // An editor over `doc`, focused with the caret at `caret` (a selection when `to` is given).
 async function mount(doc: ComposerDoc, caret: number, options: { to?: number; onSubmit?(s: Serialized): Promise<boolean>; disabled?: string | null; focus?: boolean } = {}) {
   const saved: (Draft | null)[] = [];
-  const port: DraftPort = { load: async () => draftOf(doc), save: (d) => void saved.push(d) };
+  const port: DraftPort = { load: async () => draftOf(doc), save: async (d) => (saved.push(d), true) };
   const handle = createRef<EditorHandle>();
   const props = { appSessionId: APP, cwd: '/repo', sessionId: null, drafts: port, client, handle, onSubmit: options.onSubmit };
   const view = render(<Editor {...props} disabled={options.disabled ?? null} />);
@@ -351,7 +351,7 @@ describe('editor dictation replaces interim text and settles the final', () => {
 
     it('a caret inside a pasted chip’s label selects the chip, and the words go after it', async () => {
       const { handle, editor, content } = await mount(PASTED, 1);
-      moveDOMSelection(content.querySelector('[data-pasted]')!.firstChild!, 2);
+      moveDOMSelection(content.querySelector('[data-pasted] button')!.firstChild!, 2);
       const sink = handle.current!.beginDictation(() => {})!;
       expect(editor.state.selection).toBeInstanceOf(NodeSelection);
       expect([editor.state.selection.from, editor.state.selection.to]).toEqual([CHIP, CHIP + 1]);
@@ -378,7 +378,7 @@ describe('editor dictation replaces interim text and settles the final', () => {
 
     it('a caret at the very end of a chip’s label is a text caret after it, and the words go after it', async () => {
       const { handle, editor, content } = await mount(PASTED, 1);
-      const label = content.querySelector('[data-pasted]')!.firstChild!;
+      const label = content.querySelector('[data-pasted] button')!.firstChild!;
       moveDOMSelection(label, label.nodeValue!.length);
       const sink = handle.current!.beginDictation(() => {})!;
       expect(editor.state.selection).toBeInstanceOf(TextSelection);

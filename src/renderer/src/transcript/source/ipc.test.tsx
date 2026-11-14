@@ -3,7 +3,7 @@
 // `loadSpill` over `fs.readSpill`, and the receipt's rewind interface over `session.rewindFiles`.
 import type { SessionEvent } from '@shared/graph/events';
 import { FOLLOW_RELEASED } from '@shared/graph/history-window';
-import type { AgentId, AppSessionId, EventId, ParentToolUseId, TaskId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, EventId, MessageUuid, ParentToolUseId, TaskId } from '@shared/graph/ids';
 import type { CommandName, CommandResult, EventName, EventPayload, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { act, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -19,14 +19,17 @@ import { builder, tool, uuid } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { Transcript } from '../view/Transcript';
-import { ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS, REMOTE_FOLLOW_POLL_MS } from './ipc';
+import { HOST_RETURN_WAIT_MS, ipcLoadSpillOver, ipcOpenExternalOver, ipcRewindOver, ipcSourceOver, KNOWN_WAIT_MS, REMOTE_ADOPTIONS_POLL_MS, REMOTE_FOLLOW_POLL_MS } from './ipc';
 import type { TranscriptSource } from './types';
 import { HISTORY_GAP, HISTORY_OMITTED, HISTORY_TOO_LARGE } from '../model/gap'; // P5 O7 M2; M4: HISTORY_OMITTED
 import { useMachines } from '../../stores/machines'; // P5 O7 M2
+import { useHosts } from '../../stores/hosts'; // the UX wave, U9 (O-11b)
 import { humanTurn, record, status } from '../../../../../test/support/builders'; // P5 O7 M8
 import { remoteSessionState } from '../../lane-b/test-support/remote-session'; // P5 O15 M2b
 import { applyRemoteSession, resetRemoteLaneBStore } from '../../lane-b/remote-session'; // P5 O15 M2b
 import type { RemoteAnswer, RemoteSession } from '@shared/ipc/schema/remote'; // P5 O15 M2b
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures'; // UX wave U4a
+import { journalToEvents } from '../dev/journal'; // UX wave U4a
 
 const APP = at('app-1' as AppSessionId); // the page's: the sources run behind the client, over addresses
 const MAIN_APP = bareOf(APP); // P5 O6 M2: an event id is main's, under the bare app id
@@ -250,13 +253,14 @@ describe('ipcSource', () => {
     expect(received).toEqual([[b.events[0].id, started.id, progress.id]]);
   });
 
+  // (A failure because the engine host was away waits for its return first: the UX wave's O-11b, below.)
   it('a failed snapshot rejects with the X2 error, and the store marks the key failed', async () => {
     const fake = fakeClient();
     const source = ipcSourceOver(fake.client, APP);
     const hydrated = useTranscriptStore.getState().attach(APP, source);
-    fake.calls[0].answer({ ok: false, error: { code: 'host_unavailable', message: 'engine-host is not running' } });
+    fake.calls[0].answer({ ok: false, error: { code: 'internal', message: 'session.events: the journal could not be read' } });
     await hydrated;
-    expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: 'engine-host is not running' });
+    expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: 'session.events: the journal could not be read' });
     expect(subscriptions(fake)).toBe(0);
   });
 
@@ -2111,6 +2115,48 @@ describe('rewind adapter', () => {
     fake.calls[3].answer({ ok: true, value: { ...OUTCOME, ok: false, message: 'Rewind failed: file changed on disk' } });
     await expect(undo).rejects.toThrow('Rewind failed: file changed on disk');
   });
+
+  // UX wave U4a (the architect's ruling 3 of 2026-11-13; decision 32): the messages the engine joins are one user
+  // message in its file, under the last one's uuid, standing where the first stood; the turn it opens rewinds by that
+  // uuid, the one the file holds. A turn with no join, and an engine turn, answer as before.
+  describe('after the engine joined waiting messages', () => {
+    const prompts = (name: string) => loadUxwaveJournal(name).flatMap((row) => (row.direction === 'out' && (row.frame as { type?: string }).type === 'user' ? [(row.frame as { uuid: MessageUuid }).uuid] : []));
+    const stateThrough = (name: string, seq: number) => applyEvents(createState(null, null), journalToEvents(loadUxwaveJournal(name).filter((row) => row.seq <= seq)));
+
+    for (const [name, joinedAt] of [['u4p2-two-1-1', 60], ['u4p2-two-2-1', 87]] as const) {
+      it(`${name}: the joined turn's dry run and its undo name the joined message's uuid; the turn before it, its own prompt`, async () => {
+        const [ran, first, second] = prompts(name) as [MessageUuid, MessageUuid, MessageUuid];
+        const state = stateThrough(name, joinedAt);
+        const joined = state.turns.get(turnId.ofMessage(first))!.events.find((event) => event.kind === 'user.message' && event.joined !== undefined);
+        expect(joined).toMatchObject({ messageUuid: second, joined: [first] }); // the reducer did join them
+        const fake = fakeClient();
+        const rewind = ipcRewindOver(fake.client, APP, () => state);
+
+        const check = rewind.canUndo(turnId.ofMessage(first));
+        expect(fake.calls[0].input).toEqual({ appSessionId: APP, userMessageUuid: second, dryRun: true });
+        fake.calls[0].answer({ ok: true, value: OUTCOME });
+        await expect(check).resolves.toEqual({ ok: true, reason: null, files: OUTCOME.changedFiles });
+        const undo = rewind.undo(turnId.ofMessage(first));
+        expect(fake.calls[1].input).toEqual({ appSessionId: APP, userMessageUuid: second, dryRun: false });
+        fake.calls[1].answer({ ok: true, value: OUTCOME });
+        await expect(undo).resolves.toBeUndefined();
+
+        void rewind.canUndo(turnId.ofMessage(ran)); // no join: its own prompt, as before
+        expect(fake.calls[2].input).toEqual({ appSessionId: APP, userMessageUuid: ran, dryRun: true });
+      });
+    }
+
+    it('before the join the first message’s turn answers its own uuid; an engine-initiated turn still has no prompt', async () => {
+      const [, first] = prompts('u4p2-two-1-1') as [MessageUuid, MessageUuid];
+      const before = stateThrough('u4p2-two-1-1', 55);
+      const fake = fakeClient();
+      void ipcRewindOver(fake.client, APP, () => before).canUndo(turnId.ofMessage(first));
+      expect(fake.calls[0].input).toEqual({ appSessionId: APP, userMessageUuid: first, dryRun: true });
+      const engine = turns();
+      await expect(ipcRewindOver(fake.client, APP, () => engine).canUndo(engine.order[1]!)).resolves.toEqual({ ok: false, reason: 'This turn has no prompt to rewind to' });
+      expect(fake.calls).toHaveLength(1);
+    });
+  });
 });
 
 // W7 (charter §4.3 as amended 2026-10-01): once MAWS's process has exited and a foreign process holds the session, the
@@ -2582,5 +2628,151 @@ describe('ipcSource after the engine host is lost (E10)', () => {
     await flush();
     expect(divider().state).toBe('stopped');
     useTranscriptStore.getState().detach(source.key!);
+  });
+});
+
+// The UX wave, U9 (O-11b; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a first read of a session on
+// this Mac that failed because its engine host was away (`host_unavailable`) is made again at the host's next ready, once
+// per ready, the key hydrating meanwhile (the pane's "Loading…"); a ready newer than the read's start that is already in
+// the hosts store when the failure is processed is that ready, consumed at once. With no ready in 15 s, or a second
+// failure, the key fails ("Couldn’t load this conversation"), and a later ready still loads it.
+describe('a first read the engine host’s absence failed (O-11b)', () => {
+  const ROW = { events: [], lastSeq: 0, complete: true };
+  const host = (state: 'ready' | 'crashed' | 'restarting', revision: number) => act(() => useHosts.setState({ hosts: { engine: { state, pid: state === 'ready' ? 7 : null, restarts: 0, revision }, pty: null } }));
+  const away = { ok: false, error: { code: 'host_unavailable', message: 'engine-host exited before answering session.events' } } as const;
+  const reads = (fake: ReturnType<typeof fakeClient>) => fake.calls.filter((call) => call.name === 'session.events');
+  const phase = (key: AppSessionId = APP) => useTranscriptStore.getState().entries[key]?.phase;
+  const settle = () => act(() => vi.advanceTimersByTimeAsync(0));
+  const attached = (key: AppSessionId = APP) => {
+    const fake = fakeClient();
+    void useTranscriptStore.getState().attach(key, ipcSourceOver(fake.client, key));
+    return fake;
+  };
+  afterEach(() => {
+    useHosts.setState({ hosts: { engine: null, pty: null } });
+    vi.useRealTimers();
+  });
+
+  it('is read again at the host’s next ready, once, the key hydrating meanwhile', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    await settle();
+    expect(phase(), 'no failure while the host may come back').toBe('hydrating');
+    host('restarting', 4);
+    await settle();
+    expect(reads(fake)).toHaveLength(1);
+    host('ready', 5);
+    await settle();
+    expect(reads(fake), 'one read at the ready').toHaveLength(2);
+    reads(fake)[1]!.answer({ ok: true, value: ROW } as never);
+    await settle();
+    expect(phase()).toBe('live');
+    host('ready', 7);
+    await settle();
+    expect(reads(fake), 'nothing more once whole').toHaveLength(2);
+  });
+
+  it('takes a ready that overtook the failure, newer than the read’s start, at once', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const fake = attached();
+    host('crashed', 4);
+    host('ready', 6); // the successor is ready before the failure is processed
+    reads(fake)[0]!.answer(away as never);
+    await settle();
+    expect(reads(fake), 'read again at once, waiting for no other restart').toHaveLength(2);
+    reads(fake)[1]!.answer({ ok: true, value: ROW } as never);
+    await settle();
+    expect(phase()).toBe('live');
+  });
+
+  it('fails the key when no ready comes within 15 s, and a later ready still loads it', async () => {
+    vi.useFakeTimers();
+    host('crashed', 4);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    await settle();
+    await act(() => vi.advanceTimersByTimeAsync(HOST_RETURN_WAIT_MS - 1));
+    expect(phase()).toBe('hydrating');
+    await act(() => vi.advanceTimersByTimeAsync(1));
+    expect(useTranscriptStore.getState().entries[APP]).toMatchObject({ phase: 'failed', error: 'engine-host exited before answering session.events' });
+    host('ready', 5);
+    await settle();
+    expect(reads(fake), 'the host’s return reads it again').toHaveLength(2);
+    expect(phase()).toBe('hydrating');
+    reads(fake)[1]!.answer({ ok: true, value: ROW } as never);
+    await settle();
+    expect(phase()).toBe('live');
+  });
+
+  it('fails the key at a second failure, and reads it once per later ready, never on its own', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    host('ready', 5);
+    await settle();
+    reads(fake)[1]!.answer(away as never);
+    await settle();
+    expect(phase()).toBe('failed');
+    await act(() => vi.advanceTimersByTimeAsync(10 * HOST_RETURN_WAIT_MS));
+    expect(reads(fake), 'no retry on a timer').toHaveLength(2);
+    host('ready', 7);
+    await settle();
+    expect(reads(fake)).toHaveLength(3);
+  });
+
+  it('takes a ready that overtook the retry’s own failure at once, and only once', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    host('ready', 5);
+    await settle();
+    expect(reads(fake), 'read 2 at ready 5').toHaveLength(2);
+    host('crashed', 6);
+    host('ready', 7); // the next host is ready while read 2 is out
+    reads(fake)[1]!.answer(away as never);
+    await settle();
+    expect(reads(fake), 'read 3 at ready 7, with no ready 9').toHaveLength(3);
+    reads(fake)[2]!.answer(away as never);
+    await act(() => vi.advanceTimersByTimeAsync(HOST_RETURN_WAIT_MS));
+    expect(phase()).toBe('failed');
+    expect(reads(fake), 'ready 7 is not used twice').toHaveLength(3);
+    host('ready', 9);
+    await settle();
+    expect(reads(fake)).toHaveLength(4);
+  });
+
+  it('fails at once for any other failure, and for a session on another machine (its link’s return heals it)', async () => {
+    vi.useFakeTimers();
+    host('ready', 3);
+    const local = attached();
+    reads(local)[0]!.answer({ ok: false, error: { code: 'internal', message: 'session.events: the journal could not be read' } } as never);
+    await settle();
+    expect(phase()).toBe('failed');
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-o' as AppSessionId);
+    const remote = attached(REMOTE);
+    reads(remote)[0]!.answer({ ok: false, error: { code: 'host_unavailable', message: 'Studio is offline' } } as never);
+    await settle();
+    expect(phase(REMOTE)).toBe('failed');
+    host('ready', 5);
+    await settle();
+    expect(reads(local), 'no ready retries a failure the host did not cause').toHaveLength(1);
+    expect(reads(remote)).toHaveLength(1);
+  });
+
+  it('stops waiting when the pane lets the key go', async () => {
+    vi.useFakeTimers();
+    host('crashed', 4);
+    const fake = attached();
+    reads(fake)[0]!.answer(away as never);
+    await settle();
+    act(() => useTranscriptStore.getState().detach(APP));
+    host('ready', 5);
+    await settle();
+    expect(reads(fake)).toHaveLength(1);
   });
 });

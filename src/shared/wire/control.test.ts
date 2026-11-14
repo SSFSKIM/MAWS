@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { framesOf, loadJournal, type FixturePass } from '../../../test/support/fixtures';
+import { framesOf, loadJournal, loadUxwaveJournal, type FixturePass } from '../../../test/support/fixtures';
 import {
   CanUseToolRequestSchema,
   CanUseToolResponseSchema,
@@ -12,7 +12,7 @@ import {
   RewindConversationResponseSchema,
   SetPermissionModeResponseSchema,
 } from './control';
-import { parseStdoutFrame, type ControlRequestFrame, type ControlResponseFrame } from './frames';
+import { parseStdinFrame, parseStdoutFrame, type ControlRequestFrame, type ControlResponseFrame } from './frames';
 
 type Row = { seq: number; frame: unknown };
 const asRequest = (row: Row) => parseStdoutFrame(row.frame) as ControlRequestFrame;
@@ -137,5 +137,28 @@ describe('control payloads parse from the fixtures', () => {
     expect(ControlErrorResponseSchema.safeParse({ subtype: 'success', request_id: 'r' }).success).toBe(false);
     expect(InterruptResponseSchema.safeParse({ cancelled: [] }).success).toBe(false); // still_queued
     expect(RewindConversationResponseSchema.safeParse({ rewound: true }).success).toBe(false); // prefillText, precedingAssistantUuid
+  });
+});
+
+// UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, Interfaces A; decision 3; Acceptance 19): the
+// engine's send-now request and its answer, as probe P1 recorded them (u4p1-a-seeded-1 seq 39 and 40). The request's
+// schema is loose (the same at build F), so a journal's `out` row holding it parses as a stdin frame.
+describe('the send-now request and its answer (UX wave U4a)', () => {
+  const rows = loadUxwaveJournal('u4p1-a-seeded-1');
+  const at = (seq: number) => rows.find((row) => row.seq === seq)!;
+
+  it('the request parses as a stdin frame with its two keys, and no reason or cancel_queued', () => {
+    const row = at(39);
+    expect(row.direction).toBe('out');
+    const frame = parseStdinFrame(row.frame) as ControlRequestFrame;
+    expect(frame.request).toEqual({ subtype: 'interrupt', send_now: true, message_uuid: '06932248-33ea-4dce-ba66-6956b077a02b' });
+  });
+
+  it('the answer carries the engine’s word beside what waits; an older engine’s answer has none (u4p2-old-1 seq 79)', () => {
+    expect(InterruptResponseSchema.parse(asResponse(at(40)).response.response)).toEqual({ still_queued: ['06932248-33ea-4dce-ba66-6956b077a02b'], send_now: 'delivering' });
+    const old = loadUxwaveJournal('u4p2-old-1').find((row) => row.seq === 79)!;
+    const parsed = InterruptResponseSchema.parse(asResponse(old).response.response);
+    expect(parsed.send_now).toBeUndefined();
+    expect(InterruptResponseSchema.safeParse({ still_queued: [], send_now: 7 }).success).toBe(false);
   });
 });

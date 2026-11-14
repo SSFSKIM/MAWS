@@ -4,14 +4,18 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeStatus } from '@shared/sessions/worktree';
-import { project, record, status } from '../../../../test/support/builders';
+import { project, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
+import type { MachineState } from '@shared/ipc/schema/machines';
 import type { OrgKey } from '@shared/machine/org-key';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import type { OrgProjects } from '../stores/registry';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { closeDialog, openDialog, useDialogs } from './dialogs';
@@ -19,6 +23,7 @@ import { Sheet, SheetForm } from './Sheet';
 import { cleanupTargetOf, confirmLabel } from './CleanupDialog';
 import { SessionDialogs, DeletionNotice } from './SessionDialogs';
 import { useSetup } from './store';
+import { useMachines } from '../stores/machines';
 import { currentSet } from '../stores/layout-model';
 
 const WT = `${REPO}/.claude/worktrees/accept-one`;
@@ -386,25 +391,285 @@ describe('dialogs', () => {
     expect(fake.machines('session.list')).toEqual([OTHER_MACHINE]);
   });
 
-  // P5 O7 M8 ("The offer audit and its contract"): unarchiving and deleting are declared not offered on another machine
-  // its sessions reach over RL2 (REMOTE_UNAVAILABLE): its archived rows keep their buttons, greyed with those words
-  it('greys Unarchive and Delete… for an archived session of a machine reached over RL2, with the declared words', async () => {
+  // P5 O7 M8 ("The offer audit and its contract"): deleting is declared not offered on another machine its sessions reach
+  // over RL2 (REMOTE_UNAVAILABLE), so Delete… stays greyed with those words. The UX wave, U9 (S-02, A9): Unarchive is
+  // offered there now, for a machine whose build lists `rl2.session-acts`, and returns the session to this sidebar at once
+  describe('of a machine reached over RL2', () => {
     const tmp = project(addressOf(OTHER_MACHINE, 'tmp'), 0, { discovered: true, org: { key: `folder:${OTHER_MACHINE}:tmp` as OrgKey, name: 'tmp', source: 'folder', smnsId: null } });
-    withMain({ 'session.list': () => ({ sessions: [record(BARE_IDLE1, { projectId: 'tmp' as ProjectId, archived: true, title: { text: 'In tmp', source: 'user' } })], revision: 1 }) });
-    useSessions.setState({ projects: new Map([[tmp.id, tmp]]), listedMachines: new Set([OTHER_MACHINE]) });
-    try {
+    const THERE = addressOf(OTHER_MACHINE, BARE_IDLE1);
+    const studio = (over: Partial<MachineState>) =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', ...over }]);
+    beforeEach(() => useSessions.setState({ projects: new Map([[tmp.id, tmp]]), listedMachines: new Set([OTHER_MACHINE]) }));
+    afterEach(() => {
+      useSessions.setState({ listedMachines: new Set(), listed: new Map() });
+      useMachines.setState({ roster: 'unread', machines: new Map() });
+    });
+    const archivedOn = async () => {
       render(<SessionDialogs />);
       act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
-      const row = await within(await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` })).findByRole('listitem', { name: 'In tmp' });
+      return screen.findByRole('dialog', { name: 'Archived sessions · Studio' });
+    };
+
+    it('lists its archived sessions, Unarchive enabled and Delete… greyed with the declared words; Unarchive returns the session at once', async () => {
+      studio({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      const archived = record(BARE_IDLE1, { projectId: 'tmp' as ProjectId, archived: true, title: { text: 'In tmp', source: 'user' } });
+      withMain({ 'session.list': () => ({ sessions: [archived], revision: 1 }), 'session.update': () => ({ ...archived, archived: false }) });
+      act(() => useSessions.getState().applyChanged({ record: { ...archived, appId: THERE }, cause: 'live', revision: 2 }, OTHER_MACHINE));
+      const row = await within(await archivedOn()).findByRole('listitem', { name: 'In tmp' });
       const unarchive = within(row).getByRole('button', { name: 'Unarchive' });
-      expect(unarchive).toHaveProperty('disabled', true);
-      expect(unarchive.title).toBe(REMOTE_UNAVAILABLE['session.update']);
+      expect(unarchive).toHaveProperty('disabled', false);
       const del = within(row).getByRole('button', { name: 'Delete…' });
       expect(del).toHaveProperty('disabled', true);
       expect(del.title).toBe(REMOTE_UNAVAILABLE['session.delete']);
-    } finally {
-      useSessions.setState({ listedMachines: new Set() });
-    }
+      expect(within(row).queryByRole('button', { name: 'Remove worktree…' })).toBeNull();
+      await userEvent.click(unarchive);
+      await waitFor(() => expect(fake.invoked('session.update')).toEqual([{ appSessionId: BARE_IDLE1, patch: { archived: false } }]));
+      expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]);
+      await waitFor(() => expect(useSessions.getState().records.get(THERE)?.archived).toBe(false));
+    });
+
+    it('asks nothing of a machine whose build doesn’t list the capability, and says so as that machine’s line (A14)', async () => {
+      studio({ capabilities: ['rl2.project-acts'], owner: true });
+      withMain({ 'session.list': () => ({ sessions: [], revision: 1 }) });
+      const dialog = await archivedOn();
+      expect(await within(dialog).findByText('Can’t list archived sessions on Studio yet. Update MAWS on Studio and try again.')).toBeTruthy();
+      expect(within(dialog).queryByText('Loading…')).toBeNull();
+      expect(fake.invoked('session.list')).toEqual([]);
+    });
+
+    // The UX wave, U9 (the architect's ruling (A), 2026-11-13): the footer's "Archived sessions…" reaches every machine's
+    // own row, since a machine's row leaves the sidebar with its last listed session and its menu with it
+    it('the footer’s sheet lists another machine’s archived session under its name, after this Mac’s, and Unarchive acts there', async () => {
+      studio({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true });
+      const mine = record(BARE_IDLE2, { projectId: null, archived: true, title: { text: 'Archived here', source: 'user' } });
+      const theirs = record(BARE_IDLE1, { projectId: null, archived: true, title: { text: 'Archived on Studio', source: 'user' } });
+      withMain({ 'session.list': (_: unknown, machine: string | undefined) => ({ sessions: machine === OTHER_MACHINE ? [theirs] : [mine], revision: 1 }), 'session.update': () => ({ ...theirs, archived: false }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archived', projectId: null }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions' });
+      const there = await within(dialog).findByRole('region', { name: 'Studio' });
+      const row = await within(there).findByRole('listitem', { name: 'Archived on Studio' });
+      const here = within(dialog).getByRole('region', { name: 'This Mac' });
+      await within(here).findByRole('listitem', { name: 'Archived here' });
+      expect(within(dialog).getAllByRole('region').map((r) => r.getAttribute('aria-label'))).toEqual(['This Mac', 'Studio']);
+      await userEvent.click(within(row).getByRole('button', { name: 'Unarchive' }));
+      await waitFor(() => expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]));
+    });
+
+    it('the footer’s sheet holds no machine for another: each section its rows, its line or its loading, none for a machine with nothing archived', async () => {
+      const LOFT = 'LoftMachineRef00000000' as MachineRef;
+      useMachines.getState().applyRoster([
+        { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true },
+        { ref: LOFT, name: 'Loft', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: ['rl2.project-acts'], owner: true },
+      ]);
+      useSessions.setState({ listedMachines: new Set([OTHER_MACHINE, LOFT]) });
+      withMain({});
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archived', projectId: null }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions' });
+      await waitFor(() => expect(fake.pending('session.list')).toBe(2)); // this Mac and Studio; Loft is not asked
+      const order = fake.machines('session.list');
+      await act(() => fake.reply('session.list', { sessions: [], revision: 1 }, order.findIndex((machine) => machine !== OTHER_MACHINE))); // this Mac's
+      const here = within(dialog).getByRole('region', { name: 'This Mac' });
+      expect(await within(here).findByText('No archived sessions.')).toBeTruthy();
+      expect(within(within(dialog).getByRole('region', { name: 'Studio' })).getByText('Loading…')).toBeTruthy();
+      expect(within(within(dialog).getByRole('region', { name: 'Loft' })).getByText('Can’t list archived sessions on Loft yet. Update MAWS on Loft and try again.')).toBeTruthy();
+      await act(() => fake.reply('session.list', { sessions: [], revision: 1 }));
+      await waitFor(() => expect(within(dialog).queryByRole('region', { name: 'Studio' })).toBeNull());
+    });
+
+    it('asks nothing of a machine that is offline or connecting, and says which as its line', async () => {
+      studio({ state: 'down', generation: 0 });
+      withMain({ 'session.list': () => ({ sessions: [], revision: 1 }) });
+      expect(await within(await archivedOn()).findByText('List archived sessions is unavailable while Studio is offline.')).toBeTruthy();
+      act(() => studio({ state: 'connecting', generation: 0 }));
+      expect(await screen.findByText('Connecting to Studio…')).toBeTruthy();
+      expect(fake.invoked('session.list')).toEqual([]);
+    });
+  });
+
+  // The UX wave, U9 (S-02, A9, A10): Rename… and Archive work from a listing alone. The sheets take the title and the
+  // machine from the listing and skip what needs a record; what this window did shows in the sidebar at once.
+  describe('of a session on another machine with only its listing here', () => {
+    const THERE = addressOf(OTHER_MACHINE, BARE_IDLE1);
+    beforeEach(() => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+      useSessions.setState({ listed: new Map([[THERE, { ...remoteRow(OTHER_MACHINE, BARE_IDLE1, { title: 'Listed over there', revision: 3 }), appId: THERE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+      useSessions.getState().applyRows({ machines: [OTHER_MACHINE], rows: [remoteRow(OTHER_MACHINE, BARE_IDLE1, { title: 'Listed over there', revision: 3 })], complete: true, pending: [], members: [], member: 'member-1' });
+    });
+    afterEach(() => {
+      useSessions.getState().applyRows({ machines: [], rows: [], complete: true, pending: [], members: [], member: null });
+      useMachines.setState({ roster: 'unread', machines: new Map() });
+    });
+
+    it('renames it from the listing’s title, on its machine, and the listing says the new title at once', async () => {
+      withMain({ 'session.rename': () => ({ record: record(BARE_IDLE1, { title: { text: 'Renamed from here', source: 'user' } }), via: 'override' }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'rename', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Rename' });
+      const field = within(dialog).getByRole('textbox', { name: 'Title' }) as HTMLInputElement;
+      expect(field.value).toBe('Listed over there');
+      expect(within(dialog).queryByRole('button', { name: 'Regenerate' })).toBeNull();
+      await userEvent.clear(field);
+      await userEvent.type(field, 'Renamed from here{Enter}');
+      await waitFor(() => expect(fake.invoked('session.rename')).toEqual([{ appSessionId: BARE_IDLE1, title: 'Renamed from here' }]));
+      expect(fake.machines('session.rename')).toEqual([OTHER_MACHINE]);
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(useSessions.getState().listed.get(THERE)?.title).toBe('Renamed from here');
+    });
+
+    it('archives it from the listing, its sheet naming the machine, closes its tab, and the listing leaves at once', async () => {
+      withMain({ 'session.archive': () => ({ archived: true }) });
+      useLayout.getState().openTab({ kind: 'session', appSessionId: THERE });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      expect(dialog.textContent).toContain('Ends its engine process on Studio and hides it.');
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(fake.invoked('session.archive')).toEqual([{ appSessionId: BARE_IDLE1 }]));
+      expect(fake.machines('session.archive')).toEqual([OTHER_MACHINE]);
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(useSessions.getState().listed.has(THERE)).toBe(false);
+      expect(currentSet(useLayout.getState().main).panes[0].tabs.some((t) => t.kind === 'session' && t.appSessionId === THERE)).toBe(false);
+    });
+
+    it('says a refusal main worded, and keeps the listing', async () => {
+      withMain({});
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      await userEvent.keyboard('{Enter}');
+      await waitFor(() => expect(fake.pending('session.archive')).toBe(1));
+      await act(() => fake.fail('session.archive', 'Not archived: only the session’s owners can', 'internal', { refusal: 'grade' }));
+      expect(await within(dialog).findByText('Not archived: only the session’s owners can')).toBeTruthy();
+      expect(useSessions.getState().listed.has(THERE)).toBe(true);
+    });
+
+    it('words a typed refusal the machine answered as the act not done', async () => {
+      withMain({ 'session.archive': () => ({ status: 'held', holder: { kind: 'terminal', pid: 4 } }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      await userEvent.keyboard('{Enter}');
+      expect(await within(dialog).findByText('Not archived: held by terminal · 4; archive it where it runs')).toBeTruthy();
+      expect(useSessions.getState().listed.has(THERE)).toBe(true);
+    });
+
+    // Review (M4): a sheet opened while the machine is up reads the helper, so a link that goes reconnecting or offline
+    // while it is open greys its submit with the helper's sentence, and Enter sends nothing
+    const studioDown = (since: number) =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'down', since: new Date(since).toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+    const studioUp = () =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 2, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+
+    it('greys Rename once the link goes reconnecting, then offline, after the sheet opened, and sends nothing', async () => {
+      withMain({ 'session.rename': () => ({ record: record(BARE_IDLE1, { title: { text: 'Renamed from here', source: 'user' } }), via: 'override' }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'rename', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Rename' });
+      const field = within(dialog).getByRole('textbox', { name: 'Title' });
+      await userEvent.clear(field);
+      await userEvent.type(field, 'Renamed from here');
+      const submit = within(dialog).getByRole('button', { name: 'Rename' });
+      expect(submit).toHaveProperty('disabled', false);
+      act(() => studioDown(Date.now()));
+      expect(await within(dialog).findByText('Reconnecting to Studio…')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
+      act(() => studioDown(Date.now() - REMOTE_ACT_PENDING_MS - 1_000));
+      expect(await within(dialog).findByText('Rename is unavailable while Studio is offline.')).toBeTruthy();
+      await userEvent.type(field, '{Enter}');
+      expect(fake.invoked('session.rename')).toEqual([]);
+      act(() => studioUp());
+      await waitFor(() => expect(submit).toHaveProperty('disabled', false));
+      expect(within(dialog).queryByText('Rename is unavailable while Studio is offline.')).toBeNull();
+    });
+
+    it('greys Archive once the link goes offline after the sheet opened, and sends nothing', async () => {
+      withMain({ 'session.archive': () => ({ archived: true }) });
+      render(<SessionDialogs />);
+      act(() => openDialog({ kind: 'archive', appSessionId: THERE }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archive “Listed over there”?' });
+      const submit = within(dialog).getByRole('button', { name: 'Archive' });
+      expect(submit).toHaveProperty('disabled', false);
+      act(() => studioDown(Date.now() - REMOTE_ACT_PENDING_MS - 1_000));
+      expect(await within(dialog).findByText('Archive is unavailable while Studio is offline.')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
+      await userEvent.keyboard('{Enter}');
+      expect(fake.invoked('session.archive')).toEqual([]);
+      act(() => studioDown(Date.now()));
+      expect(await within(dialog).findByText('Reconnecting to Studio…')).toBeTruthy();
+      expect(submit).toHaveProperty('disabled', true);
+    });
+  });
+
+  // ticket 644: a row's archived sessions are the ones the sidebar files under it: another machine's record by its listing,
+  // though the registry places its project on that machine
+  describe('another machine’s archived session at a listed address, its project a registry location there', () => {
+    const ID = '11111111-2222-4333-8444-555555555555';
+    const KEY = 'remote:example.org/app' as OrgKey;
+    const registry: OrgProjects = {
+      projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [{ machine: OTHER_MACHINE, pid: 'app', path: '/srv/app', key: KEY, name: 'app', source: 'remote', acts: true }] }],
+      keys: { [ID]: KEY }, moved: {}, removals: [], seen: {},
+    };
+    const b = addressOf(OTHER_MACHINE, BARE_IDLE1);
+    const stage = (orgKey: OrgKey | null) => {
+      withMain({
+        'session.list': (_: unknown, machine: string | undefined) => ({ sessions: machine === OTHER_MACHINE ? [record(BARE_IDLE1, { projectId: 'app' as ProjectId, archived: true, title: { text: 'Archived on B', source: 'user' } })] : [], revision: 1 }),
+        'session.update': () => record(BARE_IDLE1, { projectId: 'app' as ProjectId, archived: false }),
+      });
+      useSessions.getState().applyRegistry(registry, TEST_MACHINE);
+      useSessions.setState({ listed: new Map([[b, { ...remoteRow(OTHER_MACHINE, BARE_IDLE1, { orgKey, project: orgKey === null ? null : ID }), appId: b }]]) });
+      render(<SessionDialogs />);
+    };
+    const shown = (dialog: HTMLElement) => within(dialog).queryAllByRole('listitem').map((li) => li.getAttribute('aria-label'));
+    // archived from this window: its listing leaves at the act (`noteArchived`) and at the hub's withdrawal (main's rows)
+    const archivedHereAndWithdrawn = () => {
+      act(() => useSessions.getState().noteArchived(b));
+      act(() => useSessions.getState().applyRows({ machines: [], rows: [], complete: true, pending: [], members: [], member: null }));
+      expect(useSessions.getState().listed.has(b), 'no listing names it').toBe(false);
+    };
+    afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map() }));
+
+    it('lists it under its machine’s row when its listing’s key is none of the key table’s', async () => {
+      stage(null);
+      act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
+      const dialog = await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` });
+      await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull());
+      expect(shown(dialog)).toEqual(['Archived on B']);
+    });
+
+    // the UX wave, U9: a session this window archived stays under the row it sat under before the archive, whatever the
+    // order of the hub's withdrawal and the registry's arrival, in the row's sheet and in the footer's
+    it('lists it under its machine’s row once this window archived it and its listing left, and Unarchive acts there', async () => {
+      stage(null);
+      archivedHereAndWithdrawn();
+      act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
+      const dialog = await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` });
+      await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull());
+      expect(shown(dialog)).toEqual(['Archived on B']);
+      await userEvent.click(within(within(dialog).getByRole('listitem', { name: 'Archived on B' })).getByRole('button', { name: 'Unarchive' }));
+      await waitFor(() => expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]));
+    });
+
+    it('lists it in its machine’s section of the footer’s sheet once this window archived it and its listing left, and Unarchive acts there', async () => {
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: new Date().toISOString(), generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+      stage(null);
+      archivedHereAndWithdrawn();
+      act(() => openDialog({ kind: 'archived', projectId: null }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions' });
+      const there = await within(dialog).findByRole('region', { name: 'Studio' });
+      const row = await within(there).findByRole('listitem', { name: 'Archived on B' });
+      await userEvent.click(within(row).getByRole('button', { name: 'Unarchive' }));
+      await waitFor(() => expect(fake.machines('session.update')).toEqual([OTHER_MACHINE]));
+    });
+
+    it('lists it under the registry project’s row when its listing and the registry agree on the key', async () => {
+      stage(KEY);
+      act(() => openDialog({ kind: 'archived', projectId: addressOf(OTHER_MACHINE, 'app' as ProjectId) }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · app' });
+      await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull());
+      expect(shown(dialog)).toEqual(['Archived on B']);
+    });
   });
 
   // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory

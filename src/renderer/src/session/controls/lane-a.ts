@@ -36,17 +36,18 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { ipcError } from '@shared/ipc/errors';
 import { AGENT_SCOPE_CAPABILITY, type ControlResult, type LaneAAct, type LaneARaised, type LaneAState } from '@shared/ipc/schema/lane-a';
-import { aliasOf, chipLabel } from '@shared/sessions/model-label';
-import { workingFolder } from '@shared/sessions/working-folder';
+import { modelName, NO_MODEL } from '@shared/sessions/model-label';
+import { workingBranch, workingFolder } from '@shared/sessions/working-folder';
 import type { HookResult, ModelInfo } from '../../composer/setup-intent';
 import type { FrameBindings } from '../../composer/frame/bindings';
 import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { TERMINAL_KEEPS_NO_QUEUE } from '../../composer/submit/submit-state'; // UX wave U4a
 import { WIDGET_COMMANDS } from '../../composer/mentions/widgets';
 import { commandRoute, slashItems } from '../../lane-a/conversation/catalog';
 import { announceCommand } from '../../lane-a/outcomes';
 import { followUpload } from '../../lane-a/uploads';
 import { watchLaneA } from '../../lane-a/watches';
-import { branchLabel, recordBranch } from '../../sessions/branch-label';
+import { branchLabel } from '../../sessions/branch-label';
 import { canTakeOver } from '../../sessions/holder-words'; // not record-ops: its imports reach the terminal stack
 import type { SessionCatalog } from '../../stores/catalog';
 import { holdPendingSend, noteLaneASettlement, useLaneA } from '../../stores/lane-a';
@@ -189,7 +190,7 @@ function partsOf(content: string | readonly Block[], names: readonly string[] = 
   }
   return { text: content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n'), files };
 }
-const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX
+export const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX (UX wave U5a: exported, a comment's room for screenshots)
 
 // Whether lane A carries a card's answer on this request, and why not (Interfaces §D): the same rules main's driver
 // applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered. U1a §G: an
@@ -314,15 +315,18 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
     const override = state.override;
     const rows = models();
     const modelClosed = capability('model');
+    const named = modelName(override?.model ?? state.model, rows, { effort: override?.effort ?? state.effort });
     const refusedWith = (reason: string) => async (): Promise<HookResult> => ({ ok: false, error: reason });
     return {
-      location: { path: record ? workingFolder(record).path : '', branch: branchLabel(recordBranch(record), null), note: LANE_A_WORDS.location },
+      location: { path: record ? workingFolder(record).path : '', branch: branchLabel(record ? workingBranch(record) : null, null), note: LANE_A_WORDS.location }, // UX wave U8c-2: the working folder's branch
       project: null,
       model: {
         value: { model: override?.model ?? null, effort: (override?.effort ?? null) as BridgeEffort | null },
         // what the session runs on (its latest request's, so a `/model` or `/effort` typed in the terminal too), an
-        // override MAWS set naming itself before the next request carries it
-        label: chipLabel(aliasOf(override?.model ?? state.model, rows), (override?.effort ?? state.effort) as BridgeEffort | null),
+        // override MAWS set naming itself before the next request carries it; UX wave U4a (decision 19): named as every
+        // chip is, which over the bridge's catalog (no display names) is the alias, and never Fast (no engine status)
+        label: named?.text ?? NO_MODEL,
+        name: named,
         options: rows,
         disabled: modelClosed.available ? null : modelClosed.reason,
         // Only what changed goes: the bridge's `model` op replaces both, and main keeps the other as it reads it fresh.
@@ -360,8 +364,12 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
       return laneAAnswerCapability(raised, answer, state.controls, remote?.machine);
     },
     async send(content, options) {
-      if (options.current?.() === false || options.precheck?.() === false) return { disposition: 'refused', started: false };
       const refuse = (reason: string): HumanPromptResult => ({ disposition: 'refused', started: false, reason });
+      if (options.current?.() === false) return { disposition: 'refused', started: false };
+      // UX wave U4a (l3-input-03): MAWS keeps no queue for a terminal session, so a prompt kept for after a running turn is
+      // refused there, nothing sent, before the caller's size check (a refusal by state comes first, as the seam's does)
+      if (options.when === 'after' && stateNow().turn.running) return refuse(TERMINAL_KEEPS_NO_QUEUE);
+      if (options.precheck?.() === false) return { disposition: 'refused', started: false };
       const parts = partsOf(content as string | readonly Block[], options.attachmentNames);
       if (parts === null) return refuse(LANE_A_WORDS.otherContent);
       const { text, files } = parts;
@@ -394,8 +402,9 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
         const reason = out.reason ?? 'The session did not take the message';
         return refuse(files.length > 0 ? LANE_A_WORDS.wordsAfterFiles(reason) : reason);
       }
-      if (out.key !== null) holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
-      return { disposition: 'unconfirmed', started: false };
+      if (out.key === null) return { disposition: 'unconfirmed', started: false };
+      holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
+      return { disposition: 'unconfirmed', started: false, pendingKey: out.key }; // UX wave U5a: the pending send's key
     },
     // The bridge holds no MAWS queue, so Stop and Esc both interrupt.
     async interrupt() {

@@ -19,11 +19,13 @@ import { fixtureIdentity } from '../test/support/fixture-session-id';
 import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
-import { addressed } from './support/address';
+import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, mainTabById, mainTabs } from './support/shell';
+import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
+import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
 const FIXTURES = 'spikes/protocol-probe/fixtures';
@@ -169,7 +171,10 @@ async function watchTranscriptFailures(page: Page): Promise<void> {
     const note = () =>
       document.querySelectorAll('[role="alert"]').forEach((node) => {
         const text = (node.textContent ?? '').trim();
-        if (text.startsWith('Could not load this transcript') && !seen.includes(text)) seen.push(text);
+        // the alert's words (src/renderer/src/transcript/model/copy.ts's HYDRATION.failed) and, since the UX wave's U9, its
+        // reason in its title
+        const said = `${text} (${node.getAttribute('title') ?? ''})`;
+        if (text.startsWith('Couldn’t load this conversation') && !seen.includes(said)) seen.push(said);
       });
     new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
@@ -622,6 +627,43 @@ test.describe('sessions', () => {
     expect(launched.maws.consoleErrors()).toEqual([]);
   });
 
+  // UX wave U8b (A7, M6; X-168): a terminal session that MAWS only reads (a registry record names its live process, and
+  // no bridge drives it) whose last turn ended while an agent it started in the background still works: the row of that
+  // Agent call stays in view under the ended turn. The terminal's process goes (its registry record removed) and the
+  // transcript never says the agent ended, yet the agent ended with the process: its row folds with the turn.
+  test('X-168: a terminal session whose turn ended with a background agent still working; its process goes, its registry record removed, and the agent’s row folds with the ended turn', async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sid = '5e551011-0000-4000-8000-00000000000c';
+    const agent = { agentId: 'a5e55000000000001', description: 'Survey the folder', prompt: 'List what is in this folder.', at: '2026-09-29T10:00:01.000Z' };
+    const ask = `u-${sid}`;
+    const turn = backgroundAgentRecords(sid, repo.root, ask, agent);
+    const end = turnEndRecords(sid, repo.root, turn.at(-1)!.uuid as string, '2026-09-29T10:00:02.000Z');
+    await store.addTranscript(repo.root, sid, [userRecord(sid, repo.root, ask, null, 'Survey this folder in the background.', '2026-09-29T10:00:00.000Z'), ...turn, ...end].map((r) => JSON.stringify(r)));
+    await backgroundAgentSidecars(store, sid, repo.root, agent);
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.some((r) => r.engineSessionId === sid), { timeout: 20_000 }).toBe(true);
+    const id = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)!.appId;
+
+    const pid = process.pid;
+    const procStart = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { env: { LC_ALL: 'C', TZ: 'UTC' }, encoding: 'utf8' }).trim();
+    await store.addRegistryRecord(pid, { pid, sessionId: sid, cwd: repo.root, kind: 'interactive', procStart, status: 'idle' });
+    const holder = async () => value(await invoke(page, 'session.get', { appSessionId: id }))?.holder.kind;
+    await expect.poll(holder, { timeout: 10_000 }).toBe('terminal');
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByRole('note')).toContainText(`Live in Terminal · pid ${pid} · read-only`, { timeout: 10_000 });
+    const agentRow = main.locator('.transcript-subagent', { hasText: agent.description });
+    await expect(agentRow, 'the turn ended while its agent works: the call stays in view').toContainText(`${agent.description} started working`, { timeout: 15_000 });
+
+    await store.removeRegistryRecord(pid);
+    await expect.poll(holder, { timeout: 10_000 }).toBe('none');
+    await expect(agentRow, 'its process went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
+    expect(launched.maws.consoleErrors()).toEqual([]);
+  });
+
   // New chat (2026-10-01, the owner's request after Codex): the sidebar's New chat from the project list opens a tab with
   // no project; the composer's project row chooses one (or a new folder, or none) before the first send.
   test('New chat from the project list: "Choose a project" with Send disabled; a project enables Send with its branch and the Worktree checkbox; New project adds a folder; no project runs at home', async () => {
@@ -1017,5 +1059,158 @@ test.describe('sessions', () => {
     const seen = await page.evaluate(() => (window as unknown as { __u8c: unknown[] }).__u8c);
     expect(seen, 'never told archived or removed across the move').not.toContain('archived');
     expect(seen).not.toContain('removed');
+  });
+
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E; A1 to A4): on this Mac a
+  // file outside the session's folder opens, read-only, when the session's own transcript links it, and nothing else
+  // there opens: not a path written in prose, not one linked only in a message that was typed and never delivered, not
+  // one another session links, not a request that does not ask by the rule; its folder is not listed and the file is
+  // not written. Every file and both transcripts are invented, in temporary folders.
+  test("a file the transcript links opens read-only from outside the session's folder, and nothing else does", async () => {
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u6c-outside-'))); // the open log takes the real path
+    try {
+      const file = (name: string) => join(outside, name);
+      const NOTES = 'Invented notes, kept outside the session’s folder.';
+      const texts: Record<string, string> = {
+        'notes.txt': `${NOTES}\n`, 'report.pdf': '%PDF-1.4\n% an invented report\n', 'unnamed.txt': 'never linked\n', 'typed-only.txt': 'typed, never sent\n', key: 'an invented key\n', 'key,backup': 'an invented backup\n',
+      };
+      for (const [name, text] of Object.entries(texts)) writeFileSync(file(name), text);
+      const S = '5e551011-0000-4000-8000-0000000000e6';
+      const T = '5e551011-0000-4000-8000-0000000000e7';
+      const at = '2026-11-13T10:00:00.000Z';
+      const row = (sessionId: string) => ({ cwd: repo.root, sessionId, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' });
+      const reply = `Here are [the notes](${file('notes.txt')}), [the report](${file('report.pdf')}) and [the backup](${file('key,backup')}). The other one is ${file('unnamed.txt')}.`;
+      await store.addTranscript(repo.root, S, [
+        { ...row(S), type: 'user', uuid: 'u-u6c-s1', parentUuid: null, message: { role: 'user', content: 'Where are the files from outside?' } },
+        { type: 'queue-operation', operation: 'enqueue', timestamp: at, sessionId: S, content: `Also [the typed one](${file('typed-only.txt')})` },
+        {
+          ...row(S), type: 'assistant', uuid: 'a-u6c-s1', parentUuid: 'u-u6c-s1',
+          message: { id: 'msg_u6c0001', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: reply }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+        },
+      ]);
+      await store.addTranscript(repo.root, T, [{ ...row(T), type: 'user', uuid: 'u-u6c-t1', parentUuid: null, message: { role: 'user', content: 'Another session, which links nothing.' } }]);
+      const openLog = join(store.configHome, 'open.log');
+      const launched = await launchCase({ fixtures: [], trusted: [repo.root], store, env: { MAWS_E2E_OPEN_LOG: openLog } });
+      current = { ...launched, repos: [repo] };
+      const { page, maws } = launched;
+      const [s, t] = await indexed(page, [S, T]);
+
+      await (await sidebarRow(page, { appSessionId: s! })).click();
+      const main = page.locator('[data-region="main"]');
+      const chip = (name: string) => main.locator(`[data-chip="path"][title="${file(name)}"]`);
+      await expect(chip('notes.txt')).toBeVisible({ timeout: 20_000 });
+      await expect(chip('unnamed.txt'), 'a path in prose is no chip').toHaveCount(0);
+      const sessionTabId = await activeMainTab(page).getAttribute('data-tab-id');
+
+      await chip('notes.txt').click();
+      const machine = await localRef(page);
+      await expect(mainTabById(page, `file:${machine}:${file('notes.txt')}`), 'a file tab of the strip, in front').toHaveAttribute('aria-selected', 'true');
+      const notes = main.locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
+      const content = notes.locator('.cm-content');
+      await expect(content).toHaveText(NOTES, { timeout: 20_000 });
+      await expect(notes).toHaveAttribute('data-editable', 'false');
+      await expect(content).toHaveAttribute('title', 'Read-only: the file is outside the folders this session works in');
+      await content.click();
+      await page.keyboard.type('xyz');
+      await expect(content).toHaveText(NOTES);
+      await expect(notes).toHaveAttribute('data-dirty', 'false');
+      await expect(notes.locator('[data-editor-controls]')).toHaveCount(0);
+
+      await mainTabById(page, sessionTabId!).click();
+      await chip('report.pdf').click();
+      const report = main.locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
+      await expect(report.locator('[data-external-row]')).toContainText('PDF files open outside MAWS', { timeout: 20_000 });
+      await report.getByRole('button', { name: 'Open externally' }).click();
+      await expect.poll(() => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }), { timeout: 20_000 }).toBe(`${file('report.pdf')}\n`);
+
+      const refusal = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
+      const read = (appSessionId: string, name: string, named: boolean) => invoke(page, 'files.read', { appSessionId: appSessionId as never, path: file(name), ...(named ? { named: true as const } : {}) });
+      expect(await read(s!, 'unnamed.txt', true), 'written only in prose').toMatchObject(refusal);
+      expect(await read(s!, 'typed-only.txt', true), 'linked only in a message never delivered').toMatchObject(refusal);
+      expect(await read(s!, 'key', true), 'the start of a longer linked name').toMatchObject(refusal);
+      expect(await read(t!, 'notes.txt', true), 'linked only in another session').toMatchObject(refusal);
+      expect(await read(s!, 'notes.txt', false), 'asked without the key').toMatchObject(refusal);
+      expect(await invoke(page, 'files.list', { appSessionId: s! as never, path: outside }), 'its folder is not listed').toMatchObject(refusal);
+      expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: '0'.repeat(64) }), 'nor is it written').toMatchObject(refusal);
+      expect(readFileSync(file('notes.txt'), 'utf8')).toBe(texts['notes.txt']);
+      expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3; the section's A3 and A6, O-11b):
+  // a first read of a session on this Mac that fails because its engine host is away says "Loading…" while it waits, is
+  // made again at the host's next ready, and loads with no click; one that has waited past 15 s says "Couldn’t load this
+  // conversation" with Retry, and a later ready still loads it, again with no click. The host is taken away as C1's
+  // ladder leaves it: three unexpected exits within a minute and it stays crashed, so main answers its reads
+  // `host_unavailable` until Restart now (`host.restart`, the banners' and Diagnostics' act). Each step settles on what the
+  // app shows: the host's state as main reports it, and the pane's words and rows.
+  test('U9 A3 and A6: a first read the engine host’s absence failed says Loading…, and heals at the host’s next ready; one past 15 s says it could not load, and a later ready still loads it', async () => {
+    test.setTimeout(240_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sids = { soon: '5e551011-0000-4000-8000-0000000000a6', late: '5e551011-0000-4000-8000-0000000000a7' } as const;
+    const words = { soon: 'Read again at the host’s next ready', late: 'Read again at a later ready' } as const;
+    for (const key of ['soon', 'late'] as const) {
+      const sid = sids[key];
+      await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-11-13T10:00:00.000Z', message: { role: 'user', content: words[key] } }]);
+    }
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    const main = page.locator('[data-region="main"]');
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.filter((r) => r.engineSessionId === sids.soon || r.engineSessionId === sids.late).length, { timeout: 20_000 }).toBe(2);
+    const listed = value(await invoke(page, 'session.list', {})).sessions;
+    const appOf = (key: 'soon' | 'late') => listed.find((r) => r.engineSessionId === sids[key])!.appId;
+    const host = async () => value(await invoke(page, 'engine.hostState', undefined));
+    // C1's ladder to its limit: each exit is waited out to the successor's ready, and the third within the minute leaves
+    // the host crashed for good
+    const crashForGood = async () => {
+      let killed: number | null = null;
+      for (let exits = 0; exits < 5; exits++) {
+        let now = await host();
+        await expect
+          .poll(async () => ((now = await host()).state === 'crashed' || (now.state === 'ready' && now.pid !== killed) ? now.state : `${now.state} ${now.pid}`), { timeout: 30_000, message: `the engine host after ${exits} exits` })
+          .toMatch(/^(ready|crashed)$/);
+        if (now.state === 'crashed') return;
+        killed = now.pid!;
+        // only the scene's own engine host: a process whose command line names this launch's profile
+        expect(processesNaming(launched.maws.userData).map((p) => p.pid), `pid ${killed} is this launch's engine host`).toContain(killed);
+        process.kill(killed, 'SIGKILL');
+      }
+      throw new Error('the engine host was not left crashed by its exits');
+    };
+    const restart = async () => {
+      value(await invoke(page, 'host.restart', { stopSessions: true }));
+      await expect.poll(async () => (await host()).state, { timeout: 30_000, message: 'the engine host is ready again' }).toBe('ready');
+    };
+    // the transcript's words (src/renderer/src/transcript/model/copy.ts's HYDRATION)
+    const loading = main.getByRole('status').filter({ hasText: /^Loading…$/ });
+    const failed = main.getByRole('alert').filter({ hasText: 'Couldn’t load this conversation' });
+
+    await test.step('opened while the host is away: Loading…, and its rows once the host is back, with no click', async () => {
+      await crashForGood();
+      await (await sidebarRow(page, { appSessionId: appOf('soon') })).click();
+      await expect(loading, 'the pane says it is loading while its read waits for the host').toBeVisible({ timeout: 10_000 });
+      await expect(failed).toHaveCount(0);
+      await restart();
+      await expect(main.getByText(words.soon, { exact: true }), 'read again at the next ready').toBeVisible({ timeout: 30_000 });
+      await expect(loading).toHaveCount(0);
+      await expect(failed).toHaveCount(0);
+    });
+
+    await test.step('past 15 s with no ready: it could not load, with Retry; a later ready still loads it, with no click', async () => {
+      await crashForGood();
+      await (await sidebarRow(page, { appSessionId: appOf('late') })).click();
+      await expect(loading, 'Loading… while it waits').toBeVisible({ timeout: 10_000 });
+      await expect(failed, 'the wait ran out (15 s, and margin for a loaded Mac)').toBeVisible({ timeout: 45_000 });
+      await expect(failed.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+      await restart();
+      await expect(main.getByText(words.late, { exact: true }), 'a later ready loads it').toBeVisible({ timeout: 30_000 });
+      await expect(failed).toHaveCount(0);
+    });
   });
 });

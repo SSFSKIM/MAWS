@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { ProvisioningSecretSchema, type ProvisioningSecret } from '@shared/ipc/schema/org';
 import { openProvisioningSecret, PROVISIONING_SECRET_FILE } from './provisioning-secret-store';
 
-const PRODUCTION: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const PRODUCTION: ProvisioningSecret = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
 
 let profile: string;
 let file: string;

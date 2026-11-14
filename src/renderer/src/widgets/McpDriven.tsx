@@ -4,6 +4,8 @@
 // read, and each server's Disable. Each runs as `command mcp <verb> <name>` through the session's port, one at a time,
 // drawn from its own capability: one the bridge can't run stays in place, disabled, with its reason. The outcome is the
 // command op's end, worded as the slash palette words it; the list is read again after each.
+// UX wave U11a (§C): the Connectors dialog's title and subtitle, and each status in the dialog's words; its switch, and
+// so the sentence of what it reaches, is the terminal's own `/mcp`.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { OpBody } from 'desk-hub/protocol';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -13,6 +15,7 @@ import { readLaneA } from '../lane-a/watches';
 import { ipc } from '../ipc/client';
 import type { SessionControls } from '../session/controls/types';
 import { FIELD } from '../sessions/ui';
+import { connectorStatusWords } from './connector-status';
 import { MCP, MCP_ACTIONS, WIDGET_TITLE } from './copy';
 import { Row, Rows, TextButton } from './parts';
 import type { ReadState } from './read';
@@ -86,7 +89,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
   const reconnect = controls.capability('mcp.reconnect');
   const disable = controls.capability('mcp.disable');
   return (
-    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} command="mcp" state={read.state} error={read.error} close={close}>
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.mcp} subtitle={MCP.subtitle} command="mcp" state={read.state} error={read.error} close={close}>
       <div className="flex flex-col gap-2">
         {read.servers.length === 0 ? (
           <p className="m-0 text-ui-sm text-fg-muted">{MCP.none}</p>
@@ -97,7 +100,7 @@ export function McpDriven({ appSessionId, controls, close }: { appSessionId: App
                 key={server.name}
                 data-mcp-server={server.name}
                 main={<span className="font-semibold">{server.name}</span>}
-                note={`${server.status}${server.tools > 0 ? ` · ${MCP.tools(server.tools)}` : ''}`}
+                note={[connectorStatusWords(server.status), server.tools > 0 ? MCP.tools(server.tools) : ''].filter((part) => part !== '').join(' · ')}
                 actions={
                   <>
                     <TextButton onClick={() => void run('reconnect', server.name)} disabled={busy || !reconnect.available} title={reconnect.available ? undefined : reconnect.reason}>

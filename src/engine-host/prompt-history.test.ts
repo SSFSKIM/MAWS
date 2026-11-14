@@ -173,7 +173,7 @@ describe('unsettledPrompts: the steers a dead launch left unstated (P2-C)', () =
     const rows: Record<string, unknown>[] = [];
     const queue = new MessageQueue({
       appSessionId: APP, store: new MemorySessionStateStore(), write: async () => {}, meta: (frame) => void rows.push(frame), turnOpen: () => false, canWrite: () => true,
-      cancel: async () => true, onChange: () => {}, log: () => {}, unsettled: () => unsettledPrompts(dir, 'L3'),
+      cancel: async () => true, sendNow: async () => undefined, onChange: () => {}, log: () => {}, unsettled: () => unsettledPrompts(dir, 'L3'),
     });
     await queue.recover();
     expect(rows).toEqual([{ event: 'queue', action: 'abandon', messageUuid: 'u-1' }, { event: 'queue', action: 'recovered' }]);
@@ -190,7 +190,7 @@ describe('unsettledPrompts: the steers a dead launch left unstated (P2-C)', () =
     const rows: Record<string, unknown>[] = [];
     const queue = new MessageQueue({
       appSessionId: APP, store: new MemorySessionStateStore(), write: async () => {}, meta: (frame) => void rows.push(frame), turnOpen: () => false, canWrite: () => true,
-      cancel: async () => true, onChange: () => {}, log: () => {}, unsettled: () => Promise.reject(new Error('EIO: i/o error')),
+      cancel: async () => true, sendNow: async () => undefined, onChange: () => {}, log: () => {}, unsettled: () => Promise.reject(new Error('EIO: i/o error')),
     });
     await queue.recover(); // startup goes on
     expect(queue.recovered).toBe(true);

@@ -53,6 +53,7 @@ import {
   arrivalTurnOpened, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, opensAtHead, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
   type LiveArrivals,
 } from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
+import { interruptAnswered, interruptWritten, lifecycleSeen, noSendNow, outputSeen, promptStarted, promptWritten, replayJoins, turnEnded, type SendNowState } from './normalizer-send-now'; // UX wave U4a
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -107,6 +108,9 @@ export interface NormalizerState {
   // UX wave U3 (UC-2; the U3a document, Interfaces E): what the main lane's frames carried from elsewhere, read in order,
   // and the background tasks' ends kept until the model is told (`normalizer-arrivals.ts`)
   arrivals: LiveArrivals;
+  // UX wave U4a (the U4a document, Interfaces B; decision 32): the messages sent now and whether a stop was asked since the
+  // last end, and what tells the engine's replay of several waiting prompts from an echo (`normalizer-send-now.ts`)
+  sendNow: SendNowState;
 }
 
 // C10 start: the engine's trust line on stderr (fixture pass2/trust-no-attestation seq 5). It is printed at settings
@@ -150,6 +154,7 @@ export class Normalizer {
       reseeded: new Set(), // P5 O16 M3
       reseededMessages: new Set(), // P5 O16 M3 fix wave 1
       arrivals: noLiveArrivals(), // UX wave U3
+      sendNow: noSendNow(), // UX wave U4a
     };
   }
 
@@ -239,6 +244,7 @@ export class Normalizer {
       case 'command_lifecycle': {
         const f = frame as CommandLifecycleFrame;
         out.emit({ kind: 'command.lifecycle', commandUuid: f.command_uuid as MessageUuid, state: f.state }, attribution);
+        lifecycleSeen(this.state.sendNow, f.command_uuid as MessageUuid, f.state, this.state.currentTurn !== null); // UX wave U4a: before it opens a turn
         this.promptLifecycle(f, row, out, attribution);
         if (lane === null) scheduleFire(this.state.arrivals, arrivals, f.command_uuid as MessageUuid); // UX wave U3: a scheduled fire's turn opens next
         return;
@@ -382,6 +388,7 @@ export class Normalizer {
     if (attribution.parentToolUseId === null) {
       if (arrivals.some((arrival) => arrival.class === 'command')) return this.commandOutput((frame.uuid ?? null) as MessageUuid | null, arrivals, false, out, attribution);
       output(this.state.arrivals);
+      outputSeen(this.state.sendNow); // UX wave U4a
     }
     // a response after it (a Stop hook that blocked the stop) is the turn's again: its result is its own
     if (attribution.parentToolUseId === null) this.state.lastMessage.final = false;
@@ -430,6 +437,7 @@ export class Normalizer {
     const main = attribution.parentToolUseId === null;
     if (results.length > 0) {
       if (main) output(this.state.arrivals); // UX wave U3
+      if (main) outputSeen(this.state.sendNow); // UX wave U4a
       const meta = frame.tool_result_meta ?? [];
       const launch = frame.tool_use_result as { agentId?: unknown } | null | undefined;
       for (const block of results) {
@@ -450,6 +458,10 @@ export class Normalizer {
     const uuid = (frame.uuid ?? null) as MessageUuid | null;
     if (uuid !== null && this.state.pendingHumanUuids.has(uuid)) {
       this.state.pendingHumanUuids.delete(uuid); // the engine's --replay-user-messages echo of our own frame
+      // UX wave U4a (decision 32 b): unless the engine wrote several waiting prompts as one under this uuid: then the one
+      // message it wrote, which a reader draws in their place
+      const joined = replayJoins(this.state.sendNow, uuid, content);
+      if (joined !== null) out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, joined }, attribution);
       return;
     }
     if (main && this.arrivalIn(frame, row.seq, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
@@ -574,11 +586,14 @@ export class Normalizer {
       const word = isEchoReceipt ? null : resultReached(this.state.arrivals, typeof runId === 'string' ? runId : null, out);
       const message = this.state.lastMessage; // P4-R7z: after a final message the reply is the message, not the made-up answer
       this.state.lastMessage = { text: null, final: false };
+      // UX wave U4a (Interfaces B): an end a sent-now message caused, by what the frames show
+      const endedForMessage = !isEchoReceipt && turnEnded(this.state.sendNow, terminalReason, frame.subtype);
+      if (!isEchoReceipt) outputSeen(this.state.sendNow);
       out.emit({
         kind: 'turn.ended', result: frame.subtype, isError: frame.is_error, terminalReason, resultText: message.final ? message.text : stringOrNull(f.result), durationMs: frame.duration_ms, numTurns: frame.num_turns,
         costUsd: frame.total_cost_usd, usage, permissionDenials: denials, errors: Array.isArray(f.errors) ? f.errors.map(String) : [],
         userMessageUuids: (Array.isArray(f.user_message_uuids) ? f.user_message_uuids : []) as MessageUuid[], origin: word ?? stringOrNull(origin),
-        resultIndex: typeof f.result_index === 'number' ? f.result_index : null, isEchoReceipt,
+        resultIndex: typeof f.result_index === 'number' ? f.result_index : null, isEchoReceipt, ...(endedForMessage && { endedForMessage: true as const }),
       }, attribution);
       if (isEchoReceipt) this.state.pendingEcho = null;
       else this.state.currentTurn = null;
@@ -600,6 +615,7 @@ export class Normalizer {
     }
     if (frame.state !== 'started') return;
     this.state.unstartedPrompts.delete(uuid);
+    promptStarted(this.state.sendNow, uuid); // UX wave U4a
     if (this.state.currentTurn) {
       this.state.currentTurn.userMessageUuids.push(uuid);
       return;
@@ -629,6 +645,7 @@ export class Normalizer {
     const sent = this.state.outbound.get(requestId);
     if (!sent) return;
     this.state.outbound.delete(requestId);
+    if (sent.subtype === 'interrupt') interruptAnswered(this.state.sendNow, sent.request as Record<string, unknown>, frame.response); // UX wave U4a
     // C10 start: the launch's initialize answered; the held trust line was a warning only if trust was not recorded
     if (sent.subtype === 'initialize') {
       const recorded = frame.response.subtype === 'success' && (frame.response.response as { workspace_trust_recorded?: unknown } | undefined)?.workspace_trust_recorded === true;
@@ -685,6 +702,7 @@ export class Normalizer {
         return;
       case 'control_request':
         this.state.outbound.set(frame.request_id as RequestId, { subtype: frame.request.subtype, request: frame.request });
+        interruptWritten(this.state.sendNow, frame.request, this.state.currentTurn !== null); // UX wave U4a
         return;
       case 'control_response': {
         const requestId = frame.response.request_id as RequestId;
@@ -709,6 +727,8 @@ export class Normalizer {
       out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: true, origin: 'bash_echo', bash: null }, main);
       return;
     }
+    // UX wave U4a: a `now` frame while a turn runs or an earlier prompt waits is a message sent now
+    if (uuid !== null) promptWritten(this.state.sendNow, uuid, content, frame.priority, this.state.currentTurn !== null || this.state.unstartedPrompts.size > 0);
     // no turn opens at the write: the engine's `started` for this uuid opens it (promptLifecycle)
     if (uuid !== null) this.state.unstartedPrompts.add(uuid);
     this.state.lastUserMessageUuid = uuid;

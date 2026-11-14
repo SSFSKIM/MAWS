@@ -4,7 +4,7 @@
 // P3-G: the body renders inside its tab's X32 scope, so an editor registers with `useEditorHost(useEditorHostScope(), …)`.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { unavailable } from './copy';
 import { EditorHostScopeContext, type EditorHostScope } from './editor-host';
@@ -20,6 +20,7 @@ export function ToolBody({ tab, appSessionId }: { tab: PanelTabRef; appSessionId
   const registered = usePanelHost((s) => s.tools.has(tab.toolId));
   const focusRequest = usePanelHost((s) => s.focus[tab.id] ?? 0);
   const collapsed = useLayout((s) => s.regions.panel.collapsed);
+  const page = useLayout(pageOpen); // UX wave U7b (§N): the side column is not on screen behind a page
   const session = useSessions((s) => (appSessionId ? (s.records.get(appSessionId) ?? null) : null));
   const status = useSessions((s) => (appSessionId ? (s.engine.get(appSessionId) ?? null) : null));
 
@@ -33,7 +34,7 @@ export function ToolBody({ tab, appSessionId }: { tab: PanelTabRef; appSessionId
     session,
     status,
     pinned: tab.pinned,
-    visible: !collapsed,
+    visible: !collapsed && !page,
     focusRequest,
     setTitle: (suffix) => setTitle(tab.id, suffix),
     close: () => void panelHost.closeTab(tab.id),

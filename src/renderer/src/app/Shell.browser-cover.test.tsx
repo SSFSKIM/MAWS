@@ -26,7 +26,10 @@ const frames = async (n = 3) => {
 };
 const mainPlaces = () => main.callsOf('browser.view.place').filter((call) => call.surface === 'main');
 const covers = () => main.callsOf('browser.view.cover').map((call) => call.covered);
-const openSurface = (id: string) => act(() => useLayout.getState().setPanelTabs(A, { tabs: [ref(`${id}:aaaaaaaa`)], activeTabId: `${id}:aaaaaaaa` }));
+const openSurface = (id: string) => act(() => {
+  useLayout.getState().setPanelTabs(A, { tabs: [ref(`${id}:aaaaaaaa`)], activeTabId: `${id}:aaaaaaaa` });
+  useLayout.getState().showSurfaceTab(A, `${id}:aaaaaaaa`); // UX wave U8b: a write of refs shows nothing
+});
 function renderShell() {
   const root = document.createElement('div');
   root.id = 'root';
@@ -85,6 +88,26 @@ describe('native Browser views under shell overlays', () => {
     await frames();
     expect(screen.getByRole('complementary', { name: 'Session cards' })).toBeTruthy();
     expect(covers()).toEqual([true, false, true, false]); // wide cards have their own reserved main-area column
+  });
+
+  // UX wave U7b (§N): a page covers the mounted panes that place a native view for as long as it is open; the Settings
+  // dialog covers as any dialog does, through the watch of the DOM.
+  it('covers the main Browser while a page is open over it and lifts at Back; the Settings dialog covers while it is open', async () => {
+    renderShell();
+    await frames();
+    expect(covers()).toEqual([]);
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    await frames();
+    expect(covers()).toEqual([true]);
+    act(() => useLayout.getState().closeDestination());
+    await frames();
+    expect(covers()).toEqual([true, false]);
+    act(() => useLayout.getState().openSettings());
+    await frames();
+    expect(covers()).toEqual([true, false, true]);
+    act(() => useLayout.getState().closeSettings());
+    await frames();
+    expect(covers()).toEqual([true, false, true, false]);
   });
 
   it('registers the automatic sidebar overlay with the cover lifecycle and lifts it on close or return to a docked sidebar', async () => {

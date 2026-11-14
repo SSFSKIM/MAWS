@@ -3,7 +3,6 @@ import { commands, type CommandName, type CommandResult, type MawsBridge } from 
 import { validateCommandInput } from '@shared/ipc/validate';
 import { isActionEnabled, runAction } from '../keymap/actions-runtime';
 import { useLayout } from '../stores/layout';
-import { activeTab, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { resetShellStores } from '../test-support/shell-stores';
 import { openClaudeUsage, registerGatewayActions } from './actions';
@@ -81,14 +80,17 @@ describe('gateway actions pass the command validator', () => {
     expect(refusals[0]).toMatchObject({ kind: 'toast', text: expect.stringMatching(/^ClaudeUsage could not be opened · .*settings\.claudeUsage\.open/) });
   });
 
-  it('opens the singleton Settings tab (at a section by index); the retired Accounts tab is not among its actions (W6)', () => {
+  it('opens the Settings dialog (at a section by index) and leaves the strip alone; the retired Accounts tab is not among its actions (W6)', () => {
     const { bridge } = validatingBridge(() => OPENED);
     off = registerGatewayActions(bridge);
+    const strip = useLayout.getState().main;
     runAction('settings.open');
-    expect(activeTab(useLayout.getState().main)).toEqual({ id: 'settings', kind: 'settings', section: null, pinned: false });
+    expect(useLayout.getState().settings).toEqual({ section: null });
     runAction('settings.open', 2);
-    expect(activeTab(useLayout.getState().main)).toEqual({ id: 'settings', kind: 'settings', section: 'keyboard', pinned: false });
-    expect(currentSet(useLayout.getState().main).panes[0].tabs.filter((t) => t.kind === 'settings')).toHaveLength(1);
+    expect(useLayout.getState().settings).toEqual({ section: 'keyboard' });
+    runAction('settings.open'); // open already: it stays open at its section
+    expect(useLayout.getState().settings).toEqual({ section: 'keyboard' });
+    expect(useLayout.getState().main).toBe(strip);
     expect(isActionEnabled('accounts.open')).toBe(false);
   });
 

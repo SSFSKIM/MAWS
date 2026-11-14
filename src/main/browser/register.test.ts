@@ -39,6 +39,7 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
   const window = { id: 3 };
   const windowOf = vi.fn((): unknown => window);
   const favicons = { forOrigins: vi.fn(() => ({ 'https://a.test': 'data:image/png;base64,QQ==' })) };
+  const writeImage = vi.fn<(image: unknown) => Promise<void>>(async () => {}); // U12a: Copy screenshot's clipboard
   registerBrowserHandlers({
     store,
     views: makeViews?.(store) ?? views,
@@ -55,9 +56,10 @@ function setup(makeViews?: (store: InstanceType<typeof TabStore>) => Views) {
     ],
     avatars: new ProfileAvatars(join(tmpdir(), 'maws-cua90-no-such-user-data')), // cua #90: no avatar.png anywhere
     register: (name, handler) => void handlers.set(name, handler as (input: unknown) => unknown),
+    writeImage,
   });
   const call = (name: CommandName, input: unknown) => handlers.get(name)!(input, contextOf(fakePage()));
-  return { store, views, navigator, downloads, history, bookmarks, bar, favicons, window, windowOf, handlers, call };
+  return { store, views, navigator, downloads, history, bookmarks, bar, favicons, window, windowOf, handlers, call, writeImage };
 }
 
 // What a handler threw, as the router's CommandFailure (undefined when it did not throw one).
@@ -75,12 +77,72 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
   it('registers the tab store\'s commands and the profile list', () => {
     expect([...setup().handlers.keys()]).toEqual([
       'browser.tabs.list', 'browser.tabs.open', 'browser.tabs.close', 'browser.tabs.select',
-      'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload',
+      'browser.tabs.navigate', 'browser.tabs.zoom', 'browser.tabs.setViewport' /* U12a */, 'browser.tabs.find', 'browser.tabs.dismiss', 'browser.tabs.devtools', 'browser.tabs.revealDownload',
       'browser.history.suggest',
       'browser.profiles.list', 'browser.view.place', 'browser.view.cover', 'browser.view.capture', // P3-G
+      'browser.view.copyScreenshot', // U12a
       'browser.control.handBack',
+      'browser.agent.show', // U12a
       'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons', // cua #90
     ]);
+  });
+
+  // U12a (M2; Interfaces §C, ruling R2): the window about to open the Browser by itself asks main for the agent's tab
+  describe('browser.agent.show', () => {
+    const THREAD = 'App-Thread' as AppSessionId; // a side thread of A, acting in A's tab
+    const opened = (call: (name: CommandName, input: unknown) => unknown, appSessionId: AppSessionId, url: string, select: boolean) =>
+      (call('browser.tabs.open', { appSessionId, url, select }) as { tab: { tabId: string } }).tab.tabId;
+    const selectedOf = (call: (name: CommandName, input: unknown) => unknown, appSessionId: AppSessionId) =>
+      (call('browser.tabs.list', { appSessionId }) as { selected: Record<string, string | null> }).selected[appSessionId];
+
+    // the answer names the session's selected tab, whole, so the window can list the selection before its panel mounts
+    const answeredTab = (answer: unknown) => (answer as { selected: { tabId: string } | null }).selected?.tabId ?? null;
+
+    it("selects the agent's tab in the session that owns it and answers with it as the session's selected tab", () => {
+      const { call } = setup();
+      const theirs = opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      expect(selectedOf(call, A)).toBe(theirs);
+      const answer = call('browser.agent.show', { tabId: agents });
+      expect(answer).toEqual({ selected: expect.objectContaining({ tabId: agents, appSessionId: A, url: 'https://b.test/' }) });
+      expect(selectedOf(call, A)).toBe(agents);
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(agents); // already selected: still the one
+    });
+
+    it('leaves the selection while the person uses the selected tab, and answers with the person’s tab', () => {
+      const { call, store } = setup();
+      const theirs = opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      store.require(theirs).input.emit({ kind: 'key', source: 'human', at: Date.now() });
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(theirs);
+      expect(selectedOf(call, A)).toBe(theirs);
+    });
+
+    it('leaves the selection the person has just made while another window’s panel still shows the tab it had', () => {
+      const { call, store } = setup();
+      const shown = opened(call, A, 'https://a.test/', true);
+      store.update(shown, { placedIn: { paneId: 'pane-other-window', surface: 'panel' } });
+      const chosen = opened(call, A, 'https://c.test/', false);
+      const agents = opened(call, A, 'https://b.test/', false);
+      call('browser.tabs.select', { appSessionId: A, tabId: chosen }); // the notice and the view's move follow
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(chosen);
+      expect(selectedOf(call, A)).toBe(chosen);
+    });
+
+    it("a side thread's acting tab, which is its parent's, is selected in the parent's session", () => {
+      const { call } = setup();
+      const threads = opened(call, THREAD, 'https://t.test/', true);
+      opened(call, A, 'https://a.test/', true);
+      const agents = opened(call, A, 'https://b.test/', false);
+      expect(answeredTab(call('browser.agent.show', { tabId: agents }))).toBe(agents);
+      expect(selectedOf(call, A)).toBe(agents);
+      expect(selectedOf(call, THREAD)).toBe(threads);
+    });
+
+    it('refuses an unknown tab as invalid_input ("unknown browser tab")', () => {
+      const { call } = setup();
+      expect(failure(() => call('browser.agent.show', { tabId: 'b_ffffffffffff' }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    });
   });
 
   // cua #90 start
@@ -157,6 +219,7 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
       profiles: () => [],
       avatars: { list: () => [] },
       register: (name, handler) => void handlers.set(name, handler as (input: unknown, context: unknown) => unknown),
+      writeImage: vi.fn(async () => {}),
     });
     const tabId = 'b_ffffffffffff';
     const inputs: [string, unknown][] = [
@@ -277,6 +340,44 @@ describe('browser.* handlers in main (E4a Interfaces "IPC")', () => {
     expect(await (call('browser.view.capture', { tabId: tab.tabId }) as Promise<unknown>)).toEqual({ image: null }); // placed, but no page on show
     windowOf.mockReturnValueOnce({ id: 4 });
     await expect(call('browser.view.capture', { tabId: tab.tabId }) as Promise<unknown>).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+  });
+
+  // U12a (Interfaces §D, §K): the tab's device size, by tab id from any window; never on an extension's options tab
+  it('browser.tabs.setViewport sets the tab’s device size and Responsive again; an unknown tab and an extension’s options tab are refused', () => {
+    const { call, store } = setup();
+    const { tab } = call('browser.tabs.open', { appSessionId: A, url: 'https://a.test/', select: true }) as { tab: { tabId: string } };
+    expect(call('browser.tabs.setViewport', { tabId: tab.tabId, viewport: { width: 375, height: 812 } })).toBeUndefined();
+    expect(store.require(tab.tabId).tab.viewport).toEqual({ width: 375, height: 812 });
+    call('browser.tabs.setViewport', { tabId: tab.tabId, viewport: null });
+    expect(store.require(tab.tabId).tab.viewport).toBeNull();
+    expect(failure(() => call('browser.tabs.setViewport', { tabId: 'b_ffffffffffff', viewport: null }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    const PROBE = 'nenbjdahllkkbfanbpfmmdacjencdfpg';
+    const options = store.open({
+      appSessionId: A, url: `chrome-extension://${PROBE}/options.html`, select: true, partition: 'persist:maws-chrome-Default',
+      internal: { kind: 'extension', extensionId: PROBE, title: 'MAWS probe · Options' },
+    }).tab;
+    expect(failure(() => call('browser.tabs.setViewport', { tabId: options.tabId, viewport: { width: 375, height: 812 } }))?.error).toMatchObject({ code: 'invalid_input' });
+    expect(store.require(options.tabId).tab.viewport).toBeNull();
+  });
+
+  // U12a (Interfaces §D, §K): Copy screenshot is the placed window's alone, written to the clipboard in main
+  it('browser.view.copyScreenshot writes the placed tab’s capture to the clipboard and refuses any other window', async () => {
+    const { call, store, windowOf, window, writeImage } = setup();
+    const { tab } = call('browser.tabs.open', { appSessionId: A, url: null, select: false }) as { tab: { tabId: string } };
+    expect(failure(() => call('browser.view.copyScreenshot', { tabId: 'b_ffffffffffff' }))?.error).toMatchObject({ code: 'invalid_input', message: 'unknown browser tab' });
+    await expect(call('browser.view.copyScreenshot', { tabId: tab.tabId }) as Promise<unknown>).rejects.toMatchObject({ error: { code: 'invalid_input' } }); // not placed
+    const entry = store.require(tab.tabId);
+    entry.placement = { paneId: 'p', surface: 'panel', window, rect: { x: 0, y: 0, width: 10, height: 10 } } as never;
+    expect(await (call('browser.view.copyScreenshot', { tabId: tab.tabId }) as Promise<unknown>)).toEqual({ copied: false }); // placed, but no page on show
+    const captured = { isEmpty: () => false, getSize: () => ({ width: 750, height: 1624 }) };
+    entry.view = { webContents: { isDestroyed: () => false, capturePage: async () => captured } } as never;
+    entry.committed = true;
+    expect(await (call('browser.view.copyScreenshot', { tabId: tab.tabId }) as Promise<unknown>)).toEqual({ copied: true });
+    expect(writeImage).toHaveBeenCalledTimes(1);
+    expect(writeImage.mock.calls[0]![0]).toBe(captured);
+    windowOf.mockReturnValueOnce({ id: 4 });
+    await expect(call('browser.view.copyScreenshot', { tabId: tab.tabId }) as Promise<unknown>).rejects.toMatchObject({ error: { code: 'invalid_input' } });
+    expect(writeImage).toHaveBeenCalledTimes(1);
   });
 
   it('browser.view.place for an unknown tab answers invalid_input', () => {

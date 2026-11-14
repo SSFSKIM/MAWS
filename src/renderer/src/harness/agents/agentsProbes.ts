@@ -70,8 +70,9 @@ function subagents(): SubagentsView | null {
       orphan: row.querySelector('[data-part="nested"]') !== null,
       status: graph?.tasks.get(row.dataset.agentRow as TaskId)?.status ?? 'unknown',
       elapsed: text(row.querySelector('[data-part="elapsed"]')),
-      waiting: row.querySelector('[data-part="waiting"]') !== null,
+      waiting: row.dataset.waiting !== undefined,
       line: text(row.querySelector('[data-part="line"]')),
+      under: underOf(row),
     }));
   const lists = body.querySelector('[data-view="lists"]');
   const agent = body.querySelector<HTMLElement>('[data-view="agent"]');
@@ -97,7 +98,7 @@ function subagents(): SubagentsView | null {
     };
   }
   return {
-    agents: rows('agents'),
+    agents: rows('running'),
     done: rows('done'),
     disk: rows('disk'),
     headings: [...(lists?.querySelectorAll('section[data-section] > h3') ?? [])].map(text),
@@ -106,15 +107,21 @@ function subagents(): SubagentsView | null {
   };
 }
 
-// E7: the tree's rows as shown, in order (the lists view only).
+// The UX wave's U8b (M7): a row's disclosure as shown, `(+N)` (empty while it shows no count) and whether it is open.
+function underOf(row: Element): AgentRowView['under'] {
+  const under = row.querySelector<HTMLElement>(':scope > [data-part="under"]');
+  return under ? { count: text(under.querySelector('[data-part="under-count"]')), expanded: under.getAttribute('aria-expanded') === 'true' } : null;
+}
+
+// E7: the tree's rows as shown, in order (the lists view only; the UX wave's U8b: its Running and Done sections).
 function tree(): TreeRowView[] | null {
   const lists = bodyOf('subagents')?.querySelector('[data-view="lists"]');
   if (!lists) return null;
-  return [...lists.querySelectorAll<HTMLElement>('section[data-section="agents"], section[data-section="done"]')].flatMap((section) =>
+  return [...lists.querySelectorAll<HTMLElement>('section[data-section="running"], section[data-section="done"]')].flatMap((section) =>
     [...section.querySelectorAll<HTMLElement>('[data-agent-row], [data-fold], [data-team], [data-roster]')].map((row): TreeRowView => {
-      const base = { section: section.dataset.section as TreeRowView['section'], depth: Number(row.dataset.depth), count: null, expanded: null, orphan: false };
+      const base = { section: section.dataset.section as TreeRowView['section'], depth: Number(row.dataset.depth), count: null, expanded: null, orphan: false, under: null };
       if (row.dataset.agentRow !== undefined) {
-        return { ...base, kind: 'agent', agentId: row.dataset.agentRow, title: text(row.querySelector('[data-part="title"]')), orphan: row.querySelector('[data-part="nested"]') !== null };
+        return { ...base, kind: 'agent', agentId: row.dataset.agentRow, title: text(row.querySelector('[data-part="title"]')), orphan: row.querySelector('[data-part="nested"]') !== null, under: underOf(row) };
       }
       if (row.dataset.fold !== undefined) {
         return { ...base, kind: 'done-fold', agentId: row.dataset.fold, title: text(row), count: Number(/\d+$/.exec(text(row))?.[0]), expanded: row.getAttribute('aria-expanded') === 'true' };
@@ -125,7 +132,7 @@ function tree(): TreeRowView[] | null {
   );
 }
 
-// ---- Background work -------------------------------------------------------------------------------------------------------
+// ---- Background tasks ------------------------------------------------------------------------------------------------------
 
 const errorOf = (root: Element) => [...root.querySelectorAll('p')].map(text).find((line) => line.startsWith("Couldn't stop it:")) ?? null;
 const stoppingIn = (root: Element) => buttonNamed(root, BACKGROUND_COPY.stopping) !== null;
@@ -154,6 +161,7 @@ function background(): BackgroundView | null {
       error: errorOf(row),
     })),
     monitors: [...body.querySelectorAll<HTMLElement>('[data-monitor]')].map((row) => ({ taskId: row.dataset.monitor!, line: text(row.querySelector('[data-part="line"]')) })),
+    others: [...body.querySelectorAll<HTMLElement>('[data-other]')].map((row) => ({ taskId: row.dataset.other!, line: text(row.querySelector('[data-part="line"]')) })), // the UX wave's U8b
     tasks: {
       heading: text(tasks?.querySelector('h3 button')),
       label: tasks?.querySelector('[data-part="label"]') ? text(tasks.querySelector('[data-part="label"]')) : null,
@@ -166,7 +174,7 @@ function background(): BackgroundView | null {
   };
 }
 
-// E7: the run's widget, when the selected Background work tab shows one.
+// E7: the run's widget, when the selected Background tasks tab shows one.
 function widget(): RunWidgetView | null {
   const root = bodyOf('background')?.querySelector<HTMLElement>('[data-view="run"]');
   if (!root) return null;
@@ -534,6 +542,10 @@ export const agentsProbes: AgentsHarnessApi = {
   clearStatus,
   selectPhase: (n) => click(bodyOf('background')?.querySelectorAll('[data-view="run"] [role="option"]')[n], `phase option ${n}`),
   toggleFold: (parentId) => click(bodyOf('subagents')?.querySelector(`[data-fold="${CSS.escape(parentId)}"]`), `the fold under ${parentId}`),
+  // the UX wave's U8b start (M7)
+  toggleUnder: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"] > [data-part="under"]`), `the disclosure of ${agentId}`),
+  toggleSection: (tool, section) => click(bodyOf(tool)?.querySelector(`section[data-section="${CSS.escape(section)}"] h3 button`), `the ${section} heading of ${tool}`),
+  // the UX wave's U8b end
   reply,
   setColumnWidth(px) {
     const before = useLayout.getState().regions.sidebar.width;
@@ -542,7 +554,7 @@ export const agentsProbes: AgentsHarnessApi = {
   },
   openCreatingTurn: (id) => click(buttonNamed(bodyOf('background')?.querySelector(`[data-scheduled="${CSS.escape(id)}"]`), SCHEDULED_COPY.openTurn), `Open creating turn of ${id}`),
   // E7 end
-  clickRow: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"]`), `the row of ${agentId}`),
+  clickRow: (agentId) => click(bodyOf('subagents')?.querySelector(`[data-agent-row="${CSS.escape(agentId)}"] > [data-part="open"]`), `the row of ${agentId}`),
   back: () => click(buttonNamed(bodyOf('subagents'), SUBAGENTS_COPY.back), 'Back'),
   typeRelay(value) {
     const box = agentView().querySelector('textarea');

@@ -1,5 +1,9 @@
 // The `files.*` service (C8c execution document, Interfaces "The open-first boundary"; the C8 spec's K1): list, read,
-// watch and open a session's own files, every one confined to the session's allowlist (`allowlist.ts`).
+// watch and open a session's own files, every one confined to the session's allowlist (`allowlist.ts`). Beyond it, one
+// file at a time and never its folder: a file the session's deliverables name (E2: `read`, `openExternal`, `reveal`), and
+// (UX wave U6c, docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §C) a file the session's own
+// transcript links, for `read` and `openExternal` asked with `named` by a caller on this machine (`named.ts` decides).
+// Either stands as a root of one for the rest of the boundary; `write`, `list` and `watch` take the roots alone.
 //
 // The boundary opens before it trusts: a pre-check (step 1) resolves the path to its in-root realpath `real0` and
 // refuses a path that ends in a symlink; step 3 opens `real0` with `O_RDONLY | O_NONBLOCK` and no link on its way
@@ -52,6 +56,7 @@ import {
   type FilesOpenExternalOutput,
   type FilesReadInput,
   type FilesReadOutput,
+  type FilesReadResolvedInput,
   type FilesWriteInput,
   type FilesWriteOutput,
   type FilesRevealOutput, // E1
@@ -63,7 +68,7 @@ import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch';
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -81,32 +86,46 @@ export interface FilesServiceOptions {
   admitted?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
   // 2026-11-06: the machine's homes as the home-root rule reads them for a remote caller (machineHomes; a suite's fake one)
   homes?: () => readonly string[];
+  // UX wave U6c: whether the session's transcript names this path, as the request gave it (`createNamedPaths(...).names`).
+  // Asked by `read` and `openExternal` alone, for a request that carries `named`, from this machine, for a path outside the
+  // roots that no delivered file admits. Absent: nothing is admitted by name.
+  named?: (appSessionId: AppSessionId, path: string, signal?: AbortSignal) => Promise<boolean>;
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
 // (`openExternal`, `reveal`) admit a delivered file; `write`, `list` and `watch` never do, so a file an agent delivered
-// from outside is never written through MAWS and the store's version copies are never edited in place.
+// from outside is never written through MAWS and the store's version copies are never edited in place. U6c: a file the
+// transcript names, for `read` and `openExternal` alone, when the request asks (`Asked`).
 interface Purpose {
   admitDelivered: boolean;
+  admitNamed: boolean;
 }
-const ROOTS_ONLY: Purpose = { admitDelivered: false };
-const DELIVERED_TOO: Purpose = { admitDelivered: true };
+const ROOTS_ONLY: Purpose = { admitDelivered: false, admitNamed: false };
+const DELIVERED_TOO: Purpose = { admitDelivered: true, admitNamed: false };
+const DELIVERED_OR_NAMED: Purpose = { admitDelivered: true, admitNamed: true };
+
+// U6c: what the request itself says about a name: whether it asked (`named`), and the signal its wait ends with (its
+// client's end, `register.ts`)
+interface Asked {
+  named?: boolean;
+  signal?: AbortSignal;
+}
 
 // 2026-11-06 (the home-root rule, ./allowlist.ts): `remote`, a request from another machine (the handler context's), whose
 // roots leave out the machine's home and anything above it.
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }, remote?: boolean): Promise<FilesListOutput>;
-  read(input: FilesReadInput, remote?: boolean): Promise<FilesReadOutput>;
+  read(input: FilesReadInput, remote?: boolean, signal?: AbortSignal): Promise<FilesReadOutput>; // U6c: `input.named`, answered with `named`
   // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
   // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
   // P5 O7 M5a: `linkFree`, the path must be its own real path (no link anywhere on it) or the read is refused, so a caller
   // that resolved a path inside a directory it owns reads that file and nothing a link leads to (`library.read`'s export).
-  readResolved(input: Omit<FilesReadInput, 'appSessionId'>, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
+  readResolved(input: FilesReadResolvedInput, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
   write(input: FilesWriteInput, remote?: boolean): Promise<FilesWriteOutput>; // E5
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
-  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput>;
+  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c
   reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput>; // E1
   release(owner: string): void; // everything a client holds, when it ends
   watching(): string[];
@@ -145,9 +164,10 @@ interface Confirmed {
   stat: BigIntStats;
   real: string;
   roots: string[];
+  named: boolean; // U6c: the transcript's name admitted it
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -162,30 +182,46 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // the check below would pass a link to a directory), a known session with at least one resolvable root, and a
   // realpath under one of them. E2: for a purpose that admits delivered files, a realpath outside every root that the
   // session's records name is a root of its own for the rest of the boundary (`under` accepts it as equal), so step 5
-  // and every later confirmation hold for exactly that file and nothing beside it.
-  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose, remote = false): Promise<{ roots: string[]; real0: string }> {
+  // and every later confirmation hold for exactly that file and nothing beside it. U6c (Interfaces §C): after the
+  // delivered files, for `read` and `openExternal` asked with `named` by a caller on this machine, a realpath outside
+  // every root whose path, as the request gave it, the session's transcript names is such a root of one too; a remote
+  // caller never reaches the question, and the transcript is asked at most once, after everything that does not need it.
+  async function precheck(appSessionId: AppSessionId, path: string, purpose: Purpose, remote = false, asked: Asked = {}): Promise<{ roots: string[]; real0: string; named: boolean }> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     const record = records(appSessionId);
     if (!record) throw new Error(`unknown app session: ${appSessionId}`);
     if (normalize(path) !== path || (path !== sep && path.endsWith(sep))) throw new Refusal();
     let roots = await rootsOf(record, remote ? homes() : undefined); // 2026-11-06: a remote caller's, less the home
     const admits = purpose.admitDelivered && admitted !== undefined; // E2
-    if (roots.length === 0 && !admits) throw new Refusal();
+    // U6c: whether a name may admit, settled from the request's own context before anything of the transcript is read
+    const nameAdmits = purpose.admitNamed && asked.named === true && named !== undefined && !remote;
+    const namesIt = async () => {
+      await at('before-named', path);
+      return (await named?.(appSessionId, path, asked.signal)) === true;
+    };
+    if (roots.length === 0 && !admits && !nameAdmits) throw new Refusal();
     let real0: string;
     try {
       real0 = await fs.promises.realpath(path);
     } catch (error) {
-      throw await missing(path, roots, error);
+      const answer = await missing(path, roots, error);
+      // U6c (decision 16): a named path that is gone says so, as one inside the roots does
+      if (answer instanceof Refusal && nameAdmits && absent(error) && (await namesIt())) throw new Error(`not found: ${path}`, { cause: error });
+      throw answer;
     }
+    let byName = false;
     if (!roots.some((root) => under(root, real0))) {
-      if (!admits || !(await admitted?.(appSessionId, real0))) throw new Refusal();
-      roots = [...roots, real0]; // E2
+      if (admits && (await admitted?.(appSessionId, real0))) roots = [...roots, real0]; // E2
+      else if (nameAdmits && (await namesIt())) {
+        roots = [...roots, real0]; // U6c: a root of one, as a delivered file's
+        byName = true;
+      } else throw new Refusal();
     }
     // P0 opens no symlink (K1): a path that ends in one is refused even when its target lies inside, since step 3
     // opens real0, which is the target.
     const own = await fs.promises.lstat(path).catch(() => null);
     if (!own || own.isSymbolicLink()) throw new Refusal();
-    return { roots, real0 };
+    return { roots, real0, named: byName };
   }
 
   // The one open of the service, every descriptor's (`openConfirmed`'s and `readResolved`'s): `real` with no link on
@@ -210,8 +246,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 
   // Steps 2 to 5b for a regular file (`read`; `write` opens it read-write) or a directory (`list`, `watch`). The caller
   // closes the handle.
-  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY, remote = false): Promise<Confirmed> {
-    const { roots, real0 } = await precheck(appSessionId, path, purpose, remote);
+  async function openConfirmed(appSessionId: AppSessionId, path: string, kind: 'file' | 'write' | 'dir', purpose: Purpose = ROOTS_ONLY, remote = false, asked: Asked = {}): Promise<Confirmed> {
+    const { roots, real0, named: byName } = await precheck(appSessionId, path, purpose, remote, asked);
     await at('before-open', path);
     let handle: FileHandle;
     try {
@@ -232,7 +268,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       const real = await confirm(path, roots, stat);
       if (kind !== 'dir' && !stat.isFile()) throw new Error(`not a regular file: ${path}`);
       if (kind === 'dir' && !stat.isDirectory()) throw new Error(`not a directory: ${path}`);
-      return { handle, stat, real, roots };
+      return { handle, stat, real, roots, named: byName };
     } catch (error) {
       await handle.close();
       throw error;
@@ -272,13 +308,15 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadInput, remote = false): Promise<FilesReadOutput> {
-    const { handle, stat, real } = await openConfirmed(appSessionId, path, 'file', DELIVERED_TOO, remote); // E2: a delivered file is read
-    return readOpened(handle, stat, real, offset, length, hash);
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
+    // E2: a delivered file is read; U6c: a named one too, and its every answer says so
+    const { handle, stat, real, named: byName } = await openConfirmed(appSessionId, path, 'file', DELIVERED_OR_NAMED, remote, { named: asksNamed, signal });
+    const answer = await readOpened(handle, stat, real, offset, length, hash);
+    return byName ? { ...answer, named: true } : answer;
   }
 
   // P3-L (M6b fix wave 2): see `FilesService.readResolved`.
-  async function readResolved({ path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: Omit<FilesReadInput, 'appSessionId'>, options: { linkFree?: boolean } = {}): Promise<FilesReadOutput> {
+  async function readResolved({ path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false }: FilesReadResolvedInput, options: { linkFree?: boolean } = {}): Promise<FilesReadOutput> {
     if (!isAbsolute(path)) throw new Error('path must be absolute');
     let real: string;
     try {
@@ -416,10 +454,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  async function openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesOpenExternalOutput> {
-    const { real0 } = await precheck(appSessionId, path, DELIVERED_TOO); // E2: a delivered file opens outside wherever it lives
+  async function openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked: { named?: boolean; remote?: boolean; signal?: AbortSignal } = {}): Promise<FilesOpenExternalOutput> {
+    // E2: a delivered file opens outside wherever it lives; U6c: a named one too, for a caller on this machine
+    const { real0 } = await precheck(appSessionId, path, DELIVERED_OR_NAMED, asked.remote === true, { named: asked.named, signal: asked.signal });
     // "Open externally" shows a document in its viewer; it never runs a program an agent wrote into the tree. The
-    // object is in-root (step 1), so naming it in the message leaks nothing.
+    // object is admitted (step 1), so naming it in the message leaks nothing.
     const target = await fs.promises.lstat(real0).catch(() => null);
     if (!target || !target.isFile() || (target.mode & 0o111) !== 0 || !opensExternally(basename(real0))) {
       throw new Error(`not opened outside MAWS: ${path}`);
@@ -539,10 +578,11 @@ async function afterConfirmed(path: string, roots: readonly string[]): Promise<E
 }
 
 async function missing(path: string, roots: readonly string[], error: unknown): Promise<Error> {
-  const code = errno(error);
-  if ((code === 'ENOENT' || code === 'ENOTDIR') && (await missingWithin(path, roots))) return new Error(`not found: ${path}`);
+  if (absent(error) && (await missingWithin(path, roots))) return new Error(`not found: ${path}`);
   return new Refusal();
 }
+// A failure that says nothing is there: no such name, or a component of the path that is not a directory
+const absent = (error: unknown) => errno(error) === 'ENOENT' || errno(error) === 'ENOTDIR';
 
 async function missingWithin(path: string, roots: readonly string[]): Promise<boolean> {
   let ancestor = path;

@@ -25,6 +25,13 @@
 // the card's column while the pane holds the view, before paint, so the card moves onto it in the same frame. Closed to
 // its pill, the card asks nothing of the pane: the chrome's row draws the pill. P4-B3 (its Decision Log 10): a main tab
 // does the same under the main split's card (the panel's card has the main region at 0 px, so it asks nothing there).
+//
+// U12a (the UX wave's U12, l9-browser-delivery-06; Interfaces §D): a device size. The page's element sits in a page box
+// (`data-browser-page-box`), the column's flexible child, whose size is the room this mount has. With no size the element
+// fills the box, exactly the box it had before; with one the element is `pageBox`'s size, centred and top-aligned on the
+// box's surround, and the existing reports carry it to the view, so the page's own viewport is that size with no
+// emulation. A pane that does not hold the view draws no size, and tells its surface no room (`onRoom`): one tab can be
+// mounted twice at different sizes, and only the holder's room decides what its chrome offers.
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BrowserTab } from '@shared/browser/tab';
 import { shellGeometryOf } from '../../app/shell-view';
@@ -43,18 +50,25 @@ import { ErrorPage } from './pages/ErrorPage';
 import { ShownElsewhere } from './pages/ShownElsewhere';
 import { paneRect, Placement, type PlacementMode } from './placement';
 import { onShowRequest, useBrowser } from './store';
+import { pageBox, type Room } from './viewport'; // U12a
 
 const PANE = 'relative h-full w-full overflow-hidden bg-bg';
-const PAGE = 'relative min-h-0 w-full flex-1 overflow-hidden bg-bg'; // P2-E2: a placed pane's page, over the card's strip
+// P2-E2: a placed pane's page, over the card's strip. U12a: in its page box, which takes the column's flexible place; the
+// page fills it, or at a device size sits at its size, centred and top-aligned on the box's surround.
+const PAGE_BOX = 'relative flex min-h-0 w-full flex-1 overflow-hidden';
+const PAGE_BOX_SIZED = `${PAGE_BOX} items-start justify-center bg-bg-active`;
+const PAGE = 'relative min-w-0 flex-1 overflow-hidden bg-bg';
+const PAGE_SIZED = 'relative shrink-0 overflow-hidden bg-bg';
 
 export interface BrowserPaneProps {
   tab: BrowserTab | null; // null: the session has no tab to show
   surface: 'panel' | 'main';
   gone?: boolean; // a main tab whose tab main no longer knows (Decision Log 21)
   onOwns?(owns: boolean): void; // whether this pane holds the page's view (the chrome's commands follow it)
+  onRoom?(room: Room | null): void; // U12a: the page box's size while this pane holds the view; null when it does not, and at unmount
 }
 
-export function BrowserPane({ tab, surface, gone = false, onOwns }: BrowserPaneProps) {
+export function BrowserPane({ tab, surface, gone = false, onOwns, onRoom }: BrowserPaneProps) {
   if (tab === null) {
     return (
       <div data-browser-pane="" className={PANE}>
@@ -62,11 +76,19 @@ export function BrowserPane({ tab, surface, gone = false, onOwns }: BrowserPaneP
       </div>
     );
   }
-  return <PlacedPane key={tab.tabId} tab={tab} surface={surface} onOwns={onOwns} />;
+  return <PlacedPane key={tab.tabId} tab={tab} surface={surface} onOwns={onOwns} onRoom={onRoom} />;
 }
 
-function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel' | 'main'; onOwns?(owns: boolean): void }) {
+// U12a: the page box's size in whole points, never more than it has
+const roomOf = (box: HTMLElement): Room => {
+  const { width, height } = box.getBoundingClientRect();
+  return { width: Math.max(0, Math.floor(width)), height: Math.max(0, Math.floor(height)) };
+};
+const sameRoom = (a: Room | null, b: Room) => a !== null && a.width === b.width && a.height === b.height;
+
+function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface: 'panel' | 'main'; onOwns?(owns: boolean): void; onRoom?(room: Room | null): void }) {
   const element = useRef<HTMLDivElement>(null);
+  const boxElement = useRef<HTMLDivElement>(null); // U12a: the page box
   const placement = useRef<Placement | null>(null);
   const [mode, setMode] = useState<PlacementMode>('claiming');
   const { tabId, appSessionId } = tab;
@@ -134,6 +156,33 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   useEffect(() => onOwns?.(mode === 'owner'), [mode, onOwns]);
   useEffect(() => () => onOwns?.(false), [onOwns]);
 
+  // U12a: the room, the page box's size as laid out (its own resizes, and the window's), and the page's box in it
+  const [room, setRoom] = useState<Room | null>(null);
+  useLayoutEffect(() => {
+    const box = boxElement.current;
+    if (!box) return;
+    const read = () => {
+      const next = roomOf(box);
+      setRoom((previous) => (sameRoom(previous, next) ? previous : next));
+    };
+    read();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    observer?.observe(box);
+    window.addEventListener('resize', read);
+    return () => {
+      observer?.disconnect();
+      window.removeEventListener('resize', read);
+    };
+  }, []);
+  const sized = mode !== 'elsewhere' && room !== null ? pageBox(tab.viewport, tab.zoom, room) : null;
+  // the page's element moved or resized with the room or its size: reported at once (a move inside a box that grew is no
+  // resize of the element's own, which its observer would miss)
+  const [sizedWidth, sizedHeight] = [sized?.width ?? null, sized?.height ?? null];
+  useEffect(() => placement.current?.report(), [room, sizedWidth, sizedHeight]);
+  const heldRoom = mode === 'owner' ? room : null;
+  useEffect(() => onRoom?.(heldRoom), [heldRoom, onRoom]);
+  useEffect(() => () => onRoom?.(null), [onRoom]);
+
   // P2-E2: the card's dock, registered for the tab while this pane holds its view (where main sends its picks)
   const hostId = useId();
   useEffect(() => (mode === 'owner' ? registerDock(tabId, hostId) : undefined), [mode, tabId, hostId]);
@@ -162,10 +211,12 @@ function PlacedPane({ tab, surface, onOwns }: { tab: BrowserTab; surface: 'panel
   return (
     <div className="flex h-full w-full">
       <div data-browser-column="" className="flex h-full min-w-0 flex-1 flex-col">
-        <div ref={element} data-browser-pane="" className={PAGE}>
-          {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+        <div ref={boxElement} data-browser-page-box="" className={sized ? PAGE_BOX_SIZED : PAGE_BOX}>
+          <div ref={element} data-browser-pane="" className={sized ? PAGE_SIZED : PAGE} style={sized ? { width: sized.width, height: sized.height } : undefined}>
+            {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
+          </div>
         </div>
-        {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
+        {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} subject={tabId} /* UX wave U5a: the tab's pass */ />}
       </div>
       {column !== null && (
         <div ref={spacer} aria-hidden data-browser-reserved-column="" className="shrink-0" style={{ width: column, maxWidth: `calc(100% - ${COLUMN_PAGE_MIN}px)` }} />

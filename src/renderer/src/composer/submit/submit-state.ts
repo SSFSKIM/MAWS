@@ -8,6 +8,9 @@
 // menu and no Stop beside it: Esc interrupts and sends the queued head now, and the queue rows keep their own actions.
 // Busy is C3's predicate as the renderer can read it: a turn is open, or an entry is `submitting` or `released` (C3
 // opens the turn at the engine's `started`, so between a write and its start the entry is what makes the session busy).
+// UX wave U4a (l3-input-15, l3-input-03; its Interfaces E): the same table decides the glyph the round button draws and
+// whether ⌘Enter differs from Enter (it keeps the message for after the running turn); the label stays the button's
+// word, its accessible name and its text.
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { QueueEntry, QueuePauseReason } from '@shared/engine/session-state-store';
 import type { Availability } from '@shared/ipc/schema/session'; // P2-A
@@ -43,6 +46,11 @@ export interface SubmitInput {
   // Board 525: why the member's words don't go to another member's session (its machine refused them at the member's
   // grade), naming whom to ask; absent or null: nothing says so
   closed?: string | null;
+  // The UX wave, U9 (S-01): a Stop for the session has been out for more than 300 ms and has not settled
+  stopping?: boolean;
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): the session's machine is in its offline phase, with UC-7.5's sentences for Send and Stop;
+  // absent or null: it is not (while it connects or reconnects main holds the act, and nothing here changes)
+  offline?: { send: string; stop: string } | null;
 }
 
 export interface SubmitDecision {
@@ -52,7 +60,19 @@ export interface SubmitDecision {
   reason: string | null; // why it is disabled, when that is not just an empty editor
   detail: string | null; // what the primary does, when its label alone would not say
   steer: boolean; // W10: this Send is the `next` steer (`session.steer`), not `session.send`
+  glyph: SubmitGlyph; // UX wave U4a: what the button draws (`glyphs.tsx`)
+  queues: boolean; // UX wave U4a: ⌘Enter differs from Enter now: a turn runs, the mode is send, and the session keeps MAWS's queue
 }
+
+// UX wave U4a (the child's table, l3-input-15): an up arrow to send, a square to stop, the queue mark (the arrow under a
+// bar) for a message that will wait, a play triangle to resume, a spinner while the session starts or re-attaches.
+export type SubmitGlyph = 'arrow' | 'square' | 'queue' | 'play' | 'spinner';
+
+// UX wave U4a (Interfaces I): the empty box's words while a turn runs, which the composer hands the editor, and the
+// refusal of ⌘Enter during a terminal session's turn (MAWS keeps no queue there).
+export const PLACEHOLDER_BOTH = 'Enter to send, ⌘Enter to queue for later';
+export const PLACEHOLDER_ENTER = 'Enter to send';
+export const TERMINAL_KEEPS_NO_QUEUE = 'A terminal session takes a message at its next step; MAWS cannot hold one for after the turn';
 
 export const STARTING = 'Session is starting…';
 // P5 O16 M3b: a session a successor engine host adopted, waiting for its engine's re-initialize (as long as the step the
@@ -75,6 +95,7 @@ export const SENDS_WHEN_STARTED = 'Sends once the session has started';
 export const ARCHIVED = 'Archived · unarchive it to continue';
 // P2-A end
 export const MODES_IN_TERMINAL = 'A terminal session runs `!` and `#` in its terminal'; // P5 O9 M5
+export const STOPPING = 'Stopping…'; // the UX wave, U9 (S-01)
 
 export const isBusy = (status: EngineSessionStatus | null, entries: readonly QueueEntry[]): boolean =>
   (status?.turn ?? null) !== null || entries.some((e) => e.state === 'submitting' || e.state === 'released');
@@ -89,9 +110,10 @@ export const SEND_NOW_DETAIL = 'Stops the running turn, then sends this'; // a r
 export const SENDS_NOW = 'Sends this now'; // a held row's Send now with no turn running (a paused queue at idle)
 
 // Fix wave 1: the re-attaching session's Stop with an empty editor; fix wave 2: disabled on another machine
-const endReattaching = (remote: boolean | undefined): SubmitDecision => (remote ? decide('end', 'Stop', false, REATTACHING_STOP_REMOTE) : decide('end', 'Stop', true, null, ENDS_REATTACHING));
+const endReattaching = (remote: boolean | undefined): Decided => (remote ? decide('end', 'Stop', false, REATTACHING_STOP_REMOTE) : decide('end', 'Stop', true, null, ENDS_REATTACHING));
 
-const decide = (primary: SubmitState, label: string, enabled: boolean, reason: string | null = null, detail: string | null = null, steer = false): SubmitDecision => ({
+type Decided = Omit<SubmitDecision, 'glyph' | 'queues'>;
+const decide = (primary: SubmitState, label: string, enabled: boolean, reason: string | null = null, detail: string | null = null, steer = false): Decided => ({
   primary,
   label,
   enabled,
@@ -109,6 +131,21 @@ function queuedBehindTurn(queue: SubmitInput['queue']): string {
 }
 
 export function submitState(i: SubmitInput): SubmitDecision {
+  const decided = decideSubmit(i);
+  // a turn runs: the holder's for a driven session, C3's busy predicate over a ready process otherwise
+  const running = i.intent === null && (i.driven ? i.driven.running : i.status?.process === 'ready' && isBusy(i.status, i.queue.entries));
+  const queues = running && !i.driven && i.mode === 'send' && (i.closed ?? null) === null;
+  return { ...decided, glyph: glyphOf(decided, running && i.mode === 'send' && !i.empty), queues };
+}
+
+function glyphOf(d: Decided, waits: boolean): SubmitGlyph {
+  if (d.primary === 'stop' || d.primary === 'end') return 'square';
+  if (d.primary === 'resume') return 'play';
+  if (d.label === 'Starting…' || d.label === 'Re-attaching…') return 'spinner';
+  return waits && d.enabled ? 'queue' : 'arrow'; // the message will wait (at the next step, or after the turn); a closed Send is the greyed arrow
+}
+
+function decideSubmit(i: SubmitInput): Decided {
   const { status, intent, queue, empty, mode } = i;
   if (intent !== null) { // C10: the caller answers the intent while unstarted, even beside a failed setup's exited status
     if (intent.starting || (intent.phase ?? null) !== null) return decide('send', 'Starting…', false, intent.phase ?? STARTING); // C10: the setup phase is the reason
@@ -118,6 +155,14 @@ export function submitState(i: SubmitInput): SubmitDecision {
     return decide('send', 'Send', !empty);
   }
   if ((i.closed ?? null) !== null) return decide('send', 'Send', false, i.closed); // board 525: Stop too, whatever the turn
+  // The UX wave, U9 (S-01): a Stop on its way for more than 300 ms reads so, disabled, until it settles, whatever the draft
+  if (i.stopping) return decide('stop', STOPPING, false, STOPPING);
+  // The UX wave, U9 (the ticket on a pane kept through a link's loss): in the machine's offline phase Send and Stop are closed with the phase's sentence
+  const offline = i.offline ?? null;
+  if (offline !== null && mode === 'send') {
+    const running = i.driven ? i.driven.running : isBusy(status, queue.entries);
+    return running && empty ? decide('stop', 'Stop', false, offline.stop) : decide('send', 'Send', false, offline.send);
+  }
   // P5 O9 M5: driven through its holder (lane A). Send goes in either turn state, never as a steer: the bridge reads words
   // sent while a turn runs at the turn's next model request; with the box empty during a turn, Stop interrupts.
   if (i.driven) {

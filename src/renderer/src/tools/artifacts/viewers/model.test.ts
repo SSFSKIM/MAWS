@@ -2,7 +2,8 @@
 // version list in order with its labels, and which version a picker choice or a row's Open shows.
 import { describe, expect, it } from 'vitest';
 import type { ArtifactVersion } from '@shared/artifacts/version';
-import { bodyOf, placeOfNumber, placeOfOpenAt, selectionAt, selectionOf, selectionOfOpen, selectionOfVersionId, shownVersion, versionLabel, versionsInOrder } from './model';
+import { record } from '../../../../../../test/support/builders';
+import { bodyOf, placeOfNumber, placeOfOpenAt, selectionAt, selectionOf, selectionOfOpen, selectionOfVersionId, shownVersion, underSession, versionLabel, versionsInOrder } from './model';
 
 const version = (id: number, seq: number): ArtifactVersion => ({ id, seq, at: seq * 1000, actor: { kind: 'human' }, kind: 'auto', assetRefs: [] });
 
@@ -91,5 +92,24 @@ describe('versions', () => {
     expect(placeOfOpenAt(thinned, { revision: 9 })).toBe(2);
     expect(placeOfOpenAt(thinned, { revision: 99 })).toBeNull();
     expect(placeOfOpenAt(thinned, { version: 2 })).toBe(2);
+  });
+});
+
+// Whether Open as file is offered: a path under one of the session's folders, the record's word (the read itself is the
+// files service's). UX wave U8c-2, M3 (§G): the launch folder and the working folder a fact names count too.
+describe('underSession', () => {
+  it('holds a normal path under the directory, an additional directory or the worktree, at a segment boundary', () => {
+    const session = record('a', { directory: '/repo', additionalDirectories: ['/docs'], worktree: { path: '/wt', branch: 'w' } });
+    for (const path of ['/repo/a.ts', '/docs/x.md', '/wt/b.ts', '/repo']) expect(underSession(path, session), path).toBe(true);
+    for (const path of ['/repo2/a.ts', '/elsewhere/a.ts', '/repo/../etc/x', 'repo/a.ts']) expect(underSession(path, session), path).toBe(false);
+    expect(underSession('/repo/a.ts', undefined)).toBe(false);
+  });
+
+  it('holds a path under the working folder or the launch folder a fact names', () => {
+    const cd = record('a', { directory: '/repo', agentFolder: { checkout: '/repo-wt', cwd: '/repo-wt', branch: 'w', linked: true } });
+    expect(underSession('/repo-wt/src/a.ts', cd)).toBe(true);
+    const tool = record('a', { directory: '/repo/.claude/worktrees/w1', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'w1' }, launchFolder: '/repo/packages/app' });
+    expect(underSession('/repo/packages/app/index.ts', tool)).toBe(true);
+    expect(underSession('/repo/README.md', tool)).toBe(false);
   });
 });

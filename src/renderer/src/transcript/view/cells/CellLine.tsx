@@ -38,11 +38,12 @@ const asLabelled = (cell: Cell) => cell.classification.denial !== null || cell.s
 
 // UX wave U2 (O-49; the U2a document, decision 5, Interfaces §D): what a shell call's row reads, the one function its
 // row and its run's line call. In order: the model's label for a refused call that stands alone and for a stopped call;
-// the description, always, when the call gave one (the agent's own summary, inflected); else the verb and the short
-// form of the command, in code marks; else the verb and `a command`. A shell tool with no command line of its own reads
-// the verb and its name.
+// the moved label of a call the engine moved to the background (UX wave U4a); the description, always, when the call
+// gave one (the agent's own summary, inflected); else the verb and the short form of the command, in code marks; else
+// the verb and `a command`. A shell tool with no command line of its own reads the verb and its name.
 export function shellLabel(cell: Cell): string {
   if (cell.detail.kind !== 'shell' || asLabelled(cell)) return cell.label;
+  if (cell.moved === true) return cell.label; // UX wave U4a (decision 33): the model's moved label first, before a description
   const description = cell.detail.description?.trim().split(/\r?\n/, 1)[0];
   if (description) return descriptionLabel(description, cell.status);
   const status = cell.status === 'running' ? 'running' : cell.status === 'error' ? 'error' : 'done';

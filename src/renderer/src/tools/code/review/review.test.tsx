@@ -21,7 +21,7 @@ import { FloatingSummary } from '../../../panel/summary/Summary';
 import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
-import { fail, installFakeMain, ok } from '../../../test-support/code';
+import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { useTranscriptStore, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
 import { journalToEvents } from '../../../transcript/dev/journal';
@@ -516,7 +516,8 @@ interface ReviewMainOptions {
 }
 type DiffAnswer = { patch: string; files: typeof APP_FILES };
 function reviewMain(options: ReviewMainOptions = {}) {
-  const state: { status: GitStatus; uncommitted: DiffAnswer; perFile: Record<string, DiffAnswer> } = {
+  // `diff`: a test's own answer to a `git.diff` (a held one), else undefined for the scripted answers below
+  const state: { status: GitStatus; uncommitted: DiffAnswer; perFile: Record<string, DiffAnswer>; diff?: (input: Record<string, unknown>) => Promise<ReturnType<typeof ok>> | undefined } = {
     perFile: {},
     status: options.status ?? DIRTY,
     uncommitted: options.uncommitted ?? {
@@ -528,9 +529,12 @@ function reviewMain(options: ReviewMainOptions = {}) {
     switch (name) {
       case 'git.watch':
         return ok(state.status);
-      case 'git.diff':
+      case 'git.diff': {
+        const held = state.diff?.(input);
+        if (held) return held;
         if (typeof input.path === 'string') return ok(state.perFile[input.path] ?? { patch: '', files: [] });
         return ok(input.scope === 'staged' ? { patch: STAGED_PATCH, files: [{ path: 'src/staged.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] } : state.uncommitted);
+      }
       case 'layout.get':
         return ok({ value: null });
       case 'fs.workflows':
@@ -581,6 +585,10 @@ function layOut(body: Element, { rowHeight, clientHeight }: { rowHeight: number;
   return () => void (Element.prototype.getBoundingClientRect = original);
 }
 const openReview = (params?: ReviewParams) => act(() => void panelHost.addTool('review', { appSessionId: A, params }));
+// UX wave U8c-2: the agent in a worktree of /repo reached by `cd` (a fact on the record), or back at /repo (null)
+const WT = '/repo/.claude/worktrees/w1';
+const moveTo = (checkout: string | null) =>
+  act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo', ...(checkout ? { agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } } : {}) })) })));
 
 async function attachTranscript(events: SessionEvent[]) {
   const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
@@ -1089,12 +1097,57 @@ describe('review tool', () => {
     expect(panelOf(A)?.tabs).toHaveLength(1);
   });
 
-  it('fills the folded Environment card’s change line with the staged count, and opens Review from it', async () => {
+  // UX wave U8c-2 (M4 decision 5, §I): a change of the session's working folder starts Review over there (the scope decided
+  // again, its first file selected, the scroll at the top); the viewed marks are the checkout's, found again on return.
+  it('starts over in the agent’s new folder, and finds a checkout’s viewed marks again on return', async () => {
+    render(<TestHost />);
+    openReview();
+    await waitFor(() => expect(screen.getByText('Mark viewed')).toBeTruthy());
+    fireEvent.click(screen.getByText('Mark viewed')); // src/app.ts, in /repo
+    expect(row('src/app.ts').dataset.viewed).toBe('true');
+    fireEvent.click(chipOf('staged')!);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('git.diff')).toContainEqual({ directory: WT, scope: 'all' }));
+    await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true')); // decided again for the new folder
+    await waitFor(() => expect(selectedPath()).toBe('src/app.ts'));
+    expect(row('src/app.ts').dataset.viewed).toBeUndefined(); // marked in the other checkout
+    moveTo(null);
+    await waitFor(() => expect(row('src/app.ts')?.dataset.viewed).toBe('true'));
+    expect(selectedPath()).toBe('src/app.ts');
+  });
+
+  // Held open: a re-read of the folder left behind is still out when the agent moves; it lands and changes nothing shown.
+  it('drops a diff still loading for the folder left behind; the new folder’s first file is shown', async () => {
+    render(<TestHost />);
+    openReview();
+    await waitFor(() => expect(rows()).toHaveLength(3));
+    fireEvent.click(row('src/staged.ts'));
+    const late = deferred<ReturnType<typeof ok>>();
+    let held = 0;
+    main.state.diff = (input) => {
+      if (input.directory !== '/repo' || input.path !== undefined) return undefined;
+      held += 1;
+      return late.promise;
+    };
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(held).toBeGreaterThan(1)); // the card's diff and Review's re-read of /repo, both out
+    moveTo(WT);
+    await waitFor(() => expect(selectedPath()).toBe('src/app.ts'));
+    late.resolve(ok({ patch: STAGED_PATCH, files: [{ path: 'src/staged.ts', oldPath: null, insertions: 1, deletions: 0, binary: false }] }));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+    expect(rows().map((r) => r[0])).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
+    expect(selectedPath()).toBe('src/app.ts');
+    expect(header()).toBe('3 files changed · +3 −0 · Uncommitted');
+  });
+
+  // UX wave U8b (A8, l5-code-16): the line is a control named Open changes, its counts its description, and Environment is open
+  it('fills the Environment card’s change line with the staged count, as a control that opens Review', async () => {
     render(<QueryClientProvider client={queryClient}><FloatingSummary appSessionId={A} /><TestHost /></QueryClientProvider>);
-    expect(screen.queryByTestId('change-line')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /^Environment/ }));
     await waitFor(() => expect(screen.getByTestId('change-line').textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged'));
-    fireEvent.click(screen.getByTestId('change-line'));
+    const line = screen.getByRole('button', { name: 'Open changes', description: '+3 −0 across 3 files · 1 untracked · 1 staged' });
+    expect(line.textContent).toBe('+3 −0 across 3 files · 1 untracked · 1 staged›');
+    fireEvent.click(line);
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0 · Uncommitted'));
     expect(rows().map((r) => r[0])).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
   });
@@ -1102,11 +1155,12 @@ describe('review tool', () => {
 
 describe('review diff tab', () => {
   const offs: (() => void)[] = [];
+  let main: ReturnType<typeof reviewMain>;
   beforeEach(() => {
     resetPanelStores();
     useReview.getState().reset();
     resetDiffTabs();
-    reviewMain();
+    main = reviewMain();
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo' })) }));
     offs.push(connectPanelEvents());
   });
@@ -1141,6 +1195,36 @@ describe('review diff tab', () => {
     act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref }));
     render(<DiffTab tab={tab as ReturnType<typeof diffTab>} />);
     await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+  });
+
+  // UX wave U8c-2 (M4 decision 5): a diff tab does as the tool does at a move, starting again from its ref.
+  it('starts again from its ref when the agent’s working folder changes', async () => {
+    render(<DiffTab tab={diffTab('uncommitted @ src/staged.ts')} />);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+    fireEvent.click(row('src/app.ts'));
+    expect(selectedPath()).toBe('src/app.ts');
+    moveTo(WT);
+    await waitFor(() => expect(document.querySelector('[data-review]')).not.toBeNull());
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+  });
+
+  // Fix wave 1 (the architect's ruling a): the ref's file has no change in the folder the agent moved to. The tab shows
+  // that folder's changes, its first file selected, with nothing of the old folder's file and no error.
+  it('shows the new folder’s changes when its ref’s file has none there, with nothing of the old folder and no error', async () => {
+    const OTHER_PATCH = APP_PATCH.replaceAll('src/app.ts', 'src/other.ts');
+    main.state.diff = (input) => (input.directory === WT && input.path === undefined ? Promise.resolve(ok({ patch: OTHER_PATCH, files: [{ ...APP_FILES[0], path: 'src/other.ts' }] })) : undefined);
+    render(<DiffTab tab={diffTab('uncommitted @ src/staged.ts')} />);
+    await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
+    await waitFor(() => expect(bodyText()).toContain('export const staged = 1;'));
+    moveTo(WT);
+    await waitFor(() => expect(rows().map((r) => r[0])).toEqual(['src/other.ts', 'scratch.txt'])); // the fake's status lists scratch.txt untracked in every folder
+    await waitFor(() => expect(selectedPath()).toBe('src/other.ts'));
+    expect(header()).toBe('2 files changed · +2 −0 · Uncommitted');
+    expect(document.body.textContent).not.toContain('src/staged.ts');
+    expect(document.body.textContent).not.toContain('export const staged = 1;');
+    expect(document.querySelector('[data-review-refused]')).toBeNull();
+    expect(document.querySelector('[data-review-unavailable]')).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
   });
 
   it('says why a ref does not parse or names a turn not loaded', async () => {

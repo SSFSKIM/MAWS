@@ -80,6 +80,14 @@ export const SessionRecordSchema = z.strictObject({
   permissionMode: SessionPermissionModeSchema,
   lineage: LineageSchema.nullable(), // X11 (E3); null for a root session
   launchedBy: LaunchedBySchema.optional(), // P5 O7 M4: a remote spawn's requester and its signed action
+  // UX wave U8c-2 (§D): two facts beside the fields build F's record carries, which keep build F's meaning (the folder the
+  // engine files the session under). Written only by the index, each only while it differs from what those fields say,
+  // and read only through the selector (src/shared/sessions/working-folder.ts): the folder the session was launched in,
+  // while the engine files it elsewhere in the same repository; and where the main loop is, while that is not the filed
+  // folder or the directory (the root of the work tree it is in, or the launch folder inside the launch folder's own work
+  // tree; its realpath; the branch recorded for that checkout; whether the checkout is a linked worktree)
+  launchFolder: z.string().optional(),
+  agentFolder: z.strictObject({ checkout: z.string(), cwd: z.string(), branch: z.string().nullable(), linked: z.boolean() }).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

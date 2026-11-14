@@ -1,15 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { classifyFile, classifyText, mentionPath } from './paste';
+import { classifyFile, classifyText, mentionPath, PASTE_INLINE_MAX_CHARS } from './paste';
 
 const MiB = 1024 * 1024;
 const file = (name: string, type: string, size = 100) => ({ name, type, size });
 
 describe('paste and drop classify by threshold, type and path', () => {
-  it('keeps a paste inline up to 1,024 characters and 10 lines, and makes an atom beyond', () => {
-    expect(classifyText('x'.repeat(1024))).toBe('inline');
-    expect(classifyText('x'.repeat(1025))).toBe('atom');
-    expect(classifyText(Array.from({ length: 10 }, (_, i) => `l${i}`).join('\n'))).toBe('inline');
-    expect(classifyText(Array.from({ length: 11 }, (_, i) => `l${i}`).join('\n'))).toBe('atom');
+  // UX wave U4a M6 (l3-input-09; decision 23): a paste stays text whatever its line count; only one past 20,000 characters is a chip
+  it('keeps a paste inline up to 20,000 characters, whatever its line count, and makes an atom beyond', () => {
+    expect(PASTE_INLINE_MAX_CHARS).toBe(20_000);
+    expect(classifyText('x'.repeat(5000))).toBe('inline');
+    expect(classifyText(Array.from({ length: 200 }, (_, i) => `line ${i}`).join('\n'))).toBe('inline');
+    expect(classifyText('a\n'.repeat(10_000))).toBe('inline'); // 20,000 characters on 10,001 lines
+    expect(classifyText('x'.repeat(20_000))).toBe('inline');
+    expect(classifyText('x'.repeat(20_001))).toBe('atom');
   });
 
   it('attaches the four image types the API reads as bytes, and PDFs', () => {

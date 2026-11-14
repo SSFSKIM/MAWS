@@ -10,9 +10,15 @@
 // - Each snapshot (the endpoint's `attention.list`, filtered to the member's sessions) replaces the machine's items and is
 //   said as `remote.attention {machine, items, greyed: false}`; each `ev {appSessionId, items}` replaces one session's
 //   and is said as that session's `attention.changed`, from the machine (`emitFrom`).
-// - A machine whose link goes `down` keeps its items greyed: said again as `remote.attention {…, greyed: true}`, left out
-//   of the badge and raising no notification, until its next snapshot. A link the roster makes again keeps them greyed
-//   the same way until the new link's snapshot, its old feed closed and whatever it still says ignored.
+// - A machine shown offline keeps its items greyed: said again as `remote.attention {…, greyed: true}`, left out of the
+//   badge and raising no notification, until its next snapshot. The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-
+//   wave-U9-other-machines.md, the Decision Log's ruling of 2026-11-13): "shown offline" is O-39's phase, the one rule the
+//   window reads too (src/shared/machine/link-phase.ts), from this link's own state, the moment it entered it and whether
+//   it was up earlier in this run: a link `down` after `up` greys at one deadline a minute on (the hold an act gets),
+//   cleared when its state changes; a first attempt that failed, or a machine that removed this Mac, greys at once; a
+//   link connecting or reconnecting greys nothing, so a short loss keeps a pending approval counted and in the badge. A
+//   link the roster makes again carries what the old one said, greyed or not, and greys by its own phase, its old feed
+//   closed and whatever it still says ignored.
 // - An endpoint older than M6 answers the feed `not-offered` (and one without `rl2.feeds` is asked for none): that
 //   channel has no feed. Nothing is retried on it and nothing surfaced; the machine's items are said gone, and the next
 //   channel (a different peer's `h2` list, or a new one after the link had none) asks again. Any other end but `behind`
@@ -33,7 +39,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { REGISTRY } from '@shared/ipc/registry';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { codecOf } from '@shared/ipc/validate';
+import { phaseOf, showsOffline } from '@shared/machine/link-phase';
 import type { MachineRef } from '@shared/machine/ref';
+import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
+import type { LinkState } from '../machines/manager';
 import type { RemoteLink, Subscription } from '../machines/remote/link';
 import type { RemoteCheckoutTiming } from './remote-checkout';
 
@@ -113,6 +122,12 @@ type Feed = {
    * after a channel with no feed), and whenever no feed follows, the streams' items are.
    */
   fed: boolean;
+  /** The UX wave, U9: the phase's inputs as the roster has them: the link's state, when it entered it, its `up`s in this run. */
+  state: LinkState | null;
+  since: number;
+  ups: number;
+  /** The reconnecting minute's end, while the link is down after an `up`. */
+  deadline: ReturnType<typeof setTimeout> | null;
   off(): void;
 };
 
@@ -269,11 +284,33 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
     subscribe(machine, feed);
   }
 
-  /** The link's state or caps moved: greyed at `down`, a channel gone forgets its refusal, and the feed opened if it can be. */
+  /** O-39's phase of the feed's link now, by the roster's rule (src/shared/machine/link-phase.ts). */
+  const shownOffline = (feed: Feed) =>
+    showsOffline(phaseOf({ state: feed.link.state(), since: new Date(feed.since).toISOString(), generation: feed.ups, refusal: feed.link.refusal() ?? undefined }, Date.now()));
+
+  /** The link's reported state as the roster follows it: when it entered it, its `up`s, and the reconnecting minute's deadline. */
+  function track(machine: MachineRef, feed: Feed): void {
+    const state = feed.link.state();
+    if (state === feed.state) return;
+    feed.state = state;
+    feed.since = Date.now();
+    if (state === 'up') feed.ups += 1;
+    if (feed.deadline !== null) clearTimeout(feed.deadline);
+    feed.deadline = null;
+    if (state === 'down' && !shownOffline(feed)) {
+      feed.deadline = setTimeout(() => {
+        feed.deadline = null;
+        moved(machine, feed);
+      }, REMOTE_ACT_PENDING_MS);
+    }
+  }
+
+  /** The link's state or caps moved: greyed when its phase says offline, a channel gone forgets its refusal, and the feed opened if it can be. */
   function moved(machine: MachineRef, feed: Feed): void {
     if (stopped || feeds.get(machine) !== feed) return;
+    track(machine, feed);
     if (feed.link.peerCapabilities() === null) feed.refusedOn = null;
-    if (feed.link.state() === 'down' && !feed.greyed) {
+    if (shownOffline(feed) && !feed.greyed) {
       feed.greyed = true;
       if (feed.said || feed.sessions.size > 0) say(machine, feed); // the feed's, or (fix waves 3, 4) the streams', greyed
       changed({ machine, kind: 'greyed' });
@@ -289,6 +326,8 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
 
   function close(feed: Feed): void {
     feed.off();
+    if (feed.deadline !== null) clearTimeout(feed.deadline);
+    feed.deadline = null;
     if (feed.timer !== null) clearTimeout(feed.timer);
     feed.timer = null;
     const sub = feed.sub;
@@ -297,16 +336,17 @@ export function createRemoteAttention(deps: RemoteAttentionDeps): RemoteAttentio
   }
 
   function attach(machine: MachineRef, link: RemoteLink, was: Feed | undefined): void {
-    const feed: Feed = { link, sub: null, timer: null, backoffMs: retryMs[0], refusedOn: null, sessions: was?.sessions ?? new Map(), greyed: false, said: was?.said ?? false, fed: was?.fed ?? false, off: () => {} };
+    // the roster's count of the machine's `up`s is never reset (src/main/machines/manager.ts), so a link made again
+    // carries the old one's: a machine that was up earlier in this run reconnects
+    const feed: Feed = {
+      link, sub: null, timer: null, backoffMs: retryMs[0], refusedOn: null, sessions: was?.sessions ?? new Map(), greyed: was?.greyed ?? false, said: was?.said ?? false, fed: was?.fed ?? false,
+      state: null, since: Date.now(), ups: was?.ups ?? 0, deadline: null, off: () => {},
+    };
     feeds.set(machine, feed);
     const offs = [link.onState(() => moved(machine, feed)), link.onCaps(() => moved(machine, feed))];
     feed.off = () => offs.forEach((off) => off());
-    // A link made again: what the old one said stands, greyed, until the new one's snapshot.
-    if (was !== undefined && (was.said || was.sessions.size > 0)) {
-      feed.greyed = true;
-      say(machine, feed);
-      changed({ machine, kind: 'greyed' });
-    }
+    // A link made again: what the old one said stands, greyed as it was, until the new one's snapshot; its phase greys it
+    if (was !== undefined && (was.said || was.sessions.size > 0)) say(machine, feed);
     moved(machine, feed);
   }
 

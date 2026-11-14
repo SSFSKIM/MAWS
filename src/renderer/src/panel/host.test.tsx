@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type PanelTabRef, storedMain } from '@shared/ipc/schema/layout';
 import { createLayoutStore, persistLayout, useLayout } from '../stores/layout';
+import { activeTab } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import {
   A,
@@ -23,7 +24,7 @@ import {
   TestHost,
 } from '../test-support/panel';
 import type { PanelTool } from './tool';
-import { connectPanelHost, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
+import { connectPanelHost, instanceOf, panelHost, pendingAdds, registerPanelTool, restoredLogIds, togglePinned, usePanelHost } from './host';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { editorHostOf, registerEditorHost } from './editor-host'; // P3-G
 
@@ -111,7 +112,7 @@ describe('panel host registry and instances', () => {
     useLayout.setState({ panelBySession: new Map([[A, { tabs: [ref('terminal:aaaaaaaa')], activeTabId: 'terminal:aaaaaaaa' }]]) });
     render(<TestHost />);
     expect(screen.getByRole('tabpanel').textContent).toBe('terminal is not available');
-    expect(document.querySelector('[data-header-title]')?.textContent).toContain('terminal');
+    expect(screen.getByRole('tab', { name: 'terminal' })).toBeTruthy(); // the strip names it (UX wave U8b: no header row)
     await act(async () => void expect(await panelHost.closeTab('terminal:aaaaaaaa')).toBe(true));
     expect(panelOf(A)).toEqual({ tabs: [], activeTabId: null });
   });
@@ -230,6 +231,21 @@ describe('panel host registry and instances', () => {
     expect(useLayout.getState().regions.panel.collapsed).toBe(false);
     expect(screen.getByTestId(`body:${first}`).textContent).toMatch(/visible · focus [23]$/);
     keyboard.remove();
+  });
+
+  // UX wave U7b (§N): behind a page the side column is not on screen; its tools are told so, and stay the same instances.
+  it('a tool’s visible goes false when a page opens and true at Back, its instance the same object', () => {
+    register(probeTool('t').tool);
+    render(<TestHost />);
+    let id = '';
+    act(() => void (id = panelHost.addTool('t', { appSessionId: A })));
+    const instance = instanceOf(id);
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · visible · /);
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · hidden · /);
+    act(() => useLayout.getState().closeDestination());
+    expect(screen.getByTestId(`body:${id}`).textContent).toMatch(/ · visible · /);
+    expect(instanceOf(id)).toBe(instance);
   });
 
   // W4: the receipt's Review changes added an invisible tab while the panel was hidden (⌘⇧B).
@@ -498,6 +514,32 @@ describe('panel host transitions', () => {
       expect(pendingAdds()).toEqual([]);
     });
 
+    // UX wave U7b (M6, decision 5; Interfaces §F, "Not the person's act"): who asked travels with a queued add, so an
+    // agent's add applied at the barrier brings its session to the front of the strip behind a page or the Settings
+    // dialog the person opened meanwhile, and closes neither; the person's own add closes them, as any act that shows a
+    // tab does.
+    describe.each([
+      ['a page', () => useLayout.getState().openDestination({ kind: 'projects' }), () => useLayout.getState().destination],
+      ['the Settings dialog', () => useLayout.getState().openSettings(), () => useLayout.getState().settings],
+    ] as const)('with %s opened while an add waits', (_, open, opened) => {
+      for (const asked of ['agent', undefined] as const) {
+        it(asked === 'agent' ? 'an agent’s add brings its session to the front and leaves it open' : 'the person’s add closes it', async () => {
+          connect();
+          register(probeTool('t').tool);
+          const bridge = heldBridge(persisted({}));
+          let id = '';
+          await hydrateHeld(bridge, () => {
+            id = panelHost.addTool('t', { appSessionId: B, activate: true, asked });
+            open();
+          });
+          expect(panelOf(B)!.tabs.map((tab) => tab.id)).toContain(id);
+          expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+          if (asked === 'agent') expect(opened()).not.toBeNull();
+          else expect(opened()).toBeNull();
+        });
+      }
+    });
+
     it('with persistence subscribed before the host, a pending pinned add is written at the barrier and restores into a fresh store', async () => {
       const bridge = heldBridge({ regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(LAYOUT_DEFAULTS.main) }); // a first launch: no panel.pinned yet
       const stopPersistence = persistLayout(bridge.client);
@@ -590,14 +632,16 @@ describe('panel host transitions', () => {
       await hydrateHeld(bridge);
       expect([...restoredLogIds()].sort()).toEqual(['log:aaaaaaaa', 'log:bbbbbbbb', 'log:cccccccc']);
       render(<TestHost />);
-      expect(onChangeCalls).toEqual([{ appSessionId: A, next: { tabs: [ref('t:aaaaaaaa')], activeTabId: 't:aaaaaaaa' } }]);
+      expect(onChangeCalls.map(({ appSessionId, next }) => [appSessionId, next.tabs])).toEqual([[A, [ref('t:aaaaaaaa')]]]);
+      expect(panelOf(A)!.activeTabId).toBe('t:aaaaaaaa'); // the store's repair moved the view off the pruned Log
       expect(screen.queryByRole('tab', { name: /log/ })).toBeNull();
       expect(panelOf(B)!.tabs).toEqual([ref('log:cccccccc')]); // not shown yet
       expect(log.probe.created).toEqual([]);
       show(C);
       expect(onChangeCalls).toHaveLength(1); // C held no restored log
       show(B);
-      expect(onChangeCalls.at(-1)).toEqual({ appSessionId: B, next: { tabs: [], activeTabId: null } });
+      expect(onChangeCalls.at(-1)).toMatchObject({ appSessionId: B, next: { tabs: [] } });
+      expect(panelOf(B)!.activeTabId).toBeNull();
       expect(restoredLogIds().size).toBe(0);
 
       show(A);
@@ -615,7 +659,7 @@ describe('panel host transitions', () => {
       expect(screen.getByTestId(`body:${fresh}`)).toBeTruthy();
     });
 
-    it('a restored pinned log that B selected, pruned when A is first shown, repairs B, and A’s onChange carries A’s own replacement', async () => {
+    it('a restored pinned log that B selected, pruned when A is first shown, moves A’s and B’s view to its neighbour with no write of B’s list', async () => {
       connect();
       register(probeTool('log', { pinnable: false }).tool, probeTool('t').tool);
       const bridge = heldBridge(
@@ -628,12 +672,9 @@ describe('panel host transitions', () => {
       await hydrateHeld(bridge);
       const spies = spyLayout();
       render(<TestHost />);
-      expect(onChangeCalls).toEqual([{ appSessionId: A, next: { tabs: [ref('t:pin00000', true), ref('t:aaaaaaaa')], activeTabId: 't:pin00000' } }]);
-      expect(spies.updatePanelTabs.mock.calls).toHaveLength(1);
-      const [target, fn, opts] = spies.updatePanelTabs.mock.calls[0];
-      const refs = [ref('t:x')];
-      expect([target, fn(refs), opts]).toEqual([B, refs, { activeTabId: 't:pin00000' }]);
-      expect(fn(refs)).toBe(refs);
+      expect(onChangeCalls.map(({ appSessionId, next }) => [appSessionId, next.tabs])).toEqual([[A, [ref('t:pin00000', true), ref('t:aaaaaaaa')]]]);
+      expect(spies.updatePanelTabs).not.toHaveBeenCalled(); // UX wave U8b (M1, decision 5): the store repairs every scope
+      expect(panelOf(A)!.activeTabId).toBe('t:pin00000');
       expect(panelOf(B)!.activeTabId).toBe('t:pin00000');
       expect(pinIds()).toEqual(['t:pin00000']);
     });
@@ -723,7 +764,7 @@ describe('panel host transitions', () => {
       return { off, spies: spyLayout() };
     };
 
-    it.each(['close', 'unregister', 'unpin'] as const)('%s of a pin selected in A (shown) and B (not shown) moves B through one identity updatePanelTabs', async (how) => {
+    it.each(['close', 'unregister', 'unpin'] as const)('%s of a pin selected in A (shown) and B (not shown) moves B’s view to its neighbour with no write of B’s list', async (how) => {
       const { off, spies } = setup();
       if (how === 'close') await act(() => panelHost.closeTab('p:pin00000'));
       if (how === 'unregister') {
@@ -731,11 +772,7 @@ describe('panel host transitions', () => {
         await settle();
       }
       if (how === 'unpin') act(() => togglePinned('p:pin00000'));
-      const toB = spies.updatePanelTabs.mock.calls.filter(([target]) => target === B);
-      expect(toB).toHaveLength(1);
-      const refs = [ref('q:x')];
-      expect(toB[0][1](refs)).toBe(refs);
-      expect(toB[0][2]).toEqual({ activeTabId: 'q:pin00001' });
+      expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === B)).toEqual([]); // the store's repair
       expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
       expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === C)).toEqual([]);
       expect(panelOf(C)!.activeTabId).toBe('q:pin00001');
@@ -763,7 +800,7 @@ describe('panel host transitions', () => {
     });
 
     it.each(['close', 'unregister'] as const)(
-      '%s of a pin selected in B while the shown session holds no list creates no list and moves B through one identity updatePanelTabs',
+      '%s of a pin selected in B while the shown session holds no list creates no list and moves B’s view with no write of B’s list',
       async (how) => {
         connect();
         const [off] = register(probeTool('p').tool, probeTool('q').tool);
@@ -779,11 +816,7 @@ describe('panel host transitions', () => {
           await settle();
         }
         expect([...useLayout.getState().panelBySession.keys()]).toEqual([B]);
-        const toB = spies.updatePanelTabs.mock.calls.filter(([target]) => target === B);
-        expect(toB).toHaveLength(1);
-        const refs = [ref('q:x')];
-        expect(toB[0][1](refs)).toBe(refs);
-        expect(toB[0][2]).toEqual({ activeTabId: 'q:pin00001' });
+        expect(spies.updatePanelTabs.mock.calls.filter(([target]) => target === B)).toEqual([]); // the store's repair
         expect(panelOf(B)!.activeTabId).toBe('q:pin00001');
         expect(pinIds()).toEqual(['q:pin00001']);
       },

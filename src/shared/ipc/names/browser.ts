@@ -6,12 +6,15 @@ export const commands = [
   'browser.view.cover', 'browser.control.handBack', 'browser.history.suggest', 'browser.profiles.list',
   // E4d start
   'browser.comment.set',
+  'browser.comment.card', // UX wave U5a
   // E4d end
   // E4b start
   'browser.import.profiles', 'browser.import.chooseUserData', 'browser.import.inspect', 'browser.import.discard', 'browser.import.start',
   'browser.import.cancel', 'browser.import.list', 'browser.import.remove', 'browser.import.setExtension',
   // E4b end
   'browser.agent.activities.list', // E13
+  'browser.agent.show', // U12a
+  'browser.tabs.setViewport', 'browser.view.copyScreenshot', // U12a
   // cua #90 start
   'browser.bookmarks.tree', 'browser.bookmarks.sync', 'browser.bookmarks.open', 'browser.bookmarks.menu', 'browser.bookmarks.favicons',
   'browser.extensions.actions', 'browser.extensions.action.click', 'browser.extensions.action.options', 'browser.extensions.action.menu', 'browser.extensions.puzzle',

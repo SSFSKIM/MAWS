@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -258,6 +259,73 @@ describe('edit prompt restores the initiating prompt', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
     await screen.findByText("Couldn't deliver the answer");
     expect(useComposerStore.getState().prefills.size).toBe(0);
+  });
+
+  // UX wave U5a (M5; Decision Log 49): a message of several comments is the prompt the refusal interrupted, and its text
+  // cannot be edited in place (one text cannot hold the comments' framing): the dialog offers Retry and Cancel only, and
+  // never answers edit_prompt for it, also when the transcript changed between the render and the click.
+  const SEVERAL = commentsMessage(
+    [
+      { anchor: { kind: 'browser-element', label: 'Save button', locator: 'form > button.save', pageUrl: 'https://example.com/signup' }, text: 'Make this primary.', screenshot: false },
+      { anchor: { kind: 'browser-element', label: 'Page title', locator: 'main > h1', pageUrl: 'https://example.com/signup' }, text: 'Shorter.', screenshot: false },
+    ],
+    'main',
+  );
+  const held = async () => {
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP))); // a view mounted, then closed: the store keeps its entry
+    act(() => useTranscriptStore.getState().detach(APP));
+  };
+
+  // Decision Log 52 (3): the render-time answer reads only rows a holder follows now; a kept entry nobody follows (the
+  // overview's and the hover card's hosts attach none) may be older than the session, so the button is offered and
+  // the click reads again
+  it('a followed transcript whose turn was opened by a message of several comments: no Edit prompt, only Retry and Cancel; offered again once nobody follows it', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    b.turn('u-2', SEVERAL);
+    transcript(b.events);
+    await act(() => useTranscriptStore.getState().attach(APP, ipcSource(APP))); // a view follows the session
+    mount(refusal, 'inline');
+    expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Cancel' })).toBeTruthy();
+    act(() => useTranscriptStore.getState().detach(APP)); // the view closes while the card is mounted
+    expect(screen.getByRole('button', { name: 'Edit prompt' })).toBeTruthy();
+  });
+
+  it('a kept entry nobody follows, whose last prompt was several comments: Edit prompt is offered, and a click on a current plain prompt edits it', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    b.turn('u-2', SEVERAL);
+    b.end(['u-2']);
+    transcript([...b.events]);
+    await held(); // the kept entry ends on the several comments
+    b.turn('u-3', 'a newer plain prompt');
+    transcript([...b.events]);
+    mount(refusal, 'inline');
+    fireEvent.click(screen.getByRole('button', { name: 'Edit prompt' }));
+    await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'edit_prompt' }]));
+    await waitFor(() => expect(useComposerStore.getState().inlineEdits.get(APP)).toMatchObject({ text: 'a newer plain prompt', messageUuid: 'u-3', kind: 'edit' }));
+  });
+
+  it('a prompt that became a message of several comments between the render and the click: no edit_prompt, Retry and Cancel stay', async () => {
+    const b = builder();
+    b.turn('u-1', 'an earlier prompt');
+    b.end(['u-1']);
+    transcript([...b.events]);
+    await held();
+    mount(refusal, 'inline');
+    const edit = screen.getByRole('button', { name: 'Edit prompt' });
+    b.turn('u-2', SEVERAL);
+    transcript([...b.events]);
+    fireEvent.click(edit);
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Edit prompt' })).toBeNull());
+    await flush();
+    expect(answers()).toEqual([]);
+    expect(useComposerStore.getState().inlineEdits.get(APP)).toBeUndefined();
+    expect(screen.getByRole('button', { name: 'Retry with claude-sonnet-5' })).toBeTruthy();
   });
 
   it('with no human prompt in the transcript the answer is still delivered and says there is nothing to edit', async () => {
@@ -769,6 +837,15 @@ describe('the permission card', () => {
       expect(screen.getByText('Main session wants to read a file')).toBeTruthy();
       expect(screen.getByText('/work/the-folder')).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Read a file' })).toBeNull();
+    });
+
+    // UX wave U8c-2 (M4 decision 3): the kept folder line says where the call will run, the agent's folder.
+    it('the hover placement’s folder line names the agent’s folder after a move', () => {
+      const W1 = '/work/the-folder/.claude/worktrees/w1';
+      act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(APP, record(APP, { directory: '/work/the-folder', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } })), recordsVersion: s.recordsVersion + 1 })));
+      mount(unflaggedRead, 'hover');
+      expect(screen.getByText(`${W1}/src`).getAttribute('title')).toBe(`${W1}/src`);
+      expect(screen.queryByText('/work/the-folder')).toBeNull();
     });
   });
 

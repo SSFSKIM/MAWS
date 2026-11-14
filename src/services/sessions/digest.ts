@@ -186,7 +186,9 @@ function foldWithLedger(prev: SessionDigest, event: SessionEvent, ledger: CostLe
       // API error the session's end (the owner's ruling, 2026-10-30): the transcript shows it where it happened, and the
       // session waits for the next prompt like any other.
       const failed = event.isError && !event.terminalReason?.startsWith('aborted_') && event.terminalReason !== 'api_error';
-      const ended: SessionDigest = { ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.at, activity: null };
+      // UX wave U4a (decision 6): the turn a message sent now ended goes idle and leaves lastTurnEndedAt where it was, so
+      // main's "Turn finished" and the unread mark, which hang on that time moving, fire once, at the message's own end
+      const ended: SessionDigest = { ...d, phase: failed ? 'failed' : 'idle', lastTurnEndedAt: event.endedForMessage === true ? d.lastTurnEndedAt : event.at, activity: null };
       return event.seq === null ? ended : withCost(ended, costOf(ledger));
     }
     case 'context.sample':

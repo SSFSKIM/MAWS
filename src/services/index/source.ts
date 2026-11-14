@@ -53,7 +53,12 @@ export interface SourceOptions {
 const TICK_MS = 16;
 export const DISCOVERY_BATCH = 200; // E11: summaries per transaction
 const LAST_LINE_CHARS = 160; // C5's digest `lastAssistantLine`
-const locatedDirectory = (s: TranscriptSummary) => s.relocatedCwd ?? s.directory; // the one `upsertFromSummary` locates
+// The folders `upsertFromSummary` locates: the home, and (UX wave U8c-2, §B) the first row's folder too when the home
+// moved from it, which the record's launch folder is located from.
+const locatedDirectories = (s: TranscriptSummary): string[] => {
+  const home = s.relocatedCwd ?? s.directory;
+  return [home, ...(s.relocatedCwd !== null && s.relocatedCwd !== s.directory ? [s.directory] : [])].filter((d): d is string => d !== null && d !== '');
+};
 
 // A record's change waiting for the tick: its latest committed state and that change's revision.
 type Pending = { t: 'changed'; record: SessionRecord; cause: Exclude<ChangeCause, 'removed'>; revision: number } | { t: 'removed'; revision: number };
@@ -280,7 +285,7 @@ export class IndexSessionSource implements SessionSource {
     try {
       while (this.discoveries.length > 0 && !this.stopped) {
         const warming = new Set(this.discoveries);
-        const directories = new Set(this.discoveries.flatMap((s) => { const d = locatedDirectory(s); return d ? [d] : []; }));
+        const directories = new Set(this.discoveries.flatMap(locatedDirectories));
         await warm([...directories]).catch((error: unknown) => console.error('[index] the discoveries\' warm-up failed:', error instanceof Error ? error.message : error));
         // what was warmed and is still queued (another write may have applied some or all of it meanwhile): a prefix of
         // the queue, since arrivals join its end and a write only takes summaries out
@@ -305,7 +310,7 @@ export class IndexSessionSource implements SessionSource {
   private applyBefore(about: readonly (SessionId | null)[] = []): void {
     if (this.discoveries.length === 0) return;
     let warm = 0;
-    while (warm < this.discoveries.length && locatesWithoutGit(locatedDirectory(this.discoveries[warm]))) warm += 1;
+    while (warm < this.discoveries.length && locatedDirectories(this.discoveries[warm]).every(locatesWithoutGit)) warm += 1;
     const named = new Set(about);
     const now = this.discoveries.filter((s, at) => at < warm || named.has(s.sessionId));
     if (now.length === 0) return;

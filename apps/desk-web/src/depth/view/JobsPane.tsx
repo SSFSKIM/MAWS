@@ -18,7 +18,7 @@ import { capabilities, type Capability } from '../../conversation/capabilities';
 import type { DeskSession } from '../../shell/sessions';
 import { useConnected, useDesk } from '../../views/conversation/desk-context';
 import { RpcStatus } from '../../views/conversation/RpcStatus';
-import { BACKGROUND_COPY } from '../../../../../src/renderer/src/tools/agents/copy';
+import { BACKGROUND_COPY, type PanelHeading } from '../../../../../src/renderer/src/tools/agents/copy';
 import { Group, type BackgroundSection } from '../../../../../src/renderer/src/tools/agents/background/Group';
 import { MonitorRow, ShellRow } from '../../../../../src/renderer/src/tools/agents/background/TaskRows';
 import type { TaskNode } from '../../../../../src/renderer/src/tools/agents/model/task-graph';
@@ -28,6 +28,14 @@ import { jobStop, latestStops, type JobStop } from '../jobs/job-stops';
 import { JOBS_COPY, noFileNote, shortPath } from '../../../../../src/renderer/src/lane-a/jobs/jobs-copy';
 import type { OutputView } from '../../../../../src/renderer/src/lane-a/jobs/output-requests';
 import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
+
+// The depth view's section headings by kind. MAWS's Background tasks panel reads by state since the UX wave's U8b and no
+// longer carries these; the desk keeps its own words, drawn whole in the heading's weight.
+const DEPTH_HEADINGS = {
+  shellsRunning: (n: number) => `Shells · ${n} running`,
+  monitors: (n: number) => `Monitors · ${n}`,
+};
+const wholeHeading = (text: string): PanelHeading => ({ label: text, detail: null });
 
 type Section = 'shells' | 'monitors' | 'mcp';
 
@@ -62,7 +70,7 @@ export function JobsPane({ controller, state, session, scope = 'session' }: { co
   };
   const group = (id: Section, heading: string, children: ReactNode) => (
     // MCP is not one of MAWS's Background sections; `Group` reads its id only as `data-section` and the toggle's key.
-    <Group id={id as BackgroundSection} heading={heading} expanded={!collapsed.has(id)} onToggle={toggle}>
+    <Group id={id as BackgroundSection} heading={wholeHeading(heading)} expanded={!collapsed.has(id)} onToggle={toggle}>
       {children}
     </Group>
   );
@@ -83,7 +91,7 @@ export function JobsPane({ controller, state, session, scope = 'session' }: { co
       {lists.shells.length > 0 &&
         group(
           'shells',
-          BACKGROUND_COPY.shellsRunning(running(lists.shells)),
+          DEPTH_HEADINGS.shellsRunning(running(lists.shells)),
           lists.shells.map((node) => {
             const view = outputs.get(node.taskId);
             const stop = stopOf(node);
@@ -99,7 +107,7 @@ export function JobsPane({ controller, state, session, scope = 'session' }: { co
       {lists.monitors.length > 0 &&
         group(
           'monitors',
-          BACKGROUND_COPY.monitors(lists.monitors.length),
+          DEPTH_HEADINGS.monitors(lists.monitors.length),
           lists.monitors.map((node) => {
             const stop = stopOf(node);
             return (

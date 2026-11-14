@@ -11,7 +11,7 @@
 // written prompts, the transcript's chip and image (P2-E2: the docked card becoming the thread, handed off to the Side
 // pane at the thread's permission), the thread header's page button reusing the parent's tab; (2b) P2-F L146: the Side
 // pane's "Show in browser" re-docking the thread into the card under its page, and Show here; (2c) P2-F: the Side pane
-// after Browser is closed, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
+// with Browser out of view, its "Reopen in browser" bringing Browser back with the thread's card under the page; (3) G2 without E4c: every target's anchor
 // resolves with E4c's own expression in the view's page; (4) an area pick; (5) Esc in the page and in the chrome; (6)
 // the context menu's pick (through the seam's `pickAt`); (7) a navigation disarms, a stale report is dropped; (7b) a
 // tab whose preload never acknowledges the arm is refused; (7c) a tab adopted from window.open arms and shields; (8) a
@@ -25,18 +25,18 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { anchoredMessage, parseAnchoredText } from '../src/shared/anchor/message';
+import { anchoredMessage, commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message';
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { addressed } from './support/address';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
-import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
+import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, resizeWindow, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
 import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
-import { closeSurface } from './support/shell';
+import { hideSurface, sideColumn, sideTab } from './support/shell';
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -444,7 +444,36 @@ test('1b. the strip opening under the page scrolls it by the least that keeps a 
       }, { message: 'the target at the shrunk page’s bottom edge' })
       .toBe(true);
     await expect(t.panel.locator('[data-card-dock] [data-card-caret]')).toHaveAttribute('data-card-caret', String(position!.x));
+
+    // UX wave U5a (A5, X-216; §G): past the pick's two seconds the page keeps the element in view because it was told the
+    // card is open (main's `card` message), so a shorter window still brings the target back. Once the card closed, a
+    // shorter window that clips the target scrolls nothing. The earlier page script forgot its subject only when the
+    // page grew back to its height at the pick; the close here gives back the strip but not the 60 px the window took, so
+    // that script still held the target and would have scrolled it back into view
+    await t.page.waitForTimeout(2_100); // PICK_GRACE_MS (2 s) has passed: only the card's message holds the element now
+    const pane = paneIn(t.panel);
+    await resizeWindow(s, pane, 0, -60);
+    await expect
+      .poll(async () => {
+        const [now, height] = [await rectOf(target), await page.evaluate(() => window.innerHeight)];
+        return near(now.y + now.height, height, 1);
+      }, { message: 'the open card still keeps the target in view after the window got shorter' })
+      .toBe(true);
     await dismiss(s, t, card);
+    await expect.poll(async () => near(await page.evaluate(() => window.innerHeight), full - 60, 1), { message: 'the strip gave the page its bottom back, less the 60 px' }).toBe(true);
+    // the target 12 px above the page's bottom, so the next 60 px clip 48 px of it: what the earlier script brought back
+    await page.evaluate(() => window.scrollTo({ left: 0, top: 1400 + 32 - window.innerHeight + 12, behavior: 'instant' }));
+    const closed = await rectOf(target);
+    expect(near(closed.y + closed.height, (await page.evaluate(() => window.innerHeight)) - 12, 1), `the target 12 px above the page's bottom: ${JSON.stringify({ closed, full })}`).toBe(true);
+    const closedAt = await scrollOf(page);
+    await resizeWindow(s, pane, 0, -60);
+    await expect.poll(async () => near(await page.evaluate(() => window.innerHeight), full - 120, 1), { message: 'the page 60 px shorter again' }).toBe(true);
+    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)))); // the resize dispatched
+    const clipped = await rectOf(target);
+    expect(clipped.y + clipped.height, 'the shorter page clips the target').toBeGreaterThan(await page.evaluate(() => window.innerHeight));
+    expect(await scrollOf(page), 'A5: after the card closed, a shorter window does not scroll the page').toEqual(closedAt);
+    await resizeWindow(s, pane, 0, 120); // the window's height back for the cases below
+    await expect.poll(() => page.evaluate(() => window.innerHeight), { message: 'the page’s full height back' }).toBe(full);
 
     // a target the shrunk page still shows: nothing moves
     await page.evaluate(() => window.scrollTo({ left: 0, top: 1300, behavior: 'instant' }));
@@ -528,6 +557,12 @@ async function untilThread(card: Locator): Promise<void> {
 const writtenUsers = (s: BrowserScene, id: string) => s.journal(id).filter((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user');
 const contentOf = (row: JournalRow) => (row.frame as { message: { content: unknown } }).message.content as ({ type: 'image'; source: { data: string } } | { type: 'text'; text: string })[];
 
+// UX wave U5a: a session's title as the card's place names it (`displayTitle`: "New chat" while it has none).
+async function sessionTitle(s: BrowserScene, id: AppSessionId): Promise<string> {
+  const text = value(await invoke(s.page, 'session.list', {})).sessions.find((record) => record.appId === id)?.title.text ?? '';
+  return text.trim() === '' ? 'New chat' : text;
+}
+
 // The anchor of a pick of `#increment` as the e2e computes it from the page itself (`box` checked apart, within 2 px).
 async function incrementAnchor(t: CommentTab): Promise<{ expected: Omit<Anchor, 'box' | 'screenshot'>; box: Rect }> {
   const rect = await rectOf(t.page.locator('#increment'));
@@ -584,25 +619,30 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       let card = cardOf(s, INCREMENT_LABEL);
       await expect(card).toBeVisible();
       await expect(card.locator('[data-comment-screenshot]')).toBeVisible();
-      await card.locator('[data-destination="main"]').click();
-      await expect(card.getByRole('radio', { name: /Send to main/ })).toBeChecked();
+      // UX wave U5a (A1, A2): the "Send to main" checkbox ticked; once the delivery is confirmed the card's place in the
+      // dock says where it went, by the name the session had when Send was pressed (the send may rename it after)
+      await card.getByRole('checkbox', { name: 'Send to main' }).check();
       await card.getByRole('textbox', { name: 'Comment' }).fill(MAIN_COMMENT);
+      const title = await sessionTitle(s, parent);
       await card.getByRole('button', { name: 'Send' }).click();
       await expect(card).toHaveCount(0);
+      await expect(t.panel.locator('[data-card-dock] [data-sent-note]')).toHaveText(`Sent to ${title}`);
       await expect.poll(() => writtenUsers(s, parent).length, { timeout: 20_000 }).toBe(1);
       const [image, text] = contentOf(writtenUsers(s, parent)[0]!);
       expect(image?.type, 'the image block first').toBe('image');
       expect(Buffer.from((image as { source: { data: string } }).source.data, 'base64').subarray(0, 8).equals(PNG_SIGNATURE), 'the crop’s PNG').toBe(true);
       expect(text?.type).toBe('text');
       const sent = (text as { text: string }).text;
-      const parsed = parseAnchoredText(sent);
-      expect(parsed, 'the tag parses').not.toBeNull();
-      expect(parsed!.destination).toBe('main');
-      expect(parsed!.text).toBe(MAIN_COMMENT);
-      const { box: sentBox, ...rest } = parsed!.anchor;
+      const read = readAnchoredMessage(sent);
+      expect(read?.comments, 'the tag parses: one comment').toHaveLength(1);
+      expect(read!.destination).toBe('main');
+      const parsed = read!.comments[0]!;
+      expect(parsed.text).toBe(MAIN_COMMENT);
+      expect(parsed.screenshot, 'its lead says a screenshot is attached').toBe(true);
+      const { box: sentBox, ...rest } = parsed.anchor;
       expect(rest).toEqual(expected);
       expectBox(sentBox, box);
-      expect(sent, 'E3’s lead, with the screenshot sentence').toBe(anchoredMessage({ anchor: parsed!.anchor, text: MAIN_COMMENT, destination: 'main', screenshot: true }));
+      expect(sent, 'E3’s lead, with the screenshot sentence').toBe(anchoredMessage({ anchor: parsed.anchor, text: MAIN_COMMENT, destination: 'main', screenshot: true }));
       expect(sent).toContain('a11y="main &gt; region “A form” &gt; button “Increment”"');
       // the transcript draws the prompt with its chip and its picture
       const main = s.page.locator('[data-region="main"]');
@@ -620,7 +660,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
       card = cardOf(s, INCREMENT_LABEL);
       await expect(card).toBeVisible();
-      await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      await expect(card.getByRole('checkbox', { name: 'Send to main' }), 'the next card starts unchecked again').not.toBeChecked();
       await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
       await card.getByRole('button', { name: 'Send' }).click();
       await untilThread(card);
@@ -666,9 +706,10 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(pane.getByText(THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
       const [threadImage, threadText] = contentOf(writtenUsers(s, child)[0]!);
       expect(threadImage?.type).toBe('image');
-      const threadParsed = parseAnchoredText((threadText as { text: string }).text);
-      expect(threadParsed?.destination).toBe('thread');
-      expect(threadParsed?.anchor).toMatchObject(expected);
+      const threadRead = readAnchoredMessage((threadText as { text: string }).text);
+      expect(threadRead?.destination).toBe('thread');
+      expect(threadRead?.comments, 'one comment').toHaveLength(1);
+      expect(threadRead!.comments[0]!.anchor).toMatchObject(expected);
       await expect(pane.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]')).toHaveText(INCREMENT_LABEL);
 
       // the thread header's URL opens the page in the parent's browser: the commented tab, reused; the thread has none
@@ -725,7 +766,7 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
       let card = cardOf(s, INCREMENT_LABEL);
       await expect(card).toBeVisible();
-      await expect(card.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      await expect(card.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
       await card.getByRole('textbox', { name: 'Comment' }).fill(THREAD_COMMENT);
       await card.getByRole('button', { name: 'Send' }).click();
       await untilThread(card);
@@ -762,9 +803,9 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
   );
 });
 
-// ---- (2c) P2-F: reopening a closed Browser surface from the Side pane ---------------------------------------------------------
+// ---- (2c) P2-F: reopening a Browser surface out of view from the Side pane --------------------------------------------------
 
-test('2c. with the Browser surface closed, the Side pane offers Reopen in browser (not Show in browser), which opens Browser again with the thread’s card docked under the page', async () => {
+test('2c. with the Browser surface out of view (the Side pane’s tab in its place), the Side pane offers Reopen in browser (not Show in browser), which brings Browser back into view with the thread’s card docked under the page', async () => {
   test.setTimeout(240_000);
   let parentJournal = '';
   await commentScene(
@@ -792,7 +833,8 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       await parentTurn(s, parent);
       const t = await openCommentPage(s, parent); // the page in the panel's Browser
 
-      // A Side thread from a pick, handed to the Side pane. Close Browser explicitly: surfaces now stack.
+      // A Side thread from a pick, handed to the Side pane, whose tab comes into view in Browser's place (UX wave U8b:
+      // one tab in view per group; Browser stays a tab of the strip, its body not mounted).
       await arm(s, t);
       await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
       let card = cardOf(s, INCREMENT_LABEL);
@@ -805,17 +847,18 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator('[data-side-thread-view]');
       await expect(pane, 'the Side pane draws the thread').toBeVisible();
-      await closeSurface(s.page, 'Browser');
-      await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
+      await expect(t.panel, 'the Browser surface is out of view').toHaveCount(0);
+      await expect(sideTab(sideColumn(s.page), 'Browser'), 'Browser is still a tab of the strip').toHaveAttribute('aria-selected', 'false');
       const header = pane.locator('header');
       await expect(header.getByRole('button', { name: 'Show in browser' }), 'no pane holds the page').toHaveCount(0);
 
       // Reopen in browser: Browser returns on the page; the thread is drawn only in its card, with no caret.
       await header.getByRole('button', { name: 'Reopen in browser' }).click();
       await expect(t.panel).toBeVisible();
-      // UX2-L keeps the other stacked surface mounted; it must not draw a second copy of the thread.
-      await expect(pane.getByText('Shown in the card under the page')).toBeVisible();
-      await expect(pane.getByRole('group', { name: 'Approval needed' })).toHaveCount(0);
+      // Browser's tab comes into view in the Side pane's place: the Side tab stays in the strip, its body (and so a
+      // second drawing of the thread) is not mounted.
+      await expect(sideTab(sideColumn(s.page), 'Side')).toHaveAttribute('aria-selected', 'false');
+      await expect(pane).toHaveCount(0);
       card = t.panel.locator('[data-card-dock] [data-comment-card]');
       await expect(card).toHaveAttribute('data-card-phase', 'thread');
       await expect(card.locator('[data-needs-you]'), 'the thread’s request, in the card again').toContainText('Waiting for your permission');
@@ -826,6 +869,176 @@ test('2c. with the Browser surface closed, the Side pane offers Reopen in browse
       expect((await card.boundingBox())!.y, 'the card under the view').toBeGreaterThanOrEqual(view.bounds!.y + view.bounds!.height);
     },
   );
+});
+
+// ---- (2d, 2e) UX wave U5a: several comments on a page, sent as one message ----------------------------------------------
+
+// docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8 (A4, A2): the comments of one tab are its pass; the
+// card goes and comes back without losing a word, and one Send carries them all.
+const PASS_FIRST = 'Make this the primary button.';
+const PASS_SECOND = 'Give this one a quieter style.';
+const PASS_REPLY = 'Both noted: Increment becomes the primary button and Act goes quiet.';
+const nextFrames = (page: Page) => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+
+test('2d. a pass on a page (A4): Escape keeps the text in the card; a second pick lists the first and Send reads "Send 2 comments"; the Browser surface closed and opened again shows "2 unsent comments" under the page, which reopens the card with its text; one Send to main writes one frame of both crops and one text, the dock says "Sent to <title>", and the page does not move when that line leaves', async () => {
+  test.setTimeout(240_000);
+  let parentJournal = '';
+  await commentScene(
+    {
+      titles: ['U5a: a pass'],
+      fixtures: (scratch) => {
+        const dir = join(scratch.root, 'journals');
+        mkdirSync(dir, { recursive: true });
+        const parent = new SideJournal(PARENT, scratch.repo);
+        parent.turn(PASS_REPLY); // the one turn the pass's message opens
+        parentJournal = parent.write(dir, 'parent');
+        return [];
+      },
+    },
+    async (s) => {
+      const [parent] = s.ids as [AppSessionId];
+      await liveParent(s, parent, parentJournal);
+      const t = await openCommentPage(s, parent);
+      const field = (card: Locator) => card.getByRole('textbox', { name: 'Comment' });
+
+      // the first pick, typed, then Escape: the card stays with its text and gives the keyboard back
+      await arm(s, t);
+      await clickAt(t.page, centre(await rectOf(t.page.locator('#increment'))));
+      const first = cardOf(s, INCREMENT_LABEL);
+      await expect(first).toBeVisible();
+      await field(first).fill(PASS_FIRST);
+      await field(first).press('Escape');
+      await expect(first, 'Escape keeps the card').toBeVisible();
+      await expect(field(first)).toHaveValue(PASS_FIRST);
+      await expect(field(first), 'the keyboard left the card').not.toBeFocused();
+
+      // a second pick: the card moves to it and lists the first comment; Send counts both once the second has words
+      const act = t.page.locator('[data-target="act"]');
+      await act.scrollIntoViewIfNeeded();
+      await arm(s, t);
+      await clickAt(t.page, centre(await rectOf(act)));
+      const { anchor: second } = await lastPicked(s, 2);
+      const card = cardOf(s, second.label);
+      await expect(card).toBeVisible();
+      await expect(first, 'one card: the second pick’s').toHaveCount(0);
+      const others = card.locator('[data-pass-comment]');
+      await expect(others).toHaveCount(1);
+      await expect(others).toContainText(INCREMENT_LABEL);
+      await expect(others).toContainText(PASS_FIRST);
+      await field(card).fill(PASS_SECOND);
+      await expect(card.getByRole('button', { name: 'Send 2 comments' })).toBeEnabled();
+      // what main cropped for each pick, read now (the comments' screenshots, in the order made)
+      const crops = (await recorded(s)).picked.map((pick) => readFileSync(pick.anchor.screenshot!.path).toString('base64'));
+      expect(crops, 'a crop for each pick').toHaveLength(2);
+
+      // the side surface away and back: the card went with its pane and its comments stayed; the chip under the page
+      // counts them and opens the card on the newest, with its text
+      await hideSurface(s.page, 'Browser');
+      await expect(t.panel, 'the Browser surface is closed').toHaveCount(0);
+      await openBrowser(s);
+      await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+      const chip = t.panel.locator('[data-card-dock] [data-unsent-chip]');
+      await expect(chip).toHaveText('2 unsent comments');
+      await expect(t.panel.locator('[data-comment-card]'), 'no card while the chip shows').toHaveCount(0);
+      await chip.click();
+      await expect(card).toBeVisible();
+      await expect(field(card)).toHaveValue(PASS_SECOND);
+      await expect(card.locator('[data-pass-comment]')).toContainText(PASS_FIRST);
+      await expect(chip).toHaveCount(0);
+
+      // one Send to main; once it is confirmed the dock reads where it went, and the page keeps still when that line leaves
+      const title = await sessionTitle(s, parent);
+      await card.getByRole('checkbox', { name: 'Send to main' }).check();
+      await card.getByRole('button', { name: 'Send 2 comments' }).click();
+      await expect(card).toHaveCount(0);
+      const sentLine = t.panel.locator('[data-card-dock] [data-sent-note]');
+      await expect(sentLine).toHaveText(`Sent to ${title}`);
+      await nextFrames(t.page);
+      const [scrollWithLine, actWithLine, heightWithLine] = [await scrollOf(t.page), await rectOf(act), await t.page.evaluate(() => window.innerHeight)];
+      await expect(sentLine, 'the line leaves after about four seconds').toHaveCount(0, { timeout: 10_000 });
+      await expect.poll(() => t.page.evaluate(() => window.innerHeight), { message: 'the page took back the line’s height' }).toBeGreaterThan(heightWithLine);
+      await nextFrames(t.page);
+      expect(await scrollOf(t.page), 'the page did not scroll when the line left').toEqual(scrollWithLine);
+      expect(await rectOf(act), 'the picked element did not move').toEqual(actWithLine);
+
+      // the engine received one frame: both crops in the comments' order, then one text of both comments, framed (§A)
+      await expect.poll(() => writtenUsers(s, parent).length, { timeout: 20_000 }).toBe(1);
+      const blocks = contentOf(writtenUsers(s, parent)[0]!);
+      expect(blocks.map((block) => block.type), 'two images, then one text').toEqual(['image', 'image', 'text']);
+      expect(blocks.slice(0, 2).map((block) => (block as { source: { data: string } }).source.data), 'each comment’s crop, in the order made').toEqual(crops);
+      const sent = (blocks[2] as { text: string }).text;
+      expect(sent.startsWith('2 comments, in the order made:\n\n'), 'the framing line first').toBe(true);
+      const read = readAnchoredMessage(sent);
+      expect(read?.destination).toBe('main');
+      expect(read!.comments.map(({ anchor, text, screenshot }) => ({ label: anchor.label, locator: anchor.locator, text, screenshot }))).toEqual([
+        { label: INCREMENT_LABEL, locator: '#increment', text: PASS_FIRST, screenshot: true },
+        { label: second.label, locator: second.locator, text: PASS_SECOND, screenshot: true },
+      ]);
+      expect(sent, 'the writer’s text of the two, to the byte').toBe(commentsMessage(read!.comments, 'main'));
+      // the agent runs one turn for it
+      const main = s.page.locator('[data-region="main"]');
+      await expect(main.getByText(PASS_REPLY)).toBeVisible({ timeout: 20_000 });
+      expect(writtenUsers(s, parent), 'one message for the two comments').toHaveLength(1);
+
+      // UX wave U5a (M5, decision 13): the transcript draws the message as one bubble of two comments, each its own chip
+      // over its own text and its own picture, in the order made; no lead line, no framing line
+      await test.step('the transcript’s bubble of the two comments draws two chips, in order', async () => {
+        const bubble = main.locator('[data-bubble]').filter({ hasText: PASS_FIRST }).filter({ hasText: PASS_SECOND });
+        await expect(bubble).toHaveCount(1);
+        const chips = bubble.locator('[data-chip="anchor"][data-anchor-kind="browser-element"]');
+        await expect(chips).toHaveText([INCREMENT_LABEL, second.label]);
+        await expect(chips.nth(0)).toHaveAttribute('title', '#increment');
+        await expect(chips.nth(1)).toHaveAttribute('title', second.locator);
+        await expect(bubble.locator('img.transcript-attachment-image'), 'each comment’s picture').toHaveCount(2);
+        const drawn = await bubble.innerText();
+        const order = [INCREMENT_LABEL, PASS_FIRST, second.label, PASS_SECOND].map((part) => drawn.indexOf(part));
+        expect(order.every((index) => index >= 0), `every part drawn: ${JSON.stringify({ order, drawn })}`).toBe(true);
+        expect([...order].sort((a, b) => a - b), `chip, text, chip, text in that order: ${JSON.stringify(drawn)}`).toEqual(order);
+        await expect(main.getByText('2 comments, in the order made:'), 'the framing line is not drawn').toHaveCount(0);
+        await expect(main.getByText('Comment on "button', { exact: false }), 'the lead lines are not drawn').toHaveCount(0);
+      });
+    },
+  );
+});
+
+// Decision 23: at every height the dock allows the card keeps its checkbox row and Send in view; the list of the other
+// comments shows three lines and scrolls within itself.
+test('2e. at the window’s smallest height (600 px), a pass of five comments with a six-line text keeps the card’s Send wholly inside the card and the dock', async () => {
+  await commentScene({ titles: ['U5a: the smallest window'] }, async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    const t = await openCommentPage(s, id);
+    await s.maws.app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!; // the app's one window
+      win.setSize(win.getSize()[0]!, 600);
+    });
+    await expect.poll(() => s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.isVisible())!.getSize()[1]), { message: 'the window at its minimum height' }).toBe(600);
+    await expectOnPane(s, t.tabId, paneIn(t.panel), 'panel');
+
+    const targets = ['increment', 'act', 'name', 'local-link', 'pin-show'];
+    const longText = ['The spacing here is uneven.', 'The label wraps too early.', 'The colour is too light.', 'The corner radius differs.', 'The focus ring is missing.', 'Check it at a larger zoom.'].join('\n');
+    let card = s.page.locator('[data-card-dock] [data-comment-card]');
+    for (const [k, target] of targets.entries()) {
+      const element = t.page.locator(`[data-target="${target}"]`);
+      await element.scrollIntoViewIfNeeded();
+      await arm(s, t);
+      await clickAt(t.page, centre(await rectOf(element)));
+      const { anchor } = await lastPicked(s, k + 1);
+      card = cardOf(s, anchor.label);
+      await expect(card, `${target}: the card`).toBeVisible();
+      await expect(card.locator('[data-pass-comment]'), `${target}: the earlier comments listed`).toHaveCount(k);
+      await card.getByRole('textbox', { name: 'Comment' }).fill(k === targets.length - 1 ? longText : `Note ${k + 1} on this control.`);
+    }
+    const send = card.getByRole('button', { name: 'Send 5 comments' });
+    await expect(send).toBeVisible();
+    await expect(card.getByRole('checkbox', { name: 'Send to main' })).toBeVisible();
+    await nextFrames(s.page);
+    const [sendBox, cardBox, dockBox, listBox] = [(await send.boundingBox())!, (await card.boundingBox())!, (await t.panel.locator('[data-card-dock]').boundingBox())!, (await card.locator('[data-pass-comments]').boundingBox())!];
+    const inside = (inner: Rect, outer: Rect) => inner.x >= outer.x - 0.5 && inner.y >= outer.y - 0.5 && inner.x + inner.width <= outer.x + outer.width + 0.5 && inner.y + inner.height <= outer.y + outer.height + 0.5;
+    expect(inside(sendBox, cardBox), `Send inside the card: ${JSON.stringify({ sendBox, cardBox })}`).toBe(true);
+    expect(inside(sendBox, dockBox), `Send inside the dock: ${JSON.stringify({ sendBox, dockBox })}`).toBe(true);
+    expect(listBox.height, 'the list of the other four shows at most three lines').toBeLessThanOrEqual(72.5);
+    await test.info().attach('u5a-smallest-window-card', { body: await s.page.screenshot(), contentType: 'image/png' });
+  });
 });
 
 // ---- (3) G2 without E4c: every anchor resolves with E4c's expression ------------------------------------------------------

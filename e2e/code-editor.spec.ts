@@ -13,7 +13,7 @@ import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
-import { closeSurface, openSurface } from './support/shell';
+import { hideSurface, openSurface } from './support/shell';
 
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
@@ -224,9 +224,9 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // E11 W-D: at a viewer about 600 px wide the merge bar's controls take the directory's width, never the file's name
       const [width, height] = await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
       const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
-      // Files otherwise consumes a responsive share of the window (and becomes a sheet below 700 px).
-      // Close it through its chrome; at 600 px the sidebar yields and the real viewer fills main.
-      await closeSurface(p.page, 'Files');
+      // Files otherwise takes 60 % of the room (and becomes a sheet below 700 px). Hide the side column from its
+      // strip (Files stays a tab); at 600 px the sidebar yields and the real viewer fills main.
+      await hideSurface(p.page, 'Files');
       await resize(600);
       await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);
       const name = viewer.locator('[data-path-name]');
@@ -320,7 +320,9 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expect(sheet).toHaveAttribute('data-anchor-kind', 'file-line');
       await expect(sheet).toHaveAttribute('data-anchor-locator', `${path}#L3`);
       await expect(sheet.getByText(`${path}#L3`)).toBeVisible();
-      await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      // UX wave U5a (A1): one "Send to main" checkbox, unchecked (a side thread), in place of the two segments
+      await expect(sheet.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
+      await expect(sheet.getByRole('radio')).toHaveCount(0);
       await expect(sheet.getByRole('button', { name: 'Send' })).toBeDisabled();
       await sheet.getByRole('button', { name: 'Cancel' }).click();
       await expect(sheet).toHaveCount(0);

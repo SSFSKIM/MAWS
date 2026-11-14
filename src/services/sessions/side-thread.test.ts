@@ -5,20 +5,21 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { anchoredMessage, promotionMessage } from '@shared/anchor/message';
+import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture';
 import { SessionHarness } from '../../../test/support/session-harness';
-import { InvalidSideInput } from '../side/invalid';
-import { ScreenshotRefused } from '../side/screenshot';
+import { InvalidSideInput } from '@shared/anchor/invalid';
+import { ScreenshotRefused } from '@shared/anchor/screenshot';
 
 vi.mock('electron', () => {
   throw new Error('SessionService must not load Electron');
 });
 
+const GIF = Buffer.from('GIF89a, an invented frame'); // typed by its magic bytes alone (screenshot.ts)
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==', 'base64');
 const SID = sessionIdFor(0x5e);
 const TURN = { id: 'x', origin: 'human', startedAt: '', acceptedAt: null, userMessageUuids: [] } as never;
@@ -122,6 +123,64 @@ describe('side threads', () => {
     expect(await h.service.listIntents()).toEqual([]);
   });
 
+  // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §B.1, decision 11): a pass of
+  // several comments opens one thread; the first comment stays in `anchor`, `text` and `screenshot`, the others in `more`
+  describe('from several comments (UX wave U5a)', () => {
+    const shotsUnderUserData = () => {
+      mkdirSync(join(h.userData, 'browser', 'crops'), { recursive: true });
+      const png = join(h.userData, 'browser', 'crops', 'a.png');
+      const gif = join(h.userData, 'browser', 'crops', 'c.gif');
+      writeFileSync(png, PNG);
+      writeFileSync(gif, GIF);
+      return { png: { path: png, width: 1, height: 1 }, gif: { path: gif, width: 1, height: 1 } };
+    };
+    const others = (): Anchor[] => [
+      { ...anchor, locator: `${h.work}/src/y.ts#L7`, label: 'src/y.ts:7', path: `${h.work}/src/y.ts`, line: 7 },
+      { ...anchor, locator: `${h.work}/src/z.ts#L9`, label: 'src/z.ts:9', path: `${h.work}/src/z.ts`, line: 9 },
+    ];
+
+    it('sends the screenshots in the comments’ order before one text, keeps the first comment’s anchor and titles the thread "… and 2 more"', async () => {
+      const parent = parentRecord();
+      const { png, gif } = shotsUnderUserData();
+      const [second, third] = others();
+      const outcome = await h.service.openSideThread(parent.appId, {
+        kind: 'comment', anchor, text: 'First.', screenshot: png,
+        more: [{ anchor: second!, text: ' Second. ', screenshot: null }, { anchor: third!, text: 'Third.', screenshot: gif }],
+      });
+      const child = outcome.appSessionId;
+      expect(await h.settled(child)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      const text = commentsMessage([{ anchor, text: 'First.', screenshot: true }, { anchor: second!, text: 'Second.', screenshot: false }, { anchor: third!, text: 'Third.', screenshot: true }], 'thread');
+      expect(sent(child)).toEqual([
+        [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG.toString('base64') } },
+          { type: 'image', source: { type: 'base64', media_type: 'image/gif', data: GIF.toString('base64') } },
+          { type: 'text', text },
+        ],
+      ]);
+      expect(h.index.sessions.get(child)!.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: SID, anchor, openedBy: 'comment' });
+      expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'src/x.ts:42 and 2 more' }]);
+      expect(h.index.sessions.get(child)!.title).toEqual({ text: 'src/x.ts:42 and 2 more', source: 'none' });
+      expect(parentEvents(parent.appId)).toEqual([expect.objectContaining({ kind: 'side.thread.opened', childAppSessionId: child, anchor, openedBy: 'comment' })]); // the first comment's label alone
+    });
+
+    it('refuses a screenshot of a later comment outside every root, naming its place in `more`, before anything is created', async () => {
+      const parent = parentRecord();
+      const { png } = shotsUnderUserData();
+      const away = join(h.root, 'away.png');
+      writeFileSync(away, PNG);
+      const [second, third] = others();
+      const refused = h.service.openSideThread(parent.appId, {
+        kind: 'comment', anchor, text: 'First.', screenshot: png,
+        more: [{ anchor: second!, text: 'Second.', screenshot: null }, { anchor: third!, text: 'Third.', screenshot: { path: away, width: 1, height: 1 } }],
+      });
+      await expect(refused).rejects.toBeInstanceOf(ScreenshotRefused);
+      await expect(refused).rejects.toMatchObject({ path: ['more', 1, 'screenshot'] });
+      await expect(refused).rejects.toThrow('screenshot: not under an allowed root');
+      expect(h.host.launches).toEqual([]);
+      expect(await h.service.listIntents()).toEqual([]);
+    });
+  });
+
   it('names the thread in the index when the engine refuses the rename', async () => {
     const parent = parentRecord();
     h.host.renameError = 'rename refused';
@@ -132,10 +191,10 @@ describe('side threads', () => {
 
   // E11 (tracker row E3 "quit before finishBinding leaves a side thread unrenamed"): binding recovery at launch
   describe('a quit after the first message reached C3 and before the thread was bound', () => {
-    const quitBeforeBinding = async (keep: boolean) => {
+    const quitBeforeBinding = async (keep: boolean, more?: { anchor: Anchor; text: string; screenshot: null }[]) => {
       const parent = parentRecord();
       h.hangPut = (intent) => intent.progress.send !== null; // the app dies as it records the handoff
-      const outcome = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null });
+      const outcome = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor, text: 'Why?', screenshot: null, ...(more !== undefined && { more }) });
       const child = outcome.appSessionId;
       await h.until(() => h.gateReached);
       expect(h.host.calledWith('session.renameSession')).toEqual([]);
@@ -152,6 +211,11 @@ describe('side threads', () => {
       expect(await h.service.listIntents()).toEqual([]);
       expect(h.host.disk.queues.get(child)).toHaveLength(1); // sent once, before the quit (C3's queue)
       expect(sent(child)).toEqual([]); // and not again
+    });
+
+    it('titles a thread of several comments "… and N more" there too (UX wave U5a, decision 11)', async () => {
+      const { child } = await quitBeforeBinding(false, [{ anchor: { ...anchor, label: 'src/y.ts:7' }, text: 'And this?', screenshot: null }]);
+      expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'src/x.ts:42 and 1 more' }]);
     });
 
     it('does the same for a thread a kept supervisor still runs', async () => {

@@ -8,13 +8,24 @@
 import { randomUUID } from 'node:crypto';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Reader } from '@shared/ipc/client';
-import { STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
+import { DRAFT_CLAIM, DRAFT_KEPT_WORDS, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import type { Db } from './db';
 
 /** A tombstone's `attachments` column: no draft's (DraftSchema's is always a list). */
 const CLEARED = 'null';
 type Row = { doc: string; attachments: string; updated_at: string };
 const draftOf = (row: Row): Draft => ({ doc: JSON.parse(row.doc) as unknown, attachments: JSON.parse(row.attachments) as Draft['attachments'], updatedAt: row.updated_at });
+// UX wave U4a (decision 13; Interfaces D): a take-back's stage is a kept draft whose document carries `attrs.takeBack`.
+// The text is looked at first, so an ordinary save parses nothing.
+const isStage = (row: Row): boolean => {
+  if (row.attachments === CLEARED || !row.doc.includes('"takeBack"')) return false;
+  const doc = JSON.parse(row.doc) as { attrs?: { takeBack?: unknown } } | null;
+  return typeof doc?.attrs?.takeBack === 'object' && doc.attrs.takeBack !== null;
+};
+const SETTLE = settles('');
+// A revision `replaces` could not name, since it would be read as a claim or a settle form, is never written.
+const unnameable = (updatedAt: string): boolean => updatedAt.startsWith('claim:') || updatedAt.startsWith(SETTLE);
+const UNNAMEABLE_WORDS = 'session.drafts.set: a draft’s revision may not begin with claim: or settle:';
 
 export class DraftStore {
   constructor(private readonly db: Db) {}
@@ -34,11 +45,21 @@ export class DraftStore {
 
   // null clears the draft. P5 O8 M6a (M6a's branch review, F1): `replaces`, when given, is the `updatedAt` of the draft
   // this one replaces (null: none ever kept), and a save whose replaced draft is no longer the reader's kept one is
-  // refused, in the same transaction as its write.
+  // refused, in the same transaction as its write. UX wave U4a (decision 13): while the kept draft is a stage, only the
+  // save naming `settles(<its revision>)` is taken; a claim (`DRAFT_CLAIM`) is taken where no document is kept, a
+  // tombstone or no row; a settle form naming no kept stage is stale.
   set(appId: AppSessionId, draft: Draft | null, reader: Reader = 'owner', replaces?: string | null): void {
     this.db.transaction(() => {
       this.requireSession(appId);
-      if (replaces !== undefined && (this.row(appId, reader)?.updated_at ?? null) !== replaces) throw new Error(STALE_DRAFT_WORDS);
+      if (draft !== null && unnameable(draft.updatedAt)) throw new Error(UNNAMEABLE_WORDS);
+      const kept = this.row(appId, reader);
+      if (kept !== null && isStage(kept)) {
+        if (replaces !== settles(kept.updated_at)) throw new Error(STAGED_DRAFT_WORDS);
+      } else if (replaces === DRAFT_CLAIM) {
+        if (kept !== null && kept.attachments !== CLEARED) throw new Error(DRAFT_KEPT_WORDS);
+      } else if (replaces?.startsWith(SETTLE)) {
+        throw new Error(STALE_DRAFT_WORDS); // no stage is kept at that revision: another mount settled it, or this one did
+      } else if (replaces !== undefined && (kept?.updated_at ?? null) !== replaces) throw new Error(STALE_DRAFT_WORDS);
       const [doc, attachments, updatedAt] = draft === null ? ['null', CLEARED, `${new Date().toISOString()}#${randomUUID()}`] : [JSON.stringify(draft.doc ?? null), JSON.stringify(draft.attachments), draft.updatedAt];
       if (reader === 'owner') {
         this.db.run(

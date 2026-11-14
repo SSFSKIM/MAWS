@@ -28,6 +28,8 @@ describe('widget registration covers every WIDGET_COMMANDS name', () => {
     const off = registerAllWidgets();
     expect([...registeredWidgetNames()].sort()).toEqual([...NAMES].sort());
     for (const name of NAMES) expect(slashWidget(name)?.title, name).toBeTruthy();
+    expect(NAMES.indexOf('fork')).toBe(NAMES.indexOf('rewind') + 1); // UX wave U4a (decision 18): `/fork [prompt]`, after `/rewind`
+    expect(slashWidget('fork')?.apply).toBeTypeOf('function');
     off();
     expect(registeredWidgetNames().size).toBe(0);
   });
@@ -78,7 +80,8 @@ describe('every widget renders its fixture response', () => {
   };
 
   const SELECTOR = ['model', 'effort', 'fast'];
-  const FRAMED = NAMES.filter((name) => !SELECTOR.includes(name));
+  // UX wave U4a: `/fork` draws nothing and its mount is the fork itself (ForkWidget.test.tsx)
+  const FRAMED = NAMES.filter((name) => !SELECTOR.includes(name) && name !== 'fork');
 
   // E11's sitting (owner-notes 00-consolidated-plan §2.2): no frame carries a provenance foot.
   it.each(FRAMED)('%s opens with its body and no foot', async (name) => {

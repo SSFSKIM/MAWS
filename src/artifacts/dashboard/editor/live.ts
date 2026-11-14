@@ -14,7 +14,8 @@ type NotOfferedPause = `notOffered:${string}`;
 /** P5 O7 M5c: the pause of a dashboard whose machine, `machine` by its shown name, doesn't offer its connectors. */
 export const notOfferedPause = (machine: string): LivePause => `notOffered:${machine}`;
 const NOT_OFFERED = 'notOffered:';
-const notOfferedOn = (pause: LivePause): string | null => (pause.startsWith(NOT_OFFERED) ? pause.slice(NOT_OFFERED.length) : null);
+/** The machine a `notOffered` pause names, by its shown name; null for any other pause. */
+export const notOfferedOn = (pause: LivePause): string | null => (pause.startsWith(NOT_OFFERED) ? pause.slice(NOT_OFFERED.length) : null);
 
 /** The owner's grant of the query's tool, as the host's grants read: a read grant, none, or not read yet. */
 export type LivePermission = 'unknown' | 'read' | 'none';
@@ -63,7 +64,8 @@ export interface LiveDatasets {
 // E3 M3 fix: a refusal that says what is wrong, which a missing grant does not cover (P5 O7 M5c: a machine that doesn't
 // offer connectors is one: no grant would make the dashboard refresh)
 const CONCRETE: readonly LivePause[] = ['mayWrite', 'failed', 'watchLimit'];
-const concrete = (pause: LivePause) => CONCRETE.includes(pause) || notOfferedOn(pause) !== null;
+/** A pause that says what is wrong, which no grant would mend (U11a board 456: also the source sheet's test). */
+export const concrete = (pause: LivePause) => CONCRETE.includes(pause) || notOfferedOn(pause) !== null;
 
 /** The pause a view says: a concrete refusal first (the tool may write, a failed refresh, the watch limit), then no read
  * grant, else what the bridge last answered. */

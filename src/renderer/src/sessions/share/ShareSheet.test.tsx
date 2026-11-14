@@ -79,6 +79,7 @@ describe('the sheet', () => {
     await within(sheet).findByText(SHARE.general);
     expect(fake.invoked('org.policy.get')).toEqual([{ address: ADDRESS }]);
     expect(sheet.querySelector('[data-share-session]')!.textContent).toBe('Nightly import · studio-mini');
+    expect(sheet.querySelector('[data-share-session]')!.getAttribute('title')).toBe('Nightly import · studio-mini'); // board 523: the whole title and machine on hover
     expect(within(sheet).getAllByRole('radio').map((r) => (r as HTMLInputElement).value)).toEqual(['private', 'listed', 'org-view', 'org-converse']);
     expect(['Private', 'Listed', 'Org can view', 'Org can talk'].map((name) => level(sheet, name).checked)).toEqual([false, true, false, false]);
     expect(within(sheet).getByText("Only its owners, and the people it's shared with, can see it or message its agent. Its agent can message only them too.")).toBeTruthy();
@@ -283,10 +284,10 @@ describe("the sheet's reader", () => {
 });
 
 describe('what the sheet cannot offer', () => {
-  it("says the machine's sminos can't keep a session's reach yet, and offers nothing", async () => {
+  it("says the machine's sminos can't keep a session's reach yet and names the remedy (board 523), and offers nothing", async () => {
     install({ 'org.policy.get': { ok: true, machine: OTHER_MACHINE, supported: false } satisfies OrgPolicy });
     const sheet = await open();
-    expect(await within(sheet).findByText("studio-mini's sminos can't keep a session's reach yet")).toBeTruthy();
+    expect(await within(sheet).findByText("studio-mini's sminos can't keep a session's reach yet. Update sminos on studio-mini, then open this again.")).toBeTruthy();
     expect(within(sheet).queryAllByRole('radio')).toEqual([]);
     expect(within(sheet).queryByRole('button', { name: SHARE.save })).toBeNull();
     expect(within(sheet).getByRole('button', { name: SHARE.close })).toBeTruthy();

@@ -60,6 +60,16 @@ export function RefreshGesture({ appSessionId, availability, refresh, ready }: {
   return <DormantGesture appSessionId={appSessionId} label={L.refresh} onGesture={refresh.run} busy={refresh.pending} starting={refresh.pending} words={words} />;
 }
 
+// UX wave U11a (§D "Plugins"): an unstarted tab's line, the loaded line's "Not observed yet" alone: nothing has loaded,
+// and nothing here starts the chat
+export function NotObservedLine() {
+  return (
+    <div data-plugins-loaded data-loaded-freshness="unknown" className="flex min-w-0 items-center border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">
+      <span>{FRESHNESS.notObserved}</span>
+    </div>
+  );
+}
+
 export function LoadedLine({ appSessionId, availability, loaded, reloads, allowAcquire = true, onShowLoaded, now: fixed }: LoadedLineProps) {
   const clock = useNow();
   const now = fixed ?? clock;

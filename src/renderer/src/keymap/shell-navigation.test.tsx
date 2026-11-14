@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ACTIONS, ACTION_IDS, effectiveChord, type KeymapOverrides } from '@shared/keymap/actions';
@@ -6,11 +6,13 @@ import { matchesChord, parseChord } from '@shared/keymap/chord';
 import { registerShellActions } from '../app/shell-actions';
 import { runAction } from './actions-runtime';
 import { currentSet } from '../stores/layout-model';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { TabStrip } from '../main/TabStrip';
 import { connectKeys } from './dispatcher';
+import { A, probeTool, resetPanelStores, TestHost } from '../test-support/panel';
+import { panelHost, registerPanelTool } from '../panel/host';
 
 let off: () => void;
 beforeEach(() => {
@@ -158,7 +160,7 @@ describe('strip-order navigation', () => {
   it('steps the pane owning DOM focus instead of moving a different pane', () => {
     openTabs();
     useLayout.getState().splitWithActive();
-    useLayout.getState().openTab({ kind: 'settings', section: 'keyboard' });
+    useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }); // a tab of no session
     render(<Regions />);
     screen.getByLabelText('Pane 1 content').focus();
     // A store focus is not a substitute for the keyboard's actual owner.
@@ -235,19 +237,131 @@ describe('visible region focus', () => {
 });
 
 
-it('visits Session cards and surface content without stopping on resize controls', () => {
+// UX wave U7b (M5, decision 8): an open page is a stop of F6 after the sidebar; what it covers is inert and invisible, as
+// the shell leaves it (a wrapper around the main area's panes, the side column's region), so F6 passes over it.
+describe('F6 with a page open', () => {
+  function WithPage() {
+    const page = useLayout(pageOpen);
+    const set = useLayout((s) => currentSet(s.main));
+    return <>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-main">
+        <div data-behind-page inert={page} className={page ? 'invisible' : ''}>
+          {set.panes.map((pane, index) => <section id={`pane-${index}`} data-pane={index} key={index}>
+            <div data-pane-strip><div role="tablist" aria-label={`Tabs ${index}`}>
+              {pane.tabs.map((tab) => <button role="tab" aria-selected={tab.id === pane.activeTabId} tabIndex={tab.id === pane.activeTabId ? 0 : -1} key={tab.id}>{tab.id}</button>)}
+            </div></div>
+            <div role="tabpanel"><textarea aria-label={`Pane ${index} content`} /></div>
+          </section>)}
+        </div>
+      </section>
+      {page && <section id="region-page" tabIndex={-1}><button>Page control</button></section>}
+      <section id="region-panel" inert={page}><button>Surface overflow</button></section>
+    </>;
+  }
+  beforeEach(() => {
+    openTabs();
+    render(<WithPage />);
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+  });
+
+  it('from the sidebar lands on the page, and the next F6 on the sidebar, never in a pane or the side column', () => {
+    screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Page control' }));
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sidebar destination' }));
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Page control' }));
+  });
+
+  it('after Back the stops are the sidebar, the strip, the pane and the side column again', () => {
+    act(() => useLayout.getState().closeDestination());
+    screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(document.activeElement).toBe(screen.getByRole('tab', { selected: true }));
+  });
+});
+
+// UX wave U8b (M2, decision 7): each group of the side column is its strip (its selected tab) and then its content.
+it('visits Session cards, each group’s strip and its content, without stopping on resize controls', () => {
+  const group = (name: string, tool: string, field: string) => (
+    <section data-side-group={name}>
+      <div><div role="tablist"><button role="tab" aria-selected="false" tabIndex={-1}>Other</button><button role="tab" aria-selected="true">{tool}</button></div><button>Hide side column</button></div>
+      <div data-surface={tool}><div role="tabpanel"><input aria-label={field} /></div></div>
+    </section>
+  );
   render(<>
     <section id="region-sidebar"><button>Sidebar destination</button></section>
     <section id="region-main"><div data-pane="0"><div role="tabpanel"><textarea aria-label="Conversation" /></div></div>
       <aside data-region="cards"><button>Environment card</button></aside>
     </section>
-    <section id="region-panel"><button role="separator">Resize surface</button><div data-panel-content><section data-surface="terminal"><button>Close surface</button><div role="tabpanel"><input aria-label="Terminal input" /></div></section></div></section>
+    <section id="region-panel"><button role="separator">Resize surface</button><div data-panel-content><div data-surface-stack>
+      {group('upper', 'terminal', 'Terminal input')}
+      {group('lower', 'review', 'Review input')}
+    </div></div></section>
   </>);
   screen.getByLabelText('Conversation').focus();
-  pressMenu({ key: 'F6', code: 'F6' });
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
-  pressMenu({ key: 'F6', code: 'F6' });
-  expect(document.activeElement).toBe(screen.getByLabelText('Terminal input'));
+  const visits = [...Array(6)].map(() => {
+    pressMenu({ key: 'F6', code: 'F6' });
+    return document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent;
+  });
+  expect(visits).toEqual(['Environment card', 'terminal', 'Terminal input', 'review', 'Review input', 'Sidebar destination']);
   pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
-  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Environment card' }));
+  expect(document.activeElement).toBe(screen.getByLabelText('Review input'));
+});
+
+
+// UX wave U8b (M2, fix round 1): a strip's controls past its tabs ("+", Float, Expand, Hide) are part of the strip's
+// stop, so F6 from one of them goes on to the group's content and Shift+F6 back to what precedes the strip.
+describe('F6 from a control at the end of a side group\'s strip', () => {
+  let offTools: (() => void)[] = [];
+  beforeEach(() => {
+    resetPanelStores();
+    offTools = ['terminal', 'review'].map((id) => registerPanelTool(probeTool(id, { title: id === 'terminal' ? 'Terminal' : 'Review' }).tool));
+  });
+  afterEach(() => offTools.splice(0).forEach((off) => off()));
+
+  const mount = (groups: 1 | 2) => {
+    render(<>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-panel"><TestHost /></section>
+    </>);
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    if (groups === 2) {
+      let review = '';
+      act(() => void (review = panelHost.addTool('review', { appSessionId: A })));
+      act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    }
+    const sections = [...document.querySelectorAll<HTMLElement>('section[data-side-group]')];
+    expect(sections).toHaveLength(groups);
+    return sections;
+  };
+  const named = (element: Element | null) => element?.closest('[role="tab"]')?.textContent ?? element?.closest('[role="tabpanel"]')?.id ?? element?.textContent;
+  const control = (section: HTMLElement, name: string) => within(section).getByRole('button', { name });
+
+  it.each(['Float conversation over surface', 'Expand surface', 'Hide side column', 'Add a tool'])('the upper group: F6 from %s goes to its content, Shift+F6 to the sidebar', (name) => {
+    const [upper] = mount(1);
+    control(upper, name).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+    control(upper, name).focus();
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Sidebar destination' }));
+  });
+
+  it('two groups: from the upper strip\'s Hide and the lower strip\'s "+", F6 goes on to that group\'s content and Shift+F6 back past its strip', () => {
+    const [upper, lower] = mount(2);
+    control(upper, 'Hide side column').focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('Review'); // the lower strip's stop is its selected tab
+    control(lower, 'Add a tool').focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    expect(named(document.activeElement)).toBe('panel-host-body-lower');
+    control(lower, 'Add a tool').focus();
+    pressMenu({ key: 'F6', code: 'F6', shiftKey: true });
+    expect(named(document.activeElement)).toBe('panel-host-body-upper');
+  });
 });

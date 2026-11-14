@@ -2,8 +2,9 @@
 // view of a session's own directories, for the Files tool, the file viewer and (E5) the editor. Owner `machine` for
 // every command from P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §C): `mawsd` serves
 // them with the spine on the daemon shape. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
-// and `worktree.path`) by the open-first boundary in `src/main/files/service.ts`; refusals answer `internal` with
-// `path outside the session's directories`. One write is E5's `files.write`, the hash-checked save of a file that
+// and `worktree.path`) by the open-first boundary in `src/services/files/service.ts`, but for one file outside them that
+// the session's deliverables name (`read`, `openExternal`, `reveal`) or, UX wave U6c, that its transcript links (`read`
+// and `openExternal`, asked with `named`); refusals answer `internal` with `path outside the session's directories`. One write is E5's `files.write`, the hash-checked save of a file that
 // already exists; the other, P5 O3-E's `files.upload`, creates new files in the session's attachments directory alone;
 // nothing here renames a file, or deletes one but the upload's own.
 import * as z from 'zod';
@@ -63,6 +64,11 @@ export const FilesReadInputSchema = z.strictObject({
   // E5: answer the whole file's hash with this chunk. Main then reads the whole file (up to FILES_READ_MAX_LENGTH) into
   // one buffer, hashes it and slices the chunk from it, so the chunk's bytes are always the hashed file's.
   hash: z.boolean().optional(),
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §D): the caller knows the rule
+  // and holds what it reads read-only: a file outside the session's directories is read when the session's own transcript
+  // links it (`src/services/files/named.ts`), for a caller on the session's machine alone. Sent by the window only for a
+  // session on this Mac; a peer that does not know the key drops it and answers the plain read.
+  named: z.literal(true).optional(),
 });
 export type FilesReadInput = z.infer<typeof FilesReadInputSchema>;
 
@@ -86,6 +92,9 @@ export const FilesReadOutputSchema = z.strictObject({
   // renderer knows the text it holds re-encodes to the file's bytes exactly; null when not hashed. A byte-length
   // comparison is no such test: a truncated multi-byte sequence decodes to U+FFFD, which may be as long.
   utf8: z.boolean().nullable(),
+  // UX wave U6c: the file is outside the session's directories, admitted because the transcript names it; present only
+  // in the answer to a request that carried `named`, and absent for every other file
+  named: z.literal(true).optional(),
 });
 export type FilesReadOutput = z.infer<typeof FilesReadOutputSchema>;
 
@@ -108,6 +117,9 @@ export const FilesWriteOutputSchema = z.discriminatedUnion('status', [
 export type FilesWriteOutput = z.infer<typeof FilesWriteOutputSchema>;
 
 const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string() });
+// UX wave U6c: `files.openExternal` takes `named` as `files.read` does
+export const FilesOpenExternalInputSchema = SessionPathSchema.extend({ named: z.literal(true).optional() });
+export type FilesOpenExternalInput = z.infer<typeof FilesOpenExternalInputSchema>;
 
 export const FilesOpenExternalOutputSchema = z.strictObject({
   opened: z.boolean(),
@@ -125,8 +137,9 @@ export type FilesRevealOutput = z.infer<typeof FilesRevealOutputSchema>;
 // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach to a File artifact's stored bytes, a path main resolved itself
 // (the artifact's admission), read with `files.read`'s rules (no link on the path, a regular file, the same answer).
 // Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
-// which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told.
-export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true });
+// which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told. UX wave
+// U6c: `named` is left out as the session is; the caller's resolution is the admission.
+export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true });
 export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema>;
 
 // P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,
@@ -224,7 +237,7 @@ export const commands = {
   // A directory; ref-counted per confirmed realpath; re-confirmed after install and before each batch it forwards.
   'files.watch': { input: SessionPathSchema, output: z.void(), owner: 'machine' },
   'files.unwatch': { input: SessionPathSchema, output: z.void(), owner: 'machine' },
-  'files.openExternal': { input: SessionPathSchema, output: FilesOpenExternalOutputSchema, owner: 'machine' },
+  'files.openExternal': { input: FilesOpenExternalInputSchema, output: FilesOpenExternalOutputSchema, owner: 'machine' },
   // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
   'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
   // E5 end

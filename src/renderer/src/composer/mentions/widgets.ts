@@ -1,7 +1,8 @@
 // The slash palette's widgets (C7 execution document, "Mentions, palette and the "+" menu"): the declared widget
 // catalogue, every name of which is a palette item whether or not the engine's catalogue lists it (ten of these exist
 // only as terminal menus), and the registry through which C11 supplies a widget per name. A registered widget opens for
-// its name whatever the item's origin.
+// its name whatever the item's origin. UX wave U4a (decision 17 h): the order declared here is the order the palette
+// opens on.
 import { useSyncExternalStore, type ComponentType } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 
@@ -13,7 +14,7 @@ export const WIDGET_COMMANDS = [
   { name: 'usage', description: 'Plan usage and what counts against it' },
   { name: 'config', description: 'Settings for this session' },
   { name: 'plugins', description: 'Browse and manage plugins' },
-  { name: 'mcp', description: 'Manage MCP servers' },
+  { name: 'mcp', description: 'Connectors in this chat (MCP servers)' }, // UX wave U11a (§C); items.ts lets it win over the engine's
   { name: 'sandbox', description: 'Sandbox settings' },
   { name: 'hooks', description: 'Review configured hooks' },
   { name: 'memory', description: 'Edit memory files' },
@@ -27,9 +28,10 @@ export const WIDGET_COMMANDS = [
   { name: 'export', description: 'Export the conversation' },
   { name: 'diff', description: 'Changes in the working tree' },
   { name: 'rewind', description: 'Rewind the conversation, its files or both to an earlier message' }, // W3 (B7); Esc Esc too
+  { name: 'fork', description: 'Fork this conversation into a new tab; words after it are the fork’s first message', argumentHint: '[prompt]' }, // UX wave U4a (decision 18; O-48)
   { name: 'btw', description: 'Ask a side question beside the running turn' }, // E3: the engine's side_question, never a prompt
   { name: 'reload-plugins', description: 'Reload the plugins of this session' }, // E11 §2.2: the engine's terminal-only command, run as reload_plugins
-] as const satisfies ReadonlyArray<{ name: string; description: string }>;
+] as const satisfies ReadonlyArray<{ name: string; description: string; argumentHint?: string }>; // the hint: shown in the palette's popover (U4a)
 
 export type WidgetCommandName = (typeof WIDGET_COMMANDS)[number]['name'];
 

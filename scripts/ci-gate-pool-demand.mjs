@@ -1,5 +1,7 @@
 // Prints ci-kit's Pool-Demand trailer value for the exact tree and trailers ci-gate.sh will push. Repository variables
 // arrive through GATE_RUNNER and GATE_E2E_RUNNER, read at push time; the planner, its dependencies and inputs come from sha.
+// The plan's `mini_window`, a scheduled hold of the mini's that this run's jobs would wait for, goes to stderr as a
+// `ci-gate:` line; a planner without it prints none.
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -66,7 +68,9 @@ export function targetOutputs(gitDir, sha, message = process.env.HEAD_MESSAGE ??
 if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) try {
   const { values } = parseArgs({ options: { 'git-dir': { type: 'string' }, sha: { type: 'string' } } });
   if (!values['git-dir'] || !values.sha) throw new Error('--git-dir and --sha are required');
-  process.stdout.write(`${poolDemand(targetOutputs(values['git-dir'], values.sha))}\n`);
+  const outputs = targetOutputs(values['git-dir'], values.sha);
+  if (outputs.mini_window) process.stderr.write(`ci-gate: ${outputs.mini_window}\n`);
+  process.stdout.write(`${poolDemand(outputs)}\n`);
 } catch (error) {
   process.stderr.write(`ci-gate-pool-demand: ${error.message}\n`);
   process.exitCode = 1;

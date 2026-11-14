@@ -62,4 +62,10 @@ export const ENDPOINT_CAPABILITIES = [
   // `session.projects.link`, `relocate`, `resolve`, `update` and `remove`, and `addFolder`'s `into` and `own`; a device
   // sends a machine none of them, nor `remove`'s `expect`, unless its `h2` listed it (PROJECT_ACTS_CAPABILITY).
   'rl2.project-acts',
+  // The UX wave (U9, UC-7.4; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): this endpoint offers the
+  // session acts `session.archive`, `session.update` (an unarchive alone), `session.rename`, `attention.acknowledge`,
+  // `session.steer.cancel` and `maws.pane.answer`, and the archived sessions' read `session.list {includeArchived: true}`;
+  // a device sends a machine none of them unless its `h2` listed it (SESSION_ACTS_CAPABILITY), since an older one has no
+  // row for them and answers `not-offered`.
+  'rl2.session-acts',
 ] as const;

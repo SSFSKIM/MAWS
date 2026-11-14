@@ -8,9 +8,10 @@ import type { RemoteRow } from '@shared/ipc/schema/org';
 import type { ListedSession } from '../stores/sessions';
 import { formatClock, formatShortDate, formatWeekdayClock } from '@shared/app/date-format';
 import { addressOf } from '@shared/machine/address';
-import type { OrgKey } from '@shared/machine/org-key';
+import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import type { RowKey } from '../stores/org-projects';
+import { EMPTY_REGISTRY, registryRecords, type OrgProjects } from '../stores/registry';
 import { chooserGroups, chooserRowId, chooserRows, folderBadge, groupOf, initialToggles, isListedChooserRow, NO_TOGGLES, rowTime, sessionBranch, shortBranch, TOGGLE_KEYS, type ChooserInput, type ChooserRow } from './model';
 
 const P = project('p', 0, { name: 'maws' });
@@ -157,6 +158,30 @@ describe('the chooser’s rows', () => {
       expect(chooserRows(scoped({ toggles: { ...NO_TOGGLES, currentBranch: true } })).map(chooserRowId)).not.toContain(mine.appId);
       expect(chooserRows(scoped({ query: 'SPAWN' })).map(chooserRowId)).toEqual([mine.appId]);
     });
+  });
+
+  // ticket 644: a record of another machine at a listed address is in the scope of the row its listing files it under,
+  // as the sidebar draws it there, though the registry places its project on that machine
+  it('scopes a record of another machine at a listed address by its listing’s row, though the registry knows its project', () => {
+    const KEY = 'remote:example.org/app' as OrgKey;
+    const ID = '11111111-2222-4333-8444-555555555555';
+    const registry: OrgProjects = {
+      ...EMPTY_REGISTRY,
+      projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [{ machine: OTHER_MACHINE, pid: 'app', path: '/srv/app', key: KEY, name: 'app', source: 'remote', acts: true }] }],
+      keys: { [ID]: KEY },
+    };
+    const projects = registryRecords(registry, TEST_MACHINE);
+    const held = record(addressOf(OTHER_MACHINE, 'b1'), { projectId: addressOf(OTHER_MACHINE, 'app') as ProjectId, updatedAt: at(4) });
+    const scoped = (orgKey: OrgKey | null, row: RowKey) => chooserRows(input({
+      records: new Map([[held.appId, held]]),
+      projects,
+      registry,
+      context: { projectId: null, row, exclude: null },
+      listed: new Map([[held.appId, { ...remoteRow(OTHER_MACHINE, 'b1', { orgKey, project: orgKey === null ? null : ID }), appId: held.appId }]]),
+    })).map(chooserRowId);
+    expect(scoped(null, machineKey(OTHER_MACHINE)), 'its listing’s key is none of the table’s: its machine’s row').toEqual([held.appId]);
+    expect(scoped(null, KEY), 'not the registry project’s').toEqual([]);
+    expect(scoped(KEY, KEY), 'listing and registry agree').toEqual([held.appId]);
   });
 
   it('the search narrows by title, project name, folder and branch (G2: the branch joins the sidebar’s matcher)', () => {

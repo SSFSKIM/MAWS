@@ -142,8 +142,10 @@ export function queueInterruptJournal(dir: string, name: string): string {
 // MAWS's queue with `cancel_async_message`, answered as `pass3/steer-next-cancelled` answers one (seq 34-36: the
 // steer's `cancelled`, then `cancelled: true`), then interrupts (seq 190, its answer cancelling nothing, since the
 // steer is already withdrawn; the probe's own cancel of it at seq 191 is dropped); Resume releases the held entry as the
-// next prompt (seq 199).
-export function steerStopJournal(dir: string, name: string): string {
+// next prompt (seq 199). UX wave U4a (M8, the Stop scene): with `releases: 2` a second held message follows the first
+// once its turn ends, as one more human turn in place of the probe's `bash_command` (seq 233, 235 to 237) and its exit
+// (238), so the queue's second release is a recorded write.
+export function steerStopJournal(dir: string, name: string, releases: 1 | 2 = 1): string {
   const rows = rowsOf('spikes/protocol-probe/fixtures/queue-and-interrupt.jsonl').map((row) => {
     // App recording variant: the interrupt is a person cancelling, not the probe's diagnostic interrupt.
     if (row.direction !== 'out' || row.seq !== 190) return row;
@@ -164,5 +166,41 @@ export function steerStopJournal(dir: string, name: string): string {
       return { ...r, seq: 189 * 10 + k, frame: 'session_id' in frame ? { ...frame, session_id: session } : frame };
     });
   rows.splice(interrupt, 0, ...withdrawal);
+  if (releases === 2) {
+    const kept = rows.filter((r) => ![233, 235, 236, 237, 238].includes(r.seq)); // the first release's turn to its `completed` (234), without the exit
+    const result = rowsOf('spikes/protocol-probe/fixtures/pass2/bash-context-echoed.jsonl').find((r) => r.seq === 30)!.frame;
+    const uuid = '00000000-0000-4000-8000-000000000233';
+    const at = kept.at(-1)!.at;
+    const turn: Row[] = [
+      { seq: 240, direction: 'out', at, frame: { type: 'user', uuid, message: { role: 'user', content: 'the second release' }, parent_tool_use_id: null, origin: { kind: 'human' } } },
+      { seq: 241, direction: 'in', at, frame: { type: 'command_lifecycle', command_uuid: uuid, state: 'started', uuid: '10000000-0000-4000-8000-000000000233', session_id: session } },
+      { seq: 242, direction: 'in', at, frame: { ...result, session_id: session, uuid: '20000000-0000-4000-8000-000000000233', user_message_uuid: uuid, user_message_uuids: [uuid] } },
+      { seq: 243, direction: 'in', at, frame: { type: 'command_lifecycle', command_uuid: uuid, state: 'completed', uuid: '30000000-0000-4000-8000-000000000233', session_id: session } },
+    ];
+    return writeJournal(dir, `${name}-steer-stop-2`, [...kept, ...turn]);
+  }
   return writeJournal(dir, `${name}-steer-stop`, rows);
+}
+
+// UX wave U4a (M8, the Send now scene): Send now behind a running command, as `uxwave/u4p2-a-1` recorded it on engine
+// 2.1.322 under the environment MAWS's launch sets. C3's prelude stands in for the probe's handshake (seq 3 to 11, and
+// the answer to its thinking-display write at 14, which the host's own write is answered in place of); then the probe's
+// prompt (seq 12) and its Bash call running a long `node` command, the message at the next step (37), the engine's own
+// send-now request (40) answered `delivering` (41), the command moved to the background (43 to 46), the cut turn's end
+// (`success`, `aborted_tools`, 47), the message's own turn (49 to 193), and the moved command's end (194, 195) with the
+// engine's turn after it. The meta rows go, the exit (239) with them, so the replay waits for the test's end.
+export function sendNowJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p2-a-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-send-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
+// UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
+// promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
+// Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
+// which has the command moved (46) and the turn cut (`success`, `aborted_tools`, 49); the `now` message's own turn, and
+// the waiting message read at its first tool boundary (120 to 122). C3's prelude stands in for the probe's handshake,
+// and the answer at 14 and the meta rows go, as in `sendNowJournal`.
+export function promoteNowJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p3-promote-late-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-promote-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }

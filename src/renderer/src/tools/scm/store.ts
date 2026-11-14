@@ -62,7 +62,10 @@ export interface ScmStore {
   unstage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
   discard(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, directory: string, entries: ScmDiscardInput['entries']): Promise<ScmMutationResult>;
   commit(ui: StoreApi<ScmUi>, appSessionId: AppSessionId): Promise<ScmMutationResult>; // the session's draft and Skip hooks
-  resume(appSessionId: AppSessionId): () => void; // ref-counted: seeds the run from `scm.remote.last` and follows its events
+  // ref-counted: seeds the run from `scm.remote.last` and follows its events; `ownRuns`, whether the session's own runs
+  // run in the checkout the page shows (its launch folder; UX wave U8c-2: no act runs elsewhere), true unless said; the
+  // first holder's word stands while it is held (one page per session holds it: the tool's body)
+  resume(appSessionId: AppSessionId, options?: { ownRuns?: boolean }): () => void;
   started(appSessionId: AppSessionId, plan: RemotePlan): void; // `scm.push`/`scm.pr.create` answered `started` for the plan
   reset(): void; // tests
 }
@@ -105,19 +108,28 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
     });
 
     // A mutation's answer is for the session it was asked for: a pinned tool that moved on meanwhile keeps its own, and
-    // only `elsewhere` (the commit's parked draft) touches the state then. `ok` clears the last notice; a refusal or a
-    // failed call becomes it, unless a sheet that stays open shows it (`sheetShows`: the discard's, E11 W-D).
+    // only `elsewhere` (the commit's parked draft) touches the state then. UX wave U8c-2 (fix wave 1): and for the working
+    // folder it was asked in: the page of the folder the agent moved to takes no notice, output or commit of the one it
+    // left, and only `away` (the session's own draft, which the page keeps across a move) touches the state then. `ok`
+    // clears the last notice; a refusal or a failed call becomes it, unless a sheet that stays open shows it
+    // (`sheetShows`: the discard's, E11 W-D).
     type Landed = Extract<ScmMutation, { ok: true }>;
     const mutate = async (
       ui: StoreApi<ScmUi>,
       appSessionId: AppSessionId,
       call: Promise<CommandResult<'scm.stage'>>,
-      landed?: { here(answer: Landed): Partial<ScmUi>; elsewhere(): Partial<ScmUi> },
+      landed?: { here(answer: Landed): Partial<ScmUi>; away(): Partial<ScmUi>; elsewhere(): Partial<ScmUi> },
       sheetShows = false,
     ) => {
+      const asked = ui.getState().directory;
       const result = await settled(call);
+      const ran = result.ok && !('refused' in result.value);
       if (ui.getState().session !== appSessionId) {
-        if (landed && result.ok && !('refused' in result.value)) ui.setState(landed.elsewhere());
+        if (landed && ran) ui.setState(landed.elsewhere());
+        return result;
+      }
+      if (ui.getState().directory !== asked) {
+        if (landed && ran) ui.setState(landed.away());
         return result;
       }
       if (!result.ok) {
@@ -170,8 +182,11 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       // Skip hooks goes back off (it is a decision per commit, as `--no-verify` is in a terminal).
       commit(ui, appSessionId) {
         const { message, noVerify } = ui.getState();
+        // The session's draft once its commit ran, wherever the page now is (UX wave U8c-2: the draft is kept across a move).
+        const drafted = (): Partial<ScmUi> => ({ noVerify: false, ...(ui.getState().message === message ? { message: '' } : {}) });
         return mutate(ui, appSessionId, client.invoke('scm.commit', { appSessionId, message, noVerify }), {
-          here: (answer) => ({ lastCommit: answer.commit ?? null, noVerify: false, ...(ui.getState().message === message ? { message: '' } : {}) }),
+          here: (answer) => ({ lastCommit: answer.commit ?? null, ...drafted() }),
+          away: drafted, // landed after the agent moved: the commit was the launch folder's, so no other page records it
           // Landed while a pinned tool shows another session: the committed draft parked for this one goes, unless it
           // was edited before the switch.
           elsewhere: () => {
@@ -188,8 +203,11 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       // event is the session's when it names the session or the run it holds. Events that arrive before the snapshot
       // answers are either folded into it (its run, at or below its `seq`) or from a run before it (main's latest run
       // is the newest one when it answers): only its own run's later events are kept. With no run in main, whatever
-      // the session's own runs sent is a run that started since.
-      resume(appSessionId) {
+      // the session's own runs sent is a run that started since. The event names no checkout: UX wave U8c-2 (the
+      // branch review, finding 6), a session's own runs run only in its launch folder, so on the page of any other
+      // folder (`ownRuns` false) an event is taken only for the run that checkout's snapshot named; one of the
+      // session's naming it alone is the launch folder's run, running on after the agent moved.
+      resume(appSessionId, { ownRuns = true } = {}) {
         let r = resumed.get(appSessionId);
         if (r) r.count += 1;
         else {
@@ -199,7 +217,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
           entry.off = client.on('scm.remote.output', (event) => {
             if (entry.pending) return void entry.pending.push(event);
             const run = get().runs.get(appSessionId) ?? null;
-            if (event.appSessionId !== appSessionId && event.token !== run?.token) return;
+            if (event.token !== run?.token && (!ownRuns || event.appSessionId !== appSessionId)) return;
             setRun(appSessionId, advanceRun(run, event));
           });
           void settled(client.invoke('scm.remote.last', { appSessionId })).then((result) => {
@@ -208,7 +226,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
             entry.pending = null;
             const seeded = result.ok ? runFromSnapshot(result.value) : null;
             let run = seeded;
-            for (const event of pending) if (seeded === null ? event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
+            for (const event of pending) if (seeded === null ? ownRuns && event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
             set((s) => ({ runs: mapWith(s.runs, appSessionId, run) }));
           });
         }

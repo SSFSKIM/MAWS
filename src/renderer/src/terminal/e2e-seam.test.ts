@@ -9,6 +9,7 @@ const probe = (lines: string[]): TerminalProbe => ({
   cursorX: 0,
   cursorY: 0,
   line: (row) => lines[row]!,
+  wrapped: () => false,
   lineCount: () => lines.length,
   modes: () => ({ alternateScreen: false, bracketedPaste: false, applicationCursorKeys: false, mouseTracking: 'none' }),
 });

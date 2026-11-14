@@ -56,7 +56,10 @@ export const ElicitationResponseSchema = z.discriminatedUnion('action', [
 ]);
 export type ElicitationResponse = z.infer<typeof ElicitationResponseSchema>;
 
-export const InterruptResponseSchema = z.looseObject({ still_queued: z.array(z.string()), cancelled: z.array(z.string()).optional() });
+// UX wave U4a (Interfaces A): `send_now` answers a send-now request, `delivering`, `stopped` or `nothing_waiting` as engine
+// 2.1.322 words it (spikes/protocol-probe/fixtures/uxwave/u4p1-a-seeded-1.jsonl seq 40); an engine without the handler
+// answers none (u4p2-old-1.jsonl seq 79)
+export const InterruptResponseSchema = z.looseObject({ still_queued: z.array(z.string()), cancelled: z.array(z.string()).optional(), send_now: z.string().optional() });
 export type InterruptResponse = z.infer<typeof InterruptResponseSchema>;
 
 export const SetPermissionModeResponseSchema = z.looseObject({ mode: z.string() });
@@ -135,7 +138,9 @@ export interface InitializeRequest {
   workspaceTrust?: { accepted: true; directory: string };
   sdkMcpServers?: string[]; // E1: the SDK-hosted MCP servers the host serves over `mcp_message` (SPEC 45 §45.21; pass3/p1-sdk-mcp-roundtrip seq 4)
 }
-export interface InterruptRequest { reason?: string; cancel_queued?: boolean }
+// UX wave U4a (decision 3): a send-now request is `{ send_now: true, message_uuid }` with no reason and no cancel_queued,
+// exactly as probe P1 recorded it (u4p1-a-seeded-1.jsonl seq 39)
+export interface InterruptRequest { reason?: string; cancel_queued?: boolean; send_now?: boolean; message_uuid?: string }
 export interface SetPermissionModeRequest { mode: string }
 export interface SetModelRequest { model: string | null }
 export interface SetMaxThinkingTokensRequest { max_thinking_tokens: number | null; thinking_display?: string | null }

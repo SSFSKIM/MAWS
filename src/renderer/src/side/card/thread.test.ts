@@ -27,6 +27,9 @@ const user = (over: Partial<Extract<Row, { kind: 'user' }>> = {}): Row =>
   ({ id: `u${++n}`, turnId: null, at: T0, kind: 'user', messageUuid: null, text: 'text', attachments: [], placeholders: [], lines: 1, editable: true, steer: false, dropped: false, ...over }) as Row;
 const answer = (): Row => ({ id: `a${++n}`, turnId: null, at: T0, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: 'reply', live: false, phase: 'answer', model: null }) as Row;
 const anchored = (anchor: Anchor = ANCHOR, destination: 'thread' | 'main' = 'thread') => user({ anchor, anchorFrame: { destination, screenshot: false } });
+// UX wave U5a (M5): a message of several comments, framed for a thread (`commentsTo`) unless sent to the main conversation
+const several = (first: Anchor, to: 'thread' | null = 'thread') =>
+  user({ comments: [{ anchor: first, text: 'a' }, { anchor: { ...ANCHOR, locator: 'p.lead', label: 'Lead' }, text: 'b' }], editable: false, ...(to !== null && { commentsTo: to }) });
 
 describe('threadStartOf', () => {
   const start = threadStartOf(lineage());
@@ -46,6 +49,21 @@ describe('threadStartOf', () => {
   it('reads the anchor on kind, locator and label, and only a prompt framed for a thread', () => {
     const rows = [anchored({ ...ANCHOR, locator: 'p.lead' }), anchored({ ...ANCHOR, label: 'Other' }), anchored(ANCHOR, 'main'), anchored({ ...ANCHOR, screenshot: { path: '/s.png', width: 1, height: 1 } }), answer()];
     expect(start(rows, true)).toBe(3);
+  });
+
+  it('a thread opened from several comments starts at its prompt of several comments, by its first comment’s anchor (UX wave U5a, M5)', () => {
+    expect(start([user(), answer(), several(ANCHOR), answer()], true)).toBe(2);
+    expect(start([several(ANCHOR), answer(), several(ANCHOR), answer()], true)).toBe(2);
+    expect(start([several({ ...ANCHOR, locator: 'p.lead' }), answer()], false)).toBeNull();
+    expect(start([user({ comments: [{ anchor: { ...ANCHOR, label: 'Lead' }, text: 'a' }, { anchor: ANCHOR, text: 'b' }], commentsTo: 'thread' }), answer()], false)).toBeNull(); // only the first comment's anchor is the lineage's
+  });
+
+  // M5's review: only a message framed for a thread opens one, so a pass sent to the main conversation later, starting on
+  // the same anchor, never moves the start past the thread's own opener.
+  it('a main-sent pass of several comments on the same anchor, after the opener, leaves the start at the opener', () => {
+    expect(start([user(), anchored(), answer(), several(ANCHOR, null), answer()], true)).toBe(1);
+    expect(start([user(), several(ANCHOR), answer(), several(ANCHOR, null), answer()], true)).toBe(1);
+    expect(start([several(ANCHOR, null), answer()], false)).toBeNull();
   });
 
   it('a promotion (no lineage anchor) starts at 0', () => {

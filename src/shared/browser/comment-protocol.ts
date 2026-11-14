@@ -17,7 +17,10 @@ export type ToPreload =
   | { type: 'arm'; epoch: number }
   | { type: 'disarm' }
   // the context menu's one-shot pick at a point, in CSS px of the viewport; no hover UI
-  | { type: 'pickAt'; x: number; y: number; requestId: string; epoch: number };
+  | { type: 'pickAt'; x: number; y: number; requestId: string; epoch: number }
+  // UX wave U5a (X-216): the tab's comment card opened on a comment (the css of its element) or closed, as the window
+  // tells it through `browser.comment.card`
+  | { type: 'card'; open: boolean; css?: string };
 
 export type PickRect = { x: number; y: number; width: number; height: number };
 
@@ -48,6 +51,8 @@ export const REPORT_TOKEN_MAX = 64; // `role` (E4c's cap) and `tag`
 export const DRAG_THRESHOLD_PX = 6; // a pointer moved further with the button down is an area pick
 export const PICK_AT_MS = 2000; // how long main waits for the report a `pickAt` asked for
 export const ARM_ACK_MS = 2000; // how long main waits for the arm's acknowledgement (the preload shares the page's main thread)
+// UX wave U5a (X-216): how long a pick stays in view with no word that its card opened (a pick that opens the sheet)
+export const PICK_GRACE_MS = 2_000;
 
 // The description bounded to the report's caps, so a long page string never makes a legitimate pick fail main's schema.
 export function trimDescription(description: ElementDescription): { description: ElementDescription; nameOverLong: boolean } {

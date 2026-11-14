@@ -6,13 +6,15 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { toast } from '../stores/notices';
 import { PLUGIN } from '../transcript';
 
-// Whether a pane of this window shows the session as its active tab (R2's prompt requests read it too).
+// Whether a pane of this window shows the session as its active tab (R2's prompt requests read it too). UX wave U7b
+// (§N): never behind a page.
 export function shownHere(appSessionId: AppSessionId): boolean {
+  if (pageOpen(useLayout.getState())) return false;
   return currentSet(useLayout.getState().main).panes.some((pane) => pane.tabs.some((tab) => tab.id === pane.activeTabId && tab.kind === 'session' && tab.appSessionId === appSessionId));
 }
 

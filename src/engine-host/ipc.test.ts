@@ -1338,6 +1338,23 @@ describe('session.steer.cancel and session.promptHistory (P2-C M3)', () => {
 });
 // P2-C end
 
+// UX wave U4a (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M1; Interfaces A): Send now, one round trip
+// bounded as `session.steer.cancel` is, owned by the engine host
+describe('session.steer.sendNow (UX wave U4a)', () => {
+  it('has a handler and one bounded deadline shape, owned by the engine host; for a session the host does not hold it fails', async () => {
+    const { U4A_SESSION_COMMANDS } = await import('@shared/ipc/schema/session');
+    const { U4A_DEADLINE_SHAPES } = await import('./ipc');
+    const host = engineHost();
+    expect(U4A_DEADLINE_SHAPES).toEqual({ 'session.steer.sendNow': 'bounded' });
+    expect(Object.keys(U4A_DEADLINE_SHAPES).sort()).toEqual([...U4A_SESSION_COMMANDS].sort());
+    for (const name of U4A_SESSION_COMMANDS) {
+      expect(host.handlers.has(name), name).toBe(true);
+      expect(commands[name].owner).toBe('engine-host');
+    }
+    await expect(host.call('session.steer.sendNow', { appSessionId: 'app-none' as AppSessionId, messageUuid: 'u-1' as never })).rejects.toThrow('unknown session app-none');
+  });
+});
+
 // P5 O2 M2: the owner's Keep running mark (docs/doperpowers/plans/2026-10-27-p5-o2-mawsd.md, M2 "Keep")
 describe('session.setKeep (P5 O2 M2)', () => {
   it('has one immediate deadline shape and a handler', async () => {

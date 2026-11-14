@@ -373,7 +373,8 @@ describe('Transcript', () => {
     expect(document.querySelector(`[data-cell-id="${target}"]`)).not.toBeNull();
   });
 
-  it('a history that failed to load says why and offers Retry, which hydrates it', async () => {
+  // The UX wave, U9 (O-11b): one line, "Couldn’t load this conversation", with Retry; the reason in its hover title, off the screen
+  it('a history that failed to load says so with Retry, its reason in the line’s title, and Retry hydrates it', async () => {
     let attempts = 0;
     const source: TranscriptSource = {
       key: `transcript-test-${++keys}`,
@@ -382,11 +383,39 @@ describe('Transcript', () => {
     };
     render(<Transcript source={source} variant="session" />);
     const alert = await screen.findByRole('alert');
-    expect(alert.textContent).toContain('Could not load this transcript · engine-host is not running');
+    expect(alert.textContent).toBe('Couldn’t load this conversationRetry');
+    expect(alert.getAttribute('title')).toBe('engine-host is not running');
+    expect(document.querySelector('.transcript')!.getAttribute('data-hydration')).toBe('failed');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
     expect(screen.queryByRole('alert')).toBeNull();
     expect(document.querySelectorAll('[data-kind="user"]')).toHaveLength(2);
+  });
+
+  // The UX wave, U9 (O-39, A3): a pane with nothing to draw says "Loading…" once its history read has been out 300 ms, and
+  // nothing before; rows already drawn (a staged restart) show no word.
+  it('says “Loading…” once a read with nothing to draw has been out 300 ms, and not before', async () => {
+    let answer: (events: SessionEvent[]) => void = () => {};
+    const source: TranscriptSource = { key: `transcript-test-${++keys}`, subscribe: () => () => {}, snapshot: () => new Promise((resolve) => (answer = resolve)) };
+    render(<Transcript source={source} variant="session" />);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 200)));
+    expect(screen.queryByText('Loading…'), 'nothing in the first 300 ms').toBeNull();
+    const root = document.querySelector('.transcript')!;
+    expect(root.getAttribute('data-hydration'), 'the read is out before the word shows').toBe('loading');
+    expect(await screen.findByText('Loading…', undefined, { timeout: 1_000 })).toBeTruthy();
+    await act(async () => answer(deniedThenAnswer()));
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!].phase).toBe('live'));
+    expect(screen.queryByText('Loading…')).toBeNull();
+    expect(root.getAttribute('data-hydration')).toBe('ready');
+  });
+
+  it('says nothing for a read that answers within 300 ms, nor while rows it already drew stay on screen through a restart', async () => {
+    const key = await mounted(deniedThenAnswer());
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(screen.queryByText('Loading…')).toBeNull();
+    act(() => useTranscriptStore.setState((s) => ({ entries: { ...s.entries, [key]: { ...s.entries[key]!, phase: 'hydrating' } } })));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
+    expect(screen.queryByText('Loading…'), 'the rows are the content').toBeNull();
   });
 
   it('docks C7’s card through renderRequest in a pending request’s slot', async () => {

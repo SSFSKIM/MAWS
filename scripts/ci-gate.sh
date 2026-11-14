@@ -4,7 +4,7 @@
 #   scripts/ci-gate.sh <worktree-or-sha> --gates all|static,unit,unit:darwin,probes,e2e:<group>,… [--runner linux|macos]
 #                      [--class1a linux|macos|pool] [--lane vm|vm-trial|hosted|no-hosted] [--default-beside <groups>] [--evidence]
 #                      [--hosted-route direct|mirror] [--live] [--affected] [--peer <ref>|none | --peer-exact <ref>]
-#                      [--label <name>] [--keep]
+#                      [--no-mini-copy <reason>] [--label <name>] [--keep]
 #
 #   scripts/ci-gate.sh <worktree> --gates static,unit,probes     class 1a alone
 #   scripts/ci-gate.sh <worktree> --gates all                    the whole set (on a macOS e2e lane, every Mac job)
@@ -26,7 +26,8 @@
 # job-started check: a dialog or the wrong app in front; its measured-job guard: a MEASURED_E2E group's desktop not
 # settled within 15 minutes), the last line before the run's status names the refused, the green and the red, and the
 # --gates that relaunches the refused and the red on the same tree (Decision Log 58(c), 59(1)), with --default-beside
-# naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66).
+# naming the run's other e2e groups when the relaunch takes e2e:default (Decision Log 66); the refused and red mini copies
+# follow on lines of their own, relaunched on the mini alone (ci-gate-refusals.sh).
 #
 #   <worktree-or-sha>  a worktree path (its HEAD is tested) or a commit
 #   --gates            required: a comma list over static, unit, unit:darwin, packaged (macOS), probes and e2e:<group>, or
@@ -95,6 +96,16 @@
 #                      line and an alert refusal's override carry --peer-exact with that sha
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
+#   --no-mini-copy     no mini copies for this run, for the reason given (letters, digits, spaces and . _ : / # , = + -),
+#                      which the plan's summary prints: for a head whose copies already stand on an earlier head of the
+#                      same change, as a re-merge of master's. Without it, each e2e group the run asks for (for `all`, the
+#                      tested commit's CLASS1_E2E) whose specs reach a path under e2e/ that the change edits (a spec or
+#                      e2e/support; the spec-import graph from the merge base with origin/master, fetched first) gets a
+#                      `MiniCopy: <group> <paths>` trailer, and where the run puts that group off the mini, on a hosted
+#                      Mac or EC2, the plan runs it once more on the mini, in the guest or on its home host, as a
+#                      `(mini copy)` job (gate-plan.mjs): scenes went green on the hosted Macs and red on the mini. A
+#                      graph that cannot be read (no merge base, no TypeScript) gives no copy, and an E2E-Coverage note
+#                      that says so
 #   --label            the ref's name before the short sha, sanitized as before. Without it: auto-<branch-or-gate>-
 #                      <gates-and-lane>-<configuration-hash>, bounded and never a reserved final label. Different
 #                      configurations have distinct refs; an identical call may supersede its predecessor
@@ -104,7 +115,8 @@
 # triggers a run of its own and the run found is this one's) and, when given, the `Gates:` (none for `all`, the plan's
 # default set), `Runner:`, `Class1a:`, `Lane:`, `DefaultBeside:`, `Evidence:` and `Live:` trailers; under --affected its subject is
 # `ci-gate: <short> affected` and it carries `Selection: affected`, `Affected-Count:` and an `Affected:` trailer per path.
-# The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer, --peer-exact).
+# The peer's `Peer:`, `Peer-Wire:` and `Wire:` trailers follow when there is one (--peer, --peer-exact), then the run's
+# `MiniCopy:` trailers, one per group, or `MiniCopy: none (<reason>)` under --no-mini-copy.
 # Direct e2e runs without --lane hosted or no-hosted add `Mac-Backlog:` when the caller can read the account queues and
 # self-hosted runners and mini lane publication (cached for 60 s).
 # The plan may overflow eligible groups to EC2 or the mini; an absent or older-than-five-minute sample preserves normal placement.
@@ -181,6 +193,7 @@ live=''
 affected=''
 peer=''
 peer_exact=''
+no_mini_copy=''
 label=''
 keep=false
 while (($# > 0)); do
@@ -196,6 +209,7 @@ while (($# > 0)); do
     --affected) affected=yes; shift ;;
     --peer) peer=${2:?--peer needs a ref or none}; shift 2 ;;
     --peer-exact) peer_exact=${2:?--peer-exact needs a commit}; shift 2 ;;
+    --no-mini-copy) no_mini_copy=${2:?--no-mini-copy needs a reason}; shift 2 ;;
     --label) label=${2:?--label needs a name}; shift 2 ;;
     --keep) keep=true; shift ;;
     -h | --help) usage ;;
@@ -210,6 +224,8 @@ case $hosted_route in '' | direct | mirror) ;; *) echo "ci-gate: --hosted-route 
 case $lane in '' | vm | vm-trial | hosted | no-hosted) ;; *) echo "ci-gate: --lane is vm, vm-trial, hosted or no-hosted, not $lane" >&2; exit 2 ;; esac
 # The names land unquoted in a printed relaunch command, so only characters that are inert there pass.
 case $default_beside in *[!A-Za-z0-9._:,\ -]*) echo "ci-gate: --default-beside takes group names of letters, digits, . _ : - separated by commas, not $default_beside" >&2; exit 2 ;; esac
+# The reason reaches a trailer and, quoted, a printed relaunch command, so only characters inert in both pass.
+case $no_mini_copy in *[!A-Za-z0-9._:/#,=+\ -]*) echo "ci-gate: --no-mini-copy takes a reason of letters, digits, spaces and . _ : / # , = + -, not $no_mini_copy" >&2; exit 2 ;; esac
 # The whole set is asked for by name: left implicit, it was queued by calls that meant class 1a alone. A value of commas
 # and spaces names nothing either: the plan reads it as the whole set. A live run takes only its live groups (Decision
 # Log 75), so its hint names those.
@@ -227,11 +243,13 @@ gates_trailer=$gates
 
 # The repository the git commands run in: the worktree given, or this script's own checkout for a bare sha.
 if [[ -d $target ]]; then
-  git_dir=$target
+  git_dir=$(git -C "$target" rev-parse --show-toplevel) || exit 2
   sha=$(git -C "$git_dir" rev-parse --verify HEAD) || exit 2
   branch=$(git -C "$git_dir" symbolic-ref --quiet --short HEAD || true)
 else
-  git_dir=$(dirname "$0")
+  # The checkout's top, not scripts/: `git archive` run from a subfolder archives only that subfolder, which left the
+  # coverage graph and mini copies without package.json for every bare-sha call.
+  git_dir=$(git -C "$(dirname "$0")" rev-parse --show-toplevel) || exit 2
   sha=$(git -C "$git_dir" rev-parse --verify --quiet "$target^{commit}") || { echo "ci-gate: no commit $target" >&2; exit 2; }
   branch=''
 fi
@@ -299,6 +317,22 @@ if [[ -n $affected ]]; then
   affected_note="ci-gate: --affected: ${#affected_lines[@]} paths from the merge base ${base:0:8} with origin/master$(if ((${#affected_lines[@]} > AFFECTED_BOUND)); then echo ", above the bound of $AFFECTED_BOUND, so none is listed and the plan runs the whole suite"; fi)"
 fi
 
+# Mini copies: the run's e2e groups whose specs reach a changed path under e2e/ (ci-gate-e2e-coverage.mjs --mini-copy),
+# read before the alert check, the label and the pool hint, whose plans the copies change; what it found is said once the
+# transcript starts. Under --no-mini-copy, its reason instead.
+mini_copy_trailers=''
+mini_copy_said=''
+if [[ -n $no_mini_copy ]]; then
+  mini_copy_trailers="MiniCopy: none ($no_mini_copy)"
+  mini_copy_said="ci-gate: no mini copies: $no_mini_copy"
+elif [[ $gates == all || $gates == *e2e:* ]]; then
+  git -C "$git_dir" fetch --quiet origin master || echo 'ci-gate: warning: fetching origin/master failed; mini copies use the local origin/master' >&2
+  mini_copy_notes=$(mktemp)
+  mini_copy_trailers=$(node "$(dirname "$0")/ci-gate-e2e-coverage.mjs" --mini-copy --git-dir "$git_dir" --sha "$sha" --gates "$gates_trailer" 2>"$mini_copy_notes")
+  mini_copy_said=$(<"$mini_copy_notes")
+  rm -f "$mini_copy_notes"
+fi
+
 # One paragraph of trailers: the nonce makes every pushed sha unique, so pushing the same sha again still triggers a run.
 trailers="Nonce: $(date +%s)-$$"
 [[ -n $gates_trailer ]] && trailers+=$'\n'"Gates: $gates_trailer"
@@ -314,6 +348,7 @@ if [[ -n $affected ]]; then
   if ((${#affected_lines[@]} > 0 && ${#affected_lines[@]} <= AFFECTED_BOUND)); then for line in "${affected_lines[@]}"; do trailers+=$'\n'"Affected: $line"; done; fi
 fi
 [[ -n $peer_trailers ]] && trailers+=$'\n'"$peer_trailers"
+[[ -n $mini_copy_trailers ]] && trailers+=$'\n'"$mini_copy_trailers"
 # ci-kit's attempt-1 pre-launch hint: this plan's exact pool jobs, not the shape of a historical run. Advisory only:
 # an unreadable variable, tree or plan omits the hint and leaves the launcher its history fallback. Read the variables
 # now, and the package scripts and workflow env at the sha we push (never the caller's possibly dirty checkout).
@@ -325,6 +360,8 @@ gate_mac_ec2=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(
 gate_mini_overflow=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "MAC_MINI_OVERFLOW") | .value') || variables_ok=false
 gate_hosted_cap=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_CAP") | .value') || variables_ok=false
 gate_hosted_repos=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "HOSTED_MAC_REPOS") | .value') || variables_ok=false
+# The mini's scheduled holds, for the plan's advisory window line alone: a failed read only leaves the line out.
+gate_mini_lanes=$(gh variable list -R "$REPO" --json name,value --jq '.[] | select(.name == "MAC_MINI_LANES") | .value') || gate_mini_lanes=''
 # Sample only when the direct route could host e2e work (unit may add the peer group) and the caller named no hosted
 # lane: --lane hosted asks for GitHub's hosted Macs themselves (a trial or an admission), so nothing of it may move to
 # self-hosted, and no-hosted puts nothing there. The caller's token sees the account-wide queue and self-hosted state. Missing/failed
@@ -355,6 +392,7 @@ if [[ ${MAWS_GATE_IGNORE_ALERTS:-} == 1 ]]; then
 else
   # the peer's trailers, and an iteration run's Selection, which keeps the peer groups off the run
   alert_trailers=$peer_trailers
+  [[ -z $mini_copy_trailers ]] || alert_trailers+=$'\n'"$mini_copy_trailers"
   [[ -z $backlog_trailer ]] || alert_trailers+=$'\n'"$backlog_trailer"
   [[ -n $hosted_route ]] && alert_trailers+=$'\n'"Hosted-Route: $hosted_route"
   [[ -n $affected ]] && alert_trailers+=$'\n'"Selection: affected"
@@ -363,7 +401,8 @@ else
     0) ;;
     2)
       printf '%s\n' "$alert_check" >&2
-      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh ${args[*]} $relaunch_peer_flag $relaunch_peer" >&2
+      # Shell-quoted, so a reason's spaces or its `#` stay one argument when the line is pasted.
+      echo "ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts/ci-gate.sh $(printf '%q ' "${args[@]}")$relaunch_peer_flag $relaunch_peer" >&2
       exit 2 ;;
     *) alert_check+="${alert_check:+$'\n'}ci-gate: warning: the ci-kit alert check failed; going ahead (the runner's job-started check still refuses jobs under a dialog)" ;;
   esac
@@ -381,11 +420,13 @@ exec 3>&2
 PACE_NOTES_FD=3
 [[ -z $alert_check ]] || printf '%s\n' "$alert_check"
 [[ -z $peer_said ]] || printf '%s\n' "$peer_said"
+[[ -z $mini_copy_said ]] || printf '%s\n' "$mini_copy_said"
 [[ -z $affected_note ]] || printf '%s\n' "$affected_note"
 [[ -z $backlog_trailer ]] || printf 'ci-gate: %s\n' "$backlog_trailer"
 
+# The same plan says on stderr, into the transcript, when one of the mini's scheduled holds will keep this run's jobs waiting.
 if [[ $variables_ok == true ]] &&
-   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" MAC_MINI_OVERFLOW="$gate_mini_overflow" \
+   pool_demand=$(HEAD_MESSAGE="$trailers" GATE_RUNNER="$gate_runner" GATE_E2E_RUNNER="$gate_e2e_runner" HOSTED_MAC_ROUTE="$gate_hosted_route" HOSTED_MAC_CAP="$gate_hosted_cap" MAC_EC2="$gate_mac_ec2" MAC_MINI_OVERFLOW="$gate_mini_overflow" MAC_MINI_LANES="$gate_mini_lanes" \
      node "$(dirname "$0")/ci-gate-pool-demand.mjs" --git-dir "$git_dir" --sha "$sha"); then
   trailers+=$'\n'"Pool-Demand: $pool_demand"
 else
@@ -437,7 +478,7 @@ interrupted() {
 }
 trap interrupted INT TERM
 
-echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${lane:+ (Lane: $lane)}${hosted_route:+ (Hosted-Route: $hosted_route)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}"
+echo "ci-gate: $sha as $ref${gates:+ (Gates: $gates)}${runner:+ (Runner: $runner)}${class1a:+ (Class1a: $class1a)}${lane:+ (Lane: $lane)}${hosted_route:+ (Hosted-Route: $hosted_route)}${default_beside:+ (DefaultBeside: $default_beside)}${evidence:+ (Evidence: $evidence)}${live:+ (Live: $live)}${affected:+ (Selection: affected)}${no_mini_copy:+ (MiniCopy: none ($no_mini_copy))}"
 # The ref is this invocation's own and the commit fixed, so a forced re-push is idempotent: a transient rejection
 # (a remote index-pack race while another gate pushes, a "[remote rejected] (failed)") is retried twice; an
 # authentication failure is not (Decision Log 54).

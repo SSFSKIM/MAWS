@@ -3,7 +3,7 @@
 import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import type { Cell, SubagentStatus, ToolCategory } from './rows';
-import { MCP_TOOL } from './classify';
+import { isCuaJsTool, MCP_TOOL } from './classify';
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U2
@@ -33,7 +33,7 @@ const list = (names: string[]) => (names.length <= 1 ? (names[0] ?? '') : `${nam
 
 export interface DividerCopyInput {
   state: 'working' | 'completed' | 'stopped' | 'failed';
-  cause?: 'crash' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"
+  cause?: 'crash' | 'message' | null; // E11: a stopped turn its engine process ended reads in the engine's words, not "You stopped"; UX wave U4a: one a message sent now ended reads so
   origin: 'human' | 'engine' | 'peer';
   opener?: { class: Arrival['class'] }; // UX wave U2 (l2-transcript-04): what opened a turn the person did not start
   durationMs: number;
@@ -56,7 +56,7 @@ function verb(input: Pick<DividerCopyInput, 'state' | 'origin' | 'opener' | 'dur
   switch (state) {
     case 'working': return durationMs < SHORTEST_FIGURE_MS ? 'Working' : `Working for ${t}`;
     case 'completed': return origin === 'engine' ? `Continued for ${t}` : origin === 'peer' ? `Peer session worked for ${t}` : `Worked for ${t}`;
-    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : `You stopped after ${t}`;
+    case 'stopped': return cause === 'crash' ? `Stopped after ${t} (engine process exited)` : cause === 'message' ? `Ended for your message after ${t}` : `You stopped after ${t}`;
     case 'failed': return `Failed after ${t}`;
   }
 }
@@ -111,7 +111,8 @@ export type CellLabelInput =
   | { kind: 'edit'; path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number }
   | { kind: 'read'; paths: string[] }
   | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null }
-  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null };
+  | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null }
+  | { kind: 'moved'; name: string; durationMs: number }; // UX wave U4a (decision 33): a call the engine moved to the background so a message sent now could be read
 
 export function cellLabel(input: CellLabelInput): string {
   switch (input.kind) {
@@ -141,7 +142,10 @@ export function cellLabel(input: CellLabelInput): string {
       }
       break;
     }
+    case 'moved':
+      return `Moved \`${input.name}\` to the background after ${duration(input.durationMs)}`;
     case 'generic': {
+      if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
       const detail = input.detail ?? null;
@@ -378,8 +382,10 @@ export const SPILL = {
   retry: 'Retry',
 } as const;
 
-// A transcript whose history could not be loaded (the store's failed hydration phase).
-export const HYDRATION = { failed: (reason: string) => `Could not load this transcript · ${reason}`, retry: 'Retry' } as const;
+// A transcript whose history could not be loaded (the store's failed hydration phase): the UX wave, U9 (O-11b), one line,
+// its reason in the line's hover title, off the screen; and (O-39, A3) what a pane with nothing to draw says once its
+// history read has been out for 300 ms.
+export const HYDRATION = { failed: 'Couldn’t load this conversation', retry: 'Retry', loading: 'Loading…' } as const;
 // The long-transcript window: an older page that did not load (lane A's words, session/controls/lane-a.ts)
 export const OLDER = { failed: (reason: string) => `Older messages didn’t load: ${reason}`, retry: 'Retry' } as const;
 

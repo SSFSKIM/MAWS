@@ -538,28 +538,24 @@ class FollowerCore {
     return current;
   }
 
-  // The synthesised end of a transcript nobody is writing whose last turn on the chain never ended (C6's ask): the
-  // process is gone and was not seen to go, so `process.exited { reason: 'unknown' }` at the last record's time, where a
-  // synthetic `turn.ended` would invent a result. Null when the chain's last turn ended or none started.
-  unendedTurnExit(): SessionEvent | null {
-    for (let i = this.chain.length - 1; i >= 0; i--) {
-      const skeleton = this.skeletons.get(this.chain[i]);
-      if (skeleton?.endsTurn) return null;
-      if (!skeleton?.opensTurn) continue; // E7: a peer message's turn too
-      const at = (this.leaf === null ? null : this.skeletons.get(this.leaf)?.timestamp) ?? this.ctx.lastAt;
-      return {
-        ...eventBase(this.ctx, `session:${this.ctx.sessionId}:exited`),
-        at,
-        agentId: null,
-        kind: 'process.exited',
-        code: null,
-        signal: null,
-        reason: 'unknown',
-        lostAttentionCount: 0,
-        budget: null, // C12
-      };
-    }
-    return null;
+  // The synthesised end of a transcript nobody is writing (C6's ask; X-168): its process is gone and was not seen to go,
+  // so `process.exited { reason: 'unknown' }` at the last record's time, where a synthetic `turn.ended` would invent a
+  // result. It ends the agents the transcript left running, and an unended last turn by the superseding start's rule,
+  // whether or not the last turn ended (X-168's terminal ends after its turn). Null when no turn started on the chain.
+  exitAtLeaf(): SessionEvent | null {
+    if (!this.chain.some((uuid) => this.skeletons.get(uuid)?.opensTurn)) return null; // E7: a peer message's turn too
+    const at = (this.leaf === null ? null : this.skeletons.get(this.leaf)?.timestamp) ?? this.ctx.lastAt;
+    return {
+      ...eventBase(this.ctx, `session:${this.ctx.sessionId}:exited`),
+      at,
+      agentId: null,
+      kind: 'process.exited',
+      code: null,
+      signal: null,
+      reason: 'unknown',
+      lostAttentionCount: 0,
+      budget: null, // C12
+    };
   }
 
   // The rewind continuation walk: from `parent` up through the skeletons to the announced leaf without crossing a
@@ -621,6 +617,8 @@ export class ChainFollower {
   private readonly deliveries = new Map<string, number>();
   private startedDelivered = false; // `session.started` goes out at most once per follow
   private backfillEnded = false; // the first complete read of this follow has happened
+  private exitArmed = true; // X-168: no exit was supplied since the last record delivered or the last live process seen
+  private exitOwed = false; // X-168: a holder's going was told and its decision not yet made (the file could not be read)
 
   constructor(
     private readonly reader: FileReader,
@@ -657,6 +655,8 @@ export class ChainFollower {
         if ((await this.sync(false)) === 'complete') {
           this.endBackfill(); // a start whose every read was interrupted ends its backfill here
           this.report('following');
+          if (this.exitOwed) this.supplyExit(); // a decision a failed final drain left owed (`refold`)
+          else this.noteHolders();
         }
       } catch (error) {
         this.report('error', messageOf(error));
@@ -664,17 +664,28 @@ export class ChainFollower {
     });
   }
 
-  // W7: the contest ended (the foreign holder exited). A follower that held a branch back reads the file again as it
-  // stands and reconciles, as a rewrite does: the chain becomes the one the transcript ends on (the branch a resume
-  // continues from, pass3/w7-collision), the records it leaves are one retraction, and a notice says why. A follower
-  // that held nothing back has nothing to re-fold.
+  // The session's foreign holder exited (the registry's holder for it went to none). W7: a follower that held a branch
+  // back reads the file again as it stands and reconciles, as a rewrite does: the chain becomes the one the transcript
+  // ends on (the branch a resume continues from, pass3/w7-collision), the records it leaves are one retraction, and a
+  // notice says why; one that held nothing back has nothing to re-fold. X-168: then, in this follower's own order, the
+  // file is read to its end and the registry asked again: with no live process left, the gone process's exit is
+  // supplied (`supplyExit`). A read still pending, or a holder back meanwhile, is decided on as it stands then, never on
+  // the callback's word. A drain that cannot read the file (absent, interrupted, failed) leaves the decision owed to the
+  // next read that completes, since the registry tells a holder's going once.
   refold(): Promise<void> {
     return this.enqueue(async () => {
-      if (this.stopped || !this.core.held) return;
+      if (this.stopped) return;
+      this.exitOwed = this.agent === null;
       try {
-        const stat = await this.reader.stat();
-        if (this.stopped || stat === null) return;
-        if (await this.reload(stat, 'refold')) this.report('following');
+        if (this.core.held) {
+          const stat = await this.reader.stat();
+          if (this.stopped) return;
+          if (stat !== null && (await this.reload(stat, 'refold'))) this.report('following');
+        }
+        if ((await this.sync(false)) !== 'complete') return;
+        this.endBackfill();
+        this.report('following');
+        this.supplyExit();
       } catch (error) {
         this.report('error', messageOf(error));
       }
@@ -692,20 +703,39 @@ export class ChainFollower {
     this.report('stopped', message);
   }
 
-  // After the backfill's last record, once per follow: a session's own transcript that no live process holds and whose
-  // last turn never ended (SDK entrypoints write no `turn_duration`) gets the synthesised exit. A holder that appears
-  // later changes nothing here; the live producer (C3) owns the session's ending from then on. An agent's transcript
-  // carries none: the process is its parent session's.
+  // After the backfill's last record, once per follow: a session's own transcript that no live process holds gets the
+  // synthesised exit (`supplyExit`), whether or not its last turn ended (SDK entrypoints write no `turn_duration`, and a
+  // terminal's background agents outlive the turn that started them). An agent's transcript carries none: the process
+  // is its parent session's.
   private endBackfill(): void {
     if (this.backfillEnded || this.stopped) return;
     this.backfillEnded = true;
-    if (this.agent !== null || (this.options.holders?.() ?? 0) > 0) return;
-    const exit = this.core.unendedTurnExit();
+    this.supplyExit();
+  }
+
+  // X-168: the exit a gone process leaves, which no transcript holds, made at most once for each stretch of the
+  // transcript since the last one: a record delivered after it (`deliver`), or a live process seen since (`noteHolders`),
+  // arms it again, so a session resumed in a terminal, working and ending again, ends again, while a holder count that
+  // changes twice with nothing written between makes one. "Live" is the registry's count of every live process of the
+  // session, MAWS's own included: a session MAWS runs has its exit on the wire, and a holder's going leaves it to that.
+  private supplyExit(): void {
+    if (this.stopped || this.agent !== null || !this.backfillEnded) return;
+    this.exitOwed = false;
+    if (this.noteHolders() || !this.exitArmed) return;
+    const exit = this.core.exitAtLeaf();
     if (exit === null) return;
     this.deliver([{ source: null, group: 0, event: exit }]);
-    // UX wave U3 (the U3a document, M3): the mapping reads what is written after as past that turn's end, so a fire's
-    // meta row written later opens the engine's turn rather than continuing the one the exit closed
+    // UX wave U3 (the U3a document, M3): the mapping reads what is written after as past the gone process's end, so a
+    // fire's meta row written later opens the engine's turn rather than continuing the one the exit closed
     endedByExit(this.core.ctx);
+    this.exitArmed = false;
+  }
+
+  // Whether a live process holds the session now; one that does arms the next exit (`supplyExit`).
+  private noteHolders(): boolean {
+    const live = (this.options.holders?.() ?? 0) > 0;
+    if (live) this.exitArmed = true;
+    return live;
   }
 
   snapshot(): FollowerState {
@@ -865,6 +895,7 @@ export class ChainFollower {
         events.push(item.event);
         continue;
       }
+      if (item.source !== null) this.exitArmed = true; // a record after the last exit (X-168)
       if (item.source === null) {
         // A synthesised boundary or notice: its base id counts as its own occurrence key.
         const g: number = (this.deliveries.get(item.event.id) ?? 0) + 1;

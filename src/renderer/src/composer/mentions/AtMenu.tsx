@@ -50,10 +50,12 @@ const rootsFor = (cwd: string, additional: readonly string[], query: string) => 
 // Files for the query: the session's directory, and in path mode each additional directory (absolute paths); `null`
 // while the search has not answered this query yet.
 // P5 O7 M4: the search is made from the composer's session (another machine's checkout is read by its session).
+// UX wave U8c-2 (M4 decision 8): the items are kept with the folder they were listed for, and shown only while that is
+// the folder asked about, so a list of the folder the agent left is never offered for the one it is in now.
 function useFiles(appSessionId: AppSessionId, cwd: string, additional: readonly string[], query: string): AtItem[] | null {
   const machine = machineOf(appSessionId);
   const settled = useDebounced(query, 80);
-  const [files, setFiles] = useState<{ query: string | null; items: AtItem[] }>({ query: null, items: [] });
+  const [files, setFiles] = useState<{ query: string | null; cwd: string; items: AtItem[] }>({ query: null, cwd: '', items: [] });
   useEffect(() => {
     let live = true;
     const pathMode = PATH_MODE.test(settled);
@@ -72,14 +74,14 @@ function useFiles(appSessionId: AppSessionId, cwd: string, additional: readonly 
     ).then((lists) => {
       if (!live) return;
       const all = lists.flat();
-      setFiles({ query: settled, items: [...all.filter((f) => f.group === 'files' && !f.directory), ...all.filter((f) => f.group === 'files' && f.directory)] });
+      setFiles({ query: settled, cwd, items: [...all.filter((f) => f.group === 'files' && !f.directory), ...all.filter((f) => f.group === 'files' && f.directory)] });
     });
     return () => {
       live = false;
     };
   }, [machine, appSessionId, cwd, additional, settled]);
   if (rootsFor(cwd, additional, query).length === 0) return []; // nowhere to search: known empty at once
-  return files.query === query ? files.items : null;
+  return files.query === query && files.cwd === cwd ? files.items : null;
 }
 
 const GROUPS: { group: AtItem['group']; label: string }[] = [

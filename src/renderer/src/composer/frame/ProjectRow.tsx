@@ -17,10 +17,12 @@
 // checkout there keeps the local project's words, as before): its own projects, most recently active first where this app knows their sessions, "New
 // project" there (RemoteSetupSheet.tsx's folder sheet: any folder, git or not, registered as a project there) and "Don't
 // work in a project" (its home); one it can't offer is greyed with why, in the item. No branch or Worktree box there:
-// they are the local project's. This Mac chosen again, the local row is as it was.
+// they are the local project's. This Mac chosen again, the local row is as it was. UX wave U4a M6 (l3-input-07):
+// in both menus a name two listed projects share shows the part of the path that tells them apart, in the folder's place,
+// and every row's title is its whole path.
 import { Command } from 'cmdk';
 import { Popover } from 'radix-ui';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
@@ -29,8 +31,9 @@ import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { openDialog } from '../../sessions/dialogs';
 import { useRemoteSpawn, useSpawnTarget, type SpawnTarget } from '../../sessions/remote-spawn';
-import { knownCheckouts, readPlaces, SETUP_WORDS, suggestionsFor, tabProject, type Places } from '../../sessions/remote-setup';
+import { knownCheckouts, suggestionsFor, tabProject, useRemotePlaces } from '../../sessions/remote-setup';
 import { projectsByRecency } from '../../sidebar/derive';
+import { projectSuffixes } from '../../sidebar/project-labels';
 import { selectProjectOrder, useSessions } from '../../stores/sessions';
 import type { HookResult } from '../setup-intent';
 import type { ProjectRowBinding } from './bindings';
@@ -48,6 +51,41 @@ export const PLACE_WORDS = {
 } as const;
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
+
+// UX wave U4a M6 (l3-input-07; decision 24): what each row draws dimmed beside the name. For a name another listed
+// project shares, the part of its path that tells it apart: the sidebar's part of the parent path (`projectSuffixes`)
+// when those parts are distinct across every project of that name; where any two of them tie (two folders under one
+// parent), every project of that name takes instead the shortest tail of its whole path that no other of the name
+// shares at that depth. Otherwise the folder's name where it differs from the project's. Every row's title is its
+// whole path.
+function rowDetails(projects: readonly ProjectRecord[]): Map<ProjectRecord['id'], string | null> {
+  const suffixes = projectSuffixes(projects);
+  const parts = (p: ProjectRecord) => p.directory.split('/').filter(Boolean);
+  const tail = (p: ProjectRecord, depth: number) => parts(p).slice(-depth).join('/') || '/';
+  return new Map(projects.map((p) => {
+    const suffix = suffixes.get(p.id) ?? null;
+    if (suffix === null) {
+      const folder = basename(p.directory);
+      return [p.id, folder !== p.name ? folder : null];
+    }
+    const namesakes = projects.filter((other) => other.name === p.name);
+    const parentParts = new Set(namesakes.map((other) => suffixes.get(other.id)));
+    if (parentParts.size === namesakes.length) return [p.id, suffix];
+    const others = namesakes.filter((other) => other.id !== p.id);
+    let depth = 1;
+    while (depth < parts(p).length && others.some((other) => tail(other, depth) === tail(p, depth))) depth++;
+    return [p.id, tail(p, depth)];
+  }));
+}
+
+function ProjectName({ project, detail }: { project: ProjectRecord; detail: string | null }) {
+  return (
+    <>
+      <span className="min-w-0 truncate">{project.name}</span>
+      {detail !== null && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{detail}</span>}
+    </>
+  );
+}
 
 // Every project the index lists, most recently active first: the sidebar's level-one order (`projectsByRecency`).
 export function recentProjects({ records, digests, projects }: { records: ReadonlyMap<AppSessionId, SessionRecord>; digests: ReadonlyMap<AppSessionId, SessionDigest>; projects: readonly ProjectRecord[]; rows?: unknown }): ProjectRecord[] {
@@ -76,28 +114,24 @@ function ActionItem({ value, label, why, disabled, onSelect }: { value: string; 
 // tab's target there (sessions/remote-spawn.ts), "New project" its folder sheet.
 function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onDone }: { appSessionId: AppSessionId; target: SpawnTarget; projectId: ProjectId | null; projectKey: string | null; disabled: boolean; onDone(): void }) {
   const [query, setQuery] = useState('');
-  const [places, setPlaces] = useState<Places | null>(null); // null while read
   const { machine, name } = target;
-  useEffect(() => {
-    let live = true;
-    void readPlaces(machine, name).then((read) => live && setPlaces(read));
-    return () => {
-      live = false;
-    };
-  }, [machine, name]);
+  // the UX wave, U9 (O-39, A1): the projects known there at once, the machine's list as it answers, the folders apart
+  const places = useRemotePlaces(machine, name);
+  const folders = places.folders;
   const records = useSessions((s) => s.records);
   const digests = useSessions((s) => s.digests);
-  const ordered = useMemo(() => recentProjects({ records, digests, projects: places?.projects ?? [] }), [records, digests, places]);
+  const ordered = useMemo(() => recentProjects({ records, digests, projects: places.projects ?? [] }), [records, digests, places.projects]);
   const shown = ordered.filter((p) => matchesProject(p, query));
+  const details = useMemo(() => rowDetails(ordered), [ordered]);
   const choose = (place: Pick<SpawnTarget, 'checkout' | 'label'>) => {
     useRemoteSpawn.getState().choose(appSessionId, { machine, name, key: null, ...place });
     onDone();
   };
   const newProject = () => {
-    const first = places?.first;
+    const first = folders?.first;
     if (first == null) return;
     onDone();
-    const home = places?.home ?? null;
+    const home = folders?.home ?? null;
     openDialog({ kind: 'remoteSetup', request: { kind: 'folder', tab: appSessionId, machine, name, key: projectKey, home, first, suggestions: suggestionsFor(knownCheckouts(tabProject(projectId, useSessions.getState().unstarted.get(appSessionId)?.registry ?? null)), home) } });
   };
   return (
@@ -111,16 +145,14 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
       />
       <Command.List>
         <Command.Group className="max-h-40 overflow-y-auto py-1">
-          {places === null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{SETUP_WORDS.reading(name)}</p>}
-          {places?.error != null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
-          {places?.projects != null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
+          {places.reading !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.reading}</p>}
+          {places.error !== null && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">{places.error}</p>}
+          {places.projects !== null && shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
           {shown.map((project) => {
-            const folder = basename(project.directory);
             const chosen = project.directory === target.checkout;
             return (
-              <Command.Item key={project.id} value={`project:${project.id}`} disabled={disabled} onSelect={() => choose({ checkout: project.directory, label: project.name })} aria-current={chosen || undefined} className={ITEM}>
-                <span className="min-w-0 truncate">{project.name}</span>
-                {folder !== project.name && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{folder}</span>}
+              <Command.Item key={project.id} value={`project:${project.id}`} disabled={disabled} onSelect={() => choose({ checkout: project.directory, label: project.name })} title={formatCwd(project.directory)} aria-current={chosen || undefined} className={ITEM}>
+                <ProjectName project={project} detail={details.get(project.id) ?? null} />
                 <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
                   {chosen ? '✓' : ''}
                 </span>
@@ -130,9 +162,9 @@ function RemoteMenu({ appSessionId, target, projectId, projectKey, disabled, onD
         </Command.Group>
         <Command.Separator alwaysRender className="border-t border-border" />
         <Command.Group className="py-1">
-          <ActionItem value="new-project" label={NEW_PROJECT} why={places?.newProject ?? null} disabled={disabled || places?.first == null} onSelect={newProject} />
+          <ActionItem value="new-project" label={NEW_PROJECT} why={folders?.newProject ?? null} disabled={disabled || folders?.first == null} onSelect={newProject} />
           {target.checkout !== HOME_CHECKOUT && (
-            <ActionItem value="no-project" label={NO_PROJECT} why={places?.noProject ?? null} disabled={disabled || places === null} onSelect={() => choose({ checkout: HOME_CHECKOUT, label: NO_PROJECT_LABEL })} />
+            <ActionItem value="no-project" label={NO_PROJECT} why={folders?.noProject ?? null} disabled={disabled || folders === null} onSelect={() => choose({ checkout: HOME_CHECKOUT, label: NO_PROJECT_LABEL })} />
           )}
         </Command.Group>
       </Command.List>
@@ -149,11 +181,7 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
   const projects = useMemo(() => all.filter((p) => machineOf(p.id) === ipc.localMachine), [all]);
   const ordered = useMemo(() => recentProjects({ records, digests, projects, rows: [] }), [records, digests, projects]);
   const shown = ordered.filter((p) => matchesProject(p, query));
-  const collides = useMemo(() => {
-    const count = new Map<string, number>();
-    for (const p of ordered) count.set(p.name, (count.get(p.name) ?? 0) + 1);
-    return (p: ProjectRecord) => (count.get(p.name) ?? 0) > 1;
-  }, [ordered]);
+  const details = useMemo(() => rowDetails(ordered), [ordered]);
   const noProject = binding.projectId === null && binding.label !== null;
   return (
     <Command label="Projects" shouldFilter={false} loop>
@@ -170,7 +198,6 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
           {/* the footer's items are cmdk items too, so its own Empty never shows: the list says it */}
           {shown.length === 0 && <p className="m-0 px-2 py-1.5 text-ui-sm text-fg-muted">No projects found</p>}
           {shown.map((project) => {
-            const folder = basename(project.directory);
             const chosen = project.id === binding.projectId;
             return (
               <Command.Item
@@ -178,12 +205,11 @@ function ProjectMenu({ binding, disabled, onWrite }: { binding: ProjectRowBindin
                 value={`project:${project.id}`}
                 disabled={disabled}
                 onSelect={() => onWrite(() => binding.choose(project.id))}
-                title={collides(project) ? formatCwd(project.directory) : undefined}
+                title={formatCwd(project.directory)}
                 aria-current={chosen || undefined}
                 className={ITEM}
               >
-                <span className="min-w-0 truncate">{project.name}</span>
-                {folder !== project.name && <span className="min-w-0 shrink truncate text-ui-sm text-fg-muted">{folder}</span>}
+                <ProjectName project={project} detail={details.get(project.id) ?? null} />
                 <span aria-hidden className="ml-auto w-3 shrink-0 text-accent">
                   {chosen ? '✓' : ''}
                 </span>

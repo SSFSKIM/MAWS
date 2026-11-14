@@ -16,7 +16,8 @@ import type { PluginManifestView } from '@shared/ipc/schema/plugins';
 import { insertComposerText } from '../composer';
 import { useSessionCatalog } from '../stores/catalog';
 import { useSessions } from '../stores/sessions';
-import { LIBRARY as L, SKILLS_LIBRARY as S, WIDGET_TITLE } from './copy';
+import { useSettings } from '../stores/settings';
+import { BEFORE_START, LIBRARY as L, SKILLS_LIBRARY as S, WIDGET_TITLE } from './copy';
 import { operationLine, useOperation } from './operation';
 import { identitiesOf, installationRef } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
@@ -25,16 +26,63 @@ import { usePluginManifests } from './plugins/manifests';
 import { usePluginsRead } from './plugins/read';
 import { lineFailed, skillsSummary } from './plugins/reload';
 import { useEngineRead, WidgetReadPolicyContext } from './read';
-import { hasPluginSkills, skillGroups, skillsView } from './skills/skills';
+import { diskSkillGroups, hasPluginSkills, skillGroups, skillsView } from './skills/skills';
 import { SkillsLibrary, SkillsToolbar } from './skills/SkillsLibrary';
 import { WidgetFrame } from './WidgetFrame';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
+import { useCustomizationInventory } from '../customize/inventory';
+import { InventoryState } from '../customize/InventoryState';
+import { useCloseOnLeavingForRemote, useTabPlace } from './tab-place';
 
 const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
-export function SkillsWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
+// UX wave U11a (§D "Skills"): before the first message, the skills on disk for the tab's folder; a tab set to another
+// machine reads nothing of this Mac's. A started chat's library reads the engine, as before.
+export function SkillsWidget(props: { appSessionId: AppSessionId; args: string; close(): void }) {
+  const place = useTabPlace(props.appSessionId);
+  useCloseOnLeavingForRemote(place, props.close);
+  if (place.kind === 'remote') {
+    return (
+      <WidgetFrame appSessionId={props.appSessionId} title={WIDGET_TITLE.skills} command="skills" state="ready" error={null} close={props.close} size="library">
+        <p className="m-0 px-2 text-fg-muted">{BEFORE_START.remote(place.machine)}</p>
+      </WidgetFrame>
+    );
+  }
+  if (place.kind === 'local') return <SkillsOnDisk key={place.folder ?? ''} appSessionId={props.appSessionId} folder={place.folder} place={place.place} close={props.close} />;
+  return <SkillsEngine {...props} />;
+}
+
+// Customize's three groups under its headings, under one line that names the place; "Use in chat" inserts the form the
+// engine runs (`diskSkillGroups`), a plugin skill whose manifest name is unknown is listed without it; no Reload.
+function SkillsOnDisk({ appSessionId, folder, place, close }: { appSessionId: AppSessionId; folder: string | null; place: string; close(): void }) {
+  const inventory = useCustomizationInventory(folder);
+  // the launch's own source of which plugins a chat started here goes without (the branch panel's finding 1); not known
+  // until the settings are read (App connects them in an effect), and a plugin's skill waits for them (the task review)
+  const off = useSettings((s) => s.state?.settings.engine.launchProfile.plugins.off);
+  const pluginsOff = useMemo(() => (off === undefined ? null : new Set(off)), [off]);
+  const groups = useMemo(() => (inventory.data ? diskSkillGroups(inventory.data.skills, { invocable: true, pluginsOff }) : null), [inventory.data, pluginsOff]);
+  const view = useLibraryStore((s) => s.skills);
+  const plugin = groups !== null && hasPluginSkills(groups);
+  const shown = useMemo(() => (groups === null ? null : skillsView(groups, { search: view.search, sort: plugin ? view.sort : 'name' })), [groups, view, plugin]);
+  const [inDetail, setInDetail] = useState(false);
+  const use = (name: string) => {
+    close();
+    insertComposerText(appSessionId, `/${name} `);
+  };
+  return (
+    <WidgetFrame appSessionId={appSessionId} title={WIDGET_TITLE.skills} command="skills" state="ready" error={null} close={close} size="library" toolbar={inDetail ? null : <SkillsToolbar plugins={plugin} />}>
+      <p data-before-start className="m-0 px-2 pb-1 text-ui-sm text-fg-muted">
+        {BEFORE_START.skills(place)}
+      </p>
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
+      {groups !== null && shown !== null && <SkillsLibrary groups={groups} shown={shown} onUse={use} onDetail={setInDetail} />}
+    </WidgetFrame>
+  );
+}
+
+function SkillsEngine({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const active = useContext(WidgetReadPolicyContext).mode === 'active';
   const read = useEngineRead('session.getSkillsDialog', { appSessionId });
   const catalog = useSessionCatalog(appSessionId);

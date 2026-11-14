@@ -11,6 +11,7 @@ import type { HostState } from '@shared/ipc/schema';
 import { WIRE_MINOR } from '@shared/ipc/wire';
 import { wireFingerprint } from '@shared/ipc/wire-fingerprint';
 import { SocketPort } from '@shared/host/socket-port';
+import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { buildIdOf, SUPERVISOR_FILES } from '../../engine-host/supervisor-files';
 import { engineHostSettled } from '../../services/sessions/service-register';
 import { supervisorEnv, type DetachedTransportOptions } from './detached-transport';
@@ -669,6 +670,40 @@ describe('the detached transport: early exits and the crash ladder', () => {
     expect(errors.mock.calls.flat().join(' ')).toContain('unexpectedly');
   });
 
+  // UX wave U9 (M1): another machine's pane answer, the remote endpoint's `host.op` carrying it, that arrives after the
+  // host that raised the pane's request exited in the middle of that call (the call dies with it). Whether it comes while
+  // the supervisor restarts or once the successor serves, it is an ordinary op: held for and answered by the served
+  // host's ledger, never refused as the stale completion itself is. And it counts nothing: the exit's count is the one
+  // an exit with a call in flight takes today (one restart; board ticket 473, open, counts that exit as a crash), and the
+  // op adds no restart, spawn or exit of its own.
+  it('a pane answer’s op after its raiser exited mid-call goes to the served host’s ledger and adds nothing to the exit’s count', async () => {
+    const PANE = { appSessionId: 'app-1', requestId: 'req-1', pane: 'terminal', target: null, line: null };
+    const ANSWER = { appSessionId: 'app-1', requestId: 'req-1', result: { ok: false, error: 'closed' } };
+    const OP = (opId: string) => ({ opId, opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER, context: { launchId: 'launch-1', engineSessionId: 'engine-1' } });
+    const ops: unknown[] = [];
+    const LEDGER = { state: 'done' as const, result: { ok: true as const, value: { outcome: 'not_pending' } } }; // the successor's: it holds no such request
+    onSpawn = (candidate) => void startFake({ pid: candidate.pid!, register: (on) => on('host.op', async (input) => (ops.push(input), LEDGER)) });
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    await old.die(); // SIGKILL while its show_pane call waits on the answer
+    await until(() => state().state !== 'ready'); // its link's close heard: no request goes to it any more
+    const whileRestarting = supervisor.dispatch('engine-host', 'host.op', OP('op-pane-answer-while-restarting') as never);
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    const counted = { restarts: state().restarts, lastExit: supervisor.facts('engine-host').lastExit, spawned: spawn.mock.calls.length };
+    expect(counted.restarts).toBe(1); // the exit's own count (473), as any exit with a call in flight takes it
+    expect(counted.lastExit).not.toBeNull();
+    await expect(whileRestarting).resolves.toEqual({ ok: true, value: LEDGER });
+    await expect(supervisor.dispatch('engine-host', 'host.op', OP('op-pane-answer-once-served') as never)).resolves.toEqual({ ok: true, value: LEDGER });
+    expect(ops).toEqual([OP('op-pane-answer-while-restarting'), OP('op-pane-answer-once-served')]);
+    await expect(supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).resolves.toMatchObject({ ok: false, error: { code: 'host_unavailable' } }); // the bare completion, refused
+    await sleep(BACKOFF[2] * 2); // room for any restart the ops would have caused
+    expect({ restarts: state().restarts, lastExit: supervisor.facts('engine-host').lastExit, spawned: spawn.mock.calls.length }).toEqual(counted);
+    expect(state()).toMatchObject({ state: 'ready', restarts: 1 });
+  });
+
   it('backs off on repeated early exits and stays crashed after three within the window', async () => {
     const exitedAt: number[] = [];
     onSpawn = (candidate) => {
@@ -726,6 +761,25 @@ describe('the detached transport: a reused pid is another process', () => {
     const result = await supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER);
     expect(result).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
     expect(answered).toEqual([]);
+  });
+
+  // UX wave U9 (M1): the remote endpoint's op carrying a pane answer goes by the completion's route while its raiser
+  // lives (src/mawsd/daemon-handover.test.ts, the drain); its raiser gone, it is an ordinary op of the served host, whose
+  // ledger answers it, where the completion itself is refused
+  it('an op carrying a completion of a crashed process goes to the served host as any op, the completion itself refused', async () => {
+    const old = await startFake();
+    await supervisor.start();
+    const early = vi.spyOn(console, 'info').mockImplementation(() => {});
+    await until(() => old.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore());
+    await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
+    const ops: unknown[] = [];
+    spawnReusing(old.pid, (on) => on('host.op', async (input) => (ops.push(input), { state: 'done' as const, result: { ok: true as const, value: { outcome: 'not_pending' } } })));
+    await old.die();
+    await until(() => state().state === 'ready' && fakes.length === 2);
+    const OP = { opId: 'op-pane-answer-req-1', opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER, context: { launchId: 'launch-1', engineSessionId: 'engine-1' } };
+    expect(await supervisor.dispatch('engine-host', 'maws.pane.answer', ANSWER)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(await supervisor.dispatch('engine-host', 'host.op', OP as never)).toEqual({ ok: true, value: { state: 'done', result: { ok: true, value: { outcome: 'not_pending' } } } });
+    expect(ops).toEqual([OP]);
   });
 
   it('a handover marker left by a process that exited when idle never makes the crash of the process that reuses its pid planned', async () => {
@@ -1400,6 +1454,7 @@ describe('the detached transport: the handover', () => {
     const drain = { inFlight: 1, armed: false };
     const asked: unknown[] = [];
     const answered: unknown[] = [];
+    const ops: unknown[] = []; // UX wave U9: the remote endpoint's ops carrying a pane answer
     const stops: unknown[] = []; // fix wave 3d: a stop-all it was sent, answered, then its exit order (it exits)
     const status = { hold: false, held: false, release: () => {} };
     const fake: FakeSupervisor = await startFake({
@@ -1417,6 +1472,7 @@ describe('the detached transport: the handover', () => {
           return drain.inFlight > 0 ? { state: 'deferred' as const, inFlight: drain.inFlight } : { state: 'detaching' as const };
         });
         on('maws.pane.answer', async (input) => (answered.push(input), { outcome: 'delivered' as const }));
+        on('host.op', async (input) => (ops.push(input), { state: 'done' as const, result: { ok: true as const, value: { outcome: 'delivered' } } }));
         on('host.stopAll', async (input) => (stops.push(input), setImmediate(() => void fake.die()), { stopped: 1, forced: 0 }));
       },
     });
@@ -1425,7 +1481,7 @@ describe('the detached transport: the handover', () => {
     await until(() => fake.emit('maws.pane.show', PANE as never)).finally(() => early.mockRestore()); // announced once the link said ready
     await until(() => emit.mock.calls.some(([name]) => name === 'maws.pane.show'));
     expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'deferred', inFlight: 1 } });
-    return { fake, asked, answered, stops, status };
+    return { fake, asked, answered, ops, stops, status };
   }
 
   it('a completion held while its raiser reconnects mid-drain goes out on the link that meets it draining, once; held work stays for the successor', { timeout: 15_000 }, async () => {
@@ -1447,6 +1503,28 @@ describe('the detached transport: the handover', () => {
     expect(spawn).not.toHaveBeenCalled(); // the ping waits for the successor
     await old.die(); // its drain settled: it exits
     expect(await work).toMatchObject({ ok: true, value: { pid: candidates[0]!.pid } });
+  });
+
+  // UX wave U9 (M1): the remote endpoint's `host.op` carrying the pane answer, the case above's: kept for its raiser while
+  // that process may live, so it settles the old host's call before the pane's deadline, and before any successor serves
+  it('an op carrying a completion, queued while its raiser reconnects mid-drain, goes out on the link that meets it draining, before the pane’s deadline', { timeout: 15_000 }, async () => {
+    const { fake: old, asked, ops, status } = await paneDrainingFake();
+    const OP = { opId: 'op-pane-answer-reconnect', opCreated: '2026-11-13T00:00:00.000Z', member: 'member-b', device: 'device-b1', fingerprint: 'f'.repeat(64), name: 'maws.pane.answer', input: ANSWER, context: { launchId: 'launch-1', engineSessionId: 'engine-1' } };
+    status.hold = true; // the reconnect's welcome status waits
+    old.dropClient(); // the host lives on, draining
+    await until(() => status.held, 5_000); // past the exit's settle: reconnected, its status asked
+    const queued = Date.now();
+    const op = supervisor.dispatch('engine-host', 'host.op', OP as never); // its raiser reconnecting
+    await sleep(50);
+    expect(ops).toEqual([]);
+    status.release();
+    await until(() => asked.length >= 2); // met draining at the welcome: taken back into the handover
+    await vi.waitFor(() => expect(ops, 'the op went out on the link met draining').toHaveLength(1), { timeout: 2_000, interval: 5 });
+    await expect(op).resolves.toEqual({ ok: true, value: { state: 'done', result: { ok: true, value: { outcome: 'delivered' } } } });
+    expect(Date.now() - queued).toBeLessThan(PANE_ANSWER_MS);
+    expect(ops).toEqual([OP]);
+    expect([state().state, supervisor.handoverState('engine-host')?.state]).toEqual(['restarting', 'draining']);
+    expect(spawn).not.toHaveBeenCalled(); // no successor served it
   });
 
   it('a completion dispatched while a drain’s closed socket awaits the exit’s settle is held for its raiser, never written to that socket, and reaches it once reconnected', { timeout: 15_000 }, async () => {

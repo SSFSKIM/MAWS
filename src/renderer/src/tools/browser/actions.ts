@@ -2,13 +2,13 @@
 // URL here has passed `validateBrowserUrl` and is its parsed form, never typed text (Decision Log 34). A tab that closed
 // meanwhile answers `invalid_input` "unknown browser tab", which is no fault of the person's and is dropped silently;
 // every other refusal is warned.
-import { UNKNOWN_BROWSER_TAB, type BrowserTab } from '@shared/browser/tab';
+import { UNKNOWN_BROWSER_TAB, type BrowserTab, type BrowserViewport } from '@shared/browser/tab';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput } from '@shared/ipc/schema';
 import { ipc } from '../../ipc/client';
 import { writeSettings } from '../../settings-tab/parts';
 import { useLayout } from '../../stores/layout';
-import { tabOpened } from './store';
+import { raiseNotice, tabOpened } from './store';
 
 type Answer<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -54,6 +54,19 @@ export function selectTab(appSessionId: AppSessionId, tabId: string): void {
 
 export function zoom(tabId: string, action: CommandInput<'browser.tabs.zoom'>['action']): void {
   void ipc.invoke('browser.tabs.zoom', { tabId, action }).then(quietly('zooming'));
+}
+
+// U12a (Interfaces §D): the tab's device size, null for Responsive. The menu's mark follows the tab as main lists it, so
+// nothing is set here: a refused change leaves the old mark.
+export function setViewport(tabId: string, viewport: BrowserViewport | null): void {
+  void ipc.invoke('browser.tabs.setViewport', { tabId, viewport }).then(quietly('setting the device size'));
+}
+
+// U12a: Copy screenshot, written to the clipboard by main; the chrome's line says what came of it once main answers (a
+// refusal, warned, reads as nothing copied).
+export async function copyScreenshot(appSessionId: AppSessionId, tabId: string): Promise<void> {
+  const value = quietly('copying a screenshot')(await ipc.invoke('browser.view.copyScreenshot', { tabId }));
+  raiseNotice({ appSessionId, tabId, kind: value?.copied === true ? 'screenshotCopied' : 'screenshotFailed' });
 }
 
 export function find(request: CommandInput<'browser.tabs.find'>): void {

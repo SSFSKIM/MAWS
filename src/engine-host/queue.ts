@@ -50,6 +50,7 @@ export interface MessageQueueDeps {
   turnOpen: () => boolean; // the normaliser holds a main-lane turn open
   canWrite: () => boolean; // the process is ready
   cancel: (messageUuid: MessageUuid) => Promise<boolean>; // W1: `cancel_async_message`; true when the engine withdrew the message from its queue
+  sendNow: (messageUuid: MessageUuid) => Promise<string | undefined>; // UX wave U4a: `interrupt { send_now }`; the answer's `send_now`, undefined when it has none
   onChange: (queue: QueueState) => void;
   onPauseChange?: (paused: boolean) => void; // immediate pause, committed resume/recovery; never a save snapshot
   log?: (message: string) => void;
@@ -451,6 +452,20 @@ export class MessageQueue {
     await this.persist().catch((error: unknown) => this.log(`cancelled steer not saved: ${messageOf(error)}`)); // a pending steer is the engine's: a lost save loses nothing
     await this.releaseHead('hold');
     return { outcome: 'cancelled' };
+  }
+
+  // UX wave U4a (the U4a document, Interfaces A): a pending steer of this session's own sent now through the engine's
+  // send-now request, which moves a running call to the background rather than killing it. Refused while a hold, a Stop
+  // or a cancel withdraws it; `nothing_waiting` without asking when it is not a pending steer (started, dropped, or never
+  // one). It pauses nothing, holds nothing and removes nothing: the engine's `started` retires the steer, as for any. The
+  // engine's word is read as itself; an answer without one is an engine that took the request for a plain interrupt
+  // (decision 5): `stopped`. A failed request (a timeout) rejects and leaves everything as it was.
+  async sendNow(messageUuid: MessageUuid): Promise<{ outcome: 'delivering' | 'stopped' | 'nothing_waiting' }> {
+    if (this.withdrawing.has(messageUuid)) throw new QueueEntryError('This message is already being withdrawn');
+    if (!this.steers.some((s) => s.messageUuid === messageUuid)) return { outcome: 'nothing_waiting' };
+    if (!this.deps.canWrite()) throw new QueueEntryError('the session is not ready');
+    const word = await this.deps.sendNow(messageUuid);
+    return { outcome: word === undefined || word === 'stopped' ? 'stopped' : word === 'nothing_waiting' ? 'nothing_waiting' : 'delivering' };
   }
 
   // A claimed steer withdrawn from the engine (`cancel_async_message`): on `cancelled: true` a held entry, saved before

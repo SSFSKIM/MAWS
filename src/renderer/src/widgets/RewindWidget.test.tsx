@@ -12,7 +12,8 @@ import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder } from '../transcript/model/test-events';
-import { RewindWidget } from './RewindWidget';
+import { commentsMessage } from '@shared/anchor/message'; // UX wave U5a
+import { RewindWidget, rewindTargets } from './RewindWidget';
 
 // P5 O6 M2: the fake is main: asked with the bare id; the page holds the address
 const A_ID = 'app-a' as AppSessionId;
@@ -97,5 +98,52 @@ describe('the rewind picker', () => {
     mount();
     expect((screen.getByRole('button', { name: 'Rewind to before it' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('Wait for the turn to end, or stop it first')).toBeTruthy();
+  });
+});
+
+// UX wave U5a (M5; Decision Log 49): a message of several comments is the person's own message though its text is not
+// editable in place, so it is a target; a rewind onto it leaves the composer as it is, since the engine's `prefillText`
+// would be MAWS's framed comments, never what the person typed.
+describe('a message of several comments in the rewind picker', () => {
+  const SEVERAL = commentsMessage(
+    [
+      { anchor: { kind: 'browser-element', label: 'Save button', locator: 'form > button.save', pageUrl: 'https://example.com/signup' }, text: 'Make this primary.', screenshot: false },
+      { anchor: { kind: 'browser-element', label: 'Page title', locator: 'main > h1', pageUrl: 'https://example.com/signup' }, text: 'Shorter.', screenshot: false },
+    ],
+    'main',
+  );
+  beforeEach(async () => {
+    useTranscriptStore.getState().drop(A);
+    const b = builder();
+    b.turn('u-1', 'first prompt');
+    b.end(['u-1']);
+    b.turn('u-2', SEVERAL);
+    b.end(['u-2']);
+    fake = fakeClient({ 'session.events': () => ({ events: b.events, lastSeq: b.events.length, complete: true }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    await act(() => useTranscriptStore.getState().attach(A, ipcSource(A)));
+  });
+
+  it('is a target, listed by its first comment’s first line', () => {
+    expect(rewindTargets(useTranscriptStore.getState().rows(A)).map((row) => [row.messageUuid, row.editable])).toEqual([['u-2', false], ['u-1', true]]);
+    mount();
+    expect(messages().map((m) => m.querySelector('.truncate')?.textContent)).toEqual(['Make this primary.', 'first prompt']);
+  });
+
+  it('a conversation rewind onto it leaves the composer as it is; onto an editable prompt the composer holds the prefillText', async () => {
+    const close = mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
+    await waitFor(() => expect(fake.invoked('session.rewind')).toEqual([{ appSessionId: A_ID, targetMessageUuid: 'u-2', lastSeenMessageUuid: 'u-2', files: false }]));
+    await act(() => fake.reply('session.rewind', rewound(SEVERAL)));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(useComposerStore.getState().prefills.size).toBe(0);
+    cleanup();
+    const again = mount();
+    fireEvent.click(messages()[1]);
+    fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
+    await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
+    await act(() => fake.reply('session.rewind', rewound('first prompt')));
+    await waitFor(() => expect(again).toHaveBeenCalledTimes(1));
+    expect(useComposerStore.getState().prefills.get(A)).toEqual({ text: 'first prompt' });
   });
 });

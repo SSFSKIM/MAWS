@@ -41,6 +41,10 @@ const BrowserTab: Slots['browserTab'] = () => <Placeholder className="h-full">Br
 // P3-G (§D5): the Artifacts tab where no host registers P3-L's library (App.tsx does).
 const ArtifactsLibrary: Slots['artifactsLibrary'] = () => <Placeholder className="h-full">Artifacts unavailable</Placeholder>;
 
+// UX wave U8b (§C.1): the card column's two places draw nothing until U1b and U4b register their cards.
+const SessionCardWaiting: Slots['sessionCardWaiting'] = () => null;
+const SessionCardFoot: Slots['sessionCardFoot'] = () => null;
+
 export const FALLBACKS: Slots = {
   transcript: Transcript,
   composer: Composer,
@@ -53,4 +57,6 @@ export const FALLBACKS: Slots = {
   topBarEnd: TopBarEnd,
   browserTab: BrowserTab, // E4a
   artifactsLibrary: ArtifactsLibrary, // P3-G
+  sessionCardWaiting: SessionCardWaiting, // UX wave U8b
+  sessionCardFoot: SessionCardFoot, // UX wave U8b
 };

@@ -9,7 +9,7 @@ import { A, mainShowing, ref, resetPanelStores } from '../../test-support/panel'
 import { floatPanel } from '../../shell/floating';
 import { useLayout } from '../../stores/layout';
 import { useNotices } from '../../stores/notices';
-import { coverAcknowledged, coverPane, holdCover, resetCovering } from './covering';
+import { coverAcknowledged, coverPane, holdCover, resetCovering, sessionsOnScreen } from './covering';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 const RECT = { x: 0, y: 0, width: 300, height: 200 };
@@ -50,6 +50,7 @@ describe('the window’s cover', () => {
     useLayout.setState({ main: mainShowing(A) }); // a session in front, for the card to draw (P3-F wave S, F6)
     // UX2: floating requires a selected surface, not merely an uncollapsed empty panel.
     useLayout.getState().setPanelTabs(A, { tabs: [ref('browser:aaaaaaaa')], activeTabId: 'browser:aaaaaaaa' });
+    useLayout.getState().showSurfaceTab(A, 'browser:aaaaaaaa'); // UX wave U8b: a write of refs shows nothing
     useLayout.getState().setOverviewOpen(true);
     floatPanel();
     expect(useLayout.getState().regions.panel.floating).toBe(true);
@@ -62,6 +63,17 @@ describe('the window’s cover', () => {
     useLayout.getState().setPanel({ collapsed: true }); // a collapsed panel leaves main on screen
     expect(sent()).toEqual([true, false, true, false, true]);
     await settle();
+    pane.release();
+  });
+
+  // UX wave U7b (§N): behind a page no session's browser is on screen, so a line about the browser becomes a toast.
+  it('sessionsOnScreen names none while a page is open, and the pane’s session again at Back', () => {
+    const pane = coverPane(() => RECT, A);
+    expect(sessionsOnScreen()).toEqual([A]);
+    useLayout.getState().openDestination({ kind: 'projects' });
+    expect(sessionsOnScreen()).toEqual([]);
+    useLayout.getState().closeDestination();
+    expect(sessionsOnScreen()).toEqual([A]);
     pane.release();
   });
 

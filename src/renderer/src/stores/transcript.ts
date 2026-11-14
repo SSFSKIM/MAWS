@@ -115,6 +115,7 @@ export interface TranscriptStore {
   // source's, not one kept from an earlier mount); a jump to the text wherever it is in the history, the pages back to
   // it loaded first when it is older than what is loaded (`reach` says how that goes, and how it ended when it did not
   // land); and the reader giving up on one, or dismissing how it ended.
+  // UX wave U5a (Decision Log 52): read in a selector, it is current: attaching a key and its last detach both notify.
   attached(key: string): boolean;
   reachMessage(key: string, target: ReachTarget): Promise<ReachOutcome>;
   stopReach(key: string): void;
@@ -421,6 +422,7 @@ export function createTranscriptStore() {
         if (!attached || --attached.count > 0) return;
         release(attached);
         attachments.delete(key);
+        set({}); // UX wave U5a (Decision Log 52): `attached(key)` changed, so a selector that reads it is asked again
       },
 
       drop(key) {

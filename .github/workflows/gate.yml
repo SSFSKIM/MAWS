@@ -393,6 +393,7 @@ jobs:
       e2e_build_runner: ${{ steps.plan.outputs.e2e_build_runner }}
       e2e_hosted: ${{ steps.plan.outputs.e2e_hosted }}
       peer_wait: ${{ steps.plan.outputs.peer_wait }}
+      e2e_copy: ${{ steps.plan.outputs.e2e_copy }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -427,6 +428,7 @@ jobs:
           HOSTED_MAC_CAP: ${{ vars.HOSTED_MAC_CAP }}
           MAC_EC2: ${{ vars.MAC_EC2 }}
           MAC_MINI_OVERFLOW: ${{ vars.MAC_MINI_OVERFLOW }}
+          MAC_MINI_LANES: ${{ vars.MAC_MINI_LANES }}
           HEAD_MESSAGE: ${{ github.event.head_commit.message }}
           GATE_RUNNER: ${{ vars.GATE_RUNNER }}
           GATE_E2E_RUNNER: ${{ vars.GATE_E2E_RUNNER }}
@@ -853,13 +855,14 @@ jobs:
         if: always()
         run: .github/scripts/hosted-mac.sh --cleanup
 
-  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs. A direct job builds
+  # The e2e groups outside the guest and mirror matrices (e2e_host), including direct hosted Macs, and the mini copies
+  # (gate-plan.mjs) that take the exclusive host, each named e2e:<group> (mini copy). A direct job builds
   # out/ on its own Mac or restores it from the Actions cache (its entry's `cached`): no pool prerequisite or artifact
   # transfer. e2e-vm shares these steps for guest jobs.
   e2e:
     needs: plan
     if: needs.plan.outputs.e2e_host != '[]'
-    name: e2e:${{ matrix.group }}${{ matrix.overflow == 'mini' && ' (mini overflow)' || matrix.overflow == 'ec2' && ' (EC2 overflow)' || '' }}
+    name: e2e:${{ matrix.group }}${{ matrix.copy && ' (mini copy)' || matrix.overflow == 'mini' && ' (mini overflow)' || matrix.overflow == 'ec2' && ' (EC2 overflow)' || '' }}
     runs-on: ${{ fromJSON(matrix.runner) }}
     # 30, a measured group's 45, a group's own on E2E_MINUTES, and on the Mac the wait bound of its instance's start on top
     # (gate-plan.mjs).
@@ -1060,6 +1063,108 @@ jobs:
             test-results/**/engine-host-*.log
           retention-days: 7
           if-no-files-found: ignore
+
+  # The mini copies that take the guest (the plan's e2e_copy; gate-plan.mjs): an e2e group this run puts off the mini, whose
+  # specs reach a changed path under e2e/, run once more in ci-kit's macOS guest. Each guest job boots a VM of its own,
+  # 13-18 minutes before its first test, so one job runs several groups one after another, each in a slot of its own: the
+  # slot's step has the group's own bound and continue-on-error, so a red or a hung group leaves the next its run, and its
+  # reports go up under that group's `<slug>-mini`. The out/ variants the job's groups need are downloaded once; each
+  # group's script restores its own (scripts/e2e-build.sh under MAWS_E2E_BUILD_REQUIRE=1). Each group runs in a process
+  # group of its own, which the next slot and the verdict stop if a cut step left it running (gate-copy.sh). The verdict
+  # fails the job when any group is not green and writes one line per group. The slots are COPY_STEPS (gate-plan.mjs), one step pair each.
+  e2e-copy:
+    needs: [plan, e2e-build]
+    if: needs.plan.outputs.e2e_copy != '[]'
+    name: 'e2e: mini copy (${{ matrix.groups }})'
+    runs-on: ${{ fromJSON(matrix.runner) }}
+    # The uplink's margin once, then each group's bound in turn; within ci-kit's VM job bound (gate-plan.mjs).
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.plan.outputs.e2e_copy) }}
+    env: *e2e-env
+    steps:
+      - uses: actions/checkout@v7
+        id: checkout
+      - uses: ./.github/actions/setup
+        with:
+          e2e: 'true'
+          libreoffice: ${{ matrix.libreoffice }}
+          poppler: ${{ matrix.poppler }}
+      - if: contains(matrix.variants, 'plain')
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-build-${{ github.sha }}-plain
+          path: ${{ runner.temp }}/maws-e2e-build
+      - if: contains(matrix.variants, 'harness')
+        uses: actions/download-artifact@v8
+        with:
+          name: e2e-build-${{ github.sha }}-harness
+          path: ${{ runner.temp }}/maws-e2e-build
+      - id: copy1
+        if: matrix.copies[0]
+        continue-on-error: true
+        timeout-minutes: ${{ matrix.copies[0].minutes || 15 }}
+        env:
+          MAWS_E2E_GROUP: ${{ matrix.copies[0].group }}
+          SCRIPT: ${{ matrix.copies[0].script }}
+          LAUNCHD: ${{ matrix.launchd }}
+        run: .github/scripts/gate-copy.sh run 1
+      - if: always() && matrix.copies[0] && steps.checkout.outcome == 'success' && (steps.copy1.outcome == 'failure' || steps.copy1.outcome == 'cancelled' || needs.plan.outputs.evidence == 'true')
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.copies[0].slug }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+      - id: copy2
+        if: matrix.copies[1]
+        continue-on-error: true
+        timeout-minutes: ${{ matrix.copies[1].minutes || 15 }}
+        env:
+          MAWS_E2E_GROUP: ${{ matrix.copies[1].group }}
+          SCRIPT: ${{ matrix.copies[1].script }}
+          LAUNCHD: ${{ matrix.launchd }}
+        run: .github/scripts/gate-copy.sh run 2
+      - if: always() && matrix.copies[1] && steps.checkout.outcome == 'success' && (steps.copy2.outcome == 'failure' || steps.copy2.outcome == 'cancelled' || needs.plan.outputs.evidence == 'true')
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.copies[1].slug }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+      - id: copy3
+        if: matrix.copies[2]
+        continue-on-error: true
+        timeout-minutes: ${{ matrix.copies[2].minutes || 15 }}
+        env:
+          MAWS_E2E_GROUP: ${{ matrix.copies[2].group }}
+          SCRIPT: ${{ matrix.copies[2].script }}
+          LAUNCHD: ${{ matrix.launchd }}
+        run: .github/scripts/gate-copy.sh run 3
+      - if: always() && matrix.copies[2] && steps.checkout.outcome == 'success' && (steps.copy3.outcome == 'failure' || steps.copy3.outcome == 'cancelled' || needs.plan.outputs.evidence == 'true')
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-${{ matrix.copies[2].slug }}
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+      - name: the copies' verdict
+        if: always() && steps.checkout.outcome == 'success'
+        env:
+          COPY_GROUPS: ${{ matrix.groups }}
+          OUTCOMES: ${{ steps.copy1.outcome }} ${{ steps.copy2.outcome }} ${{ steps.copy3.outcome }}
+          LAUNCHD: ${{ matrix.launchd }}
+        run: .github/scripts/gate-copy.sh verdict
+      - if: always() && matrix.launchd && steps.checkout.outcome == 'success'
+        run: .github/scripts/launchd-sweep.sh
 
   # The guest-eligible e2e groups (the plan's e2e_vm: on ci-kit-mac-solo, -vm or -vm-trial), on whichever desktop takes
   # them, once e2e-build has made their out/: the e2e job's env and steps, which restore it under MAWS_E2E_BUILD_REQUIRE=1.

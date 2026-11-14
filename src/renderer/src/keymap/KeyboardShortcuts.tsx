@@ -3,6 +3,7 @@ import { Dialog } from 'radix-ui';
 import { useRef, useState } from 'react';
 import { create } from 'zustand';
 import { useDialogFocus } from '../app/dialog-focus';
+import { Backdrop } from '../sessions/scrim'; // board 523 (U11a): the one scrim
 import { keymapGroups } from '../settings-tab/keymap';
 import { useSettings } from '../stores/settings';
 
@@ -16,7 +17,9 @@ export function KeyboardShortcuts() {
   return (
     <Dialog.Root open={open} onOpenChange={(open) => useShortcuts.setState({ open })}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-bg/60" />
+        <Dialog.Overlay asChild>
+          <Backdrop className="fixed inset-0 z-50" />
+        </Dialog.Overlay>
         <Dialog.Content
           {...focus}
           onOpenAutoFocus={(event) => { focus.onOpenAutoFocus(); event.preventDefault(); search.current?.focus(); }}

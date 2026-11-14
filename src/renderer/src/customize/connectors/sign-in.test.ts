@@ -8,7 +8,8 @@ import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { signInViewOf } from './present';
-import { cancelSignIn, connectSignInEvents, forgetSignIn, heard, resetSignIns, signInKeyOf, startSignIn, useSignIns } from './sign-in';
+import { cancelSignIn, connectSignInEvents, forgetSignIn, heard, resetSignIns, signInKeyOf, startSignIn, startSignInDynamic, useSignIns } from './sign-in';
+import type { AppSessionId } from '@shared/graph/ids';
 
 const event = (opId: string, state: ConnectorSignInChanged['state'], name = 'linear'): ConnectorSignInChanged => ({ opId, name, state, reason: null, message: null, where: null });
 const USER = { name: 'linear', scope: 'user', cwd: '/a', path: '/cfg/.claude.json', fingerprint: 'print-user' } as const;
@@ -156,5 +157,45 @@ describe('a sign-in on another machine', () => {
     const bridge = { invoke: vi.fn(async () => ({ ok: true, value: { cancelled: true } })) } as unknown as MawsBridge;
     cancelSignIn('op-1', ON_B, bridge);
     expect(bridge.invoke).toHaveBeenCalledWith('connectors.signInCancel', { opId: 'op-1' }, { machine: OTHER_MACHINE });
+  });
+});
+
+// UX wave U11a M8 (§A, "The connector's identity"): a dynamic connector, a plugin's or one of MAWS's own list, is its
+// machine and its name, keyed as a user one is (no folder) yet apart from a file-scope server of the name. The dialog
+// signs it in by name alone; Customize's row of MAWS's own list also sends the revision it was drawn with, and keeps the
+// fingerprint, which decides as today which row shows a finished result.
+describe('a dynamic connector’s sign-in', () => {
+  beforeEach(() => resetSignIns());
+  const DYNAMIC = { name: 'fx-own', scope: 'dynamic', cwd: null } as const;
+  const SESSION = 'session-a' as AppSessionId;
+
+  it('is keyed by its machine and name, with no folder, apart from a user-scope server of the name', () => {
+    expect(signInKeyOf(DYNAMIC)).toBe(signInKeyOf({ ...DYNAMIC, cwd: '/b' }));
+    expect(signInKeyOf(DYNAMIC)).not.toBe(signInKeyOf({ ...DYNAMIC, scope: 'user' }));
+    expect(signInKeyOf({ ...DYNAMIC, machine: OTHER_MACHINE })).not.toBe(signInKeyOf(DYNAMIC));
+  });
+
+  it('from the dialog: the name alone, no fingerprint, bound to the dynamic connector’s record', async () => {
+    const bridge = bridgeAnswering('op-d');
+    heard(event('op-d', 'starting', 'plugin:fx-plugin:fx-oauth'), 10);
+    await startSignInDynamic({ name: 'plugin:fx-plugin:fx-oauth' }, null, SESSION, bridge);
+    expect(bridge.invoke).toHaveBeenCalledWith('connectors.signInDynamicServer', { name: 'plugin:fx-plugin:fx-oauth', appSessionId: SESSION });
+    expect(recordOf({ ...DYNAMIC, name: 'plugin:fx-plugin:fx-oauth' })).toEqual({ event: event('op-d', 'starting', 'plugin:fx-plugin:fx-oauth'), appSessionId: SESSION, at: 10, fingerprint: null });
+  });
+
+  it('from Customize’s row of MAWS’s own list: the revision the row was drawn with goes, the fingerprint stays in the window', async () => {
+    const bridge = bridgeAnswering('op-c');
+    await startSignInDynamic({ name: 'fx-own', revision: 'rev-1' }, 'print-own', SESSION, bridge);
+    expect(bridge.invoke).toHaveBeenCalledWith('connectors.signInDynamicServer', { name: 'fx-own', appSessionId: SESSION, entry: { revision: 'rev-1' } });
+    heard(event('op-c', 'done', 'fx-own'), 20);
+    expect(recordOf(DYNAMIC)).toMatchObject({ event: { state: 'done' }, fingerprint: 'print-own' });
+    expect(recordOf({ ...DYNAMIC, scope: 'user' })).toBeUndefined();
+  });
+
+  it('reads a refused invoke, an older daemon’s unknown command among them, as a sign-in that did not finish in the transport’s words', async () => {
+    const bridge = { invoke: vi.fn(async () => ({ ok: false, error: { code: 'unknown_command', message: 'unknown command connectors.signInDynamicServer' } })) } as unknown as MawsBridge;
+    await startSignInDynamic({ name: 'fx-own' }, null, SESSION, bridge);
+    expect(recordOf(DYNAMIC)).toMatchObject({ event: { state: 'failed', reason: 'engine' }, appSessionId: SESSION });
+    expect(recordOf(DYNAMIC)!.event.message).toBeTruthy();
   });
 });

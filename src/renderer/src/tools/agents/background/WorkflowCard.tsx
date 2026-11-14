@@ -2,10 +2,12 @@
 // description as its title (the progress frame's `summary` is not on X1 for a workflow), `workflow <name> · <elapsed> ·
 // <n> agents · <tokens>`, then one summary line (`<phase> · <done>/<total> agents`, `Queued` before any start, `Done`
 // after) where its per-phase tables were: those live in the run's widget, which the title and the chevron open.
-// `Stop workflow` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once.
+// `Stop workflow` asks no confirmation (Codex stops a workflow in one click) and reads `stopping…` at once. The UX wave's
+// U8b (M7): the title leads with the workflow's kind mark, since the Background tasks panel lists every kind together.
 import type { TaskId } from '@shared/graph/ids';
 import { Icon } from '../../../app/IconButton';
 import { BACKGROUND_COPY } from '../copy';
+import { KindMark } from '../marks';
 import type { TaskNode } from '../model/task-graph';
 import { runSummary, type RunSummary, type RunView } from '../model/workflow-run';
 import { RunBadge, runLine } from './run-parts';
@@ -37,7 +39,10 @@ export function WorkflowCard({ node, view, live, selected, stopError, onOpen, on
       className={`mx-3 mb-2 flex flex-col gap-1 rounded-sm border px-2.5 pt-2 pb-2 ${selected ? 'border-accent' : 'border-border'}`}
     >
       <div className="flex items-start justify-between gap-2">
-        <h4 className="min-w-0 truncate text-ui font-semibold">
+        <span className="mt-0.5">
+          <KindMark kind="workflow" />
+        </span>
+        <h4 className="min-w-0 flex-1 truncate text-ui font-semibold">
           <button type="button" onClick={() => onOpen(node.taskId)} className="max-w-full truncate rounded-sm text-left outline-accent hover:underline focus-visible:outline-2">
             {node.description}
           </button>

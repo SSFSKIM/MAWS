@@ -20,7 +20,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   usage: 'Usage',
   config: 'Config',
   plugins: 'Plugins',
-  mcp: 'MCP servers',
+  mcp: 'Connectors', // UX wave U11a (§C): the dialog's name, with `MCP.subtitle` beside it
   sandbox: 'Sandbox',
   hooks: 'Hooks',
   memory: 'Memory',
@@ -34,6 +34,7 @@ export const WIDGET_TITLE: Record<WidgetCommandName, string> = {
   export: 'Export',
   diff: 'Changes',
   rewind: 'Rewind', // W3 (B7)
+  fork: 'Fork', // UX wave U4a (decision 18)
   btw: 'Side question', // E3
   'reload-plugins': 'Reload plugins', // E11 §2.2: the engine's terminal-only command as MAWS's action
 };
@@ -149,8 +150,35 @@ export const CONFIG = {
 // Plugins.
 export const PLUGINS = { none: 'The engine loaded no plugins', problems: 'Problems', problemList: 'Plugin problems', loaded: 'Loaded in this session', loadedList: 'Loaded plugins' };
 
-// MCP.
-export const MCP = { none: 'No MCP servers', list: 'MCP servers', scope: (scope: string) => `scope ${scope}`, from: (source: string) => `from ${source}`, tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}` };
+// MCP. UX wave U11a (§C): the Connectors dialog's head, its muted subtitle and the one sentence of what the switch
+// reaches; `failed` and `off` are the status words Customize's copy does not hold (connector-status.ts).
+export const MCP = {
+  none: 'No connectors',
+  list: 'Connectors',
+  subtitle: 'MCP servers',
+  reach: (place: string) => `Off here is off for every session in ${place}.`,
+  reachTip: 'The engine records it in ~/.claude.json.',
+  failed: 'Failed',
+  off: 'Off',
+  scope: (scope: string) => `scope ${scope}`,
+  from: (source: string) => `from ${source}`,
+  tools: (n: number) => `${n} tool${n === 1 ? '' : 's'}`,
+};
+
+// UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
+// "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
+export const BEFORE_START = {
+  connectors: (place: string) => `Configured for ${place}. Connection state, and connectors from plugins, show once the chat starts.`,
+  skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
+  remote: (machine: string) => `Shown once the chat starts on ${machine}`,
+  userConfiguration: 'your user configuration',
+};
+
+// The "+" › Connectors submenu's line where a started session lists no rows (connector-menu.ts).
+export const CONNECTOR_MENU = {
+  noneReported: 'No connectors reported by this session',
+  notRunning: 'Live details are unavailable until this session is running',
+};
 
 // Sandbox (E11 §2.2): on or off first, with why it is off or what happens to a command it cannot run; the engine's
 // fields under Details.
@@ -285,6 +313,7 @@ export const MODEL = {
   effort: 'Effort',
   unstarted: 'Applies when the session starts',
   fast: 'Fast mode',
+  fastState: { on: 'On', off: 'Off' } as const, // UX wave U4a (decision 20): the fast-mode row's line with nothing else to say
   fastForOpus: 'Fast mode is for Opus',
   cooldown: 'on · cooling down',
   fastWarning: 'Fast mode disables the auto-mode server lane: reviews then run locally on Sonnet 5 and count against usage',
@@ -426,12 +455,11 @@ export const PLUGIN_MANAGEMENT = {
   reloadAgain: 'Reload again',
 };
 
-// MCP's Reconnect and the persistent enable switch.
+// MCP's Reconnect and the persistent enable switch (what it reaches is said once, in the head: `MCP.reach`).
 export const MCP_ACTIONS = {
   reconnect: 'Reconnect',
   reconnected: 'Reconnected',
   enabled: (name: string) => `Enabled: ${name}`,
-  persisted: 'Recorded by the engine for this project in ~/.claude.json',
   done: 'Done',
   notConnected: (error: string) => `On · not connected · ${error}`,
   unconfirmed: (words: string) => `Unconfirmed · ${words}`,
@@ -597,6 +625,9 @@ export const SKILLS_LIBRARY = {
   search: 'Search skills',
   sort: { name: 'Name', plugin: 'Plugin name' } as const,
   useInChat: 'Use in chat',
+  // U11a (the branch panel's finding 1): why Use in chat is greyed for a skill of a plugin the launch profile turns off
+  pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
+  pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',
   firstTitle: 'Add your first skills',
   firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",

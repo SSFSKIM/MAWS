@@ -18,6 +18,7 @@ import { resetHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { loadScenario, type Scenario } from '../../../../test/support/scenario';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
+import { resetPlaceNotes } from '../side/card/store'; // UX wave U5a
 
 export function scenarioFile(name: 'nine-sessions' | 'empty' | 'many-sessions'): Scenario {
   return loadScenario(join(TEST_FIXTURE_DIR, `shell/${name}.json`));
@@ -71,7 +72,7 @@ export function resetShellStores(): void {
   useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
-  useSessions.setState({ indexing: null, reconnecting: false, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen; UX wave U7 (ticket 407): no refused read
+  useSessions.setState({ indexing: null, reconnecting: false, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map(), acted: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen; UX wave U7 (ticket 407): no refused read; the UX wave, U9: nothing this window did
   resetHidden(); // UX wave U7, O-16: nothing hidden, and the key not read yet
   useSessions.getState().applyRegistry(EMPTY_REGISTRY, TEST_MACHINE); // the project registry's M11: signed out, no registry record
   // P5 O6 M4: the store's per-machine reconciliation (revisions, tombstones) is no state `setState` reaches, and a
@@ -85,9 +86,15 @@ export function resetShellStores(): void {
     panelActiveNoSession: null,
     panelParams: {}, // P4-B3
     panelSurfaces: { version: 2, stacks: {}, pinnedTools: [], contexts: {} },
+    panelGroups: { version: 1, lower: {} }, // UX wave U8b
+    panelWidths: { version: 1, wide: null, narrow: null },
+    cardsOpen: ['environment'],
     knownSession: () => true,
     dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,
+    destination: null, // UX wave U7b: no page, no Settings dialog
+    settings: null,
   });
+  resetPlaceNotes(); // UX wave U5a: the comment card's passes and place lines are window state a suite must not inherit
 }

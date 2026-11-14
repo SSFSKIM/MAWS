@@ -62,6 +62,9 @@ export interface LaunchInput {
   // E13 (the in-app browser spec of 2026-10-08, "Socket and lifecycle"): the session's cua socket, which the engine, its
   // subagents and the cua_repl shims they start inherit as CUA_BROWSER_BACKENDS; null when there is none
   browserBackend?: string | null;
+  // UX wave U12a (Interfaces §F): the session's title for the computer-use plugin's on-screen cursor, which the engine
+  // passes on as CUA_CURSOR_LABEL; null: none (the plugin falls back as before)
+  cursorLabel?: string | null;
   // P5 O12 M11 (Interfaces §H): the launched session's own spawner, with the file its proof is written to; null for every
   // session a remote member did not spawn, a fork and the trust bootstrap
   launchedBy?: LaunchedBySpec | null;
@@ -100,11 +103,24 @@ function spawnerOf(appSessionId: AppSessionId, launchedBy: LaunchedBy | undefine
 }
 
 // The launch's own `--settings` keys before the host's: the launch profile's (P4-A2: flag-level keys, none for the user
-// scope, so a user-scope launch is what it was before the profile existed) and the session's cua socket. The engine's
-// environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way to add a variable.
+// scope, so a user-scope launch is what it was before the profile existed), the session's cua socket and its cursor's
+// label (UX wave U12a). The engine's environment is an allowlist (engine-host/launch.ts): `--settings` env is the one way
+// to add a variable. The label is therefore kept where the launch's settings are: the session's state file and the
+// journal's `spawn` row, which records the engine's argument list.
 function extraSettingsOf(input: LaunchInput, settings: C10Settings): Record<string, unknown> | null {
-  const merged = { ...profileSettings(settings.engine.launchProfile), ...(input.browserBackend ? { env: { CUA_BROWSER_BACKENDS: input.browserBackend } } : {}) };
+  const env = { ...(input.browserBackend ? { CUA_BROWSER_BACKENDS: input.browserBackend } : {}), ...(input.cursorLabel ? { CUA_CURSOR_LABEL: input.cursorLabel } : {}) };
+  const merged = { ...profileSettings(settings.engine.launchProfile), ...(Object.keys(env).length > 0 ? { env } : {}) };
   return Object.keys(merged).length > 0 ? merged : null;
+}
+
+// UX wave U12a (Interfaces §F): a record's title as the cursor's label: none for a title whose source is `none`; control
+// characters removed, trimmed, and cut at 64 characters (by code point), which only keeps a long title short in the
+// engine's argument list, since the plugin cuts it to 24 with its own ellipsis; none when nothing is left.
+const CURSOR_LABEL_MAX = 64;
+function cursorLabelOf(title: SessionRecord['title']): string | null {
+  if (title.source === 'none') return null;
+  const text = title.text.replace(/\p{Cc}/gu, '').trim();
+  return text.length === 0 ? null : Array.from(text).slice(0, CURSOR_LABEL_MAX).join('');
 }
 
 // P2-C start (2026-10-09): the owner channel's launch decision applied to a spec (the P2-C document, Design §2, §3;
@@ -217,6 +233,7 @@ export function resumeLaunchSpec(record: SessionRecord, options: ResumeOptions, 
       inheritGrantsFrom: null,
       replay: ctx.replay,
       browserBackend: ctx.browserBackend ?? null,
+      cursorLabel: cursorLabelOf(record.title), // UX wave U12a
       launchedBy: spawnerOf(record.appId, record.launchedBy, ctx.proofFile),
     },
     settings,

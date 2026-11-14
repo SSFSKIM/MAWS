@@ -2,6 +2,9 @@
 // hash when asked and `files.write` by comparing hashes, as main's service does. Each answer is computed when its call
 // arrives (the disk as it is then) and may be held back by the test, so an answer can land after later events: the
 // interleavings the editing state machine's commit-time rules are about.
+// UX wave U6c: folders outside the session's (`outside`), and the files there its transcript names (`names`): as the
+// service, a read or an "Open externally" of such a file answers only when it asks with `named` and the transcript
+// names the path, a read then answering `named: true`; any other call on a path there answers the refusal.
 import type { CommandName } from '@shared/ipc/schema';
 import { mimeOf } from '@shared/files/mime';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
@@ -25,7 +28,16 @@ export function fakeHash(text: string): string {
   return (hex(a) + hex(b)).repeat(4);
 }
 
-export function installDisk(files: Record<string, DiskFile>) {
+export const OUTSIDE_REFUSAL = "path outside the session's directories";
+
+export interface DiskOptions {
+  outside?: Iterable<string>; // folders outside the session's; a test adds and removes them through the returned `outside`
+  names?: (appSessionId: string, path: string) => boolean; // whether the session's transcript names the path (bare ids)
+}
+
+export function installDisk(files: Record<string, DiskFile>, options: DiskOptions = {}) {
+  const outside = new Set(options.outside ?? []);
+  const isOutside = (path: string) => [...outside].some((folder) => path === folder || path.startsWith(`${folder}/`));
   const held = new Map<CommandName, ReturnType<typeof deferred<void>>[]>();
   const textOf = (path: string) => {
     const file = files[path];
@@ -33,10 +45,14 @@ export function installDisk(files: Record<string, DiskFile>) {
   };
 
   const answer = (name: CommandName, input: Record<string, unknown>) => {
+    if (name === 'files.watch' && isOutside(input.path as string)) return fail(OUTSIDE_REFUSAL); // a folder outside is never watched
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
     const path = input.path as string;
     const file = textOf(path);
+    const named = isOutside(path) && (name === 'files.read' || name === 'files.openExternal') && input.named === true && options.names?.(input.appSessionId as string, path) === true;
+    if (isOutside(path) && !named) return fail(OUTSIDE_REFUSAL);
+    if (name === 'files.openExternal') return file === undefined ? fail(`not found: ${path}`) : ok({ opened: true, message: null });
     if (name === 'files.read') {
       if (file === undefined) return fail(`not found: ${path}`);
       const offset = (input.offset as number | undefined) ?? 0;
@@ -47,6 +63,7 @@ export function installDisk(files: Record<string, DiskFile>) {
         encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: mimeOf(path),
         hash: input.hash === true ? fakeHash(file.text) : null,
         utf8: input.hash === true ? file.utf8 : null,
+        ...(named ? { named: true } : {}),
       });
     }
     if (name === 'files.write') {
@@ -69,6 +86,7 @@ export function installDisk(files: Record<string, DiskFile>) {
   return {
     ...main,
     files,
+    outside,
     // The next call of `name` is answered (as the disk is when it arrives) only once the returned gate is released.
     hold(name: CommandName) {
       const gate = deferred<void>();

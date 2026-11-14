@@ -18,7 +18,7 @@ import { RequestCard } from '../request-card';
 import { askItemFor, askOpened } from '../request-card/test-requests';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useAttention } from '../stores/attention';
-import { useHubAccess } from '../stores/hub-access';
+import { useHubAccess, type HubAccess } from '../stores/hub-access';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { fillStores, resetShellStores } from '../test-support/shell-stores';
@@ -126,7 +126,7 @@ describe('offline', () => {
     act(() => useHubAccess.setState({ access: 'unreachable' }));
     expect(screen.queryByRole('textbox', { name: 'Message the project' })).toBeNull();
     expect(stream().querySelector(`[data-channel-as-of="${T(30)}"]`)?.textContent).toBe(`As of ${formatDayTime(Date.parse(T(30)))}`);
-    expect(within(stream().querySelector<HTMLElement>('[data-channel-offline]')!).getByText('Hub unreachable')).toBeTruthy();
+    expect(within(stream().querySelector<HTMLElement>('[data-channel-offline]')!).getByText('Offline · retrying')).toBeTruthy();
     tell(change({ live: true }));
     expect(screen.getByRole('textbox', { name: 'Message the project' })).toBeTruthy();
   });
@@ -139,6 +139,64 @@ describe('offline', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Sign in to the hub again' }));
     expect(fake.invoked('org.signIn')).toEqual([undefined]);
     expect((await screen.findByRole('alert')).textContent).toBe('Couldn’t sign in · access');
+  });
+});
+
+// UX wave U11a M4 (S-09; Interfaces §F, "The footer"): while not live, after "As of <time>", the first that holds: signed
+// out; the hub sign-in ended (its button) from the channel's refusal or the org's hub status; the hub no longer admitting
+// the member, the same; "Offline · retrying" from the channel's reach or the hub status; else "Connecting…".
+describe('the footer’s words', () => {
+  type Given = { member?: string | null; access: HubAccess | null; reach?: 'connecting' | 'unreachable'; refused?: 'credentials' | 'removed' };
+  const SIGN_IN = 'Sign in to the hub again';
+  const footers: Array<[string, Given, string]> = [
+    ['signed out, whatever the channel says', { member: null, access: 'connected', reach: 'unreachable', refused: 'credentials' }, 'Signed out'],
+    ['refused for the sign-in while the hub status reads connected and the reach unreachable', { access: 'connected', reach: 'unreachable', refused: 'credentials' }, `The hub sign-in has ended.${SIGN_IN}`],
+    ['the hub status expired', { access: 'expired', reach: 'connecting' }, `The hub sign-in has ended.${SIGN_IN}`],
+    ['the ended sign-in before a member no longer admitted', { access: 'expired', reach: 'unreachable', refused: 'removed' }, `The hub sign-in has ended.${SIGN_IN}`],
+    ['refused for a member no longer admitted while the hub status reads connected and the reach unreachable', { access: 'connected', reach: 'unreachable', refused: 'removed' }, 'The hub no longer admits you.'],
+    ['the hub status denied', { access: 'denied', reach: 'connecting' }, 'The hub no longer admits you.'],
+    ['the channel unreachable while the hub status reads connected', { access: 'connected', reach: 'unreachable' }, 'Offline · retrying'],
+    ['the hub status unreachable while the channel is connecting', { access: 'unreachable', reach: 'connecting' }, 'Offline · retrying'],
+    ['the channel connecting', { access: 'connected', reach: 'connecting' }, 'Connecting…'],
+    ['the hub status connecting, with no reach told', { access: 'connecting' }, 'Connecting…'],
+  ];
+  const footer = () => stream().querySelector<HTMLElement>('[data-channel-offline]')!;
+  const asOf = `As of ${formatDayTime(Date.parse(T(30)))}·`;
+
+  it.each(footers)('reads, while not live: %s', async (_, given, words) => {
+    install();
+    useHubAccess.setState({ access: given.access, member: given.member === undefined ? ME.id : given.member });
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ live: false, ...(given.reach === undefined ? {} : { reach: given.reach }), ...(given.refused === undefined ? {} : { refused: given.refused }) })));
+    expect(footer().textContent).toBe(`${asOf}${words}`);
+  });
+
+  it('follows each change: connecting, then offline and retrying, then the refusal, and the composer back once live', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ live: false, reach: 'connecting' })));
+    expect(footer().textContent).toBe(`${asOf}Connecting…`);
+    tell(change({ live: false, reach: 'unreachable' }));
+    expect(footer().textContent).toBe(`${asOf}Offline · retrying`);
+    tell(change({ live: false, reach: 'unreachable', refused: 'credentials' }));
+    expect(footer().textContent).toBe(`${asOf}The hub sign-in has ended.${SIGN_IN}`);
+    tell(change({ live: false, reach: 'connecting' }));
+    expect(footer().textContent).toBe(`${asOf}Connecting…`);
+    tell(change({ live: true }));
+    expect(stream().querySelector('[data-channel-offline]')).toBeNull();
+    expect(screen.getByRole('textbox', { name: 'Message the project' })).toBeTruthy();
+  });
+
+  it('says this Mac has no copy of a channel open with nothing held and never caught up; one caught up with nothing says it is empty', async () => {
+    install();
+    render(<ChannelView project={SMNS} />);
+    await act(() => fake.reply('org.channel.open', opened({ asOf: null, live: false, reach: 'unreachable' })));
+    expect(within(stream()).getByText('This Mac has no copy of this channel yet.')).toBeTruthy();
+    expect(within(stream()).queryByText('Nothing in this channel yet.')).toBeNull();
+    expect(footer().textContent).toBe('Offline · retrying'); // no "As of" before it: never caught up
+    tell(change({ asOf: T(31), live: true }));
+    expect(within(stream()).getByText('Nothing in this channel yet.')).toBeTruthy();
+    expect(within(stream()).queryByText('This Mac has no copy of this channel yet.')).toBeNull();
   });
 });
 

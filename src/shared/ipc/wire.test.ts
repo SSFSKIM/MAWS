@@ -368,6 +368,28 @@ describe('the render host on the wire (P5 O5 M3)', () => {
   });
 });
 
+// UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A, §H): the dynamic
+// sign-in adds one command and one optional property, the configuration's revision on an endpoint the engine host
+// answers. Its progress rides the existing event, whose name lost only the configured-name rule, which the manifest
+// cannot render: its entry is unchanged, the bound of 128 included.
+describe('the dynamic sign-in on the wire (UX wave U11a M8)', () => {
+  const current = wireManifestOf(REGISTRY);
+  const REVISION = 'commands.customization.serverEndpoints.output.properties.servers.items.properties.revision';
+
+  it('adds one command and one optional property, and nothing else', () => {
+    const before = structuredClone(current) as WireManifest & { entries: Record<string, { output: { properties: { servers: { items: { properties: Record<string, unknown> } } } } }> };
+    delete before.entries['commands.connectors.signInDynamicServer'];
+    delete before.entries['commands.customization.serverEndpoints']!.output.properties.servers.items.properties.revision;
+    expect(classifyWireChange(before, current)).toEqual({ additive: ['commands.connectors.signInDynamicServer', REVISION], breaking: [] });
+    expect((current.entries['commands.connectors.signInDynamicServer'] as { owner: string }).owner).toBe('machine');
+  });
+
+  it('leaves the progress event’s name as it was: a string of at most 128 characters', () => {
+    const event = current.entries['events.connectors.signInChanged'] as { properties: { name: unknown } };
+    expect(event.properties.name).toEqual({ type: 'string', maxLength: 128 });
+  });
+});
+
 describe('classifyWireChange', () => {
   const manifest = (entries: Record<string, unknown>, capabilities: string[] = []): WireManifest => ({ major: 3, minor: 0, capabilities, entries });
   const render = (schema: z.ZodType) => z.toJSONSchema(schema, { unrepresentable: 'any' });

@@ -22,7 +22,9 @@
 // loaded, `./always-load`), `artifact_describe_type`, `artifact_read`, `artifact_publish` and the document's
 // `artifact_edit`: under tool search a deferred tool costs one ToolSearch request before a session's first edit. P4-R7z
 // (the P4 spec's Decision Log 92, the X9 amendment) takes out P4-R7's `message`: a MAWS session messages its human
-// through the to-human plugin's `mcp__to-human__message`.
+// through the to-human plugin's `mcp__to-human__message`. U12a (docs/doperpowers/plans/2026-11-12-ux-wave-U12a-browser-
+// computer-use-delivery.md, Interfaces §A; the X9 amendment) gives `show_pane` its reload clause, the result's `page` and
+// `note` with the note texts, and the refusal for a page MAWS could not open.
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
@@ -34,6 +36,7 @@ import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B 
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
 import { ALWAYS_LOAD } from './always-load'; // P4-A3
+import { BrowserOpenPageSchema } from '../browser/tab'; // U12a
 
 export { ARTIFACT_ID } from './artifact-id';
 export { ArtifactEditorSchema, ListedArtifactSchema, type ArtifactEditor, type ListedArtifact } from './listed-artifact'; // P4-B4
@@ -331,8 +334,22 @@ export const ShowPaneOpenedSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('main-tab'), tabId: z.string(), path: z.string(), line: z.number().int().nullable() }),
 ]);
 export type ShowPaneOpened = z.infer<typeof ShowPaneOpenedSchema>;
-export const ShowPaneResultSchema = z.strictObject({ status: z.literal('shown'), pane: PaneSchema, opened: ShowPaneOpenedSchema });
+// U12a (the UX wave's U12 execution document, Interfaces §A; a dated X9 line): a browser answer's two optional keys, in
+// the order the agent reads them: what main did with the page at the address, and the note the engine host writes for
+// a session launched with a browser backend (`SHOW_PANE_NOTES`).
+export const ShowPaneResultSchema = z.strictObject({
+  status: z.literal('shown'),
+  pane: PaneSchema,
+  opened: ShowPaneOpenedSchema,
+  page: BrowserOpenPageSchema.optional(), // the browser pane with a target
+  note: z.string().optional(), // the browser pane, in a session with a browser backend
+});
 export type ShowPaneResult = z.infer<typeof ShowPaneResultSchema>;
+// U12a: the note on a browser answer, exact: `browserKept` with `page: 'kept'`, `browser` otherwise.
+export const SHOW_PANE_NOTES = {
+  browser: "This page is in the session's in-app browser, which the user sees. To act on it, use cua_repl's js tool: cua.getBrowser() with no id is this browser.",
+  browserKept: "The user is using this tab, so it was shown without reloading. To act on it, use cua_repl's js tool: cua.getBrowser() with no id is this browser.",
+} as const;
 
 // P2-E1 (2026-10-09, a dated exception inside E2's result schemas; D10): `ownerAppSessionId` names the session whose
 // X12 record the result is about when that is a side thread's ancestor, not the calling session; absent for its own.
@@ -467,7 +484,7 @@ export const MAWS_TOOLS = {
   show_pane: {
     title: 'Show pane',
     description:
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser. at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     input: ShowPaneInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -606,6 +623,8 @@ export const TOOL_ERRORS = {
   // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`)
   navigationRefused: (target: string) => `show_pane: MAWS opens only http and https pages in its browser; refused "${target}"`,
   // E4a end
+  // U12a (ruling R9): main refused the open of a page, so nothing was shown; the target as the agent gave it
+  browserOpenFailed: (target: string, message: string) => `show_pane: MAWS could not open "${target}" in its browser: ${message}`,
 } as const;
 
 // P3-A (M6): the machine-readable part of an artifact tool's refusal (`TOOL_ERRORS.refused`), or null for any other text.
