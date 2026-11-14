@@ -913,10 +913,6 @@ jobs:
         run: |
           export MAWS_E2E_BUILD_CACHE=$RUNNER_TEMP/maws-e2e-build MAWS_E2E_BUILD_KEY=$GITHUB_SHA MAWS_E2E_BUILD_REQUIRE=1
           .github/scripts/gate-run.sh '^e2e-build: ' scripts/e2e-build.sh "$VARIANT"
-          # The guest's virtual mouse gives the app legacy 15 px scroll bars where the host's are overlays, and default's
-          # layout-transfer.spec.ts measures the document column to the pixel (guest run 43413169788: 593 against 608).
-          # Overlays in the clone, as on the host; never on the host itself (the solo label also lands there).
-          if [[ ${CI_KIT_VM_GUEST:-} == 1 ]]; then defaults write -g AppleShowScrollBars -string WhenScrolling; fi
       # A direct hosted Mac's out/ (the entry's `cached` variant), restored from the Actions cache, where the run's first job
       # to build that variant saved it under the commit and the variant; else built here and saved. A set larger than the
       # account's 5 hosted Macs runs in rounds, and only the first round builds. The command's own build restores it from
