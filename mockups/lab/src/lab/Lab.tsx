@@ -4,7 +4,7 @@ import { href, useRoute, type Route } from './route';
 import type { Experiment, SceneId } from './types';
 import './lab.css';
 
-const sceneLabel: Record<SceneId, string> = { session: 'Session', settings: 'Settings', home: 'New chat' };
+const sceneLabel: Record<SceneId, string> = { session: 'Session', settings: 'Settings', home: 'New chat', overview: 'Overview', file: 'File' };
 
 function knobValues(exp: Experiment, route: Route): Record<string, string> {
   const out: Record<string, string> = {};
@@ -108,7 +108,7 @@ function Panel({ exp, route, onClose }: { exp: Experiment; route: Route; onClose
         ))}
       </ul>
       <div className="lab-keys">
-        [ ] experiment · 1 2 3 scene · D scheme · L this panel · <a href="#/">all experiments</a>
+        [ ] experiment · {exp.scenes.map((_, i) => i + 1).join(' ')} scene · D scheme · L this panel · <a href="#/">all experiments</a>
       </div>
     </div>
   );
@@ -135,7 +135,7 @@ export function Lab() {
       else if (ev.key === '[') toExp(experiments[(i - 1 + experiments.length) % experiments.length]!);
       else if (ev.key === 'd' || ev.key === 'D') go({ exp: exp.id, scheme: route.scheme === 'dark' ? 'light' : 'dark' });
       else if (ev.key === 'l' || ev.key === 'L') setOpen((v) => !v);
-      else if (['1', '2', '3'].includes(ev.key)) {
+      else if (/^[1-9]$/.test(ev.key)) {
         const s = exp.scenes[Number(ev.key) - 1];
         if (s) go({ exp: exp.id, scene: s });
       }

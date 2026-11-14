@@ -12,7 +12,7 @@ import {
   type VitreaDiagnosticSink,
 } from '@vitreajs/vitrea-react';
 import { PanelLeft, PanelRight } from 'lucide-react';
-import { overview, plan, projects, sessionOverviews, tabs as fixedTabs, type Session } from '../../content/fixtures';
+import { fileBodies, fleet, overview, plan, sessionOverviews, tabs as fixedTabs, type FileBody, type Session } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
 import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
@@ -21,11 +21,13 @@ import { FULL, type Presence } from './paper';
 import { gatherOf, type Gather } from './plain';
 import { Composer } from './Composer';
 import { after, emptyDraft, NeedsCtx, nextDraft, type Needs, type Reply } from './needs';
-import { GBtn, isYours, RootCtx } from './parts';
+import { GBtn, isYours, RootCtx, split } from './parts';
 import { Sidebar } from './Sidebar';
 import { Home, Modules, SIDE_ROOM_MS, Tabs, Waiting, type SideData, type TabItem } from './Session';
 import { itemsOf, Transcript } from './Transcript';
 import { Settings } from './Settings';
+import { Board, Yours, type BoardForm, type Grouping } from './Overview';
+import { FilePage, type CodeGround, type DiffForm } from './File';
 import './layers.css';
 
 /** The owner's ground candidates. A chip names a light and a dark value; the scheme picks which one is painted. */
@@ -63,6 +65,9 @@ const PIN: Record<Scheme, { disc: string; glyph: string; ring: string }> = {
   light: { disc: '#e6b450', glyph: '#2b1f04', ring: 'rgb(120 84 0 / 0.3)' },
   dark: { disc: '#ecbf63', glyph: '#231a04', ring: 'transparent' },
 };
+
+/** A file the lab holds whole, by its path or by its name alone (`file=keys.ts` in the address). */
+const bodyOf = (path: string): FileBody | undefined => fileBodies.find((f) => f.path === path || f.path.endsWith(`/${path}`));
 
 /** Capture and review aids read from the address (`x=tools,card`, `pose=inactive`, `tier=css`, `dev=1`); never design states. */
 function addressFlags(): URLSearchParams {
@@ -345,10 +350,13 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   // ---- Which session is on screen, and what has been answered ---------------------------------------------------
   // Four sessions can be opened: the one that runs, and the three that wait. A session is reached the way a person
   // reaches it: its tab, its row in the pane, or the arrow in the waiting list. `at=s3` opens one for a capture.
-  const all = useMemo(() => projects.flatMap((p) => p.sessions), []);
+  const all = useMemo(() => fleet.flatMap((p) => p.sessions), []);
   const asked = flags.get('at');
-  const [at, setAt] = useState(() => (asked && itemsOf(asked).length > 0 ? asked : 's1'));
-  const [tab, setTab] = useState(at);
+  // A file opens as a tab beside the session that changed it, and the window has one such tab: opening another
+  // file from the session shows it there. `file=keys.ts` starts on one; `line=31` starts with a line pointed at.
+  const [file, setFile] = useState(() => bodyOf(flags.get('file') ?? '') ?? fileBodies[0]!);
+  const [picked, setPicked] = useState<number | null>(() => Number(flags.get('line')) || null);
+  const [at, setAt] = useState(() => (asked && itemsOf(asked).length > 0 ? asked : scene === 'file' ? file.session : 's1'));
   // A session opened from its row gets a tab, as it would in the app.
   const [extra, setExtra] = useState<string[]>(() => (fixedTabs.some((t) => t.id === at) ? [] : [at]));
   // An answer is real in the lab: the session goes back to work and its mark leaves the window. `did=s2-approved`
@@ -371,13 +379,30 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     (id: string) => {
       if (itemsOf(id).length === 0) return;
       setAt(id);
-      setTab(id);
       setExtra((list) => (fixedTabs.some((t) => t.id === id) || list.includes(id) ? list : [...list, id]));
       const raw = window.location.hash.replace(/^#\/?/, '');
       const [path = '', query = ''] = raw.split('?');
       if (!path.endsWith('/session')) window.location.hash = `#/layers/session${query ? `?${query}` : ''}`;
     },
     [],
+  );
+  const go = useCallback((to: SceneId) => {
+    const raw = window.location.hash.replace(/^#\/?/, '');
+    const [, query = ''] = raw.split('?');
+    window.location.hash = `#/layers/${to}${query ? `?${query}` : ''}`;
+  }, []);
+  const openFile = useCallback(
+    (path: string, session: string) => {
+      const body = bodyOf(path);
+      if (!body) return undefined;
+      return () => {
+        setFile(body);
+        setPicked(null);
+        setAt(session);
+        go('file');
+      };
+    },
+    [go],
   );
   const waits = useMemo<Needs>(
     () => ({
@@ -386,19 +411,30 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
       draft,
       toggle: (q, o) => setDraft((d) => nextDraft(d, q, o)),
       open: openSession,
+      file: openFile,
     }),
-    [replies, draft, openSession],
+    [replies, draft, openSession, openFile],
   );
+  // A file's page is its session's: whichever session was on screen before, the one beside the file is the one
+  // that changed it.
+  const here = scene === 'file' ? file.session : at;
   // A plan's steps are not a to-do list until the plan is approved; then they are.
   const sideData: SideData =
-    at === 's1' ? overview : at === 's5' && replies.s5?.kind === 'approved' ? { ...sessionOverviews.s5!, todos: plan.steps.map((text, i) => ({ text, done: false, current: i === 0 })) } : sessionOverviews[at] ?? overview;
-  const tabList: TabItem[] = [...fixedTabs, ...extra.map((id) => ({ id, title: all.find((s) => s.id === id)?.title ?? id, kind: 'session' }))];
+    here === 's1' ? overview : here === 's5' && replies.s5?.kind === 'approved' ? { ...sessionOverviews.s5!, todos: plan.steps.map((text, i) => ({ text, done: false, current: i === 0 })) } : sessionOverviews[here] ?? overview;
+  // The file tab carries the name of the file it holds. Settings is a tab while it is open; the Overview is not
+  // one: it is a place in the pane, and the tabs over it are what the person has open, none of them current.
+  const tabList: TabItem[] = [
+    ...fixedTabs.map((t) => (t.kind === 'file' ? { ...t, title: split(file.path)[1] } : t)),
+    ...extra.map((id) => ({ id, title: all.find((s) => s.id === id)?.title ?? id, kind: 'session' })),
+    ...(scene === 'settings' ? [{ id: 'settings', title: 'Settings', kind: 'settings' }] : []),
+  ];
+  const fileTab = fixedTabs.find((t) => t.kind === 'file')!.id;
 
-  const go = useCallback((to: SceneId) => {
-    const raw = window.location.hash.replace(/^#\/?/, '');
-    const [, query = ''] = raw.split('?');
-    window.location.hash = `#/layers/${to}${query ? `?${query}` : ''}`;
-  }, []);
+  // The Overview's and the file page's own forks (DESIGN.md section 18): the first position of each is the design.
+  const board: BoardForm = knobs.sessions === 'cards' ? 'cards' : 'rows';
+  const by: Grouping = knobs.by === 'project' ? 'project' : 'state';
+  const diff: DiffForm = knobs.diff === 'sides' ? 'sides' : 'inline';
+  const codeGround: CodeGround = knobs.code === 'sheet' ? 'sheet' : 'field';
 
   // The modules leave before the main space takes their room, and arrive after it has given it back.
   const [sideLaid, setSideLaid] = useState(sideOpen);
@@ -410,8 +446,10 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     const t = window.setTimeout(() => setSideLaid(false), SIDE_ROOM_MS);
     return () => window.clearTimeout(t);
   }, [sideOpen]);
-  const side = scene === 'session' && sideLaid;
-  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${at}`;
+  // A session and its files share the side column. On the Overview the room on the right is taken while
+  // something waits, by the one piece of glass that holds it.
+  const side = scene === 'overview' ? board === 'rows' && waiting.length > 0 : (scene === 'session' || scene === 'file') && sideLaid;
+  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${here}:${board}:${by}:${diff}:${codeGround}`;
   const pose = flags.get('pose') === 'inactive' ? 'inactive' : flags.get('pose') === 'active' ? 'active' : 'auto';
   const tier = flags.get('tier') === 'css' ? 'css' : 'webgpu';
   const dev = flags.has('dev');
@@ -444,6 +482,8 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-needs={needs}
             data-align={align}
             data-sideform={sideForm === 'modules' ? undefined : sideForm}
+            data-board={scene === 'overview' ? board : undefined}
+            data-diff={scene === 'file' ? diff : undefined}
             style={
               {
                 '--xl-ground': ground,
@@ -496,16 +536,25 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               setSideOpen={setSideOpen}
               live={live}
               waiting={waiting}
-              at={live(all.find((s) => s.id === at)!)}
+              at={live(all.find((s) => s.id === here)!)}
               side={sideData}
-              tab={scene === 'settings' ? 'settings' : tab}
-              tabList={scene === 'settings' ? [...tabList, { id: 'settings', title: 'Settings', kind: 'settings' }] : tabList}
+              tab={scene === 'settings' ? scene : scene === 'overview' ? '' : scene === 'file' ? fileTab : at}
+              tabList={tabList}
               onTab={(id) => {
                 if (id === 'settings') return;
-                setTab(id);
-                if (itemsOf(id).length > 0) openSession(id);
-                else if (scene !== 'session') go('session');
+                if (id === fileTab) {
+                  setAt(file.session);
+                  go('file');
+                } else if (itemsOf(id).length > 0) openSession(id);
               }}
+              file={file}
+              picked={picked}
+              setPicked={setPicked}
+              openFile={openFile}
+              board={board}
+              by={by}
+              diff={diff}
+              codeGround={codeGround}
               card={flags.get('card') ?? (x.includes('card') ? 's2' : undefined)}
               waitFirst={flags.get('wait') ?? undefined}
               section={section}
@@ -557,6 +606,15 @@ interface ShellProps {
   section: string;
   setSection: (s: string) => void;
   go: (scene: SceneId) => void;
+  /** The file its tab holds, the line pointed at in it, and what opens another. */
+  file: FileBody;
+  picked: number | null;
+  setPicked: (no: number | null) => void;
+  openFile: (path: string, session: string) => (() => void) | undefined;
+  board: BoardForm;
+  by: Grouping;
+  diff: DiffForm;
+  codeGround: CodeGround;
 }
 
 /** Everything inside the window root. A component of its own so its hooks run inside the glass root. */
@@ -568,33 +626,51 @@ function Shell(p: ShellProps) {
   useGlassBarInset(refs.tabBar, { scrollRef: refs.scroller, edge: 'top', measure: 'far-edge' });
   useGlassBarInset(refs.composerBar, { scrollRef: refs.scroller, edge: 'bottom', measure: 'far-edge' });
 
-  // A live session is read from its end.
+  // A session and a file it changed are one place: the same side column, the same composer.
+  const work = scene === 'session' || scene === 'file';
+  const scrolls = work || scene === 'overview';
+
+  // A live session is read from its end; a file and the Overview from their start.
   useLayoutEffect(() => {
     const el = refs.scroller.current;
-    if (!el || scene !== 'session') return;
+    if (!el || !scrolls) return;
     const toEnd = () => {
-      el.scrollTop = p.flags.includes('top') ? 0 : p.flags.includes('mid') ? (el.scrollHeight - el.clientHeight) * 0.45 : el.scrollHeight;
+      const end = el.scrollHeight - el.clientHeight;
+      el.scrollTop = p.flags.includes('top') ? 0 : p.flags.includes('mid') ? end * 0.45 : scene === 'session' || p.flags.includes('end') ? end : 0;
     };
     toEnd();
     const t = [setTimeout(toEnd, 80), setTimeout(toEnd, 420)];
     void document.fonts?.ready.then(toEnd);
     return () => t.forEach(clearTimeout);
-  }, [scene, refs.scroller, material, p.at.id, p.at.state]);
+  }, [scene, scrolls, refs.scroller, material, p.at.id, p.at.state, p.file]);
 
-  const transcript = <Transcript session={p.at} open={p.flags.includes('tools')} />;
+  const page =
+    scene === 'session' ? (
+      <Transcript session={p.at} open={p.flags.includes('tools')} />
+    ) : scene === 'overview' ? (
+      <Board live={p.live} by={p.by} form={p.board} />
+    ) : scene === 'file' ? (
+      <FilePage body={p.file} diff={p.diff} ground={p.codeGround} scroller={refs.scroller} picked={p.picked} onPick={p.setPicked} />
+    ) : null;
+  // Only a page that stands blocks on glass needs the root inside the column: a transcript always, the Overview
+  // when its sessions are cards, a file when it is on a sheet.
+  const blocks = material === 'glass' && (scene === 'session' || (scene === 'overview' && p.board === 'cards') || (scene === 'file' && p.codeGround === 'sheet'));
 
-  const capsule = scene !== 'settings' && p.waiting.length > 0 && (
-    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} open={p.flags.includes('waiting')} first={p.waitFirst} alone={scene !== 'session'} />
+  // On the Overview what waits is the page's own glass, so the capsule that stands for it is not drawn.
+  const capsule = scene !== 'settings' && scene !== 'overview' && p.waiting.length > 0 && (
+    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} open={p.flags.includes('waiting')} first={p.waitFirst} alone={!work} />
   );
   // Under the column rule the capsule is the tabs' neighbour on the reading column, not the side column's: it
   // leaves the side group, so the two capsules owe each other a small control's room and not a pane's.
-  const apart = p.own && scene === 'session';
+  const apart = p.own && work;
+  // A file's page keeps its session's composer as one line, unless the session waits: then it is the answer, whole.
+  const slim = scene === 'file' && !isYours(p.at.state);
   const toggle = () => p.setSideOpen((v) => !v);
 
   const trail = (
     <>
       {!apart && capsule}
-      {scene === 'session' && p.sideForm !== 'button' && (
+      {work && p.sideForm !== 'button' && (
         <GlassSurface asChild capsule thickness={THICKNESS} foreground="vibrant">
           <div className="xl-host xl-round" data-glass-role="control" role="group" aria-label="Details">
             <GBtn label={p.sideOpen ? 'Hide the side column' : 'Show the side column'} tip={p.sideOpen ? 'Hide details' : 'Show details'} data-tip-at="end" aria-pressed={p.sideOpen} onClick={toggle}>
@@ -610,9 +686,9 @@ function Shell(p: ShellProps) {
     <>
       {/* ---- The main space: prose on the field, blocks standing over it ---- */}
       <main className="xl-main">
-        {scene === 'session' && (
-          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1}>
-            {material === 'glass' ? (
+        {scrolls && (
+          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1} data-foot={scene === 'overview' ? 'none' : undefined}>
+            {blocks ? (
               <GlassRoot
                 asChild
                 attachment="container"
@@ -624,16 +700,18 @@ function Shell(p: ShellProps) {
                 onDiagnostic={sink}
                 materialProfile={NO_OUTER_SHADOW}
               >
-                <div className="xl-column" ref={setColumn}>
+                <div className="xl-column" ref={setColumn} key={scene}>
                   <SupplyField stamp={p.stamp} live={p.fieldLive} />
                   {p.dev && <Readout name="blocks" />}
                   <GlassLayer group="xl-blocks" space="container" origin={column} layout={layout}>
-                    {transcript}
+                    {page}
                   </GlassLayer>
                 </div>
               </GlassRoot>
             ) : (
-              <div className="xl-column">{transcript}</div>
+              <div className="xl-column" key={scene}>
+                {page}
+              </div>
             )}
           </div>
         )}
@@ -643,10 +721,14 @@ function Shell(p: ShellProps) {
 
       {/* ---- The side column: one module per section, each its own piece of glass. The waiting capsule and the
           column's toggle stand above it in the same group: neighbours, and the capsule is the page's one tint. ---- */}
-      {scene === 'session' ? (
+      {work ? (
         <GlassLayer group="xl-side" space="viewport" layout={layout}>
           {trail}
-          <Modules key={p.at.id} open={p.sideOpen} form={p.sideForm} onToggle={toggle} data={p.side} />
+          <Modules key={p.at.id} open={p.sideOpen} form={p.sideForm} onToggle={toggle} data={p.side} file={scene === 'file' ? p.file.path : undefined} onFile={(path) => p.openFile(path, p.at.id)} />
+        </GlassLayer>
+      ) : scene === 'overview' && p.board === 'rows' && p.waiting.length > 0 ? (
+        <GlassLayer group="xl-side" space="viewport" layout={layout}>
+          <Yours waiting={p.waiting} first={p.waitFirst} />
         </GlassLayer>
       ) : (
         <GlassGroup id="xl-side" backdrop={PLANE}>
@@ -696,11 +778,16 @@ function Shell(p: ShellProps) {
         </GlassGroup>
       )}
 
-      {scene === 'session' && (
+      {work && (
         <GlassGroup id="xl-composer" backdrop={PLANE}>
           <GlassSurface asChild radius={26} thickness={THICKNESS} foreground="vibrant">
-            <form className="xl-host xl-composer" ref={refs.composerBar} aria-label="Message" data-glass-role="control" onSubmit={(e) => e.preventDefault()}>
-              <Composer key={p.at.id} session={p.at} />
+            <form className="xl-host xl-composer" data-slim={slim || undefined} ref={refs.composerBar} aria-label="Message" data-glass-role="control" onSubmit={(e) => e.preventDefault()}>
+              <Composer
+                key={p.at.id}
+                session={p.at}
+                slim={slim}
+                about={scene === 'file' && p.picked !== null ? { label: `${split(p.file.path)[1]}:${p.picked}`, clear: () => p.setPicked(null) } : undefined}
+              />
             </form>
           </GlassSurface>
         </GlassGroup>

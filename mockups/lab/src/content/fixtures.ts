@@ -483,3 +483,269 @@ export const sessionOverviews: Record<string, Pick<typeof overview, 'branch' | '
     ],
   },
 };
+
+// ---- The Overview: every live or unread session, across projects ---------------------------------------------------
+// Invented. The four projects above with more sessions in the ones the pane keeps closed, and two more projects. The
+// pane's open projects read exactly as they do in `projects`; only what was folded away has grown.
+
+const more: Record<string, Session[]> = {
+  kiln: [
+    { id: 's9', title: 'Firing schedule export', state: 'running', line: 'Writing the CSV exporter', age: '4m', branch: 'feat/schedule-export' },
+    { id: 's10', title: 'Kiln log parser', state: 'unread', line: 'Parses all three controller formats', age: '35m' },
+  ],
+  dotfiles: [{ id: 's11', title: 'Zsh startup time', state: 'unread', line: 'Startup is down from 410 ms to 95 ms', age: '2h' }],
+};
+
+export const fleet: Project[] = [
+  ...projects.map((p) => ({ ...p, sessions: [...p.sessions, ...(more[p.id] ?? [])] })),
+  {
+    id: 'press',
+    name: 'press-site',
+    open: false,
+    sessions: [
+      { id: 's12', title: 'Image pipeline', state: 'running', line: 'Resizing 318 photographs', age: '12m', branch: 'feat/responsive-images', machine: 'studio' },
+      { id: 's13', title: 'Dark mode pass', state: 'running', line: 'Checking contrast on the article page', age: '2m' },
+      { id: 's14', title: 'RSS feed', state: 'unread', line: 'The feed validates, with 42 entries', age: '50m' },
+      { id: 's15', title: 'Broken link sweep', state: 'idle', line: 'Fixed 17 links', age: '5h' },
+      { id: 's16', title: 'Contact form spam', state: 'running', line: 'Reading last month\'s submissions', age: '1m' },
+    ],
+  },
+  {
+    id: 'ledger',
+    name: 'ledger',
+    open: false,
+    sessions: [
+      { id: 's17', title: 'Invoice layout', state: 'running', line: 'Rendering 12 sample invoices', age: '6m', machine: 'studio' },
+      { id: 's18', title: 'Currency rounding', state: 'running', line: 'Running the property tests', age: '9m', branch: 'fix/half-even' },
+      { id: 's19', title: 'Year-end export', state: 'idle', line: 'Exported 2,318 entries', age: '1d' },
+      { id: 's20', title: 'Bank feed import', state: 'idle', line: 'Matched 96% of the rows', age: '6h' },
+    ],
+  },
+];
+
+// ---- Files, whole ---------------------------------------------------------------------------------------------------
+// Invented. A file a session changed, as it reads now, with what the session did to it: every line of the file, and
+// the lines that were taken out where they stood. The first character of a line is its sign. The counts agree with
+// `overview.files` and `sessionOverviews`; the passages a transcript shows are passages of these.
+
+export interface FileBody {
+  path: string;
+  /** The session that changed it. */
+  session: string;
+  lines: DiffLine[];
+}
+
+const whole = (text: string): DiffLine[] =>
+  text
+    .split('\n')
+    .slice(1, -1)
+    .map((l) => ({ sign: (l[0] ?? ' ') as DiffLine['sign'], text: l.slice(1) }));
+
+export const fileBodies: FileBody[] = [
+  {
+    path: 'src/limits/bucket.ts',
+    session: 's1',
+    lines: whole(`
++// A token bucket per key. Tokens come back at a steady rate up to a burst
++// size, and a request spends one. The bucket lives in Redis as a hash.
++import { redis } from '../redis';
++import { shapeOf } from './keys';
++import type { Rule } from './rules';
++
++/** What a bucket holds between two requests. */
++export interface Bucket {
++  tokens: number;
++  filledAt: number;
++}
++
++const FIELDS = ['tokens', 'filledAt'] as const;
++
++/** A key that was never written is a full bucket. */
++function fresh(rule: Rule, now: number): Bucket {
++  return { tokens: rule.burst, filledAt: now };
++}
++
++/** What a fixed-window counter is worth: the quota it had not yet spent. */
++async function fromCounter(key: string, rule: Rule, now: number) {
++  const spent = Number(await redis.get(key));
++  return { tokens: Math.max(0, rule.burst - spent), filledAt: now };
++}
++
++export async function readBucket(key: string, rule: Rule): Promise<Bucket> {
++  const now = Date.now();
++  if ((await shapeOf(key)) === 'counter') return fromCounter(key, rule, now);
++  const [tokens, filledAt] = await redis.hmget(key, ...FIELDS);
++  if (tokens === null || filledAt === null) return fresh(rule, now);
++  return { tokens: Number(tokens), filledAt: Number(filledAt) };
++}
++
++export async function writeBucket(key: string, bucket: Bucket, ttl: number) {
++  await redis.multi().del(key).hset(key, bucket).expire(key, ttl).exec();
++}
++
++export async function take(key: string, rule: Rule, now = Date.now()) {
++  const { tokens, filledAt } = await readBucket(key, rule);
++  const refill = ((now - filledAt) / 1000) * rule.perSecond;
++  const next = Math.min(rule.burst, tokens + refill) - 1;
++  if (next < 0) return { allowed: false, retryAfter: -next / rule.perSecond };
++  await writeBucket(key, { tokens: next, filledAt: now }, rule.ttl);
++  return { allowed: true, remaining: Math.floor(next) };
++}
++
++/** Seconds until one token is back, for the Retry-After header. */
++export const waitFor = (rule: Rule) => Math.ceil(1 / rule.perSecond);
+`),
+  },
+  {
+    path: 'src/limits/keys.ts',
+    session: 's1',
+    lines: whole(`
+ // Names of the Redis keys the limiter writes. A name never changes: during a
+ // rollout old and new code read the same keys at once.
+ import { createHash } from 'node:crypto';
+-import { scanPage } from '../redis';
++import { redis, scanPage } from '../redis';
+ 
+ const PREFIX = 'rl';
+-export const WINDOW_SECONDS = 60;
+ 
+ /** Who is calling: an API key when there is one, else the address. */
+ export interface Caller {
+   apiKey?: string;
+   address: string;
+ }
+ 
++/** A key written before the token bucket holds a counter; after it, a hash. */
++export type Shape = 'counter' | 'bucket' | 'none';
++
+ function digest(value: string): string {
+   return createHash('sha256').update(value).digest('hex').slice(0, 16);
+ }
+ 
+ export function callerId(caller: Caller): string {
+   if (caller.apiKey) return 'k:' + digest(caller.apiKey);
+   return 'a:' + caller.address;
+ }
+ 
+ /** Routes that differ only by an id share one limit. */
+ export function normalise(route: string): string {
+   return route
+     .toLowerCase()
+     .replace(/\\/\\d+(?=\\/|$)/g, '/:id')
+     .replace(/\\/+$/, '');
+ }
+ 
+ /** rl:<route>:<caller>, the name every limiter uses. */
+ export function keyFor(route: string, caller: Caller): string {
+   return [PREFIX, normalise(route), callerId(caller)].join(':');
+ }
+ 
+ /** Every key of one caller, for the admin page that clears a limit. */
+ export function patternFor(caller: Caller): string {
+   return [PREFIX, '*', callerId(caller)].join(':');
+ }
+ 
+ export function parse(key: string): { route: string; caller: string } | null {
+   const [prefix, route, ...caller] = key.split(':');
+   if (prefix !== PREFIX || !route || caller.length === 0) return null;
+   return { route, caller: caller.join(':') };
+ }
+ 
++export async function shapeOf(key: string): Promise<Shape> {
++  const type = await redis.type(key);
++  return type === 'string' ? 'counter' : type === 'hash' ? 'bucket' : 'none';
++}
++
+ /** Keys are listed in pages, so a scan never holds Redis for long. */
+ export async function* scan(pattern: string, page = 200) {
+   let cursor = '0';
+   do {
+     const [next, keys] = await scanPage(cursor, pattern, page);
+     cursor = next;
+     yield* keys;
+   } while (cursor !== '0');
+ }
+`),
+  },
+  {
+    path: 'src/limits/index.ts',
+    session: 's1',
+    lines: whole(`
+ // The limiter as the routes see it: one call per request.
+ import type { Request } from '../http';
+-import { keyFor, WINDOW_SECONDS } from './keys';
+-import { redis } from '../redis';
++import { take } from './bucket';
++import { keyFor } from './keys';
+ import { ruleFor } from './rules';
+ 
+ export interface Verdict {
+   allowed: boolean;
+   /** Seconds to wait, when the request is refused. */
+   retryAfter?: number;
+ }
+ 
+ export async function limitFor(req: Request): Promise<Verdict> {
+   const rule = ruleFor(req.route);
+   if (!rule) return { allowed: true };
+   const key = keyFor(req.route, req.caller);
+-  const count = await redis.incr(key);
+-  if (count === 1) await redis.expire(key, WINDOW_SECONDS);
+-  if (count <= rule.perMinute) return { allowed: true };
+-  const left = await redis.ttl(key);
+-  return { allowed: false, retryAfter: Math.max(1, left) };
++  // One token a request; the bucket fills again between them.
++  const { allowed, retryAfter } = await take(key, rule);
++  if (allowed) return { allowed };
++  return { allowed, retryAfter: Math.ceil(retryAfter ?? 1) };
+ }
+ 
+-export async function usedBy(req: Request): Promise<number> {
+-  return Number(await redis.get(keyFor(req.route, req.caller))) || 0;
+-}
+-
+ 
+ export { ruleFor } from './rules';
+`),
+  },
+  {
+    path: 'src/upload/client.ts',
+    session: 's2',
+    lines: whole(`
+ // Uploads a file to storage and answers with its id.
+ import { put } from './storage';
++import { confirmed } from './storage';
+ 
+ const LIMIT = 50 * 1024 * 1024;
+ 
+ export class TooLarge extends Error {
+   constructor(readonly size: number) {
+     super('file is larger than the upload limit');
+   }
+ }
+ 
+ export function check(file: Blob) {
+   if (file.size > LIMIT) throw new TooLarge(file.size);
+ }
+ 
++/** Storage confirms a write a moment after the request returns. */
+ export async function upload(file: Blob, to: string) {
+-  const res = await put(to, file);
+-  return res.id;
++  const res = await put(to, file);
++  const done = await confirmed(res.id, { within: 4000 });
++  if (!done) return upload(file, to);
++  return res.id;
+ }
+ 
+ export async function uploadAll(files: Blob[], to: string) {
+   const ids: string[] = [];
+   for (const file of files) {
+     check(file);
+     ids.push(await upload(file, to));
+   }
+   return ids;
+ }
+`),
+  },
+];

@@ -11,7 +11,8 @@ a switch too: section 13. Four of them are answered and their answers are the de
 section 15. Paper has four warmer neighbours (section 14), of which the owner chose Warm paper, and the painted form
 has a fourth position with no drawing at all, Open's plain ground (section 16). Then the smaller parts of the
 session went to a board of alternatives (`../choices/`), the owner took its suggested set, and those forms are the
-design now: section 17, which is read over sections 2, 3 and 5. Sections 0 to 11 are the experiment as it was built, under what is now
+design now: section 17, which is read over sections 2, 3 and 5. Last, the product's other scene and the second
+surface of the first were drawn in the same design, the Overview and a file's page: section 18. Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -323,6 +324,11 @@ shows the field alone), `pose=inactive`,
 `tier=css`, `rt=1`, `dev=1` (the runtime's checks and what each group resolved, in the console). Section 17 adds
 `at=s2|s3|s5` (the session on screen), `did=s2-approved` (also `-denied`, `s3-chose`, `s5-said`: an answer already
 given), `card=<id>` (that row's card) and `wait=<id>` (the list's open item).
+
+Section 18 adds four knobs, one per fork on its two pages, with the chosen form first: sessions on the Overview as
+lines or as cards (`sessions`), grouped by state or by project (`by`), a file's code on the field or on a sheet
+(`code`), its changes in the file or side by side (`diff`). And three aids: `file=keys.ts` (the file its tab
+holds), `line=35` (a line pointed at), `x=end`; `wait=<id>` also names the open item of the Overview's glass.
 
 ## 11. Rejected
 
@@ -1439,6 +1445,235 @@ the list open, and answered.
 - `measure.mjs`: the faded band's depth includes a waiting message.
 - `src/content/fixtures.ts`: `sessionTranscripts`, `sessionOverviews` (additions).
 
+## 18. The other scene: the Overview, and a file's page
+
+Added 2026-11-14. The product has two scenes of equal weight, watching over many sessions and going deep in one,
+and until now Layers was drawn on three pages that are all the second scene or beside it. The owner settled the
+style on the session page (Warm paper, the blurred drawing, the suggested set, the orange disc); a style chosen on
+one scene of two is not chosen yet. The pane has had an "Overview" row and the tab strip a "bucket.ts" tab since
+round 1, and neither had ever opened. They open now. Both pages are Layers, not a neighbour of it: nothing in this
+section adds a material, an ink, a radius or a motion curve, and each page had one question of its own to answer.
+
+What the real app shows on these two surfaces was read from its renderer for the information each carries, not
+for its look, and none of its words are here. Its Overview is a board of cards, one per live or unread session,
+"needs you" first and then by project; a card carries a state glyph, the title, the project, the branch, an unread
+dot, what the session is doing, its last answer, the pending request with its controls, and a footer of context,
+cost and running agents. Its file tab is a viewer and an editor with a separate diff tab: unified or split, wrap,
+hunk and file stepping, a viewed mark, comments anchored to a line.
+
+### 18.1 What both pages keep
+
+The session page's skeleton, piece for piece: the pane; the tab capsule on the reading column's left edge; one
+column, read on the field; and one place for glass beside it, at the top right, where the side column grows from
+its button. The same four inks, the same glyph for each state, the same two fill sets, and orange on the disc and
+nowhere else. The test was that someone who knows the session page should need no telling.
+
+The rule is the session page's too, read at two new scales. **What is read is on the field. Glass is what can be
+opened or answered.** On a session that put prose on the field and the agent's blocks on glass. On the Overview it
+puts twenty sessions on the field and one thing on glass: what is the person's to answer. On a file it puts the
+whole file on the field and no new glass at all.
+
+### 18.2 The Overview
+
+**Its question: what do glass, the field and the "needs you" mark do when there are twenty sessions and not one?**
+
+*A session is a line on the field.* Its state's glyph, its title, what it is doing or what it ended on, its
+project, how long ago: 36 px, in the grammar of the waiting list's own item. Twenty cards of glass would have
+made glass mean "a session", which is everything on the page and so nothing; and a board is where the count
+grows. So a session that is the agents' business is words on the field, as the agent's prose is.
+
+*The order is the heading.* Without the waiting ones, the lines stand in three runs: finished and not read yet
+(the solid dot, the title strong), working (the breathing dot), at rest (no dot, the quiet ink). The glyph column
+says which run is which, so the runs have no titles. A session at rest is its title and its age: what it ended on
+was read once already and comes back under the pointer. Under the pointer a line's end gives way to where it runs
+(branch, machine) and the arrow that opens it, as the age gives way in the waiting list.
+
+*Glass is the one thing that is yours.* The sessions that wait are not lines. They stand at the top right, where
+the side column stands on a session, on the page's one piece of glass: the waiting capsule's own list, standing
+open. It is the same component (`WaitItems`, which the capsule's popover now also uses), so one item is open at a
+time and holds what that session's composer holds: Approve and Deny with the command; the question's chips and a
+field; the plan's steps with Approve and Send back. An answer given there is the answer everywhere. Answered, the
+item folds away and the session joins the working lines with a line that says what it does now (the command it
+was allowed, the plan's first step, the choices made, the person's own words); when nothing waits the glass is
+gone and the lines take the room.
+
+*The mark is all in one place.* The capsule is not drawn on this page, because the page is its list. So every
+orange disc on the page is inside the one piece of glass (the pane keeps its own), and the lines carry only grey
+and ink. "It is your move" reads as a place, not as a scatter of twenty rows to search.
+
+*The tabs are still the window's.* The Overview is a place in the pane, not something that was opened, so it adds
+no tab; the capsule shows what is open with none of them current.
+
+Twenty sessions in six projects: three waiting, four unread, seven working, six at rest. At 1280 by 800 all of
+them are in the window without scrolling. The column is what the pane and the glass leave (520 px at 1280, 680 at
+1440, 744 from 1504), and under 600 px a line gives up its project first, which then waits with the branch under
+the pointer.
+
+### 18.3 The Overview's forks
+
+**Lines, against cards** (the "Overview: sessions" switch; `sessions=cards`). Cards is the board the app has
+today, drawn in this material: every session a card of glass in a grid as wide as the room, the waiting ones
+first with their answers open inside. It is kept on the switch because it is the form a board is expected to
+have. Against it: twenty glass surfaces where the chosen form has one, so glass no longer says "yours"; three
+answers open at once put a command, two questions, five options, a field and five steps on screen before a
+single session is read; and at 1280 by 800 the window holds the three answers, the four unread and the first
+three of the working, where the lines show all twenty.
+
+**By state, against by project** (the "Overview: grouped" switch; `by=project`). The pane already lists
+sessions by project, open on the same screen. Grouped by project the Overview would be the pane again with one
+more line of words; grouped by state it answers what the pane cannot: what finished, what is working, what is
+quiet. The project is then a quiet word at the line's end.
+
+Not switches, and why. *Where the glass stands.* On the left it would be the first thing read, but it would sit
+against the pane, a second glass column beside the first, and the lines would lose the tabs' edge. Across the top
+it would be three columns of unequal height over a list. At the right it is where this design already keeps what
+is beside the reading (the side column), under the place the capsule has on every other page, and the orange
+finds it without help. *Three answers open at once* was drawn (it is what Cards shows) and refused for the words.
+
+### 18.4 A file's page
+
+**Its question: how does code at length sit in a design whose rule is prose on the field and blocks on glass?**
+
+*It is read on the field, as prose is.* The sheet an edit stands on in the transcript is a passage lifted out of
+its file, and it needs an edge because prose runs above and below it. Opened as a tab the passage is back in its
+file, and a file has nothing to be told apart from: so the glass is gone and the code lies on the field at the
+column's own edge, in the transcript's own setting for code (12 on 20). The glass on this page is what it is on a
+session's: the tabs, the side column, the composer. A sheet as long as a file would have been a second ground,
+and its top and bottom would be under the page's fades for almost all of the reading, which leaves a veil and not
+a piece of glass.
+
+*What the session did is marked as the sheet marks it.* One bar of the change's colour for each run of lines,
+hung in the left margin so that the code keeps the column's edge, the tabs' edge and the caption's. A line that
+was taken out stands where it stood, in the second ink on the red wash the sheet uses. The page's head is the
+caption an edit has in the transcript: the name, where it is, the counts.
+
+*A line's number is not on the page until the line is pointed at*, and then it is that line's alone, at the
+line's end. There is no gutter, so there is no column of sixty numbers beside sixty lines. A press on a line
+points at it: the line takes the selected fill, keeps its number, and the composer gains a chip naming it
+(`keys.ts:35`), so the next message is about that line.
+
+*Where the changes are in a file longer than the window* is drawn beside the column, in the room between it and
+the side column: the same bars at the file's scale, and a soft shape for the part that is in the window. A bar is
+pressed to go to its change. A file that is new from end to end, or all in the window, has none.
+
+*Beside the session it came from* is meant literally. A file's page is its session's page with the file where the
+transcript was. The side column is the session's and has not moved; in its Changes the file on screen is the
+current line, and another line shows another file in the same tab. The pane keeps the session's row current. The
+composer is the session's: at rest one line (48 px), so the file keeps the height, and whole again while the
+caret is in it, while it holds words, or while its menu is open. If the session waits on the person, the composer
+is the answer, whole, as on the session's own page: reading the file of a session that wants to push, Approve is
+under the file.
+
+### 18.5 The file page's forks
+
+**On the field, against on a sheet** (the "File: code" switch; `code=sheet`). The sheet is the transcript's
+block at a file's length, so it is the form that looks most like what was there. Besides the reasons above it
+costs 48 px of every line to its padding, which at 1280 by 800 with both panes open is the difference between 79
+columns and 72.
+
+**In the file, against side by side** (the "File: changes" switch; `diff=sides`). Side by side shows what was
+there beside what is, row against row, with the gaps hatched. It needs two columns of code: its column takes all
+the room there is (up to 1180), and it is still about 260 px a side at 1280 by 800 with both panes open, where
+most lines are cut. In the file, a change costs one line of height where it happened and nothing in width. Side by side
+would be the better form for a rewrite read on a wide window with the side column closed.
+
+### 18.6 The ways there, and what the lab learned
+
+- The Overview: its row in the pane (the row is the current one while it is open).
+- A file: its tab; a line of Changes in the side column; and the arrow that waits for the pointer beside an
+  edit's caption in the transcript. The window has one file tab, and it carries the name of the file it holds.
+- The lab knows five scenes. `SceneId` gained `overview` and `file`; the scene keys are 1 to 9 by an experiment's
+  own list, so the three keys every other experiment answers to are unchanged and Layers answers to 4 and 5.
+- `fixtures.ts`, additions only: `fleet` (the four projects, with three more sessions in the two the pane keeps
+  closed, and two more projects, twenty sessions in all) and `fileBodies` (four changed files whole: every line,
+  with the lines taken out where they stood; the counts agree with the side column's, and the passages the
+  transcripts show are passages of these). Layers' pane lists `fleet`, so it has two more closed projects at its
+  foot and is otherwise as it was.
+- Address aids: `file=keys.ts`, `line=35`, and `x=end` beside `x=top` and `x=mid`.
+
+### 18.7 Readings
+
+`measure.mjs`, the floors of section 7, Warm paper under section 15's defaults, WebGPU at 2x, and for the first
+time at three window sizes: 1280 by 800, 1440 by 900 and 1728 by 1117. 36 routes at each: the Overview at rest,
+with the question open and with the plan open, with all three answered, by project, and as cards at its top and
+its end; a file new from end to end, a changed one at its top, mid-file with a line pointed at, and at its end,
+a second changed one, a waiting session's with the answer in its composer, side by side, and on a sheet at its
+top and end; then the session page twice, because the pane under it has two more lines. Each in both schemes.
+108 routes, 12,482 gated readings. 27 were under their floor, all of them one line (the first item below) in
+the nine night routes of a file at each size; after its mend and one more by day, the 39 routes the two touched
+were measured again at the three sizes (4,521 readings): none under.
+
+| | light | dark |
+|---|---|---|
+| lowest text on the Overview | 4.72: what a working session is doing, low on the page, grouped by project at 1440 (4.76 in the chosen grouping: an age, at 1280) | 5.15: a project's name, grouped by project (5.22 in the chosen grouping: a title at rest) |
+| lowest text on a file's page | 4.91: the number of the line pointed at, on its fill (5.47 otherwise: the caption) | 4.83: a count on the current line of Changes (5.37 on the field: a line's number) |
+| lowest icon | 3.26: a caret in the pane | 4.11: the same |
+| glass bodies, drawn level | 0.79 to 0.99 | 0.11 to 0.33 |
+| code on the field, mid-file at 1440 | 9.5 to 12.8 | 7.6 to 13.4 |
+
+No body is in the band where neither ink holds. Code in the full ink is far from its floor on this field; the
+lines to watch are the quiet ones low on a page by day, as before: they pass by a few tenths.
+
+Met on the way:
+
+- **The current line of Changes, at night.** Its chip is lighter than the glass under it, and on it the file's
+  folder read 3.72 and the two counts 4.21 and 3.75. The folder is the second ink on that line (a step past it at
+  night), and at night the counts take a lighter step of their hues there.
+- **A line at rest, by day, low on the page.** 4.61 at the quiet ink over the shaded side of the picture's paper:
+  over its floor and too near it for a list that grows downwards. Those titles are the ink at 0.75 by day (5.26).
+- **A page with no bar at its foot.** The script took the bottom 188 px of any scrolling page for the composer's
+  faded band and did not gate them; the Overview has no composer, and it now says so (`data-foot`), so its last
+  lines are gated.
+
+Diagnostics with `dev=1`: none on either page in its chosen form (neither has a glass root inside its column);
+the one by design on Cards and on the sheet. Every group resolved WebGPU with exact analysis. Also seen, not
+measured: both pages in the receded pose, on the CSS tier, under Paper and under Blue hour.
+
+### 18.8 Not made good
+
+- **Motion was not watched.** A page arriving, the glass leaving when its last item is answered and the column
+  taking the room, the composer growing under the caret (it changes height at once, with no transition), the
+  rail following a scroll: built, and seen as stills only.
+- **Four files, and the longest is 65 lines.** No file of thousands of lines, so nothing here says how a long file
+  is drawn in pieces. No line longer than the column was put in front of the cut at the column's edge. The two
+  test files in the lists have no body in the lab, and their lines do not open.
+- **No colour in the code.** One ink, as in the transcript's sheets. A highlighter's colours on the field, over a
+  picture, in both schemes, is the first thing to measure before this ships, and may be what sends code back to
+  a quieter ground.
+- **It is a viewer.** Editing, saving, a file that changed on disk, a conflict, a comment thread on a line: the
+  app has all of them and none is drawn. Pointing at a line and naming it in the composer is as far as it goes.
+- **One file tab.** A second file replaces the first. Two files open at once would be two tabs, and the tab row
+  still has no rule for more tabs than fit (17.7); at 1280 by 800 the four tabs are already shortened.
+- **The Overview at a size it was not drawn for.** Twenty sessions and three waiting. A hundred lines; eight
+  waiting items (the glass would scroll inside itself, not seen); nothing live at all (no empty page was drawn);
+  a failed session; a session held by another machine. Only four of the twenty lines open a session, because
+  only four have a transcript.
+- **What a card's foot carries in the app** (context, cost since last seen, running agents) is on neither form.
+  It was left out as not needed to decide anything from this page; that is a call the owner may reverse.
+- **Under 1180 px** the Overview keeps its glass and the lines take what is left (about 300 px at 1000); it was
+  not drawn narrower than 1280.
+- **Seen under Warm paper; glanced at under Paper and Blue hour.** Not measured under any other colouring.
+- **The lines of a session just answered** are made from what the lab has (the command, the first step, the
+  choices); a real session would say what it is doing.
+
+### 18.9 What changed in the code
+
+- `Overview.tsx` (new): `Board` (the lines; the cards) and `Yours` (the glass that holds what waits).
+  `File.tsx` (new): `FilePage`, its lines in both forms, and the rail.
+- `Session.tsx`: `WaitItems` taken out of `Waiting`, so the capsule's list and the Overview's glass are one
+  component; a line of Changes opens its file and knows the one on screen.
+- `Transcript.tsx`: `Block` is exported; an edit's caption has the arrow that opens its file.
+- `Composer.tsx`: `slim` and `about`. `needs.tsx`: the context carries `file`; `after` gives an answered session
+  its line. `Sidebar.tsx`: the Overview's row goes there; a session's row stays current on its file's page; the
+  pane lists `fleet`.
+- `Layers.tsx`: the two scenes in the shell (one scroller for the three pages that scroll; the glass root inside
+  the column only where a page stands blocks on it), the file on its tab and the line pointed at, the four
+  switches, `file=`, `line=`, `x=end`.
+- `layers.css`: one new section at the end; above it, the five rules keyed to a session's scene are keyed to a
+  file's too. `measure.mjs`: a page with no bar at its foot. `meta.ts`: the scenes, the switches, the notes.
+- `src/lab/types.ts`, `src/lab/Lab.tsx`: two more scenes, their labels, keys 1 to 9. `BRIEF.md`: the two scenes
+  named. `src/content/fixtures.ts`: `fleet`, `fileBodies` (additions).
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -1498,5 +1733,17 @@ What the real renderer would need, against "The app today" in the brief.
 - **A warmer Paper, if one is chosen** (section 14). It is a light record beside the colouring (the values the
   painter reads) and, for two of them, a pigment for the mark; the night values of the sheet's face and edge
   (0.36, 0.66) are Paper's as well.
+- **The Overview** (section 18). The board is a list, not a grid of cards: one row component fed by the same
+  derivation the board has today (waiting first, then unread, working, the rest), with the waiting group moved out
+  of the list into one glass surface in the shell's root, in the side column's group. That surface holds the
+  request card's own controls through the slot the cards use now, one open at a time. The board's keyboard model
+  (one tab stop, arrows across cards) becomes arrows down a list. The toolbar's "needs you" count is not drawn
+  while the Overview is open.
+- **A file's page** (section 18). The viewer and the diff tab become one surface: the file with its changes in
+  it, change bars in a margin that is inside the scrolling element, line numbers drawn for the pointed line only,
+  and a rail fed by the diff's hunks. The editor's own gutter, its themes and its merge view have to be brought
+  to the same margin and the same two hues, and its syntax colours measured on the field. The session's composer
+  is mounted on the file's page with a collapsed state, and an anchored line becomes a chip in it; the side
+  column is kept mounted across a session and its files so that it does not leave and return.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

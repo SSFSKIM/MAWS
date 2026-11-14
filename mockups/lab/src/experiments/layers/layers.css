@@ -613,12 +613,12 @@
 /* Alignment under Open's rule: the reading column is the join. The panes stand one derived room from it, the tabs
    start on its left edge, the waiting capsule ends on its right edge, and the composer is its width (it already
    was). The column takes what the panes leave, up to Open's 744. */
-.x-layers[data-align='column'][data-scene='session'] {
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file']) {
   --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room)));
   --xl-wait-r: calc(100vw - var(--xl-col-l) - var(--xl-col));
   --xl-tabs-r: calc(var(--xl-wait-r) + 84px + var(--xl-seam));
 }
-.x-layers[data-align='column'][data-scene='session'] .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file']) .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
 /* Settings has a column of its own (620, kept clear of the margin note); the tabs start on that one. */
 .x-layers[data-align='column'][data-scene='settings'] {
   --xl-col-l: calc(var(--xl-main-l) + max(32px, min((100vw - var(--xl-main-l) - 620px) / 2, 100vw - var(--xl-main-l) - 892px)));
@@ -656,10 +656,10 @@
 .x-layers .xl-bud-btn:active { transform: scale(0.94); }
 /* With the capsule's place taken by the card, the capsule stands beside the card as its neighbour (12 px, as it
    stood above the modules), and the tabs keep a room from it. Under the column rule it is on the column instead. */
-.x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) {
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) {
   --xl-tabs-r: max(calc(var(--xl-main-r) + 96px + var(--xl-room)), calc(var(--xl-gap) + 128px + var(--xl-room)));
 }
-.x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) .xl-waiting {
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) .xl-waiting {
   right: max(calc(var(--xl-main-r) + 12px), calc(var(--xl-gap) + var(--xl-bar-h) + 8px)); transition: right var(--xl-t-shell) var(--xl-ease);
 }
 
@@ -669,7 +669,7 @@
   .x-layers { --xl-main-r: 0px; }
   .x-layers .xl-side, .x-layers .xl-round { display: none; }
   .x-layers .xl-waiting { right: var(--xl-gap); }
-  .x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
+  .x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
 }
 @media (width < 900px) {
   .x-layers { --xl-main-l: 0px; --xl-tabs-min: calc(84px + 36px + var(--xl-room)); }
@@ -837,3 +837,183 @@
 .x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-age { opacity: 0; }
 .x-layers .xl-wait-item:is(:hover, :focus-within) .xl-wait-go { opacity: 1; transform: none; }
 .x-layers .xl-wait-go:hover { background: var(--xl-selected); color: var(--xl-fg); }
+
+/* ==== 18. The Overview and a file's page (DESIGN.md section 18) ===================================================
+   The product's other scene, and the second surface of the first. Both keep the session page's skeleton (the pane,
+   the tabs on the reading column's edge, a column read on the field, glass on the right) and its rule: what is read
+   is on the field, and glass is what can be opened or answered. A file's page is its session's page with the file
+   where the transcript was, so every rule keyed to a session's scene above is keyed to both. */
+
+/* ---- the Overview ------------------------------------------------------------------------------------------------ */
+
+/* The room on the right is the waiting list's while something waits (348, the capsule's list), and nobody's after. */
+.x-layers[data-scene='overview'] { --xl-side-w: 348px; --xl-tabs-r: calc(var(--xl-main-r) + var(--xl-room)); }
+.x-layers[data-scene='overview'][data-side='closed'] { --xl-tabs-r: calc(var(--xl-gap) + 16px); }
+.x-layers[data-align='column'][data-scene='overview'] { --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room))); }
+@media (width < 1180px) { .x-layers[data-scene='overview'][data-side='open'] { --xl-main-r: calc(var(--xl-gap) + var(--xl-side-w)); } }
+/* No bar stands at the foot of this page: the lines run to the window's edge and thin out over its last 28 px. */
+.x-layers .xl-scroll[data-foot='none'] { --xl-edge-b: -4px; }
+.x-layers[data-scene='overview'] .xl-column { justify-content: flex-start; padding-bottom: 44px; }
+.x-layers .xl-board { user-select: none; container-type: inline-size; animation: xl-scene-in 340ms var(--xl-ease-open); }
+
+/* A session is one line on the field: its glyph, its title, what it is doing or what it ended on. The line hangs
+   12 px outside the column on both sides, so its glyph stands on the column's edge and its hover is a full shape. */
+.x-layers .xl-o-group + .xl-o-group { margin-top: 20px; }
+.x-layers .xl-o-head { display: flex; align-items: center; height: 28px; color: var(--xl-ink-3); font: var(--xl-w-label) 12px/16px var(--xl-font); }
+.x-layers .xl-o-row {
+  display: grid; grid-template-columns: 16px minmax(0, 13.5em) minmax(0, 1fr) auto; align-items: center; column-gap: 12px;
+  width: calc(100% + 24px); height: 36px; margin: 0 -12px; padding: 0 12px; border-radius: var(--xl-r-row); corner-shape: squircle;
+  color: var(--xl-ink-2); white-space: nowrap; transition: background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-o-row:is(:hover, :focus-visible) { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-o-row:active { transform: scale(0.995); }
+.x-layers .xl-o-mark { display: grid; place-items: center; width: 16px; height: 16px; }
+.x-layers .xl-o-title { overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent); }
+.x-layers .xl-o-line { overflow: hidden; color: var(--xl-ink-3); mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); }
+.x-layers .xl-o-row[data-weight='unread'] { color: var(--xl-ink); }
+.x-layers .xl-o-row[data-weight='unread'] .xl-o-title { font-weight: var(--xl-w-strong); }
+.x-layers .xl-o-row[data-weight='unread'] .xl-o-line { color: var(--xl-ink-2); }
+/* A session at rest is its title. What it ended on was read once already, and comes back under the pointer. */
+.x-layers .xl-o-row[data-weight='rest'] { color: var(--xl-ink-3); }
+/* By day these are the quiet ink low on the page, over the shaded side of the picture's paper (4.61 at 0.7). */
+.x-layers[data-scheme='light'] .xl-o-row[data-weight='rest'] { color: rgb(var(--xl-ink-rgb) / 0.75); }
+.x-layers .xl-o-row[data-weight='rest']:is(:hover, :focus-visible) { color: var(--xl-ink); }
+.x-layers .xl-o-row[data-weight='rest'] .xl-o-line { opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-o-row[data-weight='rest']:is(:hover, :focus-visible) .xl-o-line { opacity: 1; }
+/* The end of a line: where it is and how long ago. Under the pointer these step aside for where it runs and the
+   arrow that opens it, as the age does in the waiting list. */
+.x-layers .xl-o-end { position: relative; display: grid; justify-items: end; align-items: center; min-width: 28px; color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-o-end > * { display: inline-flex; align-items: center; }
+.x-layers .xl-o-meta { gap: 14px; }
+.x-layers .xl-o-age { min-width: 30px; text-align: right; }
+/* One of the two is laid out at a time, so the words before them are cut by what is really there. */
+.x-layers .xl-o-more { display: none; gap: 12px; color: var(--xl-ink-2); animation: xl-o-more-in var(--xl-t-pop) var(--xl-ease-open); }
+@keyframes xl-o-more-in { from { opacity: 0; transform: translateX(4px); } }
+.x-layers .xl-o-more > span { display: inline-flex; align-items: center; gap: 4px; }
+.x-layers .xl-o-row:is(:hover, :focus-visible) .xl-o-meta { display: none; }
+.x-layers .xl-o-row:is(:hover, :focus-visible) .xl-o-more { display: inline-flex; }
+/* Where the column is short of room, the project is the first thing a line gives up; it is still under the pointer. */
+@container (width < 600px) {
+  .x-layers .xl-o-meta > .xl-o-where { display: none; }
+}
+
+/* What waits for the person: the capsule's list, standing open on glass where the side column stands on a session. */
+.x-layers .xl-yours {
+  position: fixed; z-index: 1002; top: var(--xl-gap); right: var(--xl-gap); width: var(--xl-side-w); max-height: calc(100vh - 2 * var(--xl-gap));
+  display: flex; flex-direction: column; pointer-events: none; font-size: 14px; line-height: 20px;
+}
+.x-layers .xl-yours-card { min-height: 0; padding: 6px; border-radius: 22px; overflow-y: auto; scrollbar-width: none; }
+.x-layers .xl-yours-card > * { animation: xl-yours-in 420ms var(--xl-ease-open) backwards; }
+.x-layers .xl-yours-card > :nth-child(2) { animation-delay: 50ms; }
+.x-layers .xl-yours-card > :nth-child(n + 3) { animation-delay: 100ms; }
+@keyframes xl-yours-in { from { opacity: 0; } }
+
+/* The other form: every session a card of glass, in a board as wide as the room. */
+.x-layers[data-board='cards'] .xl-column { width: min(1128px, calc(100vw - var(--xl-main-l) - 2 * var(--xl-room))); }
+.x-layers .xl-board[data-form='cards'] .xl-o-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(256px, 1fr)); gap: 12px; align-items: start; }
+.x-layers .xl-board[data-form='cards'] .xl-o-group + .xl-o-group { margin-top: 28px; }
+.x-layers .xl-o-card { border-radius: 20px; font-size: 14px; line-height: 20px; }
+.x-layers .xl-o-card-in { padding: 14px 16px 13px; color: var(--xl-fg2); }
+.x-layers .xl-o-card-head { display: flex; align-items: flex-start; gap: 10px; width: 100%; border-radius: 10px; color: var(--xl-fg); }
+.x-layers .xl-o-card-head .xl-glyph { margin-top: 2px; }
+.x-layers .xl-o-card-text { flex: 1; min-width: 0; }
+.x-layers .xl-o-card-text > span { display: block; }
+.x-layers .xl-o-card-in[data-weight='rest'] .xl-card-title { font-weight: var(--xl-w); color: var(--xl-fg2); }
+.x-layers .xl-o-card-in:not([data-weight='unread']) .xl-card-title { font-weight: var(--xl-w-label); }
+.x-layers .xl-o-card .xl-card-meta { margin-top: 10px; }
+
+/* ---- a file's page ------------------------------------------------------------------------------------------------- */
+
+.x-layers[data-scene='file'] { --xl-file-col: var(--xl-col); }
+.x-layers[data-scene='file'][data-diff='sides'] { --xl-file-col: min(1180px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room))); }
+.x-layers[data-scene='file'] .xl-column { width: var(--xl-file-col); justify-content: flex-start; }
+.x-layers .xl-file { animation: xl-scene-in 340ms var(--xl-ease-open); }
+/* The page's head is the caption an edit has in the transcript: the name, where it is, what changed. */
+.x-layers .xl-file-head { display: flex; align-items: baseline; gap: 6px; min-height: 28px; padding-top: 5px; color: var(--xl-ink-3); font-size: 13px; line-height: 18px; }
+.x-layers .xl-file-head .xl-cap-name { color: var(--xl-ink); }
+.x-layers .xl-file-head .xl-stat { margin-left: 2px; }
+.x-layers .xl-file-head .xl-add { color: var(--xl-add-field); }
+.x-layers .xl-file-head .xl-del { color: var(--xl-del-field); }
+
+/* Code on the field, at the column's own edge, set as it is on a sheet (12 on 20), so 79 columns stand in the
+   reading column at 1280 with both panes open; a longer line is cut at the column's edge and the code moves
+   sideways under it. A line's change is a bar hung in the margin, one bar a run; a line that was taken out keeps
+   its wash. The margin is inside the element, so what hangs there is not cut. */
+.x-layers .xl-src { margin: 8px 0 0 -24px; padding-left: 24px; overflow-x: auto; scrollbar-width: none; font: 450 12px/20px var(--xl-mono); color: var(--xl-ink); white-space: pre; tab-size: 2; cursor: text; }
+.x-layers .xl-src-line { position: relative; min-height: 20px; width: max(100%, max-content); }
+.x-layers .xl-src-line::before { content: ''; position: absolute; z-index: -1; inset: 0 0 0 -22px; transition: background-color var(--xl-t-press); }
+.x-layers .xl-src-line[data-first]::before { border-top-left-radius: 7px; border-top-right-radius: 7px; }
+.x-layers .xl-src-line[data-last]::before { border-bottom-left-radius: 7px; border-bottom-right-radius: 7px; }
+.x-layers .xl-src-line[data-sign='-']::before { background: var(--xl-del-wash); }
+.x-layers .xl-src-line[data-sign='-'] { color: var(--xl-ink-2); }
+.x-layers .xl-src-line:not([data-sign='-'], [data-none]):hover::before { background: var(--xl-hover); border-radius: 7px; }
+.x-layers .xl-src-line[data-picked]::before, .x-layers .xl-src-line[data-picked]:hover::before { background: var(--xl-selected); border-radius: 7px; }
+.x-layers .xl-src-line i { position: absolute; left: -14px; top: 0; bottom: 0; width: 3px; }
+.x-layers .xl-src-line[data-sign='+'] i { background: var(--xl-add-field); }
+.x-layers .xl-src-line[data-sign='-'] i { background: var(--xl-del-field); }
+.x-layers .xl-src-line[data-first] i { top: 2px; border-top-left-radius: 2px; border-top-right-radius: 2px; }
+.x-layers .xl-src-line[data-last] i { bottom: 2px; border-bottom-left-radius: 2px; border-bottom-right-radius: 2px; }
+/* A line's number is not on the page until the line is pointed at, and then only its own. */
+.x-layers .xl-src-no { position: absolute; right: 0; top: 0; color: var(--xl-ink-3); font-size: 11.5px; opacity: 0; user-select: none; pointer-events: none; transition: opacity var(--xl-t-press); }
+.x-layers .xl-src-line:is(:hover, [data-picked]) .xl-src-no { opacity: 1; }
+
+/* Before and after, side by side: the other form of the Changes switch. The column takes the room it can. */
+.x-layers .xl-src[data-form='sides'] .xl-src-pair { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); column-gap: 48px; }
+.x-layers .xl-src[data-form='sides'] .xl-src-text { display: block; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
+.x-layers .xl-src[data-form='sides'] .xl-src-line[data-none]::before { background: repeating-linear-gradient(135deg, transparent 0 5px, rgb(var(--xl-ink-rgb) / 0.05) 5px 6px); }
+
+/* On a sheet: the other form of the Code switch. The transcript's sheet at the length of a file. */
+.x-layers .xl-src-sheet { margin-top: 6px; padding: 12px 18px 14px 30px; overflow: hidden; }
+.x-layers .xl-src-sheet .xl-src { margin: 0 0 0 -30px; padding-left: 30px; }
+.x-layers .xl-src-sheet .xl-src-line i { left: -17px; }
+.x-layers .xl-src-sheet .xl-src-line[data-sign='+'] i { background: var(--xl-add); }
+.x-layers .xl-src-sheet .xl-src-line[data-sign='-'] i { background: var(--xl-del); }
+.x-layers .xl-src-sheet .xl-src-line::before { inset: 0 -18px 0 -30px; border-radius: 0 !important; }
+
+/* Where the changes are in the whole file: the same bars at the file's scale, beside the column, with the part of
+   the file that is in the window as a soft shape behind them. */
+.x-layers .xl-rail {
+  position: fixed; z-index: 1002; top: 100px; bottom: var(--xl-rail-b, 104px); width: 5px;
+  left: calc(var(--xl-main-l) + (100vw - var(--xl-main-l) - var(--xl-main-r)) / 2 + var(--xl-file-col) / 2 + 12px);
+  transition: left var(--xl-t-shell) var(--xl-ease); animation: xl-yours-in 400ms ease 200ms backwards;
+}
+.x-layers .xl-rail-seen { position: absolute; left: -3px; right: -3px; border-radius: 6px; background: rgb(var(--xl-ink-rgb) / 0.07); transition: top 80ms linear, height 80ms linear; }
+.x-layers .xl-rail-mark { position: absolute; left: 0.5px; width: 4px; border-radius: 2px; background: var(--xl-add-field); transition: transform var(--xl-t-pop) var(--xl-spring); }
+.x-layers .xl-rail-mark[data-sign='-'] { background: var(--xl-del-field); }
+.x-layers .xl-rail-mark::before { content: ''; position: absolute; inset: -4px -8px; }
+.x-layers .xl-rail-mark:hover { transform: scaleX(1.8); }
+
+/* The session's composer, on its file's page: one line at rest, whole again while the caret is in it, while it
+   holds words, or while its menu is open. */
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) { display: flex; align-items: center; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-field { flex: 1; min-height: 0; height: 48px; padding: 13px 8px 13px 20px; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-tools { padding: 0 8px 0 0; }
+.x-layers .xl-composer[data-slim]:not(:focus-within, :has(.xl-field:not(:placeholder-shown)), :has(.xl-chip[aria-expanded='true'])) .xl-tools > :is(.xl-gbtn:first-child, .xl-grow, .xl-chip) { display: none; }
+/* The line the next message is about. */
+.x-layers .xl-about { display: inline-flex; align-items: center; gap: 4px; height: 26px; margin-right: 4px; padding: 0 4px 0 10px; border-radius: 13px; background: var(--xl-well); color: var(--xl-fg2); font: 450 12px/18px var(--xl-mono); animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-about .xl-queued-x { opacity: 1; color: var(--xl-fg3); }
+
+/* ---- the ways there ----------------------------------------------------------------------------------------------- */
+
+/* An edit's caption opens its whole file: an arrow that waits for the pointer, as the list's does. */
+.x-layers .xl-cap-go {
+  position: relative; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: 2px; border-radius: 9px; vertical-align: top; color: var(--xl-ink-2);
+  opacity: 0; transform: scale(0.8); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open), background-color var(--xl-t-hover);
+}
+.x-layers .xl-folded:hover .xl-cap-go, .x-layers .xl-cap-go:focus-visible { opacity: 1; transform: none; }
+.x-layers .xl-cap-go:hover { background: var(--xl-hover); color: var(--xl-ink); }
+/* A changed file in the side column is pressed to open it; the one on screen is the current line. */
+.x-layers button.xl-line { width: 100%; }
+.x-layers button.xl-line:active { transform: scale(0.99); }
+.x-layers .xl-line[aria-current='page'] { background: var(--xl-selected); color: var(--xl-fg); box-shadow: var(--xl-current-shadow); }
+/* The current line's chip is lighter than the glass it lies on, so what is quiet or coloured on it steps up: the
+   quiet words to the second ink (at night a step past it: 3.7 as it was, 4.47 at the second ink), and at night the
+   two counts to a lighter step of their hues (3.75 and 4.2 before). */
+.x-layers .xl-line[aria-current='page'] .xl-quiet { color: var(--xl-fg2); }
+.x-layers[data-scheme='dark'] .xl-line[aria-current='page'] .xl-quiet { color: color-mix(in srgb, var(--xl-fg) 92%, transparent); }
+.x-layers[data-scheme='dark'] .xl-line[aria-current='page'] { --xl-add: #8ee0b6; --xl-del: #ffbfb2; }
+/* Forced colours: a change's bar is a filled shape, so it keeps its own colour. */
+@media (forced-colors: active) {
+  .x-layers .xl-src-line i, .x-layers .xl-rail-mark { forced-color-adjust: none; }
+  .x-layers :is(.xl-o-row:focus-visible, .xl-src-line[data-picked], .xl-line[aria-current='page']) { outline: 2px solid Highlight; outline-offset: -2px; }
+}

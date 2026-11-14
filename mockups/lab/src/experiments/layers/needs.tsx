@@ -24,6 +24,8 @@ export interface Needs {
   toggle: (q: number, o: number) => void;
   /** Open a session: its tab, its transcript. */
   open: (id: string) => void;
+  /** What opens a file a session changed as a tab beside it; undefined for a file the lab holds no body of. */
+  file: (path: string, session: string) => (() => void) | undefined;
 }
 
 export const NeedsCtx = createContext<Needs | null>(null);
@@ -40,7 +42,19 @@ export const nextDraft = (draft: number[][], q: number, o: number): number[][] =
 export function after(s: Session, r: Reply | undefined): Session {
   if (!r) return s;
   if (r.kind === 'denied') return { ...s, state: 'idle', age: 'now' };
-  return { ...s, state: 'running', age: 'now', line: s.state === 'approval' && r.kind === 'approved' ? approval.command : s.line };
+  // What it is doing now, for the places that say so in a line: the command it was allowed, the plan's first step,
+  // the person's own words when they gave some, and the choices they made otherwise.
+  const line =
+    r.kind === 'said'
+      ? r.text
+      : r.kind === 'chose'
+        ? question.questions.flatMap((q, i) => r.picked[i]!.map((o) => q.options[o]!.label)).join(', ')
+        : s.state === 'approval'
+          ? approval.command
+          : s.state === 'plan'
+            ? plan.steps[0]!
+            : s.line;
+  return { ...s, state: 'running', age: 'now', line };
 }
 
 // ---- pieces shared by the composer and the card -----------------------------------------------------------------------

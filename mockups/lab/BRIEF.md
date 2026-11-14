@@ -49,7 +49,9 @@ An experiment lives in `src/experiments/<id>/` and touches nothing outside it.
 - Scenes. `session` (required): the whole window with the sidebar (destinations, pinned, projects, sessions in every
   state, usage), tabs, the transcript with every item kind, the composer, the side column, and the waiting approval
   made findable. `settings` (required): the settings page, at least Engine, Appearance and Notifications. `home`
-  (optional): the new-chat state.
+  (optional): the new-chat state. `overview` and `file` (optional, added after round 2 and drawn by Layers alone so
+  far, section 18 of its DESIGN.md): every live or unread session across projects with the waiting ones answerable
+  in place, and a changed file opened as a tab beside its session.
 - Both colour schemes, each designed, at 1280×800 through 1728×1117 (1440×900 is the size captures use).
 - It is a live page, and motion is one of the things being judged. These work for real, with the motion the
   experiment argues for: collapsing the sidebar, opening one menu, expanding a folded tool run, hover and focus and

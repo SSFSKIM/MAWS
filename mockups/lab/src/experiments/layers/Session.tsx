@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { GlassGroup, GlassSurface } from '@vitreajs/vitrea-react';
 import { ArrowUpRight, Check, ChevronDown, Circle, CircleCheck, FileCode, Folder, GitBranch, LoaderCircle, PanelRight, Plus, SlidersHorizontal, Terminal, X } from 'lucide-react';
-import { approval, composer, overview, projects, type Session } from '../../content/fixtures';
+import { approval, composer, fleet, overview, type Session } from '../../content/fixtures';
 import type { SceneId } from '../../lab/types';
 import { Composer } from './Composer';
 import { PLANE, THICKNESS, useGlassUnder, useKick } from './glass';
@@ -21,7 +21,7 @@ export interface TabItem {
 
 /** The tabs are the window's: which is current, and what a press on one opens, are decided above. */
 export function Tabs({ list, current, onPick, live }: { list: TabItem[]; current: string; onPick: (id: string) => void; live: (s: Session) => Session }) {
-  const all = projects.flatMap((p) => p.sessions);
+  const all = fleet.flatMap((p) => p.sessions);
   return (
     <>
       {list.map((tab) => {
@@ -57,16 +57,12 @@ export function Tabs({ list, current, onPick, live }: { list: TabItem[]; current
  * `tint` the capsule is clear glass, and the marks in it are the discs the rows carry (DESIGN.md §13.3).
  */
 export function Waiting({ waiting, tint, open: openAtOnce, first, alone }: { waiting: Session[]; tint?: string; open?: boolean; first?: string; alone?: boolean }) {
-  const needs = useNeeds();
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
-  const [picked, setPicked] = useState<string | null>(first ?? null);
   const close = useCallback(() => setOpen(false), []);
   useEffect(() => {
     if (openAtOnce && el) setOpen(true);
   }, [openAtOnce, el]);
-  // The item that is open: the one pressed, or the first that still waits.
-  const which = waiting.some((s) => s.id === picked) ? picked : waiting[0]?.id;
   return (
     <>
       <GlassSurface asChild capsule thickness={THICKNESS} tint={tint} foreground={tint ? undefined : 'vibrant'} interactive>
@@ -89,42 +85,58 @@ export function Waiting({ waiting, tint, open: openAtOnce, first, alone }: { wai
         </button>
       </GlassSurface>
       <Pop open={open} anchor={el} place="below-end" onClose={close} className="xl-wait-list" label="Waiting for you">
-        {waiting.map((s) => {
-          const isOpen = s.id === which;
-          return (
-            <div key={s.id} className="xl-wait-item" data-open={isOpen}>
-              <div className="xl-wait-head">
-                <button type="button" className="xl-wait-main" aria-expanded={isOpen} onClick={() => setPicked(s.id)}>
-                  <StateGlyph state={s.state} />
-                  <span className="xl-wait-text">
-                    <span className="xl-card-title">{s.title}</span>
-                    {/* Open, a question or a plan shows itself; an approval keeps the line that says what it is for. */}
-                    {(!isOpen || s.state === 'approval') && <span className="xl-card-line">{s.state === 'approval' ? approval.title : s.line}</span>}
-                  </span>
-                </button>
-                <span className="xl-wait-slot">
-                  <span className="xl-wait-age">{s.age}</span>
-                  <button
-                    type="button"
-                    className="xl-wait-go"
-                    aria-label={`Open ${s.title}`}
-                    data-tip="Open"
-                    data-tip-at="end"
-                    onClick={() => {
-                      needs.open(s.id);
-                      close();
-                    }}
-                  >
-                    <ArrowUpRight size={15} strokeWidth={1.9} />
-                  </button>
-                </span>
-              </div>
-              {/* Only the open item holds its answer: a closed one keeps no fields waiting out of sight. */}
-              <Fold open={isOpen}>{isOpen && <Remote session={s} />}</Fold>
-            </div>
-          );
-        })}
+        <WaitItems waiting={waiting} first={first} onOpen={close} />
       </Pop>
+    </>
+  );
+}
+
+/**
+ * The sessions that wait, each answered in place: one item is open at a time and holds what that session's own
+ * composer holds. The capsule's list is these, and so is the Overview's one piece of glass (Overview.tsx).
+ */
+export function WaitItems({ waiting, first, onOpen }: { waiting: Session[]; first?: string; onOpen?: () => void }) {
+  const needs = useNeeds();
+  const [picked, setPicked] = useState<string | null>(first ?? null);
+  // The item that is open: the one pressed, or the first that still waits.
+  const which = waiting.some((s) => s.id === picked) ? picked : waiting[0]?.id;
+  return (
+    <>
+      {waiting.map((s) => {
+        const isOpen = s.id === which;
+        return (
+          <div key={s.id} className="xl-wait-item" data-open={isOpen}>
+            <div className="xl-wait-head">
+              <button type="button" className="xl-wait-main" aria-expanded={isOpen} onClick={() => setPicked(s.id)}>
+                <StateGlyph state={s.state} />
+                <span className="xl-wait-text">
+                  <span className="xl-card-title">{s.title}</span>
+                  {/* Open, a question or a plan shows itself; an approval keeps the line that says what it is for. */}
+                  {(!isOpen || s.state === 'approval') && <span className="xl-card-line">{s.state === 'approval' ? approval.title : s.line}</span>}
+                </span>
+              </button>
+              <span className="xl-wait-slot">
+                <span className="xl-wait-age">{s.age}</span>
+                <button
+                  type="button"
+                  className="xl-wait-go"
+                  aria-label={`Open ${s.title}`}
+                  data-tip="Open"
+                  data-tip-at="end"
+                  onClick={() => {
+                    needs.open(s.id);
+                    onOpen?.();
+                  }}
+                >
+                  <ArrowUpRight size={15} strokeWidth={1.9} />
+                </button>
+              </span>
+            </div>
+            {/* Only the open item holds its answer: a closed one keeps no fields waiting out of sight. */}
+            <Fold open={isOpen}>{isOpen && <Remote session={s} />}</Fold>
+          </div>
+        );
+      })}
     </>
   );
 }
@@ -296,7 +308,23 @@ export type SideData = Pick<typeof overview, 'branch' | 'added' | 'removed' | 'f
  * The side column. Its content is plain (the real app will supply it); what is judged is its container, so that is
  * a prop: four modules (as it was, and the default), one card, or a card that grows out of a button.
  */
-export function Modules({ open: asked, form = 'modules', onToggle, data = overview }: { open: boolean; form?: SideForm; onToggle?: () => void; data?: SideData }) {
+export function Modules({
+  open: asked,
+  form = 'modules',
+  onToggle,
+  data = overview,
+  file,
+  onFile,
+}: {
+  open: boolean;
+  form?: SideForm;
+  onToggle?: () => void;
+  data?: SideData;
+  /** The file on screen, when the page is a file's: its line is the current one. */
+  file?: string;
+  /** Opens a changed file as a tab; undefined for a file the lab holds no body of. */
+  onFile?: (path: string) => (() => void) | undefined;
+}) {
   const wide = useRoomForSide();
   const open = wide && asked;
   const every: { title: string; has: boolean; meta?: ReactNode; body: ReactNode }[] = [
@@ -318,8 +346,9 @@ export function Modules({ open: asked, form = 'modules', onToggle, data = overvi
           )}
           {data.files.map((f) => {
             const [dir, name] = split(f.path);
-            return (
-              <div key={f.path} className="xl-line">
+            const go = onFile?.(f.path);
+            const inside = (
+              <>
                 <span className="xl-line-text xl-fade">
                   {name} <span className="xl-quiet">{dir.replace(/\/$/, '')}</span>
                 </span>
@@ -327,6 +356,16 @@ export function Modules({ open: asked, form = 'modules', onToggle, data = overvi
                   <span className="xl-add">+{f.added}</span>
                   {f.removed > 0 && <span className="xl-del"> −{f.removed}</span>}
                 </span>
+              </>
+            );
+            // A changed file opens as a tab, beside its session; the one on screen is the current line.
+            return go ? (
+              <button key={f.path} type="button" className="xl-line" aria-current={f.path === file ? 'page' : undefined} onClick={go}>
+                {inside}
+              </button>
+            ) : (
+              <div key={f.path} className="xl-line">
+                {inside}
               </div>
             );
           })}

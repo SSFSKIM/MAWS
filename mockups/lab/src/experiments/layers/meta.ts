@@ -8,17 +8,57 @@ export const experiment: Experiment = {
   thesis:
     'Glass taken into the transcript: the colour field runs under the whole window, prose is read directly on it, and what the agent made that can be opened (a tool run, an edit, a running command) is a piece of glass standing over it.',
   notes: [
+    'New, and first: the two pages that were missing. Press "Overview" in the pane (key 4) and the bucket.ts tab (key 5). Both are meant to be this same design at the product\'s other scale; say where they are not.',
+    'Overview: twenty sessions, and one piece of glass. A session that is the agents\' business is one line on the field (unread first, then working, then at rest, told apart by the dot alone). The three that wait stand on glass at the top right: it is the orange capsule\'s list standing open, so Approve, the question\'s chips and the plan are answered there, one item open at a time. Answer one and watch it join the working lines; answer all three and the glass is gone. Rest on a line for where it runs.',
+    'A file: bucket.ts is the whole file read on the field, with no glass under it; what the session changed is a bar in the margin. In the side column press keys.ts or index.ts for a file with lines taken out, and for the marks beside the column that show where its changes are. Rest on a line for its number; press a line and the composer names it. The composer is the session\'s, one line until you click in it. Back in the session, rest on an edit\'s caption for the arrow that opens its file.',
+    'Four new switches, each with the form I chose first: sessions as lines or as cards; grouped by state or by project; code on the field or on a sheet; changes in the file or side by side.',
     'This is the design as you have answered it so far: Warm paper, the orange disc for "waiting on you", the drawing blurred behind text, everything lined up on the reading column, the right column as a button that opens, the system face. Every earlier position is still one chip away below.',
     'New, and first: the suggested set from the Choices board is in. Your own message is a wash, not glass; thinking is the first row of the run it led to; an edit is a caption and a sheet of code; what runs is a capsule; agents are chips; the queued message waits above the composer; the model appears as you approach the composer; stop and send are two things; usage is one drop. Tell me what looks wrong.',
     'The three sessions that wait can be opened now. Press "Fix flaky upload test", "Billing webhook audit" or "Offline sync design" in the pane (or their tabs, or the arrow in the list the orange capsule opens). Each is answered in its own composer: Approve or Deny, the question\'s chips one question at a time, Approve for the plan. Typing is always the other answer.',
     'The same answers from elsewhere: open the capsule (one item opens at a time), or rest on a waiting row for its card. Answer in either place and watch the other: the session goes back to work, its orange disc leaves the pane, the tab and the capsule, and the transcript keeps a record on your side of the column (your choices under each question; one mark and a word for a decision; an approved command starts running; an approved plan becomes the To do list).',
     'Look at the joins: a short transcript stands on the composer, so what a session waits on is beside the words that led to it; the queued message is outside the composer and the transcript thins out before it. Orange is spent on the disc only: Approve and Send are ink.',
     'Colour: Warm paper is the default now. Paper, the three other warm Papers and the earlier comparison set (Peach to Orange) are still on the switch. Painted form: the blurred drawing is the default; Everywhere shows the whole drawing, None is Open\'s plain ground.',
-    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 17.',
+    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 18.',
     'Cost: content on glass breaks the glass guideline on purpose; a second glass root runs inside the transcript; legibility depends on the field staying graded.',
   ],
-  scenes: ['session', 'settings', 'home'],
+  scenes: ['session', 'settings', 'home', 'overview', 'file'],
   knobs: [
+    {
+      id: 'sessions',
+      label: 'Overview: sessions',
+      default: 'rows',
+      options: [
+        { value: 'rows', label: 'Lines, and one glass for what waits' },
+        { value: 'cards', label: 'Cards' },
+      ],
+    },
+    {
+      id: 'by',
+      label: 'Overview: grouped',
+      default: 'state',
+      options: [
+        { value: 'state', label: 'By state' },
+        { value: 'project', label: 'By project' },
+      ],
+    },
+    {
+      id: 'code',
+      label: 'File: code',
+      default: 'field',
+      options: [
+        { value: 'field', label: 'On the field' },
+        { value: 'sheet', label: 'On a sheet' },
+      ],
+    },
+    {
+      id: 'diff',
+      label: 'File: changes',
+      default: 'inline',
+      options: [
+        { value: 'inline', label: 'In the file' },
+        { value: 'sides', label: 'Side by side' },
+      ],
+    },
     {
       id: 'colour',
       label: 'Colour',

@@ -7,7 +7,7 @@
 // two answers, a question's options one question at a time, a plan's decision. Typing is always the other answer.
 import { useCallback, useState, type KeyboardEvent } from 'react';
 import { ArrowUp, ChevronDown, ChevronRight, Folder, GitBranch, Plus, Square, X } from 'lucide-react';
-import { approval, composer, projects, question, type Session } from '../../content/fixtures';
+import { approval, composer, fleet, question, type Session } from '../../content/fixtures';
 import { Chips, useNeeds } from './needs';
 import { GBtn, isYours, Pop, Ring } from './parts';
 
@@ -15,7 +15,19 @@ import { GBtn, isYours, Pop, Ring } from './parts';
 const NEAR_FULL = 0.8;
 const pct = `${Math.round(composer.context * 100)}%`;
 
-export function Composer({ session, fresh }: { session?: Session; fresh?: boolean }) {
+export function Composer({
+  session,
+  fresh,
+  slim,
+  about,
+}: {
+  session?: Session;
+  fresh?: boolean;
+  /** On a file's page the composer rests as one line, so the file keeps the height; it is whole again under the caret. */
+  slim?: boolean;
+  /** What the next message is about: the line of the file the person pointed at. */
+  about?: { label: string; clear: () => void };
+}) {
   const { reply, draft } = useNeeds();
   const [text, setText] = useState('');
   const [held, setHeld] = useState(true);
@@ -29,8 +41,8 @@ export function Composer({ session, fresh }: { session?: Session; fresh?: boolea
   const wait = session && isYours(session.state) ? session.state : null;
   const running = session?.state === 'running';
   // The queued message of the fixtures belongs to the session that is on screen at first.
-  const queued = session?.id === 's1' && running && held;
-  const project = session ? projects.find((p) => p.sessions.some((s) => s.id === session.id)) : undefined;
+  const queued = session?.id === 's1' && running && held && !slim;
+  const project = session ? fleet.find((p) => p.sessions.some((s) => s.id === session.id)) : undefined;
   const id = session?.id ?? '';
 
   const q = question.questions[Math.min(step, question.questions.length - 1)]!;
@@ -107,6 +119,14 @@ export function Composer({ session, fresh }: { session?: Session; fresh?: boolea
           <Plus size={17} strokeWidth={1.75} />
         </GBtn>
         <span className="xl-grow" />
+        {about && (
+          <span className="xl-about">
+            {about.label}
+            <button type="button" className="xl-queued-x" aria-label={`Leave ${about.label} out`} onClick={about.clear}>
+              <X size={12} strokeWidth={2} />
+            </button>
+          </span>
+        )}
         <button type="button" ref={setEl} className="xl-chip" data-approach="" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
           {composer.model}
           <ChevronDown size={13} strokeWidth={2} />

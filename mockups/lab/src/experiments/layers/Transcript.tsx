@@ -4,7 +4,7 @@
 // What is running is one capsule that opens into its output. Agents that were started are chips with their own
 // state. Glass therefore means one thing here: something the agent made that can be opened.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ChevronRight, Sparkle } from 'lucide-react';
+import { ArrowUpRight, ChevronRight, Sparkle } from 'lucide-react';
 import { approval, overview, plan, sessionTranscripts, transcript, type Session, type TranscriptItem } from '../../content/fixtures';
 import { useGlassUnder, useKick } from './glass';
 import { Kept, Steps, useNeeds, waitOf } from './needs';
@@ -13,7 +13,7 @@ import { clock, cx, Fold, split } from './parts';
 type Of<K extends TranscriptItem['kind']> = Extract<TranscriptItem, { kind: K }>;
 
 /** A transcript block that stands on glass (or on the veil, or on an opaque card, as the Blocks knob says). */
-function Block({ className, radius = 18, clip, on = true, children, style }: { className?: string; radius?: number; clip?: HTMLElement | null; on?: boolean; children: ReactNode; style?: React.CSSProperties }) {
+export function Block({ className, radius = 18, clip, on = true, children, style }: { className?: string; radius?: number; clip?: HTMLElement | null; on?: boolean; children: ReactNode; style?: React.CSSProperties }) {
   const ref = useRef<HTMLDivElement>(null);
   useGlassUnder(ref, { radius, clip, on });
   return (
@@ -24,7 +24,7 @@ function Block({ className, radius = 18, clip, on = true, children, style }: { c
 }
 
 /** One grey caption that opens in place: its chevron and its duration wait for the pointer. */
-function Folded({ caption, time, startOpen, file, children }: { caption: ReactNode; time?: string; startOpen?: boolean; file?: boolean; children: (clip: HTMLElement | null, shown: boolean) => ReactNode }) {
+function Folded({ caption, time, startOpen, file, after, children }: { caption: ReactNode; time?: string; startOpen?: boolean; file?: boolean; after?: ReactNode; children: (clip: HTMLElement | null, shown: boolean) => ReactNode }) {
   const [open, setOpen] = useState(!!startOpen);
   // The card's glass exists while it is open and for the length of its closing.
   const [shown, setShown] = useState(!!startOpen);
@@ -53,6 +53,7 @@ function Folded({ caption, time, startOpen, file, children }: { caption: ReactNo
         <ChevronRight className="xl-cap-chev" size={13} strokeWidth={2} />
         {time && <span className="xl-cap-time">{time}</span>}
       </button>
+      {after}
       <Fold open={open} clipRef={setClip}>
         {children(clip, shown)}
       </Fold>
@@ -91,12 +92,21 @@ function Run({ item, thought, startOpen }: { item: Of<'tools'>; thought?: Of<'th
 }
 
 /** An edit: its file is a caption on the field, and the glass holds the code. A run of changed lines is one bar. */
-function Code({ item }: { item: Of<'edit'> }) {
+function Code({ item, session }: { item: Of<'edit'>; session: string }) {
   const [dir, name] = split(item.file);
+  // The passage opens as its whole file, in a tab beside this session.
+  const open = useNeeds().file(item.file, session);
   return (
     <Folded
       startOpen
       file
+      after={
+        open && (
+          <button type="button" className="xl-cap-go" aria-label={`Open ${name} in a tab`} data-tip="Open" onClick={open}>
+            <ArrowUpRight size={15} strokeWidth={1.9} />
+          </button>
+        )
+      }
       caption={
         <>
           <span className="xl-cap-name">{name}</span>
@@ -189,7 +199,7 @@ function Capsule({ command, from, tail }: { command: string; from: number; tail?
   );
 }
 
-function Item({ item, thought, open }: { item: TranscriptItem; thought?: Of<'thought'>; open: boolean }) {
+function Item({ item, thought, open, session }: { item: TranscriptItem; thought?: Of<'thought'>; open: boolean; session: string }) {
   switch (item.kind) {
     case 'user':
       return (
@@ -218,7 +228,7 @@ function Item({ item, thought, open }: { item: TranscriptItem; thought?: Of<'tho
     case 'tools':
       return <Run item={item} thought={thought} startOpen={open} />;
     case 'edit':
-      return <Code item={item} />;
+      return <Code item={item} session={session} />;
     case 'agents':
       return (
         <div className="xl-folded xl-agents">
@@ -268,7 +278,7 @@ export function Transcript({ session, open }: { session: Session; open: boolean 
         const before = items[i - 1];
         const startOpen = item.kind === 'tools' && firstRun && open;
         if (item.kind === 'tools') firstRun = false;
-        return <Item key={i} item={item} thought={before?.kind === 'thought' ? before : undefined} open={startOpen} />;
+        return <Item key={i} item={item} thought={before?.kind === 'thought' ? before : undefined} open={startOpen} session={session.id} />;
       })}
       {wait === 'plan' && <Plan />}
       {/* What the transcript keeps of an answer; an approved command then runs, as any command does. */}

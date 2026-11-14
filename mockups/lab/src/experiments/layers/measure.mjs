@@ -67,7 +67,8 @@ function collect() {
     const cs = getComputedStyle(scroller);
     const t = parseFloat(cs.getPropertyValue('--vitrea-bar-inset-top')) || 46;
     // A message that waits above the composer lengthens the faded band by its own height (`--xl-above`).
-    const bt = scroller.classList.contains('xl-scroll') ? (parseFloat(cs.getPropertyValue('--vitrea-bar-inset-bottom')) || 150) + (parseFloat(cs.getPropertyValue('--xl-above')) || 0) : -40;
+    // A page with no bar at its foot (the Overview) fades only over its last 28 px.
+    const bt = scroller.dataset.foot === 'none' ? -6 : scroller.classList.contains('xl-scroll') ? (parseFloat(cs.getPropertyValue('--vitrea-bar-inset-bottom')) || 150) + (parseFloat(cs.getPropertyValue('--xl-above')) || 0) : -40;
     return r.top < b.top + t + 38 || r.bottom > b.bottom - bt - 38;
   };
   // A line counts only where it can be seen: its centre and both ends must be the topmost thing there, so a

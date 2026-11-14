@@ -3,7 +3,7 @@
 // standing on Field's pane.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Archive, ArrowLeft, ChevronRight, Ellipsis, GitBranch, LayoutGrid, Monitor, Pencil, Pin, Settings as Gear, Shapes, SlidersHorizontal, SquarePen } from 'lucide-react';
-import { destinations, pinned, projects, settingsNav, settingsSections, usage, type Session } from '../../content/fixtures';
+import { destinations, fleet, pinned, settingsNav, settingsSections, usage, type Session } from '../../content/fixtures';
 import type { SceneId } from '../../lab/types';
 import { Remote, useNeeds } from './needs';
 import { Drop, Fold, isYours, Pop, StateGlyph } from './parts';
@@ -100,7 +100,10 @@ function Usage() {
 
 function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene' | 'live' | 'at' | 'go' | 'card'>) {
   const needs = useNeeds();
-  const [openIds, setOpenIds] = useState(() => new Set(projects.filter((p) => p.open).map((p) => p.id)));
+  // The pane lists every project the Overview draws from; the ones it keeps closed are a line each.
+  const [openIds, setOpenIds] = useState(() => new Set(fleet.filter((p) => p.open).map((p) => p.id)));
+  // A file's page belongs to its session: the session's row stays the current one.
+  const within = scene === 'session' || scene === 'file';
   const [menu, setMenu] = useState<{ id: string; el: HTMLElement } | null>(null);
   const [menuEl, setMenuEl] = useState<HTMLElement | null>(null);
   const [card, setCard] = useState<{ id: string; el: HTMLElement } | null>(null);
@@ -139,7 +142,7 @@ function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene'
   const closeCard = useCallback(() => setCard(null), []);
   const closeMenu = useCallback(() => setMenu(null), []);
 
-  const all = [...pinned, ...projects.flatMap((p) => p.sessions)].map(live);
+  const all = [...pinned, ...fleet.flatMap((p) => p.sessions)].map(live);
   const shown = card ? all.find((s) => s.id === card.id) : undefined;
   const lastShown = useRef(shown);
   if (shown) lastShown.current = shown;
@@ -155,13 +158,13 @@ function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene'
           if (el) rows.current.set(s.id, el);
         }}
         className="xl-row"
-        data-selected={scene === 'session' && s.id === at}
+        data-selected={within && s.id === at}
         data-weight={weight}
         data-held={menu?.id === s.id || card?.id === s.id}
         onPointerEnter={(e) => enter(s.id, e.currentTarget)}
         onPointerLeave={leave}
       >
-        <button type="button" className="xl-row-main" aria-current={scene === 'session' && s.id === at ? 'page' : undefined} onClick={() => (needs.open(s.id), setCard(null))}>
+        <button type="button" className="xl-row-main" aria-current={within && s.id === at ? 'page' : undefined} onClick={() => (needs.open(s.id), setCard(null))}>
           <span className="xl-fade">{s.title}</span>
         </button>
         <span className="xl-slot">
@@ -193,8 +196,8 @@ function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene'
       {destinations.map((d) => {
         const Icon = destIcon[d.icon];
         return (
-          <div key={d.id} className="xl-row" data-selected={d.id === 'new' && scene === 'home'}>
-            <button type="button" className="xl-row-main" onClick={() => d.id === 'new' && go('home')}>
+          <div key={d.id} className="xl-row" data-selected={(d.id === 'new' && scene === 'home') || (d.id === 'overview' && scene === 'overview')}>
+            <button type="button" className="xl-row-main" aria-current={d.id === scene ? 'page' : undefined} onClick={() => (d.id === 'new' ? go('home') : d.id === 'overview' ? go('overview') : undefined)}>
               <Icon size={16} strokeWidth={1.75} />
               <span className="xl-fade">{d.label}</span>
             </button>
@@ -210,7 +213,7 @@ function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene'
         {pinned.map(row)}
       </div>
 
-      {projects.map((p) => {
+      {fleet.map((p) => {
         const isOpen = openIds.has(p.id);
         return (
           <div className="xl-group" key={p.id} style={p.open ? undefined : { marginTop: 4 }}>
