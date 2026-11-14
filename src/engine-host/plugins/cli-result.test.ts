@@ -286,6 +286,14 @@ describe('the outcome of a custom add', () => {
         expect(JSON.stringify(outcome).includes(value.trim())).toBe(false);
       }
     }
+    // a line that begins with the value: a trim before the test would cut its leading space and pass the line
+    for (const value of [' value-one', '\u00a0value-one']) {
+      for (const entry of [{ ...stdio, env: [{ name: 'FILES_PROBE_KEY', value }] }, { ...http, headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
+        const outcome = failed(`${value} was refused\n`, entry);
+        expect(outcome, JSON.stringify(value)).toEqual(withheld(entry));
+        expect(JSON.stringify(outcome).includes(value.trim())).toBe(false);
+      }
+    }
     // what is forwarded is still the trimmed line
     expect(failed('  MCP server files-probe already exists in user config  \n')).toMatchObject({ ok: false, error: { message: 'MCP server files-probe already exists in user config', failureCode: null } });
   });

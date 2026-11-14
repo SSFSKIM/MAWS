@@ -574,6 +574,27 @@ describe('a custom add and the rule about values', () => {
     }
   }, 30_000); // ten runs of the fake CLI
 
+  // the same, with the value at the head of the line: a trim before the test would cut its leading space and pass the line
+  it('withholds a line that begins with a value led by a space or a non-breaking space, in a header and in a variable, from output, done and the replay', async () => {
+    for (const value of [' lead-space-one', '\u00a0lead-nbsp-two']) {
+      for (const entry of [{ type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }, { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
+        rmSync(join(fake, 'go'), { force: true });
+        behave(`printf '%s\\n' '${value} was refused' >&2\necho "a clean line" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '%s\\n' '${value} was refused' >&2\nexit 1\n`);
+        const { runner: r, events, done } = make();
+        const { opId } = await r.start('mcp-add', { name: 'files-probe', scope: 'user', entry }, cwd, bin);
+        await until(() => events.some((e) => e.opId === opId && e.line === 'a clean line'), 'the clean line');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const replay = r.running();
+        writeFileSync(join(fake, 'go'), '');
+        const end = await done(opId);
+        expect(end.outcome, JSON.stringify(value)).toMatchObject({ ok: false, error: { code: 'cli_failed', failureCode: 'message_withheld' } });
+        expect(events.filter((e) => e.opId === opId && e.phase === 'output').map((e) => e.line)).toEqual(['a clean line']);
+        for (const said of [...events, ...replay]) expect(JSON.stringify(said).includes(value.trim()), JSON.stringify(value)).toBe(false);
+        await r.stop();
+      }
+    }
+  }, 30_000); // four runs of the fake CLI
+
   // R10: the engine's read-back error is withheld whole by its phrase, whatever fragment of the file it quotes
   it('withholds the engine’s read-back error whole from output, done, the replay and the log, tells the change, and forwards a duplicate-name line', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
