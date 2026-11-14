@@ -85,9 +85,13 @@ const installedKeys=()=>Object.keys(readJson(INSTALLED)?.plugins??{});
 const PROBE_RE=/plugin:|m4-|twin|alpha|tpl|mcp_status|mcpServers/;
 function shrink(v){if(Array.isArray(v)){if(v.length>24){const kept=v.filter(x=>PROBE_RE.test(JSON.stringify(x)));return {trimmedArray:v.length,kept:kept.map(shrink)};}return v.map(shrink);}
  if(v&&typeof v==='object'){const o={};for(const [k,x] of Object.entries(v))o[k]=shrink(x);return o;}if(typeof v==='string'&&v.length>4000)return v.slice(0,600)+`…[${v.length} chars]`;return v;}
-function slim(f){const s=JSON.stringify(f);if(s.length>4000&&!PROBE_RE.test(s)){if(f.type==='control_response'&&f.response&&typeof f.response==='object'){const i=f.response.response;return {...f,response:{...f.response,response:i&&typeof i==='object'?{trimmedBytes:JSON.stringify(i).length,keys:Object.keys(i)}:i}};}
+// initialize's answer (commands, agents, models, account) is reduced to its size and keys whatever it names.
+function slim(f){const s=JSON.stringify(f);if(s.length>4000&&(!PROBE_RE.test(s)||f.response?.response?.commands)){if(f.type==='control_response'&&f.response&&typeof f.response==='object'){const i=f.response.response;return {...f,response:{...f.response,response:i&&typeof i==='object'?{trimmedBytes:JSON.stringify(i).length,keys:Object.keys(i)}:i}};}
  if(f.type==='control_request'&&f.request)return {...f,request:{subtype:f.request.subtype,trimmedBytes:JSON.stringify(f.request).length}};}return shrink(f);}
-function trimJournal(file){if(!existsSync(file))return;const rows=readFileSync(file,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)).filter(r=>r.frame?.type!=='stream_event');
+// The maws SDK server's own traffic (mcp_message requests and their answers) is dropped too: no statement reads it.
+function trimJournal(file){if(!existsSync(file))return;let rows=readFileSync(file,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)).filter(r=>r.frame?.type!=='stream_event');
+ const sdk=new Set(rows.filter(r=>r.frame?.type==='control_request'&&r.frame.request?.subtype==='mcp_message').map(r=>r.frame.request_id));
+ rows=rows.filter(r=>!(r.frame?.type==='control_request'&&r.frame.request?.subtype==='mcp_message')&&!(r.frame?.type==='control_response'&&sdk.has(r.frame.response?.request_id)));
  writeFileSync(file,rows.map(r=>redact(anon(JSON.stringify({...r,frame:slim(r.frame)})))).join('\n')+'\n');}
 
 const isPlugin=s=>typeof s?.name==='string'&&s.name.startsWith('plugin:');
@@ -108,13 +112,13 @@ async function session(name,what,extra={}){
   const s=prompt(p,'/cost');const res=await waitFor(p,f=>f.type==='result',{after:s.seq,timeout:60000});
   const init=p.frames.find(r=>sys(r.frame,'init'));
   row.init=init?{seq:init.seq,pluginServers:(init.frame.mcp_servers??[]).filter(isPlugin),entryKeys:[...new Set((init.frame.mcp_servers??[]).flatMap(x=>Object.keys(x)))].sort(),plugins:(init.frame.plugins??[]).filter(x=>!/@builtin/.test(x.source??'')).map(x=>({name:x.name,source:x.source,path:x.path,keys:Object.keys(x).sort()})),plugin_errors:init.frame.plugin_errors,plugin_warnings:init.frame.plugin_warnings,mcp_server_errors:init.frame.mcp_server_errors}:null;
-  row.result={seq:res?.seq??null,subtype:res?.subtype??null,costUsd:res?.total_cost_usd??null};
+  row.result={seq:p.seq,subtype:res?.subtype??null,costUsd:res?.total_cost_usd??null};
  });
  row.reached=reached(t0);
  const J=FIXTURES+TAG+'-'+name+'.jsonl';
  row.stderr=existsSync(J)?readFileSync(J,'utf8').split('\n').filter(l=>/"direction":"stderr"/.test(l)).map(l=>anon(JSON.parse(l).frame?.text??'').slice(0,300)).slice(0,10):[];
  const D=existsSync(dbg)?readFileSync(dbg,'utf8').split('\n'):[];
- row.debug={lines:D.length,matched:[...new Set(D.filter(l=>DEBUG_RE.test(l)&&!/CA certs|Starting connection|Successfully connected|Connection established|connected with subscribe|Initializing HTTP|Node version|Environment:|transport options|Plugin autoupdate/.test(l)).map(l=>anon(l.replace(/^\S+\s+/,'')).slice(0,400)))].slice(0,40)};
+ row.debug={lines:D.length,matched:[...new Set(D.filter(l=>DEBUG_RE.test(l)&&!/CA certs|Starting connection|Successfully connected|Connection established|connected with subscribe|Initializing HTTP|Node version|Environment:|transport options|Plugin autoupdate|cc-plugin|hooks module|hooks native|plugin\.register|getPluginSkills|Checking plugin|Total plugin|settings\.read|engine\.create|getSkills|transport created|Keeping |No token data|connection closed|Cleared connection|startupWorkGate|skipping migration|Initialized versioned|installPluginsForHeadless|Testing basic|Parsed URL|loopback address|Client created|tools\/list|capabilities|Connected to|Calling MCP/.test(l)).map(l=>anon(l.replace(/^\S+\s+/,'')).slice(0,400)))].slice(0,40)};
  if(existsSync(dbg))rmSync(dbg);
  journals.push(J);
  keep(row);
