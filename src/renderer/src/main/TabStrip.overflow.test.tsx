@@ -31,3 +31,24 @@ it('does not spend a control on overflow when the strip fits', () => {
   act(() => render(<TabStrip pane={0} split={false} idPrefix="fits" />));
   expect(screen.queryByRole('button', { name: 'All tabs' })).toBeNull();
 });
+
+// UX wave U7b (the branch review): a page widens the title bar over an open side column, and the browser clamps the
+// hidden strip's offset to what the wider strip allows; Back gives the strip the offset it had when the page opened.
+it('Back shows the strip at the offset it had when a page opened, after the wider strip under the page clamped it', () => {
+  vi.spyOn(HTMLElement.prototype, 'scrollWidth', 'get').mockReturnValue(480);
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(180);
+  act(() => render(<TabStrip pane={0} split={false} idPrefix="offset" />));
+  const strip = screen.getByRole('tablist');
+  act(() => {
+    strip.scrollLeft = 120;
+    strip.dispatchEvent(new Event('scroll'));
+  });
+  act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+  act(() => {
+    strip.scrollLeft = 0; // the wider strip fits: the browser's clamp
+    strip.dispatchEvent(new Event('scroll'));
+  });
+  act(() => useLayout.getState().closeDestination());
+  expect(strip.scrollLeft).toBe(120);
+});
+

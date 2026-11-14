@@ -9,12 +9,12 @@
 import { DropdownMenu } from 'radix-ui';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { Icon, IconButton } from '../app/IconButton';
-import { useEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { NEW_CHAT, newChat, requestCloseTab, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { SESSION_DRAG_TYPE } from '../sidebar/SessionRow';
 import { dragAccepted, dropPanelRecord, endDrag, moveMainTab, PANEL_TAB_DRAG_TYPE } from '../shell/transfer'; // P4-B3
-import { useLayout } from '../stores/layout';
+import { pageOpen, useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { Tab, tabName, useTabLabel, TAB_DRAG_TYPE } from './Tab';
@@ -82,6 +82,20 @@ export function TabStrip({ pane, split, idPrefix }: { pane: Pane; split: boolean
   useEffect(() => {
     strip.current?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
   }, [activeTabId]);
+
+  // UX wave U7b (the branch review): a page widens the title bar across an open side column, which clamps this hidden
+  // strip's offset; Back gives the strip the offset it had when the page opened. It is read in the store's write that
+  // opens the page, before the wider strip is drawn, and given back before what keeps the tab in front in view runs.
+  const page = useLayout(pageOpen);
+  const offsetAtPage = useRef<number | null>(null);
+  useEffect(() => useLayout.subscribe((now, before) => {
+    if (pageOpen(now) && !pageOpen(before)) offsetAtPage.current = strip.current?.scrollLeft ?? null;
+  }), []);
+  useLayoutEffect(() => {
+    if (page || offsetAtPage.current === null) return;
+    if (strip.current) strip.current.scrollLeft = offsetAtPage.current;
+    offsetAtPage.current = null;
+  }, [page]);
 
   if (!state) return null;
   const tabs = state.tabs;
