@@ -108,11 +108,12 @@
   },
   {
     "at": "2026-09-28T10:20:01.250Z",
+    "body": "Skip node_modules entirely.",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:57:1",
     "kind": "agent_message",
-    "text": "Sent message to Survey src for TODOs: Skip node_modules entirely.",
+    "text": "Sent to Survey src for TODOs: Skip node_modules entirely.",
     "to": {
       "agentId": "ad1synthagent0001",
       "glyph": 0,

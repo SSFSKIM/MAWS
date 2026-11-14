@@ -16,6 +16,7 @@ import {
   ToolUseIdSchema,
 } from './ids';
 import { PaneRosterSchema, PromptFillModeSchema, SURFACE_ASKS } from '../engine/surface'; // R2
+import { ArrivalEntrySchema } from '../engine/arrival-schema'; // UX wave U3 (UC-2)
 // E1 start
 import { PaneSchema } from '../maws/panes';
 import { AskAnswerSchema, AskQuestionSchema, DeliveredFileSchema, ShowPaneOpenedSchema } from '../maws/tools';
@@ -185,6 +186,12 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
       z.strictObject({ part: z.literal('input'), command: z.string() }),
       z.strictObject({ part: z.literal('output'), stdout: z.string(), stderr: z.string(), exitCode: z.number() }),
     ]).nullable(),
+    // UX wave U3 (UC-2; the charter's X1, amended 2026-11-12): the arrivals its carrier holds of class `task`, `schedule`,
+    // `answer`, `wake` or `consent`, absent when it holds none. An entry of a class this build does not know is ignored
+    // (read through `carriedOf`). Synthetic messages under one `messageUuid` are one arrival: the first carrier stands and
+    // a later one is another form of it, an empty list withdraws it, the next carrier then places it anew, and a list of
+    // unknown entries alone does neither
+    arrival: z.array(ArrivalEntrySchema).optional(),
   }),
   event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable() }),
   event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['skipped', 'not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
@@ -243,7 +250,13 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     taskId: TaskIdSchema,
     patch: z.strictObject({ status: z.string().optional(), description: z.string().optional(), endTime: z.number().optional(), error: z.string().optional(), isBackground: z.boolean().optional() }),
   }),
-  event('task.notification', { taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), status: TaskOutcomeSchema, summary: z.string(), outputFile: nullableString(), reason: nullableString() }),
+  event('task.notification', {
+    taskId: TaskIdSchema, toolUseId: ToolUseIdSchema.nullable(), status: TaskOutcomeSchema, summary: z.string(), outputFile: nullableString(), reason: nullableString(),
+    // UX wave U3 (the whole-branch review's finding 3; minor 42): set by a normaliser that reads arrivals, whose task's
+    // end is told by an arrival, so the event draws no line of its own; absent on an older host's, whose event is the
+    // end's one telling
+    arrivals: z.literal(true).optional(),
+  }),
   event('tasks.snapshot', { tasks: z.array(z.strictObject({ taskId: TaskIdSchema, taskType: z.string(), description: z.string(), ambient: z.boolean(), parentTaskId: TaskIdSchema.optional() })) }),
   event('workflow.progress', { taskId: TaskIdSchema, workflowName: nullableString(), progress: z.unknown() }), // shape fixed by C2's findings; kept opaque here
   event('boundary.compaction', { trigger: z.string(), preTokens: z.number(), postTokens: z.number().nullable(), logicalParentUuid: MessageUuidSchema.nullable(), historical: z.boolean() }),

@@ -943,7 +943,7 @@ test('every fixture renders its whole work area expanded', async ({ harness }) =
   const fixtures = (await fixtureNames(page)).filter((name) => !name.startsWith('synthetic/'));
   expect(fixtures.length).toBeGreaterThan(40);
   test.setTimeout(60_000 + fixtures.length * PER_FIXTURE_MS);
-  const WORK_KINDS = ['group', 'cell', 'subagent', 'agent_message', 'bash', 'plan', 'question', 'boundary', 'error'];
+  const WORK_KINDS = ['group', 'cell', 'subagent', 'agent_message', 'notice', 'bash', 'plan', 'question', 'boundary', 'error']; // UX wave U3: `notice` (pass3/stop-task draws one)
   const seen = new Map<string, number>();
   for (const fixture of fixtures) {
     await loadAll(page, fixture);

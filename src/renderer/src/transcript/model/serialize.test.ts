@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import { serializeRows } from './serialize';
-import { BASH_RESULT, builder } from './test-events';
+import { BASH_RESULT, builder, uuid } from './test-events';
 import { configureTime } from './time';
 
 const rows = (events: SessionEvent[]) => rowsOf(withAllExpanded(applyEvents(createState(null, null), events)));
@@ -79,10 +79,28 @@ describe('serializeRows', () => {
       '- Agents: 2 subagents, 0 teammates, 1 peer session',
       '- Agents: Messaging is off.',
       '- Listing the agents was never answered', // its turn ended with no result (scale-review C scalpel-1#1)
-      '- Sent to peer-b: first\n  > first\n  > second',
-      '- Report from a1\n  > done\n  > all of it',
-      '- Sent to peer-c: padded',
+      '- Sent to @peer-b: first\n  > first\n  > second', // U3 (O-12): the message line's words, a peer as @name
+      '- Report from a1: done\n  > done\n  > all of it', // U3 (O-12): a hand-back's line carries the report's first line
+      '- Sent to @peer-c: padded',
       '- Message from a1: note\n  > note\n  > more',
+    ].join('\n\n'));
+  });
+
+  // UX wave U3 (M2): a notice copies as its line, with the duration the engine gave and what opens under it quoted; the
+  // person's consent as its one line
+  it('renders a notice as its line and its detail, and a consent prompt as its line', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('c1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('c1'), content: 'Permission granted for this exact command only…', isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'echo `date`' }] });
+    b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [
+      { class: 'task', taskId: 'a1', toolUseId: null, runId: 'r1', outcome: 'completed', summary: 'Agent "Survey notes" finished', durationMs: 65_000, outputFile: null, detail: 'Found three notes.\nTwo are stale.' },
+      { class: 'wake' },
+    ] });
+    b.end(['c1']);
+    expect(serializeRows(rows(b.events).filter((row) => row.kind === 'notice' || row.kind === 'user'))).toBe([
+      '*Agent "Survey notes" finished · 1m 05s*\n> Found three notes.\n> Two are stale.',
+      '*You approved `` echo `date` ``*', // a fence longer than the subject's own backticks
+      '*sminos bridge woke the session to read a message it had not read*',
     ].join('\n\n'));
   });
 

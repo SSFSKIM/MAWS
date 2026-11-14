@@ -108,17 +108,21 @@
     "turnId": "turn:0b4385a8-900b-4da0-8e62-59fe1aff7066"
   },
   {
-    "at": "2026-10-06T10:54:24.943Z",
+    "at": "2026-10-06T10:54:24.940Z",
     "autoDenied": 0,
     "denied": 0,
     "endedAt": "2026-10-06T10:54:31.815Z",
     "expanded": true,
     "files": [],
     "firstDeniedCell": null,
-    "id": "divider:turn:ereplay:journal:71:1",
+    "id": "divider:turn:ereplay:journal:73:0",
     "kind": "divider",
+    "opener": {
+      "class": "peer",
+      "line": "Message from @repo-b-gen1il-79: E7 probe: hello from B"
+    },
     "origin": "peer",
-    "startedAt": "2026-10-06T10:54:24.943Z",
+    "startedAt": "2026-10-06T10:54:24.940Z",
     "state": "completed",
     "summary": {
       "autoDenied": 0,
@@ -152,13 +156,13 @@
       }
     },
     "toolCalls": 1,
-    "turnId": "turn:ereplay:journal:71:1"
+    "turnId": "turn:ereplay:journal:73:0"
   },
   {
     "at": "2026-10-06T10:54:24.940Z",
     "direction": "between",
     "from": null,
-    "id": "agentmsg:replay:journal:73:1",
+    "id": "agentmsg:replay:journal:73:2",
     "kind": "agent_message",
     "peer": {
       "body": "E7 probe: hello from B",
@@ -177,9 +181,9 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-b-gen1il-79: E7 probe: hello from B",
+    "text": "Message from @repo-b-gen1il-79: E7 probe: hello from B",
     "to": null,
-    "turnId": "turn:ereplay:journal:71:1"
+    "turnId": "turn:ereplay:journal:73:0"
   },
   {
     "agent": null,
@@ -227,7 +231,7 @@
     "status": "done",
     "toolName": "ToolSearch",
     "toolUseId": "toolu_012KymREdAbAQBqhzMBbRXdF",
-    "turnId": "turn:ereplay:journal:71:1"
+    "turnId": "turn:ereplay:journal:73:0"
   },
   {
     "at": "2026-10-06T10:54:30.247Z",
@@ -250,9 +254,9 @@
       "summary": "Respond to peer session probe",
       "toolUseId": "toolu_01Hjvw4bRrU1xo6YfEsM31Lj"
     },
-    "text": "Sent to repo-b-gen1il-79: Hello from A — received your probe message.",
+    "text": "Sent to @repo-b-gen1il-79: Hello from A — received your probe message.",
     "to": null,
-    "turnId": "turn:ereplay:journal:71:1"
+    "turnId": "turn:ereplay:journal:73:0"
   },
   {
     "at": "2026-10-06T10:54:31.720Z",
@@ -264,7 +268,7 @@
     "messageUuid": "92f5e2c0-aa9c-45a6-bc18-3fcebfe89435",
     "model": "claude-haiku-4-5-20251001",
     "phase": "answer",
-    "turnId": "turn:ereplay:journal:71:1"
+    "turnId": "turn:ereplay:journal:73:0"
   },
   {
     "at": "2026-10-06T10:54:47.822Z",
@@ -348,7 +352,7 @@
       "summary": null,
       "toolUseId": "toolu_014MYinuDDFrreJtW6nkbeVh"
     },
-    "text": "Sent to repo-b-gen1il-79: E7 probe: reply from A",
+    "text": "Sent to @repo-b-gen1il-79: E7 probe: reply from A",
     "to": null,
     "turnId": "turn:fab15aee-8755-4d22-be95-fe6a693bb43e"
   },
@@ -487,7 +491,7 @@
       "summary": null,
       "toolUseId": null
     },
-    "text": "Message from repo-b-gen1il-79: E7 probe: second message while you work",
+    "text": "Message from @repo-b-gen1il-79: E7 probe: second message while you work",
     "to": null,
     "turnId": "turn:d6dcf359-401e-4c0c-b982-082a8b388515"
   },
@@ -585,7 +589,7 @@
       "summary": null,
       "toolUseId": "toolu_01KC8uNWxWQ5zXJ7EU6Fh8nT"
     },
-    "text": "Sent to nobody-e7: E7 probe: nobody",
+    "text": "Sent to @nobody-e7: E7 probe: nobody",
     "to": null,
     "turnId": "turn:c762441a-e67e-4d7d-bf40-f40a32c465ec"
   },

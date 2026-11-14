@@ -8,10 +8,10 @@ import { resultInput, toolInputs, withToolProps, type ToolInput } from './adapte
 import { useTranscriptSurface } from './context';
 
 export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = false }: { cell: Cell; turnId: TurnId | null; standalone?: boolean; focusable?: boolean }) {
-  const { appSessionId, turn } = useTranscriptSurface({ turnId });
+  const { appSessionId, state, turn } = useTranscriptSurface({ turnId });
   const attached = useSurfaceAttached(appSessionId);
   const hooked = useSurfaceHooked(appSessionId, 'ToolUse');
-  const inputs = toolInputs(cell, turn);
+  const inputs = toolInputs(cell, turn, state?.ui.revealed);
   // A merged read remains MAWS's one merged row unless a ToolUse hook owns the calls. When hook knowledge is not
   // available, ask each call but give only the first the merged native; a later hooked answer unfolds the calls.
   if (!inputs.length || !attached || hooked === false) return <CellLine cell={cell} turnId={turnId} focusable={focusable} renderDetail={standalone && inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} /> : undefined} />;

@@ -96,10 +96,12 @@ describe('the context a command the bridge ran gives the model', () => {
   it.each([
     ['a fresh load', (rows: JsonObject[]) => fresh(rows)],
     ['rows arriving live', (rows: JsonObject[], at: number) => live(rows, at)],
-  ] as const)('%s: draws no bubble, in its own turn or the next', async (_how, draw) => {
+  ] as const)('%s: draws no bubble of its context, in its own turn or the next', async (_how, draw) => {
     const { rows, at } = sitting();
     const drawn = await draw(rows, at);
-    expect(bubbles(drawn.rows)).toEqual(['Run a background shell.', 'Spawn two subagents.']);
+    // The command's own `system` row is the person's command now (the U3a document, M3: a command a terminal wrote as a
+    // `system` row): the engine writes a command the plugin ran in the same shape, so it draws its bubble too
+    expect(bubbles(drawn.rows)).toEqual(['Run a background shell.', '/rename o9-remote', 'Spawn two subagents.']);
     expect(drawn.rows.some((row) => row.kind === 'user' && row.text.includes('The user named this session'))).toBe(false);
     expect(drawn.rows.flatMap((row) => (row.kind === 'local_command' ? [row.text] : []))).toEqual(['Session renamed to: o9-remote']);
   });
