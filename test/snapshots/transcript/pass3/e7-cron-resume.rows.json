@@ -77,8 +77,37 @@
     "turnId": "turn:7a30e587-493f-47fc-a592-2397d7fe9938"
   },
   {
-    "at": "2026-10-06T11:16:59.033Z",
+    "at": "2026-10-06T11:16:58.271Z",
     "cells": [
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 562,
+          "kind": "thinking",
+          "recordedMs": 562,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:16:58.271Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktYiDKJC2MdfJzCbRiA:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:16:58.271Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
       {
         "agent": null,
         "background": false,
@@ -138,6 +167,35 @@
           "subagentLifecycle": null
         },
         "detail": {
+          "durationMs": 413,
+          "kind": "thinking",
+          "recordedMs": 413,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:17:00.140Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktYvhQEh6VpAi3FCnMR:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:17:00.140Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
           "input": {},
           "isError": false,
           "kind": "generic",
@@ -173,6 +231,35 @@
         "status": "done",
         "toolName": "CronList",
         "toolUseId": "toolu_019bfsoJm7MwnLf8fE8DcYdw"
+      },
+      {
+        "agent": null,
+        "background": false,
+        "category": "other",
+        "classification": {
+          "category": "other",
+          "denial": null,
+          "groupable": true,
+          "humanDecision": false,
+          "safeguard": "not_evaluated",
+          "startsGroup": false,
+          "subagentLifecycle": null
+        },
+        "detail": {
+          "durationMs": 862,
+          "kind": "thinking",
+          "recordedMs": 862,
+          "text": ""
+        },
+        "endedAt": "2026-10-06T11:17:02.095Z",
+        "expanded": true,
+        "id": "cell:think:msg_011CfktZ3G3efS6dW3WALNVx:0",
+        "label": "Thought",
+        "paths": [],
+        "startedAt": "2026-10-06T11:17:02.095Z",
+        "status": "done",
+        "toolName": "thinking",
+        "toolUseId": null
       }
     ],
     "counts": {

@@ -402,7 +402,7 @@
     },
     "expanded": true,
     "icon": "exploration",
-    "id": "group:cell:think:msg_explorationandweb_007:0",
+    "id": "group:cell:toolu_synth_x_grep",
     "kind": "group",
     "state": "completed",
     "summary": "Searched code, searched for files, read 6 files",

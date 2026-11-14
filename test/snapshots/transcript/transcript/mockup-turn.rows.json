@@ -281,7 +281,7 @@
     },
     "expanded": true,
     "icon": "exploration",
-    "id": "group:cell:think:msg_mockupturn_007:0",
+    "id": "group:cell:toolu_synth_mock_1",
     "kind": "group",
     "state": "completed",
     "summary": "Read 2 files, searched code, searched for files",
