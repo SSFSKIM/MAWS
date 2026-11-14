@@ -47,7 +47,7 @@ export const REMOTE_DRAFT_WORDS = {
  * A session's saves not yet taken: the newest draft handed to `save`, whether a save is out, whether one waits, and the
  * newest's sending again after a `timeout` (how many times since it was handed, and the one due).
  */
-type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null };
+type Saves = { latest: Draft | null; out: boolean; waiting: boolean; refused(draft: Draft | null): void; resent: number; resend: ReturnType<typeof setTimeout> | null; handed: number };
 const saves = new Map<AppSessionId, Saves>();
 /** The draft kept there as this run last knew it, by its `updatedAt` (null: none); absent while not known. */
 const bases = new Map<AppSessionId, string | null>();
@@ -126,12 +126,13 @@ export async function loadRemoteDraft(client: MawsBridge, appSessionId: AppSessi
 /** The draft saved there after the session's saves before it; `refused` takes the newest if the machine offers none. */
 export function saveRemoteDraft(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, refused: (draft: Draft | null) => void): void {
   const held = saves.get(appSessionId);
-  const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null };
+  const queue = held ?? { latest: draft, out: false, waiting: false, refused, resent: 0, resend: null, handed: 0 };
   if (held === undefined) saves.set(appSessionId, queue);
   queue.latest = draft;
   queue.waiting = true;
   queue.refused = refused;
   queue.resent = 0;
+  queue.handed = ++tickets; // in the session's order: a take-back's save taken after it supersedes it
   if (!queue.out) startPump(client, appSessionId, queue);
 }
 
@@ -246,7 +247,7 @@ const handedAfter = (appSessionId: AppSessionId, ticket: number): boolean => (or
  */
 export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppSessionId, draft: Draft | null, replaces: string): Promise<CommandResult<'session.drafts.set'> | { withheld: true }> {
   if (draft !== null && isStage(draft) && fitDraft(draft).withheld.length > 0) return { withheld: true };
-  return inOrder(appSessionId, async () => {
+  return inOrder(appSessionId, async (ticket) => {
     const fitted = draft === null ? { draft: null, withheld: [] } : fitDraft(nameWithheld(draft, leftThere.get(appSessionId) ?? []));
     const sent = fitted.draft === null || fitted.withheld.length === 0 ? fitted.draft : nameWithheld(fitted.draft, [...(leftThere.get(appSessionId) ?? []), ...fitted.withheld]);
     const result = await client.invoke('session.drafts.set', { appSessionId, draft: sent, replaces });
@@ -256,9 +257,20 @@ export async function saveRemoteDraftOnce(client: MawsBridge, appSessionId: AppS
       else bases.set(appSessionId, draft.updatedAt);
       if (draft !== null && fitted.withheld.length > 0) wholeHere.set(appSessionId, draft); // the rest stays in this run
       else wholeHere.delete(appSessionId);
+      retireOlderSaves(appSessionId, ticket);
     } else bases.delete(appSessionId); // what is kept there is read again before the next ordinary save
     return result;
   });
+}
+// This window's ordinary save of the session handed before a take-back's save that was taken is superseded by it, and
+// so is its sending again after a `timeout`: it would land over the message (the panel's finding 2). One handed after
+// it is newer and stays. Between windows the last writer wins, as decision 13 leaves it.
+function retireOlderSaves(appSessionId: AppSessionId, ticket: number): void {
+  const queue = saves.get(appSessionId);
+  if (queue === undefined || queue.handed > ticket) return;
+  if (queue.resend !== null) clearTimeout(queue.resend);
+  queue.resend = null;
+  saves.delete(appSessionId);
 }
 const isStage = (draft: Draft): boolean => typeof (draft.doc as { attrs?: { takeBack?: unknown } } | null)?.attrs?.takeBack === 'object';
 
