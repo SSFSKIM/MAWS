@@ -1,0 +1,468 @@
+/* Windows: every rule is under .x-windows. Glass hosts are portalled into the root's planes, which sit inside the
+   .x-windows container, so a host is always a descendant of the container and never of the wrapper it was written in:
+   hosts are placed with fixed positions from the container's layout variables. No rule here paints a background,
+   border, shadow or filter on a host (.x-windows-host); everything drawn is on a child. */
+
+@font-face {
+  font-family: 'X Windows Nunito';
+  src: url('../../../node_modules/@fontsource-variable/nunito/files/nunito-latin-wght-normal.woff2') format('woff2');
+  font-weight: 200 1000;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: 'X Windows Mono';
+  src: url('../../../node_modules/@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2') format('woff2');
+  font-weight: 100 800;
+  font-style: normal;
+  font-display: block;
+}
+
+.x-windows {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  /* layout */
+  --x-m: 14px; /* window to viewport edge */
+  --x-g: 66px; /* window to window, window to ornament: a first-frame value, replaced by the runtime's derived gap */
+  --x-sbw: 248px;
+  --x-sidew: 280px;
+  --x-bar: 44px; /* the ornament row above the session window */
+  --x-comp: 104px; /* the composer ornament */
+  --x-left: calc(var(--x-m) + var(--x-sbw) + var(--x-g));
+  --x-right: calc(var(--x-m) + var(--x-sidew) + var(--x-g));
+  /* geometry: the window corner is the concentric anchor */
+  --x-r: 28px;
+  --x-r8: 20px; /* a fill at an 8 px inset */
+  --x-r12: 16px; /* at 12 */
+  --x-r16: 12px; /* at 16 */
+  /* type */
+  --x-font: 'X Windows Nunito', ui-rounded, system-ui, 'Apple SD Gothic Neo', sans-serif;
+  --x-mono: 'X Windows Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* the one colour */
+  --x-orange: #fd780f;
+  --x-on-orange: #2b1200;
+  /* motion */
+  --x-ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --x-spring: cubic-bezier(0.3, 1.36, 0.5, 1);
+  --x-layout: 460ms;
+  font-family: var(--x-font);
+  font-size: 13.5px;
+  line-height: 1.4;
+  font-weight: 600;
+  letter-spacing: 0.006em;
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+  cursor: default;
+  user-select: none;
+}
+.x-windows[data-sb='closed'] { --x-left: var(--x-m); }
+.x-windows[data-side='closed'] { --x-right: var(--x-m); }
+.x-windows *, .x-windows *::before, .x-windows *::after { box-sizing: border-box; }
+.x-windows :where(h1, h2, h3, p, ul, ol, pre, figure) { margin: 0; padding: 0; }
+.x-windows :where(ul, ol) { list-style: none; }
+.x-windows :where(button, input, textarea) { font: inherit; letter-spacing: inherit; color: inherit; }
+.x-windows :where(button) { appearance: none; background: none; border: 0; padding: 0; cursor: default; }
+.x-windows :where(a) { color: inherit; text-decoration: none; cursor: default; }
+.x-windows svg { flex: none; }
+/* Continuous corners on the rounded rectangles; circles and capsules stay what they are. */
+.x-windows :where(.x-windows-edit, .x-windows-live, .x-windows-user, .x-windows-run, .x-windows-plate, .x-windows-set-card, .x-windows-approval pre) { corner-shape: squircle; }
+
+/* fills: lighter lifts what can be pressed or is selected, darker separates sections and holds inputs */
+.x-windows[data-scheme='light'] {
+  --x-ink-fallback: rgb(0 0 0 / 0.86);
+  --x-lift: rgb(255 255 255 / 0.46);
+  --x-lift-2: rgb(255 255 255 / 0.74);
+  --x-well: rgb(60 30 0 / 0.055);
+  --x-well-2: rgb(60 30 0 / 0.09);
+  --x-rule: rgb(60 30 0 / 0.1);
+  --x-plate-veil: rgb(255 255 255 / 0.5);
+  --x-plate-sheet: rgb(255 255 255 / 0.94);
+  --x-add: #0b6b3a;
+  --x-del: #a32a1c;
+}
+.x-windows[data-scheme='dark'] {
+  --x-ink-fallback: rgb(255 255 255 / 0.9);
+  --x-lift: rgb(255 255 255 / 0.075);
+  --x-lift-2: rgb(255 255 255 / 0.13);
+  --x-well: rgb(0 0 0 / 0.2);
+  --x-well-2: rgb(0 0 0 / 0.3);
+  --x-rule: rgb(255 255 255 / 0.09);
+  --x-plate-veil: rgb(0 0 0 / 0.34);
+  --x-plate-sheet: rgb(18 18 18 / 0.94);
+  --x-add: #7fe0a6;
+  --x-del: #ff9d8e;
+}
+
+.x-windows-env { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+/* Ink is the runtime's published pair, read on children; the second level is authored from the first because
+   the runtime's own secondary has no margin on a window-scale body. The variables are declared on every element
+   that stands directly on glass (our hosts, and the content written into vitrea's own platters), since a custom
+   property resolves where it is declared. */
+.x-windows-host, .x-windows-ink {
+  --x-ink: var(--vitrea-foreground, var(--x-ink-fallback));
+  --x-ink-2: color-mix(in srgb, var(--x-ink) 80%, transparent);
+  --x-ink-3: color-mix(in srgb, var(--x-ink) 46%, transparent); /* marks and rules only, never words */
+  color: var(--x-ink);
+}
+.x-windows-host {
+  position: fixed;
+  box-sizing: border-box;
+  margin: 0;
+  transition:
+    left var(--x-layout) var(--x-ease),
+    right var(--x-layout) var(--x-ease),
+    width var(--x-layout) var(--x-ease),
+    top var(--x-layout) var(--x-ease),
+    bottom var(--x-layout) var(--x-ease);
+}
+.x-windows-fill { position: absolute; inset: 0; border-radius: inherit; }
+.x-windows :focus-visible { outline: 2px solid var(--x-orange); outline-offset: 2px; }
+
+/* ---- traffic lights ------------------------------------------------------------------------------------------- */
+.x-windows-lights { position: fixed; left: 34px; top: 30px; display: flex; gap: 8px; z-index: 2147482000; pointer-events: none; }
+.x-windows-lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.16); }
+.x-windows-lights i:nth-child(1) { background: #ff5f57; }
+.x-windows-lights i:nth-child(2) { background: #febc2e; }
+.x-windows-lights i:nth-child(3) { background: #28c840; }
+
+/* ---- the three windows ------------------------------------------------------------------------------------------ */
+.x-windows-sidebar { left: var(--x-m); top: var(--x-m); bottom: var(--x-m); width: var(--x-sbw); border-radius: var(--x-r); }
+.x-windows-session { left: var(--x-left); right: var(--x-right); top: calc(var(--x-m) + var(--x-bar) + var(--x-g)); bottom: calc(var(--x-m) + var(--x-comp) + var(--x-g)); border-radius: var(--x-r); }
+.x-windows-side { right: var(--x-m); top: var(--x-m); bottom: var(--x-m); width: var(--x-sidew); border-radius: var(--x-r); }
+.x-windows-page { left: var(--x-left); right: var(--x-m); top: calc(var(--x-m) + var(--x-bar) + var(--x-g)); bottom: var(--x-m); border-radius: var(--x-r); }
+
+/* content of a window that leaves with its material: a child fades, the host never does */
+.x-windows-body { position: absolute; inset: 0; border-radius: inherit; display: flex; flex-direction: column; min-height: 0; transition: opacity 200ms var(--x-ease), transform var(--x-layout) var(--x-ease); }
+.x-windows-host[data-away='true'] { pointer-events: none; }
+.x-windows-host[data-away='true'] .x-windows-body { opacity: 0; transform: scale(0.985); }
+
+/* scrolling happens in a child; its edges are the scroll edges */
+.x-windows-scroll {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; border-radius: inherit; scrollbar-width: none;
+  mask-image: linear-gradient(to bottom, transparent 0, #000 22px, #000 calc(100% - 22px), transparent 100%);
+}
+.x-windows-scroll::-webkit-scrollbar { display: none; }
+
+/* ---- shared pieces ---------------------------------------------------------------------------------------------- */
+.x-windows-row {
+  display: flex; align-items: center; gap: 9px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 16px;
+  text-align: left; position: relative; transition: background-color 140ms var(--x-ease), transform 220ms var(--x-spring);
+}
+.x-windows-row:hover { background: var(--x-lift); }
+.x-windows-row:active { transform: scale(0.985); }
+.x-windows-row[aria-current='true'], .x-windows-row[aria-current='page'] { background: var(--x-lift-2); }
+.x-windows[data-scheme='light'] .x-windows-row[aria-current='true'], .x-windows[data-scheme='light'] .x-windows-row[aria-current='page'] { box-shadow: 0 1px 2px rgb(80 40 0 / 0.08); }
+.x-windows-row svg { color: var(--x-ink-2); }
+/* Text that does not fit thins out instead of ending in dots: the fade lives in 16 px of padding the layout does
+   not count, so a title that fits is never touched by it. */
+.x-windows-clip { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; padding-right: 16px; margin-right: -16px; mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+.x-windows-kicker { font-size: 11.5px; font-weight: 750; letter-spacing: 0.035em; color: var(--x-ink-2); padding: 0 10px; }
+.x-windows-mono { font-family: var(--x-mono); font-size: 12px; font-weight: 500; letter-spacing: 0; }
+.x-windows-num { font-variant-numeric: tabular-nums; }
+.x-windows-round {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; flex: none;
+  transition: background-color 140ms var(--x-ease), transform 240ms var(--x-spring);
+}
+.x-windows-round:hover { background: var(--x-lift); }
+.x-windows-round:active { transform: scale(0.92); }
+
+/* state marks: a shape and a colour together, so the word can go */
+.x-windows-state { width: 16px; height: 16px; display: grid; place-items: center; flex: none; position: relative; }
+.x-windows-state[data-state='running']::before { content: ''; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--x-ink-3); border-top-color: var(--x-orange); animation: x-windows-spin 1.1s linear infinite; }
+.x-windows-state[data-state='approval']::before { content: ''; width: 10px; height: 10px; border-radius: 50%; background: var(--x-orange); box-shadow: 0 0 0 3px color-mix(in srgb, var(--x-orange) 28%, transparent); }
+.x-windows-state[data-state='question']::before { content: '?'; font-size: 12px; font-weight: 900; line-height: 16px; width: 16px; height: 16px; text-align: center; border-radius: 50%; background: var(--x-ink); color: var(--x-on-mark); }
+.x-windows-state[data-state='plan']::before { content: ''; width: 10px; height: 10px; border-radius: 3.5px; border: 2px solid var(--x-ink); }
+.x-windows-state[data-state='unread']::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--x-ink); }
+.x-windows[data-scheme='light'] { --x-on-mark: #fff; }
+.x-windows[data-scheme='dark'] { --x-on-mark: #161616; }
+@keyframes x-windows-spin { to { transform: rotate(360deg); } }
+
+/* a fold: the disclosure every expandable thing uses */
+.x-windows-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 380ms var(--x-ease); }
+.x-windows-fold > div { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-4px); transition: opacity 220ms var(--x-ease), transform 380ms var(--x-ease); }
+.x-windows-fold[data-open='true'] { grid-template-rows: 1fr; }
+.x-windows-fold[data-open='true'] > div { opacity: 1; transform: none; transition-delay: 60ms, 0ms; }
+
+/* ---- sidebar ------------------------------------------------------------------------------------------------------ */
+.x-windows-sb-top { height: 54px; flex: none; display: flex; align-items: center; justify-content: flex-end; padding: 6px 12px 0; }
+.x-windows-sb-list { padding: 4px 8px 14px; display: flex; flex-direction: column; gap: 1px; }
+.x-windows-sb-gap { height: 16px; flex: none; }
+.x-windows-sb-kbd { font-size: 11.5px; font-weight: 700; color: var(--x-ink-2); opacity: 0; transition: opacity 140ms var(--x-ease); }
+.x-windows-row:hover .x-windows-sb-kbd, .x-windows-row:focus-visible .x-windows-sb-kbd { opacity: 1; }
+.x-windows-project { display: flex; align-items: center; gap: 6px; width: 100%; height: 30px; padding: 0 10px; border-radius: 15px; text-align: left; font-size: 12px; font-weight: 750; letter-spacing: 0.02em; color: var(--x-ink-2); transition: background-color 140ms var(--x-ease); }
+.x-windows-project:hover { background: var(--x-lift); }
+.x-windows-project svg { transition: transform 300ms var(--x-ease); color: var(--x-ink-2); }
+.x-windows-project[aria-expanded='true'] svg { transform: rotate(90deg); }
+.x-windows-project-n { margin-left: auto; font-weight: 700; }
+.x-windows-session-row { align-items: flex-start; padding-top: 7px; padding-bottom: 7px; min-height: 32px; }
+.x-windows-session-row .x-windows-state { margin-top: 1px; }
+.x-windows-session-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.x-windows-session-title { display: flex; gap: 8px; align-items: baseline; }
+.x-windows-session-line { font-size: 12px; font-weight: 600; color: var(--x-ink-2); white-space: nowrap; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 18px), transparent); padding-top: 1px; }
+.x-windows-age { font-size: 11.5px; font-weight: 700; color: var(--x-ink-2); opacity: 0; transition: opacity 140ms var(--x-ease); flex: none; }
+.x-windows-row:hover .x-windows-age, .x-windows-row:focus-visible .x-windows-age { opacity: 1; }
+/* The line a quiet session keeps for hover: it opens after a beat, so scanning the list does not make it shiver. */
+.x-windows-session-row .x-windows-fold { transition-delay: 0ms; }
+.x-windows-session-row:hover .x-windows-fold, .x-windows-session-row:focus-visible .x-windows-fold { grid-template-rows: 1fr; transition-delay: 260ms; }
+.x-windows-session-row:hover .x-windows-fold > div, .x-windows-session-row:focus-visible .x-windows-fold > div { opacity: 1; transform: none; transition-delay: 300ms, 260ms; }
+.x-windows-sb-foot { flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 12px 12px 16px; }
+.x-windows-usage { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; height: 36px; padding: 0 6px; border-radius: 18px; position: relative; }
+.x-windows-ring { display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 750; color: var(--x-ink-2); }
+.x-windows-ring svg circle { fill: none; stroke-width: 4; stroke-linecap: round; }
+.x-windows-ring svg circle:first-child { stroke: var(--x-well-2); }
+.x-windows-ring svg circle:last-child { stroke: var(--x-ink); transition: stroke-dashoffset 600ms var(--x-ease); }
+.x-windows-ring[data-hot='true'] svg circle:last-child { stroke: var(--x-orange); }
+.x-windows-usage-more { font-size: 11.5px; font-weight: 700; color: var(--x-ink-2); white-space: nowrap; opacity: 0; transform: translateX(-4px); transition: opacity 180ms var(--x-ease), transform 300ms var(--x-ease); }
+.x-windows-usage:hover .x-windows-usage-more { opacity: 1; transform: none; }
+
+/* ---- the ornament row above the session window ------------------------------------------------------------------ */
+.x-windows-orn { top: var(--x-m); height: var(--x-bar); border-radius: 22px; }
+.x-windows-orn-sb { left: 104px; width: var(--x-bar); }
+.x-windows-orn-side { right: var(--x-m); width: var(--x-bar); }
+.x-windows-orn button.x-windows-orn-hit { position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; transition: opacity 200ms var(--x-ease); }
+.x-windows-orn[data-away='true'] button.x-windows-orn-hit { opacity: 0; }
+.x-windows-orn button.x-windows-orn-hit svg { transition: transform 300ms var(--x-spring); }
+.x-windows-orn button.x-windows-orn-hit:active svg { transform: scale(0.86); }
+.x-windows { --x-og: 24px; --x-approval-right: var(--x-right); --x-tabs-left: var(--x-left); }
+.x-windows[data-sb='closed'] { --x-tabs-left: calc(104px + var(--x-bar) + var(--x-og)); }
+.x-windows[data-scene='session'][data-side='closed'] { --x-approval-right: calc(var(--x-m) + var(--x-bar) + var(--x-og)); }
+.x-windows-tabs { left: var(--x-tabs-left); max-width: calc(100vw - var(--x-tabs-left) - var(--x-approval-right) - var(--x-approval-w) - var(--x-og)); display: flex; align-items: center; gap: 2px; padding: 5px; }
+.x-windows-tab { display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 13px 0 11px; border-radius: 17px; min-width: 44px; flex: 0 1 auto; overflow: hidden; font-size: 13px; font-weight: 650; color: var(--x-ink-2); transition: background-color 140ms var(--x-ease), color 140ms var(--x-ease), transform 240ms var(--x-spring); }
+.x-windows-tab:hover { background: var(--x-lift); }
+.x-windows-tab:active { transform: scale(0.97); }
+.x-windows-tab[aria-selected='true'] { background: var(--x-lift-2); color: var(--x-ink); flex-shrink: 0; }
+.x-windows[data-scheme='light'] .x-windows-tab[aria-selected='true'] { box-shadow: 0 1px 2px rgb(80 40 0 / 0.1); }
+.x-windows-tab .x-windows-clip { flex: 0 1 auto; }
+.x-windows-tab[data-kind='file'] { flex-shrink: 0; }
+.x-windows-tab svg { color: var(--x-ink-2); }
+.x-windows-tab-plus { width: 34px; height: 34px; flex: none; border-radius: 50%; display: grid; place-items: center; transition: background-color 140ms var(--x-ease); }
+.x-windows-tab-plus:hover { background: var(--x-lift); }
+
+/* the approval: the one tinted surface, a capsule that grows into its platter */
+.x-windows-approval-trigger { display: flex; align-items: center; gap: 7px; height: var(--x-bar); padding: 0 16px 0 13px; border-radius: 22px; font-size: 13px; font-weight: 750; white-space: nowrap; color: var(--x-ink); }
+.x-windows-approval-anchor { position: fixed; top: var(--x-m); right: var(--x-approval-right); height: var(--x-bar); transition: right var(--x-layout) var(--x-ease); }
+.x-windows-approval { width: 318px; padding: 18px 18px 16px; display: flex; flex-direction: column; gap: 10px; color: var(--x-ink); font-family: var(--x-font); }
+.x-windows-approval h3 { font-size: 15.5px; font-weight: 800; letter-spacing: -0.005em; }
+.x-windows-approval p { font-size: 13px; font-weight: 600; color: var(--x-ink-2); }
+.x-windows-approval pre { padding: 9px 12px; border-radius: 12px; background: var(--x-well-2); white-space: pre-wrap; }
+.x-windows-approval-actions { display: flex; gap: 8px; margin-top: 4px; }
+.x-windows-btn { flex: 1; height: 36px; border-radius: 18px; font-size: 13.5px; font-weight: 750; background: var(--x-lift-2); transition: transform 240ms var(--x-spring), filter 140ms var(--x-ease); }
+.x-windows-btn:hover { filter: brightness(1.06); }
+.x-windows-btn:active { transform: scale(0.96); }
+.x-windows-btn[data-kind='go'] { background: var(--x-orange); color: var(--x-on-orange); }
+.x-windows-btn[data-kind='ink'] { background: var(--x-ink); color: var(--x-on-mark); }
+
+/* ---- transcript, read on the glass ------------------------------------------------------------------------------ */
+.x-windows-plate { position: absolute; inset: 8px; border-radius: var(--x-r8); pointer-events: none; opacity: 0; transition: opacity 320ms var(--x-ease), background-color 320ms var(--x-ease); }
+.x-windows[data-reading='veil'] .x-windows-plate { opacity: 1; background: var(--x-plate-veil); }
+.x-windows[data-reading='sheet'] .x-windows-plate { opacity: 1; background: var(--x-plate-sheet); }
+.x-windows-thread { max-width: 728px; margin: 0 auto; padding: 34px 32px 40px; display: flex; flex-direction: column; gap: 18px; user-select: text; cursor: auto; }
+.x-windows-prose { font-size: 15px; line-height: 1.62; font-weight: 600; letter-spacing: 0.004em; display: flex; flex-direction: column; gap: 12px; }
+.x-windows-user { align-self: flex-end; max-width: 84%; padding: 11px 16px; border-radius: 20px 20px 6px 20px; background: var(--x-well-2); font-size: 15px; line-height: 1.55; font-weight: 600; }
+.x-windows-quiet { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 650; color: var(--x-ink-2); min-height: 24px; }
+.x-windows-quiet svg { color: var(--x-ink-2); }
+.x-windows-quiet em { font-style: normal; opacity: 0; transition: opacity 160ms var(--x-ease); }
+.x-windows-quiet:hover em, .x-windows-run-head:hover em, .x-windows-run-head:focus-visible em { opacity: 1; }
+.x-windows-run { border-radius: 16px; transition: background-color 300ms var(--x-ease); margin: -4px -10px; }
+.x-windows-run[data-open='true'] { background: var(--x-well); }
+.x-windows-run-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 0 10px; border-radius: 16px; font-size: 13px; font-weight: 650; color: var(--x-ink-2); text-align: left; transition: background-color 140ms var(--x-ease); }
+.x-windows-run-head:hover { background: var(--x-lift); }
+.x-windows-run-head em { font-style: normal; font-size: 12px; }
+.x-windows-run-head svg { transition: transform 320ms var(--x-ease); }
+.x-windows-run-head[aria-expanded='true'] svg.x-windows-chev { transform: rotate(90deg); }
+.x-windows-calls { padding: 2px 10px 10px 34px; display: flex; flex-direction: column; gap: 5px; }
+.x-windows-call { display: flex; align-items: baseline; gap: 10px; font-size: 12.5px; color: var(--x-ink); }
+.x-windows-call b { font-weight: 750; width: 36px; flex: none; color: var(--x-ink-2); font-family: var(--x-font); font-size: 12px; }
+.x-windows-call span:last-child { margin-left: auto; font-family: var(--x-font); font-weight: 650; font-size: 12px; color: var(--x-ink-2); white-space: nowrap; }
+.x-windows-edit { border-radius: 16px; background: var(--x-well); overflow: hidden; }
+.x-windows-edit-head { display: flex; align-items: center; gap: 8px; padding: 9px 14px 7px; font-size: 13px; font-weight: 700; }
+.x-windows-edit-head span:last-child { margin-left: auto; font-weight: 800; }
+.x-windows-diff { padding: 2px 0 10px; overflow-x: auto; scrollbar-width: none; }
+.x-windows-diff div { display: flex; white-space: pre; padding: 0 14px; line-height: 1.62; }
+.x-windows-diff i { font-style: normal; width: 16px; flex: none; font-weight: 800; }
+.x-windows-add { color: var(--x-add); }
+.x-windows-del { color: var(--x-del); }
+.x-windows-agents { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; font-weight: 650; color: var(--x-ink-2); }
+.x-windows-chip { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 12px 0 9px; border-radius: 14px; background: var(--x-lift); color: var(--x-ink); font-size: 12.5px; font-weight: 700; }
+.x-windows-live { border-radius: 16px; background: var(--x-well); padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 7px; }
+.x-windows-live-head { display: flex; align-items: center; gap: 9px; }
+.x-windows-live-head span:last-child { margin-left: auto; font-family: var(--x-font); font-size: 12px; font-weight: 700; color: var(--x-ink-2); }
+.x-windows-live ol { display: flex; flex-direction: column; gap: 3px; padding-left: 25px; color: var(--x-ink-2); }
+.x-windows-live li:last-child { color: var(--x-ink); }
+
+/* ---- the composer ornament ---------------------------------------------------------------------------------------- */
+.x-windows-composer { bottom: var(--x-m); height: var(--x-comp); border-radius: var(--x-r); left: max(var(--x-left), calc((var(--x-left) + 100vw - var(--x-right)) / 2 - 380px)); width: min(760px, calc(100vw - var(--x-left) - var(--x-right))); }
+.x-windows-composer-body { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 8px; gap: 4px; }
+.x-windows-queued { position: absolute; left: 20px; bottom: calc(100% + 6px); }
+.x-windows .x-windows-input:focus-visible { outline: 0; }
+.x-windows-input { flex: 1; min-height: 0; padding: 8px 12px 0; resize: none; border: 0; outline: 0; background: none; font-size: 15px; font-weight: 600; line-height: 1.5; color: var(--x-ink); user-select: text; cursor: text; }
+.x-windows-input::placeholder { color: var(--x-ink-2); opacity: 1; }
+.x-windows-composer-row { display: flex; align-items: center; gap: 4px; height: 36px; flex: none; }
+.x-windows-pill { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 16px; font-size: 12.5px; font-weight: 700; color: var(--x-ink-2); transition: background-color 140ms var(--x-ease), transform 240ms var(--x-spring); white-space: nowrap; }
+.x-windows-pill:hover, .x-windows-pill[aria-expanded='true'] { background: var(--x-lift); color: var(--x-ink); }
+.x-windows-pill:active { transform: scale(0.96); }
+.x-windows-pill svg { color: currentColor; }
+.x-windows-spacer { flex: 1; }
+.x-windows-context { display: inline-flex; align-items: center; gap: 0; height: 32px; padding: 0 8px; border-radius: 16px; font-size: 12px; font-weight: 750; color: var(--x-ink-2); overflow: hidden; }
+.x-windows-context span { max-width: 0; opacity: 0; overflow: hidden; white-space: nowrap; transition: max-width 320ms var(--x-ease), opacity 200ms var(--x-ease), margin 320ms var(--x-ease); }
+.x-windows-context:hover span { max-width: 90px; opacity: 1; margin-left: 7px; }
+.x-windows-context svg circle { fill: none; stroke-width: 3.5; stroke-linecap: round; }
+.x-windows-context svg circle:first-child { stroke: var(--x-well-2); }
+.x-windows-context svg circle:last-child { stroke: var(--x-ink-2); }
+.x-windows-send { width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center; background: var(--x-orange); color: var(--x-on-orange); transition: transform 260ms var(--x-spring), filter 140ms var(--x-ease); }
+.x-windows-send:hover { filter: brightness(1.07); }
+.x-windows-send:active { transform: scale(0.9); }
+
+/* menus: vitrea's menu parts, dressed here because its own stylesheet is not loaded */
+.x-windows-menu { min-width: 208px; padding: 6px; display: flex; flex-direction: column; gap: 1px; font-family: var(--x-font); font-size: 13.5px; font-weight: 650; color: var(--x-ink); outline: 0; }
+.x-windows-menu [role='menuitemradio'], .x-windows-menu [role='menuitem'] { display: flex; align-items: center; gap: 9px; height: 32px; padding: 0 12px 0 10px; border-radius: 14px; outline: 0; white-space: nowrap; transition: background-color 100ms var(--x-ease); }
+.x-windows-menu [role='menuitemradio']:hover, .x-windows-menu [role='menuitem']:hover, .x-windows-menu [role='menuitemradio']:focus-visible, .x-windows-menu [role='menuitem']:focus-visible, .x-windows-menu [data-highlighted] { background: var(--x-lift-2); }
+.x-windows-menu [role='menuitemradio'][aria-checked='true'] { font-weight: 800; }
+.x-windows-menu-kicker { font-size: 11.5px; font-weight: 750; letter-spacing: 0.035em; color: var(--x-ink-2); padding: 7px 12px 4px; }
+.x-windows-menu-rule { height: 1px; background: var(--x-rule); margin: 5px 10px; }
+.x-windows-menu-check { width: 16px; height: 16px; display: grid; place-items: center; }
+.x-windows-menu-row { flex: 1; display: flex; align-items: baseline; gap: 22px; }
+.x-windows-menu-end { margin-left: auto; font-size: 12.5px; color: var(--x-ink-2); }
+
+/* ---- side column -------------------------------------------------------------------------------------------------- */
+.x-windows-side-pad { padding: 14px 10px 22px; display: flex; flex-direction: column; gap: 20px; }
+.x-windows-side-head { display: flex; align-items: center; gap: 8px; padding: 0 2px 0 10px; }
+.x-windows-side-head .x-windows-mono { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.x-windows-sec { display: flex; flex-direction: column; gap: 4px; }
+.x-windows-file { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 0 10px; border-radius: 15px; transition: background-color 140ms var(--x-ease); }
+.x-windows-file:hover { background: var(--x-lift); }
+.x-windows-file { width: 100%; text-align: left; }
+.x-windows-dir { color: var(--x-ink-2); }
+.x-windows-kicker-split { display: flex; justify-content: space-between; align-items: baseline; }
+.x-windows-kicker-split .x-windows-delta { letter-spacing: 0; }
+.x-windows-delta { display: inline-flex; gap: 6px; font-size: 12px; font-weight: 800; flex: none; }
+.x-windows-agent { display: flex; align-items: flex-start; gap: 9px; padding: 5px 10px; }
+.x-windows-agent > div { display: flex; flex-direction: column; min-width: 0; }
+.x-windows-agent small { font-size: 12px; font-weight: 600; color: var(--x-ink-2); }
+.x-windows-todo { display: flex; align-items: flex-start; gap: 9px; padding: 5px 10px; font-size: 13px; }
+.x-windows-todo[data-done='true'] { color: var(--x-ink-2); }
+.x-windows-todo[data-current='true'] { font-weight: 750; }
+.x-windows-tick { width: 16px; height: 16px; border-radius: 50%; flex: none; margin-top: 1px; display: grid; place-items: center; border: 2px solid var(--x-ink-3); }
+.x-windows-todo[data-done='true'] .x-windows-tick { border: 0; background: var(--x-ink-2); color: var(--x-on-mark); }
+.x-windows-todo[data-current='true'] .x-windows-tick { border-color: var(--x-orange); border-top-color: var(--x-ink-3); animation: x-windows-spin 1.1s linear infinite; }
+
+/* ---- settings ------------------------------------------------------------------------------------------------------- */
+.x-windows-set { position: absolute; inset: 0; display: flex; border-radius: inherit; }
+.x-windows-set-nav { width: 196px; flex: none; padding: 22px 8px 16px 12px; display: flex; flex-direction: column; gap: 1px; }
+.x-windows-set-nav h2 { font-size: 20px; font-weight: 800; letter-spacing: -0.01em; padding: 0 10px 14px; }
+.x-windows-set-nav .x-windows-row[data-empty='true'] { color: var(--x-ink-2); }
+.x-windows-set-main { flex: 1; min-width: 0; display: flex; flex-direction: column; border-radius: 0 var(--x-r) var(--x-r) 0; }
+.x-windows-set-col { max-width: 660px; margin: 0 auto; padding: 30px 28px 80px; display: flex; flex-direction: column; gap: 30px; }
+.x-windows-set-sec > h3 { font-size: 12px; font-weight: 800; letter-spacing: 0.035em; color: var(--x-ink-2); padding: 0 16px 8px; }
+.x-windows-set-card { border-radius: 20px; background: var(--x-well); padding: 4px 0; }
+.x-windows-set-row { padding: 0 8px; }
+.x-windows-set-row + .x-windows-set-row > .x-windows-set-line { box-shadow: 0 -1px 0 var(--x-rule); }
+.x-windows-set-line { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 6px 8px; }
+.x-windows-set-label { display: inline-flex; align-items: center; gap: 4px; font-size: 14px; font-weight: 700; flex: none; max-width: 72%; }
+.x-windows-set-why { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; color: var(--x-ink-2); opacity: 0; transition: opacity 140ms var(--x-ease), background-color 140ms var(--x-ease), transform 240ms var(--x-spring); }
+.x-windows-set-row:hover .x-windows-set-why, .x-windows-set-why:focus-visible, .x-windows-set-why[aria-expanded='true'] { opacity: 1; }
+.x-windows-set-why:hover, .x-windows-set-why[aria-expanded='true'] { background: var(--x-lift); }
+.x-windows-set-why:active { transform: scale(0.9); }
+.x-windows-set-ctl { margin-left: auto; display: flex; align-items: center; gap: 8px; min-width: 0; justify-content: flex-end; flex-wrap: wrap; }
+.x-windows-set-help { padding: 0 8px 12px; font-size: 13px; font-weight: 600; line-height: 1.5; color: var(--x-ink-2); max-width: 52ch; }
+.x-windows-switch { width: 44px; height: 26px; border-radius: 13px; background: var(--x-well-2); position: relative; flex: none; transition: background-color 260ms var(--x-ease); box-shadow: inset 0 0 0 1px var(--x-rule); }
+.x-windows-switch::after { content: ''; position: absolute; left: 3px; top: 3px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.28); transition: transform 380ms var(--x-spring), width 200ms var(--x-ease); }
+.x-windows-switch[aria-checked='true'] { background: var(--x-orange); box-shadow: none; }
+.x-windows-switch[aria-checked='true']::after { transform: translateX(18px); }
+.x-windows-switch:active::after { width: 24px; }
+.x-windows-switch[aria-checked='true']:active::after { transform: translateX(14px); }
+.x-windows-seg { display: inline-flex; position: relative; padding: 3px; border-radius: 17px; background: var(--x-well-2); height: 34px; }
+.x-windows-seg-thumb { position: absolute; top: 3px; bottom: 3px; left: 0; border-radius: 14px; background: var(--x-lift-2); transition: transform 420ms var(--x-spring), width 420ms var(--x-ease); }
+.x-windows[data-scheme='light'] .x-windows-seg-thumb { background: #fff; box-shadow: 0 1px 3px rgb(80 40 0 / 0.16); }
+.x-windows[data-scheme='dark'] .x-windows-seg-thumb { background: rgb(255 255 255 / 0.2); }
+.x-windows-seg button { position: relative; height: 28px; padding: 0 14px; border-radius: 14px; font-size: 13px; font-weight: 700; color: var(--x-ink-2); transition: color 200ms var(--x-ease); white-space: nowrap; }
+.x-windows-seg button[aria-checked='true'] { color: var(--x-ink); }
+.x-windows-field { height: 34px; min-width: 220px; padding: 0 14px; border-radius: 17px; border: 0; outline: 0; background: var(--x-well-2); font-size: 13px; font-weight: 650; color: var(--x-ink); user-select: text; cursor: text; }
+.x-windows-field.x-windows-mono { font-size: 12px; font-weight: 500; }
+.x-windows-field::placeholder { color: var(--x-ink-2); opacity: 1; }
+.x-windows-field:focus-visible { outline: 2px solid var(--x-orange); outline-offset: 0; }
+.x-windows-path { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.x-windows-path .x-windows-mono { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px; }
+.x-windows-badge { height: 22px; padding: 0 9px; border-radius: 11px; background: var(--x-well-2); font-size: 11.5px; font-weight: 750; display: inline-flex; align-items: center; color: var(--x-ink-2); }
+.x-windows-soft { height: 34px; padding: 0 15px; border-radius: 17px; background: var(--x-lift-2); font-size: 13px; font-weight: 750; transition: transform 240ms var(--x-spring), filter 140ms var(--x-ease); white-space: nowrap; }
+.x-windows-soft:hover { filter: brightness(1.05); }
+.x-windows-soft:active { transform: scale(0.96); }
+.x-windows-toggles { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; max-width: 360px; }
+.x-windows-toggle { height: 30px; padding: 0 12px 0 9px; border-radius: 15px; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; background: var(--x-well-2); color: var(--x-ink-2); transition: background-color 220ms var(--x-ease), color 220ms var(--x-ease), transform 240ms var(--x-spring); }
+.x-windows-toggle i { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--x-ink-3); display: grid; place-items: center; transition: background-color 220ms var(--x-ease), border-color 220ms var(--x-ease); }
+.x-windows-toggle i svg { opacity: 0; transform: scale(0.4); transition: opacity 160ms var(--x-ease), transform 300ms var(--x-spring); color: var(--x-on-orange); }
+.x-windows-toggle[aria-checked='true'], .x-windows-toggle[aria-pressed='true'] { background: var(--x-lift-2); color: var(--x-ink); }
+.x-windows-toggle[aria-checked='true'] i, .x-windows-toggle[aria-pressed='true'] i { background: var(--x-orange); border-color: var(--x-orange); }
+.x-windows-toggle[aria-checked='true'] i svg, .x-windows-toggle[aria-pressed='true'] i svg { opacity: 1; transform: none; }
+.x-windows-toggle:active { transform: scale(0.95); }
+.x-windows-select { height: 34px; padding: 0 12px 0 15px; border-radius: 17px; background: var(--x-well-2); font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px; }
+
+/* ---- home ------------------------------------------------------------------------------------------------------------- */
+/* The new-chat window stands on the sun's axis, so the rings rise around it. */
+.x-windows { --x-axis: calc(50vw - 16px); }
+.x-windows-home { --w: min(680px, calc(2 * (var(--x-axis) - var(--x-left)))); left: calc(var(--x-axis) - var(--w) / 2); width: var(--w); top: calc(50vh - 120px); height: 150px; border-radius: var(--x-r); }
+.x-windows[data-sb='closed'] .x-windows-home { --w: min(680px, calc(2 * (var(--x-axis) - 172px))); }
+.x-windows-home-body { position: absolute; inset: 0; display: flex; flex-direction: column; padding: 8px; gap: 4px; }
+
+/* ---- the material's other states ---------------------------------------------------------------------------------- */
+@media (prefers-reduced-motion: reduce) {
+  .x-windows *, .x-windows *::before, .x-windows *::after { transition-duration: 1ms !important; animation: none !important; }
+}
+@media (forced-colors: active) {
+  .x-windows-lights i, .x-windows-state::before, .x-windows-send, .x-windows-tick { forced-color-adjust: none; }
+  .x-windows-state[data-state='approval']::before { background: Highlight; box-shadow: 0 0 0 2px Canvas, 0 0 0 4px Highlight; }
+  .x-windows-state[data-state='question']::before, .x-windows-state[data-state='unread']::before { background: CanvasText; color: Canvas; }
+  .x-windows-state[data-state='plan']::before { border-color: CanvasText; }
+  .x-windows-state[data-state='running']::before { border-color: GrayText; border-top-color: Highlight; }
+  .x-windows-send { background: ButtonText; color: ButtonFace; }
+  .x-windows-switch, .x-windows-seg, .x-windows-field, .x-windows-set-card, .x-windows-edit, .x-windows-live, .x-windows-user, .x-windows-btn, .x-windows-soft, .x-windows-toggle { border: 1px solid CanvasText; }
+  .x-windows-seg-thumb, .x-windows-row[aria-current='true'], .x-windows-tab[aria-selected='true'] { outline: 2px solid Highlight; outline-offset: -2px; }
+  .x-windows-switch[aria-checked='true'] { background: Highlight; }
+}
+
+/* ---- additions ---------------------------------------------------------------------------------------------------- */
+/* A window leaves by sliding past the viewport's edge with its material on; nothing fades. */
+.x-windows[data-sb='closed'] .x-windows-sidebar { left: calc(-1 * var(--x-sbw) - 28px); }
+.x-windows[data-side='closed'] .x-windows-side { right: calc(-1 * var(--x-sidew) - 28px); }
+.x-windows { --x-comp: 124px; --x-approval-w: 150px; }
+.x-windows-fold > :first-child { min-height: 0; overflow: hidden; opacity: 0; transform: translateY(-4px); transition: opacity 220ms var(--x-ease), transform 380ms var(--x-ease); }
+.x-windows-fold[data-open='true'] > :first-child { opacity: 1; transform: none; transition-delay: 60ms, 0ms; }
+.x-windows-session-row:hover .x-windows-fold > :first-child, .x-windows-session-row:focus-visible .x-windows-fold > :first-child { opacity: 1; transform: none; transition-delay: 300ms, 260ms; }
+.x-windows-ring-text { display: grid; }
+.x-windows-ring-text > span { grid-area: 1 / 1; transition: opacity 180ms var(--x-ease), transform 300ms var(--x-ease); }
+.x-windows-ring-text > span:last-child { opacity: 0; transform: translateY(4px); }
+.x-windows-usage:hover .x-windows-ring-text > span:first-child { opacity: 0; transform: translateY(-4px); }
+.x-windows-usage:hover .x-windows-ring-text > span:last-child { opacity: 1; transform: none; }
+.x-windows-usage-more { display: inline-flex; align-items: center; gap: 4px; }
+.x-windows-queued-row { height: 26px; flex: none; display: flex; padding: 0 4px; }
+.x-windows-queued { position: static; display: inline-flex; align-items: center; gap: 8px; max-width: 100%; height: 26px; padding: 0 12px 0 4px; border-radius: 13px; background: var(--x-well); font-size: 12.5px; font-weight: 650; color: var(--x-ink-2); }
+.x-windows-queued-mark { height: 18px; padding: 0 8px; border-radius: 9px; background: var(--x-lift-2); color: var(--x-ink); font-size: 11px; font-weight: 800; display: inline-flex; align-items: center; letter-spacing: 0.02em; }
+.x-windows-send[data-kind='ink'] { background: var(--x-ink); color: var(--x-on-mark); }
+.x-windows-home-input { padding-top: 12px; font-size: 17px; }
+
+.x-windows-set-path { display: block; color: var(--x-ink); padding-bottom: 4px; user-select: text; }
+.x-windows-menu [data-vitrea-part='menu-item-indicator'] { display: none; }
+.x-windows-menu [data-vitrea-part='menu-item-label'] { flex: 1; display: flex; }
+
+/* ---- measured corrections (DESIGN.md, contrast) ------------------------------------------------------------------ */
+/* Dark: the second ink level at 80% read 4.47 on the composer over the brightest ridge; 88% holds the floor. */
+.x-windows[data-scheme='dark'] :is(.x-windows-host, .x-windows-ink) { --x-ink-2: color-mix(in srgb, var(--x-ink) 88%, transparent); }
+/* A lifted fill under second-level ink spends the dark body's margin, so a dark menu's highlight is the small lift. */
+.x-windows[data-scheme='dark'] .x-windows-menu :is([role='menuitem'], [role='menuitemradio']):is(:hover, :focus-visible, [data-highlighted]) { background: var(--x-lift); }
+/* The tinted surface is the one place the ink is authored: the dark material settles the orange seed at a level
+   (encoded 0.51) where the runtime's ink reads 4.1, so the approval carries one opaque ink in both schemes and
+   makes its hierarchy from weight. Its fills are lighter, never darker, for the same reason. */
+.x-windows .x-windows-approval, .x-windows .x-windows-approval-trigger { --x-ink: #221002; --x-ink-2: #221002; --x-ink-3: rgb(34 16 2 / 0.5); color: var(--x-ink); }
+.x-windows .x-windows-approval p { font-weight: 650; }
+.x-windows .x-windows-approval pre { background: rgb(255 255 255 / 0.26); }
+.x-windows .x-windows-approval .x-windows-btn { background: rgb(255 255 255 / 0.36); }
+.x-windows .x-windows-approval .x-windows-btn[data-kind='ink'] { background: #221002; color: #fff; }
+/* Receded, the dark tint keeps its shade and loses its chroma (a dark grey plate), so there the approval goes
+   back to the runtime's ink. */
+.x-windows[data-scheme='dark'][data-pose='inactive'] :is(.x-windows-approval, .x-windows-approval-trigger) { --x-ink: var(--vitrea-foreground, #fff); --x-ink-2: var(--vitrea-foreground, #fff); --x-ink-3: rgb(255 255 255 / 0.4); }
+.x-windows[data-scheme='dark'][data-pose='inactive'] .x-windows-approval :is(pre, .x-windows-btn:not([data-kind='ink'])) { background: rgb(255 255 255 / 0.1); }
+.x-windows .x-windows-approval :focus-visible { outline-color: var(--x-ink); }
+/* On the veil and the sheet a lighter lift would be light on light, so what lifts there is a quiet darker fill. */
+.x-windows[data-scheme='light']:is([data-reading='veil'], [data-reading='sheet']) .x-windows-chip { background: var(--x-well-2); }
