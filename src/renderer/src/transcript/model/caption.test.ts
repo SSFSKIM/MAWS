@@ -305,6 +305,31 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
     expect(line.toolCalls).toBe(8); // the data the report reads until U2b
   });
 
+  // The branch review's second finding: a Read that returned image blocks is an image row of its own (cells.ts), and its
+  // step is keyed by its file's path like any other read
+  const image = (b: Builder, id: string, path: string) => {
+    b.toolUse(id, 'Read', { file_path: path });
+    b.result(id, [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }], { structured: { isImage: true } });
+  };
+
+  it('two reads of one image read one file', () => {
+    const b = turnOf((t) => {
+      image(t, 't1', '/w/shots/home.png');
+      image(t, 't2', '/w/shots/home.png');
+    });
+    expect(drawn(b.events).filter((row) => row.kind === 'cell' && row.detail.kind === 'image')).toHaveLength(2);
+    expect(lineOf(b).caption).toBe('Read a file');
+  });
+
+  it('a failed read of an image and then a successful one of the same path read one file, with no failure', () => {
+    const b = turnOf((t) => {
+      t.toolUse('t1', 'Read', { file_path: '/w/shots/home.png' });
+      t.result('t1', 'File is not readable yet.', { isError: true });
+      image(t, 't2', '/w/shots/home.png');
+    });
+    expect(lineOf(b).caption).toBe('Read a file');
+  });
+
   it('the turn order moves a merged part that names a changed file to the front', () => {
     const b = turnOf((t) => {
       run(t, 't1', 'pnpm test');
