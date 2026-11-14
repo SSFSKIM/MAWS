@@ -49,7 +49,14 @@ function useArchived(row: RowKey, readOn: string) {
   const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
   const projects = useSessions((s) => s.projects);
-  const listings = useSessions((s) => s.listed); // ticket 644: another machine's record is the row's its listing files it under
+  const listedNow = useSessions((s) => s.listed); // ticket 644: another machine's record is the row's its listing files it under
+  // the UX wave, U9: a session this window archived keeps the listing it had at the act (`acted`), so it stays under the
+  // row it sat under before the archive once its listing leaves the store, whenever the registry places its folder here
+  const acted = useSessions((s) => s.acted);
+  const listings = useMemo(() => {
+    const kept = [...acted].flatMap(([id, note]) => (note.archived && note.hidden !== null && !listedNow.has(id) ? [[id, note.hidden] as const] : []));
+    return kept.length === 0 ? listedNow : new Map([...listedNow, ...kept]);
+  }, [listedNow, acted]);
   const [lists, setLists] = useState<SessionRecord[][] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [version, setVersion] = useState(0); // read again after an unarchive

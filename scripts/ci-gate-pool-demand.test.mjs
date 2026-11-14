@@ -8,7 +8,7 @@ import { dirname, join } from 'node:path';
 import process from 'node:process';
 import test from 'node:test';
 import { URL, fileURLToPath } from 'node:url';
-import { workflowEnv } from './ci-gate-alerts.mjs';
+import { plannerVariables, workflowEnv } from './ci-gate-alerts.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const cli = join(root, 'scripts/ci-gate-pool-demand.mjs');
@@ -217,7 +217,7 @@ test('the CLI refuses an unreadable tree or invalid plan without emitting a hint
 
 // A real local origin captures the pushed empty commit; gh and sleep alone are fake. No Actions run is created, so
 // ci-gate ends at "no run" (exit 1) after the push, and --keep leaves the message available for inspection.
-function pushedGate(args, { failure = '', affected = false } = {}) {
+function pushedGate(args, { failure = '', affected = false, lanes = '' } = {}) {
   return fixture(({ dir, tree, git, put }) => {
     const origin = join(dir, 'origin.git');
     execFileSync('git', ['init', '--quiet', '--bare', origin]);
@@ -243,6 +243,7 @@ printf '%s\\n' "$*" >> '${join(dir, 'gh-calls')}'
 case "$*" in
   'variable get GATE_RUNNER -R SSFSKIM/MAWS') ${failure === 'variable' ? 'exit 1' : 'echo pool'} ;;
   'variable get GATE_E2E_RUNNER -R SSFSKIM/MAWS') echo macos ;;
+  'variable list -R SSFSKIM/MAWS '*MAC_MINI_LANES*) ${lanes === 'failed' ? 'exit 1' : `printf '%s\\n' '${lanes}'`} ;;
   'variable list -R SSFSKIM/MAWS '*) ;;
   *' run list '*) ;;
   *) echo "unexpected gh call: $*" >&2; exit 1 ;;
@@ -260,7 +261,7 @@ esac
     if (transcript) rmSync(dirname(transcript), { recursive: true, force: true });
     assert.equal(result.status, 1, result.stdout + result.stderr);
     assert.match(result.stdout, /ci-gate: no run of/);
-    return { message: pushed, calls: readFileSync(join(dir, 'gh-calls'), 'utf8') };
+    return { message: pushed, calls: readFileSync(join(dir, 'gh-calls'), 'utf8'), stdout: result.stdout };
   });
 }
 
@@ -306,3 +307,35 @@ test('targetOutputs passes the configured hosted quota to the committed planner'
   assert.equal(JSON.parse(outputs('5').e2e)[0].overflow, 'ec2');
   assert.equal(JSON.parse(outputs('50').e2e)[0].runner, '"macos-26"');
 }));
+
+// The mini's scheduled holds reach the launcher: MAC_MINI_LANES, read at push time, goes to the target's planner, whose
+// `mini_window` the CLI says on stderr as a `ci-gate:` line, the hint unchanged. A failed read only leaves the line out.
+const soonLanes = () => {
+  const minute = Math.floor(Date.now() / 60_000) * 60_000;
+  const stamp = (time) => `${new Date(time).toISOString().slice(0, 16)}Z`;
+  return JSON.stringify({ v: 1, at: new Date(minute).toISOString().slice(0, 19) + 'Z', host: 'free', vm: 'free', why: '', windows: [{ from: stamp(minute + 3_600_000), until: stamp(minute + 7_200_000), lanes: ['host', 'vm'], why: 'quiet window' }] });
+};
+const holdLine = /^ci-gate: Mac mini: the host and VM lanes are held \S+ \(quiet window\), so this run's jobs there not started by \S+ wait until \S+: unit:darwin\.$/m;
+
+test('the CLI says a coming hold of the mini on stderr and leaves the hint as it was', () => fixture(({ tree, sha }) => {
+  assert.ok(plannerVariables.includes('MAC_MINI_LANES'));
+  const trailers = 'Gates: static,unit,unit:darwin\nRunner: macos';
+  const held = demand(tree, sha, trailers, { ...variables, MAC_MINI_LANES: soonLanes() });
+  assert.equal(held.status, 0, held.stderr);
+  assert.match(held.stderr, holdLine);
+  const quiet = demand(tree, sha, trailers);
+  assert.equal(quiet.stderr, '');
+  assert.equal(held.stdout, quiet.stdout);
+  assert.equal(held.stdout, '16x1 8x4\n');
+}));
+
+test('ci-gate prints the hold into its transcript from the push-time variable, and a failed read still pushes the hint', () => {
+  const said = pushedGate(['--gates', 'unit:darwin', '--runner', 'macos'], { lanes: soonLanes() });
+  assert.match(said.stdout, holdLine);
+  assert.match(said.calls, /^variable list -R SSFSKIM\/MAWS .*MAC_MINI_LANES/m);
+  for (const lanes of ['', 'failed']) {
+    const result = pushedGate(['--gates', 'unit:darwin', '--runner', 'macos'], { lanes });
+    assert.doesNotMatch(result.stdout, /Mac mini:/, lanes);
+    assert.deepEqual(result.message.match(/^Pool-Demand: .*$/gm), said.message.match(/^Pool-Demand: .*$/gm), lanes);
+  }
+});
