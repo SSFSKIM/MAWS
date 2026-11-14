@@ -52,7 +52,7 @@ describe('the shell cell’s folders', () => {
     } as Extract<SessionEvent, { kind: 'tool.use' }>,
     result: null, safeguard: 'not_evaluated', elapsedSeconds: 0, humanDecision: false, backgroundTaskId: null, backgroundDone: false,
   });
-  const detailOf = (rec: ToolRecord) => cellOf(rec, { closed: false, terminalReason: null, lastAt: AT }, true).detail;
+  const detailOf = (rec: ToolRecord) => cellOf(rec, { closed: false, stopped: false, continued: new Set(), lastAt: AT }, true).detail;
 
   it('carries the event’s folder beside the input’s, and neither stands in for the other', () => {
     expect(detailOf(shell({ command: 'ls' }, '/repo/.claude/worktrees/w1'))).toMatchObject({ kind: 'shell', cwd: null, rowCwd: '/repo/.claude/worktrees/w1' });

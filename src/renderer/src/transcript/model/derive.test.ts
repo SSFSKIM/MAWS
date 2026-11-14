@@ -1409,16 +1409,19 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
   });
 });
 
-// Decision 20: a call the engine moved to the background has its result and still runs
+// Decision 20: a call the engine moved to the background has its result and still runs. Since the composer landing
+// (U4a, decision 33; at the chain merge) a moved call runs past its turn's close until its task's end, and the field
+// follows the status, as decision 20 says it does.
 describe('`background` over a recorded MCP call moved to the background (uxwave/u4p2-k-mcp-1)', () => {
   const journal = loadUxwaveJournal('u4p2-k-mcp-1');
   const callsUpTo = (seq: number) => rowsOf(withAllExpanded(reduce(journalToEvents(journal.filter((row) => row.seq <= seq))))).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : [])).filter((cell) => cell.toolUseId !== null);
+  const moved = (seq: number) => callsUpTo(seq).find((cell) => cell.toolName === 'mcp__slow__slow_wait')!;
 
-  it('up to seq 55 the moved call runs in the background and ToolSearch is done; at the turn’s end (seq 132) neither runs', () => {
+  it('up to seq 55 the moved call runs in the background and ToolSearch is done; past the turn’s end (132) it still does, and at its task’s end (136) it runs no more', () => {
     expect(callsUpTo(55).map((cell) => [cell.toolName, cell.status, cell.background])).toEqual([['ToolSearch', 'done', false], ['mcp__slow__slow_wait', 'running', true]]);
-    const atEnd = callsUpTo(132).find((cell) => cell.toolName === 'mcp__slow__slow_wait')!;
-    expect(atEnd.status).not.toBe('running');
-    expect(atEnd.background).toBe(false);
+    expect([moved(132).status, moved(132).background]).toEqual(['running', true]);
+    expect(moved(136).status).not.toBe('running');
+    expect(moved(136).background).toBe(false);
   });
 });
 
