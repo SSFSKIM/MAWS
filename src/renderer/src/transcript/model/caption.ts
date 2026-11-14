@@ -138,10 +138,12 @@ const AGENT_OUTCOME: Record<SubagentStatus, StepOutcome> = { started: 'running',
 export type SentOutcome = (row: Extract<Row, { kind: 'agent_message' }>) => StepOutcome | null;
 
 // A turn's steps (decision 8), from the rows of its work in order: every call of its runs and of its rows that are
-// cells, but the refused ones that stand alone; each agent of its subagent rows, by its own status; and each message it
+// cells, but the refused ones that stand alone; each agent its turn launched, by its own status; and each message it
 // sent to a subagent or to another session, by recipient, by its call's own outcome, but the refused ones that stand
-// alone. Arrivals, questions and thoughts are no steps.
-export function stepsOfTurn(rows: readonly Row[], agentStatus: (ref: SubagentRef) => SubagentStatus, sent: SentOutcome): CaptionStep[] {
+// alone. Arrivals, questions and thoughts are no steps. An agent is a step of the turn that holds its launching call
+// (the architect's ruling on M5): `launched` holds the turn's own calls whose presentation is `subagent`, and a ref
+// whose call is not among them (live, an agent the turn messaged starts again under the sending call's id) is none.
+export function stepsOfTurn(rows: readonly Row[], launched: ReadonlySet<string>, agentStatus: (ref: SubagentRef) => SubagentStatus, sent: SentOutcome): CaptionStep[] {
   const writes = writesOf(rows.flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : [])));
   const steps: CaptionStep[] = [];
   const step = (kind: CaptionKind, key: string, outcome: StepOutcome | null) => {
@@ -151,7 +153,7 @@ export function stepsOfTurn(rows: readonly Row[], agentStatus: (ref: SubagentRef
     if (row.kind === 'group' || row.kind === 'cell') {
       for (const cell of row.kind === 'group' ? row.cells : [row]) if (cell.toolName !== 'thinking' && !standsAlone(cell)) steps.push(stepOf(cell, writes));
     } else if (row.kind === 'subagent') {
-      for (const ref of row.agents) step('agent', ref.taskId, AGENT_OUTCOME[agentStatus(ref)]);
+      for (const ref of row.agents) if (ref.toolUseId !== null && launched.has(ref.toolUseId)) step('agent', ref.taskId, AGENT_OUTCOME[agentStatus(ref)]);
     } else if (row.kind === 'agent_message' && row.direction === 'to_child') {
       // a recipient this transcript does not know is counted by its message, its own recipient
       step('agent_message', row.to?.agentId ?? row.to?.taskId ?? row.id, sent(row));
