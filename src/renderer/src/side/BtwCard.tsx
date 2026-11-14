@@ -22,7 +22,8 @@ import { SIDE_COPY } from './copy';
 import { visibleSessions } from '../session/visibility';
 import { useFloatingCard } from '../shell/floating';
 import { useLayout } from '../stores/layout';
-import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, setBtwQuestion, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
+import { useSessions } from '../stores/sessions';
+import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, refreshSide, setBtwQuestion, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
 
 const COPY = SIDE_COPY.btw;
 export type BtwCardPlacement = 'corner' | 'flow';
@@ -128,8 +129,13 @@ function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwC
   );
 }
 
-// The folded card: its word, the newest waiting line while an answer is awaited, and a dot for one that settled unseen.
+// The folded card: its word, the newest waiting line while an answer is awaited, and a dot for one that settled unseen. It
+// lists the log as the open card does, at its mount and when the session's process changes (the panel's finding 8): a
+// remote session forgotten while no pane drew it opens again with no `remote.reopened`, and an answer that settled then
+// would otherwise wait for the card's opening.
 function FoldedChip({ parent, placement }: { parent: AppSessionId; placement: BtwCardPlacement }) {
+  const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
+  useEffect(() => void refreshSide(parent), [parent, process]);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges) ?? [];
   const unseen = useBtwCards((s) => btwUnseen(btwCardOf(s, parent), exchanges));
   const awaited = exchanges.findLast((e) => e.state === 'pending');
