@@ -314,17 +314,22 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
 
-  // once widgets are registered for them, `/model` is listed as MAWS's panel, and the same names open the widget (W3,
-  // C6: as the floating dialog, never in the box). Which row opens the list here is the recency boost's: the names chosen
-  // above rank first with nothing typed (decision 17 c), so the panels' declared order before any pick is the next
-  // scene's (the M8 review's finding 2; the CI run of b1bad4a07 read `/compact` first here). The registrations land with
-  // the list closed and a fresh `/` opens it, as the app's own land at its start: an open list takes the editor's
-  // catalogue and panels when the suggestion renders, at a keystroke, not when a registration lands (popup.tsx)
+  // once widgets are registered for them, `/model` (a panel, and the newest name chosen) opens the list, from MAWS, and
+  // the same names open the widget (W3, C6: as the floating dialog, never in the box). The panels' declared order before
+  // any pick is the next scene's: the names chosen above rank first with nothing typed (decision 17 c). The registrations
+  // land with the list closed and a fresh `/` opens it, as the app's own land at its start: an open list takes the
+  // editor's catalogue and panels when the suggestion renders, at a keystroke, not when a registration lands (popup.tsx),
+  // so a list left open across them still holds the engine's rows (the Macs' runs of 443319d64; the CI run of b1bad4a07,
+  // which read the engine's `/compact`, chosen too and listed before `/model`, first)
   await clearEditor(page);
   await expect(commands).toBeHidden();
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
   await page.keyboard.type('/');
-  await expect(commands.getByRole('option', { name: '/model', exact: true })).toHaveAttribute('data-origin', 'widget');
+  await expect(commands.getByRole('option').nth(0)).toHaveAccessibleName('/model');
+  await expect(commands.getByRole('option').nth(0)).toHaveAttribute('data-origin', 'widget');
+  await expect(chosen).toHaveAccessibleName('/model');
+  await expect(detail).toContainText('Choose the model for this session');
+  await expect(detail).toContainText('MAWS');
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
     await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
