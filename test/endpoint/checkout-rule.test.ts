@@ -570,31 +570,36 @@ describe('the checkout bounds and the folders a record’s facts name', () => {
   // fold (APFS) the two names are one folder, and there is nothing to tell apart.
   it('does not take a sibling spelled in the other Unicode form for the registered worktree whose pointer it copies', async (ctx) => {
     const one = await repo();
-    const decomposed = one.path('.claude/worktrees/cafe\u0301');
-    const composed = one.path('.claude/worktrees/caf\u00e9');
-    await one.git('worktree', 'add', '-q', '-b', 'cafe', decomposed);
+    const beside = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-nfc-wt-'))); // outside the checkout, as `beside` is
     try {
-      mkdirSync(composed);
-    } catch {
-      ctx.skip(); // the forms fold (APFS): one directory
+      const decomposed = join(beside, 'cafe\u0301');
+      const composed = join(beside, 'caf\u00e9');
+      await one.git('worktree', 'add', '-q', '-b', 'cafe', decomposed);
+      try {
+        mkdirSync(composed);
+      } catch {
+        ctx.skip(); // the forms fold (APFS): one directory
+      }
+      copyFileSync(join(decomposed, '.git'), join(composed, '.git'));
+      const f = await machine(one.serviceEnv());
+      const dispatch: Parameters<CheckoutBounds['of']>[1] = (owner, name, input) => f.services.dispatch(owner, name, input);
+      const listedPaths = async () => {
+        const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: one.root });
+        return listed.ok ? (listed.value as { worktrees: { path: string }[] }).worktrees.map((entry) => entry.path) : listed.error;
+      };
+      const forged = { directory: one.root, additionalDirectories: [], worktree: null, agentFolder: { checkout: composed, cwd: composed, branch: null, linked: true } };
+      expect.soft(await listedPaths(), 'the machine lists the worktree as git spells it').toEqual([one.root, decomposed]);
+      expect.soft(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
+      moved(f, 'app-forged', forged);
+      const a = await openRemote(f, org.a1, org.A);
+      expect.soft(code(await call(a, 'git.status', { directory: composed }, B('app-forged')))).toBe('no-target');
+      // and once the registered folder is gone, its registration kept: the sibling is still not it
+      rmSync(decomposed, { recursive: true, force: true });
+      expect.soft(await listedPaths()).toEqual([one.root, decomposed]);
+      expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
+    } finally {
+      rmSync(beside, { recursive: true, force: true });
     }
-    copyFileSync(join(decomposed, '.git'), join(composed, '.git'));
-    const f = await machine(one.serviceEnv());
-    const dispatch: Parameters<CheckoutBounds['of']>[1] = (owner, name, input) => f.services.dispatch(owner, name, input);
-    const listedPaths = async () => {
-      const listed = await dispatch('machine', 'git.worktree.list', { repoRoot: one.root });
-      return listed.ok ? (listed.value as { worktrees: { path: string }[] }).worktrees.map((entry) => entry.path) : listed.error;
-    };
-    const forged = { directory: one.root, additionalDirectories: [], worktree: null, agentFolder: { checkout: composed, cwd: composed, branch: null, linked: true } };
-    expect.soft(await listedPaths(), 'the machine lists the worktree as git spells it').toEqual([one.root, decomposed]);
-    expect.soft(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
-    moved(f, 'app-forged', forged);
-    const a = await openRemote(f, org.a1, org.A);
-    expect.soft(code(await call(a, 'git.status', { directory: composed }, B('app-forged')))).toBe('no-target');
-    // and once the registered folder is gone, its registration kept: the sibling is still not it
-    rmSync(decomposed, { recursive: true, force: true });
-    expect.soft(await listedPaths()).toEqual([one.root, decomposed]);
-    expect(await f.endpoint.checkoutBounds.of(forged, dispatch)).toMatchObject({ roots: [one.root], checkoutCovers: true });
   });
 });
 
