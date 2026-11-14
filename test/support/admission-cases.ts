@@ -30,6 +30,8 @@ export interface AdmissionPaths {
   other: string; // a folder of another repository
   locked: string; // the main work tree of a repository whose config cannot be read (mode 000)
   lockedWt: string; // a registered linked worktree of that repository, beside it
+  separate: string; // the main work tree of a repository whose git dir is apart from it (`git init --separate-git-dir`)
+  separateWt: string; // a linked worktree inside it, `.claude/worktrees/sep`
   plain: string; // a folder in no repository
   missing: string; // a folder that does not exist
 }
@@ -77,6 +79,13 @@ export const ADMISSION_CASES: readonly [string, (p: AdmissionPaths) => Admission
   ['a folder of another repository', (p) => agentAt(p, p.other, null)],
   ['a folder of no repository', (p) => agentAt(p, p.plain, null)],
   ['a folder that does not resolve', (p) => agentAt(p, p.missing, null)],
+  // git lists the main work tree of such a repository at its git dir; both readers take the checkout the worktree is under
+  ['the main work tree of a repository whose git dir is apart from it, the anchor being a linked worktree under it', (p) => ({
+    record: { directory: p.separateWt, additionalDirectories: [], worktree: { path: p.separateWt, branch: 'sep' }, launchFolder: p.separate },
+    which: 'launch',
+    folder: p.separate,
+    admitted: p.separate,
+  })],
   ['a registered linked worktree of a repository whose config cannot be read: a read that fails refuses', (p) => ({
     record: { directory: p.locked, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.lockedWt, cwd: p.lockedWt, branch: null, linked: true } },
     which: 'path',
@@ -128,6 +137,8 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
     other: at('other'),
     locked: at('locked'),
     lockedWt: at('locked-wt'),
+    separate: at('separate'),
+    separateWt: at('separate/.claude/worktrees/sep'),
     plain: at('plain'),
     missing: at('missing'),
   };
@@ -157,6 +168,11 @@ export async function admissionRepos(): Promise<{ paths: AdmissionPaths; dispose
   const config = join(p.locked, '.git', 'config');
   chmodSync(config, 0o000); // git itself then exits 128 ("unable to access '.git/config': Permission denied")
   if (readable(config)) throw new Error('the admission cases need a user whom mode 000 denies (not root): the locked row would not be locked');
+  await git(base, 'init', '-q', '-b', 'main', `--separate-git-dir=${at('separate.git')}`, p.separate);
+  writeFileSync(join(p.separate, 'README.md'), 'hello\n');
+  await git(p.separate, 'add', '.');
+  await git(p.separate, 'commit', '-q', '-m', 'initial');
+  await git(p.separate, 'worktree', 'add', '-q', '-b', 'sep', p.separateWt);
   mkdirSync(p.plain);
   symlinkSync(p.beside, p.linkToWorktree);
   symlinkSync(p.plain, p.linkToPlain);
