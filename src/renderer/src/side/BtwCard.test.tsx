@@ -25,6 +25,7 @@ import { useMachines } from '../stores/machines';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { A, B, panelOf, resetPanelStores } from '../test-support/panel';
+import { preloadOf } from '../test-support/preload-of';
 import { SIDE_TOOL_ID } from './actions';
 import { applyBtw } from './btw';
 import { BtwCard } from './BtwCard';
@@ -378,7 +379,7 @@ describe('the /btw card for a terminal session', () => {
 
   it('asks through the bridge and draws the answer from its op’s end, never the host’s listing', async () => {
     fake = fakeClient({ 'laneA.btw': { state: 'done', result: { started: true, id: 'cmd-9' } }, 'laneA.watch': { watch: 'w-1' }, 'laneA.unwatch': undefined });
-    window.maws = fake.client as unknown as PreloadBridge;
+    window.maws = preloadOf(fake); // the bridge's events reach the renderer's own client
     await act(async () => void (await applyBtw(L, 'why?')));
     render(<BtwCard appSessionId={L} />);
     expect(within(card()!).getByText('why?')).toBeTruthy();
