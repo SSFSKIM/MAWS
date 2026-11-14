@@ -35,6 +35,9 @@ const SHELL_ENV = {
 // the session in front.
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
+// A session with a transcript and no request at launch (its read-only request comes at 3000 on the manual clock), so its
+// composer is drawn: FIX's permission is pending from launch and docked in its composer's place, which hides the draft.
+const CHARTER_TITLE = 'Charter + research';
 const SIP = 'Sidebar interaction pass';
 const QUOTA = 'Quota reset recovery';
 const NORTH = 'Workstation north star';
@@ -686,8 +689,9 @@ test('Settings is a dialog', async () => {
   try {
     const { app, page } = maws;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-    await (await sidebarRow(page, FIX)).click();
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX]);
+    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
+    await (await sidebarRow(page, CHARTER_TITLE)).click();
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([CHARTER_TITLE]);
     const main = page.locator('[data-region="main"]');
     // read under the dialog too, where everything outside it is hidden from accessibility
     const composer = main.getByRole('textbox', { name: 'Message', includeHidden: true });
@@ -727,6 +731,10 @@ test('Settings is a dialog', async () => {
     await dialog.getByRole('button', { name: 'Reset to defaults' }).click();
     const sheet = page.getByRole('dialog', { name: 'Reset every key binding?' });
     await expect(sheet).toBeVisible();
+    // the sheet is the top layer before the key (the second Mac run: Radix makes it so a few frames after it is drawn): it
+    // holds the keyboard, and the dialog under it takes no pointer
+    await expect(sheet.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+    await expect(page.locator('[data-settings-dialog]')).toHaveCSS('pointer-events', 'none');
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
     await expect(dialog, 'the dialog stays under the sheet it opened').toBeVisible();
@@ -740,13 +748,16 @@ test('Settings is a dialog', async () => {
 });
 
 // UX wave U7b, O-40 (the same document, M8; A7 and A9; M5, decisions 2 and 5): a page takes everything right of the
-// sidebar. With a transcript scrolled up, a draft typed and a side surface open, Customize opens as a page: the side
-// column is not drawn, the title bar spans to the window's right edge with the ring at its end, Back and "Customize"
-// stand where the strip was, and the sidebar's row is current. ⌘, opens the dialog over the page and Esc shows the page
-// again. Back returns to the same tab at the same scroll offset with its draft, and to the side surface as it was, with
-// nothing of the side column written by the visit. A session's row leaves the page. A request raised while a page is
-// open shows under Needs you and on the Overview button, and the page stays. A relaunch with the page open shows the
-// page; with the dialog open over it, the page without the dialog.
+// sidebar. With a draft typed and a side surface open, Customize opens as a page: the side column is not drawn, the
+// title bar spans to the window's right edge with the ring at its end, Back and "Customize" stand where the strip was,
+// and the sidebar's row is current. ⌘, opens the dialog over the page and Esc shows the page again. Back returns to the
+// same tab with its draft, and to the side surface as it was, with nothing of the side column written by the visit.
+// A session's row leaves the page. A request raised while a page is open shows under Needs you and on the Overview
+// button, and the page stays. A relaunch with the page open shows the page; with the dialog open over it, the page
+// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub draws
+// no transcript today (its history never reaches the app, and the daemon relay is being repaired on master); it is
+// proved on a replayed session by library.spec.ts's "a replayed session's transcript keeps its scroll offset across a
+// page and Back".
 test('a page beside the sidebar', async () => {
   test.setTimeout(150_000);
   const DRAFT = 'A draft that waits behind the page';
@@ -765,35 +776,29 @@ test('a page beside the sidebar', async () => {
     const files = panel.locator('[data-surface="files"]');
     const bar = page.getByRole('banner');
     const region = pageRegion(page);
-    await (await sidebarRow(page, FIX)).click();
-    await expect.poll(labels).toEqual([FIX]);
+    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
+    await (await sidebarRow(page, CHARTER_TITLE)).click();
+    await expect.poll(labels).toEqual([CHARTER_TITLE]);
 
-    // the tab as the person leaves it: a side surface open, a draft typed, the transcript scrolled up from its end
+    // the tab as the person leaves it: a side surface open, a draft typed
     await openSurface(page, 'Files');
     await composer.click();
     await page.keyboard.type(DRAFT);
     await expect(composer).toHaveText(DRAFT);
-    const scrollBox = (await scroller.boundingBox())!;
-    await page.mouse.move(scrollBox.x + scrollBox.width / 2, scrollBox.y + scrollBox.height / 2);
-    await page.mouse.wheel(0, -600);
-    await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop), { message: 'the transcript scrolled up from its end' }).toBeGreaterThan(0);
-    let offset = -1;
-    await expect.poll(async () => {
-      const now = await scroller.evaluate((el) => el.scrollTop);
-      const settled = now === offset;
-      offset = now;
-      return settled;
-    }, { message: 'the scroll has settled', intervals: [250] }).toBe(true);
-    // layout.json settled on what is drawn: the side surface stored, and two reads in a row the same (the store writes a
-    // key 250 ms after its last change; typing and scrolling change neither key)
-    const sides = () => JSON.stringify({ regions: storedKey(userData, 'regions'), surfaces: storedKey(userData, 'panelTools.surfaces') });
-    let read = '';
+    // layout.json holds the side column as drawn: the panel open and the Files tab in a stack. The store writes a key 250
+    // ms after its last change (write-behind, so the bound is a slow machine's); opening the surface changes these two keys
+    // and typing changes neither, so once both hold it nothing of the side column is still to be written. A failure prints
+    // what the file held.
+    const sideColumn = () => ({
+      panel: (storedKey(userData, 'regions') as { panel?: unknown } | undefined)?.panel ?? null,
+      surfaces: (storedKey(userData, 'panelTools.surfaces') as { stacks?: Record<string, string[]> } | undefined) ?? null,
+    });
     await expect.poll(() => {
-      const now = sides();
-      const settled = now === read && now.includes('"files"');
-      read = now;
-      return settled;
-    }, { message: 'layout.json holds the side surface, settled', intervals: [400] }).toBe(true);
+      const held = sideColumn();
+      const shown = (held.panel as { collapsed?: boolean } | null)?.collapsed === false && Object.values(held.surfaces?.stacks ?? {}).some((stack) => stack.some((tabId) => tabId === 'files' || tabId.startsWith('files:')));
+      return { shown, held };
+    }, { message: 'layout.json holds the side column as drawn', timeout: 15_000 }).toMatchObject({ shown: true });
+    const drawn = sideColumn();
 
     // the page: everything right of the sidebar
     await openAppDestination(page, 'Customize');
@@ -823,24 +828,18 @@ test('a page beside the sidebar', async () => {
     await expect(dialog).toHaveCount(0);
     await expect(region).toHaveAttribute('data-destination', 'customize');
 
-    // Back: the same tab at the same scroll offset with its draft, the side surface as it was, nothing written
-    await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back' }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
+    // Back: the same tab with its draft, the side surface as it was, nothing written
+    await expect.poll(() => storedKey(userData, 'destination'), { message: 'the page is stored before Back', timeout: 15_000 }).toMatchObject({ version: 1, destination: { kind: 'customize' } });
     await backToTabs(page);
     await expect(behind).toHaveJSProperty('inert', false);
     await expect(files).toBeVisible();
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
-    expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(CHARTER_TITLE);
     await expect(composer).toHaveText(DRAFT);
     // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
     // `panelTools.surfaces` before `destination` (persistedKeys' order), so once the key is gone a write of either made
-    // by the visit or by Back has landed; four more reads then hold the two keys as they were.
-    await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed' }).toBe(false);
-    let held = 0;
-    await expect.poll(() => {
-      if (sides() !== read) return `changed: ${sides()}`;
-      held += 1;
-      return held >= 4 ? 'held' : 'reading';
-    }, { message: 'regions and the side surfaces unchanged by the visit', intervals: [250], timeout: 5_000 }).toBe('held');
+    // by the visit or by Back has landed, and the side column reads as it was drawn.
+    await expect.poll(() => 'destination' in (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as object), { message: 'Back wrote the page closed', timeout: 15_000 }).toBe(false);
+    expect(sideColumn(), 'nothing of the side column written by the visit').toEqual(drawn);
 
     // a session's row leaves the page and shows that session
     await openAppDestination(page, 'Projects');
@@ -910,7 +909,9 @@ test('⌘⇧\\ under a page', async () => {
     await expect(pageRegion(page), 'the page closes').toHaveCount(0);
     await expect.poll(front, { message: 'the other pane’s tab in front' }).toBe(other);
     await expect(main.locator('[data-pane="1"]'), 'the split stays').toBeVisible();
-    expect(await tabLabels(page, 'Open tabs'), 'no tab added or lost').toEqual(expect.arrayContaining([NORTH, FIX]));
+    // the premise: in a split the two strips are named for their panes, and no strip is "Open tabs" (TabStrip, since C5)
+    const splitTabs = [...(await tabLabels(page, 'Left pane tabs')), ...(await tabLabels(page, 'Right pane tabs'))];
+    expect(splitTabs, 'no tab added or lost').toEqual(expect.arrayContaining([NORTH, FIX]));
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();

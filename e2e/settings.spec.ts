@@ -281,9 +281,14 @@ test('settings: Engine shows the resolved binary, its version and the tested one
   }
 });
 
-// WR #57: the first click after the native popup of a select was chosen from or dismissed is not swallowed. UX wave
-// U7b: the popup is inside the Settings dialog, and the click is one on a section link of its index, which moves the view.
-test('WR #57: first click after choosing or dismissing the design-system popup navigates', async () => {
+// WR #57: the first click after a choice from a select's popup is not swallowed. UX wave U7b: the popup is inside the
+// Settings dialog, and the click is one on a section link of its index, which moves the view. What this can prove on
+// macOS: the gate's keys reach the page, not the native menu, so the choice below is the page's (ArrowDown and Enter on
+// the focused select) and the native menu may stay drawn over the window; that the first click after the choice
+// navigates. The closing Escape at the end is there so the app can quit: an app with a native menu open cannot (the Mac
+// runs whose scene ended on Enter hung in teardown). The native paths, a choice made in the menu itself and closing it
+// without one (by Esc or by Return on the current item), are U14's hand check (docs/tech-debt-tracker.md, U14).
+test('WR #57: the first click after choosing from the design-system popup navigates', async () => {
   const maws = await launchMaws();
   try {
     const { app, page } = maws;
@@ -294,22 +299,25 @@ test('WR #57: first click after choosing or dismissing the design-system popup n
     await expect(link('Artifacts')).toHaveAttribute('aria-current', 'true');
     const select = panel(page).getByRole('combobox', { name: 'Default design system', exact: true });
     await expect(select.locator('option', { hasText: 'Classroom' })).toHaveCount(1);
-    for (const [commit, target] of [[true, 'Keyboard'], [false, 'Appearance']] as const) {
-      // A real popup, not selectOption: its native dismissal is what is under test.
-      await select.click();
-      if (commit) {
-        await page.keyboard.press('ArrowDown');
-        await page.keyboard.press('Enter');
-      } else {
-        await page.keyboard.press('Escape');
-      }
-      await expect(settingsDialog(page), 'the popup took its own Esc').toBeVisible();
-      // Exactly one click: no second click hides a swallowed one.
-      await link(target).click();
-      await expect(link(target)).toHaveAttribute('aria-current', 'true');
-      await expect(panel(page).getByRole('heading', { name: target, exact: true })).toBeInViewport();
-      await link('Artifacts').click();
-      await expect(link('Artifacts')).toHaveAttribute('aria-current', 'true');
+    // A real popup, not selectOption: its native closing is what is under test.
+    const before = await select.inputValue();
+    await select.click();
+    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('Enter');
+    await expect(select, 'a choice changes the value').not.toHaveValue(before);
+    await expect(settingsDialog(page), 'the popup closed alone').toBeVisible();
+    // Exactly one click: no second click hides a swallowed one.
+    await link('Keyboard').click();
+    await expect(link('Keyboard')).toHaveAttribute('aria-current', 'true');
+    await expect(panel(page).getByRole('heading', { name: 'Keyboard', exact: true })).toBeInViewport();
+    // The closing Escape, so the app can quit. Where the popup is the page's own, the first may close only the popup, so
+    // a dialog still open takes a second.
+    await page.keyboard.press('Escape');
+    try {
+      await expect(settingsDialog(page)).toHaveCount(0, { timeout: 2_000 });
+    } catch {
+      await page.keyboard.press('Escape');
+      await expect(settingsDialog(page), 'the dialog closed for the quit').toHaveCount(0);
     }
   } finally {
     await maws.cleanup();
@@ -486,7 +494,7 @@ test('settings: the regrouped page; each note one line where the body has its 76
 // far down a short section lands with its section's heading in view, holds the keyboard and is marked for a moment; a
 // word behind a row's More opens it; the results scroll as the index's list does, the field and the footer staying; Esc
 // clears the field. UX wave U7b: in the Settings dialog (§H, rows 4 to 6) Esc with text in the field clears it and the
-// dialog stays, Esc in the empty field leaves the field, and the next closes the dialog. "usage" finds Usage's row
+// dialog stays, and the next Esc, in the empty field, closes the dialog (the wave architect's ruling on the first Mac run). "usage" finds Usage's row
 // (O-47); it also finds Gateway's "Direct login", whose line holds the word, so the step asks that Usage's result is
 // among the results. The narrow form (the field a first row, its results a list under it) was reached through a split;
 // no window reaches it in the dialog, and `SettingsSearch.test.tsx` keeps it.
@@ -564,10 +572,9 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     await expect(field).toHaveValue('');
     await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toBeVisible();
     await expect(settingsDialog(page), 'clearing the field keeps the dialog').toBeVisible();
-    // Esc in the empty field leaves the field (row 5), and the next closes the dialog (row 6)
-    await page.keyboard.press('Escape');
-    await expect(field).not.toBeFocused();
-    await expect(settingsDialog(page), 'leaving the field keeps the dialog').toBeVisible();
+    // Esc in the empty field closes the dialog (row 6): ruled by the wave's architect on the first Mac run, an empty search
+    // field passes Esc to its host
+    await expect(field).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(settingsDialog(page)).toHaveCount(0);
     expect(maws.consoleErrors()).toEqual([]);
