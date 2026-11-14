@@ -62,7 +62,9 @@ export interface ScmStore {
   unstage(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, paths: string[]): Promise<ScmMutationResult>;
   discard(ui: StoreApi<ScmUi>, appSessionId: AppSessionId, directory: string, entries: ScmDiscardInput['entries']): Promise<ScmMutationResult>;
   commit(ui: StoreApi<ScmUi>, appSessionId: AppSessionId): Promise<ScmMutationResult>; // the session's draft and Skip hooks
-  resume(appSessionId: AppSessionId): () => void; // ref-counted: seeds the run from `scm.remote.last` and follows its events
+  // ref-counted: seeds the run from `scm.remote.last` and follows its events; `ownRuns`, whether the session's own runs
+  // run in the checkout the page shows (its launch folder; UX wave U8c-2: no act runs elsewhere), true unless said
+  resume(appSessionId: AppSessionId, options?: { ownRuns?: boolean }): () => void;
   started(appSessionId: AppSessionId, plan: RemotePlan): void; // `scm.push`/`scm.pr.create` answered `started` for the plan
   reset(): void; // tests
 }
@@ -200,8 +202,11 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
       // event is the session's when it names the session or the run it holds. Events that arrive before the snapshot
       // answers are either folded into it (its run, at or below its `seq`) or from a run before it (main's latest run
       // is the newest one when it answers): only its own run's later events are kept. With no run in main, whatever
-      // the session's own runs sent is a run that started since.
-      resume(appSessionId) {
+      // the session's own runs sent is a run that started since. The event names no checkout: UX wave U8c-2 (the
+      // branch review, finding 6), a session's own runs run only in its launch folder, so on the page of any other
+      // folder (`ownRuns` false) an event is taken only for the run that checkout's snapshot named; one of the
+      // session's naming it alone is the launch folder's run, running on after the agent moved.
+      resume(appSessionId, { ownRuns = true } = {}) {
         let r = resumed.get(appSessionId);
         if (r) r.count += 1;
         else {
@@ -211,7 +216,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
           entry.off = client.on('scm.remote.output', (event) => {
             if (entry.pending) return void entry.pending.push(event);
             const run = get().runs.get(appSessionId) ?? null;
-            if (event.appSessionId !== appSessionId && event.token !== run?.token) return;
+            if (event.token !== run?.token && (!ownRuns || event.appSessionId !== appSessionId)) return;
             setRun(appSessionId, advanceRun(run, event));
           });
           void settled(client.invoke('scm.remote.last', { appSessionId })).then((result) => {
@@ -220,7 +225,7 @@ export function createScmStore(client: MawsBridge, options: ScmStoreOptions = {}
             entry.pending = null;
             const seeded = result.ok ? runFromSnapshot(result.value) : null;
             let run = seeded;
-            for (const event of pending) if (seeded === null ? event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
+            for (const event of pending) if (seeded === null ? ownRuns && event.appSessionId === appSessionId : event.token === seeded.token) run = advanceRun(run, event);
             set((s) => ({ runs: mapWith(s.runs, appSessionId, run) }));
           });
         }

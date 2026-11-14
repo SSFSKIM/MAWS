@@ -49,7 +49,7 @@ const Message = ({ children, role }: { children: string; role?: 'status' }) => (
 export function ScmShell({ appSessionId, directory, ui, acts = true }: ScmShellProps) {
   const machine = machineFor(appSessionId);
   useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
-  useEffect(() => useScm.getState().resume(appSessionId), [appSessionId]);
+  useEffect(() => useScm.getState().resume(appSessionId, { ownRuns: acts }), [appSessionId, acts]); // acts: the launch folder's page
   const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = status === null ? (entry?.error ?? null) : null;
