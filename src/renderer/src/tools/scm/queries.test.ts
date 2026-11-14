@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { queryClient } from '../../ipc/query';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { invalidateScmQueries, prStateKey, refreshPublishedPrState, resetScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from './queries';
+import { invalidateScmQueries, prStateKey, refreshPrState, refreshPublishedPrState, resetScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from './queries';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -48,5 +48,26 @@ describe('resetScmQueries', () => {
     release();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(queryClient.getQueryData(prStateKey(A))).toBeUndefined();
+  });
+});
+
+// UX wave U8c-2 (M6 fix wave 1): the summary's Refresh writes its answer as the published lookup does: an ordinary read
+// of the PR state still out when it lands (the poll's, or one a ref move asked for), begun before the Refresh, is
+// cancelled, so it cannot land after the Refresh and put the older state back.
+describe('refreshPrState', () => {
+  afterEach(() => queryClient.clear());
+
+  it('keeps its answer over an ordinary read begun before it and answered after it', async () => {
+    queryClient.setQueryData(prStateKey(A), { branch: 'main', pr: null });
+    let answerRead!: () => void;
+    const read = queryClient
+      .fetchQuery({ queryKey: prStateKey(A), queryFn: () => new Promise((resolve) => (answerRead = () => resolve({ branch: 'main', pr: null }))) })
+      .catch(() => undefined); // the cancelled read rejects
+    const client = { invoke: () => Promise.resolve({ ok: true, value: { branch: 'main', pr: { number: 7 } } }) } as unknown as MawsBridge;
+    await refreshPrState(A, client);
+    answerRead();
+    await read;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(queryClient.getQueryData(prStateKey(A))).toEqual({ branch: 'main', pr: { number: 7 } });
   });
 });
