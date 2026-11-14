@@ -13,10 +13,11 @@ import fs from 'node:fs';
 import { sep } from 'node:path';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { discoverRepo, worktreeList, type GitFiles } from '@shared/machine/git-reads';
+import { discoverRepo, POINTER_MAX, worktreeList, type GitFiles, type GitRepo } from '@shared/machine/git-reads';
 import { coversHome } from '@shared/machine/machine-home';
 import type { SpineView } from '@shared/spine/view';
 import { workingFolder } from '@shared/sessions/working-folder';
+import { mainCheckout } from '../git/main-checkout';
 
 export type AllowlistRecord = Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'> & Partial<Pick<SessionRecord, 'launchFolder' | 'agentFolder'>>;
 
@@ -67,7 +68,7 @@ export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 
   try {
     const [at, home] = await Promise.all([discoverRepo(real, PLAIN_FILES), discoverRepo(anchor, PLAIN_FILES)]);
     if (at === null || home === null || at.workTree === null || at.commonDir !== home.commonDir) return null;
-    const trees = await Promise.all((await worktreeList(home, PLAIN_FILES)).map((tree) => realpathOrNull(tree.path)));
+    const trees = await Promise.all((await worktreeList(home, PLAIN_FILES)).map((tree, i) => (i === 0 && !tree.bare && tree.path === home.commonDir ? mainOf(home) : realpathOrNull(tree.path))));
     return trees.includes(at.workTree) ? { folder: real, checked: true } : null;
   } catch {
     return null; // git's layout refused, or a read failed: no root
@@ -75,6 +76,17 @@ export async function admittedFolder(record: AllowlistRecord, which: 'launch' | 
 }
 
 const realpathOrNull = (path: string): Promise<string | null> => fs.promises.realpath(path).catch(() => null);
+
+// The main work tree of a repository whose git dir is apart from it, which git's list names by the git dir itself: the
+// checkout the worktree service takes for it (src/services/git/main-checkout.ts, the one repair both readers use), read
+// from git's own files; null where none is known (the record's directory in a linked worktree outside its checkout).
+const mainOf = async (home: GitRepo): Promise<string | null> =>
+  home.workTree === null
+    ? null
+    : mainCheckout(
+        { toplevel: home.workTree, gitDir: home.gitDir, commonDir: home.commonDir },
+        { canonical: PLAIN_FILES.real, pointer: async (path) => (await PLAIN_FILES.read(path, POINTER_MAX))?.toString('utf8') ?? null },
+      );
 
 // Nothing there (ENOENT; ENOTDIR, a path through a file) is an absence, which the reader answers null; any other failure
 // (EACCES, EIO, ELOOP, …) is thrown, so the admission refuses where git itself would stop (§G: a read that fails refuses).

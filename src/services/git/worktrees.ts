@@ -24,6 +24,7 @@ import type {
 import { validateWorktreeName, worktreeDirName, type BranchStatus, type WorktreeInfo, type WorktreeStatus } from '@shared/sessions/worktree';
 import { normalizePath } from '@shared/sessions/trust';
 import { canonicalPath, occupancyOf, type HolderDeps } from '../sessions/holders';
+import { mainCheckout, type CheckoutReads } from './main-checkout';
 import { parseStatus } from './porcelain';
 import { GitCommandError, type GitRun } from './runner';
 
@@ -64,15 +65,9 @@ const NODE_FS: ExcludeFs = { readFile, appendFile, mkdir };
 // never both find no marker and append two blocks (re-review of f0ea3676): each read, check and append runs after the
 // previous one for that directory settled. The chain entry is dropped once it is the last.
 const excludeChains = new Map<string, Promise<void>>();
-// Debt wave 6: the nearest ancestor of `path` whose `.git` is a pointer file to `commonDir` (canonical), else null.
-async function checkoutAbove(path: string, commonDir: string): Promise<string | null> {
-  for (let dir = dirname(path); ; dir = dirname(dir)) {
-    const pointer = await readFile(join(dir, '.git'), 'utf8').catch(() => null); // absent, or a `.git` directory
-    const target = pointer?.match(/^gitdir:\s*(.+?)\s*$/m)?.[1];
-    if (target !== undefined && (await canonicalPath(resolve(dir, target))) === commonDir) return dir;
-    if (dirname(dir) === dir) return null;
-  }
-}
+// Debt wave 6: the service's reads for `mainCheckout` (./main-checkout.ts, shared with the files admission): its paths
+// canonical, and a `.git` that is absent, or a directory, read as no pointer.
+const CHECKOUT_READS: CheckoutReads = { canonical: canonicalPath, pointer: (path) => readFile(path, 'utf8').catch(() => null) };
 
 export function ensureRuntimeExclude(commonDir: string, fs: ExcludeFs = NODE_FS): Promise<void> {
   const next = (excludeChains.get(commonDir) ?? Promise.resolve()).then(() => writeRuntimeExclude(commonDir, fs));
@@ -285,8 +280,7 @@ export class WorktreeService {
     if (!toplevel || !commonDir || !gitDir) throw new Error(`git rev-parse answered no toplevel, common dir and git dir for ${repoRoot}`);
     const [common, git, top] = await Promise.all([canonicalPath(commonDir), canonicalPath(gitDir), canonicalPath(toplevel)]);
     if (basename(commonDir) === '.git') return { root: await canonicalPath(dirname(commonDir)), commonDir: common, isMain: true, toplevel: top };
-    if (git === common) return { root: top, commonDir: common, isMain: true, toplevel: top };
-    const checkout = await checkoutAbove(top, common);
+    const checkout = await mainCheckout({ toplevel: top, gitDir: git, commonDir: common }, CHECKOUT_READS);
     return { root: checkout ?? top, commonDir: common, isMain: checkout !== null, toplevel: top };
   }
 
