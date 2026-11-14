@@ -114,6 +114,7 @@ export type McpEntry =
 export const MCP_ENTRY_BOUNDS = { headers: 64, env: 128, args: 256, pairName: 256, value: 8192, command: 4096, arg: 8192, url: 4096, json: 32768 } as const;
 export type McpEntryProblem = { field: 'url' | 'command' | 'args' | 'headers' | 'env' | 'entry'; index: number | null; code: 'url' | 'empty' | 'space' | 'name' | 'duplicate' | 'control' | 'too-long' | 'too-many' | 'too-large' };
 
+// eslint-disable-next-line no-control-regex -- the control characters are what is refused
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const HEADER_NAME = /^[A-Za-z0-9!#$%&'*+\-.^_`|~]{1,256}$/; // an HTTP token
 const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,255}$/;

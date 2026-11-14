@@ -336,7 +336,7 @@ describe('mcpEntryProblem', () => {
   it('makes the builder throw on each problem in words that name the field and the row, never a slot’s content', () => {
     // a value of a letter or two is in any words; each short value is made one that no fixed word holds
     const distinct = (entry: McpEntry): McpEntry => {
-      const values = (pairs: McpPair[]) => pairs.map(({ name, value }, i) => ({ name, value: value.length < 8 && !/[\u0000-\u001f\u007f]/.test(value) ? `slot-value-${i}` : value }));
+      const values = (pairs: McpPair[]) => pairs.map(({ name, value }, i) => ({ name, value: value.length < 8 && ![...value].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f) ? `slot-value-${i}` : value }));
       return entry.type === 'stdio' ? { ...entry, env: values(entry.env) } : { ...entry, headers: values(entry.headers) };
     };
     for (const [what, given] of refused) {
