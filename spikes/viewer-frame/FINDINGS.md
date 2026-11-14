@@ -22,6 +22,11 @@ Three main-side settings close WebRTC and permissions in A: the app's existing `
 reaches nothing on the window's session, and the app's permission refusal. Nothing scoped to the viewer closes DNS
 prefetch. Only the app-wide `--host-resolver-rules` switch does.
 
+**Corrected by the follow-up of the same day** (the last section): Blink's own setting, set by
+`app.commandLine.appendSwitch('blink-settings', 'dnsPrefetchingEnabled=false')` before ready, closes DNS prefetch in
+A, in B and in the app's existing HTML-artifact frame, and leaves name resolution untouched. The app's existing frame
+carries the same channel without it.
+
 ## Run
 
 ```
