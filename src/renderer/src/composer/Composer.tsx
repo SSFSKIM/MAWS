@@ -449,7 +449,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       stop();
       return true;
     }
-    const refused = sendNowRefusal(refusalsNow(appSessionId), first, true);
+    const refused = sendNowRefusal(refusalsNow(appSessionId), first);
     if (refused !== null) showStackNotice(appSessionId, refused);
     else void stackActs(appSessionId, controls).sendNow(first, rows.filter((row) => row.kind === 'next').map((row) => row.key));
     return true;

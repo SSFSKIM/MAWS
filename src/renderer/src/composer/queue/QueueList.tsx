@@ -266,7 +266,7 @@ interface ControlsProps {
 }
 
 function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTakeBack }: ControlsProps) {
-  const sendRefused = sendNowRefusal(refusals, row, busy);
+  const sendRefused = sendNowRefusal(refusals, row);
   const editRefused = takeBackRefusal(refusals, row);
   const deleteRefused = deleteRefusal(refusals, row);
   const sendTitle = sendRefused ?? (!busy ? STACK_WORDS.sendNow : row.kind === 'next' && nextKeys.length > 1 ? STACK_WORDS.sendNowAll(nextKeys.length) : STACK_WORDS.sendNowWhileRunning);

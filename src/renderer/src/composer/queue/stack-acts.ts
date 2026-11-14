@@ -48,7 +48,7 @@ export function useRead(appSessionId: AppSessionId): Read {
 // ---- what may not act here ------------------------------------------------------------------------------------------
 
 export interface Refusals {
-  sendNowNext: string | null; // Send now on a next-step row while a turn runs
+  sendNowNext: string | null; // Send now on a next-step row, whether or not a turn runs (it goes by `session.steer.sendNow`)
   cancelNext: string | null; // Edit and Delete on a next-step row
   takeBack: string | null; // Edit and ↑ on any row: the machine's draft store is of an earlier build
 }
@@ -76,8 +76,9 @@ export function useRefusals(appSessionId: AppSessionId): Refusals {
   return useMemo(() => refusalsOf(remote, sendNow, cancel, hostHasWire, takeBack), [remote, sendNow, cancel, hostHasWire, takeBack]);
 }
 
-/** Why Send now cannot act on the row now, or null. */
-export const sendNowRefusal = (refusals: Refusals, row: WaitingRow, busy: boolean): string | null => (row.kind === 'next' && busy ? refusals.sendNowNext : null);
+/** Why Send now cannot act on the row now, or null. A next-step row that outlives its turn (the queue, the status and the
+ *  lifecycles arrive apart) still goes by `session.steer.sendNow`, so its refusal does not wait for a turn. */
+export const sendNowRefusal = (refusals: Refusals, row: WaitingRow): string | null => (row.kind === 'next' ? refusals.sendNowNext : null);
 /** Why Edit (and ↑) cannot take the row back, or null. */
 export const takeBackRefusal = (refusals: Refusals, row: TakenRow): string | null => (row.kind === 'next' ? (refusals.cancelNext ?? refusals.takeBack) : refusals.takeBack);
 /** Why Delete cannot act on the row, or null: never the draft store's. */
