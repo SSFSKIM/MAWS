@@ -727,7 +727,7 @@ describe('(j) an entry released while its write is held open, the write then fai
     w.row('revert', 'q-1', null); // the frame's write failed: listed again
     w.listed();
     w.holdWithdrawals(false);
-    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS + SETTLE_RETRY_MS); // listed under the same name: asked again after the backoff
     await run;
     expect(w.log).toEqual(['claim', 'remove', 'record', 'remove', 'settle']);
     expect(b.state.loaded.map(textOf)).toEqual([TEXT]);

@@ -1010,8 +1010,15 @@ export class EditorController {
         this.writer.cancel();
         this.nav = { index: null, draft: null };
         this.search = null;
-        this.setDoc(doc, { silently: true, caret: 'end' });
-        this.focusOwed = current.view.hasFocus() ? null : { from: document.activeElement };
+        if (current.isEditable) {
+          this.setDoc(doc, { silently: true, caret: 'end' });
+          return true;
+        }
+        // held: a view that is not editable takes no focus, and Tiptap's deferred focus would take it later from wherever
+        // it went meanwhile; the caret goes to the end and the focus is owed to the hold's end
+        this.setDoc(doc, { silently: true, caret: null });
+        current.view.dispatch(current.state.tr.setSelection(Selection.atEnd(current.state.doc)));
+        this.focusOwed = { from: document.activeElement };
         return true;
       },
       replaceDoc: (doc) => this.replaceDoc(doc),
