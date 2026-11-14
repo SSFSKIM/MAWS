@@ -157,10 +157,29 @@ function grain(): HTMLCanvasElement {
 }
 
 /**
+ * How present the form is. The room (its light, its falloff, the grain) is always painted; the form (the sheet, the
+ * leaf and the shadows they cast) is laid over it twice at most: `sharp` is the picture as composed, `soft` is the
+ * same picture out of focus, with no line left in it. Each is a share, 0 to 1. `FULL` is the picture as it was
+ * before presence existed, and is painted by the same calls in the same order.
+ */
+export interface Presence {
+  sharp: number;
+  soft: number;
+}
+export const FULL: Presence = { sharp: 1, soft: 0 };
+
+/** How far out of focus the soft form is: the blur's deviation in CSS px on a window 1440 on its longer side. */
+const DEFOCUS = 8;
+/** The form is painted this far past the window on every side, so its out-of-focus copy does not thin at an edge. */
+const MARGIN = 72;
+
+let layers: { key: string; sharp: HTMLCanvasElement; soft: HTMLCanvasElement | null } | null = null;
+
+/**
  * Paints the still life over a ground already filled. `k` is the field strength as a share of the default, so 1 is
  * the picture as composed.
  */
-export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, night: boolean, k: number, ground: RGB) {
+export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, night: boolean, k: number, ground: RGB, presence: Presence = FULL) {
   const L = night ? NIGHT : DAY;
   const px = (line: P[]): P[] => line.map(([x, y]) => [x * w, y * h]);
   const long = Math.max(w, h);
@@ -179,187 +198,46 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ni
   g.fillStyle = grad;
   g.fillRect(0, 0, w, h);
 
-  const N = 220;
-  const crest = resample(px(spline(CREST, 24)), N);
-  const floor = resample(px(spline(FLOOR, 24)), N);
-  const far = resample(px(spline(FAR, 24)), N);
-  const rise = px(spline(RISE, 28));
-  const belly = px(spline(BELLY, 28));
-
-  // ---- the shadows, first: a contact shadow where the arch meets the floor, and the one the leaf throws ----
-  g.save();
-  g.filter = blur(20);
-  g.fillStyle = rgba(L.shadow, L.shadowPaper * depth);
-  g.beginPath();
-  trace(g, floor.slice(Math.round(N * 0.06)));
-  g.lineTo(0.6 * w, 0.982 * h);
-  g.lineTo(0.4 * w, 0.985 * h);
-  g.lineTo(0.16 * w, 0.955 * h);
-  g.lineTo(0.02 * w, 0.92 * h);
-  g.closePath();
-  g.fill();
-  g.filter = blur(22);
-  g.fillStyle = rgba(L.shadow, L.shadowGlass * depth);
-  g.beginPath();
-  g.ellipse(0.775 * w, 0.958 * h, 0.2 * w, 0.024 * h, -0.045, 0, Math.PI * 2);
-  g.fill();
-  // Light gathered by the glass and laid inside its own shadow.
-  g.filter = blur(14);
-  g.fillStyle = rgba(L.caustic[0], L.caustic[1] * depth);
-  g.beginPath();
-  g.ellipse(0.79 * w, 0.957 * h, 0.1 * w, 0.009 * h, -0.05, 0, Math.PI * 2);
-  g.fill();
-  g.restore();
-
-  // ---- the paper: the top surface behind the crest, then the underside, rung by rung ----
-  // The top surface is one shape: it faces the light most where the sheet is still rising, turns away past the
-  // crest, and its far edge is soft, because it barely leaves the ground.
-  const groundTop = mix(ground, L.top, Math.min(1, depth));
-  g.save();
-  g.filter = blur(1.6);
-  grad = g.createLinearGradient(crest[0]![0], 0, crest[N - 1]![0], 0);
-  for (let i = 0; i <= 16; i++) {
-    const u = i / 16;
-    const facing = 1 - smooth((u - 0.34) / 0.5);
-    grad.addColorStop(u, rgba(mix(ground, groundTop, 0.3 + 0.7 * facing), 1 - smooth((u - 0.8) / 0.2)));
+  const sharp = Math.max(0, Math.min(1, presence.sharp));
+  const soft = Math.max(0, Math.min(1, presence.soft));
+  if (sharp >= 1 && soft <= 0) {
+    form(g);
+  } else if (sharp > 0 || soft > 0) {
+    // Anything less than the whole picture is laid over the room from two kept layers, so that a change of
+    // presence (a scene arriving) can be shown frame by frame without painting the form again.
+    const scale = g.canvas.width / w;
+    const m = Math.round(MARGIN * scale);
+    const key = `${g.canvas.width}x${g.canvas.height}:${w}x${h}:${night}:${k}:${ground.join()}`;
+    if (!layers || layers.key !== key) {
+      const c = document.createElement('canvas');
+      c.width = g.canvas.width + 2 * m;
+      c.height = g.canvas.height + 2 * m;
+      const lg = c.getContext('2d')!;
+      lg.setTransform(scale, 0, 0, scale, m, m);
+      form(lg);
+      layers = { key, sharp: c, soft: null };
+    }
+    if (soft > 0 && !layers.soft) {
+      const c = document.createElement('canvas');
+      c.width = layers.sharp.width;
+      c.height = layers.sharp.height;
+      const lg = c.getContext('2d')!;
+      lg.filter = `blur(${((DEFOCUS * long * scale) / 1440).toFixed(1)}px)`;
+      lg.drawImage(layers.sharp, 0, 0);
+      layers.soft = c;
+    }
+    g.save();
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    if (soft > 0 && layers.soft) {
+      g.globalAlpha = soft;
+      g.drawImage(layers.soft, -m, -m);
+    }
+    if (sharp > 0) {
+      g.globalAlpha = sharp;
+      g.drawImage(layers.sharp, -m, -m);
+    }
+    g.restore();
   }
-  g.fillStyle = grad;
-  g.beginPath();
-  trace(g, far);
-  trace(g, [...crest].reverse(), false);
-  g.closePath();
-  g.fill();
-  g.strokeStyle = rgba(L.fall.rgb, L.far * depth);
-  g.lineWidth = 1;
-  g.beginPath();
-  trace(g, far.slice(0, Math.round(N * 0.84)));
-  g.stroke();
-  g.restore();
-
-  for (let i = 0; i < N - 1; i++) {
-    const u = i / (N - 1);
-    // The underside deepens toward the fold, where the least light gets in.
-    const deep = smooth((u - 0.12) / 0.78);
-    const base = mix(L.under[0], L.under[1], deep);
-    const c = mix(ground, base, Math.min(1, depth));
-    const [x0, y0] = crest[i]!;
-    const [x1, y1] = floor[i]!;
-    const band = g.createLinearGradient(x0, y0, x1, y1);
-    // Darkest just under the edge, lifted near the floor by the light the floor sends back.
-    band.addColorStop(0, rgba(mix(c, L.under[1], 0.3 * Math.min(1, depth))));
-    band.addColorStop(0.35, rgba(c));
-    band.addColorStop(1, rgba(mix(c, ground, night ? 0.3 : 0.4)));
-    g.fillStyle = g.strokeStyle = band;
-    g.lineWidth = 0.6;
-    g.beginPath();
-    g.moveTo(x0, y0);
-    g.lineTo(crest[i + 1]![0], crest[i + 1]![1]);
-    g.lineTo(floor[i + 1]![0], floor[i + 1]![1]);
-    g.lineTo(x1, y1);
-    g.closePath();
-    g.fill();
-    g.stroke();
-  }
-  // The crest: the sheet's own edge, catching the light along the whole arch.
-  g.strokeStyle = rgba(L.edge, Math.min(1, 0.9 * depth));
-  g.lineWidth = 1.25;
-  g.lineJoin = 'round';
-  g.beginPath();
-  trace(g, crest);
-  g.stroke();
-
-  // ---- the leaf: where the sheet stands up it is glass ----
-  const leaf = () => {
-    g.beginPath();
-    trace(g, rise);
-    trace(g, belly, false);
-    g.closePath();
-  };
-  const fold: P = [0.56 * w, 0.958 * h];
-  const tip: P = [0.972 * w, 0.118 * h];
-  g.save();
-  leaf();
-  g.clip();
-  // The veil: glass is a little lighter than what is behind it, more so toward the tip.
-  grad = g.createLinearGradient(fold[0], fold[1], tip[0], tip[1]);
-  grad.addColorStop(0, rgba(L.veil[0], L.veil[1] * 0.35 * depth));
-  grad.addColorStop(0.55, rgba(L.veil[0], L.veil[1] * 0.8 * depth));
-  grad.addColorStop(1, rgba(L.veil[0], L.veil[1] * depth));
-  g.fillStyle = grad;
-  g.fillRect(0, 0, w, h);
-  // Paper passes into glass along the same curve: opaque at the fold, clear a third of the way up.
-  grad = g.createLinearGradient(fold[0], fold[1], fold[0] + (tip[0] - fold[0]) * 0.42, fold[1] + (tip[1] - fold[1]) * 0.42);
-  const sheet = mix(ground, L.top, Math.min(1, depth) * 0.8);
-  grad.addColorStop(0, rgba(sheet, 1));
-  grad.addColorStop(0.3, rgba(sheet, 0.82));
-  grad.addColorStop(0.7, rgba(sheet, 0.26));
-  grad.addColorStop(1, rgba(sheet, 0));
-  g.fillStyle = grad;
-  g.fillRect(0, 0, w, h);
-  // Light caught inside: a soft reflection that fills the upper leaf and ends on an edge of its own, the belly's
-  // inner edge, and one fine line where the far face shows through.
-  g.filter = blur(10);
-  grad = g.createLinearGradient(fold[0], fold[1], tip[0], tip[1]);
-  grad.addColorStop(0.2, rgba(L.inner[0], 0));
-  grad.addColorStop(0.6, rgba(L.inner[0], L.inner[1] * depth));
-  grad.addColorStop(1, rgba(L.inner[0], L.inner[1] * 0.8 * depth));
-  g.fillStyle = grad;
-  const sheen = px(spline(SHEEN, 20));
-  g.beginPath();
-  trace(g, sheen);
-  trace(g, belly.slice(0, Math.round(belly.length * 0.66)), false);
-  g.closePath();
-  g.fill();
-  g.filter = blur(1.2);
-  g.strokeStyle = rgba(L.inner[0], L.inner[1] * 1.2 * depth);
-  g.lineWidth = 1;
-  g.beginPath();
-  trace(g, sheen.slice(4));
-  g.stroke();
-  g.filter = blur(4);
-  g.strokeStyle = rgba(L.beside[0], L.beside[1] * 0.4 * depth);
-  g.lineWidth = 2;
-  g.beginPath();
-  trace(g, belly.slice(3, Math.round(belly.length * 0.9)).map(([x, y]) => [x - 0.007 * w, y - 0.003 * h] as P));
-  g.stroke();
-  g.restore();
-
-  // The rim: one bright line, and a fine dark one beside it so the line holds on a ground as light as itself.
-  const fromGlass = rise.slice(Math.round(rise.length * 0.14));
-  g.lineJoin = g.lineCap = 'round';
-  g.strokeStyle = rgba(L.beside[0], L.beside[1] * depth);
-  g.lineWidth = 1;
-  g.beginPath();
-  trace(g, fromGlass.map(([x, y]) => [x - 1.1, y - 0.5] as P));
-  g.stroke();
-  g.beginPath();
-  trace(g, belly.map(([x, y]) => [x + 1, y + 0.6] as P));
-  g.stroke();
-  g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * (0.5 + 0.5 * depth)));
-  g.lineWidth = 1.5;
-  g.beginPath();
-  trace(g, fromGlass);
-  g.stroke();
-  g.lineWidth = 1.1;
-  g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * 0.7 * (0.5 + 0.5 * depth)));
-  g.beginPath();
-  trace(g, belly);
-  g.stroke();
-  // The glass has thickness, and it shows where the two edges meet.
-  g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * (0.5 + 0.5 * depth)));
-  g.lineWidth = 2.2;
-  g.beginPath();
-  trace(g, belly.slice(0, Math.round(belly.length * 0.1)));
-  g.stroke();
-  // The paper's edge runs on up the leaf until the paper is gone.
-  grad = g.createLinearGradient(fold[0], fold[1], fold[0] + (tip[0] - fold[0]) * 0.3, fold[1] + (tip[1] - fold[1]) * 0.3);
-  grad.addColorStop(0, rgba(L.edge, Math.min(1, 0.9 * depth)));
-  grad.addColorStop(1, rgba(L.edge, 0));
-  g.strokeStyle = grad;
-  g.lineWidth = 1.25;
-  g.beginPath();
-  trace(g, rise.slice(0, Math.round(rise.length * 0.4)));
-  g.stroke();
 
   // Grain: paper is matte, and a lens needs something fine to displace everywhere.
   g.save();
@@ -368,4 +246,190 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ni
   g.fillStyle = g.createPattern(grain(), 'repeat')!;
   g.fillRect(0, 0, g.canvas.width, g.canvas.height);
   g.restore();
+
+  /** The form: the shadows, the sheet and the leaf, on whatever it is handed (the field itself, or a kept layer). */
+  function form(g: CanvasRenderingContext2D) {
+    let grad: CanvasGradient;
+    const N = 220;
+    const crest = resample(px(spline(CREST, 24)), N);
+    const floor = resample(px(spline(FLOOR, 24)), N);
+    const far = resample(px(spline(FAR, 24)), N);
+    const rise = px(spline(RISE, 28));
+    const belly = px(spline(BELLY, 28));
+
+    // ---- the shadows, first: a contact shadow where the arch meets the floor, and the one the leaf throws ----
+    g.save();
+    g.filter = blur(20);
+    g.fillStyle = rgba(L.shadow, L.shadowPaper * depth);
+    g.beginPath();
+    trace(g, floor.slice(Math.round(N * 0.06)));
+    g.lineTo(0.6 * w, 0.982 * h);
+    g.lineTo(0.4 * w, 0.985 * h);
+    g.lineTo(0.16 * w, 0.955 * h);
+    g.lineTo(0.02 * w, 0.92 * h);
+    g.closePath();
+    g.fill();
+    g.filter = blur(22);
+    g.fillStyle = rgba(L.shadow, L.shadowGlass * depth);
+    g.beginPath();
+    g.ellipse(0.775 * w, 0.958 * h, 0.2 * w, 0.024 * h, -0.045, 0, Math.PI * 2);
+    g.fill();
+    // Light gathered by the glass and laid inside its own shadow.
+    g.filter = blur(14);
+    g.fillStyle = rgba(L.caustic[0], L.caustic[1] * depth);
+    g.beginPath();
+    g.ellipse(0.79 * w, 0.957 * h, 0.1 * w, 0.009 * h, -0.05, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+
+    // ---- the paper: the top surface behind the crest, then the underside, rung by rung ----
+    // The top surface is one shape: it faces the light most where the sheet is still rising, turns away past the
+    // crest, and its far edge is soft, because it barely leaves the ground.
+    const groundTop = mix(ground, L.top, Math.min(1, depth));
+    g.save();
+    g.filter = blur(1.6);
+    grad = g.createLinearGradient(crest[0]![0], 0, crest[N - 1]![0], 0);
+    for (let i = 0; i <= 16; i++) {
+      const u = i / 16;
+      const facing = 1 - smooth((u - 0.34) / 0.5);
+      grad.addColorStop(u, rgba(mix(ground, groundTop, 0.3 + 0.7 * facing), 1 - smooth((u - 0.8) / 0.2)));
+    }
+    g.fillStyle = grad;
+    g.beginPath();
+    trace(g, far);
+    trace(g, [...crest].reverse(), false);
+    g.closePath();
+    g.fill();
+    g.strokeStyle = rgba(L.fall.rgb, L.far * depth);
+    g.lineWidth = 1;
+    g.beginPath();
+    trace(g, far.slice(0, Math.round(N * 0.84)));
+    g.stroke();
+    g.restore();
+
+    for (let i = 0; i < N - 1; i++) {
+      const u = i / (N - 1);
+      // The underside deepens toward the fold, where the least light gets in.
+      const deep = smooth((u - 0.12) / 0.78);
+      const base = mix(L.under[0], L.under[1], deep);
+      const c = mix(ground, base, Math.min(1, depth));
+      const [x0, y0] = crest[i]!;
+      const [x1, y1] = floor[i]!;
+      const band = g.createLinearGradient(x0, y0, x1, y1);
+      // Darkest just under the edge, lifted near the floor by the light the floor sends back.
+      band.addColorStop(0, rgba(mix(c, L.under[1], 0.3 * Math.min(1, depth))));
+      band.addColorStop(0.35, rgba(c));
+      band.addColorStop(1, rgba(mix(c, ground, night ? 0.3 : 0.4)));
+      g.fillStyle = g.strokeStyle = band;
+      g.lineWidth = 0.6;
+      g.beginPath();
+      g.moveTo(x0, y0);
+      g.lineTo(crest[i + 1]![0], crest[i + 1]![1]);
+      g.lineTo(floor[i + 1]![0], floor[i + 1]![1]);
+      g.lineTo(x1, y1);
+      g.closePath();
+      g.fill();
+      g.stroke();
+    }
+    // The crest: the sheet's own edge, catching the light along the whole arch.
+    g.strokeStyle = rgba(L.edge, Math.min(1, 0.9 * depth));
+    g.lineWidth = 1.25;
+    g.lineJoin = 'round';
+    g.beginPath();
+    trace(g, crest);
+    g.stroke();
+
+    // ---- the leaf: where the sheet stands up it is glass ----
+    const leaf = () => {
+      g.beginPath();
+      trace(g, rise);
+      trace(g, belly, false);
+      g.closePath();
+    };
+    const fold: P = [0.56 * w, 0.958 * h];
+    const tip: P = [0.972 * w, 0.118 * h];
+    g.save();
+    leaf();
+    g.clip();
+    // The veil: glass is a little lighter than what is behind it, more so toward the tip.
+    grad = g.createLinearGradient(fold[0], fold[1], tip[0], tip[1]);
+    grad.addColorStop(0, rgba(L.veil[0], L.veil[1] * 0.35 * depth));
+    grad.addColorStop(0.55, rgba(L.veil[0], L.veil[1] * 0.8 * depth));
+    grad.addColorStop(1, rgba(L.veil[0], L.veil[1] * depth));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+    // Paper passes into glass along the same curve: opaque at the fold, clear a third of the way up.
+    grad = g.createLinearGradient(fold[0], fold[1], fold[0] + (tip[0] - fold[0]) * 0.42, fold[1] + (tip[1] - fold[1]) * 0.42);
+    const sheet = mix(ground, L.top, Math.min(1, depth) * 0.8);
+    grad.addColorStop(0, rgba(sheet, 1));
+    grad.addColorStop(0.3, rgba(sheet, 0.82));
+    grad.addColorStop(0.7, rgba(sheet, 0.26));
+    grad.addColorStop(1, rgba(sheet, 0));
+    g.fillStyle = grad;
+    g.fillRect(0, 0, w, h);
+    // Light caught inside: a soft reflection that fills the upper leaf and ends on an edge of its own, the belly's
+    // inner edge, and one fine line where the far face shows through.
+    g.filter = blur(10);
+    grad = g.createLinearGradient(fold[0], fold[1], tip[0], tip[1]);
+    grad.addColorStop(0.2, rgba(L.inner[0], 0));
+    grad.addColorStop(0.6, rgba(L.inner[0], L.inner[1] * depth));
+    grad.addColorStop(1, rgba(L.inner[0], L.inner[1] * 0.8 * depth));
+    g.fillStyle = grad;
+    const sheen = px(spline(SHEEN, 20));
+    g.beginPath();
+    trace(g, sheen);
+    trace(g, belly.slice(0, Math.round(belly.length * 0.66)), false);
+    g.closePath();
+    g.fill();
+    g.filter = blur(1.2);
+    g.strokeStyle = rgba(L.inner[0], L.inner[1] * 1.2 * depth);
+    g.lineWidth = 1;
+    g.beginPath();
+    trace(g, sheen.slice(4));
+    g.stroke();
+    g.filter = blur(4);
+    g.strokeStyle = rgba(L.beside[0], L.beside[1] * 0.4 * depth);
+    g.lineWidth = 2;
+    g.beginPath();
+    trace(g, belly.slice(3, Math.round(belly.length * 0.9)).map(([x, y]) => [x - 0.007 * w, y - 0.003 * h] as P));
+    g.stroke();
+    g.restore();
+
+    // The rim: one bright line, and a fine dark one beside it so the line holds on a ground as light as itself.
+    const fromGlass = rise.slice(Math.round(rise.length * 0.14));
+    g.lineJoin = g.lineCap = 'round';
+    g.strokeStyle = rgba(L.beside[0], L.beside[1] * depth);
+    g.lineWidth = 1;
+    g.beginPath();
+    trace(g, fromGlass.map(([x, y]) => [x - 1.1, y - 0.5] as P));
+    g.stroke();
+    g.beginPath();
+    trace(g, belly.map(([x, y]) => [x + 1, y + 0.6] as P));
+    g.stroke();
+    g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * (0.5 + 0.5 * depth)));
+    g.lineWidth = 1.5;
+    g.beginPath();
+    trace(g, fromGlass);
+    g.stroke();
+    g.lineWidth = 1.1;
+    g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * 0.7 * (0.5 + 0.5 * depth)));
+    g.beginPath();
+    trace(g, belly);
+    g.stroke();
+    // The glass has thickness, and it shows where the two edges meet.
+    g.strokeStyle = rgba(L.rim[0], Math.min(1, L.rim[1] * (0.5 + 0.5 * depth)));
+    g.lineWidth = 2.2;
+    g.beginPath();
+    trace(g, belly.slice(0, Math.round(belly.length * 0.1)));
+    g.stroke();
+    // The paper's edge runs on up the leaf until the paper is gone.
+    grad = g.createLinearGradient(fold[0], fold[1], fold[0] + (tip[0] - fold[0]) * 0.3, fold[1] + (tip[1] - fold[1]) * 0.3);
+    grad.addColorStop(0, rgba(L.edge, Math.min(1, 0.9 * depth)));
+    grad.addColorStop(1, rgba(L.edge, 0));
+    g.strokeStyle = grad;
+    g.lineWidth = 1.25;
+    g.beginPath();
+    trace(g, rise.slice(0, Math.round(rise.length * 0.4)));
+    g.stroke();
+  }
 }

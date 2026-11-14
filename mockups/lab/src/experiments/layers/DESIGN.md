@@ -6,7 +6,8 @@ settles), `paint.ts` and `paper.ts` (the two field painters); this file says wha
 happened where two parts met, what the idea breaks and what that costs.
 
 The owner chose this synthesis as the style of the redesign and, in the same message, dropped its colour. Colour is
-now a switch, and its record is section 12. Sections 0 to 11 are the experiment as it was built, under what is now
+now a switch, and its record is section 12. Five calls about the result were still the owner's, and each of them is
+a switch too: section 13. Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -308,7 +309,8 @@ Knobs: Colour, first (section 12); Blocks (Glass, Veil, Opaque: this synthesis's
 Soft, Full, Vivid; the third was labelled Warm until a colouring could be cool, and its value is still `warm`);
 Ground (the two light and four dark candidates, paired; Paper and Cobalt bring their own ground and do not
 consult it); Typeface (Figtree, Geist, System). That is five, one more than the brief's "three or four at most":
-Colour was asked for by the owner and none of the other four could be folded into it.
+Colour was asked for by the owner and none of the other four could be folded into it. Section 13 adds five
+more, one per call still open with the owner; each is meant to be answered and then removed.
 
 Address aids for captures, never design states: `x=tools,top,mid,card,waiting,nopane,noside,field` (the last
 shows the field alone), `pose=inactive`,
@@ -652,6 +654,266 @@ Captures of record, in `shots/layers/`: for each colouring `layers-<scene>-colou
 alone, the two other window sizes, Whisper, Vivid, Opaque and the receded pose. The captures with no colour in
 their name are older and show Orange, which was then the only colouring.
 
+## 13. The five open calls
+
+Added 2026-11-14. After the owner chose Layers and then Paper, five calls about it were still theirs, and they make
+calls by looking. Each call is now a switch. Its first position is the design as it stood and is the default, so
+the page at rest is the page of sections 0 to 12 (captured before and after: the only pixels that differ are the
+breathing dots and the spinner). The switches follow Colour in the lab's panel, in the order below. Three of them
+are about Paper and say so in their label; under another colouring they are not consulted.
+
+| switch (`id`) | positions | what I would choose |
+|---|---|---|
+| Painted form (`form`) | Everywhere · Out of focus where you work · New chat only | Out of focus where you work |
+| New chat line (`line`) | Serif · Sans | Serif |
+| "Needs you" mark (`mark`) | Ink badge · Soft disc · One gold | One gold |
+| Alignment (`align`) | As it is · On the reading column | On the reading column |
+| Right column (`side`) | Four modules · One card · Grows from a button | Grows from a button, with the column rule |
+
+The five picks together are captured as `layers-<scene>-…-form-recede-mark-accent-align-column-side-button.png`.
+
+### 13.1 How present the painted form is
+
+The question put to the owner: this present everywhere, or mostly on New chat and quieter elsewhere? New chat has
+the whole form in every position.
+
+- **Everywhere** (as it is). One painting under every scene. It argues that the picture is the room, and a room
+  does not change when you sit down to work. It costs what 12.7 item 7 recorded: on Settings the leaf's rim and
+  the arch's edge are hairlines behind rows of words and their controls, and in a session the rim crosses the last
+  lines of the column. Every line measures above its floor; it is still lines behind words.
+- **Out of focus where you work.** On a session and on Settings the same form is still there, at 85 % of its depth
+  and out of focus (a blur of 8 px on a window 1440 wide): the arch is a soft rise of shade, the leaf a breath of
+  light, and no line is left anywhere in it. It argues that what hurts a word is an edge behind it, not a tone, so
+  the edges go and the tone stays: glass still has light and shade under it to take up, and the picture is still
+  recognisably the one New chat shows. Opening New chat brings it into focus over 620 ms, and leaving lets it go:
+  one dissolve between two kept layers, on a decelerating curve, and nothing moves once it has settled. It costs a
+  second and a third canvas the size of the window, and a field that is no longer one painting: 12.5 rejected "a
+  field that changes with the scene" because a form that jumped would be motion at rest; this one does not jump and
+  does not change its composition, only its focus, and it moves once per change of scene.
+- **New chat only.** A session and Settings stand on the ground with its light alone (the pool, the falloff, the
+  grain); the form, and the shadows it cast, are not there. It argues that work wants an empty desk. It costs the
+  glass its backdrop: on those scenes every pane and block is over a field with nothing in it to bend, which the
+  glass guideline calls a material with no job, and what declares a pane is then Paper's lower ground and its
+  shadow alone. It also makes the picture a splash screen: seen once, on the one scene with nothing to do.
+
+**What I would choose: out of focus.** It mends the scene 12.7 called weak without emptying the room. The second
+position keeps the reason Paper was chosen (the room is a still life) on every scene and removes the one thing
+that was wrong with it there.
+
+Readings (`measure.mjs`, floors and method as in section 7; default strength, then Vivid):
+
+| lowest text line (light / dark) | Everywhere | Out of focus | New chat only |
+|---|---|---|---|
+| session | 5.35 / 5.08 | 5.35 / 5.13 | 5.35 / 5.26 |
+| session, Vivid | 5.38 / 5.02 | 5.38 / 5.07 | 5.38 / 5.14 |
+| session, Vivid, from the top with a tool run open | (12.6) | 5.48 / 5.13 | not run |
+| session, receded | (12.6: 4.90 / 4.91 at the strongest setting) | 4.95 / 5.37 | 4.90 / 5.62 |
+| settings | 5.04 / 5.53 | 5.04 / 5.53 | 5.04 / 5.53 |
+| settings, Vivid | 5.04 / 5.35 | 5.04 / 5.35 | 5.04 / 5.35 |
+
+The light lines are a grey caption on the field and a placeholder in a settings input; the dark line is the running
+command's tail, which stands over the arch's lit top and gains a little as the form recedes. Lowest icon: 3.2 to
+3.3 in light (a caret on the pane), 3.9 to 4.6 in dark. Nothing is under its floor in any of the 22 routes.
+
+An out-of-focus form is a mix of levels the sharp form already had, which is why no light reading moved and no
+dark one moved by more than two tenths. What the table cannot say is what the positions are for: on Settings no
+line of the picture is behind a word in the second and third, and that is seen, not measured.
+
+### 13.2 The New chat line
+
+- **Serif** (as it is): Newsreader 300, 37/44, optical size 72, tracking −0.014em. It argues that the app has one
+  display line and the owner's picture has one voice for such a line. It costs a second family for six words, and
+  it is the only place the typeface knob does not reach. A Korean line would not be set in it at all: Newsreader
+  has no Hangul, and the stack falls to the system sans.
+- **Sans**: the same words in the interface face (it follows the Typeface knob), at 420, 33/42, tracking −0.024em.
+  The other colourings set this line at 560, 27/34; under Paper that weight reads as a label on a photograph, so
+  Paper's sans is lighter and larger, near the serif's colour on the page. It argues one voice everywhere and the
+  owner's "no serif" taken without exception. It costs the page its one moment of contrast in type: the line
+  becomes the largest piece of interface text and nothing more.
+
+**What I would choose: the serif.** One line, in the one place with nothing else to read, is what a display face
+is for, and it is what ties the page to the picture the owner sent. The sans is the better pick if this line will
+usually be read in Korean, or if the owner's ruling against the serif was about the family and not about prose.
+
+Readings, as large text (floor 3): the sans line 12.8 in light and 12.7 in dark (12.9 and 12.2 at Vivid), the same
+as the serif, since the field behind it is the same; with the Typeface knob on Geist and on System likewise.
+
+### 13.3 The "needs you" mark under Paper
+
+All three keep section 12.1's rule: the state is a shape first (a hand, a question mark, a checklist) in a disc of
+20 px (18 in a tab), in the same three places: the waiting row in the pane, its tab, the capsule at the top.
+
+- **Ink badge** (as it is). The disc is the ink and the glyph is paper; the capsule is glass tinted with the ink.
+  The strongest mark of the three by level (12:1 against the field) and the heaviest thing on the page: at rest a
+  session shows five solid discs and one black capsule, and they share their colour with the stop button, the
+  switches and the unread dot.
+- **Soft disc** (lighter, still no hue). The disc is the surface's own ink at 13 %, the glyph that ink at full
+  strength. A small part of the badge's weight. Found by its shape (nothing else in a row's slot is a glyph in a
+  disc) and by the glyph, the darkest mark in its column; not by the disc, which stands 1.3:1 from the pane. The
+  weakest place is the tab, where a 18 px disc sits beside a file icon of the same ink.
+- **One gold.** The disc is one pigment (`#e6b450` light, `#ecbf63` dark; OKLCH 0.80 0.13 82 and 0.83 0.12 84)
+  with the glyph in near-black on it in both schemes, and a hairline of its own shade so the disc keeps an edge on
+  light glass. It is the only chroma on the page, so it is found before anything is read. Gold and not another
+  hue: it is 33 degrees of hue and a clear step of lightness from the orange that was dropped (0.72 0.19 49) and
+  further from the clay of today's app (0.67 0.13 39); it leaves the warm red to removed lines (12.7 item 4); it
+  is the lamp of Paper's own night scene; amber is the old colour of "attention, not alarm". It is spent on the
+  mark and nowhere else: Approve, Send, focus and the switches stay ink, because the accent says where you are
+  needed and the ink says what you do about it. It costs Paper its claim to have no hue, and in light it is found
+  by chroma, not by level (1.7:1 against the pane; 7:1 in dark).
+
+Under both alternatives the capsule is clear glass and holds the same discs the rows do, so the mark is one object
+everywhere and none of it is glass. That mends three things section 12 recorded. The mark is no longer a seed the
+runtime draws, so it has no forbidden band and needs no second fill per scheme (12.7 item 2). A pale accent never
+has to be a stroke, so it is never deepened to bronze (item 3). And the mark keeps its strength when the window
+loses focus, where the ink capsule's seed receded to 1.4:1 in dark (12.6): a supervising app is looked at most
+when it is not the front window.
+
+**What I would choose: the gold.** The ink badge answers "is it findable" and fails "is it refined": the page's
+darkest, heaviest objects are its status marks. The soft disc is refined and asks the eye to search. The gold is
+the lightest thing that is still found at a glance, it gives the state a colour nothing else on the page uses, and
+it is the one warm note in a hueless room. If the owner wants Paper strictly without hue, the ink badge stays the
+honest choice and the soft disc is not strong enough to replace it.
+
+Readings. The glyph against its own disc, where the script can see it (the capsule and the open list; in a row
+and a tab the glyph sits under the hidden action it trades places with, and the same two colours meet there):
+
+| glyph on its disc (light / dark) | Ink badge | Soft disc | One gold |
+|---|---|---|---|
+| at rest | 14.8 / 13.4 | 11.2 / 6.0 | 8.5 / 10.0 |
+| strongest field, list open | 14.6 / 13.2 | 11.2 / 5.9 | 8.4 / 9.9 |
+| receded window | 11.7 / 8.8 | 10.2 / 8.2 | 8.5 / 10.0 |
+
+The disc against the surface it stands on, sampled from captures in the pane row and the tab: the ink badge about
+15:1 by its tokens; the soft disc 1.28:1 in light and 1.38:1 in dark; the gold 1.7:1 in light and 6.6 to 7.1:1 in
+dark. In a receded window the gold disc reads 8.4:1 on the dark pane and the soft disc is unchanged, where the ink
+capsule fell to 1.4:1 against the field. Twenty routes, none under its floor; the lowest text line (4.88) is the
+removed count under the open list's shadow, the same line as in 12.6.
+
+### 13.4 Alignment
+
+- **As it is.** The tab capsule starts on the column's left edge when the room allows; the waiting capsule and the
+  side toggle stand together above the side column; the composer is the column's width; the column is 680 at most
+  and the panes are whatever is left away from it (88 px at 1440). On Settings the tabs start 28 px left of the
+  settings column, which is centred by a different rule.
+- **On the reading column** (Open's rule, lifted from `open.css`: `--xo-colm`, `.xo-tabs`, `.xo-wait-slot`). The
+  column is the join. The panes stand one derived room from it (62 px, the runtime's answer), so the column takes
+  what they leave, up to Open's 744; the tabs start on its left edge; the waiting capsule ends on its right edge,
+  a seam after the tabs (24 px in light and 25 in dark, also derived); the composer is its width. The capsule leaves the side column's
+  group for one of its own (`xl-wait`), since it is now the tabs' neighbour. When the row is short the current tab
+  keeps its title and the others thin out (Open's). On Settings the tabs start on the settings column.
+
+What the rule argues: one edge on each side of what is read, and everything floating over the column hangs from
+those two edges; the sessions that wait sit beside the tabs that show them. What it costs: a longer measure (732 px
+at 1440 against 680, about eight more characters a line); a tighter row under about 1340 px wide, where the column
+is what pays (572 at 1280, and the tabs truncate); the side toggle left alone in its corner; and one transient
+finding when the knob itself is flipped (`group-proxy-overlap` between the tabs and the capsule for the length of
+the tabs' slide; none at rest or when a pane is toggled).
+
+**What I would choose: the column.** It replaces three alignments in the top row with one and fixes the Settings
+tabs, and the wider column suits a transcript that is half code.
+
+Readings (light / dark): session 5.35 / 5.07, at Vivid 5.38 / 5.01; from the top with a tool run open 5.45 /
+5.13; settings at Vivid 5.04 / 5.35; with the waiting list open 5.38 / 5.01. In light the list now opens over the
+column and no longer lays its shadow on the Changes module, so the lowest light line of 12.6 (the removed count at
+4.88) does not occur in this position. Ten routes, none under its floor.
+
+### 13.5 The right column's container
+
+Its content is plain and will come from the app; the owner's note is that it should have a "sort of separate
+Liquid Glass component floating feeling". The content and its order are the same in all three.
+
+- **Four modules** (as it is). Four surfaces 12 px apart, each with its own shadow. The most literal "separate
+  components", and the busiest: four rims, four shadows, the field's lines showing in three gaps, and thirteen
+  glass surfaces at rest against the guideline's one to three.
+- **One card** (Sheet's container, `sheet.css` `.xs-side`). One surface from under the top row to the window's
+  bottom margin, the four sections on it parted by space. Calm, and ten surfaces instead of thirteen. It costs the
+  floating: a pane as tall as the window, mirrored by the pane on the left, reads as a column of the layout, and
+  its lower third is empty glass at this content.
+- **Grows from a button** (Open's container, section 6 of its record). Closed, the column is the round glass
+  button at the top right. Open, the same piece of glass has grown down and to the left into the card, as tall as
+  what it holds and no taller, so its foot is free and the ground shows under it: that free edge is what reads as
+  floating. The button does not move; the glass grows out around it, and it closes the card from the same spot.
+  The room is made first (the main space gives way, the capsule steps left), then the card grows over 500 ms on a
+  curve that leaves rest slowly, with its words arriving over the last half. The capsule stands 12 px beside the
+  card as it stood 12 px above the modules; under the column rule it is on the column instead, which is where
+  Open had it and where this form looks most at home.
+
+How the third was built, and what it is not. Open drew this with the library's matched-geometry morph, whose
+content lives inside the host. Layers' side surfaces are "an element in flow with a decorative surface beneath"
+(section 3, item 6), so the card here is that: the element's own box grows by a CSS transition and the layer keeps
+the glass under it frame by frame, as it already did for a tool run that opens. It is one registered surface for
+the pair's whole life and nothing cross-fades. What that path costs: the glass can trail its box by one frame
+(the runtime draws before it calls its frame listeners, and offers no hook before the draw; the layer now asks
+for its own frame first, which puts it ahead when the runtime was idle, and the curve starts slowly so a frame is
+a pixel or two where it would have been forty); the closed button has no press light, only the scale every plain
+button has, because a decorative surface is not interactive; and its motion is a curve, not the runtime's spring.
+The library's morph was not tried here: its closed size is measured once and its open box does not follow its
+content (the library's own notes), and the root's shadows are off (section 3, item 5), so a morph would have
+needed a CSS shadow that follows a box the library animates. Seen in motion at 1x in both directions and at rest
+in both schemes; no diagnostic at rest, open, closed, or through two round trips in each scheme.
+
+**What I would choose: the card that grows from its button**, read together with the column rule. The owner asked
+for one floating component, and a surface with a free foot that comes out of its own control is that; the four
+modules are four components, and the tall card is a column. If the real content is usually taller than the
+window, the difference between the second and third positions is gone and the tall card is the honest one.
+
+Readings (light / dark). One card: 5.35 / 5.08, at Vivid 5.38 / 5.02, receded 4.95 / 5.31. The grown card: 5.35 /
+5.08, at Vivid 5.38 / 5.02, with the column rule 5.38 / 5.01, receded 4.95 / 5.31, with the waiting list open
+5.38 in light. The words on the card are the page's ink, as on a module, and the lowest lines are the same ones
+in all three containers. Sixteen routes, none under its floor.
+
+Across this section: 74 routes on the new positions and 10 on the design as it stands, 8,670 gated readings, none
+under its floor; the lowest text line on a new position is 4.88 and the lowest icon 3.19 (the pane's caret, in a
+receded light window).
+
+### 13.6 What changed in the code
+
+- `meta.ts`: five knobs after Colour (`form`, `line`, `mark`, `align`, `side`), each with today's design first;
+  notes rewritten.
+- `paper.ts`: `paintPaper` takes an optional `Presence` (`sharp`, `soft`, each a share). The painter is split into
+  the room (always painted), the form, and the grain. At full presence the form is painted by the same calls in
+  the same order as before. At any other presence it is laid over the room from two kept layers (the form, and
+  the form out of focus), painted a margin past the window so the blur does not thin at an edge.
+- `paint.ts`: `paintField` passes presence through, and sizes the canvas only when its size changes.
+- `Layers.tsx`: reads the five knobs; `Plane` shows a change of presence as a dissolve and tells both roots to read
+  the field on every frame for that long; `data-line`, `data-needs`, `data-align`, `data-sideform` and the three
+  `--xl-pin` variables on the root; the capsule in its own group under the column rule; the side toggle absent
+  where the card is its own button; `--xl-seam` derived beside `--xl-room`. New export: the `SideForm` type.
+- `Session.tsx`: `Waiting`'s `tint` is optional (none is clear glass with the runtime's ink); `Modules` takes
+  optional `form` and `onToggle`, and its four sections are one list drawn as modules, as parts of `OneCard`, or
+  as parts of `Growing`. Every export keeps its name, and every prop that existed keeps its meaning and default.
+- `glass.tsx`: a layer asks for its next frame before it writes (the paragraph above).
+- `layers.css`: the sans line; the two mark forms and the clear capsule; the column rule; the one card; the
+  growing card and the capsule's place beside it. A default is the absence of an attribute, so a root that sets
+  none of the new ones draws the design as it was.
+
+Address aids are unchanged; `x=noside` shows the third container closed.
+
+Captures of record, in `shots/layers/`, named by switch and position as the address names them:
+`layers-<scene>[-scheme-dark]-form-recede.png` and `-form-home.png` (session, settings); `layers-home[-scheme-dark]-line-sans.png`
+and `-line-serif.png`; `layers-session[-scheme-dark]-mark-soft.png` and `-mark-accent.png`, with the list open
+(`-x-waiting`), in a receded window (`-pose-inactive`), and on New chat and Settings; `layers-session[-scheme-dark]-align-column.png`,
+`layers-settings[-scheme-dark]-align-column.png`, and with a pane away (`-x-noside`, `-x-nopane`);
+`layers-session[-scheme-dark]-side-card.png`, `-side-button.png`, closed (`-side-button-x-noside`) and with the
+column rule (`-side-button-align-column`); the five picks together on all three scenes in both schemes
+(`-form-recede-mark-accent-align-column-side-button`), and at 1280 by 800 and 1728 by 1117. The lifted positions
+were laid beside their sources (`shots/open/open-session.png`, `open-session-side-away.png`,
+`shots/sheet/sheet-session.png`): the top row and the grown pane stand as Open's do, with Layers' 296 px side width
+making the column 732 where Open's was 740; the tall card runs to the window's bottom margin where Sheet's stopped
+at its sheet, because here there is no sheet to stop at.
+
+### 13.7 Not done, and what would be next
+
+- The form's focus does not follow the pane or the composer; it is one state per scene. A form that came into
+  focus only in the open margins was considered and not built: at 1440 the open margins are 88 px wide.
+- The out-of-focus layers are repainted on every resize event. A real renderer would paint them at half size.
+- The gold was chosen by eye against three neighbours at 2x in both schemes (a duller brass `#d9ac5e`, a paler straw
+  `#e9c877`, a deeper amber `#dfa63a` that leans back toward the orange); it was not tested with people, and not
+  checked under simulated colour-vision filters, where the disc would be a pale grey and the glyph would carry it.
+- The growing card's height follows its content at once when the content changes while it is open; real lists
+  that change length would want that height on a spring.
+- Ten knobs. 12.7 item 8 said five was one too many; the five new ones are meant to be answered and removed.
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -698,5 +960,11 @@ What the real renderer would need, against "The app today" in the brief.
   new-chat line and nothing else, with the system serif behind it for Korean.
 - **The clearer glass**, if it is wanted for Paper later, needs `@vitreajs/vitrea-web` as a direct dependency:
   the React package names the material documents and exports none of them.
+- **The five calls, once answered** (section 13). An out-of-focus form needs the field kept as layers (the room, the
+  form, the form out of focus), painted at half size and composited on a change of scene, never per frame at rest.
+  The mark as a disc is a token pair (`pin`, `on-pin`) and a clear capsule; nothing of it is a glass tint. The
+  column rule is three variables (the column, the capsule's right edge, the tabs' right limit) fed by the derived
+  room and seam, with the capsule in a group of its own. The grown card is one element in flow whose box
+  transitions, with its height fed by its content's measured height and capped at the window's.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

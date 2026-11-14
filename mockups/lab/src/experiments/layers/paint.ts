@@ -7,7 +7,7 @@
 // set of masses reaches across the main space at a lower level, because here the field is what prose is read on.
 // The masses and the contour ink come from the colouring (`colour.ts`); this file only paints them.
 import type { Field, Mass } from './colour';
-import { paintPaper } from './paper';
+import { FULL, paintPaper, type Presence } from './paper';
 
 export type Strength = 'whisper' | 'soft' | 'warm' | 'vivid';
 
@@ -63,22 +63,32 @@ function contours(g: CanvasRenderingContext2D, masses: Mass[], w: number, h: num
   g.stroke();
 }
 
-export function paintField(canvas: HTMLCanvasElement, field: Field, strength: Strength, ground: string) {
+/**
+ * `presence` is how present a picture field's form is (see `paper.ts`); a field of masses has no form and ignores it.
+ */
+export function paintField(canvas: HTMLCanvasElement, field: Field, strength: Strength, ground: string, presence: Presence = FULL) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (w === 0 || h === 0) return;
-  canvas.width = Math.round(w * dpr);
-  canvas.height = Math.round(h * dpr);
+  // Sized only when the size changes: a change of presence repaints on every frame for half a second.
+  const W = Math.round(w * dpr);
+  const H = Math.round(h * dpr);
+  if (canvas.width !== W || canvas.height !== H) {
+    canvas.width = W;
+    canvas.height = H;
+  }
   const g = canvas.getContext('2d')!;
-  g.scale(dpr, dpr);
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.globalAlpha = 1;
+  g.filter = 'none';
   const gain = GAIN[strength];
   const masses = field.masses;
   g.fillStyle = ground;
   g.fillRect(0, 0, w, h);
   if (field.picture === 'paper') {
     const n = parseInt(ground.slice(1), 16);
-    paintPaper(g, w, h, !!field.night, gain / GAIN.warm, [(n >> 16) & 255, (n >> 8) & 255, n & 255]);
+    paintPaper(g, w, h, !!field.night, gain / GAIN.warm, [(n >> 16) & 255, (n >> 8) & 255, n & 255], presence);
     return;
   }
   const long = Math.max(w, h);

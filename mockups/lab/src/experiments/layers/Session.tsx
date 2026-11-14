@@ -1,14 +1,14 @@
 // The session: Instrument's tab capsule, Quiet's transcript with its blocks standing on glass, the glass composer,
 // Quiet's waiting capsule and approval, and the side column as separate modules.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { GlassGroup, GlassSurface } from '@vitreajs/vitrea-react';
 import {
-  ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleCheck, CornerDownRight, FileCode, Folder, GitBranch, LoaderCircle, Plus, SlidersHorizontal, Square, Terminal, X,
+  ArrowUp, Bot, Check, ChevronDown, ChevronRight, Circle, CircleCheck, CornerDownRight, FileCode, Folder, GitBranch, LoaderCircle, PanelRight, Plus, SlidersHorizontal, Square, Terminal, X,
 } from 'lucide-react';
 import { approval, composer, overview, projects, tabs, transcript, type Session, type TranscriptItem } from '../../content/fixtures';
 import type { SceneId } from '../../lab/types';
 import { PLANE, THICKNESS, useGlassUnder, useKick } from './glass';
-import type { Answer } from './Layers';
+import type { Answer, SideForm } from './Layers';
 import { clock, cx, Fold, GBtn, Pop, Ring, split, StateGlyph, stateWord } from './parts';
 
 // ---- Tabs: Instrument's capsule, with the marks the sidebar uses -------------------------------------------------
@@ -74,9 +74,10 @@ export function Ask({ onAnswer }: { onAnswer: (a: Answer) => void }) {
 
 /**
  * What waits for you, as the glyphs the sidebar uses: no count, no word. It is the page's one tinted piece of glass.
- * It opens the list, with the approval answerable in place.
+ * It opens the list, with the approval answerable in place. With no `tint` it is clear glass, and the marks in it
+ * are the discs the rows carry (DESIGN.md §13.3).
  */
-export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { waiting: Session[]; tint: string; onAnswer: (a: Answer) => void; open?: boolean; alone?: boolean }) {
+export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { waiting: Session[]; tint?: string; onAnswer: (a: Answer) => void; open?: boolean; alone?: boolean }) {
   const [el, setEl] = useState<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
   const close = useCallback(() => setOpen(false), []);
@@ -85,12 +86,13 @@ export function Waiting({ waiting, tint, onAnswer, open: openAtOnce, alone }: { 
   }, [openAtOnce, el]);
   return (
     <>
-      <GlassSurface asChild capsule thickness={THICKNESS} tint={tint} interactive>
+      <GlassSurface asChild capsule thickness={THICKNESS} tint={tint} foreground={tint ? undefined : 'vibrant'} interactive>
         <button
           type="button"
           ref={setEl}
           className="xl-host xl-waiting"
           data-alone={alone}
+          data-clear={tint ? undefined : ''}
           data-glass-role="control"
           aria-expanded={open}
           aria-label={`${waiting.length} sessions are waiting for you`}
@@ -395,13 +397,14 @@ export function Home() {
 /** How long the side column's modules are given to leave before the main space takes their room, and the reverse. */
 export const SIDE_ROOM_MS = 320;
 
-function Module({ title, meta, index, open, children }: { title: string; meta?: ReactNode; index: number; open: boolean; children: ReactNode }) {
-  const ref = useRef<HTMLElement>(null);
+/**
+ * A piece of the side column arrives once the main space has made room and leaves before it takes the room back;
+ * its glass materialises and dematerialises with its content, and is registered only while it stands there, so
+ * nothing invisible is in the way of the tabs or the composer.
+ */
+function useStanding(open: boolean, index: number) {
   const kick = useKick();
-  // Modules arrive one after another once the main space has made room, and leave one after another before it
-  // takes the room back; the glass materialises and dematerialises with its content.
   const [want, setWant] = useState(open);
-  // Its glass is registered only while it stands there, so nothing invisible is in the way of the tabs or composer.
   const [kept, setKept] = useState(open);
   const first = useRef(true);
   useEffect(() => {
@@ -414,6 +417,13 @@ function Module({ title, meta, index, open, children }: { title: string; meta?: 
       : [window.setTimeout(() => (setWant(false), kick(700)), index * 30), window.setTimeout(() => setKept(false), SIDE_ROOM_MS)];
     return () => timers.forEach((t) => window.clearTimeout(t));
   }, [open, index, kick]);
+  return { want, kept };
+}
+
+function Module({ title, meta, index, open, children }: { title: string; meta?: ReactNode; index: number; open: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLElement>(null);
+  // Modules arrive one after another and leave one after another.
+  const { want, kept } = useStanding(open, index);
   useGlassUnder(ref, { radius: 20, want, on: kept });
   return (
     <section ref={ref} className="xl-module" data-shown={want} aria-label={title}>
@@ -423,6 +433,79 @@ function Module({ title, meta, index, open, children }: { title: string; meta?: 
       </h3>
       {children}
     </section>
+  );
+}
+
+/** A section of the one card: the same head and the same lines a module has, with no surface of its own. */
+function Part({ title, meta, children }: { title: string; meta?: ReactNode; children: ReactNode }) {
+  return (
+    <section className="xl-part" aria-label={title}>
+      <h3 className="xl-module-head">
+        {title}
+        {meta}
+      </h3>
+      {children}
+    </section>
+  );
+}
+
+/** One card as tall as the window's content (Sheet's container): the four sections on a single piece of glass. */
+function OneCard({ open, children }: { open: boolean; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const { want, kept } = useStanding(open, 0);
+  useGlassUnder(ref, { radius: 20, want, on: kept });
+  return (
+    <div ref={ref} className="xl-module xl-one" data-shown={want}>
+      <div className="xl-one-in">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * The column closed to a round glass button that grows into the one card (Open's container). One surface for the
+ * pair's whole life: the element's own box grows from the button's place down and to the left, and the layer keeps
+ * its glass under that box frame by frame, as it does for a tool run that opens. The button never moves; the
+ * glass grows out around it. The card is as tall as what it holds, so its foot is free.
+ */
+function Growing({ open, onToggle, children }: { open: boolean; onToggle?: () => void; children: ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  const kick = useKick();
+  // Mounted as its button; opening is also its arrival. The room is made before it grows into it.
+  const [grown, setGrown] = useState(false);
+  const first = useRef(true);
+  useEffect(() => {
+    kick(1000);
+    if (!open) {
+      first.current = false;
+      setGrown(false);
+      return;
+    }
+    const t = window.setTimeout(() => (setGrown(true), kick(1000)), first.current ? 160 : SIDE_ROOM_MS - 60);
+    first.current = false;
+    return () => window.clearTimeout(t);
+  }, [open, kick]);
+  // As tall as its content, which no stylesheet can name ahead of time.
+  const [height, setHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = inner.current;
+    if (!el) return;
+    const read = () => setHeight(el.offsetHeight);
+    read();
+    const seen = new ResizeObserver(read);
+    seen.observe(el);
+    return () => seen.disconnect();
+  }, []);
+  useGlassUnder(ref, { radius: 20 });
+  return (
+    <div ref={ref} className="xl-module xl-bud" data-grown={grown} style={{ ['--xl-bud-h' as string]: `${height}px` }}>
+      <div className="xl-bud-in" ref={inner} inert={!grown}>
+        {children}
+      </div>
+      <button type="button" className="xl-bud-btn" aria-label={open ? 'Hide the side column' : 'Show the side column'} aria-expanded={open} data-tip={open ? 'Hide details' : 'Show details'} data-tip-at="end" onClick={onToggle}>
+        <PanelRight size={16} strokeWidth={1.75} />
+      </button>
+    </div>
   );
 }
 
@@ -438,79 +521,105 @@ function useRoomForSide() {
   return wide;
 }
 
-export function Modules({ open: asked }: { open: boolean }) {
-  const open = useRoomForSide() && asked;
-  return (
-    <aside className="xl-side" aria-label="Session details" inert={!open} data-open={open}>
-      <Module
-        index={0}
-        open={open}
-        title="Changes"
-        meta={
-          <span className="xl-stat">
-            <span className="xl-add">+{overview.added}</span> <span className="xl-del">−{overview.removed}</span>
-          </span>
-        }
-      >
-        <div className="xl-line">
-          <GitBranch size={14} strokeWidth={1.75} />
-          <span className="xl-line-text xl-mono">{overview.branch}</span>
-        </div>
-        {overview.files.map((f) => {
-          const [dir, name] = split(f.path);
-          return (
-            <div key={f.path} className="xl-line">
-              <span className="xl-line-text xl-fade">
-                {name} <span className="xl-quiet">{dir.replace(/\/$/, '')}</span>
-              </span>
-              <span className="xl-stat">
-                <span className="xl-add">+{f.added}</span>
-                {f.removed > 0 && <span className="xl-del"> −{f.removed}</span>}
-              </span>
-            </div>
-          );
-        })}
-      </Module>
-
-      <Module index={1} open={open} title="Agents">
-        {overview.agents.map((a) => (
-          <div key={a.name} className="xl-line" data-top="">
-            {a.state === 'running' ? (
-              <span className="xl-line-mark">
-                <i className="xl-dot" data-run="" />
-              </span>
-            ) : (
-              <Check size={15} strokeWidth={1.75} />
-            )}
-            <span className="xl-line-text">
-              <span className={a.state === 'done' ? 'xl-quiet' : undefined}>{a.name}</span>
-              {a.state === 'running' && <span className="xl-line-sub">{a.line}</span>}
+/**
+ * The side column. Its content is plain (the real app will supply it); what is judged is its container, so that is
+ * a prop: four modules (as it was, and the default), one card, or a card that grows out of a button.
+ */
+export function Modules({ open: asked, form = 'modules', onToggle }: { open: boolean; form?: SideForm; onToggle?: () => void }) {
+  const wide = useRoomForSide();
+  const open = wide && asked;
+  const parts: { title: string; meta?: ReactNode; body: ReactNode }[] = [
+    {
+      title: 'Changes',
+      meta: (
+        <span className="xl-stat">
+          <span className="xl-add">+{overview.added}</span> <span className="xl-del">−{overview.removed}</span>
+        </span>
+      ),
+      body: (
+        <>
+          <div className="xl-line">
+            <GitBranch size={14} strokeWidth={1.75} />
+            <span className="xl-line-text xl-mono">{overview.branch}</span>
+          </div>
+          {overview.files.map((f) => {
+            const [dir, name] = split(f.path);
+            return (
+              <div key={f.path} className="xl-line">
+                <span className="xl-line-text xl-fade">
+                  {name} <span className="xl-quiet">{dir.replace(/\/$/, '')}</span>
+                </span>
+                <span className="xl-stat">
+                  <span className="xl-add">+{f.added}</span>
+                  {f.removed > 0 && <span className="xl-del"> −{f.removed}</span>}
+                </span>
+              </div>
+            );
+          })}
+        </>
+      ),
+    },
+    {
+      title: 'Agents',
+      body: overview.agents.map((a) => (
+        <div key={a.name} className="xl-line" data-top="">
+          {a.state === 'running' ? (
+            <span className="xl-line-mark">
+              <i className="xl-dot" data-run="" />
             </span>
+          ) : (
+            <Check size={15} strokeWidth={1.75} />
+          )}
+          <span className="xl-line-text">
+            <span className={a.state === 'done' ? 'xl-quiet' : undefined}>{a.name}</span>
+            {a.state === 'running' && <span className="xl-line-sub">{a.line}</span>}
+          </span>
+        </div>
+      )),
+    },
+    {
+      title: 'To do',
+      body: overview.todos.map((todo) => {
+        const current = 'current' in todo && todo.current;
+        return (
+          <div key={todo.text} className="xl-line" data-top="">
+            {todo.done ? <CircleCheck size={15} strokeWidth={1.75} /> : current ? <LoaderCircle className="xl-spin" size={15} strokeWidth={2} /> : <Circle size={15} strokeWidth={1.75} />}
+            <span className={cx('xl-line-text', todo.done && 'xl-quiet', current && 'xl-current')}>{todo.text}</span>
           </div>
+        );
+      }),
+    },
+    {
+      title: 'Background',
+      body: overview.background.map((b) => (
+        <div key={b.label} className="xl-line">
+          <Terminal size={14} strokeWidth={1.75} />
+          <span className="xl-line-text xl-mono">{b.label}</span>
+          <span className="xl-stat">{b.line}</span>
+        </div>
+      )),
+    },
+  ];
+  const asParts = parts.map((p) => (
+    <Part key={p.title} title={p.title} meta={p.meta}>
+      {p.body}
+    </Part>
+  ));
+  // The button form keeps its button while the column is closed, so only its content is inert then.
+  return (
+    <aside className="xl-side" aria-label="Session details" inert={form === 'button' ? !wide : !open} data-open={open} data-form={form}>
+      {form === 'modules' &&
+        parts.map((p, i) => (
+          <Module key={p.title} index={i} open={open} title={p.title} meta={p.meta}>
+            {p.body}
+          </Module>
         ))}
-      </Module>
-
-      <Module index={2} open={open} title="To do">
-        {overview.todos.map((todo) => {
-          const current = 'current' in todo && todo.current;
-          return (
-            <div key={todo.text} className="xl-line" data-top="">
-              {todo.done ? <CircleCheck size={15} strokeWidth={1.75} /> : current ? <LoaderCircle className="xl-spin" size={15} strokeWidth={2} /> : <Circle size={15} strokeWidth={1.75} />}
-              <span className={cx('xl-line-text', todo.done && 'xl-quiet', current && 'xl-current')}>{todo.text}</span>
-            </div>
-          );
-        })}
-      </Module>
-
-      <Module index={3} open={open} title="Background">
-        {overview.background.map((b) => (
-          <div key={b.label} className="xl-line">
-            <Terminal size={14} strokeWidth={1.75} />
-            <span className="xl-line-text xl-mono">{b.label}</span>
-            <span className="xl-stat">{b.line}</span>
-          </div>
-        ))}
-      </Module>
+      {form === 'card' && <OneCard open={open}>{asParts}</OneCard>}
+      {form === 'button' && wide && (
+        <Growing open={open} onToggle={onToggle}>
+          {asParts}
+        </Growing>
+      )}
     </aside>
   );
 }

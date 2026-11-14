@@ -106,11 +106,16 @@ export function GlassLayer({ group, space, origin, layout, children }: LayerProp
       until.current = Math.max(until.current, performance.now() + ms);
       if (frame.current) return;
       const tick = () => {
+        // The next frame is asked for before anything is written. Writing a box wakes the runtime, which then asks
+        // for its own frame; asked for in this order, this callback runs first on every following frame, so a box
+        // read here is drawn in the same frame and a block that grows keeps its glass under it. Asked for after,
+        // the glass trailed its block by a frame (the runtime draws before it calls its own frame listeners, so
+        // subscribing to the root does not help either).
+        frame.current = performance.now() < until.current ? requestAnimationFrame(tick) : 0;
         sync();
         // A block that moved with its container kept its box in that container's coordinates, so nothing was
         // written; the runtime still has to be told that the host is somewhere else in the window.
         rootRef.current?.invalidateGeometry();
-        frame.current = performance.now() < until.current ? requestAnimationFrame(tick) : 0;
       };
       frame.current = requestAnimationFrame(tick);
     },

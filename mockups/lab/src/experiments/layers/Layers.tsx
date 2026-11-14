@@ -17,6 +17,7 @@ import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
 import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
 import { paintField, type Strength } from './paint';
+import { FULL, type Presence } from './paper';
 import { GBtn, isYours, RootCtx } from './parts';
 import { Sidebar } from './Sidebar';
 import { Composer, Home, Modules, SIDE_ROOM_MS, Tabs, Transcript, Waiting } from './Session';
@@ -33,6 +34,32 @@ const GROUNDS: Record<string, Record<Scheme, string>> = {
 
 export type Answer = null | 'approved' | 'denied';
 export type Material = 'glass' | 'veil' | 'opaque';
+/** The right column's container: four modules, one card as tall as the window's content, or a card that grows out of a round button. */
+export type SideForm = 'modules' | 'card' | 'button';
+
+// ---- The five open calls (DESIGN.md §13). The first position of each is the design as it stood. ----------------
+
+/** How present Paper's painted form is on a scene where words and controls sit. New chat always has the whole of it. */
+const FORM: Record<string, Presence> = {
+  everywhere: FULL,
+  // Out of focus: the same picture with no line left in it, at 85 % of its depth.
+  recede: { sharp: 0, soft: 0.85 },
+  // The ground with its light alone.
+  home: { sharp: 0, soft: 0 },
+};
+const FORM_MS = 620;
+
+/**
+ * Paper's "needs you" mark, when it is not the solid ink badge. Both alternatives take the tint off the capsule's
+ * glass: the mark is one small disc with the state's glyph in it, the same object in a row, a tab and the capsule.
+ * `soft` fills the disc with the surface's own ink, thin, so every value of it lives in the sheet. `accent` fills
+ * it with the one pigment this colouring then spends: a gold, the glyph near black on it in both schemes, and a
+ * hairline of its own shade where the glass under it is nearly as light.
+ */
+const PIN: Record<Scheme, { disc: string; glyph: string; ring: string }> = {
+  light: { disc: '#e6b450', glyph: '#2b1f04', ring: 'rgb(120 84 0 / 0.3)' },
+  dark: { disc: '#ecbf63', glyph: '#231a04', ring: 'transparent' },
+};
 
 /** Capture and review aids read from the address (`x=tools,card`, `pose=inactive`, `tier=css`, `dev=1`); never design states. */
 function addressFlags(): URLSearchParams {
@@ -56,14 +83,29 @@ const NO_OUTER_SHADOW = {
 /** The painted field, shared by the two roots as one texture. */
 const FieldCtx = createContext<HTMLCanvasElement | null>(null);
 
-function Plane({ field, strength, ground, onPaint }: { field: Field; strength: Strength; ground: string; onPaint: (c: HTMLCanvasElement) => void }) {
+interface PlaneProps {
+  field: Field;
+  strength: Strength;
+  ground: string;
+  /** How present a picture field's form is on this scene. A change is shown over `FORM_MS`, not cut to. */
+  presence: Presence;
+  onPaint: (c: HTMLCanvasElement) => void;
+  /** Told while the field is changing, so the other root reads it on every frame for that long. */
+  onLive: (live: boolean) => void;
+}
+
+function Plane({ field, strength, ground, presence, onPaint, onLive }: PlaneProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const root = useGlassRoot();
+  // What is painted now; it trails `presence` while the form comes into focus or leaves it.
+  const shown = useRef(presence);
+  const what = useRef({ field, strength, ground });
+  what.current = { field, strength, ground };
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
     const draw = () => {
-      paintField(c, field, strength, ground);
+      paintField(c, field, strength, ground, shown.current);
       // The field is still: it is read once per painting, not on every frame.
       root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
       onPaint(c);
@@ -72,16 +114,56 @@ function Plane({ field, strength, ground, onPaint }: { field: Field; strength: S
     window.addEventListener('resize', draw);
     return () => window.removeEventListener('resize', draw);
   }, [field, strength, ground, root, onPaint]);
+
+  // The form comes into focus on New chat and leaves it for a session: one dissolve between two kept layers, on
+  // the curve the scene's own content arrives on. Nothing moves once it has settled.
+  const { sharp, soft } = presence;
+  useEffect(() => {
+    const c = ref.current;
+    const from = shown.current;
+    if (!c || (from.sharp === sharp && from.soft === soft)) return;
+    const paint = (p: Presence) => {
+      shown.current = p;
+      paintField(c, what.current.field, what.current.strength, what.current.ground, p);
+    };
+    const settle = () => {
+      paint({ sharp, soft });
+      root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
+      onPaint(c);
+    };
+    if (!what.current.field.picture || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      settle();
+      return;
+    }
+    root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: true });
+    onLive(true);
+    const started = performance.now();
+    let frame = requestAnimationFrame(function tick(now) {
+      const t = Math.min(1, (now - started) / FORM_MS);
+      const e = 1 - (1 - t) ** 3;
+      if (t < 1) {
+        paint({ sharp: from.sharp + (sharp - from.sharp) * e, soft: from.soft + (soft - from.soft) * e });
+        frame = requestAnimationFrame(tick);
+      } else {
+        settle();
+        onLive(false);
+      }
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      onLive(false);
+    };
+  }, [sharp, soft, root, onPaint, onLive]);
   return <canvas ref={ref} className="xl-plane" aria-hidden="true" />;
 }
 
 /** The attached root has its own device, so it is handed the same canvas. */
-function SupplyField({ stamp }: { stamp: string }) {
+function SupplyField({ stamp, live = false }: { stamp: string; live?: boolean }) {
   const canvas = useContext(FieldCtx);
   const root = useGlassRoot();
   useEffect(() => {
-    if (canvas && root) root.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas, live: false });
-  }, [canvas, root, stamp]);
+    if (canvas && root) root.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas, live });
+  }, [canvas, root, stamp, live]);
   return null;
 }
 
@@ -128,7 +210,10 @@ function LayoutPump({ layout }: { layout: string }) {
  */
 function Room({ host }: { host: HTMLElement | null }) {
   const gap = useGlassSamplingGap([{ members: [[272, 880]] }, { members: [[560, 36]] }]);
+  // What two small controls owe each other: the tab capsule and the waiting capsule, when they share the column.
+  const seam = useGlassSamplingGap([{ members: [[560, 36]] }, { members: [[84, 36]] }]);
   const widest = useRef(0);
+  const widestSeam = useRef(0);
   // The pose the runtime resolved, published for the CSS shadows: a receded window casts none.
   const active = useGlassWindowActivation();
   useLayoutEffect(() => {
@@ -137,8 +222,10 @@ function Room({ host }: { host: HTMLElement | null }) {
   useLayoutEffect(() => {
     if (!host) return;
     widest.current = Math.max(widest.current, gap);
+    widestSeam.current = Math.max(widestSeam.current, seam);
     host.style.setProperty('--xl-room', `${widest.current}px`);
-  }, [gap, host]);
+    host.style.setProperty('--xl-seam', `${widestSeam.current}px`);
+  }, [gap, seam, host]);
   return null;
 }
 
@@ -156,6 +243,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     setField(c);
     setStamp((n) => n + 1);
   }, []);
+  const [fieldLive, setFieldLive] = useState(false);
 
   // A colouring settles the field, the tint and the mark together; one that is about its ground also names it.
   const colour = colouringOf(knobs.colour);
@@ -164,6 +252,15 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const strength = (['whisper', 'soft', 'warm', 'vivid'].includes(knobs.field ?? '') ? knobs.field : 'warm') as Strength;
   const material = (['glass', 'veil', 'opaque'].includes(knobs.blocks ?? '') ? knobs.blocks : 'glass') as Material;
   const face = ['figtree', 'geist', 'system'].includes(knobs.face ?? '') ? knobs.face! : 'figtree';
+
+  // The five open calls. Three of them are about Paper and are not consulted under another colouring.
+  const isPaper = colour.id === 'paper';
+  const presence = isPaper && scene !== 'home' ? FORM[knobs.form ?? ''] ?? FULL : FULL;
+  const line = isPaper && knobs.line === 'sans' ? 'sans' : isPaper ? 'serif' : undefined;
+  const needs = isPaper && (knobs.mark === 'soft' || knobs.mark === 'accent') ? knobs.mark : undefined;
+  const pin = needs === 'accent' ? PIN[scheme] : undefined;
+  const align = knobs.align === 'column' ? 'column' : undefined;
+  const sideForm: SideForm = knobs.side === 'card' || knobs.side === 'button' ? knobs.side : 'modules';
 
   // Answering the approval is real in the lab: the session goes back to work and its orange leaves the window.
   const live = useCallback(
@@ -218,6 +315,10 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-aid={x.includes('field') ? 'field' : undefined}
             data-colour={colour.id}
             data-mark={colour.mark}
+            data-line={line}
+            data-needs={needs}
+            data-align={align}
+            data-sideform={sideForm === 'modules' ? undefined : sideForm}
             style={
               {
                 '--xl-ground': ground,
@@ -227,11 +328,12 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
                 '--xl-on-accent': tokens.onAccent,
                 '--xl-accent-mark': tokens.mark,
                 '--xl-focus': tokens.focus,
+                ...(pin ? { '--xl-pin': pin.disc, '--xl-on-pin': pin.glyph, '--xl-pin-ring': pin.ring } : null),
                 colorScheme: scheme,
               } as CSSProperties
             }
           >
-            <Plane field={colour.field[scheme]} strength={strength} ground={ground} onPaint={onPaint} />
+            <Plane field={colour.field[scheme]} strength={strength} ground={ground} presence={presence} onPaint={onPaint} onLive={setFieldLive} />
             <LayoutPump layout={layout} />
             <Room host={el} />
             {dev && <Readout name="window" />}
@@ -240,9 +342,12 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               scene={scene}
               scheme={scheme}
               material={material}
-              tint={tokens.accent}
+              tint={needs ? undefined : tokens.accent}
+              own={align === 'column'}
+              sideForm={sideForm}
               layout={layout}
               stamp={`${stamp}`}
+              fieldLive={fieldLive}
               flags={x}
               dev={dev}
               tier={tier}
@@ -272,10 +377,14 @@ interface ShellProps {
   scene: SceneId;
   scheme: Scheme;
   material: Material;
-  /** The seed of the page's one tinted piece of glass. */
-  tint: string;
+  /** The seed of the page's one tinted piece of glass; none where the mark is a disc on clear glass. */
+  tint: string | undefined;
+  /** The waiting capsule stands on the reading column's right edge, beside the tabs, as a group of its own. */
+  own: boolean;
+  sideForm: SideForm;
   layout: string;
   stamp: string;
+  fieldLive: boolean;
   flags: string[];
   dev: boolean;
   tier: 'css' | 'webgpu';
@@ -319,13 +428,21 @@ function Shell(p: ShellProps) {
 
   const transcript = <Transcript open={p.flags.includes('tools')} />;
 
+  const capsule = scene !== 'settings' && p.waiting.length > 0 && (
+    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} onAnswer={p.setAnswer} open={p.flags.includes('waiting')} alone={scene !== 'session'} />
+  );
+  // Under the column rule the capsule is the tabs' neighbour on the reading column, not the side column's: it
+  // leaves the side group, so the two capsules owe each other a small control's room and not a pane's.
+  const apart = p.own && scene === 'session';
+  const toggle = () => p.setSideOpen((v) => !v);
+
   const trail = (
     <>
-      {scene !== 'settings' && p.waiting.length > 0 && <Waiting waiting={p.waiting} tint={p.tint} onAnswer={p.setAnswer} open={p.flags.includes('waiting')} alone={scene !== 'session'} />}
-      {scene === 'session' && (
+      {!apart && capsule}
+      {scene === 'session' && p.sideForm !== 'button' && (
         <GlassSurface asChild capsule thickness={THICKNESS} foreground="vibrant">
           <div className="xl-host xl-round" data-glass-role="control" role="group" aria-label="Details">
-            <GBtn label={p.sideOpen ? 'Hide the side column' : 'Show the side column'} tip={p.sideOpen ? 'Hide details' : 'Show details'} data-tip-at="end" aria-pressed={p.sideOpen} onClick={() => p.setSideOpen((v) => !v)}>
+            <GBtn label={p.sideOpen ? 'Hide the side column' : 'Show the side column'} tip={p.sideOpen ? 'Hide details' : 'Show details'} data-tip-at="end" aria-pressed={p.sideOpen} onClick={toggle}>
               <PanelRight size={16} strokeWidth={1.75} />
             </GBtn>
           </div>
@@ -353,7 +470,7 @@ function Shell(p: ShellProps) {
                 materialProfile={NO_OUTER_SHADOW}
               >
                 <div className="xl-column" ref={setColumn}>
-                  <SupplyField stamp={p.stamp} />
+                  <SupplyField stamp={p.stamp} live={p.fieldLive} />
                   {p.dev && <Readout name="blocks" />}
                   <GlassLayer group="xl-blocks" space="container" origin={column} layout={layout}>
                     {transcript}
@@ -374,11 +491,17 @@ function Shell(p: ShellProps) {
       {scene === 'session' ? (
         <GlassLayer group="xl-side" space="viewport" layout={layout}>
           {trail}
-          <Modules open={p.sideOpen} />
+          <Modules open={p.sideOpen} form={p.sideForm} onToggle={toggle} />
         </GlassLayer>
       ) : (
         <GlassGroup id="xl-side" backdrop={PLANE}>
           {trail}
+        </GlassGroup>
+      )}
+
+      {apart && (
+        <GlassGroup id="xl-wait" backdrop={PLANE}>
+          {capsule}
         </GlassGroup>
       )}
 

@@ -63,6 +63,7 @@
   /* geometry: the window corner is the anchor; the pane and the modules stand 8 px inside it */
   --xl-gap: 8px; --xl-pane-w: 272px; --xl-side-w: 296px;
   --xl-room: 24px;            /* the room two glass groups owe each other; written from the runtime's own answer */
+  --xl-seam: 24px;            /* the same between two small controls (the tab capsule and the waiting capsule) */
   --xl-bar-top: 10px; --xl-bar-h: 36px;
   --xl-r-row: 12px;           /* 20 − 8: rows on the pane and in a module */
   --xl-main-l: calc(var(--xl-gap) + var(--xl-pane-w));
@@ -306,6 +307,19 @@
 /* Receded, the tint keeps its shade and loses its chroma, so the authored ink gives way to the runtime's. */
 .x-layers[data-pose='inactive'] .xl-waiting .xl-glyph[data-kind] { color: var(--xl-fg); }
 
+/* Paper's mark, when it is not the solid ink badge (DESIGN.md §13.3). The disc stays; what fills it changes. `soft`
+   is the surface's own ink, thin, with the glyph in that ink at full strength: no hue, and a fifth of the weight.
+   `accent` is one pigment, with a hairline of its own shade so the disc keeps an edge on glass nearly as light. */
+.x-layers[data-needs='soft'] .xl-glyph[data-kind='yours'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); color: var(--xl-fg); }
+.x-layers[data-needs='accent'] .xl-glyph[data-kind='yours'] { background: var(--xl-pin); color: var(--xl-on-pin); box-shadow: inset 0 0 0 0.5px var(--xl-pin-ring); }
+/* Under both the capsule is clear glass, and what it holds are the discs the rows carry: one object in the pane,
+   the tabs and the capsule. Nothing of the mark is glass, so it keeps its strength in a receded window. */
+.x-layers .xl-waiting[data-clear] { padding: 0 8px; gap: 4px; }
+.x-layers[data-needs] .xl-waiting .xl-glyph[data-kind='yours'] { width: 20px; height: 20px; }
+.x-layers[data-needs] .xl-waiting .xl-glyph[data-kind='yours'] svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.x-layers[data-needs='soft'] .xl-waiting .xl-glyph[data-kind='yours'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); color: var(--xl-fg); }
+.x-layers[data-needs='accent'] .xl-waiting .xl-glyph[data-kind='yours'] { background: var(--xl-pin); color: var(--xl-on-pin); }
+
 /* ---- the main space -------------------------------------------------------------------------------------------- */
 
 .x-layers .xl-main { position: absolute; top: 0; bottom: 0; left: var(--xl-main-l); right: var(--xl-main-r); transition: left var(--xl-t-shell) var(--xl-ease), right var(--xl-t-shell) var(--xl-ease); }
@@ -434,7 +448,11 @@
 .x-layers .xl-home-ask { margin: 0 0 18px 20px; font: 560 27px/34px var(--xl-font); letter-spacing: -0.015em; }
 /* Paper's display voice: the owner's picture sets one word in a light, high-contrast serif. Transcript prose stays
    sans (the owner's ruling); this is the single display line, and only under this colouring. */
-.x-layers[data-colour='paper'] .xl-home-ask { margin-bottom: 15px; font: 300 37px/44px 'XL Newsreader', ui-serif, 'Apple SD Gothic Neo', serif; font-variation-settings: 'opsz' 72; letter-spacing: -0.014em; }
+.x-layers[data-colour='paper']:not([data-line='sans']) .xl-home-ask { margin-bottom: 15px; font: 300 37px/44px 'XL Newsreader', ui-serif, 'Apple SD Gothic Neo', serif; font-variation-settings: 'opsz' 72; letter-spacing: -0.014em; }
+/* The same line in the sans, for the owner to weigh against the serif. It follows the Typeface knob. Under Paper it
+   is set lighter and larger than the other colourings set theirs, so that it keeps company with the picture's fine
+   lines as the serif does; a bold line of 27 px reads here as a label on a photograph. */
+.x-layers[data-colour='paper'][data-line='sans'] .xl-home-ask { margin-bottom: 15px; font: 420 33px/42px var(--xl-font); letter-spacing: -0.024em; }
 .x-layers .xl-home-slot { height: 92px; }
 .x-layers .xl-where { display: flex; align-items: center; gap: 2px; margin: 10px 0 0 9px; }
 .x-layers .xl-where .xl-chip { color: var(--xl-ink-2); }
@@ -579,12 +597,68 @@
 .x-layers .xl-select:is(:hover, [data-state='open'], [aria-expanded='true']) { background: var(--xl-selected); }
 .x-layers .xl-select svg { width: 13px; height: 13px; stroke-width: 2; opacity: 0.6; }
 
+/* ---- the open calls about layout (DESIGN.md §13.4, §13.5) -------------------------------------------------------- */
+
+/* Alignment under Open's rule: the reading column is the join. The panes stand one derived room from it, the tabs
+   start on its left edge, the waiting capsule ends on its right edge, and the composer is its width (it already
+   was). The column takes what the panes leave, up to Open's 744. */
+.x-layers[data-align='column'][data-scene='session'] {
+  --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room)));
+  --xl-wait-r: calc(100vw - var(--xl-col-l) - var(--xl-col));
+  --xl-tabs-r: calc(var(--xl-wait-r) + 84px + var(--xl-seam));
+}
+.x-layers[data-align='column'][data-scene='session'] .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
+/* Settings has a column of its own (620, kept clear of the margin note); the tabs start on that one. */
+.x-layers[data-align='column'][data-scene='settings'] {
+  --xl-col-l: calc(var(--xl-main-l) + max(32px, min((100vw - var(--xl-main-l) - 620px) / 2, 100vw - var(--xl-main-l) - 892px)));
+  --xl-tabs-r: calc(var(--xl-gap) + 16px); /* nothing stands at the top right of this scene */
+}
+/* Open's: when the row is short of room the current tab keeps its whole title and the others thin out. */
+.x-layers[data-align='column'] .xl-tab[data-current='true'] { flex: none; }
+
+/* The right column as one card as tall as the window's content (Sheet's container). */
+.x-layers .xl-one { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0; overflow: clip; }
+.x-layers .xl-one-in { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 8px 8px 12px; }
+.x-layers .xl-part + .xl-part { margin-top: 16px; }
+
+/* The right column closed to a round glass button that grows into that card (Open's container). The element's own
+   box is what grows; its glass is kept under it by the layer. The button stays where it is throughout. */
+.x-layers .xl-side[data-form='button'] { top: var(--xl-gap); display: block; }
+.x-layers .xl-bud {
+  position: absolute; top: calc(var(--xl-bar-top) - var(--xl-gap)); right: 0; width: var(--xl-bar-h); height: var(--xl-bar-h); padding: 0; overflow: clip;
+  box-shadow: var(--xl-shadow-bar);
+  /* It leaves rest slowly, as the runtime's own springs do: the glass can trail its box by a frame, and a frame is
+     nothing at the start of this curve and 40 px at the start of the layout's. */
+  --xl-bud-ease: cubic-bezier(0.4, 0, 0.1, 1); --xl-bud-t: 500ms;
+  transition: top var(--xl-bud-t) var(--xl-bud-ease), width var(--xl-bud-t) var(--xl-bud-ease), height var(--xl-bud-t) var(--xl-bud-ease), box-shadow var(--xl-bud-t) ease;
+}
+.x-layers .xl-bud[data-grown='true'] { top: 0; width: 100%; height: var(--xl-bud-h); box-shadow: var(--xl-shadow-block); }
+.x-layers .xl-bud-in { position: absolute; top: 0; right: 0; width: var(--xl-side-w); max-height: calc(100vh - 2 * var(--xl-gap)); overflow-y: auto; scrollbar-width: none; padding: 5px 8px 11px; opacity: 0; transition: opacity 110ms ease; }
+.x-layers .xl-bud[data-grown='true'] .xl-bud-in { opacity: 1; transition: opacity 240ms ease 260ms; }
+.x-layers .xl-bud .xl-part:first-child .xl-module-head { padding-right: 34px; }
+.x-layers .xl-bud-btn {
+  position: absolute; top: 3px; right: 3px; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 15px; color: var(--xl-fg2); opacity: 1;
+  transition: top var(--xl-bud-t) var(--xl-bud-ease), background-color var(--xl-t-hover), color var(--xl-t-hover), transform var(--xl-t-press);
+}
+.x-layers .xl-bud[data-grown='true'] .xl-bud-btn { top: calc(3px + var(--xl-bar-top) - var(--xl-gap)); }
+.x-layers .xl-bud-btn:hover { background: var(--xl-hover); color: var(--xl-fg); }
+.x-layers .xl-bud-btn:active { transform: scale(0.94); }
+/* With the capsule's place taken by the card, the capsule stands beside the card as its neighbour (12 px, as it
+   stood above the modules), and the tabs keep a room from it. Under the column rule it is on the column instead. */
+.x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) {
+  --xl-tabs-r: max(calc(var(--xl-main-r) + 96px + var(--xl-room)), calc(var(--xl-gap) + 128px + var(--xl-room)));
+}
+.x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) .xl-waiting {
+  right: max(calc(var(--xl-main-r) + 12px), calc(var(--xl-gap) + var(--xl-bar-h) + 8px)); transition: right var(--xl-t-shell) var(--xl-ease);
+}
+
 /* ---- a narrower window: the side column leaves first, then the pane -------------------------------------------- */
 
 @media (width < 1180px) {
   .x-layers { --xl-main-r: 0px; }
   .x-layers .xl-side, .x-layers .xl-round { display: none; }
   .x-layers .xl-waiting { right: var(--xl-gap); }
+  .x-layers[data-sideform='button'][data-scene='session']:not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
 }
 @media (width < 900px) {
   .x-layers { --xl-main-l: 0px; --xl-tabs-min: calc(84px + 36px + var(--xl-room)); }
