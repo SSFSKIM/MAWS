@@ -243,6 +243,7 @@ export class EditorController {
   replaceDoc(doc: ComposerDoc | null): void {
     if (this.busy) return;
     this.revision += 1;
+    this.writer.cancel(); // the copy it replaces had a write pending: superseded (the panel's finding 1)
     this.setDoc(doc ?? emptyDoc(), { silently: true, caret: null });
   }
 
@@ -989,6 +990,9 @@ export class EditorController {
         const current = this.editor;
         if (!current || this.busy || submissions.has(this.inputs.appSessionId) || !isEmptyDoc(current.getJSON())) return false;
         this.revision += 1; // supersedes a pending draft restore
+        // and every pending write of the document it replaces, the timer's and the unmount flush's: an emptied box's
+        // write landing after the settle would save nothing over the message (the panel's finding 1)
+        this.writer.cancel();
         this.nav = { index: null, draft: null };
         this.search = null;
         this.setDoc(doc, { silently: true, caret: 'end' });
