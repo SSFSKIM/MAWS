@@ -4,6 +4,8 @@ Every item the wave considered, one row each: where it came from, its state, and
 
 240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (four of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
+Built and on master, as the state column says: 9 items, those of the other-machines landing (pull request #650). The rows of the landings before it (#631, #632, #634, #635, #637, #642, #643) still read "build"; they are marked in the register's next revision.
+
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
 ## The owner's answers of 2026-11-12 and 2026-11-13
@@ -74,6 +76,12 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | One landing of the UX wave (the comment card) changed two scenes of a test group that runs a real Claude engine on your account; the group's script caps its spend at 1.70 USD and a run takes about 45 minutes. I have not run it, because the wave has no word from you for paid test runs. May I run paid live test groups for the wave? | Once per landing (Recommended) |  |
 | Today a click on a link to a file outside a session's folders is refused (your screenshot: a PDF in Downloads). On this Mac, which files outside a session's folders should open, read-only, when you click their link in that session's transcript? | Files the transcript names (Recommended) | typed before the card, over a screenshot of the file viewer's notice "Refused: path outside the session's directories" for a PDF in the Downloads folder: "another small change idea:  can we just [Image #2] allow it" |
 | Opening a linked file outside a session's folders is now planned inside the second artifacts landing, which waits for four other landings. When should it be built? | Own small landing, now (Recommended) |  |
+| Sidebar as built (pictures 1, 2 and 5 of the look set taken on the Mac lane, kept outside the repository): a row under the pointer shows a Hide button and three dots, with a card giving state, machine, branch and a reply box; the row's menu has Hide right after Pin; hidden sessions sit under a "Hidden · N" fold at the end of their project. Do you keep it as built? | Keep as built (Recommended) |  |
+| Title bar as built (pictures 3 and 4 of the same set): the project's name stands left of the tabs, cut at about nine characters (a 96 px limit it had before this landing); at the smallest window it is dropped and tabs that do not fit go behind a chevron. What should the project's name do there? | Keep as built (Recommended) |  |
+| With the column-and-tabs landing (not yet on master), a terminal opened in the side column is 46 columns wide by default; today it is about 55. The cause is the spec's rule that every tool other than Review, Files and the browser opens 360 px wide (420 px today). The terminal also shares its remembered width with the Subagents and Background tasks panels, so widening the terminal by hand would widen those panels too. How should a terminal in the side column open? | Wide, like Review (Recommended) |  |
+| Working folder landing, on a drawn example with invented names: the Environment card's folder row has room for about 28 characters and today cuts a longer path at its end, so after the agent moves into a worktree under the launch folder the row reads almost as before and the worktree's own name is not visible. Which end should a long path lose? (The answer also changes the row of a session that never moved, when its launch path is long.) | Cut at the start (Recommended) |  |
+| Working folder landing, on the same drawn example: after the agent moves into a worktree the Environment card gains one muted line naming the folder the session was launched in ("moved from <name>"). Where should it sit? | Under the folder row (Recommended) |  |
+| Working folder landing, on the same drawn example: an agent often steps into a sub-folder of its checkout and back. How should the Environment card show the sub-folder? | In the folder row (Recommended) |  |
 
 ## Questions still open
 
@@ -341,20 +349,20 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-11b | observation | build | A transcript whose read failed because the engine host was restarting retries by itself once the host is ready, and says "Couldn't load this conversation · Retry" only if that fails. |
-| O-39 | observation | build | Your screenshot is New chat's project chooser, which waits for two reads together and keeps nothing between opens. Three visible faults are fixed now: the chooser shows projects as soon as they answer; a remote tab says "Connecting to <machine>…" instead of "offline" while its link comes up (you chose the three states on 11-12); a loading pane says so. How long the real wait is has never been measured on real machines; that needs a sitting. |
-| #563 | ticket | build | A remote tab stays mounted and readable under a thin "Reconnecting…" line, so the reader keeps their place. |
-| #565 | ticket | build | No whole-history read beside a live resume when a link returns; a failed hold heals by itself. |
-| S-05 | sitting | build | A remote row with its tab open reads the tab's live stream, so it shows Working at once instead of 5 to 10 s late. |
-| O-48 | observation | build | Fork, Archive and Rename were left off the link to other machines on purpose in P5. They are added together, with Unarchive; Fork is for the machine's owners in this wave, needs no Touch ID on a machine you own, and also becomes a /fork item and "Fork from here" on an answer, for local sessions too. Stopping a turn already works there; ending a remote session's process without archiving is not added. |
-| S-02 | sitting | build | Archive and Rename for a session on another machine, in the same change as O-48. |
-| S-01 | sitting | build | A Stop that fails says so, and reads "Stopping…" while it is on its way. |
-| S-13 | sitting | build | The Touch ID sheet names the machine by its name. |
+| O-11b | observation | built, on master (#650) | A transcript whose read failed because the engine host was restarting retries by itself once the host is ready, and says "Couldn't load this conversation · Retry" only if that fails. |
+| O-39 | observation | built, on master (#650) | Your screenshot is New chat's project chooser, which waits for two reads together and keeps nothing between opens. Three visible faults are fixed now: the chooser shows projects as soon as they answer; a remote tab says "Connecting to <machine>…" instead of "offline" while its link comes up (you chose the three states on 11-12); a loading pane says so. How long the real wait is has never been measured on real machines; that needs a sitting. |
+| #563 | ticket | built, on master (#650) | A remote tab stays mounted and readable under a thin "Reconnecting…" line, so the reader keeps their place. |
+| #565 | ticket | built, on master (#650) | No whole-history read beside a live resume when a link returns; a failed hold heals by itself. |
+| S-05 | sitting | built, on master (#650) | A remote row with its tab open reads the tab's live stream, so it shows Working at once instead of 5 to 10 s late. |
+| O-48 | observation | built, on master (#650) | Fork, Archive and Rename were left off the link to other machines on purpose in P5. They are added together, with Unarchive; Fork is for the machine's owners in this wave, needs no Touch ID on a machine you own, and also becomes a /fork item and "Fork from here" on an answer, for local sessions too. Stopping a turn already works there; ending a remote session's process without archiving is not added. |
+| S-02 | sitting | built, on master (#650) | Archive and Rename for a session on another machine, in the same change as O-48. |
+| S-01 | sitting | built, on master (#650) | A Stop that fails says so, and reads "Stopping…" while it is on its way. |
+| S-13 | sitting | built, on master (#650) | The Touch ID sheet names the machine by its name. |
 | O-35 | observation | build, after a check (U14) | When the remote machine reports no running turn, MAWS draws every open turn as finished, so a turn opened by a notification reads "Continued for 0s". A turn will be drawn finished only when the machine says the process is gone. Which signal reads wrong while the agent works needs one check. |
 | #429 | ticket | hands-on check (U14) | Narrow: a reload loses the draft only for a New chat with attachments, between the spawn and the remote session being ready. Built only if a check shows the gap lasts more than a few seconds. |
 | #526 | ticket | later | A reader's grade before the first send: your org has one member, so nothing is shared below Converse yet. |
 | X-237 | tracker | later | Rides with #526. |
-| #352 | ticket | closes, nothing to build | Its premise does not hold (local panes draw no pause rows). Replaced by the reconnect line of #563; the ticket closes. |
+| #352 | ticket | closed, nothing built (replaced by #563) | Its premise does not hold (local panes draw no pause rows). Replaced by the reconnect line of #563; the ticket closes. |
 | S-06 | sitting | not MAWS's to fix | MAWS's row drew the question within 1 to 2.6 s; only sminos's own listing lagged. Yours to rule at the P5 verdict. |
 | S-12 | sitting | not MAWS's to fix | Most likely the engine's own exit code; dropped. |
 
