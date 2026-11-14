@@ -8,7 +8,7 @@ import type { ProjectRecord, SessionDigest } from '@shared/ipc/schema';
 import type { NeedsYouRow } from '../attention/derive';
 import { dateFormats, formatAgo } from '@shared/app/date-format';
 import { issuedAt, lastActivity, priorityRank, RANK_REST, sortSessions, type SeenActivity, type SidebarSort } from '../overview/derive';
-import { branchLabel } from '../sessions/branch-label';
+import { branchLabel, recordBranch } from '../sessions/branch-label';
 import { workingBranch, workingWorktree } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { displayTitle, listedTitle } from '../sessions/title'; // E3; P5 O7 M6: listedTitle
 import { projectLabels } from './project-labels';
@@ -35,7 +35,7 @@ export function sessionMatcher(query: string, projects: ReadonlyMap<ProjectId, P
     record.title.text.toLowerCase().includes(q) ||
     record.directory.toLowerCase().includes(q) ||
     (record.projectId !== null && (projects.get(record.projectId)?.name.toLowerCase().includes(q) ?? false)) ||
-    (branchLabel(workingBranch(record))?.toLowerCase().includes(q) ?? false); // P2-D; UX wave U8c-2: the working folder's
+    [recordBranch(record), workingBranch(record)].some((branch) => branchLabel(branch)?.toLowerCase().includes(q) ?? false); // P2-D; UX wave U8c-2 (fix wave 1): the branch the record shows (the Resume picker's) and the working folder's
 }
 
 // P5 O8 M2: a listed row's title (`sessions/title.ts`); the search matches a listed row by its title alone.

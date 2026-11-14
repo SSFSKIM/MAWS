@@ -30,8 +30,10 @@ export function invalidateScmQueries(which: (appSessionId: AppSessionId) => bool
 // UX wave U8c-2 (fix wave 1): the sessions whose working folder changed. Both reads are keyed by the session alone, and
 // their answers were the checkout the agent left: each is reset, so a read still out (which an invalidation would let
 // land as the answer) is cancelled and its answer dropped, nothing of the old checkout is shown, and a read in use is
-// asked again at once, of the folder main's record now names.
+// asked again at once, of the folder main's record now names. A published PR's lookup still out for one of them was the
+// old checkout's too: it is superseded, so its answer is not written.
 export function resetScmQueries(which: (appSessionId: AppSessionId) => boolean): void {
+  for (const [appSessionId, lookup] of lookups) if (which(appSessionId)) lookups.set(appSessionId, lookup + 1);
   for (const queryKey of [SCM_STATUS_QUERIES, PR_STATE_QUERIES]) void queryClient.resetQueries({ queryKey, predicate: sessionsOf(which) });
 }
 
