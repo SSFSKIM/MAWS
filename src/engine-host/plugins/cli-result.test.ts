@@ -6,7 +6,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { sourceKey } from '../../shared/plugins/source-key';
-import { availableOf, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, pluginRowsOf } from './cli-result';
+import { mcpShownCommand, type McpEntry } from '../../shared/plugins/cli';
+import { availableOf, CUSTOM_ADD_WORDS, installedOf, listing, marketplacesOf, mutationOutcome, mcpOutcome, nameCheckOutcome, pluginRowsOf } from './cli-result';
 
 const INSTALLED = '{"command":"install","outcome":"ok","plugin":"e8-probe@e8-scratch","pluginId":"e8-probe@e8-scratch","scope":"user","message":"Successfully installed plugin: e8-probe@e8-scratch (scope: user)"}';
 const NOT_FOUND = '{"command":"install","outcome":"failed","plugin":"nope@e8-scratch","scope":"user","message":"Plugin \\"nope\\" not found in marketplace \\"e8-scratch\\". Your local copy may be out of date — try `claude plugin marketplace update e8-scratch`.","failureCode":"not_found"}';
@@ -225,5 +226,76 @@ describe('mcpOutcome', () => {
     });
     expect(mcpOutcome('mcp-remove', { name: 'nosuch', scope: 'local' }, { stdout: '', stderr: 'No MCP server named "nosuch" in local scope', code: 1 })).toMatchObject({ ok: false, error: { message: 'No MCP server named "nosuch" in local scope' } });
     expect(mcpOutcome('mcp-remove', { name: 'x', scope: 'user' }, { stdout: '', stderr: '', code: null })).toMatchObject({ ok: false, error: { code: 'no_result', message: 'the CLI ended without a result' } });
+  });
+});
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §B's table and §C): a custom add's
+// outcome never reads stdout, words its success from the input, and forwards the CLI's last error line whole only when it
+// holds no value slot's content, as written or as JSON escapes it; otherwise the fixed sentence with the exit code and
+// the shown command. Nothing is replaced inside a line.
+describe('the outcome of a custom add', () => {
+  const stdio: McpEntry = { type: 'stdio', command: 'files-probe', args: ['--root', '/srv'], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }] };
+  const http: McpEntry = { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value: 'value-two' }] };
+  const input = (entry: McpEntry = stdio, name = 'files-probe') => ({ name, scope: 'user' as const, entry });
+  const failed = (stderr: string, entry: McpEntry = stdio, name = 'files-probe', code = 1) => mcpOutcome('mcp-add', input(entry, name), { stdout: '', stderr, code });
+  const withheld = (entry: McpEntry = stdio, name = 'files-probe', code = 1) => ({ ok: false, error: { code: 'cli_failed', message: CUSTOM_ADD_WORDS.withheld(code, mcpShownCommand(input(entry, name))), failureCode: 'message_withheld', shownCommand: null } });
+
+  it('answers the success worded from the input on exit 0, with stdout empty or holding a value', () => {
+    const added = { ok: true, result: { command: 'mcp add-json', outcome: 'ok', message: 'Added stdio MCP server files-probe to user config', name: 'files-probe', scope: 'user' } };
+    expect(mcpOutcome('mcp-add', input(), { stdout: '', stderr: '', code: 0 })).toEqual(added);
+    expect(mcpOutcome('mcp-add', input(), { stdout: 'Added stdio MCP server files-probe with FILES_PROBE_KEY=value-one\n', stderr: '', code: 0 })).toEqual(added);
+    expect(mcpOutcome('mcp-add', { name: 'files-probe', scope: 'project', entry: http }, { stdout: '', stderr: '', code: 0 })).toMatchObject({ ok: true, result: { message: 'Added http MCP server files-probe to project config', scope: 'project' } });
+  });
+
+  it('answers a clean last error line whole', () => {
+    expect(failed('MCP server files-probe already exists in user config\n')).toEqual({ ok: false, error: { code: 'cli_failed', message: 'MCP server files-probe already exists in user config', failureCode: null, shownCommand: null } });
+    expect(failed('a notice at start\nInvalid configuration: env.FILES_PROBE_KEY: Invalid input\n')).toMatchObject({ ok: false, error: { message: 'Invalid configuration: env.FILES_PROBE_KEY: Invalid input', failureCode: null } });
+  });
+
+  it('withholds a line holding a value as written, and one holding it as JSON escapes it, with the exit code and the shown command', () => {
+    expect(failed('could not be read to confirm the change (value-one)\n')).toEqual(withheld());
+    const quoted: McpEntry = { ...stdio, env: [{ name: 'FILES_PROBE_KEY', value: 'say "hi" \\ there' }] };
+    const escaped = `MCP server "files-probe" may not have been saved: .claude.json could not be read to confirm the change (Unexpected token in ${JSON.stringify({ FILES_PROBE_KEY: 'say "hi" \\ there' })})`;
+    expect(escaped.includes('say "hi" \\ there')).toBe(false); // only its JSON form is in the line
+    expect(failed(`${escaped}\n`, quoted)).toEqual(withheld(quoted));
+    expect(failed('value-one\n', stdio, 'files-probe', 2)).toEqual(withheld(stdio, 'files-probe', 2));
+    expect((withheld().error.message as string).includes('value-one')).toBe(false);
+  });
+
+  it('withholds whole every line that holds a value, whatever the value: part of the name, one character, the mask, or one value inside another', () => {
+    const inName: McpEntry = { ...http, headers: [{ name: 'X-Part', value: 'probe' }] };
+    expect(failed('MCP server files-probe already exists in user config', inName)).toEqual(withheld(inName));
+    expect(withheld(inName).error.message).toContain('claude mcp add-json files-probe '); // the name is shown as typed
+    const one: McpEntry = { ...stdio, env: [{ name: 'A', value: 'e' }] };
+    expect(failed('MCP server files-probe already exists in user config', one)).toEqual(withheld(one));
+    expect(failed('Invalid scop: x', one)).toMatchObject({ ok: false, error: { message: 'Invalid scop: x', failureCode: null } }); // a line without it is forwarded
+    const mask: McpEntry = { ...stdio, env: [{ name: 'A', value: '•••' }] };
+    expect(failed('a line with ••• in it', mask)).toEqual(withheld(mask));
+    const nested: McpEntry = { ...stdio, env: [{ name: 'A', value: 'value-one' }, { name: 'B', value: 'value-one-more' }] };
+    expect(failed('saw value-one-more', nested)).toEqual(withheld(nested));
+    expect(failed('saw value-one', nested)).toEqual(withheld(nested));
+    expect(failed('saw value-on', nested)).toMatchObject({ ok: false, error: { message: 'saw value-on', failureCode: null } });
+  });
+
+  it('never reads stdout: a failure with no error line is no_result in today’s words, whatever stdout holds', () => {
+    expect(mcpOutcome('mcp-add', input(), { stdout: 'value-one\n', stderr: '', code: 1 })).toEqual({ ok: false, error: { code: 'no_result', message: 'the CLI exited 1 without a result', failureCode: null, shownCommand: null } });
+    expect(mcpOutcome('mcp-add', input(), { stdout: '', stderr: '', code: null })).toMatchObject({ ok: false, error: { code: 'no_result', message: 'the CLI ended without a result' } });
+  });
+
+  it('words a CLI ended by a signal with a withheld line', () => {
+    expect(failed('value-one', stdio, 'files-probe', null as unknown as number)).toMatchObject({ ok: false, error: { failureCode: 'message_withheld', message: expect.stringMatching(/^Claude Code exited on a signal\. /) } });
+  });
+});
+
+// UX wave U11g (§B, R3): the engine host's name check before the run, read from the inventory of the page's folder
+describe('nameCheckOutcome', () => {
+  const server = (name: string, scope: 'app' | 'user' | 'project' | 'local') => ({ name, scope, path: '/cfg/.claude.json', transport: 'stdio' as const });
+  it('refuses a name configured in any scope with that scope, one held by MAWS’s own list, and a read that was not whole; a free name passes', () => {
+    for (const scope of ['user', 'project', 'local'] as const) {
+      expect(nameCheckOutcome({ servers: [server('other', 'user'), server('files-probe', scope)], serversRead: true }, 'files-probe')).toEqual({ ok: false, error: { code: 'spawn_failed', message: `files-probe is already configured here (${scope} scope). Nothing was added.`, failureCode: 'name_configured', shownCommand: null } });
+    }
+    expect(nameCheckOutcome({ servers: [server('files-probe', 'app')], serversRead: true }, 'files-probe')).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'files-probe is held by MAWS’s own list (Settings › Sessions › MCP servers). Nothing was added.', failureCode: 'name_configured', shownCommand: null } });
+    expect(nameCheckOutcome({ servers: [], serversRead: false }, 'files-probe')).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'Not every configuration here could be read, so the name can’t be checked. Nothing was added.', failureCode: 'configuration_unread', shownCommand: null } });
+    expect(nameCheckOutcome({ servers: [server('other', 'user'), server('Files-probe', 'user')], serversRead: true }, 'files-probe')).toBeNull();
   });
 });

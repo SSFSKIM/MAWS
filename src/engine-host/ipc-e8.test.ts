@@ -320,3 +320,60 @@ esac
   });
 });
 // P2-B end
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §B, R3): `connectors.addJson` checks
+// the name against the configuration of the page's folder, read with the inventory's own reader inside the runner's
+// queue immediately before the CLI starts, then runs `claude mcp add-json` there. The fake CLI writes the scratch
+// configuration as the engine would, so a second add of the name queued behind the first meets it.
+describe('connectors.addJson', () => {
+  const config = () => join(root, 'config');
+  const writeUser = (servers: Record<string, unknown>) => {
+    mkdirSync(config(), { recursive: true });
+    writeFileSync(join(config(), '.claude.json'), JSON.stringify({ mcpServers: servers }));
+  };
+  const entry = { type: 'stdio' as const, command: 'files-probe', args: ['--root', '/srv'], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }] };
+  const add = (name: string, scope: 'user' | 'local' | 'project', over: Partial<CommandInput<'connectors.addJson'>> = {}): CommandInput<'connectors.addJson'> => ({ cwd: project, binary: join(fake, 'claude'), name, scope, entry, folder: project, ...over });
+  // as the engine writes a user-scope add: the entry under the top-level mcpServers of the global config
+  const WRITES = `while [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '{"mcpServers":{"%s":{"type":"stdio","command":"files-probe","args":[]}}}' "$3" > "${root}/config/.claude.json"\necho "Added stdio MCP server $3 to $6 config"\n`;
+
+  it('refuses a name configured at any scope the folder reads, naming that scope, and starts no CLI', async () => {
+    writeUser({ 'files-probe': { type: 'http', url: 'https://files.example.test/mcp' } });
+    const host = engineHost();
+    for (const scope of ['user', 'local', 'project'] as const) {
+      const { opId } = await host.call('connectors.addJson', add('files-probe', scope));
+      expect((await host.done(opId)).outcome, scope).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'files-probe is already configured here (user scope). Nothing was added.', failureCode: 'name_configured', shownCommand: null } });
+    }
+    writeFileSync(join(project, '.mcp.json'), JSON.stringify({ mcpServers: { 'shared-probe': { type: 'stdio', command: 'x', args: [] } } }));
+    const shared = await host.call('connectors.addJson', add('shared-probe', 'user'));
+    expect((await host.done(shared.opId)).outcome).toMatchObject({ ok: false, error: { message: 'shared-probe is already configured here (project scope). Nothing was added.' } });
+    // on the user configuration's page the user scope alone is read
+    const page = await host.call('connectors.addJson', add('files-probe', 'user', { cwd: config(), folder: null }));
+    expect((await host.done(page.opId)).outcome).toMatchObject({ ok: false, error: { failureCode: 'name_configured' } });
+    expect(calls()).toEqual([]);
+  });
+
+  it('refuses when the configuration could not be read whole, starting nothing', async () => {
+    writeUser({});
+    writeFileSync(join(config(), '.config.json'), '{}'); // a legacy config file the inventory cannot place
+    const host = engineHost();
+    const { opId } = await host.call('connectors.addJson', add('files-probe', 'user'));
+    expect((await host.done(opId)).outcome).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'Not every configuration here could be read, so the name can’t be checked. Nothing was added.', failureCode: 'configuration_unread', shownCommand: null } });
+    expect(calls()).toEqual([]);
+  });
+
+  it('runs add-json in the folder for a free name; a second add of the name at another scope, queued behind it, is refused and the CLI ran once', async () => {
+    writeUser({});
+    behave(WRITES);
+    const host = engineHost();
+    const first = await host.call('connectors.addJson', add('files-probe', 'user'));
+    const second = await host.call('connectors.addJson', add('files-probe', 'local'));
+    await until(() => calls().length === 1, 'the first CLI');
+    writeFileSync(join(fake, 'go'), '');
+    expect((await host.done(first.opId)).outcome).toMatchObject({ ok: true, result: { command: 'mcp add-json', message: 'Added stdio MCP server files-probe to user config', name: 'files-probe', scope: 'user' } });
+    expect((await host.done(second.opId)).outcome).toMatchObject({ ok: false, error: { failureCode: 'name_configured', message: 'files-probe is already configured here (user scope). Nothing was added.' } });
+    expect(calls()).toHaveLength(1);
+    expect(calls()[0].startsWith('mcp add-json files-probe {"type":"stdio","command":"files-probe","args":["--root","/srv"],"env":{"FILES_PROBE_KEY":')).toBe(true);
+    for (const event of host.operations()) expect(JSON.stringify(event)).not.toContain('value-one');
+    expect(host.emitted.filter((e) => e.name === 'plugins.changed')).toHaveLength(2);
+  });
+});

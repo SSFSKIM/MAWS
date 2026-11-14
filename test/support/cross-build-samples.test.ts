@@ -22,7 +22,7 @@ const sent = Object.entries(manifest.entries)
 // plugins CLI under an absolute cwd and binary), named in INPUTS when a gap first brings it. The list is exact, so a
 // sample newly refused, or one now given, fails here.
 const NOT_YET_NAMED = [
-  'artifacts.uploadAsset', 'artifacts.versionState', 'connectors.add', 'connectors.remove', 'customization.inventory',
+  'artifacts.uploadAsset', 'artifacts.versionState', 'connectors.add', 'connectors.addJson', 'connectors.remove', 'customization.inventory',
   'marketplaces.add', 'marketplaces.list', 'marketplaces.remove', 'marketplaces.update', 'plugins.available', 'plugins.disable',
   'plugins.enable', 'plugins.install', 'plugins.list', 'plugins.manifest', 'plugins.marketplaceManifest', 'plugins.uninstall',
   'plugins.update', 'session.answer', 'session.replay.launch',
