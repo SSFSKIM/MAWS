@@ -57,6 +57,13 @@ describe('divider and summary copy', () => {
     expect(turnSummaryCopy({ state: 'stopped', cause: 'crash', origin: 'human', durationMs: 5_000, model: 'haiku', parts: [], denied: [], safeguard: NO_SAFEGUARD, costUsd: null, tokens: null })).toBe('Stopped after 5s (engine process exited) on haiku');
   });
 
+  // UX wave U4a (Interfaces B) and U2 (O-15), at the chain merge: a turn a message sent now ended reads U4a's verb and
+  // then what it did, its lines and its counts, as every other closed turn does; a sent-now end with no work reads the verb
+  it('reads a turn a message sent now ended as “Ended for your message after …” with what it did after it', () => {
+    expect(line({ state: 'stopped', cause: 'message', durationMs: 13_000, caption: 'Read plan.md, ran a command', counts: { added: 3, removed: 1 }, denied: 1 })).toBe('Ended for your message after 13s · Read plan.md, ran a command +3 −1 · 1 denied');
+    expect(line({ state: 'stopped', cause: 'message', durationMs: 13_000 })).toBe('Ended for your message after 13s');
+  });
+
   it('suffixes the denied and auto-denied counts', () => {
     expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', denied: 1 })).toBe('Worked for 2m 14s · Ran 12 commands · 1 denied');
     expect(line({ state: 'completed', durationMs: 134_000, caption: 'Ran 12 commands', counts: { added: 1, removed: 1 }, denied: 1, autoDenied: 2 })).toBe('Worked for 2m 14s · Ran 12 commands +1 −1 · 1 denied · 2 auto-denied');
