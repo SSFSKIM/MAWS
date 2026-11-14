@@ -1,4 +1,5 @@
 import { expect, it } from 'vitest';
+import type { ProjectId } from '@shared/graph/ids';
 import { project } from '../../../../test/support/builders';
 import { projectLabels, projectSuffixes } from './project-labels';
 
@@ -22,6 +23,6 @@ it('answers the distinguishing part of each colliding project’s parent path, a
     project('six', 5, { name: 'top', directory: '/srv/top' }),
   ];
   expect(Object.fromEntries(projectSuffixes(projects))).toEqual({ one: 'work/client-a', two: 'client-b', three: 'home/client-a', four: null, five: '/', six: 'srv' });
-  expect(projectSuffixes(projects.slice(1, 4)).get('two')).toBe('client-b'); // only over the projects listed together
-  expect(projectSuffixes([projects[0], projects[3]]).get('one')).toBeNull();
+  expect(projectSuffixes(projects.slice(1, 4)).get('two' as ProjectId)).toBe('client-b'); // only over the projects listed together
+  expect(projectSuffixes([projects[0], projects[3]]).get('one' as ProjectId)).toBeNull();
 });
