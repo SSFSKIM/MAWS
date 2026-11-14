@@ -140,14 +140,16 @@ export function connectShell(
   // UX wave U8c-2 (M4 decision 2): the card's pull-request row and Source control read `scm.status` and `scm.pr.state` by
   // the session alone, so a session whose working folder the store now holds differently has both reset (fix wave 1: an
   // answer or a read still out was the checkout the agent left) and asked again; a change that leaves the folder (a
-  // title, the agent's folder inside the same checkout) touches neither.
-  const askAgainWhereMoved = (events: EventPayload<'session.changed'>[], before: ReadonlyMap<AppSessionId, SessionRecord>) => {
+  // title, the agent's folder inside the same checkout) touches neither. The branch review (finding 7): every path that
+  // replaces records runs it, a machine's changes (`ids`, the records they name) and its snapshot (every record held
+  // before); the hub's rows hold no folder and replace no record.
+  const askAgainWhereMoved = (before: ReadonlyMap<AppSessionId, SessionRecord>, ids: Iterable<AppSessionId> = before.keys()) => {
     const after = sessions().records;
     const moved = new Set<AppSessionId>();
-    for (const { record } of events) {
-      const was = before.get(record.appId);
-      const now = after.get(record.appId);
-      if (was && now && workingFolder(was).path !== workingFolder(now).path) moved.add(record.appId);
+    for (const id of ids) {
+      const was = before.get(id);
+      const now = after.get(id);
+      if (was && now && was !== now && workingFolder(was).path !== workingFolder(now).path) moved.add(id);
     }
     if (moved.size > 0) resetScmQueries((appSessionId) => moved.has(appSessionId));
   };
@@ -166,7 +168,7 @@ export function connectShell(
           const before = sessions().records;
           sessions().applyChangedMany(events, m);
           closeArchived(events, before);
-          askAgainWhereMoved(events, before);
+          askAgainWhereMoved(before, events.map(({ record }) => record.appId));
         } else sessions().applyDigests(run.map((q) => (q as Extract<Queued, { t: 'digest' }>).d), m);
         i = j;
         continue;
@@ -293,7 +295,11 @@ export function connectShell(
     attention().beginSnapshot(machine);
     const attended = answer('attention.list', live, client.invoke('attention.list', undefined, opts), (items) => attention().applySnapshot(items, machine), () => attention().cancelSnapshot(machine));
     const records = Promise.all([
-      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => sessions().applyList(value, machine), refused),
+      answer('session.list', live, client.invoke('session.list', {}, opts), (value) => {
+        const before = sessions().records;
+        sessions().applyList(value, machine);
+        askAgainWhereMoved(before);
+      }, refused),
       answer('session.projects.list', live, client.invoke('session.projects.list', undefined, opts), (value) => sessions().applyProjects(value, machine), refused),
       answer('session.digests', live, client.invoke('session.digests', undefined, opts), ({ digests }) => sessions().applyDigests(digests, machine), refused),
     ]).then((applied) => applied.every(Boolean));
