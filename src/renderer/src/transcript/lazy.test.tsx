@@ -38,9 +38,8 @@ it('draws an instance mounted before the chunk loads once it does, and keeps it 
   expect(strong(view.container)).toBe(drawn); // the same node: not remounted onto the loaded module
 }, 60_000);
 
-// A suite that renders these components before its cases waits on `chunksSettled`, the chunks' own arrival: an import of
-// a chunk's module can resolve before the chunk has (the view's graph imports this module back through the transcript's
-// index, and the module runner answers an import into that cycle with the partial exports of a module still evaluating).
+// `chunksSettled` is the chunks' own arrival, which a suite awaits before cases that render these components (an import
+// of a chunk's module can resolve before the chunk has: lazy.tsx's comment).
 it('settles chunksSettled only once every chunk has loaded, each component then drawing in its first commit', async () => {
   let arrive!: () => void;
   const arrived = new Promise<void>((resolve) => (arrive = resolve));

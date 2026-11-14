@@ -10,14 +10,18 @@ import type { MarkdownProps } from './view/markdown/Markdown';
 import type { TranscriptProps } from './view/Transcript';
 import type { TranscriptSlotProps } from './view/TranscriptSlot';
 
+const arrivals: Promise<unknown>[] = []; // each chunk's, for `chunksSettled`
+
 // A chunk's component, drawn in an instance's first commit once the chunk has loaded (React.lazy suspends the first
 // instance it ever renders even then, so a first consumer's layout, a log pinned to its end, met an empty commit). An
 // instance mounted before the chunk arrives keeps its Suspense boundary for life: the arrival never remounts it.
 function fromChunk<P extends object>(chunk: Promise<ComponentType<P>>): ComponentType<P> {
   let loaded: ComponentType<P> | null = null;
-  chunk.then(
-    (component) => (loaded = component),
-    () => {}, // a chunk that fails to load fails through the lazy component, under the consumer's error boundary
+  arrivals.push(
+    chunk.then(
+      (component) => (loaded = component),
+      () => {}, // a chunk that fails to load fails through the lazy component, under the consumer's error boundary
+    ),
   );
   const Lazy = lazy(() => chunk.then((component) => ({ default: component })));
   return function FromChunk(props: P) {
@@ -35,3 +39,8 @@ const view = import('./view/transcript-view');
 export const Transcript = fromChunk<TranscriptProps>(view.then((module) => module.Transcript));
 export const TranscriptSlot = fromChunk<TranscriptSlotProps>(view.then((module) => module.TranscriptSlot));
 export const Markdown = fromChunk<MarkdownProps>(import('./view/markdown/Markdown').then((module) => module.Markdown));
+// Settles once every chunk above has loaded (or failed): each component then draws in its first commit. A suite that
+// renders them waits on this, never on an import of a chunk's modules: the view's graph imports this module back (its
+// surface rows reach the transcript's index), and Vite's module runner answers an import into that cycle with the
+// partial exports of a module still evaluating, so such an import can resolve while the chunk is still loading.
+export const chunksSettled: Promise<void> = Promise.all(arrivals).then(() => undefined);

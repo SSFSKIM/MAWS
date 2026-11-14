@@ -23,6 +23,7 @@ import { useMachines } from '../../stores/machines'; // 2026-11-06
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
 import { useTaskGraph } from '../../tools/agents/store';
 import { DEFAULT_ACTIONS, registerRequestRenderer, registerTranscriptActions, TranscriptSlot, useTranscriptStore } from '../index';
+import { chunksSettled } from '../lazy'; // the U4a landing's unit shard
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
@@ -43,12 +44,14 @@ beforeAll(() => {
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
 
 // No case waits on a clock (L79). The slot renders through its lazy chunk (`lazy.tsx`), whose first import is real
-// module loading that the machine's load can stretch past any poll's deadline, so the chunk is loaded before the cases.
+// module loading that the machine's load can stretch past any poll's deadline, so the chunk is loaded before the cases:
+// the hook waits on lazy.tsx's own `chunksSettled`, since an import of the chunk's modules can resolve with a module
+// still evaluating (lazy.tsx's comment), and the slot then drew nothing in any case (the U4a landing's unit shard).
 // After that, everything a render or an event sets off is promise-chained (the fake IPC's answers, the store's batches,
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
 // read once, so load can slow a case but not fail it.
 beforeAll(async () => {
-  await Promise.all([import('./TranscriptSlot'), import('./Transcript'), import('./markdown/Markdown'), import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
+  await Promise.all([chunksSettled, import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
 });
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
