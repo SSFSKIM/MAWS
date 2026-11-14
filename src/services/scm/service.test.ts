@@ -452,17 +452,23 @@ describe('scm service', () => {
       let fail!: (error: Error) => void;
       const failing = new Promise<void>((_resolve, reject) => (fail = reject));
       const scm = service({ admitMs: ADMIT_MS });
-      const holding: FolderGuard = () => held;
+      let judged = 0;
+      const holding: FolderGuard = () => {
+        judged++;
+        return held;
+      };
+      view.putRecord(at(OTHER, join(root, 'other'))); // a folder of its own, so its capture is not queued behind the held one
       const answers = [
         scm.stage({ appSessionId: ID, paths: ['a.txt'] }, holding),
         scm.commit({ appSessionId: ID, message: 'x', noVerify: false }, holding),
         scm.run({ appSessionId: ID, token: 'c4444444-4444-4444-8444-444444444444' }, 'push', holding),
-        scm.unstage({ appSessionId: ID, paths: ['s.ts'] }, () => failing),
+        scm.unstage({ appSessionId: OTHER, paths: ['s.ts'] }, () => failing),
       ];
       expect(await Promise.all(answers)).toMatchObject([{ refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }]);
       release();
       fail(new Error('the guard refused after the deadline'));
       await wait(20);
+      expect(judged).toBe(1); // the commit and the run waited behind the stage's capture in their folder's queue and never began theirs
       expect(read).not.toHaveBeenCalled();
       expect(readStatus).not.toHaveBeenCalled();
       expect(mutate).not.toHaveBeenCalled();

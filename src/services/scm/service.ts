@@ -21,6 +21,7 @@
 // are reported (`runs`), so the spine's release or yield waits for them.
 import { realpath } from 'node:fs/promises';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import type {
   ScmCommitInput,
@@ -117,7 +118,7 @@ interface Keys {
 
 export class ScmService {
   private readonly chains = new Map<string, Promise<unknown>>(); // repository key
-  private readonly admissions = new Map<string, Promise<unknown>>(); // checkout as given: its last key resolution (admit)
+  private readonly admissions = new Map<string, Promise<unknown>>(); // working folder as its record names it: its last admission (admitted)
   private readonly now: () => number;
   private readonly plans: PlanTable;
   private readonly runner: RemoteRunner;
@@ -153,7 +154,7 @@ export class ScmService {
   }
 
   async stage({ appSessionId, paths }: ScmPathsInput, guard?: FolderGuard): Promise<ScmMutation> {
-    return this.mutation(this.capture(appSessionId, guard), (status) => {
+    return this.mutation(appSessionId, guard, (status) => {
       const targets = stageTargets(status, paths);
       return isRefusal(targets) ? targets : { commands: [['add', '--', ...targets.paths.map(literal)]], timeoutMs: LOCAL_TIMEOUT_MS };
     });
@@ -163,7 +164,7 @@ export class ScmService {
   // only lifts the check that the index matches the file or HEAD (an added file edited since, `AM`, fails it): with
   // `--cached` the working tree is never touched, so this unstages exactly as `restore --staged` would.
   async unstage({ appSessionId, paths }: ScmPathsInput, guard?: FolderGuard): Promise<ScmMutation> {
-    return this.mutation(this.capture(appSessionId, guard), (status) => {
+    return this.mutation(appSessionId, guard, (status) => {
       const targets = unstageTargets(status, paths);
       if (isRefusal(targets)) return targets;
       const verb = status.head === '' ? ['rm', '--cached', '-r', '-f'] : ['restore', '--staged'];
@@ -174,7 +175,7 @@ export class ScmService {
   // Unstaged entries take the index's content; untracked ones are deleted (`-d` for a directory entry; never `-x`, so
   // ignored files are never touched). Both run in one chained operation, the restore first.
   async discard({ appSessionId, entries }: ScmDiscardInput, guard?: FolderGuard): Promise<ScmMutation> {
-    return this.mutation(this.capture(appSessionId, guard), (status) => {
+    return this.mutation(appSessionId, guard, (status) => {
       const targets = discardTargets(status, entries);
       if (isRefusal(targets)) return targets;
       const commands: string[][] = [];
@@ -192,7 +193,8 @@ export class ScmService {
   async commit({ appSessionId, message, noVerify }: ScmCommitInput, guard?: FolderGuard): Promise<ScmMutation> {
     if (message.includes('\0')) throw new Error('a commit message cannot hold a NUL character');
     return this.mutation(
-      this.capture(appSessionId, guard),
+      appSessionId,
+      guard,
       (status) => commitRefusal(status, message) ?? { commands: [['commit', '-m', message, ...(noVerify ? ['--no-verify'] : [])]], timeoutMs: COMMIT_TIMEOUT_MS },
       async (checkout) => {
         // One read gives the sha and subject of the same commit, still inside the checkout's chain.
@@ -223,7 +225,7 @@ export class ScmService {
   async run({ appSessionId, token }: ScmRunInput, kind: 'push' | 'pr', guard?: FolderGuard): Promise<ScmRunStarted> {
     const running = ({ checkout: key }: Keys) => (this.runner.isRunning(key) ? refusal('busy', BUSY_DETAIL) : null);
     // moved: refused `changed` before the token is spent
-    return this.admitted(this.capture(appSessionId, guard), async (checkout, keys): Promise<ScmRunStarted> => {
+    return this.admitted(appSessionId, guard, async (checkout, keys): Promise<ScmRunStarted> => {
       const busy = running(keys);
       if (busy !== null) return busy;
       const issued = this.plans.consume(token, { appSessionId, key: keys.checkout, kind });
@@ -341,8 +343,17 @@ export class ScmService {
   // the caller's guard is awaited on that folder before anything reads there; `moved` says whether it is the launch
   // folder, from the same record, so an act's check and its folder cannot come from two reads.
   private async capture(appSessionId: AppSessionId, guard?: FolderGuard): Promise<Captured> {
+    return this.captureOf(this.recordOf(appSessionId), guard);
+  }
+
+  // The record a request reads once; an act takes it at its call (`admitted`), a read inside `capture`.
+  private recordOf(appSessionId: AppSessionId): SessionRecord {
     const record = this.deps.view.record(appSessionId);
     if (record === null) throw new Error(`unknown app session: ${appSessionId}`);
+    return record;
+  }
+
+  private async captureOf(record: SessionRecord, guard?: FolderGuard): Promise<Captured> {
     const admitted = await admittedFolder(record, 'path');
     if (admitted === null) throw new Error(FILES_REFUSAL);
     await guard?.(admitted.folder);
@@ -418,11 +429,12 @@ export class ScmService {
   // after (what is answered). Git's own failure is the refusal `git_failed` with both streams; a timeout goes to the
   // router. Once any command ran, the watcher is asked to re-read the root, whatever the outcome.
   private async mutation(
-    captured: Promise<Captured>,
+    appSessionId: AppSessionId,
+    guard: FolderGuard | undefined,
     decide: (status: GitStatus) => Decided | ScmRefusal,
     facts: (checkout: string) => Promise<{ commit?: { sha: string; subject: string } }> = async () => ({}),
   ): Promise<ScmMutation> {
-    return this.admitted(captured, async (checkout): Promise<ScmMutation> => {
+    return this.admitted(appSessionId, guard, async (checkout): Promise<ScmMutation> => {
       if (!(await this.trust(checkout)).trusted) return refusal('untrusted', UNTRUSTED_DETAIL);
       let before: GitStatus;
       try {
@@ -450,13 +462,27 @@ export class ScmService {
     });
   }
 
-  // An act's way to its work (P5 O3-E, Interfaces §H): the request's capture of its folder (UX wave U8c-2: the
-  // admission's reads and the caller's guard; a moved session refused `changed`), its keys resolved in the checkout's
-  // queue (admit), then its turn in the repository's chain (serial), all within SCM_ADMIT_MS of the call; `before` may
-  // refuse once the keys are known, ahead of the chain. Past the deadline with its work not started, it answers `busy`
-  // and runs nothing: a capture ending later starts nothing, and its place in each queue becomes a no-op that lets the
-  // queue's tail run on in order. A capture or key resolution that fails before the deadline fails the call, as it did.
-  private admitted<T>(captured: Promise<Captured>, work: (checkout: string, keys: Keys) => Promise<T>, before: (keys: Keys) => T | null = () => null): Promise<T | ScmRefusal> {
+  // An act's way to its work (P5 O3-E, Interfaces §H): its place in the queue of the folder its record names, taken at the
+  // call (the branch review of U8c-2, finding 5: before anything is awaited, so acts on one folder keep the order they
+  // were asked in however long each one's admission takes); in that place, the request's capture of its folder (UX wave
+  // U8c-2: the admission's reads and the caller's guard; a moved session refused `changed`) and its keys; then its turn
+  // in the repository's chain (serial), all within SCM_ADMIT_MS of the call; `before` may refuse once the keys are
+  // known, ahead of the chain. A refused or failed capture gives the place up having run nothing. Past the deadline with
+  // its work not started, it answers `busy` and runs nothing: a capture ending later starts nothing, and its place in
+  // each queue becomes a no-op that lets the queue's tail run on in order. A capture or key resolution that fails before
+  // the deadline fails the call, as it did.
+  private admitted<T>(
+    appSessionId: AppSessionId,
+    guard: FolderGuard | undefined,
+    work: (checkout: string, keys: Keys) => Promise<T>,
+    before: (keys: Keys) => T | null = () => null,
+  ): Promise<T | ScmRefusal> {
+    let record: SessionRecord;
+    try {
+      record = this.recordOf(appSessionId);
+    } catch (error) {
+      return Promise.reject(error);
+    }
     return new Promise<T | ScmRefusal>((resolve, reject) => {
       let state: 'waiting' | 'started' | 'expired' = 'waiting';
       const deadline = setTimeout(() => {
@@ -473,29 +499,34 @@ export class ScmService {
         end();
         reject(error);
       };
-      captured.then(({ checkout, moved }) => {
-        if (state !== 'waiting') return;
+      const admission = async (): Promise<{ checkout: string; keys: Keys } | null> => {
+        if (state !== 'waiting') return null;
+        const { checkout, moved } = await this.captureOf(record, guard);
+        if (state !== 'waiting') return null;
         if (moved) {
           end();
-          return resolve(away());
+          resolve(away());
+          return null;
         }
-        queue(this.admissions, checkout, () => (state === 'waiting' ? this.keysOf(checkout) : Promise.resolve(null))).then((keys) => {
-          if (keys === null || state !== 'waiting') return;
-          const refused = before(keys);
-          if (refused !== null) {
-            end();
-            return resolve(refused);
+        return { checkout, keys: await this.keysOf(checkout) };
+      };
+      queue(this.admissions, workingFolder(record).path, admission).then((admitted) => {
+        if (admitted === null || state !== 'waiting') return;
+        const { checkout, keys } = admitted;
+        const refused = before(keys);
+        if (refused !== null) {
+          end();
+          return resolve(refused);
+        }
+        return this.serial(keys.repository, async () => {
+          if (state !== 'waiting') return;
+          end();
+          try {
+            resolve(await work(checkout, keys));
+          } catch (error) {
+            reject(error);
           }
-          return this.serial(keys.repository, async () => {
-            if (state !== 'waiting') return;
-            end();
-            try {
-              resolve(await work(checkout, keys));
-            } catch (error) {
-              reject(error);
-            }
-          });
-        }, fail);
+        });
       }, fail);
     });
   }
@@ -503,8 +534,9 @@ export class ScmService {
   // The checkout's keys, resolved in call order (`admitted` keeps the order): each call reaches its chain in the order
   // the owner asked for it, since a call reaches `serial` without awaiting once its keys resolved. P4 W2-B
   // (tracker 2026-10-06 "The mutation chain and admission queue are keyed by the checkout's realpath…"): the order is
-  // kept per checkout as the session names it, each in a queue of its own, so one whose resolution hangs (a stalled
-  // mount) holds up only its own calls; calls naming two directories of one repository are not ordered between them.
+  // kept per checkout as the session's record names it, each in a queue of its own, so one whose resolution hangs (a
+  // stalled mount) holds up only its own calls; calls naming two directories of one repository are not ordered between
+  // them.
   // One promise chain per repository: work starts after every earlier work of the repository settled.
   private serial<T>(repository: string, work: () => Promise<T>): Promise<T> {
     return queue(this.chains, repository, work);
