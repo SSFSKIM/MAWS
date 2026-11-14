@@ -155,11 +155,20 @@ export function rowOfListed(index: OrgIndex, listed: ListedSession, alsoListed?:
 // key main gave the listing need not be that project's row's. For this Mac's record the listing decides only while its
 // project is not known here. Undefined when no listing names its address, or this Mac's record has a known project:
 // `rowOfSession` decides.
-export function rowOfListedRecord(index: OrgIndex, projects: ReadonlyMap<ProjectId, ProjectRecord>, record: SessionRecord, listed: ReadonlyMap<AppSessionId, ListedSession> | undefined, alsoListed?: ReadonlySet<RowKey>): RowKey | null | undefined {
+function rowOfListedRecord(index: OrgIndex, projects: ReadonlyMap<ProjectId, ProjectRecord>, record: SessionRecord, listed: ReadonlyMap<AppSessionId, ListedSession> | undefined, alsoListed?: ReadonlySet<RowKey>): RowKey | null | undefined {
   const listing = listed?.get(record.appId);
   if (listing === undefined) return undefined;
   if (machineOf(record.appId) === index.local && record.projectId !== null && projects.has(record.projectId)) return undefined;
   return rowOfListed(index, listing, alsoListed);
+}
+
+// The row a record sits under (null: nowhere, its project being hidden), the one answer every reader that files a
+// record takes (the sidebar, a row's sessions, the resume chooser and `/resume`, a row's archived list, the channel's
+// waiting): its listing's where `rowOfListedRecord` decides, else `rowOfSession`'s. `listed`: the other machines'
+// listings (the sessions store's).
+export function rowOfRecord(index: OrgIndex, projects: ReadonlyMap<ProjectId, ProjectRecord>, record: SessionRecord, listed: ReadonlyMap<AppSessionId, ListedSession> | undefined, alsoListed?: ReadonlySet<RowKey>): RowKey | null {
+  const filed = rowOfListedRecord(index, projects, record, listed, alsoListed);
+  return filed === undefined ? rowOfSession(index, projects, record, alsoListed) : filed;
 }
 
 // P5 O7 M2: the tab set a listing's session files into: its row's, or its org key's when every checkout of it is hidden
@@ -249,10 +258,10 @@ export function rowProjects(index: OrgIndex, key: RowKey, up: (machine: MachineR
   return (index.projects.get(key) ?? []).filter((p) => !p.hidden && up(machineOf(p.id)));
 }
 
-// The sessions a row holds now, from every machine, archived ones included (the row's own filing, `rowOfSession`).
-export function sessionsOfRow(state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord> }, local: MachineRef, key: RowKey): SessionRecord[] {
+// The sessions a row holds now, from every machine, archived ones included (the row's own filing, `rowOfRecord`).
+export function sessionsOfRow(state: ProjectsHolder & { records: ReadonlyMap<AppSessionId, SessionRecord>; listed: ReadonlyMap<AppSessionId, ListedSession> }, local: MachineRef, key: RowKey): SessionRecord[] {
   const index = selectOrgIndex(state, local);
-  return [...state.records.values()].filter((r) => rowOfSession(index, state.projects, r) === key);
+  return [...state.records.values()].filter((r) => rowOfRecord(index, state.projects, r, state.listed) === key);
 }
 
 // The checkout a row's own actions act on (New chat, Resume…, Reveal in Finder, Worktrees…, the hover card): the local

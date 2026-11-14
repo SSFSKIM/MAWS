@@ -1,7 +1,7 @@
 // A row's archived sessions (C10 execution document, Actions: `project.archived`): a dialog list, not a sidebar section
 // (C5 hides archived rows and C10 adds none). Each row offers Unarchive (C4's `session.update`), Delete, and, for a
 // session in a managed worktree, "Remove worktree…" (the cleanup dialog). P5 O6 M5: the list is the sidebar row's, by
-// the row's own filing (`rowOfSession`): a project's org project, every checkout and folder it groups, read on each
+// the row's own filing (`rowOfRecord`): a project's org project, every checkout and folder it groups, read on each
 // machine they are on that is up; with no project, a machine's own row (its menu names it; this machine's by default),
 // its sessions of no project and of folders nobody opened there, titled by the machine's name.
 import { useEffect, useMemo, useState } from 'react';
@@ -13,7 +13,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { selectOffline, useMachines } from '../stores/machines';
-import { machineName, machineOfRow, rowName, rowOfSession, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
+import { machineName, machineOfRow, rowName, rowOfRecord, rowProjects, selectOrgIndex, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 import { isManagedWorktree } from './ArchiveDialog';
 import { cleanupTargetOf } from './CleanupDialog';
@@ -26,6 +26,7 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
   const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
   const projects = useSessions((s) => s.projects);
+  const listings = useSessions((s) => s.listed); // ticket 644: another machine's record is the row's its listing files it under
   const machines = useMachines((s) => s.machines);
   const project = projectId === null ? undefined : projects.get(projectId);
   const row: RowKey = projectId === null ? machineKey(named ?? local) : project ? index.keyOf(project) : machineKey(machineOf(projectId));
@@ -53,8 +54,8 @@ export function ArchivedSessionsDialog({ projectId, machine: named }: { projectI
   }, [readOn, version]);
   const listed = useMemo(() => new Set([row]), [row]);
   const rows = useMemo(
-    () => lists?.flat().filter((r) => r.archived && rowOfSession(index, projects, r, listed) === row).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? null,
-    [lists, index, projects, listed, row],
+    () => lists?.flat().filter((r) => r.archived && rowOfRecord(index, projects, r, listings, listed) === row).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)) ?? null,
+    [lists, index, projects, listings, listed, row],
   );
 
   const unarchive = async (appSessionId: AppSessionId) => {
