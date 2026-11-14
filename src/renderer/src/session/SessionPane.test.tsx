@@ -24,6 +24,7 @@ import { resetLaneAWatches, watchLaneA } from '../lane-a/watches'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
 import { connectReaderGrades, resetReaderPanes } from '../sessions/share/reader-connect'; // board 525
+import { openBtwCard, resetSideQuestions } from '../side/store'; // UX wave U4a
 
 const nine = scenarioFile('nine-sessions');
 const idOf = (title: string) => pageScenario(nine).sessions.find((r) => r.title.text === title)!.appId; // P5 O6 M2: the page's id
@@ -38,6 +39,7 @@ afterEach(() => {
   cleanup();
   delete (window as { maws?: PreloadBridge }).maws;
   resetSlots();
+  resetSideQuestions(); // UX wave U4a: the /btw cards too
   // C7 start: a failing assertion must not leave the fake clock or the windows to the next test
   vi.useRealTimers();
   useUsage.setState({ windows: null });
@@ -103,6 +105,31 @@ describe('session pane', () => {
     render(<SessionPane appSessionId={idOf('Somersault terminal run')} paneIndex={0} />);
     expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
     expect(screen.getByText('transcript waiting none')).toBeTruthy();
+  });
+
+  // UX wave U4a (M7; decision 26 a): the `/btw` card is a layer of the pane over the transcript's bottom right corner,
+  // beside the transcript's scroller and never inside it; the compact pill, which draws no transcript, has it in the flow
+  // directly above the composer's frame
+  it('draws the session’s /btw card over the transcript’s corner, a layer of the pane and not of the scroller', () => {
+    const id = idOf('Charter + research');
+    registerSlot('transcript', () => <p>transcript</p>);
+    act(() => openBtwCard(id));
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    const card = document.querySelector<HTMLElement>('[data-btw-card]')!;
+    expect(card.getAttribute('data-btw-card')).toBe('corner');
+    const scroller = screen.getByText('transcript').parentElement!;
+    expect(scroller.contains(card)).toBe(false);
+    expect(card.parentElement).toBe(scroller.parentElement);
+    expect(card.contains(screen.getByText('Composer unavailable'))).toBe(false);
+  });
+
+  it('in the compact pill, which draws no transcript, the /btw card stands directly above the composer’s frame', () => {
+    const id = idOf('Charter + research');
+    act(() => openBtwCard(id));
+    render(<SessionPane appSessionId={id} paneIndex={0} compact />);
+    const card = document.querySelector<HTMLElement>('[data-btw-card]')!;
+    expect(card.getAttribute('data-btw-card')).toBe('flow');
+    expect(card.compareDocumentPosition(screen.getByText('Composer unavailable')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   // C10 (M5): the notice's actions are C10's HolderActions, pinned in `sessions/HolderActions.test.tsx`
