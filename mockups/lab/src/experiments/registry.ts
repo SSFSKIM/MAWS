@@ -1,7 +1,5 @@
+import { all } from 'virtual:experiments';
 import type { Experiment } from '../lab/types';
 
-// One entry per experiment, in the order the lab shows them. Each experiment owns its folder and exports `experiment`
-// from its meta.ts; nothing is shared between experiments but src/content and src/lab.
-import { experiment as smoke } from './smoke/meta';
-
-export const experiments: Experiment[] = [smoke];
+/** Every experiment folder that has a meta.ts, in the order of their `order` field. */
+export const experiments: Experiment[] = [...all].sort((a, b) => a.order - b.order);

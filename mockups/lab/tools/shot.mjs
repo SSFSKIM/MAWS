@@ -1,6 +1,6 @@
 // Capture lab pages with the installed Chrome, headless, from the single-file build.
 //   node tools/shot.mjs <out-dir> <route> [<route> …]      route = "<exp>/<scene>[?scheme=dark&knob=value]"
-// Options by environment: W, H (CSS px, default 1440x900), DPR (default 2), WAIT (ms after load, default 1500).
+// Options by environment: OUT (the build folder, default dist), W, H (CSS px, default 1440x900), DPR (default 2), WAIT (ms after load, default 1500).
 import { chromium } from 'playwright-core';
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -11,7 +11,7 @@ if (!outDir || routes.length === 0) {
   process.exit(2);
 }
 mkdirSync(outDir, { recursive: true });
-const page0 = 'file://' + resolve('dist/index.html');
+const page0 = 'file://' + resolve(process.env.OUT ?? 'dist', 'index.html');
 const browser = await chromium.launch({
   channel: 'chrome',
   headless: true,

@@ -20,6 +20,8 @@ export interface ExperimentProps {
 
 export interface Experiment {
   id: string;
+  /** Position in the lab's list; lower comes first. */
+  order: number;
   /** Short name shown in the lab. */
   name: string;
   /** One sentence: what this experiment treats as central. */
