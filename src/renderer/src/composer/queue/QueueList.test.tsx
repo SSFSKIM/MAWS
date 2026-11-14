@@ -324,8 +324,8 @@ describe('the stack’s refused controls', () => {
     machineLists([]); // a build that serves no session acts
     const cancelWords = remoteUnavailableOf(R, 'session.steer.cancel');
     expect(cancelWords).toContain('Update MAWS on mini');
-    let view = mount();
-    let [next, after] = rows();
+    const view = mount();
+    const [next, after] = rows();
     const send = within(next).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.sendNow']);
@@ -341,11 +341,11 @@ describe('the stack’s refused controls', () => {
 
     machineLists([SESSION_ACTS_CAPABILITY]); // one that takes a waiting message back
     expect(remoteUnavailableOf(R, 'session.steer.cancel')).toBeNull();
-    view = mount();
-    [next, after] = rows();
-    expect((within(next).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'Send now stays declared').toBe(true);
-    expect((within(next).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
-    await userEvent.setup().click(within(next).getByRole('button', { name: 'More' }));
+    mount();
+    const [nextThere] = rows();
+    expect((within(nextThere).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'Send now stays declared').toBe(true);
+    expect((within(nextThere).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.setup().click(within(nextThere).getByRole('button', { name: 'More' }));
     expect((await screen.findByRole('menuitem', { name: 'Edit' })).getAttribute('aria-disabled')).not.toBe('true');
     expect(invoke).not.toHaveBeenCalled();
   });
