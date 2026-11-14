@@ -6,8 +6,9 @@
 // with the reason. Opening the widget starts nothing. A widget put away while its start runs still asks (Ask was
 // pressed), but closes nothing: the host's close puts away whichever widget is open by then. UX wave U4a (decision 26 d):
 // on a session that can take a question now, the widget is not drawn at all: it closes before the dialog paints and the
-// session's `/btw` card opens with its field focused (with a question, it is asked there, as a typed `/btw <question>`
-// is); the dialog stays for a session that cannot take one yet, which it starts or says why.
+// session's side questions open with their field focused where a typed question would answer (the session's `/btw` card,
+// or under a side thread hosted in its parent's pane); with a question, it is asked there, as a typed `/btw <question>`
+// is. The dialog stays for a session that cannot take one yet, which it starts or says why.
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { STARTS } from '../composer/submit/submit-state';
@@ -15,10 +16,9 @@ import { useAvailability } from '../sessions/availability';
 import { useSessions } from '../stores/sessions';
 import { WIDGET_TITLE } from '../widgets/copy';
 import { WidgetFrame } from '../widgets/WidgetFrame';
-import { askSideQuestion, canAskSide, sideBlock, startForSide, useDrivenAsk } from './btw';
+import { askSideQuestion, canAskSide, openSideQuestions, sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
-import { openBtwCard } from './store'; // UX wave U4a
 
 const COPY = SIDE_COPY.btw;
 
@@ -44,7 +44,7 @@ export function BtwWidget({ appSessionId, args, close }: { appSessionId: AppSess
     handed.current = true;
     if (!canAskSide(appSessionId)) return;
     const asked = args.trim();
-    if (asked === '') openBtwCard(appSessionId, { focus: true });
+    if (asked === '') openSideQuestions(appSessionId, { focus: true }); // where a typed question would answer: the card, or under a hosted thread
     else askSideQuestion(appSessionId, asked);
     close();
   });

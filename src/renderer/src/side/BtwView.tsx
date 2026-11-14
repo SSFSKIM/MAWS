@@ -24,22 +24,34 @@ import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
-import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, useSidePane } from './store';
+import { askSide, btwCardOf, clearSide, promotable, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, useSidePane } from './store';
 
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
 
 // Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is for the
-// scroller, kept at its newest exchange.
-export function useSideAsk(parent: AppSessionId) {
+// scroller, kept at its newest exchange; `field` for the textarea, which takes the keyboard when the session's side-question
+// field is asked for it (a pick of `/btw` from the palette). `kept`: the field's text held outside the component (the
+// card's, in its store, so a fold loses nothing); the component's own state otherwise.
+type Kept = { question: string; setQuestion(next: string | ((current: string) => string)): void };
+export function useSideAsk(parent: AppSessionId, kept?: Kept) {
   const log = useRef<HTMLDivElement>(null);
+  const field = useRef<HTMLTextAreaElement>(null);
+  const focus = useBtwCards((s) => btwCardOf(s, parent).focus);
+  useEffect(() => {
+    if (!focus) return;
+    field.current?.focus();
+    takeBtwFocus(parent);
+  }, [focus, parent]);
   const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const driven = useDrivenAsk(parent); // P5 O9 M5
   const ready = process === 'ready' || driven?.available === true;
   const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
   const availability = useAvailability(parent);
-  const [question, setQuestion] = useState('');
+  const [ownQuestion, setOwnQuestion] = useState('');
+  const question = kept?.question ?? ownQuestion;
+  const setQuestion = kept?.setQuestion ?? setOwnQuestion;
   const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
@@ -97,12 +109,12 @@ export function useSideAsk(parent: AppSessionId) {
   };
   const canClear = !shown.every((e) => e.state === 'pending') && clearUnavailable === null;
   const clear = () => void clearSide(parent);
-  return { log, shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
+  return { log, field, shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
 }
 
 export function BtwView({ parent }: { parent: AppSessionId }) {
   const side = useSideAsk(parent);
-  const { log, shown, question, setQuestion, canAsk, note, refusal } = side;
+  const { log, field, shown, question, setQuestion, canAsk, note, refusal } = side;
 
   return (
     <div data-side-btw-view={parent} className="flex h-full min-h-0 flex-col">
@@ -126,6 +138,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
         )}
         <div className="flex items-end gap-2">
           <textarea
+            ref={field}
             aria-label={COPY.field}
             placeholder={COPY.placeholder}
             rows={2}

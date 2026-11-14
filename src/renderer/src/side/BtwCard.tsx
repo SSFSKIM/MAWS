@@ -9,7 +9,7 @@
 // up to 360 px tall); the compact pill, which draws no transcript, in the flow above its composer (`flow`). It draws
 // nothing while its session's card is closed. Its state is the window's (side/store.ts, `useBtwCards`), never stored.
 // U4b registers it at the card column's foot.
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
 import { Icon, IconButton } from '../app/IconButton';
@@ -19,7 +19,10 @@ import { duration } from '../transcript/model/time';
 import { useTicker } from '../transcript/view/rows/parts';
 import { Exchange, SideActions, useSideAsk } from './BtwView';
 import { SIDE_COPY } from './copy';
-import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, sidePaneOf, takeBtwFocus, useBtwCards, useSidePane, waitingSince } from './store';
+import { visibleSessions } from '../session/visibility';
+import { useFloatingCard } from '../shell/floating';
+import { useLayout } from '../stores/layout';
+import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, setBtwQuestion, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
 
 const COPY = SIDE_COPY.btw;
 export type BtwCardPlacement = 'corner' | 'flow';
@@ -51,18 +54,26 @@ function WaitingLine({ parent, exchange, className }: { parent: AppSessionId; ex
   );
 }
 
+// Whether the session is on screen by the rule the unread mark follows (`visibleSessions`, its layout part: a pane's active
+// tab not floated or covered, the child a Side pane draws, the floating card's session), whether or not it has a record (a
+// terminal session on another machine has none); the window's focus is not asked. A card in the flow is the compact pill's,
+// which is drawn only where it is seen.
+function useOnScreen(parent: AppSessionId, placement: BtwCardPlacement): boolean {
+  const panes = useSidePane((s) => s.panes);
+  useFloatingCard((s) => s.closed); // drawn again when the floating card opens or closes, which `visibleSessions` reads
+  const onScreen = useLayout((layout) => visibleSessions(layout, new Map([[parent, null as never]]), true, sideChildrenShown({ panes })).has(parent));
+  return placement === 'flow' || onScreen;
+}
+
 function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwCardPlacement }) {
-  const field = useRef<HTMLTextAreaElement>(null);
-  const side = useSideAsk(parent);
+  const question = useBtwCards((s) => btwCardOf(s, parent).question);
+  const side = useSideAsk(parent, { question, setQuestion: (next) => setBtwQuestion(parent, next) });
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
-  const focus = useBtwCards((s) => btwCardOf(s, parent).focus);
-  useEffect(() => markBtwSeen(parent, exchanges ?? []), [parent, exchanges]); // open on screen: every settled one is seen
+  const onScreen = useOnScreen(parent, placement);
   useEffect(() => {
-    if (!focus) return;
-    field.current?.focus();
-    takeBtwFocus(parent);
-  }, [focus, parent]);
-  const { log, shown, question, setQuestion, canAsk, note, refusal } = side;
+    if (onScreen) markBtwSeen(parent, exchanges ?? []); // open on screen: every settled one is seen
+  }, [parent, exchanges, onScreen]);
+  const { log, field, shown, setQuestion, canAsk, note, refusal } = side;
   const box = placement === 'corner' ? `${CORNER} w-[320px] max-w-[calc(100%-24px)] max-h-[min(360px,calc(100%-68px))]` : 'w-full max-h-[360px]';
   return (
     <section data-btw-card={placement} aria-label={COPY.card} className={`${box} flex min-h-0 flex-col overflow-hidden rounded-lg ${SURFACE} text-ui`}>

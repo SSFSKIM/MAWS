@@ -21,7 +21,7 @@ import { titleOf } from '../sessions/record-ops';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { SIDE_COPY } from './copy';
-import { askSide, hostedInSidePane, openBtwCard, setInlineQuestions } from './store';
+import { askSide, hostedInSidePane, openBtwCard, requestSideFocus, setInlineQuestions } from './store';
 
 // P5 O9 M5 start: a terminal session driven through its bridge (its port names a turn) is asked through its port, so it
 // can take a question when its `btw` control can, and says why not otherwise; null for any other session.
@@ -32,12 +32,23 @@ export const useDrivenAsk = (appSessionId: AppSessionId): Capability | null => d
 export const canAskSide = (appSessionId: AppSessionId): boolean =>
   useSessions.getState().engine.get(appSessionId)?.process === 'ready' || drivenAsk(sessionControls(appSessionId))?.available === true;
 
-// The question's view revealed: under the thread in its parent's pane, else the session's own card (UX wave U4a), with a
-// toast saying where when that session is not the one shown.
+// The session's side questions opened where they are drawn: under the thread in its parent's pane, else the session's own
+// card (UX wave U4a); `focus`, the field takes the keyboard there (a pick of `/btw` from the palette, a bare `/btw`).
+export function openSideQuestions(appSessionId: AppSessionId, options: { focus?: boolean } = {}): void {
+  if (hostedInSidePane(appSessionId)) {
+    setInlineQuestions(appSessionId, true);
+    if (options.focus) requestSideFocus(appSessionId);
+    return;
+  }
+  openBtwCard(appSessionId, options);
+}
+
+// The question's view revealed as a question is asked, with a toast saying where when its card belongs to a session that
+// is not the one shown.
 function revealQuestions(appSessionId: AppSessionId): void {
-  if (hostedInSidePane(appSessionId)) return setInlineQuestions(appSessionId, true);
-  openBtwCard(appSessionId);
-  if (shownSession() !== appSessionId) toast({ level: 'info', text: SIDE_COPY.btw.askedElsewhere(titleOf(appSessionId)), actions: [], dismissible: true });
+  const hosted = hostedInSidePane(appSessionId);
+  openSideQuestions(appSessionId);
+  if (!hosted && shownSession() !== appSessionId) toast({ level: 'info', text: SIDE_COPY.btw.askedElsewhere(titleOf(appSessionId)), actions: [], dismissible: true });
 }
 
 // The question asked and its view revealed (the widget's Ask and the typed path alike).
