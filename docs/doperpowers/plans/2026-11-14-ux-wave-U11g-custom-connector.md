@@ -19,7 +19,7 @@ How to see it working: Acceptance, G1 to G7.
 - [x] (2026-11-14) This document written against master `3514e9cda`; the code statements in "What the code says today" checked at that commit.
 - [x] (2026-11-14) The adversarial review of this document: needs attention, five findings; none on the remote reach, the wire or the splitter. The architect ruled R1 to R9 and this document was revised once to them (Decision Log).
 - [x] (2026-11-14) The owner's look: the sheet was drawn from this document and the architect ruled on what the drawing showed (R7). M2 is released at these defaults (R8); one question is with the owner, whether the value fields are masked ("The owner's look").
-- [ ] M1 — The rules, the command, the check before the run, and what may leave the runner.
+- [x] (2026-11-14) M1 — The rules, the command, the check before the run, and what may leave the runner. Commits `739e3edc1`..`1ab670d7f`, the fix `d8e13b1c3`..`13a50d579` (the trim finding, R10); reviewed clean at its frontier.
 - [ ] M2 — The sheet and the action in Customize.
 - [ ] M3 — The dialog's sentence, the record, the whole checks, the hand-back.
 - [ ] The architect's: the e2e scenes on a Mac, the branch review, class 1a, the pull request (Proof, P2 to P4).
