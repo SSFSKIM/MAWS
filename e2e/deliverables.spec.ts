@@ -275,9 +275,11 @@ test('ticket 662: an HTML artifact’s dns-prefetch links ask the resolver for n
 
     const { constants, events } = JSON.parse(readFileSync(log, 'utf8')) as { constants: { logEventTypes: Record<string, number> }; events: { type: number; params?: unknown }[] };
     const typeNames = new Map(Object.entries(constants.logEventTypes).map(([name, type]) => [type, name]));
-    const mentions = (name: string) => events.filter((event) => JSON.stringify(event.params ?? {}).includes(name)).map((event) => `${typeNames.get(event.type) ?? event.type} ${JSON.stringify(event.params)}`);
+    // each event that names one of the run's names, by its type alone: its other params hold the machine's resolver
+    // settings (search domains among them), which a report keeps out
+    const mentions = (name: string) => events.filter((event) => JSON.stringify(event.params ?? {}).includes(name)).map((event) => typeNames.get(event.type) ?? String(event.type));
     const found = { control: mentions(names.control), script: mentions(names.script), markup: mentions(names.markup) };
-    const report = `net log: ${events.length} events\n${Object.entries(found).map(([which, lines]) => `${which} (${names[which as keyof typeof names]}): ${lines.length}\n${lines.map((line) => `  ${line}`).join('\n')}`).join('\n')}`;
+    const report = `net log: ${events.length} events\n${Object.entries(found).map(([which, types]) => `${which} ${names[which as keyof typeof names]}: ${types.length} events ${JSON.stringify(types)}`).join('\n')}`;
     console.log(`[dns-prefetch] ${report}`);
     expect(found.control.length, `the control's resolver job is in the log\n${report}`).toBeGreaterThan(0);
     expect(found.script, `the script-made link asked for no name\n${report}`).toEqual([]);
