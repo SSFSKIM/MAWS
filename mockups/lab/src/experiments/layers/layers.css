@@ -161,9 +161,9 @@
 .x-layers[data-pose='inactive'] .xl-module { box-shadow: none; }
 /* Under Paper in light, receded glass falls to the ivory's own level (0.89 to 0.92 on 0.89) and has no hue to differ
    by, so a shadow stays at about half strength: without it a block has nothing left but its rim. */
-.x-layers[data-colour='paper'][data-scheme='light'][data-pose='inactive'] .xl-host::before { opacity: 0.55; }
-.x-layers[data-colour='paper'][data-scheme='light'][data-pose='inactive'][data-material='glass'] .xl-block,
-.x-layers[data-colour='paper'][data-scheme='light'][data-pose='inactive'] .xl-module:not([data-shown='false']) { box-shadow: 0 9px 26px -12px rgb(var(--xl-shade-rgb) / 0.2), 0 1px 5px -2px rgb(var(--xl-shade-rgb) / 0.08); }
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'] .xl-host::before { opacity: 0.55; }
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'][data-material='glass'] .xl-block,
+.x-layers:is([data-colour='paper'], [data-paper])[data-scheme='light'][data-pose='inactive'] .xl-module:not([data-shown='false']) { box-shadow: 0 9px 26px -12px rgb(var(--xl-shade-rgb) / 0.2), 0 1px 5px -2px rgb(var(--xl-shade-rgb) / 0.08); }
 .x-layers .xl-under { pointer-events: none; }
 .x-layers .xl-under[data-space='viewport'] { position: fixed; }
 .x-layers .xl-under[data-space='container'] { position: absolute; }
@@ -285,6 +285,9 @@
 .x-layers .xl-tab[data-current='true'] { color: var(--xl-fg); background: var(--xl-selected); box-shadow: var(--xl-current-shadow); }
 .x-layers[data-scheme='dark'] .xl-tab[data-current='true'] { background: color-mix(in srgb, var(--xl-fg) 13%, transparent); }
 .x-layers .xl-tab-main { display: flex; align-items: center; gap: 6px; min-width: 0; height: 100%; padding: 0 13px 0 8px; border-radius: inherit; white-space: nowrap; }
+/* The system face sets these titles about 5 px wider apiece than Figtree did, and the seam beside the capsule is 30
+   where it was 24: together that is more than the row had left at 1440. The tab's trailing padding gives it back. */
+.x-layers[data-face='system'] .xl-tab-main { padding-right: 9px; }
 .x-layers .xl-tab-mark { display: grid; place-items: center; width: 16px; height: 16px; transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-ease-open); }
 .x-layers .xl-tab-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Quiet's exchange: under the pointer the mark steps aside for the close button, in the same place. */
@@ -448,11 +451,12 @@
 .x-layers .xl-home-ask { margin: 0 0 18px 20px; font: 560 27px/34px var(--xl-font); letter-spacing: -0.015em; }
 /* Paper's display voice: the owner's picture sets one word in a light, high-contrast serif. Transcript prose stays
    sans (the owner's ruling); this is the single display line, and only under this colouring. */
-.x-layers[data-colour='paper']:not([data-line='sans']) .xl-home-ask { margin-bottom: 15px; font: 300 37px/44px 'XL Newsreader', ui-serif, 'Apple SD Gothic Neo', serif; font-variation-settings: 'opsz' 72; letter-spacing: -0.014em; }
+.x-layers:is([data-colour='paper'], [data-paper]):not([data-line='sans']) .xl-home-ask { margin-bottom: 15px; font: 300 37px/44px 'XL Newsreader', ui-serif, 'Apple SD Gothic Neo', serif; font-variation-settings: 'opsz' 72; letter-spacing: -0.014em; }
 /* The same line in the sans, for the owner to weigh against the serif. It follows the Typeface knob. Under Paper it
    is set lighter and larger than the other colourings set theirs, so that it keeps company with the picture's fine
    lines as the serif does; a bold line of 27 px reads here as a label on a photograph. */
-.x-layers[data-colour='paper'][data-line='sans'] .xl-home-ask { margin-bottom: 15px; font: 420 33px/42px var(--xl-font); letter-spacing: -0.024em; }
+.x-layers:is([data-colour='paper'], [data-paper])[data-line='sans'] .xl-home-ask { margin-bottom: 15px; font: 420 33px/42px var(--xl-font); letter-spacing: -0.024em; }
+.x-layers:is([data-colour='paper'], [data-paper])[data-line='sans'][data-face='system'] .xl-home-ask { letter-spacing: -0.02em; }
 .x-layers .xl-home-slot { height: 92px; }
 .x-layers .xl-where { display: flex; align-items: center; gap: 2px; margin: 10px 0 0 9px; }
 .x-layers .xl-where .xl-chip { color: var(--xl-ink-2); }
@@ -596,6 +600,13 @@
 .x-layers .xl-select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; font-size: 13px; font-weight: 520; color: var(--xl-ink); background: var(--xl-well); transition: background-color var(--xl-t-hover) var(--xl-ease); }
 .x-layers .xl-select:is(:hover, [data-state='open'], [aria-expanded='true']) { background: var(--xl-selected); }
 .x-layers .xl-select svg { width: 13px; height: 13px; stroke-width: 2; opacity: 0.6; }
+
+/* The plain ground (DESIGN.md §16). The field gathers light and shade under the glass that stays put; a block of the
+   transcript travels, so what gathers under it travels with it as a second, wider shadow in the gathering's own
+   colour: shade under Paper by day, the lamp at night, the orange under a warmer Paper. */
+.x-layers[data-ground='plain'][data-material='glass']:not([data-pose='inactive']) .xl-block {
+  box-shadow: var(--xl-shadow-block), 0 22px 60px -22px rgb(var(--xl-gather-rgb) / var(--xl-gather-a));
+}
 
 /* ---- the open calls about layout (DESIGN.md §13.4, §13.5) -------------------------------------------------------- */
 

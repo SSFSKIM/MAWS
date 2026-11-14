@@ -7,7 +7,9 @@ happened where two parts met, what the idea breaks and what that costs.
 
 The owner chose this synthesis as the style of the redesign and, in the same message, dropped its colour. Colour is
 now a switch, and its record is section 12. Five calls about the result were still the owner's, and each of them is
-a switch too: section 13. Sections 0 to 11 are the experiment as it was built, under what is now
+a switch too: section 13. Four of them are answered and their answers are the design at rest, in the system face:
+section 15. Paper has four warmer neighbours for the owner to choose among (section 14), and the painted form has a
+fourth position with no drawing at all, Open's plain ground (section 16). Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -310,7 +312,9 @@ Soft, Full, Vivid; the third was labelled Warm until a colouring could be cool, 
 Ground (the two light and four dark candidates, paired; Paper and Cobalt bring their own ground and do not
 consult it); Typeface (Figtree, Geist, System). That is five, one more than the brief's "three or four at most":
 Colour was asked for by the owner and none of the other four could be folded into it. Section 13 adds five
-more, one per call still open with the owner; each is meant to be answered and then removed.
+more, one per call still open with the owner; each is meant to be answered and then removed. Four have been
+answered (section 15), and their defaults are now the answers: Painted form on Out of focus, the New chat line in
+the sans, Alignment on the column, Right column growing from its button, and Typeface on System.
 
 Address aids for captures, never design states: `x=tools,top,mid,card,waiting,nopane,noside,field` (the last
 shows the field alone), `pose=inactive`,
@@ -664,13 +668,17 @@ are about Paper and say so in their label; under another colouring they are not 
 
 | switch (`id`) | positions | what I would choose |
 |---|---|---|
-| Painted form (`form`) | Everywhere · Out of focus where you work · New chat only | Out of focus where you work |
+| Painted form (`form`) | Everywhere · Out of focus where you work · New chat only (and, since section 16, None: plain ground) | Out of focus where you work |
 | New chat line (`line`) | Serif · Sans | Serif |
 | "Needs you" mark (`mark`) | Ink badge · Soft disc · One gold | One gold |
 | Alignment (`align`) | As it is · On the reading column | On the reading column |
 | Right column (`side`) | Four modules · One card · Grows from a button | Grows from a button, with the column rule |
 
 The five picks together are captured as `layers-<scene>-…-form-recede-mark-accent-align-column-side-button.png`.
+
+Since this section was written the owner has answered four of the five, and the defaults follow their answers, not
+the "as it stood" positions (section 15). The captures and readings below were taken under the earlier defaults
+(the form everywhere, the earlier alignment, four modules, the serif, Figtree) unless a route names another.
 
 ### 13.1 How present the painted form is
 
@@ -914,6 +922,319 @@ at its sheet, because here there is no sheet to stop at.
   that change length would want that height on a spring.
 - Ten knobs. 12.7 item 8 said five was one too many; the five new ones are meant to be answered and removed.
 
+## 14. Warmer Papers
+
+Added 2026-11-14, on the owner's reaction to Paper: "two that survies is open and layer. but I'd make color more
+warmer perhaps by mixing older orange?" Paper reads too neutral to them. Paper itself is unchanged and is still
+the default; four warmer Papers stand beside it in the Colour switch, so the owner chooses by looking.
+
+"Older orange" is read as `#fd780f`, the strong orange they used and dropped as a ground (OKLCH 0.72 0.19 49).
+Three positions are built on it. It could also mean the terracotta of today's app (`#c9663f`, `#d97757`; hue 39
+to 41), which they earlier asked to keep out, so a fourth takes its warmth from that and is named for it.
+
+### 14.1 What mixing in orange can and cannot do here
+
+Four facts from sections 7 and 12 decide the values, and one found here.
+
+- **Light glass draws 0.90 to 0.99 whatever is under it** (12.7 item 1). By day the warmth cannot reach a pane or
+  a block through the field; it shows in the room between surfaces and as a faint cast in the panes (over Warm
+  paper's ground, chroma 0.025, the bodies were drawn at 0.013 to 0.018). A warmer Paper by day is a warmer room,
+  not warmer glass.
+- **The quietest text bounds the lightness of anything it can cross.** Captions and placeholders are the ink at
+  70 % by day and 68 % at night. Composited over a flat colour they hold 4.5:1 only where that colour is 0.82 or
+  lighter by day and 0.38 or darker at night, whatever its hue (computed for hues 40 to 55 at chroma 0 to 0.19; it
+  moves by less than 0.01). `#fd780f` is 0.72. So the orange as given cannot be a broad area anywhere text can
+  scroll, by day or by night; it can be a small mark, a light, or a tint of itself at 0.79 and up.
+- **So every warm position keeps Paper's lightness, value for value, and changes only what has a hue.** The
+  ground stays 0.914, the sheet's face 0.95, its underside 0.86 to 0.79, the floor shadow 0.53. The readings of
+  every line are then Paper's own to within a tenth, and the room is the same room.
+- **Dark glass turns the hue under it about ten degrees toward red** (12.6), and a saturated orange under it was
+  drawn redder still and lifted the body toward the band where neither ink reads (the `orange` synthesis's
+  finding). So the night oranges are kept deep (0.38 and under) and authored a few degrees yellow (hue 56 to 58
+  for 49). The turn itself could not be observed here: at this depth no dark body drew more than 0.012 of chroma
+  (over a field of 0.02 to 0.03 under its footprint), which is under what the script reads a hue from. At night,
+  too, the warmth is in the room and at the foot of the glass, not in its body.
+- **Found here: Paper's own night picture puts a caption under its floor at one scroll position.** Section 12
+  measured the session at rest, from the top, and with things open, never mid-scroll. At `x=mid` in dark the
+  caption "Key migration check and Load profile started working" lies across the sheet's lit face (0.49) and its
+  icon across the bright edge (0.79): 3.87:1 and 3.47:1 at default strength with the form everywhere, 2.78 for the
+  icon at Vivid. The four warm Papers set those two values at 0.36 and 0.66 at night, the only places they leave
+  Paper's lightness, and hold their floors there. Paper was to stay as it is, so it still has the failure; the
+  readings are in 15.3 and the mend is two numbers.
+
+### 14.2 The positions
+
+| position (`colour=`) | where the warmth sits | the mark |
+|---|---|---|
+| **Warm paper** (`warmpaper`) | In the paper itself: ground, sheet, shade and shadow carry the orange at low chroma. | The orange, as a disc |
+| **Orange light** (`orangelight`) | In the light: Paper's materials unchanged, the orange caught in the leaf and laid on the floor. | Ink (Paper's) |
+| **Orange underside** (`underside`) | In a second material: the sheet's reverse is the orange. | Ink (Paper's) |
+| **Clay paper** (`claypaper`) | In the paper itself, with the warmth taken from today's terracotta instead. | The terracotta, as a disc |
+
+**Warm paper.** The literal answer: the same still life with the old orange mixed into every material at low
+strength. Each of Paper's values keeps its lightness and takes hue 58 to 68 at two to three times its chroma:
+ground `#f0dfd1` (0.914 0.027 62) where Paper's is `#e8e1db` (0.914 0.011 63); the sheet's face `rgb(249 236 224)`,
+its edge `rgb(253 247 241)`, its underside `rgb(228 204 182)` to `rgb(214 179 152)`, the floor shadow
+`rgb(139 98 67)`. Night: ground `#1c150f` (0.202 0.016 60), a lamp of `rgb(255 206 152)`, underside
+`rgb(58 45 34)` to `rgb(21 15 11)`. Ink `rgb(36 29 23)` and `rgb(236 224 212)`; shadow tint `110 66 30`. The
+first build was a shade more chromatic and a few degrees redder (0.032 at hue 60) and read as peach, not as warm
+paper; it was pulled back. Its mark is the one place the orange appears as itself: `#fd780f` on the disc of
+section 13.3, with `#2a1300` on it, the same in both schemes, on a clear capsule. On a disc it never has to be a
+15 px stroke, so it is never deepened to `#c84c00`, which is where the old orange turned into the clay the owner
+ruled out (12.7 item 3). Approve, Send and focus stay ink.
+
+**Orange light.** Nothing in the room is orange; the light is. Paper's ground, sheet and shade are untouched. By
+day the leaf of glass holds an amber reflection (`rgb(255 172 98)` at 30 % where Paper's is white at 17 %), the
+line of light inside its shadow is orange, and three soft pools lie on the floor: in the leaf's shadow, under the
+fold where the composer stands, and faintly behind the leaf's body. At night the lamp is the orange
+(`rgb(255 150 56)` at 20 %, hue 56 for the reason above) and the same pools glow at about half strength. The
+pools are part of the form, so they go out of focus with it and are gone where it is. Every pool is capped at
+42 % however far Field strength is turned, which keeps the floor under it at about 0.83 or lighter. Its mark is Paper's
+ink: a mark in the light's own colour would be one more glow, and the gold of 13.3 is 30 degrees from it.
+
+**Orange underside.** The orange as a material: the sheet is paper on its face and the old orange on its reverse,
+and the arch shows the reverse. It runs from apricot near the floor (`rgb(251 196 153)`, 0.86 0.085 60) to
+tangerine at the fold (`rgb(253 161 102)`, 0.79 0.15 52): the orange as far toward itself as Paper's own
+underside lightness lets it go. The floor shadow takes its hue (`rgb(150 93 57)`) and the leaf a faint warm
+reflection. At night it is an ember, `rgb(100 52 3)` to `rgb(41 17 1)` (0.38 to 0.21). This is the strongest of
+the four and the only one where the orange is plainly an object. With orange in the room the mark cannot be
+orange (12.3's reasoning for Blue hour, turned round), so it is ink.
+
+**Clay paper.** Warm paper's construction at hue 39 to 46: ground `#f5ddd3` (0.914 0.030 42) and `#1d1411`, the
+sheet and shade in the same family, shadow tint `112 60 44`. Its mark is today's pair as the app has it: `#c9663f`
+by day with paper on it (3.7:1 as a glyph), `#d97757` at night with ink on it (5.4:1). It is here so that the
+owner can say "not that one" by looking, or the opposite.
+
+The Mark switch (section 13.3) works under Orange light and Orange underside, whose mark is Paper's ink; Warm
+paper and Clay paper bring their own pigment, so it does not apply to them. The other two Paper switches (the
+painted form, the New chat line) work under all four.
+
+### 14.3 Rejected
+
+- **The orange underside at `#fd780f` itself.** At 0.72 a caption that scrolls across it reads 3.7:1 (computed).
+  The tint at 0.79 is the deepest that holds.
+- **An orange glass leaf** (the paper passing into amber glass). Considered, not built: it is Orange light with
+  the cause removed, the same tint on the same floor, and a tinted object where the picture's point was that the
+  glass is clear.
+- **Tinting the app's own glass orange.** Considered, not built: one tinted control per view is the material's
+  ration, and by day a tint on glass this size is drawn as a fill.
+- **A mark in gold on Warm paper.** Considered, not built: twenty degrees from the room's own hue and nearly its
+  lightness by day.
+- **The orange as the ground.** That is the `orange` synthesis and the Orange colouring, both already in the lab.
+
+### 14.4 Which to show first, readings, and what changed in the code
+
+**Warm paper first.** It is what the owner's sentence says: the colour of Paper made warmer by mixing the old
+orange in, with the orange itself back in one small place. Orange underside second: it is the only one where the
+orange is an object, and New chat under it is the most changed page of the four. Orange light is the gentlest and
+depends on the form being there. Clay paper is shown so it can be ruled in or out.
+
+Readings for all four, in both schemes, are in 15.3, taken under the defaults the owner has since chosen. None of
+the four has a line under its floor in 22 routes each.
+
+Code. `colour.ts`: four colourings, reachable through `COLOURINGS` and `colouringOf` as the first eight are; the
+optional `Field.light` (a colouring's own light for the still life) and `Colouring.pin` (a pigment for the mark
+on a clear capsule). `paper.ts`: the light record is exported as `PaperLight`, with Paper's two as `PAPER_DAY`
+and `PAPER_NIGHT`; `paintPaper` takes an optional light as its last parameter; a light may carry `glows`. Every
+earlier export and parameter is as it was. `paint.ts` passes the light through. `Layers.tsx`: the Paper switches
+are consulted for every colouring whose field is the still life (`data-paper` on the root beside `data-colour`),
+and a colouring with a `pin` settles its own mark. `layers.css`: the rules that named `[data-colour='paper']`
+name the family.
+
+## 15. The owner's answers, and the design at rest
+
+Added 2026-11-14. The owner answered four of section 13's five calls, and their answers are now the design at
+rest. The switches stay, with every earlier position still reachable; what changed is which chip is the default in
+`meta.ts` and what a missing knob means in `Layers.tsx`.
+
+| call | the owner's answer | default now | was |
+|---|---|---|---|
+| Painted form | "Blurred behind text" | Out of focus where you work (`form=recede`) | Everywhere |
+| Alignment | "Yes, line up" | On the reading column (`align=column`) | As it was (`align=layers`) |
+| Right column | "Button that opens" | Grows from a button (`side=button`) | Four modules |
+| New chat line | "i'd use from Quiet. the one that's used for layer is too round", with a picture of Quiet's message bubble | Sans (`line=sans`), and the Typeface default is System (`face=system`) | Serif; Figtree |
+| "Needs you" mark | open; it waits for the colour | Ink badge (unchanged) | |
+
+The fourth answer is wider than the question. Quiet's face is the system face, so what was refused is Figtree, for
+the whole interface and not only for that line: the Typeface knob's default is System, and the New chat line is set
+in that same sans. Section 13's sentence "its first position is the design as it stood and is the default" is true
+of the first half only from here on; section 1's Type line and section 6's "Figtree and Geist Mono by default"
+read "the system face and its mono". Figtree and Geist remain on the knob.
+
+### 15.1 What had been tuned to Figtree
+
+The page was looked at again in all three scenes and both schemes under the new defaults, since no earlier capture
+showed this combination. One thing had been fitted to Figtree's widths, and it brought a second with it:
+
+- **The tab row.** The system face sets the four tab titles about 5 px wider apiece (22 px in all). Under the
+  column rule the row at 1440 had 16 px to spare with Figtree; with the system face three titles lost their last
+  letter to an ellipsis. And once the tabs came that near the capsule the runtime's own check reported the pair
+  (`group-proxy-overlap` at 26 px apart), although 24 px was the room it had derived for them; forced apart in
+  steps, the pair is clean from 30. So the seam the layout spends is the derived answer and a quarter more (30 px
+  by day, 32 at night), and under the system face a tab's trailing padding is 9 px where it was 13. The row is
+  then 614 px of tabs, 34 px of air and the 84 px capsule in a 732 px column, with every title whole and no
+  finding at rest or through two round trips of the side card.
+- **The New chat line.** 13.2's sans (420, 33/42) was drawn in Figtree. In the system face it keeps its size and
+  weight and is tracked at −0.02em where Figtree took −0.024em. The serif is one chip away.
+
+Nothing else moved: rows are 34 px, prose 15/24, the settings column 620, and the system face's own weight steps
+(400, 500, 600; section 6) were already designed for.
+
+### 15.2 A line under its floor in Paper's night picture
+
+Measuring at a scroll position section 12 never used (`x=mid`) found it, and it is in the design at rest. In dark,
+the caption "Key migration check and Load profile started working" crosses the sheet's lit face:
+
+| Paper, dark, mid-scroll | caption (floor 4.5) | its icon (floor 3) |
+|---|---|---|
+| form everywhere, default strength | 3.87 | 3.47 |
+| form everywhere, Vivid | 3.69 | 2.78 to 3.39 over three runs |
+| form out of focus (the default now), default strength | 4.16 | 3.96 |
+| form out of focus, Vivid | 3.92 | 3.57 |
+| plain ground, Vivid | 5.32 lowest line of the route | 4.17 |
+
+It is Paper's, not the new defaults': the lit face is 0.49 in lightness and the quietest text needs 0.38 or
+darker behind it (14.1). The four warmer Papers set the night face at 0.36 and its edge at 0.66 and hold their
+floors at the same position. Paper was to stay as the owner chose it until they pick a colour, so the two values
+were not changed there; if Paper is kept, they should be.
+
+### 15.3 Readings under the new defaults
+
+`measure.mjs`, floors and method as in section 7; every route carries the new defaults unless it names another
+position. Eleven routes per scheme and colouring: the session at default strength; then at Vivid the session at
+rest, with the waiting list open, mid-scroll, and receded; Settings; New chat; the session mid-scroll with the form
+everywhere; and the plain ground of section 16 on the session mid-scroll, Settings and New chat.
+
+| colouring | scheme | lowest text at the defaults | mid-scroll | mid-scroll, form everywhere | plain ground | lowest icon | bodies | least apart from the field: defaults / plain | under its floor |
+|---|---|---|---|---|---|---|---|---|---|
+| Paper | light | 4.95 (removed count) | 5.37 | 5.37 | 5.00 | 3.20 | 0.90 to 0.99 | 0.039 / 0.052 | 0 of 1083 |
+| Paper | dark | 3.92 (caption on the field) | 3.92 | 3.69 | 5.32 | 3.39 | 0.15 to 0.31 | 0.025 / 0.092 | 2 of 1083 |
+| Warm paper | light | 4.94 (removed count) | 5.42 | 5.42 | 5.04 | 3.20 | 0.90 to 0.99 | 0.045 / 0.052 | 0 of 1083 |
+| Warm paper | dark | 5.04 (caption on the field) | 5.04 | 5.01 | 5.30 | 4.07 | 0.15 to 0.31 | 0.040 / 0.092 | 0 of 1083 |
+| Orange light | light | 4.83 (removed count) | 5.35 | 5.35 | 5.07 | 3.20 | 0.90 to 0.99 | 0.041 / 0.051 | 0 of 1083 |
+| Orange light | dark | 4.98 (caption on the field) | 4.98 | 4.93 | 5.35 | 4.03 | 0.15 to 0.32 | 0.040 / 0.098 | 0 of 1083 |
+| Orange underside | light | 4.95 (removed count) | 5.37 | 5.37 | 5.07 | 3.20 | 0.90 to 0.99 | 0.039 / 0.050 | 0 of 1083 |
+| Orange underside | dark | 5.03 (caption on the field) | 5.03 | 4.99 | 5.35 | 4.03 | 0.15 to 0.31 | 0.037 / 0.102 | 0 of 1083 |
+| Clay paper | light | 4.91 (removed count) | 5.40 | 5.40 | 5.02 | 3.20 | 0.90 to 0.99 | 0.044 / 0.053 | 0 of 1083 |
+| Clay paper | dark | 5.06 (caption on the field) | 5.06 | 5.03 | 5.27 | 4.08 | 0.15 to 0.31 | 0.041 / 0.094 | 0 of 1083 |
+
+110 routes, 10,830 gated readings; two are under their floor, and both are the one caption of 15.2. Every light
+row's lowest line is the removed count on the side card in a receded window, as in 13.5; every warm dark row's is
+a caption on the field mid-scroll, which is the line the corrected night values were set for. "Bodies" is the
+drawn level of every glass body in an active window (the ink's dead band is 0.39 to 0.49; nothing is near it).
+"Least apart" is the smallest distance in OKLab between a body and the field painted under it, in an active
+window: the measure of how well glass stands off its ground.
+
+One route was run twice. The first session route of Warm paper was captured while the side card was still growing
+(its words at part opacity, 44 lines "under"); run again it reads 5.40 with none under. The measuring script waits
+a fixed time, and the grown card arrives 660 ms after the page; on a loaded machine that was not always enough.
+
+Captures of record under the new defaults, in `shots/layers/`: `layers-<scene>[-scheme-dark]-defaults.png` for
+Paper, and `layers-<scene>[-scheme-dark]-colour-<id>.png` for each warmer Paper (session, home, settings), with
+`-form-everywhere` beside them for the whole picture and `-form-plain` for the plain ground.
+
+## 16. The plain ground
+
+Added 2026-11-14. Asked what Open has that they want to keep, the owner chose only "Plain ground": no drawing in
+the background, only light gathered under the glass controls. They did not choose Open's calmer transcript. So
+what is left between the two finalists is mostly the ground, and it is easiest to judge inside one design: the
+Painted form switch has a fourth position, **None: plain ground** (`form=plain`). The default stays the blurred
+drawing, as they answered.
+
+### 16.1 What it is
+
+No drawing on any page, New chat included. The ground is one plain colour, the colouring's own, with the paper's
+grain (a surface, not a drawing). The only light and shade on it is what gathers where glass stands.
+
+- **Under the glass that stays put**, the gathering is painted into the field, so the glass stands over it and
+  takes it up: the pane, the side card or modules, the composer, and more faintly the tab capsule, the waiting
+  capsule and the small round controls. The method is Open's (`open/field.ts`): each gathering is its surface's
+  own shape, grown by three tenths of its reach and blurred by four tenths, so it ends a hand's width past the
+  glass. So are Open's shares of the pane's strength: the side card 0.86, the composer 0.8, the tabs 0.4 (Open
+  0.36, where text passes under them; here nothing does). A small control cannot spend a large reach, so reach is
+  capped by the control's own span. Each pool deepens toward its foot, so a tall pane does not stand over one
+  flat tone.
+- **Under a block of the transcript**, which travels over a still field, the gathering travels with it: a second,
+  wider shadow under the block in the gathering's own colour (CSS, as every exterior shadow in Layers is). The
+  glass of a block does not take it up; it shows around the block's foot.
+- **What gathers is the colouring's.** Under Paper by day it is shade, not light: Paper's own floor shadow
+  (`rgb(126 104 84)`) at 26 % under the pane. Light glass on ivory is declared by the soft shadow it lays on the
+  floor, as in the picture Paper was built from, and a pool lighter than the ground would take away the one thing
+  the glass differs from. At night it is the lamp (`rgb(255 224 188)` at 15 %), which dark glass takes into its
+  body. A warmer Paper names its own, and here that is where its warmth sits: Warm paper and Clay paper their
+  warmer shadow and lamp; Orange light the orange (`rgb(253 136 44)` at 20 % by day, `rgb(255 150 56)` at 17 % at
+  night); Orange underside, which has no sheet left to show a reverse, its tangerine (`rgb(253 161 102)` at 28 %)
+  and its ember.
+- **It follows the glass.** While a pane slides, the side card grows or a scene arrives, the field is repainted
+  from where each piece of glass stands on that frame, for a second and a half, and both glass roots read it for
+  that long. The pools are soft, so they are painted on a canvas a quarter of the window's size and scaled up. At
+  rest nothing is repainted.
+- **Strength is capped** at 30 % by day and 22 % at night, whatever Field strength says: under the cap the ground
+  beside a control stays where the quietest text holds its floor.
+
+### 16.2 What it costs Layers, and what it gains
+
+Costs:
+
+- **The picture.** Paper was chosen as a still life; here it is an ivory ground with shade on it. The form coming
+  into focus on New chat, the one moment the picture had, is gone with it, and New chat is a composer on a plain
+  page.
+- **What the glass stands on.** Section 12.7 item 1: light glass is nearly white whatever is under it, so the
+  field showed between surfaces and gave them a tone to differ from. The gatherings restore that under the fixed
+  glass, and measurably (16.3). Under a block they cannot: the block's glass is over plain ground, a body of 0.95
+  and up on 0.91, and its rim, its own shadow and the travelling pool are all that declare it. Paper's lower
+  ground is what keeps this from being round 1's white on white; on `#faf9f5` it would be.
+- **Something to bend.** The glass guideline asks for structure under glass. A soft pool and grain is the least
+  there can be: the lens has an edge of tone to bend at each control's rim and nothing inside.
+- **The warm colourings converge.** Without the sheet, Orange light and Orange underside differ only in how
+  strong and how red their pools are, and Warm paper and Clay paper only in their ground.
+- **A repaint while things move**, where the picture was painted once.
+
+Gains:
+
+- **Nothing behind a word, anywhere.** No line and no tone of a drawing under prose or a settings row; the
+  failure of 15.2 cannot occur, in any colouring.
+- **No composition to keep.** 12.7 item 7 (a picture has a composition, and the layout can move under it) is gone
+  entirely: a gathering is wherever its glass is, at any window size, with either pane away.
+- **Glass stands further from its ground where it matters most**: the pane, the card and the composer over their
+  own pools (16.3).
+- **It is Open's ground**, so the choice between the two finalists that is left after this is the transcript.
+
+### 16.3 Readings
+
+Vivid, both schemes, on the session mid-scroll, Settings and New chat (the last three text columns of 15.3 give
+the lowest line per colouring: 5.00 to 5.15 by day, a caption beside the composer's pool; 5.27 to 5.35 at night).
+No line is under its floor on the plain ground in any colouring.
+
+How far glass stands from the field under it (least distance in OKLab over all bodies, active window):
+
+| | the drawing out of focus | the plain ground |
+|---|---|---|
+| Paper, day: session / Settings / New chat | 0.040 / 0.039 / 0.049 | 0.052 / 0.069 / 0.089 |
+| Paper, night | 0.025 to 0.068 | 0.092 to 0.094 |
+| warmer Papers, day | 0.039 to 0.052 | 0.050 to 0.091 |
+| warmer Papers, night | 0.037 to 0.084 | 0.092 to 0.104 |
+
+By day the gain is the shade under each control. At night it is the reverse of what was first built: with the
+lamp's light under the glass a body stood 0.009 to 0.029 from its ground (the pool lifted the floor to the glass's
+own level), against 0.06 to 0.08 with no pool at all. So at night the light is kept out from under each piece of
+glass and shows around its foot, and the bodies then stand 0.092 and more from the floor, further than in any
+other position of the switch.
+
+Diagnostics: none at rest in either scheme, and none through two round trips of the side card on the plain ground
+at night. Seen at 1440 by 900 in both schemes under Paper and all four warmer Papers, with the side card closed
+and with the pane away; at 1280 by 800 under Paper.
+
+### 16.4 What changed in the code
+
+- `plain.ts` (new): the painter (`paintPlain`), what gathers (`gatherOf`), and the `Gather` shape.
+- `paint.ts`: `paintField` takes an optional list of gatherings; given one, a picture field paints the plain ground.
+- `paper.ts`: `PaperLight.gather`, optional, for a colouring that names what gathers.
+- `Layers.tsx`: `gatherings()` reads the glass from the page; `Plane` follows it for 1.5 s after anything moves and
+  when a bar changes size; `data-ground='plain'` and the two `--xl-gather` variables on the root.
+- `layers.css`: the travelling pool under a block.
+- `meta.ts`: the fourth chip of Painted form.
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -966,5 +1287,12 @@ What the real renderer would need, against "The app today" in the brief.
   column rule is three variables (the column, the capsule's right edge, the tabs' right limit) fed by the derived
   room and seam, with the capsule in a group of its own. The grown card is one element in flow whose box
   transitions, with its height fed by its content's measured height and capped at the window's.
+- **The plain ground, if it is chosen** (section 16). The field becomes a quarter-size canvas of pools placed from
+  the shell's own boxes (pane, side surface, composer, bars), repainted when one of them moves; the picture, its
+  composition and its out-of-focus layers go. Each transcript row that stands on glass carries the travelling pool
+  as a second shadow. At night the pools are kept out from under the glass.
+- **A warmer Paper, if one is chosen** (section 14). It is a light record beside the colouring (the values the
+  painter reads) and, for two of them, a pigment for the mark; the night values of the sheet's face and edge
+  (0.36, 0.66) belong in Paper too if Paper is kept.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

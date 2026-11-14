@@ -5,6 +5,7 @@
 // Fields are authored in OKLCH (lightness, chroma, hue), because the two things a field has to hold are stated in
 // those terms: how light the ground under prose stays, and how deep the ground under dark glass stays.
 import type { Scheme } from '../../lab/types';
+import { PAPER_DAY, PAPER_NIGHT, type PaperLight } from './paper';
 
 export interface Mass {
   x: number; // centre, as a share of the width
@@ -22,6 +23,8 @@ export interface Field {
   picture?: 'paper';
   /** For a picture: the same forms under low light. */
   night?: boolean;
+  /** For a picture: its own light, where it is not Paper's (a warmer Paper). */
+  light?: PaperLight;
 }
 
 export interface Tokens {
@@ -48,6 +51,12 @@ export interface Colouring {
   mark: 'stroke' | 'badge';
   /** A colouring that is about its ground names it; the Ground knob is then not consulted. */
   ground?: Record<Scheme, string>;
+  /**
+   * A colouring whose mark is one pigment on a small disc, with the capsule left as clear glass (DESIGN.md §13.3),
+   * names the pigment and the glyph's ink on it. The accent tokens then stay the ink: the pigment says where you
+   * are needed, and the ink says what you do about it.
+   */
+  pin?: Record<Scheme, { disc: string; glyph: string; ring?: string }>;
   field: Record<Scheme, Field>;
   tokens: Record<Scheme, Tokens>;
 }
@@ -130,6 +139,220 @@ const paper: Colouring = {
     // At night the ink is the colour the paper was.
     dark: { ink: '232 225 219', shade: '0 0 0', accent: 'rgb(232 225 219)', onAccent: '#1c1a17', mark: 'rgb(232 225 219)', focus: 'rgb(232 225 219)' },
   },
+};
+
+// ---- warmer Papers (DESIGN.md §14) -------------------------------------------------------------------------------
+// The owner's answer to Paper: "I'd make color more warmer perhaps by mixing older orange". Four positions that put
+// the warmth in different places. Each keeps Paper's picture and Paper's lightness, value for value, and changes
+// what has a hue: the readings of every line of text are then Paper's own, and the room is the same room.
+// Two values depart from Paper on purpose, in all four, at night: the sheet's lit face is 0.36 in lightness where
+// Paper's is 0.49, and its edge 0.66 where Paper's is 0.79. A grey caption that scrolls across Paper's face reads
+// 3.87:1 and its icon, crossed by the edge, under 3:1; across these they hold their floors.
+
+const PAPER_INK = { light: '33 30 27', dark: '232 225 219' } as const;
+const inkTokens = (ink: string, shade: string, onInk: string) => ({ ink, shade, accent: `rgb(${ink})`, onAccent: onInk, mark: `rgb(${ink})`, focus: `rgb(${ink})` });
+
+// The paper itself is warmer: ground, sheet, shade and shadow carry the old orange at low chroma, each at the
+// lightness Paper gave it (chroma 0.01 to 0.04 becomes 0.03 to 0.07, at hue 58 to 68). The orange itself comes
+// back once, small, as the mark.
+const warmpaper: Colouring = {
+  id: 'warmpaper',
+  mark: 'badge',
+  ground: { light: '#f0dfd1', dark: '#1c150f' },
+  field: {
+    light: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      light: {
+        ...PAPER_DAY,
+        pool: { at: [0.3, 0.1], r: 0.9, rgb: [255, 248, 238], a: 0.12 },
+        fall: { rgb: [165, 120, 82], a: 0.1 },
+        top: [249, 236, 224],
+        edge: [253, 247, 241],
+        under: [[228, 204, 182], [214, 179, 152]],
+        shadow: [139, 98, 67],
+        beside: [[135, 96, 66], 0.26],
+        caustic: [[255, 244, 228], 0.5],
+      },
+    },
+    dark: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      night: true,
+      light: {
+        ...PAPER_NIGHT,
+        pool: { at: [0.3, 0.95], r: 0.52, rgb: [255, 206, 152], a: 0.15 },
+        top: [74, 58, 41],
+        edge: [162, 141, 115],
+        under: [[58, 45, 34], [21, 15, 11]],
+        veil: [[255, 236, 212], 0.045],
+        inner: [[255, 228, 196], 0.075],
+        rim: [[255, 238, 214], 0.62],
+        caustic: [[255, 210, 160], 0.2],
+      },
+    },
+  },
+  tokens: {
+    light: inkTokens('36 29 23', '110 66 30', '#f8efe6'),
+    dark: inkTokens('236 224 212', '0 0 0', '#1f1811'),
+  },
+  // The theme orange as given, in both schemes: on a disc it never has to be deepened to hold as a stroke.
+  pin: { light: { disc: '#fd780f', glyph: '#2a1300' }, dark: { disc: '#fd780f', glyph: '#2a1300' } },
+};
+
+// The paper as it is, and the orange arriving as light: caught inside the leaf of glass, laid on the floor in the
+// leaf's shadow and under the fold where the composer stands, and at night as the lamp itself. No material in the
+// room is orange; switch the form off and the orange goes with it. The mark stays Paper's ink.
+const orangelight: Colouring = {
+  id: 'orangelight',
+  mark: 'badge',
+  ground: { light: '#e8e1db', dark: '#181614' },
+  field: {
+    light: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      light: {
+        ...PAPER_DAY,
+        pool: { at: [0.3, 0.1], r: 0.9, rgb: [255, 242, 226], a: 0.13 },
+        shadow: [136, 100, 72],
+        veil: [[255, 234, 212], 0.12],
+        inner: [[255, 172, 98], 0.3],
+        caustic: [[253, 138, 48], 0.4],
+        gather: { rgb: [253, 136, 44], a: 0.2 },
+        glows: [
+          { at: [0.76, 0.95], rx: 0.22, ry: 0.038, turn: -0.045, blur: 32, rgb: [253, 132, 36], a: 0.28 },
+          { at: [0.6, 0.925], rx: 0.12, ry: 0.055, turn: -0.3, blur: 34, rgb: [253, 138, 46], a: 0.26 },
+          { at: [0.86, 0.6], rx: 0.07, ry: 0.2, turn: 0.42, blur: 40, rgb: [254, 150, 60], a: 0.1 },
+        ],
+      },
+    },
+    dark: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      night: true,
+      light: {
+        ...PAPER_NIGHT,
+        // The lamp is the orange. It is authored a little yellower than the orange (hue 56 for 49), because dark
+        // glass turns what is under it about ten degrees toward red (12.6).
+        pool: { at: [0.3, 0.95], r: 0.55, rgb: [255, 150, 56], a: 0.2 },
+        top: [77, 57, 40],
+        edge: [172, 137, 107],
+        veil: [[255, 214, 170], 0.05],
+        inner: [[255, 168, 92], 0.11],
+        rim: [[255, 222, 186], 0.62],
+        caustic: [[255, 140, 50], 0.32],
+        gather: { rgb: [255, 150, 56], a: 0.17 },
+        glows: [
+          { at: [0.76, 0.953], rx: 0.21, ry: 0.03, turn: -0.045, blur: 26, rgb: [253, 128, 22], a: 0.2 },
+          { at: [0.6, 0.925], rx: 0.12, ry: 0.055, turn: -0.3, blur: 34, rgb: [253, 128, 22], a: 0.16 },
+        ],
+      },
+    },
+  },
+  tokens: {
+    light: inkTokens(PAPER_INK.light, '96 62 36', '#f4f0eb'),
+    dark: inkTokens(PAPER_INK.dark, '0 0 0', '#1c1a17'),
+  },
+};
+
+// The orange as a second material: the sheet is paper on its face and the old orange on its reverse, and the
+// reverse is what the arch shows. Seen in the sheet's own shade it runs from apricot near the floor to tangerine
+// at the fold, at the lightness Paper's underside had (0.86 to 0.79), which is as deep as the quietest text over
+// it allows; at night it is an ember (0.38 to 0.21). With orange in the room the mark cannot be orange: it is ink.
+const underside: Colouring = {
+  id: 'underside',
+  mark: 'badge',
+  ground: { light: '#e8e1db', dark: '#181614' },
+  field: {
+    light: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      light: {
+        ...PAPER_DAY,
+        under: [[251, 196, 153], [253, 161, 102]],
+        // The floor under an orange sheet takes its colour: the same shadow, at the same depth, in its hue.
+        shadow: [150, 93, 57],
+        inner: [[255, 216, 186], 0.17],
+        caustic: [[255, 238, 218], 0.5],
+        // With no sheet to show its reverse, the orange is what gathers under the glass.
+        gather: { rgb: [253, 161, 102], a: 0.28 },
+      },
+    },
+    dark: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      night: true,
+      light: {
+        ...PAPER_NIGHT,
+        pool: { at: [0.3, 0.95], r: 0.52, rgb: [255, 214, 170], a: 0.15 },
+        top: [67, 60, 51],
+        edge: [154, 143, 128],
+        under: [[100, 52, 3], [41, 17, 1]],
+        caustic: [[255, 204, 156], 0.2],
+        gather: { rgb: [226, 122, 30], a: 0.17 },
+      },
+    },
+  },
+  tokens: {
+    light: inkTokens(PAPER_INK.light, '104 62 30', '#f4f0eb'),
+    dark: inkTokens(PAPER_INK.dark, '0 0 0', '#1c1a17'),
+  },
+};
+
+// The same idea as Warm paper with the warmth taken from the terracotta of today's app (#c9663f, #d97757; hue 39 to
+// 41) instead of the orange (hue 49), in case that is the "older orange" the owner meant. It is named for the clay
+// so it cannot be mistaken for the other three.
+const claypaper: Colouring = {
+  id: 'claypaper',
+  mark: 'badge',
+  ground: { light: '#f5ddd3', dark: '#1d1411' },
+  field: {
+    light: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      light: {
+        ...PAPER_DAY,
+        pool: { at: [0.3, 0.1], r: 0.9, rgb: [255, 247, 242], a: 0.12 },
+        fall: { rgb: [160, 112, 96], a: 0.1 },
+        top: [254, 234, 226],
+        edge: [255, 246, 241],
+        under: [[236, 199, 187], [223, 174, 158]],
+        shadow: [144, 94, 79],
+        beside: [[138, 92, 78], 0.26],
+        caustic: [[255, 240, 232], 0.5],
+      },
+    },
+    dark: {
+      masses: [],
+      line: ['0,0,0', 0],
+      picture: 'paper',
+      night: true,
+      light: {
+        ...PAPER_NIGHT,
+        pool: { at: [0.3, 0.95], r: 0.52, rgb: [255, 200, 170], a: 0.15 },
+        top: [77, 56, 47],
+        edge: [169, 137, 122],
+        under: [[62, 43, 37], [22, 14, 12]],
+        veil: [[255, 232, 220], 0.045],
+        inner: [[255, 222, 206], 0.075],
+        rim: [[255, 232, 220], 0.62],
+        caustic: [[255, 200, 170], 0.2],
+      },
+    },
+  },
+  tokens: {
+    light: inkTokens('36 28 25', '112 60 44', '#f8ede8'),
+    dark: inkTokens('236 223 216', '0 0 0', '#1f1613'),
+  },
+  // Today's pair: the deeper terracotta by day with paper on it, the lighter one at night with ink on it.
+  pin: { light: { disc: '#c9663f', glyph: '#fff6f0' }, dark: { disc: '#d97757', glyph: '#2a110a' } },
 };
 
 const orange: Colouring = {
@@ -322,6 +545,6 @@ const cobalt: Colouring = {
   },
 };
 
-export const COLOURINGS: Record<string, Colouring> = { paper, peach, honey, rose, bluehour, opal, cobalt, orange };
+export const COLOURINGS: Record<string, Colouring> = { paper, warmpaper, orangelight, underside, claypaper, peach, honey, rose, bluehour, opal, cobalt, orange };
 export const DEFAULT_COLOUR = 'paper';
 export const colouringOf = (id: string | undefined): Colouring => COLOURINGS[id ?? ''] ?? COLOURINGS[DEFAULT_COLOUR]!;

@@ -18,6 +18,7 @@ import { colouringOf, type Field } from './colour';
 import { GlassLayer, PLANE, THICKNESS } from './glass';
 import { paintField, type Strength } from './paint';
 import { FULL, type Presence } from './paper';
+import { gatherOf, type Gather } from './plain';
 import { GBtn, isYours, RootCtx } from './parts';
 import { Sidebar } from './Sidebar';
 import { Composer, Home, Modules, SIDE_ROOM_MS, Tabs, Transcript, Waiting } from './Session';
@@ -83,10 +84,40 @@ const NO_OUTER_SHADOW = {
 /** The painted field, shared by the two roots as one texture. */
 const FieldCtx = createContext<HTMLCanvasElement | null>(null);
 
+/**
+ * The pieces of glass the plain ground gathers under, read where they stand now: Open's shares of the pane's
+ * strength (the side card 0.86, the composer 0.8, the tabs 0.36 there and 0.4 here, where nothing passes under
+ * them), and a reach that a small control cannot spend.
+ */
+function gatherings(host: HTMLElement | null): Gather[] {
+  if (!host) return [];
+  const out: Gather[] = [];
+  const add = (selector: string, keep: number, reach: number, r: number) => {
+    for (const el of host.querySelectorAll<HTMLElement>(selector)) {
+      const b = el.getBoundingClientRect();
+      const span = Math.min(b.width, b.height);
+      out.push({ x: b.left, y: b.top, w: b.width, h: b.height, r: Math.min(r, span / 2), keep: span < 60 ? Math.min(keep, 0.4) : keep, reach: Math.min(reach, 36 + span * 0.6) });
+    }
+  };
+  add('.xl-pane', 1, 150, 20);
+  add('.xl-bud, .xl-one', 0.86, 130, 20);
+  add(".xl-module:not(.xl-bud, .xl-one):not([data-shown='false'])", 0.7, 84, 20);
+  add('.xl-composer', 0.8, 120, 26);
+  add('.xl-tabs', 0.4, 72, 18);
+  add('.xl-waiting, .xl-round', 0.36, 48, 18);
+  if (host.dataset.pane === 'closed') add('.xl-lead', 0.36, 48, 18);
+  return out;
+}
+
 interface PlaneProps {
   field: Field;
   strength: Strength;
   ground: string;
+  /** The plain ground: nothing drawn but what gathers under the glass. `host` is where the glass is looked for. */
+  plain: boolean;
+  host: HTMLElement | null;
+  /** Changes whenever a piece of glass is about to move; the gatherings then follow for the length of the move. */
+  follow: string;
   /** How present a picture field's form is on this scene. A change is shown over `FORM_MS`, not cut to. */
   presence: Presence;
   onPaint: (c: HTMLCanvasElement) => void;
@@ -94,18 +125,19 @@ interface PlaneProps {
   onLive: (live: boolean) => void;
 }
 
-function Plane({ field, strength, ground, presence, onPaint, onLive }: PlaneProps) {
+function Plane({ field, strength, ground, plain, host, follow, presence, onPaint, onLive }: PlaneProps) {
   const ref = useRef<HTMLCanvasElement>(null);
   const root = useGlassRoot();
   // What is painted now; it trails `presence` while the form comes into focus or leaves it.
   const shown = useRef(presence);
-  const what = useRef({ field, strength, ground });
-  what.current = { field, strength, ground };
+  const what = useRef({ field, strength, ground, plain, host });
+  what.current = { field, strength, ground, plain, host };
+  const under = () => (what.current.plain ? gatherings(what.current.host) : undefined);
   useEffect(() => {
     const c = ref.current;
     if (!c) return;
     const draw = () => {
-      paintField(c, field, strength, ground, shown.current);
+      paintField(c, field, strength, ground, shown.current, under());
       // The field is still: it is read once per painting, not on every frame.
       root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
       onPaint(c);
@@ -113,7 +145,43 @@ function Plane({ field, strength, ground, presence, onPaint, onLive }: PlaneProp
     draw();
     window.addEventListener('resize', draw);
     return () => window.removeEventListener('resize', draw);
-  }, [field, strength, ground, root, onPaint]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [field, strength, ground, plain, host, root, onPaint]);
+
+  // On the plain ground a gathering follows its piece of glass: while a pane slides, the side card grows or a
+  // scene arrives, the field is repainted from where the glass stands on each frame (a quarter-size canvas of soft
+  // pools), and both roots read it for that long. At rest it is as still as the picture.
+  useEffect(() => {
+    const c = ref.current;
+    if (!c || !plain || !host) return;
+    root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: true });
+    onLive(true);
+    const until = performance.now() + 1500;
+    const again = () => paintField(c, what.current.field, what.current.strength, what.current.ground, shown.current, under());
+    let frame = requestAnimationFrame(function tick(now) {
+      again();
+      if (now < until) {
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
+      onPaint(c);
+      onLive(false);
+    });
+    // A bar that changes size at rest (a second line typed, a tab closed) is followed too.
+    const sizes = new ResizeObserver(() => {
+      again();
+      root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
+      onPaint(c);
+    });
+    for (const el of host.querySelectorAll('.xl-composer, .xl-tabs, .xl-waiting')) sizes.observe(el);
+    return () => {
+      cancelAnimationFrame(frame);
+      sizes.disconnect();
+      onLive(false);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plain, follow, host, root, onPaint, onLive]);
 
   // The form comes into focus on New chat and leaves it for a session: one dissolve between two kept layers, on
   // the curve the scene's own content arrives on. Nothing moves once it has settled.
@@ -124,14 +192,14 @@ function Plane({ field, strength, ground, presence, onPaint, onLive }: PlaneProp
     if (!c || (from.sharp === sharp && from.soft === soft)) return;
     const paint = (p: Presence) => {
       shown.current = p;
-      paintField(c, what.current.field, what.current.strength, what.current.ground, p);
+      paintField(c, what.current.field, what.current.strength, what.current.ground, p, under());
     };
     const settle = () => {
       paint({ sharp, soft });
       root?.setBackdropTexture(PLANE.id, { kind: 'canvas', canvas: c, live: false });
       onPaint(c);
     };
-    if (!what.current.field.picture || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    if (!what.current.field.picture || what.current.plain || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
       settle();
       return;
     }
@@ -224,7 +292,9 @@ function Room({ host }: { host: HTMLElement | null }) {
     widest.current = Math.max(widest.current, gap);
     widestSeam.current = Math.max(widestSeam.current, seam);
     host.style.setProperty('--xl-room', `${widest.current}px`);
-    host.style.setProperty('--xl-seam', `${widestSeam.current}px`);
+    // The runtime's derived answer for this pair (24 px) was reported by its own check as too near once the tabs
+    // came within 26 px of the capsule, and was clean from 30: the layout spends the answer and a quarter more.
+    host.style.setProperty('--xl-seam', `${Math.ceil(widestSeam.current * 1.25)}px`);
   }, [gap, seam, host]);
   return null;
 }
@@ -251,16 +321,25 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const ground = (colour.ground ?? GROUNDS[knobs.ground ?? 'warm'] ?? GROUNDS.warm!)[scheme];
   const strength = (['whisper', 'soft', 'warm', 'vivid'].includes(knobs.field ?? '') ? knobs.field : 'warm') as Strength;
   const material = (['glass', 'veil', 'opaque'].includes(knobs.blocks ?? '') ? knobs.blocks : 'glass') as Material;
-  const face = ['figtree', 'geist', 'system'].includes(knobs.face ?? '') ? knobs.face! : 'figtree';
+  // The owner refused Figtree as too round (2026-11-14): the system face, which is Quiet's, is the default.
+  const face = ['figtree', 'geist', 'system'].includes(knobs.face ?? '') ? knobs.face! : 'system';
 
-  // The five open calls. Three of them are about Paper and are not consulted under another colouring.
-  const isPaper = colour.id === 'paper';
-  const presence = isPaper && scene !== 'home' ? FORM[knobs.form ?? ''] ?? FULL : FULL;
-  const line = isPaper && knobs.line === 'sans' ? 'sans' : isPaper ? 'serif' : undefined;
-  const needs = isPaper && (knobs.mark === 'soft' || knobs.mark === 'accent') ? knobs.mark : undefined;
-  const pin = needs === 'accent' ? PIN[scheme] : undefined;
-  const align = knobs.align === 'column' ? 'column' : undefined;
-  const sideForm: SideForm = knobs.side === 'card' || knobs.side === 'button' ? knobs.side : 'modules';
+  // The five open calls. Three of them are about Paper, which is now a family (Paper and the warmer Papers of §14:
+  // every colouring whose field is the still life), and are not consulted under another colouring.
+  // Four of the five are answered (DESIGN.md §15), and the answers are what a missing knob now means: the form out
+  // of focus where you work, the line in the sans, the column rule, the card that grows from its button.
+  const isPaper = !!colour.field[scheme].picture;
+  const presence = isPaper && scene !== 'home' ? FORM[knobs.form ?? ''] ?? FORM.recede! : FULL;
+  // Open's ground, as the switch's last position: no drawing on any page, New chat included (DESIGN.md §16).
+  const plain = isPaper && knobs.form === 'plain';
+  const gather = plain ? gatherOf(scheme === 'dark', colour.field[scheme].light) : undefined;
+  const line = !isPaper ? undefined : knobs.line === 'serif' ? 'serif' : 'sans';
+  // A colouring that brings a pigment for its mark has settled the mark; the Mark switch speaks for the others.
+  const own = colour.pin?.[scheme];
+  const needs = own ? 'accent' : isPaper && (knobs.mark === 'soft' || knobs.mark === 'accent') ? knobs.mark : undefined;
+  const pin = own ? { ring: 'transparent', ...own } : needs === 'accent' ? PIN[scheme] : undefined;
+  const align = knobs.align === 'layers' ? undefined : 'column';
+  const sideForm: SideForm = knobs.side === 'card' || knobs.side === 'modules' ? knobs.side : 'button';
 
   // Answering the approval is real in the lab: the session goes back to work and its orange leaves the window.
   const live = useCallback(
@@ -314,6 +393,8 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-face={face}
             data-aid={x.includes('field') ? 'field' : undefined}
             data-colour={colour.id}
+            data-paper={isPaper ? '' : undefined}
+            data-ground={plain ? 'plain' : undefined}
             data-mark={colour.mark}
             data-line={line}
             data-needs={needs}
@@ -329,11 +410,22 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
                 '--xl-accent-mark': tokens.mark,
                 '--xl-focus': tokens.focus,
                 ...(pin ? { '--xl-pin': pin.disc, '--xl-on-pin': pin.glyph, '--xl-pin-ring': pin.ring } : null),
+                ...(gather ? { '--xl-gather-rgb': gather.rgb.join(' '), '--xl-gather-a': Math.min(0.34, gather.a * 1.3).toFixed(3) } : null),
                 colorScheme: scheme,
               } as CSSProperties
             }
           >
-            <Plane field={colour.field[scheme]} strength={strength} ground={ground} presence={presence} onPaint={onPaint} onLive={setFieldLive} />
+            <Plane
+              field={colour.field[scheme]}
+              strength={strength}
+              ground={ground}
+              plain={plain}
+              host={el}
+              follow={`${layout}:${sideOpen}:${sideForm}:${align}:${needs}`}
+              presence={presence}
+              onPaint={onPaint}
+              onLive={setFieldLive}
+            />
             <LayoutPump layout={layout} />
             <Room host={el} />
             {dev && <Readout name="window" />}

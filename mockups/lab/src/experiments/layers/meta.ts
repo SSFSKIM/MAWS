@@ -8,15 +8,14 @@ export const experiment: Experiment = {
   thesis:
     'Glass taken all the way into the transcript: the colour field runs under the whole window, prose is read directly on it, and every block (a tool run, a diff, a running command, your own message) is a piece of glass standing over it.',
   notes: [
-    'Five calls are yours, and each is a switch below Colour. The first chip of each is the design as it stands. Flip them in this order.',
-    '1. Right column, on a session: Four modules, One card, Grows from a button (click the round button at the top right to close it and open it again). Which has the floating feeling you meant?',
-    '2. Alignment, on a session and on Settings: On the reading column puts the tabs, the waiting capsule and the composer on the column\'s two edges (Open\'s rule). It pairs well with Grows from a button.',
-    '3. "Needs you" mark: Ink badge (today), Soft disc (lighter, no hue), One gold (a single small accent; Approve stays ink). Look in the pane, the tabs and the capsule, in both schemes.',
-    '4. Painted form, on Settings and on a session: Everywhere (today), Out of focus where you work (no line behind a word; go to New chat and back to see it come into focus), New chat only.',
-    '5. New chat line, on New chat: the serif against the same line in the sans.',
-    'What I would choose: Grows from a button, On the reading column, One gold, Out of focus, Serif. Reasons, costs and readings: DESIGN.md section 13.',
-    'Colour: Paper is the default (no hue: a painted still life of paper lifting into clear glass, ink for the mark). The other colourings are the comparison set; the three switches marked Paper do nothing under them.',
-    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground.',
+    'Your four answers are now the design at rest: the drawing out of focus behind text, everything lined up on the reading column, the right column as a button that opens, and Quiet\'s face (the system face) for the whole interface, the New chat line included. Each is still a switch below, so the earlier positions are one chip away.',
+    'Colour, on your word that Paper should be warmer ("perhaps by mixing older orange"): four warmer Papers beside Paper. They put the warmth in different places. Warm paper: the paper itself (ground, shade, shadow) carries the orange at low strength, and the orange comes back once, as the mark. Orange light: the paper as it is, with the orange as light (inside the glass leaf, on the floor under the composer, the lamp at night). Orange underside: the sheet\'s reverse is the orange, a second material. Clay paper: Warm paper with the warmth from today\'s terracotta instead, in case that is the orange you meant.',
+    'Look at each on New chat first (the drawing is whole there), then a session and Settings, in both schemes. Set Painted form to Everywhere to see the whole drawing on every page. Paper itself is unchanged and still the default.',
+    'Painted form has a new last chip, None: plain ground. It is Open\'s ground inside Layers: no drawing on any page, and light and shade gather only under the glass. Flip between it and the default on a session, on Settings and on New chat to choose the ground; try it under the warm colourings too, where the gathered light is where the warmth sits.',
+    '"Needs you" mark is the one call still open, and it waits for the colour: Ink badge, Soft disc, One gold under Paper, Orange light and Orange underside; Warm paper and Clay paper bring their own mark (the orange, the terracotta), so the switch does not apply to them.',
+    'Known in Paper at night: one grey caption crosses the sheet\'s lit face when the transcript is scrolled half way, and reads under its contrast floor there. The warmer Papers are corrected for it; Paper was left as you chose it.',
+    'The other colourings (Peach to Orange) are the earlier comparison set; the switches marked Paper do nothing under them.',
+    'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 16.',
     'Cost: content on glass breaks the glass guideline on purpose; a second glass root runs inside the transcript; legibility depends on the field staying graded.',
   ],
   scenes: ['session', 'settings', 'home'],
@@ -27,6 +26,10 @@ export const experiment: Experiment = {
       default: 'paper',
       options: [
         { value: 'paper', label: 'Paper' },
+        { value: 'warmpaper', label: 'Warm paper' },
+        { value: 'orangelight', label: 'Orange light' },
+        { value: 'underside', label: 'Orange underside' },
+        { value: 'claypaper', label: 'Clay paper' },
         { value: 'peach', label: 'Peach' },
         { value: 'honey', label: 'Honey' },
         { value: 'rose', label: 'Rose' },
@@ -39,17 +42,18 @@ export const experiment: Experiment = {
     {
       id: 'form',
       label: 'Painted form (Paper)',
-      default: 'everywhere',
+      default: 'recede',
       options: [
         { value: 'everywhere', label: 'Everywhere' },
         { value: 'recede', label: 'Out of focus where you work' },
         { value: 'home', label: 'New chat only' },
+        { value: 'plain', label: 'None: plain ground' },
       ],
     },
     {
       id: 'line',
       label: 'New chat line (Paper)',
-      default: 'serif',
+      default: 'sans',
       options: [
         { value: 'serif', label: 'Serif' },
         { value: 'sans', label: 'Sans' },
@@ -68,16 +72,16 @@ export const experiment: Experiment = {
     {
       id: 'align',
       label: 'Alignment',
-      default: 'layers',
+      default: 'column',
       options: [
-        { value: 'layers', label: 'As it is' },
+        { value: 'layers', label: 'As it was' },
         { value: 'column', label: 'On the reading column' },
       ],
     },
     {
       id: 'side',
       label: 'Right column',
-      default: 'modules',
+      default: 'button',
       options: [
         { value: 'modules', label: 'Four modules' },
         { value: 'card', label: 'One card' },
@@ -119,7 +123,7 @@ export const experiment: Experiment = {
     {
       id: 'face',
       label: 'Typeface',
-      default: 'figtree',
+      default: 'system',
       options: [
         { value: 'figtree', label: 'Figtree' },
         { value: 'geist', label: 'Geist' },

@@ -53,8 +53,11 @@ const smooth = (t: number) => {
   return x * x * (3 - 2 * x);
 };
 
-/** What the light does to each material. Two of these exist: daylight, and the same room under a low lamp. */
-interface Light {
+/**
+ * What the light does to each material. Paper has two of these, daylight and the same room under a low lamp; a
+ * warmer Paper (DESIGN.md §14) is another pair, handed to the painter by its colouring.
+ */
+export interface PaperLight {
   /** Broad light across the floor: where it gathers, how wide, its colour and strength; then where the room falls off. */
   pool: { at: P; r: number; rgb: RGB; a: number };
   fall: { rgb: RGB; a: number };
@@ -76,11 +79,22 @@ interface Light {
   caustic: [RGB, number];
   /** Paper grain, as an alpha of black and of white specks. */
   grain: number;
+  /**
+   * Coloured light laid on the floor by the form: soft ellipses (centre, radii as shares of the width and the
+   * height, a turn, a blur in px on a window 1440 wide), painted with the shadows and under the paper. They belong
+   * to the form, so they go out of focus with it and are absent where it is.
+   */
+  glows?: { at: P; rx: number; ry: number; turn?: number; blur: number; rgb: RGB; a: number }[];
+  /**
+   * On the plain ground (no drawing; `plain.ts`): what gathers under each piece of glass, where it is not the
+   * default. By day the default is this light's own shadow, at 0.26; at night its lamp, at the lamp's strength.
+   */
+  gather?: { rgb: RGB; a: number };
 }
 
 // Daylight from the upper left. The ground is the owner's ivory; the crest sits just above it, the underside a
 // clear step below, and the one shadow between the two.
-const DAY: Light = {
+const DAY: PaperLight = {
   pool: { at: [0.3, 0.1], r: 0.9, rgb: [255, 253, 250], a: 0.12 },
   fall: { rgb: [150, 128, 108], a: 0.1 },
   top: [243, 238, 232],
@@ -102,7 +116,7 @@ const DAY: Light = {
 // where the lamp reaches; the paper is still ivory, so its crest is the brightest broad thing in the room and its
 // underside sinks under the floor's level; the glass has almost no body left and is all rim, reflection and the
 // light it gathers onto the floor.
-const NIGHT: Light = {
+const NIGHT: PaperLight = {
   pool: { at: [0.3, 0.95], r: 0.52, rgb: [255, 224, 188], a: 0.15 },
   fall: { rgb: [0, 0, 0], a: 0.3 },
   top: [104, 95, 84],
@@ -175,12 +189,24 @@ const MARGIN = 72;
 
 let layers: { key: string; sharp: HTMLCanvasElement; soft: HTMLCanvasElement | null } | null = null;
 
+/** Paper's own two lights, for a colouring that departs from them by a few values. */
+export const PAPER_DAY: PaperLight = DAY;
+export const PAPER_NIGHT: PaperLight = NIGHT;
+
+const lightIds = new WeakMap<PaperLight, number>();
+let lightCount = 0;
+/** A light's place in the kept layers' key: two lights are the same picture only if they are the same record. */
+const idOf = (light: PaperLight) => {
+  if (!lightIds.has(light)) lightIds.set(light, ++lightCount);
+  return lightIds.get(light)!;
+};
+
 /**
  * Paints the still life over a ground already filled. `k` is the field strength as a share of the default, so 1 is
- * the picture as composed.
+ * the picture as composed. `light`, when given, replaces Paper's own light for the scheme.
  */
-export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, night: boolean, k: number, ground: RGB, presence: Presence = FULL) {
-  const L = night ? NIGHT : DAY;
+export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, night: boolean, k: number, ground: RGB, presence: Presence = FULL, light?: PaperLight) {
+  const L = light ?? (night ? NIGHT : DAY);
   const px = (line: P[]): P[] => line.map(([x, y]) => [x * w, y * h]);
   const long = Math.max(w, h);
   const blur = (n: number) => `blur(${((n * long) / 1440).toFixed(1)}px)`;
@@ -207,7 +233,7 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ni
     // presence (a scene arriving) can be shown frame by frame without painting the form again.
     const scale = g.canvas.width / w;
     const m = Math.round(MARGIN * scale);
-    const key = `${g.canvas.width}x${g.canvas.height}:${w}x${h}:${night}:${k}:${ground.join()}`;
+    const key = `${g.canvas.width}x${g.canvas.height}:${w}x${h}:${idOf(L)}:${k}:${ground.join()}`;
     if (!layers || layers.key !== key) {
       const c = document.createElement('canvas');
       c.width = g.canvas.width + 2 * m;
@@ -280,6 +306,15 @@ export function paintPaper(g: CanvasRenderingContext2D, w: number, h: number, ni
     g.beginPath();
     g.ellipse(0.79 * w, 0.957 * h, 0.1 * w, 0.009 * h, -0.05, 0, Math.PI * 2);
     g.fill();
+    // Coloured light on the floor, where a warmer Paper has any. It is light, so it is capped well short of the
+    // level where the quietest text over it would fail, however far the field strength is turned up.
+    for (const glow of L.glows ?? []) {
+      g.filter = blur(glow.blur);
+      g.fillStyle = rgba(glow.rgb, Math.min(0.42, glow.a * depth));
+      g.beginPath();
+      g.ellipse(glow.at[0] * w, glow.at[1] * h, glow.rx * w, glow.ry * h, glow.turn ?? 0, 0, Math.PI * 2);
+      g.fill();
+    }
     g.restore();
 
     // ---- the paper: the top surface behind the crest, then the underside, rung by rung ----

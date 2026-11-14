@@ -8,6 +8,7 @@
 // The masses and the contour ink come from the colouring (`colour.ts`); this file only paints them.
 import type { Field, Mass } from './colour';
 import { FULL, paintPaper, type Presence } from './paper';
+import { paintPlain, type Gather } from './plain';
 
 export type Strength = 'whisper' | 'soft' | 'warm' | 'vivid';
 
@@ -65,8 +66,10 @@ function contours(g: CanvasRenderingContext2D, masses: Mass[], w: number, h: num
 
 /**
  * `presence` is how present a picture field's form is (see `paper.ts`); a field of masses has no form and ignores it.
+ * `plain`, when given, is the plain ground instead of the picture: nothing is drawn but what gathers under the
+ * pieces of glass it lists (see `plain.ts`).
  */
-export function paintField(canvas: HTMLCanvasElement, field: Field, strength: Strength, ground: string, presence: Presence = FULL) {
+export function paintField(canvas: HTMLCanvasElement, field: Field, strength: Strength, ground: string, presence: Presence = FULL, plain?: Gather[]) {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
@@ -88,7 +91,11 @@ export function paintField(canvas: HTMLCanvasElement, field: Field, strength: St
   g.fillRect(0, 0, w, h);
   if (field.picture === 'paper') {
     const n = parseInt(ground.slice(1), 16);
-    paintPaper(g, w, h, !!field.night, gain / GAIN.warm, [(n >> 16) & 255, (n >> 8) & 255, n & 255], presence);
+    if (plain) {
+      paintPlain(g, w, h, !!field.night, gain / GAIN.warm, plain, field.light);
+      return;
+    }
+    paintPaper(g, w, h, !!field.night, gain / GAIN.warm, [(n >> 16) & 255, (n >> 8) & 255, n & 255], presence, field.light);
     return;
   }
   const long = Math.max(w, h);
