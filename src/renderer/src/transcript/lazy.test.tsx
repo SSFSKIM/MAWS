@@ -37,3 +37,24 @@ it('draws an instance mounted before the chunk loads once it does, and keeps it 
   view.rerender(<Markdown markdown="An **answer**." live={false} />);
   expect(strong(view.container)).toBe(drawn); // the same node: not remounted onto the loaded module
 }, 60_000);
+
+// A suite that renders these components before its cases waits on `chunksSettled`, the chunks' own arrival: an import of
+// a chunk's module can resolve before the chunk has (the view's graph imports this module back through the transcript's
+// index, and the module runner answers an import into that cycle with the partial exports of a module still evaluating).
+it('settles chunksSettled only once every chunk has loaded, each component then drawing in its first commit', async () => {
+  let arrive!: () => void;
+  const arrived = new Promise<void>((resolve) => (arrive = resolve));
+  vi.doMock('./view/markdown/Markdown', async (original) => {
+    await arrived;
+    return original();
+  });
+  const { Markdown, chunksSettled } = await import('./lazy');
+  let settled = false;
+  void chunksSettled.then(() => (settled = true));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(settled).toBe(false); // the Markdown chunk is held
+  arrive();
+  await chunksSettled;
+  const view = render(<Markdown markdown="An **answer**." live={false} />);
+  expect(strong(view.container)?.textContent).toBe('answer');
+}, 60_000);
