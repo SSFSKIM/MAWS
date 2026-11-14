@@ -77,7 +77,7 @@ import { notificationActions } from './attention/actions';
 import { startAttention } from './attention';
 import { LayoutFileStore } from './layout/store';
 import { registerChatPanels } from './sessions/panel-lifetime';
-import { askToQuit, installQuitGuard } from './lifecycle/quit-guard';
+import { askToQuit, installQuitGuard, type BusyReport } from './lifecycle/quit-guard';
 import { registerMenuHandlers, startMenu } from './menu';
 import { openForMachine, registerOpenExternal } from './open-external'; // P5 O7 M5c: openForMachine
 import { electronClientPort } from './client/electron-port'; // P5 O1 M3
@@ -1070,6 +1070,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     saveAll: () => unsavedFiles.saveAll((requestId) => void emit('layout.saveAll', { requestId })),
     // E5 end
   });
+  // The e2e's seam, under MAWS_E2E=1 in a build that is not packaged: the busy report a quit would read now, read through
+  // Playwright's `app.evaluate` (e2e/supervisor.spec.ts (h) settles on it before its quit)
+  if (process.env.MAWS_E2E === '1' && !app.isPackaged) (globalThis as { __maws_quit?: { report(): Promise<BusyReport> } }).__maws_quit = { report: () => quitGuard.report() };
   // C12 start: the banner's reads and answers
   registerMainHandler('layout.quitWait', () => ({ waiting: quitGuard.waiting() }));
   registerMainHandler('layout.quitWaitAnswer', ({ action }) => (action === 'quitNow' ? quitGuard.quitNow() : quitGuard.cancelWait()));
