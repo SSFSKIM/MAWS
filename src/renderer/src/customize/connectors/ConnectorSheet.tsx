@@ -10,7 +10,7 @@
 // configuration's page, a removal), the one scope is a plain line, so it stays in view with the command closed. The
 // binary is `plugins.env`'s, read at every opening: until it answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
-import type { McpActionInputs, PluginsScope } from '@shared/plugins/cli';
+import type { McpActionInputs, McpRemoteAdd, PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
 import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
@@ -20,7 +20,7 @@ import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { CONNECTORS as C } from './copy';
 import { existingOf, nameProblem, scopesFor, urlProblem, writesFor, type ConfiguredServers } from './present';
 
-type Add = McpActionInputs['mcp-add'];
+type Add = McpRemoteAdd; // Discover's add: a remote server by name and URL (UX wave U11g narrows the action's two inputs)
 
 export interface ConnectorSheetEnv {
   cwd: string | null; // the page's directory; null for the user configuration

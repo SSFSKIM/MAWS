@@ -13,13 +13,19 @@
 // the CLI itself exited. A mutation names the binary its sheet showed; one the probe no longer resolves to fails without
 // spawning. A cancel or stop that arrives while an operation is still resolving the binary or capturing the environment
 // completes it `cancelled` without spawning; after `stop` nothing new runs.
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §C): a custom add (`mcp-add` with an
+// entry) carries its value slots, and what leaves the runner for it is held to the rule about values: no line of its
+// stdout is emitted, a line of its stderr only whole and only when it holds no slot's content (so its latest event, the
+// replay, holds only such lines), its outcome is cli-result's custom branch, and a spawn's or a thrown error's message is
+// forwarded or logged only when it holds none. A mutation may name a check (`PreRunCheck`, R3) that the runner awaits
+// inside its queue, after `started` and before anything is spawned.
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import type { PluginsOperationEvent, PluginsOutcome } from '@shared/ipc/schema/plugins';
-import { isMcpAction, PLUGINS_SCOPES, runnerCommandLine, type McpAction, type McpActionInputs, type PluginsAction, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
+import { holdsValueSlot, isMcpAction, isMcpEntryAdd, mcpValueSlotsOf, PLUGINS_SCOPES, runnerCommandLine, type McpAction, type McpActionInputs, type PluginsAction, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
-import { mcpOutcome, mutationOutcome, resultOf, type CliRun } from './cli-result';
+import { CONFIGURATION_UNREAD, mcpOutcome, mutationOutcome, resultOf, SPAWN_WITHHELD, type CliRun } from './cli-result';
 import { RELOADING_ACTIONS, reloadAfter, SETTLE_MS, type ReloadTarget } from './reload-after';
 
 export { SETTLE_MS };
@@ -62,8 +68,13 @@ export interface PluginsRunnerDeps {
   timers?: Timers;
 }
 
-type Failure = Extract<PluginsOutcome, { ok: false }>['error']['code'];
-type Ended = { run: CliRun } | { failed: Failure; message: string };
+type Failed = Extract<PluginsOutcome, { ok: false }>;
+type Failure = Failed['error']['code'];
+// `fromError`: the message is a system error's own (a spawn that threw or failed), which can quote an argument
+type Ended = { run: CliRun } | { failed: Failure; message: string; fromError?: true };
+type Stream = 'stdout' | 'stderr';
+// UX wave U11g (R3): a mutation's check before its run, answering the refusal that ends the operation, or null
+export type PreRunCheck = () => Promise<Failed | null>;
 // why the runner stopped a group: the first three end the run with FAILED_WORDS, `overflow` with output_overflow, and
 // `leftover` (members left after the CLI's own exit) keeps the CLI's result
 type StopReason = 'timeout' | 'cancelled' | 'stopped' | 'overflow' | 'leftover';
@@ -80,6 +91,8 @@ interface Operation {
   abort: 'cancelled' | 'stopped' | null; // asked while running, whether or not its CLI was spawned yet
   group: OwnedGroup | null; // while its CLI's process group is owned
   latest: PluginsOperationEvent | null; // E10: its last event, which a connecting client is sent again (null while queued)
+  values: readonly string[] | null; // UX wave U11g: a custom add's value slots, under the rule about values; null for every other operation
+  check: PreRunCheck | null; // UX wave U11g
 }
 
 const FAILED_WORDS = { timeout: `the CLI was still running after ${CLI_TIMEOUT_MS / 60_000} minutes and was stopped`, cancelled: 'cancelled before the CLI finished', stopped: 'stopped with the engine host' } as const;
@@ -203,18 +216,26 @@ export class PluginsRunner {
     }
   }
 
-  // Queued behind the running mutation; the receipt answers before any of its events.
-  async start<A extends RunnerAction>(action: A, input: RunnerActionInputs[A], cwd: string, binary: string): Promise<{ opId: string }> {
+  // Queued behind the running mutation; the receipt answers before any of its events. `check`, when given, runs in the
+  // queue immediately before the CLI would.
+  async start<A extends RunnerAction>(action: A, input: RunnerActionInputs[A], cwd: string, binary: string, check?: PreRunCheck): Promise<{ opId: string }> {
     if (this.closed) throw new Error('the engine host is stopping: no plugin operation starts');
     const argv = runnerCommandLine(action, input);
     const i = input as { plugin?: string; source?: string; name?: string };
-    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null };
+    const mcp = isMcpAction(action) ? (input as McpActionInputs[McpAction]) : null;
+    const values = mcp !== null && isMcpEntryAdd(mcp) ? mcpValueSlotsOf(mcp) : null;
+    const op: Operation = { opId: randomUUID(), action, input, argv, cwd, target: i.plugin ?? i.source ?? i.name ?? '', binary, state: 'queued', abort: null, group: null, latest: null, values, check: check ?? null };
     this.hold(() => this.operations.set(op.opId, op));
     this.queue = this.queue
       .then(() => new Promise<void>((resolve) => this.timers.setTimeout(resolve, 0))) // after the receipt's answer is posted
       .then(() => this.run(op))
-      .catch((error: unknown) => console.warn(`[engine-host] plugins ${op.action} failed: ${error instanceof Error ? error.message : String(error)}`));
+      .catch((error: unknown) => console.warn(`[engine-host] plugins ${op.action} failed: ${this.withheld(op, error instanceof Error ? error.message : String(error), 'its message repeats a header or variable value and is withheld')}`));
     return { opId: op.opId };
+  }
+
+  // UX wave U11g: a system's or a thrown error's words for a custom add, or `instead` when they hold a value slot's content
+  private withheld(op: Operation, words: string, instead: string): string {
+    return op.values !== null && holdsValueSlot(words, op.values) ? instead : words;
   }
 
   // Stops the CLI of a running operation (or keeps one still preparing from spawning), or drops a queued one; false once
@@ -295,10 +316,15 @@ export class PluginsRunner {
       this.deps.emit(op.latest);
     };
     emit({ phase: 'started' });
-    const ended = await this.exec(op.argv, op.cwd, (line) => emit({ phase: 'output', line }), op);
-    op.state = 'ended';
+    // UX wave U11g: a custom add emits no stdout line, and a stderr line only when it holds no value slot's content
+    const hear = (line: string, stream: Stream) => {
+      if (op.values !== null && (stream === 'stdout' || holdsValueSlot(line, op.values))) return;
+      emit({ phase: 'output', line });
+    };
     const read = (run: CliRun): PluginsOutcome => (isMcpAction(op.action) ? mcpOutcome(op.action, op.input as McpActionInputs[McpAction], run) : mutationOutcome(run)); // P4-AGG M4
-    const outcome: PluginsOutcome = 'failed' in ended ? { ok: false, error: { code: ended.failed, message: ended.message, failureCode: null, shownCommand: null } } : read(ended.run);
+    const refused = op.check === null ? null : await this.checkBefore(op, op.check); // UX wave U11g: a refusal starts nothing
+    const outcome: PluginsOutcome = refused ?? (await this.exec(op.argv, op.cwd, hear, op).then((ended) => ('failed' in ended ? this.failedOutcome(op, ended) : read(ended.run))));
+    op.state = 'ended';
     this.deps.changed(); // the CLI has ended: the lists may have moved, even after a failure (a refreshed catalogue)
     // an MCP change reloads nothing: it takes effect at the next session (fact 2)
     if (!outcome.ok || isMcpAction(op.action) || !RELOADING_ACTIONS.has(op.action)) return this.finish(op, outcome);
@@ -317,6 +343,25 @@ export class PluginsRunner {
     this.finish(op, outcome, { sessions });
   }
 
+  // UX wave U11g (R3): the operation's check, awaited in the queue; a cancel or a stop meanwhile ends it cancelled, and a
+  // check that throws ends it as a read that was not whole would. Nothing has been spawned.
+  private async checkBefore(op: Operation, check: PreRunCheck): Promise<Failed | null> {
+    let answer: Failed | null;
+    try {
+      answer = await check();
+    } catch {
+      answer = CONFIGURATION_UNREAD;
+    }
+    const reason = this.closed ? 'stopped' : op.abort;
+    if (reason !== null) return { ok: false, error: { code: 'cancelled', message: FAILED_WORDS[reason], failureCode: null, shownCommand: null } };
+    return answer;
+  }
+
+  private failedOutcome(op: Operation, ended: Extract<Ended, { failed: Failure }>): Failed {
+    if (ended.fromError && op.values !== null && holdsValueSlot(ended.message, op.values)) return SPAWN_WITHHELD; // UX wave U11g
+    return { ok: false, error: { code: ended.failed, message: ended.message, failureCode: null, shownCommand: null } };
+  }
+
   private finish(op: Operation, outcome: PluginsOutcome, reload?: PluginsOperationEvent['reload']): void {
     op.state = 'ended';
     this.operations.delete(op.opId);
@@ -324,8 +369,9 @@ export class PluginsRunner {
     this.settledOne(); // E10
   }
 
-  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line; `op` is told of the group it owns.
-  private async exec(args: readonly string[], cwd: string, onLine: ((line: string) => void) | null, op: Operation | null): Promise<Ended> {
+  // One CLI run. `onLine` hears every non-empty line the CLI prints but a result line, with its stream; `op` is told of
+  // the group it owns.
+  private async exec(args: readonly string[], cwd: string, onLine: ((line: string, stream: Stream) => void) | null, op: Operation | null): Promise<Ended> {
     // a stop or cancel asked while preparing ends the run without a spawn: checked after every await, the last one
     // immediately before the synchronous spawn
     const aborted = (): Ended | null => {
@@ -350,7 +396,7 @@ export class PluginsRunner {
       try {
         child = this.spawn(check.path, [...args], { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
       } catch (error) {
-        resolve({ failed: 'spawn_failed', message: error instanceof Error ? error.message : String(error) });
+        resolve({ failed: 'spawn_failed', message: error instanceof Error ? error.message : String(error), fromError: true });
         return;
       }
       const group = new OwnedGroup(child, this.timers);
@@ -365,11 +411,11 @@ export class PluginsRunner {
         overflow = words;
         void group.stop('overflow', KILL_GRACE_MS);
       };
-      const lineReader = (sink: string[]) => {
+      const lineReader = (sink: string[], stream: Stream) => {
         let partial = '';
         const hear = (line: string) => {
           const trimmed = line.trim();
-          if (trimmed.length > 0 && resultOf(trimmed) === null) onLine?.(trimmed);
+          if (trimmed.length > 0 && resultOf(trimmed) === null) onLine?.(trimmed, stream);
         };
         return {
           data: (text: string) => {
@@ -389,8 +435,8 @@ export class PluginsRunner {
           },
         };
       };
-      const stdout = lineReader(out);
-      const stderr = lineReader(err);
+      const stdout = lineReader(out, 'stdout');
+      const stderr = lineReader(err, 'stderr');
       // decoded per stream, so a character split across two chunks arrives whole
       child.stdout?.setEncoding('utf8').on('data', stdout.data);
       child.stderr?.setEncoding('utf8').on('data', stderr.data);
@@ -405,7 +451,7 @@ export class PluginsRunner {
         this.settledOne(); // E10
       };
       child.on('error', (error) => {
-        if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message }); // the spawn itself failed
+        if (child.pid === undefined) settle({ failed: 'spawn_failed', message: error.message, fromError: true }); // the spawn itself failed
       });
       child.on('close', (code) => {
         stdout.end();

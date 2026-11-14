@@ -25,8 +25,9 @@ import { DirectCalls } from './direct-calls'; // P3-HD M2
 import { DirectConnectionPool } from './direct-client'; // P3-HD M2
 import { ConfiguredDeliverySources } from './configured-delivery'; // WR 76/78
 
-// P4-AGG M4: `connectors.add` and `connectors.remove` are the plugin runner's (ipc.ts registers them beside `plugins.*`)
-export const RUNNER_CONNECTOR_COMMANDS = ['connectors.add', 'connectors.remove'] as const;
+// P4-AGG M4: `connectors.add` and `connectors.remove` are the plugin runner's (ipc.ts registers them beside `plugins.*`);
+// UX wave U11g: and `connectors.addJson`, a custom connector's
+export const RUNNER_CONNECTOR_COMMANDS = ['connectors.add', 'connectors.remove', 'connectors.addJson'] as const;
 type HostConnectorCommand = Exclude<{ [N in keyof typeof ConnectorCommands]: (typeof ConnectorCommands)[N]['owner'] extends 'engine-host' ? N : never }[keyof typeof ConnectorCommands], (typeof RUNNER_CONNECTOR_COMMANDS)[number]>;
 
 export const CONNECTORS_DEADLINE_SHAPES: Record<HostConnectorCommand, DeadlineShape> = {
