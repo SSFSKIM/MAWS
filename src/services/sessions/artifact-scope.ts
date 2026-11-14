@@ -1,7 +1,7 @@
 // P2-E1 G4 (P2-E1 execution document, D10; P2 Decision Log 9): a side thread's artifact scope as `session.launch` carries
 // it, resolved over the index at every launch (the intent's lineage, a resume's record). The chain itself is shared since
-// P2-F L122 (`@shared/maws/artifact-scope`), so the window's `show_pane` resolves a deliverable target over the same
-// ancestors.
+// P2-F L122 (`@shared/maws/artifact-scope`), where the window's `show_pane` resolved a deliverable target over the same
+// ancestors until that lookup left with the retired `artifact` pane (UX wave U6d).
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Lineage } from '@shared/graph/session';
 import { artifactScopeOf } from '@shared/maws/artifact-scope';

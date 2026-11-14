@@ -631,9 +631,6 @@ export const TOOL_ERRORS = {
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
-  // P3-L (M6b): the `artifact` pane's target names no artifact the session's lineage holds, or main refused the read
-  artifactNotFound: (id: string) => `show_pane: no artifact "${id}" in this session`,
-  artifactUnreadable: (id: string, message: string) => `show_pane: could not read artifact "${id}": ${message}`,
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
   appNotOpen: (tool: 'show_pane' | 'artifact_screenshot' | 'artifact_export') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : tool === 'artifact_export' ? 'artifact cannot be exported' : 'artifact cannot be captured'}`,

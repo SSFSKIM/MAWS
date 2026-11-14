@@ -467,8 +467,9 @@ describe('X9 artifact tools (E2)', () => {
     expect(stale).toBe('artifact_publish: read the artifact again {"reason":"staleBase","liveRevision":7}');
     expect(artifactRefusalOf(stale)).toEqual({ reason: 'staleBase', liveRevision: 7 });
     expect(artifactRefusalOf('artifact_publish: no artifact "x" in this session')).toBeNull();
-    expect(TOOL_ERRORS.artifactNotFound('d1')).toBe('show_pane: no artifact "d1" in this session'); // P3-L M6b
-    expect(TOOL_ERRORS.artifactUnreadable('d1', 'EIO')).toBe('show_pane: could not read artifact "d1": EIO');
+    // U6d: P3-L M6b's artifactNotFound and artifactUnreadable left with the window's lookup of the retired pane
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactNotFound');
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactUnreadable');
     expect(TOOL_ERRORS.deliveryUnavailable).toBe('send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered');
     expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve
   });
