@@ -5,7 +5,10 @@
 //
 // The refusal's Edit prompt captures the prompt the refusal interrupted from the transcript store before it answers,
 // and only once the answer is delivered edits that bubble in place (W3, B6; the terminal's own recovery: rewind to the
-// last human prompt and restore it), whose Send rewinds to it and resends.
+// last human prompt and restore it), whose Send rewinds to it and resends. UX wave U5a (Decision Log 49): Edit prompt is
+// offered only for a prompt whose text can be edited in place, which a message of several comments cannot (Retry and
+// Cancel stand for it); the click reads the prompt again and never answers `edit_prompt` for one that cannot. Before the
+// click, only the rows a holder follows now can hide it (Decision Log 52).
 import { useEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
@@ -38,6 +41,13 @@ type DialogProps = VariantProps<'dialog.requested'>;
 function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: DialogProps & { payload: RefusalFallbackPayload }) {
   const [capturing, setCapturing] = useState(false); // reading the prompt before the answer goes
   const busy = answering || capturing;
+  // UX wave U5a: as far as the store holds the session's transcript now; with no prompt read, Edit prompt says so itself.
+  // Decision Log 52 (3): only rows a holder follows now hide it; a kept entry nobody follows (the overview's and the hover
+  // card's hosts attach none) may be older than the session, so the button is offered and the click decides
+  const editableShown = useTranscriptStore((s) => !s.attached(item.appSessionId) || (initiatingPrompt(s.rows(item.appSessionId), s.activity(item.appSessionId))?.editable ?? true));
+  const [notEditable, setNotEditable] = useState(false); // the click found a prompt that cannot be edited in place
+  // the click's own read attaches the key, its rows the kept ones until the fresh history is in: the button stands meanwhile
+  const offersEdit = (editableShown || capturing) && !notEditable;
   const answer = (result: 'retry_fallback' | 'edit_prompt' | 'cancelled', what: string, delivered?: () => void) =>
     submit(toAnswer({ kind: 'dialog', dialogKind: 'refusal_fallback_prompt', result }), what, delivered);
   const retry = () => !capturing && answer('retry_fallback', `Retry with ${payload.fallbackModel}`);
@@ -46,6 +56,7 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
     setCapturing(true);
     const prompt = await captureInitiatingPrompt(item.appSessionId);
     setCapturing(false);
+    if (prompt !== null && !prompt.editable) return setNotEditable(true); // UX wave U5a: rows can change between the render and the click
     answer('edit_prompt', 'Edit prompt', () => {
       if (prompt) startInlineEdit(item.appSessionId, prompt, 'edit');
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });
@@ -62,9 +73,11 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
         <CardButton disabled={busy} onClick={cancel} className="mr-auto">
           Cancel
         </CardButton>
-        <CardButton disabled={busy} onClick={() => void editPrompt()}>
-          Edit prompt
-        </CardButton>
+        {offersEdit && (
+          <CardButton disabled={busy} onClick={() => void editPrompt()}>
+            Edit prompt
+          </CardButton>
+        )}
         <CardButton tone="primary" disabled={busy} onClick={retry}>
           Retry with {payload.fallbackModel}
         </CardButton>

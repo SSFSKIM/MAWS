@@ -2,7 +2,7 @@
 // the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
+import { anchoredMessage, readAnchoredMessage } from '@shared/anchor/message';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -646,7 +646,7 @@ describe('an anchored bubble edited in place (scale-review C scalpel-2#1)', () =
     expect(await sendInlineEdit(client, A)).toBe('sent');
     const { content } = sends()[0] as { content: string };
     expect(content).toBe(anchoredMessage({ anchor: ANCHOR, text: 'Why so narrow?', destination: 'thread', screenshot: false }));
-    expect(parseAnchoredText(content)).toEqual({ anchor: ANCHOR, text: 'Why so narrow?', destination: 'thread' });
+    expect(readAnchoredMessage(content)).toEqual({ comments: [{ anchor: ANCHOR, text: 'Why so narrow?', screenshot: false }], destination: 'thread' });
     expect(userTextOf(content)).toMatchObject({ anchor: ANCHOR, text: 'Why so narrow?' });
   });
 

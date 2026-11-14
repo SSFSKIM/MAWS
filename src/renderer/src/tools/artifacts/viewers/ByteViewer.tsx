@@ -290,7 +290,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
         )}
         {connectors && connectorSheet && visible && <ArtifactConnectorsSheet tab={connectors} artifact={row ?? null} />}
         {kind === 'html' && (
-          <CommentCardHost hostId={hostId} host="artifact-page" mode={scope.surface === 'panel' ? 'panel' : 'tab'} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} />
+          <CommentCardHost hostId={hostId} host="artifact-page" mode={scope.surface === 'panel' ? 'panel' : 'tab'} layout="anchored" accepts={accepts} frame={cardFrame} visible={visible} restoreFocus={restoreFocus} subject={artifactId} /* UX wave U5a: the page's pass */ />
         )}
       </div>
     </div>

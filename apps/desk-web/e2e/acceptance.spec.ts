@@ -331,7 +331,7 @@ for (const ended of [false, true]) {
   });
 }
 
-test("G1: a send stays at the tail until its own framed row: delivered before its row, two identical sends each taking their own, an earlier typed prompt never taken, one refused after a delay, one whose row never comes before the session ends; a framed row draws without its frame line, a peer's with who sent it", async ({ page, hub }) => {
+test("G1: a send stays at the tail until its own framed row: delivered before its row, two identical sends each taking their own, an earlier typed prompt never taken, one refused after a delay, one whose row never comes before the session ends; a framed row draws without its frame line, a peer's as a message line naming who sent it", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   const idle = fm.recording.steps.findIndex((s, i) => i > 0 && s.k === 'presence' && s.at > 18_000 && (s.record as { status?: string } | null)?.status === 'idle');
   fm.step(idle + 1);
@@ -375,12 +375,15 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   await expect(view).not.toContainText('[sminos chat');
   await expect(bubbles('continue').filter({ hasText: 'From ' })).toHaveCount(0);
 
-  // A peer's send, delivered as its frame: drawn without the frame line, labelled with who sent it.
+  // A peer's send, delivered as its frame: a message line naming who sent it, never the owner's bubble (UX wave U3,
+  // O-41: no longer the bubble opening "From fakepeer"), without the frame line.
   land(userRow('[sminos chat MAWS 5e0c1f2a:2 from fakepeer → @you]\nI read recorded.txt: blue, as you chose.', BRIDGE));
-  const peer = bubbles('I read recorded.txt: blue, as you chose.');
+  const peer = view.locator('[data-kind="agent_message"]').filter({ hasText: 'I read recorded.txt: blue, as you chose.' });
   await expect(peer).toHaveCount(1);
+  await expect(peer).toContainText('Message from @fakepeer: I read recorded.txt: blue, as you chose.');
   await expect(peer).not.toContainText('[sminos');
-  await expect(peer.locator('em').first()).toHaveText('From fakepeer');
+  await expect(bubbles('I read recorded.txt: blue, as you chose.')).toHaveCount(0);
+  await expect(view.getByText('From fakepeer')).toHaveCount(0);
 
   // A peer's send through sminos's inbox, queued into the running turn (the engine's `queued_command`, its prompt the
   // bare envelope, under its own `source_uuid`): a message between agents, as MAWS draws one, naming its sender, its
@@ -389,7 +392,7 @@ test("G1: a send stays at the tail until its own framed row: delivered before it
   const result = { type: 'user', uuid: '5e55a11d-0000-4000-8000-0000000000c2', parentUuid: call.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_queued1', content: 'notes.md', is_error: false }] }, toolUseResult: { stdout: 'notes.md', stderr: '', interrupted: false, isImage: false } };
   const INBOX = { kind: 'peer', from: 'unknown', verifiedPeerPid: 4242, name: 'fakepeer' };
   const envelope = (body: string) => `<cross-session-message from-name="fakepeer">\n${body}\n</cross-session-message>`;
-  const reply = '[To reply, run in Bash: /Users/new/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos say "@MAWS/5e0c1f2a <your reply>"]';
+  const reply = '[To reply, run in Bash: /opt/fakehome/.claude/plugins/cache/doperpowers/doperpowers/7.175.0/skills/sminos/scripts/sminos say "@MAWS/5e0c1f2a <your reply>"]';
   const queuedDelivery = { type: 'attachment', uuid: '5e55a11d-0000-4000-8000-0000000000c3', parentUuid: result.uuid, isSidechain: false, timestamp: new Date().toISOString(), sessionId: fm.session, attachment: { type: 'queued_command', prompt: envelope(`[sminos chat MAWS 5e0c1f2a:3 from fakepeer → @you]\nPing me when the count is done.\n${reply}`), source_uuid: '5e55a11d-0000-4000-8000-0000000000c4', commandMode: 'prompt', origin: INBOX, isMeta: true } };
   for (const row of [call, result, queuedDelivery]) land(row);
   const peerMessage = view.locator('[data-kind="agent_message"]').filter({ hasText: 'Ping me when the count is done.' });

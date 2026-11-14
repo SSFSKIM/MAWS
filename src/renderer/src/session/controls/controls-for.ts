@@ -24,7 +24,7 @@ import { laneAStateOf, useLaneACatalog, useLaneAState } from '../../stores/lane-
 import { isRemoteLaneB, remoteLaneBStateOf, useIsRemoteLaneB, useRemoteLaneBState } from '../../lane-b/remote-session'; // P5 O7 M2
 import { useSessions } from '../../stores/sessions';
 import { closedWords, noteOwnPrompt, noteOwnQueued, readerGradeOf, useReaderGrade, useWhomToAsk, whomToAsk } from '../../sessions/share/reader';
-import { laneAControls } from './lane-a';
+import { FILES_MAX, LANE_A_WORDS, laneAControls } from './lane-a';
 import { laneBControls, type LaneBFrame, type LaneBInputs } from './lane-b';
 import type { Capability, ControlResult, SessionControls } from './types';
 
@@ -81,6 +81,17 @@ function portFor(record: SessionRecord | null, laneA: LaneAState | null, inputs:
 export const drivenByBridge = (appSessionId: AppSessionId): boolean =>
   (heldElsewhere(useSessions.getState().records.get(appSessionId) ?? null) && laneAStateOf(appSessionId)?.bridge === 'live') ||
   (!useSessions.getState().records.has(appSessionId) && isRemoteLaneA(appSessionId));
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 9): how many screenshots one
+// message to the session can carry, with the sentence its composer says for the rest; null when the route sets no count
+// (a session MAWS runs: a size it refuses comes back as the send's refusal). A session driven through its bridge takes the
+// bridge's four files while its `media` control is open, and none when it is closed (another machine's, whose words
+// name why).
+export function screenshotRoom(appSessionId: AppSessionId, controls: SessionControls | null = sessionControls(appSessionId)): { max: number; reason: string } | null {
+  if (!drivenByBridge(appSessionId)) return null;
+  const media = controls?.capability('media') ?? { available: false as const, reason: LANE_A_WORDS.noBridge };
+  return media.available ? { max: FILES_MAX, reason: LANE_A_WORDS.tooManyFiles } : { max: 0, reason: media.reason };
+}
 
 // The session's port as the stores have it now, for a caller outside a component (a store, a card's continuation).
 export function sessionControls(appSessionId: AppSessionId, client: MawsBridge = ipc): SessionControls | null {

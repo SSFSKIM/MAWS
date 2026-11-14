@@ -180,6 +180,19 @@ const isRecordArgs =
 /** `record.policy`'s input: none, or exactly the one session it names. */
 export const isPolicyInput = (input: unknown): boolean => input === null || input === undefined || (isFields(input, ['session']) && (input.session === undefined || isRecordId(input.session)));
 const recordAct = (change: Readonly<Record<string, (value: unknown) => boolean>>): OfferRow => ({ kind: 'act', executor: 'sminos', target: 'record', grade: 'manage', accepts: isRecordArgs(change), sminos: 'record' });
+/**
+ * The UX wave (U9, UC-7.4; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §1): `session.update`
+ * from another machine is an unarchive alone, its patch exactly `{archived: false}` (the services' handler checks it
+ * again, src/services/index/register.ts); and the archived sessions' read is exactly `{includeArchived: true}`.
+ */
+const isUnarchive = (input: unknown): boolean => isFields(input, ['appSessionId', 'patch']) && isFields(input.patch, ['archived']) && Object.keys(input.patch as object).length === 1 && (input.patch as { archived?: unknown }).archived === false;
+const isArchivedList = (input: unknown): boolean => isFields(input, ['includeArchived']) && (input as { includeArchived?: unknown }).includeArchived === true;
+/**
+ * The UX wave (U9, M2): a fork from another machine is in place alone (a new worktree's sheet checks names and branches
+ * on the asking Mac); its `rewindTo` and first message are as the schema has them.
+ */
+const isInPlaceFork = (input: unknown): boolean => isFields(input, ['appSessionId', 'target', 'message', 'rewindTo']) && isFields(input.target, ['kind']) && (input.target as { kind?: unknown }).kind === 'inPlace';
+
 /** P5 O8 M4b: the call that reads the machine's grant ledger back (grants.ts), and its input: none. */
 export const ENDPOINT_GRANTS = 'endpoint.grants';
 export const isGrantsInput = (input: unknown): boolean => input === null || input === undefined;
@@ -216,7 +229,7 @@ export const OFFERS: Offers = {
     // P5 O8 M6a (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, Interfaces §P): the caller's own reading and
     // draft, kept per member on the machine (readers.ts): pinned, last seen and unread (`list`, answered as `ReaderState`,
     // never the record), and the composer's draft, read at `view` and written at `converse` under the services' ledger.
-    // `session.update` (the record's `title` and `archived`, the owners') is not offered.
+    // `session.update` (the record's `title` and `archived`, the owners') is offered as an unarchive alone (below).
     'session.reader.update': laneBMachine('call'),
     'session.drafts.get': laneBMachine('call'),
     'session.drafts.set': laneBMachine('act'),
@@ -465,6 +478,23 @@ export const OFFERS: Offers = {
     'session.promptHistory': laneB('call'),
     'session.observedFacts': laneBMachine('call'),
     'session.recentTurns': laneBMachine('call'),
+    // The UX wave (U9, UC-7.4), behind `rl2.session-acts` (capabilities.ts): a session MAWS runs archived (which ends its
+    // process), unarchived (`session.update` narrowed to that patch, graded `manage` by its rule, by-effect.ts) and renamed,
+    // each `manage`, through the services' ledger with no launch context, so they work with no tab open; the archived
+    // sessions' read, admitted at `list` and cut to the records the caller holds `manage` on (calls.ts); an attention
+    // item dismissed (`converse`); and, on the session's live launch, a waiting message taken back and a pane's answer
+    // (`converse`). The services' handlers run them as for this machine's own window.
+    'session.archive': laneBMachine('act'),
+    'session.update': { ...laneBMachine('act'), accepts: isUnarchive },
+    'session.rename': laneBMachine('act'),
+    'session.list': { kind: 'call', executor: 'machine', target: 'each-session', grade: 'list', accepts: isArchivedList },
+    'attention.acknowledge': laneBMachine('act'),
+    'session.steer.cancel': laneB('act'),
+    'maws.pane.answer': laneB('act'),
+    // M2: a fork in place (graded `spawn`, a right on the machine), the machine's owners' alone, who must also view the
+    // source (authorize.ts): a fork names no starter, so it is the owners'. Composed by the services under the operation,
+    // answered at its setup's `launching` and held there to the machine's ceiling on the record it copies its mode from.
+    'session.fork': { kind: 'act', executor: 'machine', target: 'appSessionId', owners: true, accepts: isInPlaceFork },
   },
   subscriptions: ['A', 'B'],
   // P5 O7 M5a: the machine's `artifacts` feed (artifacts-feed.ts). P5 O17 M9a: a session's `browser.inventory`. P5 O8 M7b:

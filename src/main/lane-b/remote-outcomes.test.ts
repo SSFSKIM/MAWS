@@ -19,18 +19,25 @@ describe('outcomeAsResult', () => {
   });
 
   it('passes a failure’s IPC code and words through, and any other code as `internal` with its refusal', () => {
-    expect(outcomeAsResult('session.send', 'mini', { state: 'failed', error: { code: 'invalid_input', message: 'too long' } })).toEqual({ ok: false, error: { code: 'invalid_input', message: 'too long' } });
+    expect(outcomeAsResult('session.setModel', 'mini', { state: 'failed', error: { code: 'invalid_input', message: 'too long' } })).toEqual({ ok: false, error: { code: 'invalid_input', message: 'too long' } });
+    // U9 (UC-7.5): an act with words says "Not <done>: <the machine's own sentence>"
+    expect(outcomeAsResult('session.send', 'mini', { state: 'failed', error: { code: 'invalid_input', message: 'too long' } })).toEqual({ ok: false, error: { code: 'invalid_input', message: 'Not sent: too long' } });
     expect(outcomeAsResult('session.send', 'mini', { state: 'failed', error: { code: 'refused-delivery', message: 'the turn ended' } })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'refused-delivery' } } });
   });
 
   it('words A4’s offline, the image bound, not-sent and a lost answer; maps every other refusal by §F', () => {
-    expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'offline' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
+    // U9 (UC-7.5): the code rides in `issues.refusal`, offline's and not-sent's too
+    expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'offline' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'offline' } } });
+    expect(outcomeAsResult('session.setModel', 'mini', { state: 'refused', reason: 'offline' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline' } });
     expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'too-large' })).toEqual({ ok: false, error: { code: 'invalid_input', message: 'an image larger than 2.5 MiB goes to a session on another machine as a file' } });
-    expect(outcomeAsResult('session.send', 'mini', { state: 'not-sent' })).toMatchObject({ ok: false, error: { code: 'host_unavailable', message: expect.stringMatching(/^Not sent/) } });
+    expect(outcomeAsResult('session.send', 'mini', { state: 'not-sent' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini is offline', issues: { refusal: 'not-sent' } } });
+    expect(outcomeAsResult('session.setModel', 'mini', { state: 'not-sent' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent: mini never received it' } });
     expect(outcomeAsResult('session.send', 'mini', { state: 'unknown', reason: 'expired' })).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the message but its answer was lost; check the transcript' } });
     expect(outcomeAsResult('session.setModel', 'mini', { state: 'unknown', reason: 'closed' })).toMatchObject({ ok: false, error: { code: 'timeout', message: 'mini took the request but its answer was lost' } });
     expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'unavailable' })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
-    expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'grade' })).toEqual({ ok: false, error: { code: 'internal', message: 'session.send: refused grade by machine mini', issues: { refusal: 'grade' } } });
+    expect(outcomeAsResult('session.setModel', 'mini', { state: 'refused', reason: 'grade' })).toEqual({ ok: false, error: { code: 'internal', message: 'session.setModel: refused grade by machine mini', issues: { refusal: 'grade' } } });
+    expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'grade' })).toEqual({ ok: false, error: { code: 'internal', message: 'Not sent: you can read this session but not act on it', issues: { refusal: 'grade' } } });
+    expect(outcomeAsResult('session.interrupt', 'mini', { state: 'refused', reason: 'unavailable' })).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not stopped: mini is busy; try again in a moment', issues: { refusal: 'unavailable' } } });
     expect(outcomeAsResult('session.send', 'mini', { state: 'refused', reason: 'step-up-cancelled' })).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'step-up-cancelled' } } });
   });
 

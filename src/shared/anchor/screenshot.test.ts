@@ -1,5 +1,6 @@
 // The one path main opens for an anchored comment (E3 execution document, Design §9): a screenshot under an allowed
-// root, a regular file of at most 5 MiB, typed by its magic bytes.
+// root, a regular file of at most 5 MiB, typed by its magic bytes. UX wave U5a: moved here from src/services/side/ with
+// the reader, unchanged.
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';

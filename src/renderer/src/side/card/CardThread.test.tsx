@@ -118,7 +118,7 @@ const FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'k1', showVers
 function mount(frame: CardFrame = FRAME) {
   return render(
     <div className="relative">
-      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
+      <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
     </div>,
   );
 }

@@ -478,3 +478,25 @@ describe('an export’s file name', () => {
     expect(artifactExportName(3, 'pptx', '0b0e0c3a-8f3e-4c1d-9b7a-2f6d5e4c3b2a')).not.toBe(artifactExportName(3, 'pptx'));
   });
 });
+
+// UX wave U5 (l6-artifacts-20, A18; the U5a execution document's Interfaces §I and R6): `artifact_edit`'s `reply`, the
+// agent's own words posted into the thread it answers, and the one sentence that asks for it, placed as probe P4 ran it
+describe('artifact_edit’s reply', () => {
+  const edit = { artifact: 'brief', baseRevision: 3, ops: [{ op: 'delete', id: 'p1' }], answering: 't1' };
+
+  it('takes a reply of 1 to 2,000 characters and refuses an empty or a longer one', () => {
+    const schema = MAWS_TOOLS.artifact_edit.input;
+    for (const reply of ['x', 'y'.repeat(2000)]) expect(schema.safeParse({ ...edit, reply }).success, String(reply.length)).toBe(true);
+    for (const reply of ['', 'y'.repeat(2001)]) expect(schema.safeParse({ ...edit, reply }).success, String(reply.length)).toBe(false);
+    expect(schema.safeParse(edit).success).toBe(true); // an older call, without one
+  });
+
+  it('asks for it in one sentence right after the answering sentence, every other word as it was', () => {
+    const answering = 'answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it).';
+    const sentence = 'With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread.';
+    const { description } = MAWS_TOOLS.artifact_edit;
+    expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
+    expect(description.split(sentence)).toHaveLength(2);
+    expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
+  });
+});

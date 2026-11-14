@@ -6,6 +6,7 @@
 // which run in `mawsd` alone; of the library it takes only the command budgets its `machine` host applies (lint rule B)
 import { COMMAND_BUDGETS_MS } from '../services/command-budgets';
 import type { AppSessionId } from '@shared/graph/ids';
+import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U5: an export's fallback folder
 import type { CommandInput, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry'; // P5 O3-D M1: the bus's register reads each name's owner
 import { statSync } from 'node:fs'; // E11 F2b: the bundle on disk
@@ -37,6 +38,7 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { refuseUnservedSideThreads, SIDE_THREAD_COMMANDS } from './machines/side-thread-peer'; // UX wave U5a, Decision Log 52
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
 import { createDevOrgSession } from './org/dev-session'; // P5 O7 M1
@@ -160,6 +162,7 @@ import { legacySealer } from './connectors/legacy-custody';
 import { electronWindowShown } from './client/window-shown';
 import { registerDeliverySend } from './delivery/send';
 import { exportHeldFor } from './delivery/e2e-hold';
+import { registerCommentContent } from './side/comment-content'; // UX wave U5a
 // P5 O4 M2 end
 
 // P5 O2 landing: a test or harness launch never runs on the default profile, whose daemon and LaunchAgent are the
@@ -546,6 +549,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // panel scalpel-3#2: an act the attached daemon predates is refused `not-offered`, never sent to have its `into`
   // passed by as an unknown field (./machines/project-acts-peer.ts)
   beforeCommand(PROJECT_ACT_COMMANDS, refuseUnservedProjectActs(() => hosts.peer('machine'), localName));
+  // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
+  // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
+  beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -801,6 +807,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     return page ? captureRegion(input, page, BrowserWindow.fromWebContents(page)) : { image: null }; // a page gone is a window closed meanwhile
   });
   registerMainHandler('layout.saveTextFile', (input, { client }) => saveTextFile(input, client, { downloads: app.getPath('downloads'), port: clientPort }));
+  registerCommentContent(registerMainHandler, app.getPath('userData')); // UX wave U5a: a ticked comment's content, its screenshots under <userData>
   // The widget e2e's engine stand-in: under MAWS_WIDGET_BACKEND=fixtures in launch mode scenario only (M2).
   const stopWidgetBackend = installWidgetBackend({ env: process.env, packaged: app.isPackaged, appRoot: process.cwd(), intercept: interceptCommand, emit, fail: (error) => new CommandFailure(error) });
   if (stopWidgetBackend) shutdown.add('widget backend', stopWidgetBackend);
@@ -975,6 +982,13 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     env: process.env,
     local, // P5 O7 M5a: Save As of another machine's artifact reads it over that machine's link
     remote: (machine) => remoteLaneB.artifacts.files(machine),
+    // UX wave U5 (l6-artifacts-20): the dialog opens in the last export's folder, kept under main's layout key; with
+    // none, in the artifact's Space's linked folder or the working folder of the session that made it
+    layout,
+    sessionFolder: (appSessionId) => {
+      const record = view.record(appSessionId);
+      return record ? workingFolder(record).path : null;
+    },
   });
   // P3-E start (E2 M3; E's Decision Log 18): a dashboard source sheet's Download, the artifact's own asset saved through
   // main's dialog under Downloads

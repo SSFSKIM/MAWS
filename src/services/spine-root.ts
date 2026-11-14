@@ -152,6 +152,10 @@ export interface SpineDeps {
   // the project registry (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §H): what the index asks of
   // the machine's endpoint (mawsd: its endpoint's in process); none, `NO_REGISTRY`: no stored statement is made
   registry?: RegistrySeam;
+  // the UX wave (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M2): whether the machine's ceiling refuses
+  // a session started from another machine in `mode` (mawsd: its endpoint's policy as it stands when asked); a fork from
+  // another machine is held to it where it is allocated. None (main's root, which no other machine reaches): every mode
+  aboveCeiling?(mode: string): boolean;
 }
 
 export interface SpineRoot {
@@ -411,6 +415,7 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       ownerChannel: ownerChannel.launches, // P2-C
       acquisitions: sessions.model, // P2-A (X16): the digest's availability follows each acquisition
       systemRoot: data.systemRoot, // P5 O7 M9: the machine route's managed settings (the tests' seam)
+      ...(deps.aboveCeiling === undefined ? {} : { aboveCeiling: deps.aboveCeiling }), // the UX wave (U9, M2)
     });
     const unintercept = registerSessionServiceHandlers(service, bus, sessions.mode); // P5 O3-D M4: the rewind repair's intercepts in launch mode index only
     registerSpawn(bus, { sessions: service, projects: () => index.projects.list({ includeHidden: true }) }); // P5 O7 M4: a spawn from another device
@@ -530,7 +535,20 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // their acts are claimable by machine.op above, and a release or a yield waits for scm's runs in flight (D14)
   // M3 (Interfaces §F): files.upload's root record, a spine file under the lock beside the intents, none in a refused run
   const uploadRoots = spineRuns ? uploadRootsOf(join(sessionsDir, 'uploads.json'), { log: (line) => console.warn(`[files] ${line}`) }) : null;
-  const checkouts = startCheckouts({ view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots });
+  const checkouts = startCheckouts({
+    view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots,
+    // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, decision 13): files' admission by name
+    // reads the session's transcript: the path the index keeps when it is the record's engine session's file (not the
+    // one before a /clear), else where the engine writes it; none while the index is not read (launch mode scenario, a
+    // refused run) or for a record with no engine session id
+    transcript: async (appId) => {
+      if (spineView.view.unavailable() !== null) return null;
+      const record = index.sessions.get(appId);
+      if (!record?.engineSessionId) return null;
+      const known = index.sessions.summaryOf(appId)?.transcriptPath;
+      return known?.endsWith(`/${record.engineSessionId}.jsonl`) ? known : transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
+    },
+  });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);
 

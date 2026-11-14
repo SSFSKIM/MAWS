@@ -179,7 +179,7 @@ describe('comments on a deck’s elements (D9)', () => {
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
     act(() => session.select(['title']));
     fireEvent.click(within(toolbar).getByRole('button', { name: 'Add comment' }));
-    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments (2 open)' }));
+    fireEvent.click(within(toolbar).getByRole('button', { name: 'Comments' })); // UX wave U5a (M7; A3): two threads nothing was said in count none
     await settle();
     const rail = screen.getByRole('complementary', { name: 'Comments' });
     const [body, title] = listThreads(doc).map((t) => t.id);

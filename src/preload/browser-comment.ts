@@ -27,9 +27,14 @@
 // shows, through every scrolling ancestor that clips it and the viewport (re-read at each scroll and resize). When the
 // viewport shrinks, what showed before is brought back by the least scroll: each clipping ancestor, nearest first (an
 // app-style page scrolls a viewport-sized pane, not its root), then the page, never the element's top above what clips
-// it; nothing when it still shows or did not show. Scrolls are vertical, so the card's caret still points at it. The
-// pick stays a subject for its card's life: the strip holds the page's bottom while the card is open, so the viewport
-// back at its height at the pick means the card closed, and the pick is forgotten.
+// it; nothing when it still shows or did not show. Scrolls are vertical, so the card's caret still points at it.
+//
+// UX wave U5a (X-216; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §G): the page is told
+// when its card opens and closes (main's `card` message, from the window's card store and the dock's `onClosed`), and
+// nothing is guessed from the viewport's height any more. A pick counts at once, since the strip's growth can reach the
+// page before the word that its card opened, for PICK_GRACE_MS (a pick that opens no card: the sheet); a card that
+// opened holds the element its comment's css finds (the pick's own subject when it is that element, so an area keeps its
+// marquee) until the card closes.
 //
 // The DOM is typed structurally (`CommentPage`), as `describe.ts`'s is: src/preload compiles under the Node program,
 // which has no DOM lib (Decision Log 27(l)).
@@ -39,6 +44,7 @@ import {
   COMMENT_WORDS,
   DRAG_THRESHOLD_PX,
   elementLabel,
+  PICK_GRACE_MS,
   trimDescription,
   type PickRect,
   type PreloadMessage,
@@ -82,6 +88,7 @@ interface PageDocument extends DomDocument {
   readonly scrollingElement: PageElement | null; // the viewport's scroller: the root in standards mode, the body in quirks
   readonly body: PageElement | null;
   createElement(tagName: string): OwnNode;
+  querySelector(selectors: string): PageElement | null; // throws on a string that is no selector
   elementsFromPoint(x: number, y: number): ArrayLike<PageElement>;
 }
 interface PageEvent {
@@ -185,10 +192,12 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
   let hinted = false;
   let pointer: Point | null = null;
   let press: Press | null = null;
-  // P2-F L147: the latest pick (its rect in today's viewport, null once it left the page; the element its clipping
-  // ancestors start from; the viewport's height at the pick; how far down from its top it showed), and the viewport's height
-  type Subject = { rect(): PickRect | null; from: PageElement | null; height: number; shown: number | null };
+  // P2-F L147: the latest pick (the element picked, or the one holding an area; its rect in today's viewport, null once
+  // it left the page; the element its clipping ancestors start from; how far down from its top it showed), and the
+  // viewport's height. UX wave U5a (§G): a pick's grace runs until main says its card opened (or closed).
+  type Subject = { element: PageElement; rect(): PickRect | null; from: PageElement | null; shown: number | null };
   let subject: Subject | null = null;
+  let grace: ReturnType<typeof setTimeout> | null = null;
   let viewportHeight = page.innerHeight;
 
   const set = (node: OwnNode, styles: Record<string, string>) => {
@@ -310,7 +319,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
       page.requestAnimationFrame(() => {
         if (mine !== generation) return; // disarmed or re-armed meanwhile: main would drop it
         const rect = kept === null ? remeasured() : { ...kept, x: kept.x - page.scrollX, y: kept.y - page.scrollY };
-        keep(element, kept === null ? null : rect);
+        keepPick(element, kept === null ? null : rect);
         sendPicked(report, described, rect);
       }),
     );
@@ -460,8 +469,41 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
             const now = element.getBoundingClientRect();
             return { ...area, x: area.x + now.left - at.box.x - (element.scrollLeft - at.scrollLeft), y: area.y + now.top - at.box.y - (element.scrollTop - at.scrollTop) };
           };
-    subject = { rect, from: area === null ? element.parentElement : element, height: page.innerHeight, shown: null };
+    subject = { element, rect, from: area === null ? element.parentElement : element, shown: null };
     subject.shown = shownOf(subject);
+  };
+  // UX wave U5a (§G): a pick is the subject at once, for PICK_GRACE_MS unless main says its card opened meanwhile (which
+  // ends the grace: the card holds the subject from then on).
+  const stopGrace = () => {
+    if (grace !== null) clearTimeout(grace);
+    grace = null;
+  };
+  const keepPick = (element: PageElement, area: PickRect | null) => {
+    keep(element, area);
+    stopGrace();
+    grace = setTimeout(() => {
+      grace = null;
+      subject = null;
+    }, PICK_GRACE_MS);
+  };
+  // The card opened on a comment: its element, found by the comment's css, is the subject until the card closes. A
+  // selector that finds nothing, or throws, leaves none.
+  const find = (css: string): PageElement | null => {
+    try {
+      return doc.querySelector(css);
+    } catch {
+      return null;
+    }
+  };
+  const cardOpened = (css: string) => {
+    stopGrace();
+    const found = find(css);
+    if (found === null) subject = null;
+    else if (subject?.element !== found) keep(found, null);
+  };
+  const cardClosed = () => {
+    stopGrace();
+    subject = null;
   };
   // What showed of the subject (`shown` down from its top) back in view by the least scroll: each clipping ancestor
   // nearest first, then the page, each never past the subject's top; a scroller that moves less passes the rest on.
@@ -484,10 +526,6 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const before = viewportHeight;
     viewportHeight = page.innerHeight;
     if (subject === null) return;
-    if (viewportHeight > before && viewportHeight >= subject.height) {
-      subject = null; // the strip gave the page its bottom back: the card closed
-      return;
-    }
     if (viewportHeight < before && subject.shown !== null) reveal(subject, subject.shown);
     subject.shown = shownOf(subject);
   };
@@ -508,7 +546,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     const element = hit(x, y);
     const described = describeOrRefuse(element, at, requestId);
     if (described === null || element === null) return;
-    keep(element, null);
+    keepPick(element, null);
     sendPicked({ epoch: at, requestId, mode: 'click' }, described, rectOf(element.getBoundingClientRect()));
   };
 
@@ -518,6 +556,8 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
     if (m.type === 'arm' && isNumber(m.epoch)) arm(m.epoch);
     else if (m.type === 'disarm') teardown();
     else if (m.type === 'pickAt' && isNumber(m.x) && isNumber(m.y) && isNumber(m.epoch) && typeof m.requestId === 'string') pickAt(m.x, m.y, m.requestId, m.epoch);
+    else if (m.type === 'card' && m.open === true && typeof m.css === 'string') cardOpened(m.css);
+    else if (m.type === 'card' && m.open === false) cardClosed();
   };
 
   for (const type of TAKEN) page.addEventListener(type, onPointer, CAPTURE);
@@ -529,6 +569,7 @@ export function installCommentMode(ipc: PreloadIpc, page: CommentPage = globalTh
 
   return () => {
     teardown();
+    stopGrace();
     for (const type of TAKEN) page.removeEventListener(type, onPointer, CAPTURE);
     page.removeEventListener('scroll', onLayout, CAPTURE);
     page.removeEventListener('resize', onLayout, CAPTURE);

@@ -13,7 +13,7 @@
 // wake (P5 O15 M2b) reaches `wakeAll` from the wake source there.
 import { networkInterfaces, type NetworkInterfaceInfo } from 'node:os';
 import { join } from 'node:path';
-import { machineKeys, verifyMachineCert } from '../../../../apps/org-protocol/src/index.ts';
+import { machineKeys, machineOwners, ownerMembers, verifyMachineCert } from '../../../../apps/org-protocol/src/index.ts';
 import type { MachineRef } from '@shared/machine/ref';
 import type { OrgSession, SignedIn } from '../../org/session';
 import type { MachineLink } from '../manager';
@@ -21,9 +21,15 @@ import { createEndpointRecords, ENDPOINT_RECORDS_FILE } from './endpoint-records
 import { createRemoteLink, nextCertExpiry, timeoutAt, type ProbeReason, type RemoteLink, type RemoteLinkDeps } from './link';
 import { REMOTE_TIMING } from './timing';
 
+/**
+ * A machine of the roster. `owner` (the UX wave, U9): the signed-in member is one of its owners in the held state, by the
+ * reading `signsUnasked` makes (src/main/device/step-up.ts); absent for a machine the state places with no owners.
+ */
+export type RosterMachine = { ref: MachineRef; name: string; owner?: boolean };
+
 export interface RemoteSource {
   /** The roster: the head's machines and live certificates, local and contested refs left out. */
-  machines(): readonly { ref: MachineRef; name: string }[];
+  machines(): readonly RosterMachine[];
   onChanged(listener: () => void): () => void;
   /** A RemoteLink; the source keeps it for `link`. */
   connect(machine: { ref: MachineRef; name: string }): MachineLink;
@@ -42,7 +48,7 @@ export type RemoteSourceDeps = {
   linkDeps?: Partial<RemoteLinkDeps>;
 };
 
-type Roster = { ref: MachineRef; name: string }[];
+type Roster = RosterMachine[];
 
 /** The machines a handshake can succeed with under `signedIn`'s view (see the header). */
 export async function rosterOf(signedIn: SignedIn | null, local: MachineRef, now: Date): Promise<Roster> {
@@ -66,7 +72,8 @@ export async function rosterOf(signedIn: SignedIn | null, local: MachineRef, now
         }
       }
     }
-    roster.push({ ref: ref as MachineRef, name: name ?? ref });
+    const owners = await machineOwners(head, ref, certificates, now);
+    roster.push({ ref: ref as MachineRef, name: name ?? ref, ...(owners === null ? {} : { owner: ownerMembers(head, owners).includes(signedIn.identity.member) }) });
   }
   return roster.sort((a, b) => a.ref.localeCompare(b.ref));
 }
@@ -131,7 +138,7 @@ export function createRemoteSource(deps: RemoteSourceDeps): RemoteSource & {
       } catch (error) {
         return log(`the roster could not be read: ${(error as Error).message}`);
       }
-      const same = next.length === roster.length && next.every((m, i) => m.ref === roster[i].ref && m.name === roster[i].name);
+      const same = next.length === roster.length && next.every((m, i) => m.ref === roster[i].ref && m.name === roster[i].name && m.owner === roster[i].owner);
       if (same) return;
       roster = next;
       for (const machine of next) links.get(machine.ref)?.rename(machine.name);

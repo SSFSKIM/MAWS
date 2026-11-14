@@ -1,19 +1,24 @@
 // Desktop surface inputs over X3. Draw-time adapters do not mutate transcript history, folds, or classifications.
 // The source turn retains the original X1 tool input and output; the compact cell detail alone is not that contract.
+import { carriedOf } from '@shared/engine/arrival-schema';
+import { handbackReport, messageText, parsePeerMessage, peerLabel } from '@shared/engine/peer-envelope';
 import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@shared/engine/surface-rows';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
 import { cellOf, type ToolRecord, type TurnContext } from '../model/cells';
+import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
-import type { Cell, Row } from '../model/rows';
+import type { Cell, CellId, Row, RowId } from '../model/rows';
 import { userTextOf } from '../model/user-text';
 
 export interface RowInput<C extends TranscriptSite> { instanceId: string; props: TranscriptProps[C] }
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const object = (v: unknown): Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v) ? v as Record<string, unknown> : {};
 
-export function userInput(row: RowOf<'user'>, turn: TurnState | undefined): RowInput<'UserMessage'> | null {
-  if (!turn || row.pending || row.dropped || !row.text.trim()) return null;
+// UX wave U3 (the U3a document, Interfaces F): every ask takes the tab's revealed jump target, which asks nothing and is
+// drawn by MAWS, so the row the reader was sent to reads as MAWS draws it whatever a mod does to its neighbours.
+export function userInput(row: RowOf<'user'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'UserMessage'> | null {
+  if (!turn || row.pending || row.dropped || !row.text.trim() || row.id === revealed) return null;
   const event = turn.events.find((e) => e.kind === 'user.message' && (row.messageUuid ? e.messageUuid === row.messageUuid : `user:${e.id}` === row.id));
   if (event?.kind !== 'user.message' || event.isSynthetic) return null;
   const origin = event.origin;
@@ -23,8 +28,8 @@ export function userInput(row: RowOf<'user'>, turn: TurnState | undefined): RowI
   return { instanceId: row.messageUuid ?? row.id, props: { text: row.text, origin: { kind }, isExpanded: true } };
 }
 
-export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined): RowInput<'AssistantMessage'> | null {
-  if (!row.markdown.trim()) return null;
+export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AssistantMessage'> | null {
+  if (!row.markdown.trim() || row.id === revealed) return null;
   const identity = row.id.slice(row.id.indexOf(':') + 1);
   const api = identity.slice(0, identity.lastIndexOf(':'));
   const peers = [...(turn?.live.values() ?? [])].filter((b) => b.blockType === 'text' && b.apiMessageId === api);
@@ -62,8 +67,8 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
 const turnContext = (turn: TurnState): TurnContext => ({ closed: turn.state === 'closed', terminalReason: turn.ended?.terminalReason ?? null, lastAt: turn.events.at(-1)?.at ?? turn.startedAt });
 
 export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext }
-export function toolInputs(cell: Cell, turn: TurnState | undefined): ToolInput[] {
-  if (!turn || cell.toolUseId === null) return [];
+export function toolInputs(cell: Cell, turn: TurnState | undefined, revealed?: RowId | CellId): ToolInput[] {
+  if (!turn || cell.toolUseId === null || cell.id === revealed) return [];
   const records = toolRecords(turn);
   const all = [...records.values()];
   const at = all.findIndex((r) => r.use.toolUseId === cell.toolUseId);
@@ -73,14 +78,16 @@ export function toolInputs(cell: Cell, turn: TurnState | undefined): ToolInput[]
   const context = turnContext(turn);
   return all.slice(at, at + count).map((rec) => {
     const native = count === 1 ? cell : cellOf(rec, context, cell.expanded);
-    const output = rec.result ? (rec.result.isError ? rec.result.content : rec.result.structured ?? rec.result.content) : undefined;
-    return {
-      instanceId: rec.use.toolUseId, cell: native, record: rec, context,
-      props: { tool_use_id: rec.use.toolUseId, tool: rec.use.toolName, input: rec.use.input,
-        isRunning: native.status === 'running', isErrored: native.status === 'error' || native.status === 'denied',
-        isInterrupted: native.status === 'stopped' || object(output).interrupted === true, ...(output !== undefined && { output }) },
-    };
+    return { instanceId: rec.use.toolUseId, cell: native, record: rec, context, props: callProps(rec, native) };
   });
+}
+
+// A call's ToolUse props, read from its record and the status of its drawn cell.
+function callProps(rec: ToolRecord, native: Cell): TranscriptProps['ToolUse'] {
+  const output = rec.result ? (rec.result.isError ? rec.result.content : rec.result.structured ?? rec.result.content) : undefined;
+  return { tool_use_id: rec.use.toolUseId, tool: rec.use.toolName, input: rec.use.input,
+    isRunning: native.status === 'running', isErrored: native.status === 'error' || native.status === 'denied',
+    isInterrupted: native.status === 'stopped' || object(output).interrupted === true, ...(output !== undefined && { output }) };
 }
 
 // Render output is unknown JSON, not necessarily X1's content-block list.
@@ -165,8 +172,8 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: false } };
 }
 
-export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined): RowInput<'CommandOutput'> | null {
-  if (!row.text.trim()) return null;
+export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {
+  if (!row.text.trim() || row.id === revealed) return null;
   let command = ''; let args = '';
   if (state) {
     const events = [...state.turns.values()].flatMap((t) => t.events).concat(state.loose).sort((a, b) => a.at.localeCompare(b.at));
@@ -185,8 +192,181 @@ export function resultInput(input: ToolInput): RowInput<'ToolResult'> | null {
   return { instanceId: input.instanceId, props: { tool_use_id: input.props.tool_use_id, tool: input.props.tool, output: input.props.output, isErrored: input.props.isErrored } };
 }
 
-export function questionInput(row: RowOf<'question'>, turn: TurnState | undefined): RowInput<'AskUserQuestion'> {
+export function questionInput(row: RowOf<'question'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AskUserQuestion'> | null {
+  if (row.id === revealed) return null;
   const use = turn?.events.find((e) => e.kind === 'tool.use' && e.toolUseId === row.toolUseId);
   const metadata = object(object(use?.kind === 'tool.use' ? use.input : null).metadata);
   return { instanceId: row.toolUseId, props: { tool: 'AskUserQuestion', questions: engineQuestionsOf(row.questions), ...(typeof metadata.source === 'string' && { metadataSource: metadata.source }) } };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// UX wave U3, first landing (UC-3; docs/doperpowers/plans/2026-11-12-ux-wave-U3a-arrivals.md, M5, decisions 14 and 15):
+// the rows of what entered the session ask the engine's UserMessage site, and a message the agent sent asks ToolUse, as
+// the engine's own transcript does, so a mod folds or draws them as it does in the terminal. Read in the engine's bundle
+// (`cli.pretty.js` of 2.1.322: `useUserMessageSite` near line 93253 and its callers), its message renderer passes a
+// `user` message or a queued command through the site by the carrier's own text: `<cross-session-message>` (the inbox's
+// delivery, a peer's or the bridge's wake after an Esc: `UserCrossSessionMessage`, near line 291587), `<agent-message>`
+// under a subagent's origin (a subagent's message or hand-back: near line 929249), `<task-notification>` with a
+// `<summary>` (near lines 925119 and 925137), and any other text as a plain prompt under the message's own origin (near
+// line 925773). A meta row it never draws (the bridge's append, a scheduled fire's prompt: the fire is drawn from its
+// `system` row), nor a hook's added context (an attachment it draws as nothing, near line 926265). So a row asks where
+// its carrier event holds one of those three envelopes, with the props the engine gives there; a carrier with none asks
+// nothing: the host made it (a task's end told while idle; there is no text to give the site), or the engine draws it
+// as a plain prompt under an origin X1's event does not keep (the bridge's submitted row, a background session's prompt,
+// the bridge's wake and a plugin's answer as its prompt), which a session MAWS runs never receives (probe 3,
+// spikes/protocol-probe/findings-uxwave-u3-sminos.txt) and is the only kind of session whose surface is attached.
+
+type ArrivalRow = RowOf<'agent_message'> | RowOf<'notice'>;
+type UserMessageEvent = Extract<SessionEvent, { kind: 'user.message' }>;
+
+/**
+ * What the row's ask depends on beyond the turn: the tab's revealed jump target (which asks no site), whether its line is
+ * open, and the turn's rows as drawn (`turnRows`: after its fold), among whose notices a carrier's drawing owner is
+ * elected; absent, every notice of the carrier is drawn (an opened turn).
+ */
+export interface ArrivalAsk { revealed: RowId | CellId | undefined; expanded: boolean; drawn?: readonly Row[] }
+
+/** The UserMessage ask of a message line or a notice; null where it asks none. */
+export function arrivalInput(row: ArrivalRow, turn: TurnState | undefined, { revealed, expanded, drawn }: ArrivalAsk): RowInput<'UserMessage'> | null {
+  if (!turn || row.id === revealed) return null;
+  const carried = row.kind === 'notice' ? noticeCarrier(row, turn) : null;
+  if (carried !== null && drawingOwner(carried, revealed, drawn) !== row.id) return null; // another notice asks for the carrier
+  const carrier = row.kind === 'notice' ? carried?.carrier ?? null : messageCarrier(row, turn);
+  if (carrier === null) return null;
+  const props = engineUserProps(messageText(carrier.content), expanded, row.kind === 'agent_message' ? row : null);
+  return props === null ? null : { instanceId: carrier.messageUuid ?? row.id, props };
+}
+
+/** The ToolUse ask of a message the agent sent: its call's props, as a cell's call asks; null for any other message line. */
+export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined): RowInput<'ToolUse'> | null {
+  if (!turn || row.id === revealed || (row.peer !== undefined && row.peer.sender !== null)) return null;
+  const toolUseId = row.peer?.toolUseId ?? turn.events.find((e): e is Extract<SessionEvent, { kind: 'tool.use' }> => e.kind === 'tool.use' && rowId.agentMessage(e.id) === row.id)?.toolUseId;
+  const rec = toolUseId == null ? undefined : toolRecords(turn).get(toolUseId);
+  return rec === undefined ? null : { instanceId: rec.use.toolUseId, props: callProps(rec, cellOf(rec, turnContext(turn), false)) };
+}
+
+/**
+ * The ask a notice follows: the engine mounts one UserMessage site per carrier (its task renderer near line 925119), so of
+ * a carrier's notices the first drawn and not revealed asks, with its own line's open state, and draws the answer; each
+ * other one asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the
+ * revealed one, and for a notice whose carrier is its only notice. `drawn` as in ArrivalAsk.
+ */
+export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[]): string | null {
+  const carried = turn === undefined || row.id === revealed ? null : noticeCarrier(row, turn);
+  const asking = carried === null ? undefined : drawingOwner(carried, revealed, drawn);
+  return carried === null || asking === undefined || asking === row.id ? null : carried.carrier.messageUuid ?? asking;
+}
+
+// The carrier's drawing owner (the whole-branch review's finding 5): its first notice that the turn draws after its fold
+// and a jump did not reveal, so a drawn notice never follows an owner that is not mounted.
+function drawingOwner(carried: { ids: readonly RowId[] }, revealed: RowId | CellId | undefined, drawn: readonly Row[] | undefined): RowId | undefined {
+  const shown = drawn === undefined ? null : drawnIds(drawn);
+  return carried.ids.find((id) => id !== revealed && (shown === null || shown.has(id)));
+}
+const drawnIdsMemo = new WeakMap<readonly Row[], ReadonlySet<RowId>>();
+function drawnIds(rows: readonly Row[]): ReadonlySet<RowId> {
+  let ids = drawnIdsMemo.get(rows);
+  if (ids === undefined) drawnIdsMemo.set(rows, (ids = new Set(rows.flatMap((row) => (row.kind === 'notice' ? [row.id] : [])))));
+  return ids;
+}
+
+// The message a line stands for: a peer's by its companion's uuid, a subagent's the envelope its `subagent.message` was read from.
+function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessageEvent | null {
+  const messages = turn.events.filter((e): e is UserMessageEvent => e.kind === 'user.message');
+  if (row.peer !== undefined) return row.peer.sender === null || row.peer.messageUuid === null ? null : (messages.find((e) => e.messageUuid === row.peer!.messageUuid) ?? null);
+  const at = turn.events.findIndex((e) => e.kind === 'subagent.message' && e.direction === 'from_child' && rowId.agentMessage(e.id) === row.id);
+  const source = turn.events[at];
+  if (source?.kind !== 'subagent.message') return null;
+  for (const e of turn.events.slice(0, at).toReversed()) {
+    if (e.kind !== 'user.message') continue;
+    const envelope = parsePeerMessage(messageText(e.content));
+    if (envelope?.kind === 'agent' && envelope.fromAgentId === source.fromAgentId && envelope.body === source.text) return e;
+  }
+  return null;
+}
+
+// The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
+// with the notices it draws, in its order (the ids it gives that no earlier message gave).
+function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
+  return noticeIndex(turn.events).get(row.id) ?? null;
+}
+
+// The whole-branch review's finding 6: every notice's carrier in a turn, built once per turn's event list (a turn's list
+// is a new array whenever the reducer changes it) and read by every row of the turn, so a streaming update that leaves
+// the list untouched builds nothing for it.
+interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
+const noticeIndexMemo = new WeakMap<readonly SessionEvent[], ReadonlyMap<RowId, NoticeCarrier>>();
+let indexBuilds = 0;
+/** How many times a turn's notice-to-carrier index was built: for tests, which count builds rather than time them. */
+export const noticeIndexBuilds = (): number => indexBuilds;
+
+function noticeIndex(events: readonly SessionEvent[]): ReadonlyMap<RowId, NoticeCarrier> {
+  const memo = noticeIndexMemo.get(events);
+  if (memo !== undefined) return memo;
+  indexBuilds += 1;
+  const index = new Map<RowId, NoticeCarrier>();
+  for (const e of events) {
+    if (e.kind !== 'user.message' || !e.isSynthetic || e.arrival === undefined) continue;
+    const ids: RowId[] = [];
+    e.arrival.forEach((entry, n) => {
+      const known = carriedOf([entry])[0];
+      const id = known === undefined || known.class === 'consent' ? null : rowId.notice(known.class === 'task' ? known.runId : null, e.messageUuid ?? e.id, n);
+      if (id !== null && !index.has(id) && !ids.includes(id)) ids.push(id);
+    });
+    const carried = { carrier: e, ids };
+    for (const id of ids) index.set(id, carried);
+  }
+  noticeIndexMemo.set(events, index);
+  return index;
+}
+
+// The engine's props for a carrier's text; null where its transcript passes the text through no UserMessage site that
+// MAWS can give the props of. `isExpanded` is the line's open state, as the engine's is its expanded view (ctrl+o).
+function engineUserProps(text: string, isExpanded: boolean, line: RowOf<'agent_message'> | null): TranscriptProps['UserMessage'] | null {
+  const envelope = parsePeerMessage(text);
+  const inner = envelope === null ? null : envelopeText(text, envelope.kind === 'agent' ? 'agent-message' : 'cross-session-message');
+  if (envelope?.kind === 'cross-session' && inner !== null) {
+    return { text: inner, origin: { kind: 'peer' }, isExpanded, from: { name: speakerName(peerLabel(envelope.from, envelope.fromName), 'peer') } };
+  }
+  if (envelope?.kind === 'agent' && inner !== null) {
+    // A subagent by the name its origin gives (the agent's type), else its id; a hand-back by its report alone.
+    return { text: envelope.handback ? (handbackReport(inner) ?? inner) : inner, origin: { kind: 'peer' }, isExpanded, from: { name: speakerName(line?.from?.subagentType ?? envelope.fromAgentId, 'agent') } };
+  }
+  if (envelope === null && text.includes('<task-notification')) {
+    // Two forms the engine draws otherwise (near line 926168): an artifact room's view (nothing) and a call's late result.
+    if (text.startsWith('<task-notification>\n<task-type>artifact-room-view</task-type>\n') || LATE_RESULT.test(text)) return null;
+    // The carrier's first <summary> and the task's fields beside it: the engine draws a carrier of several blocks once.
+    const summary = tagText(text, 'summary');
+    if (summary === null) return null; // the engine draws nothing for it
+    const duration = Number(tagText(text, 'duration_ms'));
+    const field = (name: string) => tagText(text, name) || undefined;
+    const task = { id: field('task-id'), status: field('status'), type: field('task-type'), toolUseId: field('tool-use-id'), durationMs: Number.isFinite(duration) && duration > 0 ? duration : undefined };
+    return { text: summary.replace(/&(?:amp|lt|gt);/g, (entity) => ENTITIES[entity]!), origin: { kind: 'task-notification' }, isExpanded, task: Object.fromEntries(Object.entries(task).filter(([, value]) => value !== undefined)) };
+  }
+  return null;
+}
+
+// The engine's headers before an envelope (2.1.322's `Tme`), cut as its renderers cut them.
+const ENVELOPE_HEADERS = ['Another Claude session sent a message while you were working:\n', 'Another Claude session sent a message:\n', 'A peer session sent a message while you were working:\n'];
+// What lies inside an envelope, as the engine's renderers give it to the site: its header and its trailer cut, then its
+// tags (`G` near line 291571 for a peer's, `pT` near line 929220 for an agent's). Null for a text that does not open
+// with the envelope after a header (the `<system-reminder>` form the model read is not the one the engine draws).
+function envelopeText(text: string, tag: string): string | null {
+  const header = ENVELOPE_HEADERS.find((h) => text.startsWith(h));
+  let body = header === undefined ? text : text.slice(header.length);
+  if (!body.startsWith(`<${tag}`)) return null;
+  const close = `</${tag}>`;
+  const end = body.lastIndexOf(close);
+  if (end >= 0) body = body.slice(0, end + close.length);
+  return body.replace(new RegExp(`^<${tag}[^>]*>\\n`), '').replace(new RegExp(`\\n</${tag}>$`), '');
+}
+
+const LATE_RESULT = /^<task-notification>\n<tool-use-id>[^\n]*<\/tool-use-id>\n<task-type>tool_call<\/task-type>\n/; // `fMt`, near line 433387
+const ENTITIES: Record<string, string> = { '&amp;': '&', '&lt;': '<', '&gt;': '>' };
+// The text of a carrier's first element of the name, as the engine's task renderer reads it; null when it has none.
+const tagText = (text: string, name: string): string | null => new RegExp(`<${name}>([\\s\\S]*?)</${name}>`).exec(text)?.[1] ?? null;
+// A speaker's name as the engine draws it (`sw`, near line 648548): format and control characters dropped, trimmed, cut to 64.
+function speakerName(name: string, fallback: string): string {
+  const clean = [...name.replace(/[\p{Cf}\p{Cc}\p{Cs}\p{Zl}\p{Zp}]/gu, '').trim()];
+  return clean.length === 0 ? fallback : clean.length > 64 ? `${clean.slice(0, 64).join('')}…` : clean.join('');
 }

@@ -7,7 +7,7 @@ import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRe
 import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
-import { createBackfillContext, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
+import { createBackfillContext, endedByExit, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
 import { mapSystemFrame } from '../normalizer-system';
 
 const SESSION = 'S' as SessionId;
@@ -140,8 +140,10 @@ describe('transcript records map to X1 events', () => {
       rec({ type: 'mystery', uuid: 'm1', parentUuid: 's5', timestamp: at(6) }),
       rec({ type: 'attachment', uuid: 'x1', parentUuid: 'm1', attachment: { type: 'model' }, timestamp: at(7) }),
     ]);
+    // UX wave U3 (the U3a document, M3): a command a terminal wrote as a `system` row is the person's command, mapped as
+    // the user row of one is: its turn, its message, and the turn's end where it starts
     expect(kinds(events)).toEqual([
-      'session.started', 'turn.started', 'user.message', 'turn.ended', 'user.message', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
+      'session.started', 'turn.started', 'user.message', 'turn.ended', 'turn.started', 'user.message', 'turn.ended', 'frame.unknown', 'boundary.compaction', 'boundary.compaction', 'frame.unknown',
     ]);
     const ended = only(events, 'turn.ended')[0];
     expect(ended).toMatchObject({
@@ -149,7 +151,8 @@ describe('transcript records map to X1 events', () => {
       usage: { inputTokens: 0, outputTokens: 0, cacheReadInputTokens: 0, cacheCreationInputTokens: 0, thinkingTokens: null },
       permissionDenials: [], errors: [], userMessageUuids: ['u1'], origin: null, resultIndex: null, isEchoReceipt: false,
     });
-    expect(only(events, 'user.message')[1]).toMatchObject({ origin: 'local-command', content: '<command-name>/help</command-name>' });
+    expect(only(events, 'user.message')[1]).toMatchObject({ origin: null, isSynthetic: false, content: '<command-name>/help</command-name>' });
+    expect(only(events, 'turn.ended')[1]).toMatchObject({ numTurns: 0, userMessageUuids: ['s2'] });
     const unknown = only(events, 'frame.unknown');
     expect(unknown[0]).toMatchObject({ id: 's3', frameType: 'transcript:system', subtype: 'future_system_subtype' });
     expect(unknown[1]).toMatchObject({ id: 'm1', frameType: 'transcript:mystery', subtype: null });
@@ -207,11 +210,53 @@ describe('transcript records map to X1 events', () => {
     const records = [
       { subtype: 'stop_hook_summary', hookCount: 1, hookInfos: [], hookErrors: [], hookAdditionalContext: [], preventedContinuation: false, stopReason: '', hasOutput: true },
       { subtype: 'away_summary', content: 'Synthetic recap', isMeta: true },
-      { subtype: 'scheduled_task_fire', content: 'Synthetic scheduled wakeup', isMeta: true },
       { subtype: 'bridge_status', content: 'Remote control active', url: 'https://example.invalid/session', isMeta: true },
       { subtype: 'permission_retry', content: 'Synthetic permission retry', commands: ['true'], level: 'info', isMeta: true },
     ];
     expect(mapAll(records.map((record, i) => rec({ type: 'system', uuid: `s${i}`, parentUuid: 'u1', timestamp: at(i), ...record })))).toEqual([]);
+  });
+
+  // UX wave U3 (UC-2, rule 5's second pair; the U3a document, M3): a terminal's fire row is a scheduled prompt's arrival,
+  // no longer a silent record: it places its line at its own row and opens the engine's turn there; the meta row after
+  // it, the arrival's second carrier, makes nothing of its own and continues that turn (M3's second fix round)
+  const FIRE = rec({ type: 'system', subtype: 'scheduled_task_fire', uuid: 'f1', parentUuid: 'u1', timestamp: at(1), content: 'Running scheduled task (Nov 12 9:00am)', prompt: 'Check the queue.', isMeta: false });
+  const FIRE_META = rec({ type: 'user', uuid: 'm1', parentUuid: 'f1', timestamp: at(2), isMeta: true, promptSource: 'system', turnOrigin: 'scheduled', scheduledFireId: 'f1', message: { role: 'user', content: 'Check the queue.' } });
+  const ANSWER = [
+    rec({ type: 'assistant', uuid: 'a1', parentUuid: 'm1', timestamp: at(3), message: { id: 'msg_a1', model: 'x', content: [{ type: 'text', text: 'Queue is empty.' }] } }),
+    rec({ type: 'system', subtype: 'turn_duration', uuid: 'd1', parentUuid: 'a1', timestamp: at(4), durationMs: 900 }),
+  ];
+
+  it('reads a terminal’s scheduled fire as the arrival, at its own row, in the engine’s turn it opens there', () => {
+    const fired = mapAll([FIRE]);
+    expect(fired.map((e) => [e.kind, e.id])).toEqual([['turn.started', 'f1'], ['user.message', 'f1#1']]);
+    expect(fired[0]).toMatchObject({ userMessageUuid: 'f1', origin: 'task-notification' });
+    expect(fired[1]).toMatchObject({ messageUuid: 'f1', isSynthetic: true, origin: 'task-notification', arrival: [{ class: 'schedule', prompt: 'Check the queue.' }] });
+    // the same with no meta row after it: nothing waits for one
+    expect(mapAll([FIRE, ANSWER[1]!]).map((e) => [e.kind, e.id])).toEqual([['turn.started', 'f1'], ['user.message', 'f1#1'], ['turn.ended', 'd1']]);
+  });
+
+  it('a fire’s meta row continues the turn its fire opened, making nothing twice, whether read with it or later', () => {
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    expect(kinds(mapAll([FIRE], ctx))).toEqual(['turn.started', 'user.message']);
+    const later = mapAll([FIRE_META, ...ANSWER], ctx);
+    expect(kinds(later)).toEqual(['assistant.block.complete', 'turn.ended']);
+    expect(only(later, 'turn.ended')[0].userMessageUuids).toEqual(['f1']);
+    // tied by place when it names no fire
+    expect(kinds(mapAll([FIRE, { ...FIRE_META, scheduledFireId: undefined }, ...ANSWER]))).toEqual(['turn.started', 'user.message', 'assistant.block.complete', 'turn.ended']);
+    // a meta row of another fire is no continuation
+    const other = createBackfillContext({ sessionId: SESSION, agent: null });
+    mapAll([FIRE], other);
+    expect(kinds(mapAll([{ ...FIRE_META, scheduledFireId: 'f9' }], other))).not.toEqual([]);
+  });
+
+  it('a fire’s meta row read after the follower’s exit ended the fire’s turn opens the engine’s turn, as a prompt opens its own', () => {
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    mapAll([FIRE], ctx);
+    endedByExit(ctx);
+    const later = mapAll([FIRE_META, ...ANSWER], ctx);
+    expect(kinds(later)).toEqual(['turn.started', 'assistant.block.complete', 'turn.ended']);
+    expect(later[0]).toMatchObject({ id: 'm1', userMessageUuid: 'm1', origin: 'task-notification' });
+    expect(only(later, 'turn.ended')[0].userMessageUuids).toEqual(['m1']);
   });
 
   // C6's second whole-branch-review ask: the marker the engine writes after an interrupt is an ordinary `user` record on
@@ -470,7 +515,7 @@ describe('queued task notification turn boundaries', () => {
       ['p1', false, null], ['source-1', true, 'task-notification'],
     ]);
     expect(only(events, 'task.notification')).toEqual([
-      expect.objectContaining({ taskId: 'task-1', toolUseId: 't1', status: 'completed', summary: 'Task complete' }),
+      expect.objectContaining({ taskId: 'task-1', toolUseId: 't1', status: 'completed', summary: 'Task complete', arrivals: true }), // UX wave U3: its end is an arrival's
     ]);
     expect(only(events, 'turn.ended')[0]).toMatchObject({ userMessageUuids: ['p1'], durationMs: 1500 });
     // A standalone copy under the source UUID adds neither another turn nor another lifecycle event.
@@ -487,7 +532,9 @@ describe('queued task notification turn boundaries', () => {
     const events = mapAll([queued, duration], ctx);
     expect(kinds(events)).toEqual(['turn.started', 'user.message', 'task.notification', 'turn.ended']);
     expect(events[0]).toMatchObject({ userMessageUuid: 'source-1', origin: 'task-notification' });
-    expect(events[1]).toMatchObject({ messageUuid: 'source-1', isSynthetic: false, origin: 'task-notification' });
+    // UX wave U3 (the U3a document, decision 4): a task's end is never the person's prompt, so its message is synthetic;
+    // it carries the arrival its notice draws
+    expect(events[1]).toMatchObject({ messageUuid: 'source-1', isSynthetic: true, origin: 'task-notification', arrival: [{ class: 'task', taskId: 'task-1', outcome: 'completed', summary: 'Task complete' }] });
     expect(only(events, 'turn.ended')[0].userMessageUuids).toEqual(['source-1']);
   });
 });
@@ -564,7 +611,10 @@ describe('subagent sidecars map to the X1 graph', () => {
     const failed = run('failed');
     expect(only(failed, 'subagent.finished')[0]).toMatchObject({ status: 'failed', summary: 'Agent "d" finished' }); // no <result>: the summary element
     expect(only(run('killed'), 'subagent.finished')[0].status).toBe('stopped');
-    expect(only(run('something-new'), 'subagent.finished')[0].status).toBe('completed');
+    // UX wave U3 (UC-2, rule 6; the U3a document, decisions 12 and 13): a status word the rule does not list claims no
+    // end, so it ends nothing, where it read as completed before; and neither does a block with no <status>
+    expect(only(run('something-new'), 'subagent.finished')).toEqual([]);
+    expect(only(mapAll([rec({ type: 'user', uuid: 'n9', timestamp: at(5), origin: { kind: 'task-notification' }, message: { role: 'user', content: '<task-notification>\n<task-id>b-1</task-id>\n<tool-use-id>toolu_b</tool-use-id>\n<summary>Monitor event: "logs"</summary>\n<event>a line</event>\n</task-notification>' } })]), 'task.notification')).toEqual([]);
   });
 
   // The engine joins the notifications it delivers at once into one row, each block after a blank line (DX4's vectors,
@@ -739,7 +789,9 @@ describe('peer messages from disk (E7)', () => {
     const { uuid, message, origin } = frame.frame as { uuid: string; message: { content: string }; origin: Record<string, unknown> };
     const events = mapAll([rec({ type: 'user', uuid, timestamp: at(1), isMeta: true, origin, promptSource: 'system', turnOrigin: 'peer', message: { role: 'user', content: message.content } })]);
     expect(kinds(events)).toEqual(['turn.started', 'user.message', 'subagent.message']);
-    expect(events[0]).toMatchObject({ userMessageUuid: null, origin: 'peer' });
+    // UX wave U3 (UC-2, class `subagent`): the turn a hand-back opens is the engine's ("Continued for"), not a peer's
+    expect(events[0]).toMatchObject({ userMessageUuid: null, origin: 'task-notification' });
+    expect(events[1]).toMatchObject({ isSynthetic: true, origin: 'peer' });
     expect(payloads(events)).toEqual(payloads(live));
     expect(payloads(events)).toEqual([expect.objectContaining({ kind: 'subagent.message', direction: 'from_child', fromAgentId: 'a6a89722837fede78' })]);
   });
@@ -935,5 +987,55 @@ describe('a sminos delivery into a running turn', () => {
       'sminos: interrupt: [Request interrupted by user] The interrupt came from outside the terminal.',
       'sminos: delivered: words this transcript never held',
     ]);
+  });
+});
+
+// UX wave U3 (UC-2; the U3a document, M3): the backfill asks the arrivals reader, and each class becomes the events of
+// Interfaces C. Rows written by hand, in the shapes the probes recorded (invented names and words).
+describe('what arrived from elsewhere (UX wave U3)', () => {
+  const PEER = '[sminos message from session:5b2c9e10 id=aa11bb22]';
+  const submitted = (uuid: string, text: string) => rec({ type: 'user', uuid, timestamp: at(1), origin: { kind: 'plugin', name: 'sminos', asUser: true }, promptSource: 'system', message: { role: 'user', content: text } });
+
+  it('a peer’s row the bridge submitted as the user is a peer’s message in a peer’s turn, synthetic, never the person’s prompt', () => {
+    const events = mapAll([submitted('p1', `${PEER}\nCould you rerun the lint?`)]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message', 'peer.message']);
+    expect(events[0]).toMatchObject({ userMessageUuid: null, origin: 'peer' });
+    expect(events[1]).toMatchObject({ messageUuid: 'p1', isSynthetic: true, origin: 'peer', content: `${PEER}\nCould you rerun the lint?` });
+    expect(events[2]).toMatchObject({ messageUuid: 'p1', from: '', fromName: 'session:5b2c9e10', text: 'Could you rerun the lint?', midTurn: false, replyable: false });
+  });
+
+  it('the owner’s own row is their prompt with the frame line cut, in a turn of the person’s', () => {
+    const events = mapAll([submitted('o1', '[sminos message from human id=0f0e0d0c]\nAlso run the linter.')]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message']);
+    expect(events[0]).toMatchObject({ userMessageUuid: 'o1', origin: 'human' });
+    expect(events[1]).toMatchObject({ messageUuid: 'o1', isSynthetic: false, origin: 'human', content: 'Also run the linter.' });
+  });
+
+  it('a background session’s prompt with a peer’s frame is a peer’s message (decision 19); without the session’s kind, the person’s prompt', () => {
+    const prompt = (keys: Record<string, unknown>) => rec({ type: 'user', uuid: 'b1', timestamp: at(1), origin: { kind: 'human' }, promptSource: 'typed', turnOrigin: 'human', message: { role: 'user', content: '[sminos chat demo 7f3a2b1c:12 from river → @you]\nThe migration is merged.' }, ...keys });
+    const seat = mapAll([prompt({ sessionKind: 'bg' })]);
+    expect(kinds(seat)).toEqual(['turn.started', 'user.message', 'peer.message']);
+    expect(seat[0]).toMatchObject({ origin: 'peer' });
+    expect(seat[1]).toMatchObject({ isSynthetic: true, origin: 'peer' });
+    expect(seat[2]).toMatchObject({ fromName: 'river', text: 'The migration is merged.' });
+    expect(only(mapAll([prompt({})]), 'user.message')[0]).toMatchObject({ isSynthetic: false, origin: 'human' });
+  });
+
+  it('MAWS’s consent message keeps the person’s prompt and carries its arrival', () => {
+    const text = 'Permission granted for this exact command only, as one whole string: "pnpm test". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.';
+    const events = mapAll([rec({ type: 'user', uuid: 'c1', timestamp: at(1), origin: { kind: 'human' }, message: { role: 'user', content: text } })]);
+    expect(kinds(events)).toEqual(['turn.started', 'user.message']);
+    expect(events[1]).toMatchObject({ isSynthetic: false, origin: 'human', content: text, arrival: [{ class: 'consent', kind: 'command', subject: 'pnpm test' }] });
+  });
+
+  it('an answer a hook’s context gave is a synthetic message carrying it, in the turn that took it', () => {
+    const context = 'The human responded to your async AskUserQuestion (call toolu_q1): Your questions have been answered: "Which color?"="Blue". You can now continue with these answers in mind.';
+    const events = mapAll([rec({ type: 'attachment', uuid: 'h1', timestamp: at(1), attachment: { type: 'hook_additional_context', content: [context], hookName: 'tool.call', toolUseID: 'toolu_x-context', hookEvent: 'PostToolUse' } })]);
+    expect(events).toEqual([expect.objectContaining({ kind: 'user.message', messageUuid: 'h1', isSynthetic: true, origin: 'task-notification', content: context, arrival: [expect.objectContaining({ class: 'answer', tool: 'sminos', call: 'toolu_q1', dismissed: false })] })]);
+  });
+
+  it('a command’s output is a local-command message in the engine’s tag, its escapes removed', () => {
+    const events = mapAll([rec({ type: 'user', uuid: 'x1', timestamp: at(1), message: { role: 'user', content: '<local-command-stdout>\u001b[2mCompacted\u001b[22m</local-command-stdout>' } })]);
+    expect(events).toEqual([expect.objectContaining({ kind: 'user.message', isSynthetic: false, origin: 'local-command', content: '<local-command-stdout>Compacted</local-command-stdout>' })]);
   });
 });

@@ -187,10 +187,12 @@ const LATER = at('a4444444-4444-4444-8444-444444444444' as AppSessionId);
 const second = { threadId: 'p7q1w3ze', tabId: 'tab1', tabTitle: 'Main', quote: 'with design review' };
 const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
 const notice = () => document.querySelector<HTMLElement>('[data-comment-context]');
-const destination = () => (screen.getAllByRole('radio') as HTMLInputElement[]).find((radio) => radio.checked)?.value;
+// UX wave U5a: one checkbox, "Send to main", in place of the two radios
+const destination = () => ((screen.getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement).checked ? 'main' : 'thread');
 
 describe('a comment from a document with no chat beside it', () => {
   it('beside a chat: the card goes to the shown session and does not name it', async () => {
+    act(() => useLayout.getState().openSession(SHOWN)); // UX wave U5a (decision 16): the card names a session the main area does not show
     const { comment } = mount({ appSessionId: SHOWN });
     comment();
     await act(async () => {});

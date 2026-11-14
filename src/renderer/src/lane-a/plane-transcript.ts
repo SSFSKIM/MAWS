@@ -89,11 +89,9 @@ import { ReadError, type SessionPlane, type SessionTarget, type Subscription, ty
 import { taskGraphOf, withEvents, withMetas, withStatuses } from './agents/task-feed';
 import { OutputRequests } from './jobs/output-requests';
 import { StreamingLayer, type StreamBlock } from './stream/layer';
-import { deliveredLines, deliveryAsDrawn, deliveryFrame } from './conversation/delivery-frame';
+import { deliveredLines, deliveryFrame } from './conversation/delivery-frame';
 import { withAppendedTurn } from './source/appended-turn';
-import { withAnswerLines } from './source/ask-answer';
 import { isMirrorLine, steerAsDrawn } from './source/bridge-rows';
-import { withWakeLine } from './source/bridge-wake';
 import { normalizeInterruptRow, withInterruptEnd } from './source/interrupt';
 import { drawingOf, drawingsDiffer, isResponse, NONE_OFF, ownerInput, undoneEvents, type Drawing } from './source/off-chain';
 
@@ -231,30 +229,22 @@ export function subagentLookupOf(subagents: readonly SubagentMeta[]): SubagentLo
 }
 
 /**
- * One row's X1 events under a backfill context; a row that is not a transcript record yields none. A turn that a
- * message from the session's own subagent opens (its hand-back, an `<agent-message>` of the peer origin, which MAWS's
- * backfill reads as a `subagent.message`) is the session woken by its subagent, not a peer session's: it takes the
- * engine's origin, whose divider MAWS reads as "Continued for …", as it reads a task notification's turn. An interrupt
- * marker ends the turn it interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`). A
- * delivered send is drawn without its frame line, a peer's under a label naming it, and one that entered a running turn
- * as a prompt queued there (`conversation/delivery-frame.ts`); the held row keeps its frame. A steer the bridge appended
- * is drawn as the owner's prompt queued there too (`bridge-rows.ts`), one appended while no turn ran taken by the turn
- * that starts next (`appended-turn.ts`), the bridge's mirror of either not at all, and the bridge's wake as its own line
- * in a turn the session continued (`bridge-wake.ts`), read off the held row: a delivery whose words open with the
- * wake's line is no wake, and its drawn copy has lost the frame that says so. The ask mod's answer to an async question
- * is drawn as a line naming the answers where it reached the model, its idle prompt's turn one the session continued
- * (`ask-answer.ts`).
+ * One row's X1 events under a backfill context; a row that is not a transcript record yields none. What entered the
+ * session from elsewhere (a peer's delivery, the owner's own send or steer, a subagent's hand-back, a task's end, a
+ * scheduled fire, the bridge's wake, an answer to an async question) is read by the arrivals reader that MAWS's backfill
+ * asks (`@shared/engine/arrival`, UX wave U3, UC-2), so the row passes through as it is held and draws as the same row
+ * does from a transcript file on this Mac. What stays here is placement: an interrupt marker ends the turn it
+ * interrupted, the bridge's record of one read as its marker line alone (`interrupt.ts`); a steer an older bridge
+ * appended with no steer line, which no class claims, is drawn as the owner's prompt queued into the running turn
+ * (`bridge-rows.ts`), one appended while no turn ran taken by the turn that starts next (`appended-turn.ts`); and the
+ * bridge's mirror of a row it appended is not drawn.
  */
 function eventsOf(row: JsonObject, ctx: BackfillContext): SessionEvent[] {
   if (isMirrorLine(row)) return [];
-  const mapped = steerAsDrawn(deliveryAsDrawn(normalizeInterruptRow(row)));
+  const mapped = steerAsDrawn(normalizeInterruptRow(row));
   const record = TranscriptRecordSchema.safeParse(mapped);
   if (!record.success) return [];
-  let events = withAnswerLines(row, withWakeLine(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx), ctx);
-  if (events.some((event) => event.kind === 'subagent.message')) {
-    events = events.map((event) => (event.kind === 'turn.started' && event.origin === 'peer' ? { ...event, origin: 'task-notification' } : event));
-  }
-  return withAppendedTurn(row, events, ctx);
+  return withAppendedTurn(row, withInterruptEnd(mapped, recordToEvents(record.data, ctx), ctx), ctx);
 }
 
 /** A held row's events as the drawing has it (`off-chain.ts`): none for a row it leaves out, an undone input's for one it draws so. */

@@ -445,6 +445,8 @@ The list’s **This session** state still correctly says no session when none is
 
 **Keep/dismiss divergence:** W1-D’s `633cc389c` isolates each export with `ownFile`/`exportId` so concurrent same-format exports cannot swap the saved bytes, but it does not change the accepted dialog defaults. No UX change needed. **Question:** none.
 
+**2026-11-13** (UX wave U5a, `docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md`; the layout key `library.exportFolder`): Reversed by the owner's later `fix` on l6-artifacts-20: the dialog opens in the last export folder, kept across launches.
+
 ## 51. PNG export and three top-level PowerPoint entries
 
 **Owner:** fix — “Let’s make one for PNG. Let’s also Fold three PowerPoint to one … show three options … three Powerpoint up front doesn’t seem necessary.”

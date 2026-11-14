@@ -45,6 +45,9 @@ export const ArtifactEditInputSchema = z
     ops: z.array(EditOpSchema).min(1).max(DOCUMENT_LIMITS.opsPerBatch),
     mode: z.enum(['direct', 'suggest']).optional(),
     answering: ThreadIdSchema.optional(),
+    // UX wave U5 (l6-artifacts-20): with `answering`, the agent's own words posted into the thread in place of a fixed
+    // sentence; ignored without it. Never read into the result the tool answers.
+    reply: z.string().min(1).max(2000).optional(),
   })
   .superRefine((input, ctx) => {
     input.ops.forEach((op, i) => {
@@ -166,7 +169,7 @@ export const DOCUMENT_TOOLS = {
   artifact_edit: {
     title: 'Edit document',
     description:
-      'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
+      'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
     input: ArtifactEditInputSchema,
     annotations: WRITER,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it

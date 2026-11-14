@@ -273,7 +273,9 @@ describe('an unsent comment when its document moves onto a view of it already op
     keptIn(target.view.container, threadId);
   });
 
-  it('a move refused at the re-check after the source’s guard hands nothing over: the card stays the source’s, whose close asks about it', async () => {
+  // UX wave U5a (M3): the comment is the artifact's pass's, which outlives the source's close while the panel's view
+  // still shows the document, so that close asks nothing and the comment stays
+  it('a move refused at the re-check after the source’s guard hands nothing over: the card stays the source’s; its close, with the panel’s view still open, loses nothing and asks nothing', async () => {
     mainWith([DOC_TAB]);
     const kept = recordInPanel();
     const source = mountIn(main);
@@ -289,10 +291,11 @@ describe('an unsent comment when its document moves onto a view of it already op
     expect(mainTabOpen()).toBe(true);
     await waitFor(() => expect(source.view.container.contains(field())).toBe(true));
     keptIn(source.view.container, threadId);
-    let closes = true;
+    let closes = false;
     await act(async () => void (closes = await askEditorHostClose(main)!));
-    expect(closes).toBe(false);
-    expect(asked, 'the source’s own comment').toEqual(['Discard your unsent comment?']);
+    expect(closes).toBe(true);
+    expect(asked).toEqual([]);
+    expect(commentDraftOf(DOC)).toEqual({ threadId, text: TEXT });
   });
 
   it('a move the source’s guard refuses leaves the destination’s own comment on the destination', async () => {

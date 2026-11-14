@@ -38,7 +38,10 @@ export interface Applied {
   carries: Carry[];
   /** Open threads whose mark no live text carries after the batch (derived; the threads map is never written). */
   orphaned: string[];
-  /** With `answering`: the thread and the message the tool posts into it (the result lines). */
+  /**
+   * With `answering`: the thread, and the message the tool posts into it when the agent gave no `reply` ("Edited this
+   * passage.").
+   */
   answer: { threadId: string; body: string } | null;
 }
 

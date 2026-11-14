@@ -84,7 +84,7 @@ async function withApp(label: string, env: Record<string, string>, fn: (live: Li
     value(await invoke(page, 'settings.set', { engine: { subagentModel: 'sonnet' } }));
     await fn({ maws, page, main: page.locator('[data-region="main"]'), failures, observe, step });
     observe('consoleErrors', maws.consoleErrors());
-    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Could not load this transcript'))));
+    observe('transcriptLoadFailures', await page.evaluate(() => (window as unknown as C11Window).__c11.seen.filter((t) => t.startsWith('Couldn’t load this conversation')))); // HYDRATION.failed (transcript/model/copy.ts)
   } finally {
     await page.screenshot({ path: join(scratch.root, `${label}.png`) }).catch(() => undefined);
     await maws.cleanup();

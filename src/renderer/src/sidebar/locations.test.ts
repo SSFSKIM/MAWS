@@ -4,6 +4,8 @@ import type { OrgKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { EMPTY_REGISTRY, type OrgProjectLocation, type OrgProjects, type RegistryProject } from '../stores/registry';
+import type { MachineState } from '@shared/ipc/schema/machines'; // the UX wave, U9
+import { locationView } from './location-view'; // the UX wave, U9
 import { defaultLinkOf, insideOf, intoChoices, locationLines, locationState, machinesWords, pendingWords, suggestionOf, type LocationView, type Resolved } from './locations';
 
 // The project registry's words on the page (docs/doperpowers/plans/2026-11-10-project-registry.md, Interfaces §J.3).
@@ -29,6 +31,28 @@ describe('a location’s state in words', () => {
     expect(locationState(location(MINI, 'p', { state: 'missing' }), off)).toEqual({ kind: 'offline', words: 'offline', card: `offline since ${formatDayTime(Date.parse(DOWN_SINCE))}` });
     expect(locationState(location(MINI, 'p'), view([TEST_MACHINE], { [MINI]: SEEN }))).toMatchObject({ card: `offline since ${formatDayTime(Date.parse(SEEN))}` });
     expect(locationState(location(OTHER_MACHINE, 'p'), off)).toEqual({ kind: 'offline', words: 'offline', card: 'offline' }); // never seen
+  });
+
+  // The UX wave, U9 (O-39, A2): the card (ProjectLocations.tsx's `data-location-words`) reads the link's phase as the rows
+  // do (`locationView`): a machine that connects, or reconnects within the minute, is not offline; offline past the
+  // minute or after a first attempt that failed, and removed, it is. Only the words follow the phase: the link not up,
+  // the line is not `up`, so it suggests nothing and its acts stay closed (`acts = location.acts && line.up`).
+  it('says offline in the card only when offline or removed, not while the machine connects or reconnects, its acts closed while the link is down', () => {
+    const NOW = Date.parse('2026-11-13T09:00:00.000Z');
+    const recently = new Date(NOW - 30_000).toISOString();
+    const smns = location(MINI, 'p', { stated: 'linked', source: 'smns', key: `smns:${OTHER_ID}` as OrgKey });
+    const project = registered(ID, 'scrape', [smns]);
+    const registry = registryOf(project, registered(OTHER_ID, 'other', []));
+    const roster = (over: Partial<MachineState>) =>
+      new Map<MachineRef, MachineState>([[MINI, { ref: MINI, name: 'mini', local: false, state: 'up', since: DOWN_SINCE, generation: 1, ...over }]]);
+    const lineAt = (over: Partial<MachineState>, now = NOW) => locationLines(project, registry, locationView(roster(over), {}, TEST_MACHINE, now))[0]!;
+    const closed = { up: false, suggestion: null };
+    expect(lineAt({ state: 'connecting', generation: 0 }), 'connecting').toMatchObject({ ...closed, state: null });
+    expect(lineAt({ state: 'down', since: recently }), 'reconnecting').toMatchObject({ ...closed, state: null });
+    expect(lineAt({ state: 'down', since: recently }, NOW + 30_000), 'offline past the minute').toMatchObject({ ...closed, state: { kind: 'offline', card: `offline since ${formatDayTime(Date.parse(recently))}` } });
+    expect(lineAt({ state: 'down', generation: 0 }), 'offline after a first attempt that failed').toMatchObject({ ...closed, state: { kind: 'offline', words: 'offline', card: `offline since ${formatDayTime(Date.parse(DOWN_SINCE))}` } });
+    expect(lineAt({ state: 'down', since: recently, refusal: 'removed' }), 'removed').toMatchObject({ ...closed, state: { kind: 'offline' } });
+    expect(lineAt({}), 'up: its acts open again').toMatchObject({ up: true, state: null });
   });
 
   it('says a missing folder on its machine, a replaced one, and nothing for one that is there', () => {

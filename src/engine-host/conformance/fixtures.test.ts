@@ -571,9 +571,11 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     expect(ofKind(events, 'user.message').find((e) => e.seq === 65)).toMatchObject({ origin: 'interrupt-marker', isReplay: false, isSynthetic: false, bash: null });
   });
 
-  it('pass2/auto-routed: the local-command echo after set_model carries its own origin and the tag\'s inner text', async () => {
+  // UX wave U3 (UC-2, class `command`; the U3a document, Interfaces C and Acceptance 6): a command's output keeps the
+  // engine's own tag, which says stdout or stderr
+  it('pass2/auto-routed: the local-command echo after set_model carries its own origin and the engine\'s tag around its text', async () => {
     const { events } = await run('pass2', 'auto-routed');
-    expect(ofKind(events, 'user.message').find((e) => e.seq === 153)).toMatchObject({ origin: 'local-command', content: 'Set model to `haiku (claude-haiku-4-5-20251001)`', isReplay: true, bash: null });
+    expect(ofKind(events, 'user.message').find((e) => e.seq === 153)).toMatchObject({ origin: 'local-command', content: '<local-command-stdout>Set model to `haiku (claude-haiku-4-5-20251001)`</local-command-stdout>', isReplay: true, bash: null });
     expect(ofKind(events, 'turn.started').some((e) => e.seq === 153)).toBe(false);
   });
 

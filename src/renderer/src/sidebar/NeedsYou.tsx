@@ -21,7 +21,8 @@ import { ListedHoverCard, SessionHoverCard } from './HoverCard';
 import { projectLabels } from './project-labels';
 import { SectionHeading } from './SectionHeading';
 
-// P5 O7 M6: a greyed row while its machine is up again, before main's next snapshot
+// P5 O7 M6: a greyed row while its machine is up again, before main's next snapshot; the UX wave, U9: and a live row
+// while its machine reconnects
 export const RECONNECTING = 'reconnecting';
 
 export function NeedsYou({ rows: live, greyed = NO_ROWS, selected, onEmptyFocus }: { rows: NeedsYouRow[]; greyed?: NeedsYouRow[]; selected: string | null; onEmptyFocus(): void }) {
@@ -118,7 +119,8 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
   };
   const label = `${project} · ${title} · ${reason}`;
   const greyed = row.greyed === true;
-  const why = machine.offline ? greyWords(machine) : greyed ? RECONNECTING : null;
+  // the UX wave, U9: a machine reconnecting within the minute keeps its items live (main greys by the phase), and says so
+  const why = machine.offline ? greyWords(machine) : greyed || machine.phase === 'reconnecting' ? RECONNECTING : null;
   return (
     <li>
       <RowCard record={record} appSessionId={row.appSessionId} title={title}>

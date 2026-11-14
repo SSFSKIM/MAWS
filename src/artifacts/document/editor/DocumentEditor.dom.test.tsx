@@ -16,7 +16,7 @@ import type { DocumentHandle, EditorHost } from './host-types';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from './memory-host';
 import type { MentionSource, MentionTarget } from './MentionPicker';
 import type { CommentOverlayProps, DocumentComments } from './comments/surface';
-import { getThread, liveThreadIds } from '../threads';
+import { getThread, listThreads /* UX wave U5a */, liveThreadIds, reply /* UX wave U5a */ } from '../threads';
 import { MemoryHistory } from './history/memory-history';
 import { TextSelection } from '@tiptap/pm/state'; // P4-B4 at the B1 merge
 import { activeThread, commentSelection } from './comments/plugins'; // P4-B4 at the B1 merge
@@ -1007,6 +1007,9 @@ describe('a read-only document', () => {
     // a thread to resolve, and the rail open on it
     act(() => void editor().chain().focus().setTextSelection({ from: 1, to: 9 }).run());
     press('Add comment');
+    // UX wave U5a (M7; A3): a comment counts once it holds a message, as the card's send records it
+    const [written] = listThreads(handle.doc);
+    act(() => reply(handle.doc, written!.id, { id: `${written!.id}:m1`, by: { kind: 'human' }, at: Date.now(), body: 'Retitle?' }));
     // The thread is written before its passage mark; the live-target count follows after the document settles.
     await until(() => within(toolbar()).queryByRole('button', { name: 'Comments (1 open)' }) !== null, 'the live-target comment count');
     press('Comments (1 open)');
