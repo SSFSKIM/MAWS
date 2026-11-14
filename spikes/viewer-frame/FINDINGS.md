@@ -80,7 +80,7 @@ seen.
 | 8 | death handled (SIGKILL, OOM) | pass | pass (SIGKILL; OOM not rerun) | pass |
 | 9 | metrics by pid | pass | pass | pass |
 | 10 | nothing leaves: WebRTC | **fail** (TURN-TCP and STUN/UDP reach the listeners) | pass (`rtcpolicy+deadproxy`) | pass |
-| 10 | nothing leaves: the rest | **fail** (a dns-prefetch query leaves; all else silent) | **fail** (dns-prefetch); passes only with the app-wide `--host-resolver-rules` | **fail** (dns-prefetch) |
+| 10 | nothing leaves: the rest | **fail** (a dns-prefetch query leaves; all else silent) | **fail** (dns-prefetch); passes only with the app-wide `--host-resolver-rules`. 2026-11-14 follow-up: passes with `noprefetch` (`--blink-settings=dnsPrefetchingEnabled=false`) | **fail** (dns-prefetch) |
 | 11 | app out of reach | **fail** (Notification `granted`) | pass (`perms`) | pass |
 | 12 | shared process seen and refused | **not run** (a `file:` page is never shared) | pass (`appscheme`) | holds by construction |
 | 13 | hand-over, DecompressionStream | pass | pass | pass |
@@ -323,7 +323,8 @@ Each is a layer added to A's setup (`--variant=a+b+…`). Only the layers that c
 | `rtcpolicy+deadproxy` | 10 WebRTC | both | **both listeners silent** on both addresses, with and without `webrtc 'block'`; all other conditions unchanged (the libraries still draw: the custom schemes are not proxied) |
 | `perms` | 11 | permission request and check handlers that refuse a request from a `maws-viewer:` URL or the opaque origin `null` (the app's `guardPermissions('store-frames')`, adapted) | Notification `denied`; 11 passes |
 | `nodnsprefetch` | 10 DNS | `X-DNS-Prefetch-Control: off` on the viewer's answers | **no effect** on `<link rel=dns-prefetch>` |
-| switch `--host-resolver-rules=MAP * ~NOTFOUND` | 10 DNS | the app-wide resolver answers nothing | **no DNS query leaves**. But it is app-wide, every session included: the in-app browser and anything else resolving through Chromium would stop working. A reference point, not a fix |
+| switch `--host-resolver-rules=MAP * ~NOTFOUND` (rejected by the architect 2026-11-14) | 10 DNS | the app-wide resolver answers nothing | **no DNS query leaves**. But it is app-wide, every session included: the in-app browser and anything else resolving through Chromium would stop working. A reference point, not a fix |
+| `noprefetch` (`app.commandLine.appendSwitch('blink-settings', 'dnsPrefetchingEnabled=false')`, 2026-11-14 follow-up) | 10 DNS | turns off Blink's own setting for DNS prefetch, in every renderer | **no name leaves**, from A, from B and from the app's HTML frame; another session still resolves and loads by name. Cost: no page in the app gets DNS-prefetch or anchor-hover hints (a latency hint, not resolution). Section 2026-11-14 below |
 | `--disable-blink-features=RTCPeerConnection` | 10 WebRTC | | no effect (RTCPeerConnection still a function) |
 | `appscheme` | 12 | the window page from `maws-app:` instead of `file:` | 12 exercisable, and passes |
 | (none found) | 14 | | No setting makes `input-event` fire for an out-of-process frame. What the measurements give instead: `before-input-event` (keys, from inside the frame) together with the window page's own `mouseenter`/`mouseleave` and `activeElement` reported over its preload. |
@@ -379,3 +380,177 @@ Run `node run.mjs` there (no xvfb).
 - **10.** It should not depend on the OS: proxy resolution, ICE gathering and the DNS prefetch are Chromium's own.
   But macOS may have a system resolver cache between the page and the network, and the capture there needs
   `tcpdump` with privileges. The harness reports `DNS capture: not running` without them.
+
+## 2026-11-14 follow-up: the DNS-prefetch channel
+
+What closes it, what it carries when no script of an attacker runs, the app's existing HTML frame, and the bandwidth.
+
+### How it was measured
+
+- **The capture.** The same DNS capture as condition 10: `tcpdump` on port 53, every query in a run carrying the run's
+  token. Names are `<tok>-<phase>-<carrier>.example.com`, cited here only up to `.example.com`. A name counts as sent
+  when the page's query reaches the system resolver. Every name sent here also left the machine (the capture's
+  non-loopback interface).
+- **Suites.** `dns` (A), `b-dns` (B), `dns-libs`, `dns-burst` and `appframe`. Settings come from `--switches=…` and
+  `--variant=offline|noprefetch`.
+- **The control** in every run is a window on a session of its own, standing for the in-app browser. It loads
+  `http://example.com/` by name, then an http page of the listener, and runs the same carriers there (the same source,
+  `viewer/carriers.js`).
+- **Input.** Hover and pointer-down are real X11 input (xdotool). The pointer is pressed on an anchor and released
+  elsewhere, so no click follows.
+
+### Which carriers send a name
+
+| Carrier | A frame | B view | Control (own session, http page) |
+|---|---|---|---|
+| `<link rel=dns-prefetch>` made by script | **sent** | **sent** | sent |
+| `<link rel=dns-prefetch>` as inert markup (`innerHTML` into the live document) | **sent** | **sent** | sent |
+| the same, removed by a MutationObserver as soon as it is told of it | **sent** | **sent** | sent |
+| `<link rel=preconnect>` | no | no | no |
+| `<a href>` on parse | no | no | no |
+| `<a href>` on hover | no | no | **sent** |
+| `<a href>` on pointer-down | no | no | **sent** |
+| link or anchor in a subtree built detached and never attached | no | no | no |
+| link and `meta` dropped, href moved to `data-href`, then attached | no | no | no |
+
+- **The only carrier is a `<link rel=dns-prefetch>` connected to the live document.** It works whether a script makes it
+  or markup brings it in. Blink starts the prefetch when the element is inserted (`PreloadHelper::DnsPrefetchIfNeeded`
+  in Chromium 152), so an observer that removes it comes too late, as the capture shows.
+- **Anchors carry nothing inside the frame or the view.** In the control they do, on hover and on pointer-down. The
+  measurements do not say which condition of Chromium's lets the control's anchors send and the frame's not. The
+  control's document differs in its protocol (http), its origin (not opaque) and its being a top frame.
+
+### (b) The wrapper's meta
+
+The tested order and placement:
+
+1. `<meta http-equiv="x-dns-prefetch-control" content="off">` is the first element of the wrapper's `<head>`
+   (`viewer/viewer-meta.html`), ahead of the charset meta and the module script.
+2. Phase "metaon": a `<meta http-equiv="x-dns-prefetch-control" content="on">` is put into a `div` at the top of the
+   body by `innerHTML`.
+3. 100 ms later come the carriers.
+
+| Wrapper | Explicit `rel=dns-prefetch` names | Anchor names |
+|---|---|---|
+| no meta | sent | none |
+| meta off first | sent | none |
+| meta off first, then "on" later in the body | sent | none |
+
+The meta changes nothing for the explicit link. In Chromium 152 the prefetch for `rel=dns-prefetch` reads only the
+frame's `dnsPrefetchingEnabled` setting. The document's `x-dns-prefetch-control` state, which the meta sets, is read only
+when a child frame inherits it (`Document::InitDNSPrefetch`). And there is nothing for a later "on" to turn back on:
+anchors send nothing in the frame with or without it.
+
+### (1) Settings and switches
+
+The same carriers ran under each, with the control beside them.
+
+| Setting | A frame | B view | Control (other session) |
+|---|---|---|---|
+| none | sent | sent | sent; `example.com` loads |
+| `--dns-prefetch-disable` | sent | sent | sent |
+| `ses.enableNetworkEmulation({ offline: true })` on the frame's or the view's session | sent | sent | sent |
+| `X-DNS-Prefetch-Control: off` header or meta | sent | sent | not applied |
+| **`--blink-settings=dnsPrefetchingEnabled=false`**, as a switch or by `app.commandLine.appendSwitch` before ready | **none** | **none** | none sent; `example.com` still loads by name |
+
+- `--dns-prefetch-disable` is a Chrome-layer switch that Electron ignores.
+- Electron 44.4.5's web preferences have no field that reaches this setting. `enableBlinkFeatures` and
+  `disableBlinkFeatures` switch runtime features, not settings. No per-session setting in Electron's API reaches it
+  either.
+- `--blink-settings` holds after a theme change (`nativeTheme.themeSource`, which sends the renderers new web
+  preferences) and a zoom. A frame made before both and given its carriers after sent nothing.
+- **What closes it: `app.commandLine.appendSwitch('blink-settings', 'dnsPrefetchingEnabled=false')`.** Its cost is
+  app-wide but small. No renderer in the app sends DNS-prefetch hints, and anchors in the in-app browser lose their
+  hover and pointer-down prefetch (the control's anchor names stopped too). Name resolution and page loads are
+  untouched: the control loaded `example.com` by name under it.
+
+### (2) What the channel carries when no attacker script runs
+
+- **Inert markup carries it.** A `<link rel=dns-prefetch>` that reaches the live document through `innerHTML` sends its
+  name (the table above), so any path that writes file-derived HTML into the document would be a carrier without any
+  script.
+- **The three libraries take no such path from file content.**
+  - No bundle creates a `link`, `meta` or `base` element.
+  - docx-preview's `innerHTML` writes are constants.
+  - pptx-renderer's one `innerHTML` of file text escapes `&`, `<` and `>`.
+  - react-xlsx opens a cell's hyperlink with `window.open` on click and puts no anchor in the DOM.
+- **Measured with crafted files.** Each sample got one external hyperlink to a name of the run's (built at run time with
+  JSZip): a docx `w:hyperlink`, a pptx `a:hlinkClick` and an xlsx `hyperlink`.
+  - docx-preview and pptx-renderer put it in the DOM as `a[href]` (pptx-renderer with `target=_blank`). react-xlsx put
+    nothing in the DOM.
+  - No name was sent by any library, live and as specified, with the anchor hovered and pressed.
+
+**Which libraries can render into a detached container.**
+
+| Library | Detached, before attaching | After attaching |
+|---|---|---|
+| docx-preview | all of it: 101 nodes, the whole text | nothing changes |
+| pptx-renderer | partly: 157 nodes, no canvas | goes on rendering: 160 nodes, 1 canvas, and an unfiltered `a[href]` appeared that the filter had not seen |
+| react-xlsx | yes: 131 nodes, 9 canvases | re-renders: 72 nodes |
+
+Only docx-preview renders detached and stays as rendered.
+
+### (c) The allowlist filter: `link`, `meta`, `base` dropped, every anchor's `href` moved to `data-href`
+
+- **docx-preview: render detached, filter, attach.** It holds, and nothing leaves; the anchor is in the DOM as
+  `a[data-href]`.
+- **pptx-renderer and react-xlsx** render through their own DOM code and keep changing it after attach. The candidate
+  equivalents, measured:
+
+  | Candidate | Result |
+  |---|---|
+  | render detached, filter, attach | does not hold: pptx-renderer's anchor came back with its `href` after attach |
+  | MutationObserver | does not hold: the prefetch starts on insertion, before the observer runs |
+  | patched element factory (`createElement`/`createElementNS` filter at creation) plus a Trusted Types default policy for every HTML string sink (`require-trusted-types-for 'script'; trusted-types default raw`) | holds by construction; react-xlsx drew under it and sent nothing; **pptx-renderer drew nothing** (0 nodes; cause not isolated); docx-preview drew with 87 of its 101 nodes |
+
+**With (b) and (c) together nothing leaves from any library's output, and nothing leaves without them either.** No
+library emits the only carrier, and anchors are not a carrier in the frame or the view. No name leaves after (b) and
+(c), so there is no library residual to record. The channel that remains is a `<link rel=dns-prefetch>` put into the
+live document by script of ours or by a future code path that writes file-derived HTML. The setting above closes both.
+
+### (3) The app's existing HTML-artifact frame
+
+The harness built the frame as master does:
+- `maws-artifact:` answered with `STORE_FRAME_CSP` (`src/services/artifacts/scheme/scheme-handler.ts`);
+- `<iframe sandbox="allow-scripts" referrerPolicy="no-referrer">` (`HtmlFrame.tsx`);
+- the session's request filter and permission handlers (`installFramePolicies`, `guardPermissions('store-frames')`) and
+  the window's `guardFrames` (WebRTC policy, subframe navigation guard), all in `src/render/policies.ts`.
+
+The page's inline script runs by design. It sent every link carrier, and it put its own text, a 50-byte invented note,
+hex-encoded into two labels of one name; the text arrived whole at the resolver. None of the frame's layers sees a DNS
+prefetch: the request filter cancelled nothing.
+
+What a script there can put into a name: whatever it can read. That is:
+- the artifact's own HTML and text, written by the agent, possibly from the owner's data;
+- the results of the connector tools the owner granted the artifact, which the bridge's `window.mawsConnectors` hands
+  the page;
+- what the app posts it (pick and locate requests).
+
+Under `noprefetch` nothing left. Recorded in `docs/tech-debt-tracker.md` beside the E2 row (2026-11-14).
+
+### (4) Bandwidth and limits (one page load, A frame)
+
+| Burst | Distinct names at the resolver | Queries | Over | Left the machine |
+|---|---|---|---|---|
+| 1000 names inserted in 22 ms | 1000 | 10,059 | 3.7 s | all |
+| 5000 names inserted in 109 ms | 5000 | 50,096 | 13.1 s | all |
+
+There are about 10 queries per name: A and AAAA, times the resolver's search-domain expansion. No throttle showed up to
+5000 names, about 380 names a second. Nothing caches a repeat:
+- the same 100 names inserted again in the same page were all sent again;
+- after a reload (the frame removed and added again, same URL), all 100 were sent again.
+
+A name holds 253 characters in labels of at most 63, so about 120 bytes hex-encoded or about 150 in base32. At the
+measured rate that is on the order of 45 to 55 KB a second; that figure is an estimate from the two measurements, not
+measured end to end.
+
+### Not tested on Linux, or not here
+
+- **macOS.** Chromium may resolve through the system resolver there (mDNSResponder), which may cache or coalesce
+  repeats, so the bandwidth and the re-sending may differ. The capture there needs `tcpdump` with privileges.
+  `--blink-settings` is Blink's own and should not differ, but it is unverified on macOS.
+- **The real in-app browser.** The control stands for it as a plain session. The app's real in-app browser (its own
+  partition and settings) was not run under the switch.
+- **Real input on macOS.** Hover and pointer-down used xdotool; on macOS they need a real input driver.
+- **The cause of the anchor difference.** What makes the control's anchors send and the frame's not (protocol, opaque
+  origin or being a subframe) was not isolated.

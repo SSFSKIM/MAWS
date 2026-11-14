@@ -27,6 +27,7 @@ for (const [tag, address] of addresses) {
   const http = createServer((req, res) => {
     log({ listener: 'http', tag, method: req.method, url: req.url, from: req.socket.remoteAddress, origin: req.headers.origin ?? null, ua: (req.headers['user-agent'] ?? '').slice(0, 60) });
     res.setHeader('Access-Control-Allow-Origin', '*');
+    if (req.url.endsWith('/page')) { res.setHeader('Content-Type', 'text/html'); res.end('<!doctype html><title>control</title><body></body>'); return; }
     if (req.url.endsWith('/eventsource')) { res.setHeader('Content-Type', 'text/event-stream'); res.end('data: hi\n\n'); return; }
     res.end('reached');
   });

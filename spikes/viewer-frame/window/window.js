@@ -30,12 +30,13 @@ function waitMessage(id, match, timeoutMs) {
 }
 
 const harness = {
-  addFrame(id, { host, format = 'docx', page = 'viewer.html', sandbox = 'allow-scripts', width, height }) {
+  addFrame(id, { host, format = 'docx', page = 'viewer.html', sandbox = 'allow-scripts', width, height, src, referrerPolicy }) {
     const el = document.createElement('iframe');
     if (sandbox !== null) el.setAttribute('sandbox', sandbox);
     if (width) el.style.width = `${width}px`;
     if (height) el.style.height = `${height}px`;
-    el.src = `maws-viewer://${host}/${page}?format=${format}`;
+    if (referrerPolicy) el.referrerPolicy = referrerPolicy;
+    el.src = src ?? `maws-viewer://${host}/${page}?format=${format}`;
     el.addEventListener('mouseenter', () => pointer.push({ id, type: 'mouseenter', at: performance.now() }));
     el.addEventListener('mouseleave', () => pointer.push({ id, type: 'mouseleave', at: performance.now() }));
     frames.set(id, { el, host, messages: [], waiters: [] });

@@ -42,6 +42,7 @@ const require = createRequire(import.meta.url);
 cpSync(require.resolve('@extend-ai/react-xlsx/duke_sheets_wasm_bg.wasm'), join(out, 'viewer', 'duke_sheets_wasm_bg.wasm'));
 cpSync(join(here, 'viewer', 'viewer.html'), join(out, 'viewer', 'viewer.html'));
 cpSync(join(here, 'viewer', 'paint.html'), join(out, 'viewer', 'paint.html'));
+cpSync(join(here, 'viewer', 'viewer-meta.html'), join(out, 'viewer', 'viewer-meta.html')); // the wrapper with x-dns-prefetch-control off first
 writeFileSync(join(out, 'viewer', 'manifest.json'), JSON.stringify(readdirSync(join(out, 'viewer')).filter((f) => f !== 'manifest.json').sort(), null, 1));
 cpSync(join(here, 'window'), join(out, 'window'), { recursive: true });
 console.log(`built ${readdirSync(join(out, 'viewer')).length} viewer files`);

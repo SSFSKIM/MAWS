@@ -1,5 +1,7 @@
 // The spike's test hook: script running inside the viewer page, the worst case (script of ours gone wrong). Each test
 // tries something and reports what it saw; the harness in main decides pass or fail.
+import { carriers } from './carriers.js';
+
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errText = (e) => (e && (e.name ? `${e.name}: ${e.message}` : String(e))) || String(e);
 const ran = (globalThis.__ran = globalThis.__ran ?? {});
@@ -288,6 +290,92 @@ const tests = {
   },
   'keys-read': async () => ({ keys: globalThis.__keys ?? [], hasFocus: document.hasFocus() }),
   'focus-state': async () => ({ hasFocus: document.hasFocus() }),
+};
+
+// ---- the DNS follow-up ----------------------------------------------------------------------------------------------
+const XLINK = 'http://www.w3.org/1999/xlink';
+// The allowlist the follow-up names: link, meta and base dropped; every anchor's href moved into data-href.
+function filterTree(root) {
+  for (const el of [...root.querySelectorAll('link,meta,base')]) el.remove();
+  for (const a of root.querySelectorAll('a,area')) {
+    if (a.hasAttribute('href')) { a.setAttribute('data-href', a.getAttribute('href')); a.removeAttribute('href'); }
+    if (a.hasAttributeNS(XLINK, 'href')) { a.setAttribute('data-href', a.getAttributeNS(XLINK, 'href')); a.removeAttributeNS(XLINK, 'href'); }
+  }
+}
+// The patched element factory: elements a library creates through the DOM APIs are filtered at creation. link, meta
+// and base come back as inert spans; an anchor (HTML or SVG) keeps its href in data-href, whether set as a property or
+// an attribute. Parser-made nodes (an HTML string through innerHTML and its kin) do not pass here: the Trusted Types
+// default policy below takes those.
+let factoryPatched = false;
+function patchFactory() {
+  if (factoryPatched) return;
+  factoryPatched = true;
+  const create = Document.prototype.createElement;
+  const createNS = Document.prototype.createElementNS;
+  const neuter = (el) => {
+    const tag = el.localName;
+    if (tag === 'link' || tag === 'meta' || tag === 'base') return create.call(document, 'span');
+    if (tag === 'a' || tag === 'area') {
+      const setAttribute = el.setAttribute, setAttributeNS = el.setAttributeNS;
+      el.setAttribute = function (n, v) { return String(n).toLowerCase() === 'href' || String(n).toLowerCase() === 'xlink:href' ? setAttribute.call(this, 'data-href', v) : setAttribute.call(this, n, v); };
+      el.setAttributeNS = function (ns, n, v) { return /(^|:)href$/i.test(String(n)) ? setAttribute.call(this, 'data-href', v) : setAttributeNS.call(this, ns, n, v); };
+      if (el instanceof HTMLElement) Object.defineProperty(el, 'href', { configurable: true, get() { return this.getAttribute('data-href') ?? ''; }, set(v) { setAttribute.call(this, 'data-href', String(v)); } });
+    }
+    return el;
+  };
+  Document.prototype.createElement = function (...a) { return neuter(create.apply(this, a)); };
+  Document.prototype.createElementNS = function (...a) { return neuter(createNS.apply(this, a)); };
+}
+// Trusted Types: with the policy's require-trusted-types-for, every HTML string sink calls the default policy, which
+// parses the string inert, filters it and hands back the result.
+let ttInstalled = null;
+function installTrustedTypes() {
+  if (ttInstalled !== null) return ttInstalled;
+  if (!self.trustedTypes) return (ttInstalled = 'no trustedTypes');
+  try {
+    const raw = trustedTypes.createPolicy('raw', { createHTML: (s) => s });
+    trustedTypes.createPolicy('default', {
+      createHTML: (s) => { const t = document.createElement('template'); t.innerHTML = raw.createHTML(s); filterTree(t.content); const d = document.createElement('div'); d.append(t.content); return d.innerHTML === '' ? '' : raw.createHTML(d.innerHTML).toString(); },
+      createScriptURL: (s) => s,
+    });
+    return (ttInstalled = 'installed');
+  } catch (e) { return (ttInstalled = errText(e)); }
+}
+
+function urlsWith(root, tok) {
+  const out = [];
+  for (const el of root.querySelectorAll('*')) for (const at of el.attributes) if (at.value.includes(tok)) out.push(`${el.localName}[${at.name}]`);
+  return out;
+}
+
+tests.carriers = (args) => carriers(args);
+
+tests['draw-lib'] = async (args, ctx) => {
+  const { format, b64, mode, tok } = args;
+  const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)).buffer;
+  if (mode === 'factory') { patchFactory(); args.tt = installTrustedTypes(); }
+  const lib = await import(['.', `${format}.js`].join('/'));
+  const box = document.createElement('div');
+  box.style.cssText = 'width:440px;height:340px;overflow:auto';
+  const live = mode !== 'detached';
+  if (live) document.body.prepend(box);
+  const t0 = performance.now();
+  let info, error = null;
+  try { info = await Promise.race([lib.draw(box, bytes), sleep(20000).then(() => { throw new Error('no draw within 20 s'); })]); } catch (e) { error = errText(e); }
+  const before = { nodes: box.querySelectorAll('*').length, text: box.innerText.length, canvases: box.querySelectorAll('canvas').length, svgs: box.querySelectorAll('svg').length, tokUrls: urlsWith(box, tok) };
+  if (!live) { filterTree(box); document.body.prepend(box); }
+  await sleep(2000);
+  const after = { nodes: box.querySelectorAll('*').length, text: box.innerText.length, canvases: box.querySelectorAll('canvas').length, tokUrls: urlsWith(box, tok) };
+  const anchors = [...box.querySelectorAll('a')].filter((a) => (a.getAttribute('href') ?? a.getAttribute('data-href') ?? '').includes(tok) || (a.getAttributeNS(XLINK, 'href') ?? '').includes(tok));
+  const r = anchors[0]?.getBoundingClientRect();
+  return { mode, tt: args.tt ?? null, ms: Math.round(performance.now() - t0), error, info: info ?? null, beforeAttach: live ? null : before, after, anchor: r && r.width ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null };
+};
+
+tests.burst = async (args) => {
+  const { tok, label, from, count } = args;
+  const t0 = performance.now();
+  for (let i = from; i < from + count; i++) { const l = document.createElement('link'); l.rel = 'dns-prefetch'; l.href = `//${tok}-${label}-${i}.example.com`; document.head.append(l); }
+  return { inserted: count, ms: Math.round(performance.now() - t0) };
 };
 
 export async function run(name, args, ctx) {

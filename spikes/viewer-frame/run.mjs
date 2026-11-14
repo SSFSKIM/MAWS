@@ -43,6 +43,8 @@ const ALL = [
   ['input'],
   ['shared', ['--disable-site-isolation-trials']],
   ['b-basic', ['--use-fake-device-for-media-stream']], ['b-boundary'], ['b-loop'], ['b-hang'], ['b-kill'], ['b-oom'], ['b-metrics'], ['b-egress'], ['b-webrtc-block'], ['b-webrtc-noblock'], ['b-layout'],
+  // the DNS follow-up
+  ['dns'], ['b-dns'], ['dns-libs'], ['dns-burst'], ['appframe'],
 ];
 const only = argv.only ? new Set(String(argv.only).split(',')) : null;
 const extraSwitches = argv.switches ? String(argv.switches).split(/ (?=--)/) : []; // a switch's value may hold spaces
@@ -63,7 +65,7 @@ writeFileSync(join(runs, 'results.json'), JSON.stringify(results, null, 1));
 
 // One line per condition: fail if any part fails, else not run if any part was not run, else pass; `record` parts
 // (observations, controls) do not decide.
-const order = ['setup', ...Array.from({ length: 15 }, (_, i) => String(i + 1)), 'B1', 'B2', 'B3'];
+const order = ['setup', ...Array.from({ length: 15 }, (_, i) => String(i + 1)), 'B1', 'B2', 'B3', 'dns'];
 for (const arch of ['A', 'B']) {
   const mine = results.filter((r) => (arch === 'B') === r.suite.startsWith('b-'));
   if (!mine.length) continue;

