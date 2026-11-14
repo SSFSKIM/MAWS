@@ -4,11 +4,12 @@
 // delivers the composer's chords here and never a pane's Enter or Esc. UX wave U4a (l3-input-08, l3-input-03): Enter
 // sends whatever the line count, Shift+Enter and ⌥Enter break the line (the action table's fixed rows), ⌘Enter
 // (`composer.queue`) sends with `when: 'after'`, which keeps the message for after a running turn; a composing IME key
-// never sends; ArrowUp on an empty editor (or while recalling) walks
-// history. UX wave U4a M6 (l3-input-12): while recalling or searching, one muted line under the text says where
-// (`setHistory`), and Ctrl+R (`composer.historySearch`) searches the history ↑ walks. Mount one Editor per session (key it by the session): its draft and history are that session's. What a
-// submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The frame around it, the
-// attachment strip and the submit control are the Composer's (M4), which drives the editor through its handle.
+// never sends; ArrowUp on an empty editor (or while recalling) walks history. UX wave U4a M6 (l3-input-12): while
+// recalling or searching, one muted line under the text says where (`setHistory`), and Ctrl+R (`composer.historySearch`)
+// searches the history ↑ walks. Mount one Editor per session (key it by the session): its draft and history are that
+// session's. What a submission does is the caller's (`onSubmit`); the default dispatches by mode (`submit.ts`). The
+// frame around it, the attachment strip and the submit control are the Composer's (M4), which drives the editor through
+// its handle.
 import type { EditorView } from '@tiptap/pm/view';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type Ref } from 'react';

@@ -299,6 +299,7 @@ export class EditorController {
 
   blurred(): void {
     this.caretLeft = true; // ProseMirror keeps the selection across the blur
+    this.endSearch(); // UX wave U4a M6: a search ends where the keyboard leaves it, the match kept (Desktop's dismissal)
   }
 
   updated(editor: TiptapEditor, transaction: Transaction): void {

@@ -1243,6 +1243,16 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     expect(shown(handle)).toBe('notes on deploy');
   });
 
+  it('ends a search the keyboard leaves, the match kept', async () => {
+    const { handle, content, search, type } = await mounted(PROMPTS);
+    await search();
+    await type('fix');
+    expect(shown(handle)).toBe('fix the build');
+    act(() => content.blur());
+    expect(line()).toBeNull();
+    expect(shown(handle)).toBe('fix the build');
+  });
+
   it('starts a search from the recalled entry’s place, and its Esc puts back the draft the recall began from', async () => {
     const { handle, search, type, press } = await mounted(PROMPTS);
     await press('ArrowUp');
