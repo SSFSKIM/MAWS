@@ -89,6 +89,7 @@ Verbatim, as chosen on the question cards; a note is the owner's own text. An an
 | Where should "Add custom connector…" write: Claude Code's own config, or the list MAWS keeps in Settings that only sessions MAWS starts can see? | Claude Code's config (Recommended) |  |
 | Between the two scopes an off always wins in the engine: a connector off at user scope cannot be switched on for one project by an on/off setting (a plugin can). Which behaviour do you need for a connector with many tools? | Off by default, on per project (Recommended) |  |
 | In the "Add custom connector" form, should the value fields of request headers and environment variables show what is typed, or hide it behind dots with an eye button? | Plain text (Recommended) |  |
+| Word, PowerPoint and Excel files can be drawn inside MAWS with nothing installed on the Mac, but not exactly as Office draws them (a long Word file is one tall page with footnotes at the end; a slide deck has no animations; an Excel chart loses axis numbers and the legend). Is this look good enough to be how these files open in MAWS? | Yes, as drawn (Recommended) | the preview ships only if the containment test of the viewer passes; Excel's computed totals are a separate question |
 
 ## Questions still open
 
