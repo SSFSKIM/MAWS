@@ -685,6 +685,7 @@ async function countRunning(page: Page, id: string, journal: string): Promise<vo
   await messageIn(page, 0).click();
   await page.keyboard.type(COUNT);
   await page.keyboard.press('Enter');
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   await expect(transcriptOf(page, 0)).toContainText('Count to 30 slowly');
 }
@@ -699,11 +700,13 @@ test('U4a, the stack: Enter adds a Next step row and ⌘Enter an After the turn 
 
   await page.keyboard.type(steered);
   await page.keyboard.press('Enter'); // the `next` steer, written into the running turn (seq 146)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const next = list.locator('li[data-queue-state="next"]');
   await expect(next).toContainText(steered);
   await expect(next.locator('[data-mark]')).toHaveText('Next step');
   await page.keyboard.type(later);
   await page.keyboard.press('Meta+Enter'); // for after the turn: MAWS's queue holds it
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const after = list.locator('li[data-queue-state="after"]');
   await expect(after).toContainText(later);
   await expect(after.locator('[data-mark]')).toHaveText('After the turn');
@@ -736,10 +739,12 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   await messageIn(page, 0).click();
   await page.keyboard.type('Run the long command in the foreground.');
   await page.keyboard.press('Enter'); // seq 12; its Bash call then runs (32)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   const message = 'Reply with one word, then carry on.';
   await page.keyboard.type(message);
   await page.keyboard.press('Enter'); // at the next step, behind the running command (seq 37)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const list = stackOf(page, 0);
   const row = list.locator('li[data-queue-state="next"]');
   await expect(row).toContainText(message);
@@ -783,10 +788,12 @@ test('U4a, Send now: on an after-the-turn row it promotes the message at priorit
   await messageIn(page, 0).click();
   await page.keyboard.type('Run the long command in the foreground.');
   await page.keyboard.press('Enter'); // seq 12; its Bash call then runs, a task from 37
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   const steered = 'Reply with one word at the next step.';
   await page.keyboard.type(steered);
   await page.keyboard.press('Enter'); // at the next step (39)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const later = 'Reply with another word now.';
   await page.keyboard.type(later);
   await page.keyboard.press('Meta+Enter'); // after the turn: MAWS's queue holds it, nothing is written
@@ -828,6 +835,7 @@ test('U4a, take back: ↑ in the empty box returns the newest waiting message to
   const list = stackOf(page, 0);
   await page.keyboard.type(steered);
   await page.keyboard.press('Enter'); // at the next step (seq 146)
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await page.keyboard.type(later);
   await page.keyboard.press('Meta+Enter'); // after the turn, the newer
   await expect(list.locator('li')).toHaveCount(2);
@@ -844,7 +852,7 @@ test('U4a, take back: ↑ in the empty box returns the newest waiting message to
 
   // with the box emptied, ↑ takes the one at the next step: withdrawn from the engine (the recorded `cancel_async_message`)
   await messageIn(page, 0).click();
-  await page.keyboard.press('Meta+a');
+  await page.keyboard.press('ControlOrMeta+a');
   await page.keyboard.press('Backspace');
   await expect(messageIn(page, 0)).toHaveText('');
   await page.keyboard.press('ArrowUp');
@@ -864,6 +872,7 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
   const list = stackOf(page, 0);
   await page.keyboard.type(first);
   await page.keyboard.press('Meta+Enter'); // after the turn
+  await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await page.keyboard.type(second);
   await page.keyboard.press('Enter'); // at the next step (seq 146)
   await expect(list.locator('li')).toHaveCount(2);
