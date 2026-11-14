@@ -204,6 +204,25 @@ describe('the services front', () => {
     expect(spineTakes('engine.sessions', { name: 'session.rewind' })).toBe(false);
   });
 
+  // The scenario stub (src/services/sessions/stub-source.ts) intercepts engine-host names outside SPINE_ENGINE_INTERCEPTS
+  // (session.events, engine.budget): the relay sends one through the spine whenever the loaded bus holds its intercept
+  it('takes: spineTakes’s names, and any name the loaded bus intercepts (the stub’s session.events); host.op only by its inner name', async () => {
+    const harness = front();
+    const { served } = harness;
+    const EVENTS = { appSessionId: 'stub-1', afterSeq: null, limit: null };
+    const CLAIMED_STOP = { name: 'session.stop', input: { appSessionId: 'a', reason: 'stop' } };
+    expect(served.takes('session.rewind', REWIND)).toBe(true); // the spine is loaded for these, whatever is installed
+    expect(served.takes('session.events', EVENTS)).toBe(false);
+    served.bus.intercept('host.op', () => ({ state: 'done' }) as never); // production's: it takes an inner name of the set only
+    served.bus.intercept('session.events', () => ({ events: [], lastSeq: 0, complete: true }) as never); // the stub's
+    expect(served.takes('session.events', EVENTS)).toBe(true);
+    expect(served.takes('engine.budget', undefined)).toBe(false);
+    expect(served.takes('host.op', CLAIMED_STOP)).toBe(false);
+    expect(served.takes('host.op', { name: 'session.rewind', input: REWIND })).toBe(true);
+    expect(await served.intercepted('session.events', EVENTS, { id: 'app' } as never)).toEqual({ ok: true, value: { events: [], lastSeq: 0, complete: true } });
+    expect(harness.forwarded).toEqual([]);
+  });
+
   it('SPINE_ENGINE_INTERCEPTS names engine-host commands only', () => {
     for (const name of SPINE_ENGINE_INTERCEPTS) expect(REGISTRY.commands[name as CommandName].owner, name).toBe('engine-host');
   });

@@ -754,8 +754,8 @@ test('Settings is a dialog', async () => {
 // same tab with its draft, and to the side surface as it was, with nothing of the side column written by the visit.
 // A session's row leaves the page. A request raised while a page is open shows under Needs you and on the Overview
 // button, and the page stays. A relaunch with the page open shows the page; with the dialog open over it, the page
-// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub draws
-// no transcript today (its history never reaches the app, and the daemon relay is being repaired on master); it is
+// without the dialog. The transcript's scroll offset across the page (A7) is not read here: the nine-sessions stub gives
+// its sessions no history (its answer is empty by design, so a transcript there has no rows to scroll); it is
 // proved on a replayed session by library.spec.ts's "a replayed session's transcript keeps its scroll offset across a
 // page and Back".
 test('a page beside the sidebar', async () => {
@@ -1318,6 +1318,10 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     // C6 registers the transcript slot: the session's transcript is mounted in place of C5's fallback.
     await expect(panel.locator('.transcript')).toHaveCount(1);
     await expect(panel.getByText('Transcript unavailable')).toHaveCount(0);
+    // The stub answers a session's history itself (empty and complete, stub-source.ts) through mawsd's relay, so the pane
+    // hydrates to nothing; one the relay sent on to the engine host stays reading (or fails)
+    await expect(panel.locator('.transcript[data-hydration="ready"]'), 'the stub answered the history read').toHaveCount(1);
+    await expect(panel.getByText('Couldn’t load this conversation')).toHaveCount(0);
     await expect(panel.getByText('Approval needed')).toBeVisible();
     await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
     await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card
