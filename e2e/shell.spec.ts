@@ -21,7 +21,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
-import { activeMainTab, mainTabById, mainTabs, openAppDestination, openSettings, openSurface, pageRegion, pageTitle, settingsDialog, sidebarFooter, surfaceRow as shellSurfaceRow, usageRing } from './support/shell';
+import { activeMainTab, backToTabs, mainTabById, mainTabs, openAppDestination, openSettings, openSurface, pageRegion, pageTitle, settingsDialog, sidebarFooter, surfaceRow as shellSurfaceRow, usageRing } from './support/shell';
 
 const SHELL_ENV = {
   MAWS_HARNESS: '0',
@@ -955,7 +955,7 @@ test('the Overview over a page', async () => {
       expect(await overview.evaluate((el) => el.closest('[inert]') === null), 'the Overview is inside no inert element').toBe(true);
       await expect.poll(sameBox, { message: `${state}: the Overview's box is the page's` }).toBe(true);
       const before = await boxOf(region);
-      await resize(...to);
+      await resize(to[0], to[1]);
       await expect.poll(async () => JSON.stringify(await boxOf(region)), { message: 'the page took the new window’s box' }).not.toBe(JSON.stringify(before));
       await expect.poll(sameBox, { message: `${state}: after a resize the Overview's box is the page's new box` }).toBe(true);
       // the page closes under the Overview: the side column is docked
