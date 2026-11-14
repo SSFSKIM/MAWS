@@ -45,7 +45,7 @@ import { useGit } from '../stores/git';
 import { queryClient } from './query';
 import type { ScmStatus } from '@shared/ipc/schema/scm';
 import { workingFolder } from '@shared/sessions/working-folder';
-import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
+import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, resetScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from '../tools/scm/queries';
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
@@ -137,8 +137,9 @@ export function connectShell(
   };
 
   // UX wave U8c-2 (M4 decision 2): the card's pull-request row and Source control read `scm.status` and `scm.pr.state` by
-  // the session alone, so a session whose working folder the store now holds differently has both asked again; a change
-  // that leaves the folder (a title, the agent's folder inside the same checkout) asks neither.
+  // the session alone, so a session whose working folder the store now holds differently has both reset (fix wave 1: an
+  // answer or a read still out was the checkout the agent left) and asked again; a change that leaves the folder (a
+  // title, the agent's folder inside the same checkout) touches neither.
   const askAgainWhereMoved = (events: EventPayload<'session.changed'>[], before: ReadonlyMap<AppSessionId, SessionRecord>) => {
     const after = sessions().records;
     const moved = new Set<AppSessionId>();
@@ -147,7 +148,7 @@ export function connectShell(
       const now = after.get(record.appId);
       if (was && now && workingFolder(was).path !== workingFolder(now).path) moved.add(record.appId);
     }
-    if (moved.size > 0) invalidateScmQueries((appSessionId) => moved.has(appSessionId));
+    if (moved.size > 0) resetScmQueries((appSessionId) => moved.has(appSessionId));
   };
 
   // In arrival order; consecutive changes and consecutive digests of one machine go to the store as one call each.

@@ -1217,9 +1217,9 @@ describe('review diff tab', () => {
     await waitFor(() => expect(selectedPath()).toBe('src/staged.ts'));
     await waitFor(() => expect(bodyText()).toContain('export const staged = 1;'));
     moveTo(WT);
-    await waitFor(() => expect(rows().map((r) => r[0])).toEqual(['src/other.ts']));
+    await waitFor(() => expect(rows().map((r) => r[0])).toEqual(['src/other.ts', 'scratch.txt'])); // the fake's status lists scratch.txt untracked in every folder
     await waitFor(() => expect(selectedPath()).toBe('src/other.ts'));
-    expect(header()).toBe('1 file changed · +2 −0 · Uncommitted');
+    expect(header()).toBe('2 files changed · +2 −0 · Uncommitted');
     expect(document.body.textContent).not.toContain('src/staged.ts');
     expect(document.body.textContent).not.toContain('export const staged = 1;');
     expect(document.querySelector('[data-review-refused]')).toBeNull();

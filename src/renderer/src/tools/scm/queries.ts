@@ -22,20 +22,24 @@ export const prStateKey = (appSessionId: AppSessionId) => [...PR_STATE_QUERIES, 
 
 export const PR_STATE_POLL = { staleTime: 60_000, refetchInterval: 120_000, refetchIntervalInBackground: false } as const; // main keeps an answer 60 s
 
-// The scm queries of the sessions `which` picks, every one of `prefixes` (both reads by default). The keys' third part
-// names the session; a key without one names none and is passed over.
+// The scm queries of the sessions `which` picks, every one of `prefixes` (both reads by default).
 export function invalidateScmQueries(which: (appSessionId: AppSessionId) => boolean, prefixes: readonly (readonly unknown[])[] = [SCM_STATUS_QUERIES, PR_STATE_QUERIES]): void {
-  const sessionOf = (queryKey: readonly unknown[]) => (queryKey[2] as { appSessionId?: AppSessionId } | undefined)?.appSessionId;
-  for (const queryKey of prefixes) {
-    void queryClient.invalidateQueries({
-      queryKey,
-      predicate: (query) => {
-        const appSessionId = sessionOf(query.queryKey);
-        return appSessionId !== undefined && which(appSessionId);
-      },
-    });
-  }
+  for (const queryKey of prefixes) void queryClient.invalidateQueries({ queryKey, predicate: sessionsOf(which) });
 }
+
+// UX wave U8c-2 (fix wave 1): the sessions whose working folder changed. Both reads are keyed by the session alone, and
+// their answers were the checkout the agent left: each is reset, so a read still out (which an invalidation would let
+// land as the answer) is cancelled and its answer dropped, nothing of the old checkout is shown, and a read in use is
+// asked again at once, of the folder main's record now names.
+export function resetScmQueries(which: (appSessionId: AppSessionId) => boolean): void {
+  for (const queryKey of [SCM_STATUS_QUERIES, PR_STATE_QUERIES]) void queryClient.resetQueries({ queryKey, predicate: sessionsOf(which) });
+}
+
+// The keys' third part names the session; a key without one names none and is passed over.
+const sessionsOf = (which: (appSessionId: AppSessionId) => boolean) => (query: { queryKey: readonly unknown[] }) => {
+  const appSessionId = (query.queryKey[2] as { appSessionId?: AppSessionId } | undefined)?.appSessionId;
+  return appSessionId !== undefined && which(appSessionId);
+};
 
 // P5 E312: the session published a change for review (the status's `published`, from the engine's
 // code_change_published: a PR created, merged, closed, …), which moves no ref the watcher sees. When its time moves, a

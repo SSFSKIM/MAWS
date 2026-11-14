@@ -3,7 +3,8 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { queryClient } from '../../ipc/query';
-import { invalidateScmQueries, prStateKey, SCM_STATUS_QUERIES, scmStatusKey } from './queries';
+import type { MawsBridge } from '@shared/ipc/schema';
+import { invalidateScmQueries, prStateKey, refreshPublishedPrState, resetScmQueries, SCM_STATUS_QUERIES, scmStatusKey } from './queries';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
@@ -19,5 +20,33 @@ describe('invalidateScmQueries', () => {
     expect(invalidated(prStateKey(A))).toBe(true);
     expect(invalidated(scmStatusKey(B))).toBe(false);
     expect(invalidated([...SCM_STATUS_QUERIES])).toBe(false);
+  });
+});
+
+// UX wave U8c-2 (fix wave 1): a move resets both reads of the sessions that moved, and a published PR's lookup still out
+// for one of them is not written over the reset.
+describe('resetScmQueries', () => {
+  afterEach(() => queryClient.clear());
+
+  it('drops the picked sessions’ answers and passes over a key without a session', () => {
+    for (const key of [scmStatusKey(A), scmStatusKey(B), prStateKey(A), [...SCM_STATUS_QUERIES]]) queryClient.setQueryData(key, {});
+    expect(() => resetScmQueries((appSessionId) => appSessionId === A)).not.toThrow();
+    expect(queryClient.getQueryData(scmStatusKey(A))).toBeUndefined();
+    expect(queryClient.getQueryData(prStateKey(A))).toBeUndefined();
+    expect(queryClient.getQueryData(scmStatusKey(B))).toEqual({});
+    expect(queryClient.getQueryData([...SCM_STATUS_QUERIES])).toEqual({});
+  });
+
+  it('writes no published PR lookup asked before the move', async () => {
+    queryClient.setQueryData(prStateKey(A), { branch: 'main', pr: null }); // a surface holds the PR state
+    let release!: () => void;
+    const client = {
+      invoke: () => new Promise((resolve) => (release = () => resolve({ ok: true, value: { branch: 'main', pr: { number: 1 } } }))),
+    } as unknown as MawsBridge;
+    refreshPublishedPrState(A, { url: 'https://example.invalid/pr/1', action: 'created', at: new Date().toISOString() }, client);
+    resetScmQueries((appSessionId) => appSessionId === A);
+    release();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(queryClient.getQueryData(prStateKey(A))).toBeUndefined();
   });
 });
