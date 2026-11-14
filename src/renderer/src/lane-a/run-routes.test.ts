@@ -1,6 +1,7 @@
 // The routes agree (UX wave U2, first landing; the U2a execution document, Interfaces §F and Acceptance 1, 6, 10 and 11;
 // the wave's law 5): on what M1 makes a file say as the wire does (a thought's recorded duration, and a refused call's
-// kind and reading), on what a row reads (M3), and, at the end (M5), on each recording's whole drawing. One recorded
+// kind and reading), on what a row reads (M3), and, at the end (M5), on each recording's whole drawing, compared at rest
+// (through `restingRows`) because that is what a person sees: every window draws a session at rest so. One recorded
 // session is drawn from its journal as a session MAWS runs draws it (the journal through the engine host's
 // `Normalizer`), from its transcript file as the chain follower answers `session.events` for it on this Mac, and from the
 // same rows as another machine sends them (`freshSource`). It lives beside U3a's `arrival-routes.test.ts` and not in the
@@ -19,7 +20,7 @@ import { FIXTURE_DIR, FIXTURE_PASSES, listEventFixtures, listJournals, listSynth
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
 import { synthesise } from '../../../../test/support/synth-transcript';
 import { journalToEvents } from '../transcript/dev/journal';
-import { rowsOf, withAllExpanded } from '../transcript/model/derive';
+import { restingRows, rowsOf, withAllExpanded } from '../transcript/model/derive';
 import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
 import type { Cell, Row } from '../transcript/model/rows';
 import { freshSource, subagentLookupOf } from './plane-transcript';
@@ -318,8 +319,15 @@ function drawing(rows: Row[]): Map<string, Fields> {
 }
 
 const shown = (fields: Fields | undefined) => (fields === undefined ? 'no' : Object.values(fields).join(' · '));
+// A route's rows at rest, as the windows draw them (`TranscriptSlot` and `RemoteTranscriptSlot` pass `atRest`; the
+// transcript and lane A's drawn rows go through `restingRows`): an open last turn closed as an unseen exit would.
+function atRest(events: SessionEvent[]): Row[] {
+  const state = withAllExpanded(applyEvents(createState(null, null), events));
+  return restingRows(state, rowsOf(state));
+}
+
 function differences(routes: Record<string, SessionEvent[]>): string[] {
-  const [[, reference], ...others] = Object.entries(routes).map(([route, events]) => [route, drawing(drawn(events))] as const);
+  const [[, reference], ...others] = Object.entries(routes).map(([route, events]) => [route, drawing(atRest(events))] as const);
   return others.flatMap(([route, other]) => [...new Set([...reference.keys(), ...other.keys()])].flatMap((row) => {
     const a = reference.get(row);
     const b = other.get(row);
@@ -359,23 +367,21 @@ const RECORDINGS: Record<string, () => Promise<Record<string, SessionEvent[]>>> 
   'uxwave/u3-terminal-cron-r1, cut at its first fire row': () => twoRoutes(`${textOf(UXWAVE, 'u3-terminal-cron-r1.transcript').split('\n').slice(0, 50).join('\n')}\n`),
 };
 
-// Two differences between routes that predate this landing (the base, b513add6f, draws both). Each is with the
-// architect, who decides between a named exception with its ticket and a fix; until then each is pinned here by name,
-// row by row.
-const WITH_THE_ARCHITECT: Record<string, string[]> = {
-  // The file's rows (`freshSource`) leave the session's last turn open, so the link draws a `Working` line that the wire
-  // and the file, whose follower closes the turn at the file's end, do not draw (M1's Surprises).
-  'pass3/steer-next-interrupted': ['link turn line of text:msg_011CfbGWiGmBzVGAQKi7GdQZ:0 drawn: no → turn line · working · human · Working'],
-  // Cut at its first fire row, the fired turn is closed from the file (the follower's exit at the file's end) and still
-  // open from the file's rows, so the link draws `Working` where the file draws no line (M2's Surprises; U3a's routes test
-  // pins the same per route).
-  'uxwave/u3-terminal-cron-r1, cut at its first fire row': ['link turn line of divider:turn:50fd110f-cb64-47f1-a481-e5867176daba drawn: no → turn line · working · engine · Working'],
+// One difference between routes, named: a turn a monitor's event opened (the U2a document, Reported 10's visible cost;
+// the architect's ruling on M5). The live wire carries no monitor event, so on that route the turn only answers and has
+// no line (a turn with nothing under it has none), while the file and its rows, which carry the event, draw the
+// engine's `Continued for …`. Listed row by row, the turns by their first text; the exception ends when the live wire
+// carries the monitor's event.
+const monitorTurns = (...texts: string[]) => ['file', 'link'].flatMap((route) => texts.map((text) => `${route} turn line of text:${text}:0 drawn: no → turn line · completed · engine · Continued for 0s`));
+const MONITOR_TURN: Record<string, string[]> = {
+  'uxwave/u3-tasks-r1': monitorTurns('msg_011CgyEGFdZPRJDtCKFTFsDV', 'msg_011CgyEGnD5hvk8b2VcZ7Anw', 'msg_011CgyEH889fq8Wpv37JEgAX'),
+  'uxwave/u3-tasks-r2': monitorTurns('msg_011CgyF4rjii1Qw8FZtavENQ', 'msg_011CgyF5PZNQZn5q9eeR5ma6', 'msg_011CgyF5xhvBxUobnikmA5JM'),
 };
 
-describe('the whole drawing is the same by every route, but for the differences listed (§F, the proof whole)', () => {
+describe('the whole drawing at rest is the same by every route, but for the monitor\'s turn (§F, the proof whole)', () => {
   for (const [name, routes] of Object.entries(RECORDINGS)) {
     it(name, async () => {
-      expect(differences(await routes())).toEqual(WITH_THE_ARCHITECT[name] ?? []);
+      expect(differences(await routes())).toEqual(MONITOR_TURN[name] ?? []);
     });
   }
 });
