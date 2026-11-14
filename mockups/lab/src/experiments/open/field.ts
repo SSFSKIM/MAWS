@@ -9,10 +9,15 @@
 // - a colouring whose field is colour (masses) lends its colours: the seven places Field's composition names (four
 //   down the pane's column, two at the right edge, one under the composer) are looked up in its masses;
 // - a colouring whose field is a picture has no colour to lend, and its picture is not painted here. It gathers
-//   light itself: a lamp whose colour is derived from the colouring's ground and shadow tint, and the shade the
-//   glass throws. DESIGN.md has the derivation.
+//   light itself: a lamp. What the lamp is made of is what Layers' own plain ground gathers for that colouring
+//   (`gatherOf` in `../layers/plain`: a warmer Paper's own light where it names one, Paper's shade or lamp where it
+//   does not), laid out in Open's composition, plus the shade the glass throws. DESIGN.md 10.2 has the derivation.
 import type { Field, Tokens } from '../layers/colour';
 import { oklch } from '../layers/colour';
+import { gatherOf } from '../layers/plain';
+
+/** Open's default colouring: the owner's choice. `meta.ts` falls back to Layers' default if it is ever absent. */
+export const OPEN_COLOUR = 'warmpaper';
 
 export type Strength = 'whisper' | 'soft' | 'warm' | 'vivid';
 export type GatherKind = 'left' | 'right' | 'composer' | 'tabs' | 'home';
@@ -95,18 +100,21 @@ const LAMP_HUE = 68;
  * A field of colour lends its colours: each of the seven places takes the mass painted nearest to it (faint floors
  * are passed over), at that mass's own level against Field's.
  *
- * A picture field lends none, so the light is a lamp. Its hue is the room's: the shadow tint's in light (a shadow
- * takes the colour of the room it falls in), the ground's in dark, pulled a little toward the accent where the
- * accent is itself a warm colour. Its chroma starts from a small floor (a lamp is warm) and rises with the ground's
- * own chroma, so a warmer ground is answered with warmer light. Down the pane's column it runs from the lamp, to
- * the same light deepened, to the tone a sheet has in its own shade, to the shade itself.
+ * A picture field lends none, so the light is a lamp, and the lamp is the colouring's own. Layers states what
+ * gathers under glass on a plain ground for each picture colouring, as one colour and a strength (`gatherOf`):
+ * the colouring's shadow by day and its lamp by night, or the light a warmer Paper names for itself. Open takes
+ * its hue from that colour. Its chroma is a floor (a lamp is warm), plus twice the chroma of the colouring's
+ * ground, plus three times how much more colour this colouring gathers than Paper does (chroma times strength).
+ * So Paper is the quietest lamp, a Paper on a warmer ground is warmer, and one whose light is the orange is
+ * orange, by day and by night. Down the pane's column it runs from the lamp, to the same light deepened, to the
+ * tone a sheet has in its own shade, to the shade itself.
  */
 export function lightOf(field: Field, tokens: Tokens, ground: string, dark: boolean): Light {
   const g = hexRgb(ground);
   // Under the light: Field's base. A shade under the ground by day; by night a floor no darker than Field's own,
   // which is also what keeps a faint tail of colour from turning into a wash over pure black.
   const base: Rgb = dark ? [Math.max(14, g[0] * 0.55), Math.max(13, g[1] * 0.55), Math.max(12, g[2] * 0.55)] : [g[0] * 0.962, g[1] * 0.95, g[2] * 0.94];
-  const key = `${dark}:${ground}:${field.picture ?? ''}:${field.masses.length}:${field.masses.map((m) => m.rgb.join('.')).join('|')}:${tokens.shade}:${tokens.accent}`;
+  const key = `${dark}:${ground}:${field.picture ?? ''}:${field.masses.length}:${field.masses.map((m) => m.rgb.join('.')).join('|')}:${tokens.shade}:${field.picture ? JSON.stringify(gatherOf(dark, field.light)) : ''}`;
 
   const strong = field.masses.filter((m) => m.a >= 0.12);
   if (!field.picture && strong.length > 0) {
@@ -127,16 +135,19 @@ export function lightOf(field: Field, tokens: Tokens, ground: string, dark: bool
     return { roles, line: field.line, base, lamp: false, key };
   }
 
-  const [, gc, gh] = toOklch(g);
-  const [, sc, sh] = toOklch(tripleRgb(tokens.shade));
-  let hue = !dark && sc > 0.01 ? sh : gc > 0.003 ? gh : LAMP_HUE;
-  // Keep the lamp a lamp: whatever the room's tint, its light stays between amber and gold.
-  if (hue < 35 || hue > 95) hue = LAMP_HUE;
-  const [al, ac, ah] = toOklch(parseCss(tokens.accent));
-  const warmAccent = ac > 0.06 && ah > 25 && ah < 100 && al > 0.5 ? Math.min(1, ac / 0.16) : 0;
-  hue += (ah - hue) * 0.35 * warmAccent;
-  const warm = gc * 2 + 0.012 * warmAccent;
-  const at = (L: number, C: number, dh = 0): Rgb => oklch(L, C, hue + dh);
+  const [, gc] = toOklch(g);
+  const own = gatherOf(dark, field.light);
+  const paper = gatherOf(dark);
+  const [, oc, oh] = toOklch(own.rgb);
+  const [, pc] = toOklch(paper.rgb);
+  // Keep the lamp a lamp: whatever is gathered, its light stays between ember and gold.
+  const hue = oc > 0.008 && oh > 20 && oh < 100 ? oh : LAMP_HUE;
+  // How much more colour this colouring gathers than Paper does.
+  const more = Math.max(-0.02, Math.min(0.09, 3 * (oc * own.a - pc * paper.a)));
+  const warm = gc * 2 + more;
+  // By day a stronger light is also a little deeper, or it would have no room to be more than cream.
+  const dip = dark ? 0 : Math.max(0, more) * 0.5;
+  const at = (L: number, C: number, dh = 0): Rgb => oklch(L - dip, C, hue + dh);
   const roles: Light['roles'] = dark
     ? {
         amber: { rgb: at(0.66, 0.07 + warm), k: 1 },
@@ -162,12 +173,6 @@ export function lightOf(field: Field, tokens: Tokens, ground: string, dark: bool
   return { roles, line: [`${lr},${lg},${lb}`, dark ? 0.04 : 0.05], base, lamp: true, key };
 }
 
-/** A colour as CSS writes it in a colouring's tokens: `#rrggbb` or `rgb(r g b)`. */
-function parseCss(c: string): Rgb {
-  if (c.startsWith('#')) return hexRgb(c.length === 4 ? `#${c[1]}${c[1]}${c[2]}${c[2]}${c[3]}${c[3]}` : c);
-  const n = (c.match(/-?[\d.]+/g) ?? []).map(Number);
-  return [n[0] ?? 0, n[1] ?? 0, n[2] ?? 0];
-}
 
 /** The surface a gathering belongs to, in the canvas's own CSS px. */
 export interface Shape {

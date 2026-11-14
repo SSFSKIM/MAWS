@@ -24,8 +24,8 @@ import {
 } from '@vitreajs/vitrea-react';
 import { approval, composer, pinned, projects, type Session, tabs } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
-import { colouringOf } from '../layers/colour';
-import { type GatherKind, hexRgb, levelUnder, type Light, lightOf, luminanceOf, paintGather, register, type Shape, type Strength, tripleRgb } from './field';
+import { COLOURINGS, colouringOf } from '../layers/colour';
+import { type GatherKind, hexRgb, levelUnder, type Light, lightOf, luminanceOf, OPEN_COLOUR, paintGather, register, type Shape, type Strength, tripleRgb } from './field';
 import { cx, GBtn, isYours, StateGlyph, stateWord } from './parts';
 import { type Answer, Ask, ComposerBody, SidePanel, Transcript, Where } from './Session';
 import { sectionAt, SettingsPage } from './Settings';
@@ -233,7 +233,10 @@ export default function Open({ scene, scheme, knobs }: ExperimentProps) {
   const [sideOpen, setSideOpen] = useState(true);
   // A colouring settles the ground's tone, the ink, what the light is made of and the mark, for both schemes; one
   // that is about its ground also names it, and the Ground knob is then not consulted (Layers' rule and records).
-  const colour = colouringOf(knobs.colour);
+  const colour = COLOURINGS[knobs.colour ?? OPEN_COLOUR] ?? colouringOf(undefined);
+  // A colouring whose mark is one pigment on a small disc names it (`pin`); the capsule is then clear glass that
+  // holds the same discs the rows do, and the accent stays the ink for Approve, Send and focus (Layers' rule).
+  const pin = colour.pin?.[scheme];
   const tokens = colour.tokens[scheme];
   const ground = (colour.ground ?? grounds[knobs.ground ?? 'warm'] ?? grounds.warm!)[scheme];
   const strength = (STRENGTHS.includes(knobs.field ?? '') ? knobs.field : 'warm') as Strength;
@@ -274,6 +277,7 @@ export default function Open({ scene, scheme, knobs }: ExperimentProps) {
       data-face={knobs.face ?? 'system'}
       data-colour={colour.id}
       data-mark={colour.mark}
+      data-pin={pin ? '' : undefined}
       style={
         {
           '--xo-ground': ground,
@@ -283,13 +287,14 @@ export default function Open({ scene, scheme, knobs }: ExperimentProps) {
           '--xo-on-accent': tokens.onAccent,
           '--xo-accent-mark': tokens.mark,
           '--xo-focus': tokens.focus,
+          ...(pin ? { '--xo-pin': pin.disc, '--xo-on-pin': pin.glyph, '--xo-pin-ring': pin.ring ?? 'transparent' } : null),
           colorScheme: scheme,
         } as CSSProperties
       }
     >
       {el && (
         <GlassRoot renderer={/[?&]tier=css/.test(window.location.hash) ? 'css' : 'webgpu'} colorScheme={scheme} container={el} devMode onDiagnostic={sink} materialProfile={/[?&]clear=1/.test(window.location.hash) ? CLEARER[scheme] : undefined}>
-          <Shell scene={scene} scheme={scheme} ground={ground} strength={strength} light={light} ink={tokens.ink} seed={tokens.accent} host={el} paneOpen={paneOpen} setPaneOpen={setPaneOpen} sideOpen={side} sideLaid={laid} setSideOpen={setSideOpen} />
+          <Shell scene={scene} scheme={scheme} ground={ground} strength={strength} light={light} ink={tokens.ink} seed={pin ? undefined : tokens.accent} host={el} paneOpen={paneOpen} setPaneOpen={setPaneOpen} sideOpen={side} sideLaid={laid} setSideOpen={setSideOpen} />
         </GlassRoot>
       )}
     </div>
@@ -304,7 +309,8 @@ interface ShellProps {
   /** What the colouring lends: the light's colours, the ink as `r g b`, and the seed of the one tinted control. */
   light: Light;
   ink: string;
-  seed: string;
+  /** Absent where the mark is a disc: the capsule is then clear glass. */
+  seed: string | undefined;
   host: HTMLElement;
   paneOpen: boolean;
   setPaneOpen: (v: boolean) => void;
@@ -598,7 +604,7 @@ function Shell({ scene, scheme, ground, strength, light, ink, seed, host, paneOp
         </GlassGroup>
       )}
 
-      {/* What waits for you, as the glyphs the sidebar uses (Quiet's capsule), made of glass with the one tint. */}
+      {/* What waits for you, as the glyphs the sidebar uses (Quiet's capsule), made of glass: tinted with the accent, or clear and holding the colouring's discs. */}
       {waiting.length > 0 && <Waiting waiting={waiting} onAnswer={setAnswer} slot={setWaitEl} hint={over('wait')} rows={rows} tint={seed} moved={`${paneOpen}:${sideLaid}:${scene}`} />}
 
       {session && (
@@ -687,7 +693,7 @@ function Shell({ scene, scheme, ground, strength, light, ink, seed, host, paneOp
  * it renders and not while a layout transition carries it, so for the length of a move this component renders on
  * the root's frames.
  */
-function Waiting({ waiting, onAnswer, slot, hint, rows, tint, moved }: { waiting: Session[]; onAnswer: (a: Answer) => void; slot: (el: HTMLElement | null) => void; hint: BackdropHint; rows: BackdropHint; tint: string; moved: string }) {
+function Waiting({ waiting, onAnswer, slot, hint, rows, tint, moved }: { waiting: Session[]; onAnswer: (a: Answer) => void; slot: (el: HTMLElement | null) => void; hint: BackdropHint; rows: BackdropHint; tint: string | undefined; moved: string }) {
   const root = useGlassRoot();
   const [open, setOpen] = useState(false);
   const [frame, setFrame] = useState(0);
@@ -707,7 +713,7 @@ function Waiting({ waiting, onAnswer, slot, hint, rows, tint, moved }: { waiting
   }, [root, moved]);
   return (
     <div className="xo-wait-slot" ref={slot} data-frame={frame}>
-      <GlassPopover open={open} onOpenChange={setOpen} groupProps={{ id: 'xo-wait', hint: open ? rows : hint, tint: open ? null : tint }}>
+      <GlassPopover open={open} onOpenChange={setOpen} groupProps={{ id: 'xo-wait', hint: open ? rows : hint, tint: open || !tint ? null : tint }}>
         <GlassPopoverTrigger capsule thickness={8} className="xo-platter xo-wait" aria-label={`${waiting.length} sessions are waiting for you`}>
           {waiting.map((x) => (
             <StateGlyph key={x.id} state={x.state} size={15} />
