@@ -12,7 +12,7 @@ import { HostCommandError } from '@shared/host/runtime';
 import type { ServicesBus } from '@shared/spine/bus';
 import { CeilingRefused, IntentRefused, type SessionService } from './service';
 import { HostError } from './context'; // P2-A
-import { InvalidSideInput } from '../side/invalid'; // E3
+import { InvalidSideInput } from '@shared/anchor/invalid'; // E3; UX wave U5a: moved to shared
 import type { LaunchMode } from '@shared/sessions/select-source'; // P5 O3-D M4
 import { CONVERSATION_ACTS } from './rewind-note'; // P5 O3-D M4
 

@@ -446,7 +446,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
     const text = userTextOf(event.content);
     return {
-      id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable, steer, dropped: !steer && openerDropped,
+      id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
       ...anchorOf(text), // E3
       ...consentOf(event), // UX wave U3 (decision 10)
@@ -1776,8 +1776,9 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
 export { isEngineOrigin };
 
 // E3 start: the anchored prompt's anchor, carried only when the prompt has one (the user row's field is optional, so
-// every other row reads as before)
-function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']> } {
+// every other row reads as before); UX wave U5a (§H): a message of several comments carries them instead
+function anchorOf(text: UserText): { anchor?: NonNullable<UserText['anchor']>; anchorFrame?: NonNullable<UserText['frame']>; comments?: NonNullable<UserText['comments']>; commentsTo?: 'thread' } {
+  if (text.comments !== null) return { comments: text.comments, ...(text.commentsTo !== null && { commentsTo: text.commentsTo }) };
   return text.anchor === null || text.frame === null ? {} : { anchor: text.anchor, anchorFrame: text.frame };
 }
 

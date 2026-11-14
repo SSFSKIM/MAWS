@@ -66,7 +66,7 @@ afterEach(() => {
 // The library's reach to a stored file, over one artifact whose content is `stored` and whose exports live under root.
 function library(stored: { kind: 'file' | 'presentation'; name: string; path: string }, over: Partial<LibraryFilesDeps> = {}) {
   const call = async <N extends CommandName>(name: N): Promise<CommandResult<N>> => {
-    if (name === 'artifacts.get') return { ok: true, value: { artifact: { id: ID, kind: stored.kind, title: 'Quarterly', revision: 3 } } } as never;
+    if (name === 'artifacts.get') return { ok: true, value: { artifact: { id: ID, kind: stored.kind, title: 'Quarterly', revision: 3, createdBy: { kind: 'human' } } } } as never;
     if (name === 'artifacts.content') return { ok: true, value: { revision: 3, kind: stored.kind, name: stored.name, size: 1, sha256: 'x', path: stored.path } } as never;
     throw new Error(`unexpected ${name}`);
   };
@@ -77,6 +77,8 @@ function library(stored: { kind: 'file' | 'presentation'; name: string; path: st
     downloads: () => join(dir, 'Downloads'),
     port,
     env: {},
+    layout: { get: () => null, set: () => {} }, // UX wave U5: no export folder kept
+    sessionFolder: () => null,
     ...over,
   });
 }

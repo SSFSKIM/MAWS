@@ -16,7 +16,7 @@
 // Every launch's userData is its own directory under /tmp; windows are never shown (the e2e quiet mode).
 import { addDocumentSection } from './support/document-sections';
 import { openArtifactInPanel, openArtifactReplicaInPanel, pinSurfaceForSessions } from './support/shell';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { withNativeClipboard } from './support/clipboard';
 import { traceForeground } from './support/foreground-trace';
@@ -25,6 +25,9 @@ import { sidebarRow } from './support/sidebar';
 import { join } from 'node:path';
 import { PerfSeam, type ReadResult } from './support/document-scale';
 import { carriedBy, decodeMap, insertedBy } from '../src/artifacts/yjs';
+import { commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message'; // UX wave U5a
+import { FIRST_REPLY, invoke, PARENT, startSessionCase, value } from './support/library-session'; // UX wave U5a
+import { SideJournal } from './support/side-replay'; // UX wave U5a
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -855,4 +858,86 @@ test('suggestions keep the base untouched until Accept, credit the agent, and Re
   await main.getByRole('button', { name: 'Reject suggestion 1', exact: true }).click();
   await expect(main.getByRole('button', { name: 'Reject suggestion 1', exact: true })).toHaveCount(0);
   expect(await baseContent()).toBe(accepted);
+});
+
+// ---- UX wave U5a: a document's comment sent to the main conversation (A3, A2) -----------------------------------------
+
+// docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M8. A live parent on C3's replay transport (the library's
+// session case, support/library-session.ts: its first turn, then the turn the comment opens), the owner's document in
+// the pinned Artifacts surface beside it. The open-comment count does not move for a card opened and closed unsent, and
+// rises by one once the comment is sent; the card's place then says where it went. Beside its own session the card
+// names no session (decision 16: "Session: <title>" only when the receiving session is not the one the main area shows;
+// e2e/document-standalone.spec.ts shows the line for a document in a tab of its own).
+const U5A_QUOTE = 'Friday';
+const U5A_COMMENT = 'Is Friday still the date?';
+const U5A_REPLY = 'Read the comment: Friday stands.';
+
+test('UX wave U5a: a document’s count ignores a card opened and closed unsent and rises by one when its comment is sent to main; the card’s place says where it went', async () => {
+  test.setTimeout(180_000);
+  const c = await startSessionCase((cwd) => {
+    const parent = new SideJournal(PARENT, cwd);
+    parent.turn(FIRST_REPLY); // the case's first prompt
+    parent.turn(U5A_REPLY); // the comment's message
+    return [parent];
+  });
+  try {
+    const { page, maws, parent } = c;
+    const { artifact } = value(await invoke(page, 'artifacts.create', { kind: 'document', title: 'Launch notes' }));
+    await openArtifactInPanel(page, artifact.id);
+    await pinSurfaceForSessions(page, 'Artifacts');
+    await (await sidebarRow(page, { appSessionId: parent as never })).click(); // the main area on the parent, the document beside it
+    const panel = page.locator('[data-region="panel"]');
+    const record = panel.locator(`[data-artifact-record="${artifact.id}"]`);
+    const text = record.locator('.ds-doc .ProseMirror');
+    await expect(text).toBeVisible({ timeout: 15_000 });
+    await text.click();
+    await page.keyboard.type('The launch moves to Friday.');
+    await expect(text.locator('p')).toHaveText(['The launch moves to Friday.']);
+    const count = panel.getByTitle(/^\d+ open comments?$/);
+    const card = page.locator('[data-comment-card]');
+    const addComment = record.getByRole('toolbar', { name: 'Formatting' }).getByRole('button', { name: 'Add comment', exact: true });
+    await expect(count, 'before any comment').toHaveCount(0);
+
+    // a card opened and closed unsent: the count never moves, and Close withdraws the comment's mark
+    await selectIn(text, 0, U5A_QUOTE);
+    await addComment.click();
+    await expect(card).toHaveAttribute('data-anchor-locator', U5A_QUOTE);
+    await expect(text.locator('[data-thread]'), 'the unsent comment’s mark').toHaveCount(1);
+    await expect(count, 'an unsent card is no comment').toHaveCount(0);
+    await expect(card.locator('[data-card-parent]'), 'beside its own session the card names none').toHaveCount(0);
+    await card.getByRole('button', { name: 'Close' }).click();
+    await expect(card).toHaveCount(0);
+    await expect(text.locator('[data-thread]'), 'Close withdrew it').toHaveCount(0);
+    await expect(count, 'after Close').toHaveCount(0);
+
+    // sent to main: one message in the parent, the place's line, and the count at one
+    await selectIn(text, 0, U5A_QUOTE);
+    await addComment.click();
+    await expect(card).toHaveAttribute('data-anchor-locator', U5A_QUOTE);
+    await card.getByRole('textbox', { name: 'Comment' }).fill(U5A_COMMENT);
+    await card.getByRole('checkbox', { name: 'Send to main' }).check();
+    const listed = value(await invoke(page, 'session.list', {})).sessions.find((row) => row.appId === parent)?.title.text ?? '';
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    await expect(card).toHaveCount(0);
+    await expect(record.locator('[data-sent-note]'), 'the card’s place says where it went').toHaveText(`Sent to ${listed.trim() === '' ? 'New chat' : listed}`);
+    await expect(panel.getByTitle('1 open comment', { exact: true }).first()).toBeVisible();
+    const users = () =>
+      readdirSync(join(maws.userData, 'engine-host', 'journal', parent))
+        .filter((name) => name.endsWith('.jsonl'))
+        .sort()
+        .flatMap((name) => readFileSync(join(maws.userData, 'engine-host', 'journal', parent, name), 'utf8').split('\n').filter(Boolean))
+        .map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; message?: { content: { type: string; text?: string }[] } } })
+        .filter((row) => row.direction === 'out' && row.frame.type === 'user');
+    await expect.poll(() => users().length, { timeout: 20_000, message: 'the comment reached the parent' }).toBe(2);
+    const content = users()[1]!.frame.message!.content;
+    expect(content.map((block) => block.type)).toEqual(['text']);
+    const read = readAnchoredMessage(content[0]!.text!);
+    expect(read?.comments.map(({ anchor, text: words }) => ({ kind: anchor.kind, locator: anchor.locator, text: words }))).toEqual([{ kind: 'artifact-comment', locator: U5A_QUOTE, text: U5A_COMMENT }]);
+    expect(content[0]!.text, 'one comment’s text, as a single comment has always been written').toBe(commentsMessage(read!.comments, 'main'));
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { timeout: 20_000, message: 'the comment’s turn ended' }).toBeNull();
+    await expect(page.locator('[data-region="main"]').getByText(U5A_REPLY)).toBeVisible({ timeout: 20_000 });
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await c.cleanup();
+  }
 });

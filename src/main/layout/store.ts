@@ -20,6 +20,8 @@ export interface LayoutStore {
 
 const WINDOW_KEY = 'window.main';
 export const WINDOW_DEBOUNCE_MS = 500;
+// Main's own keys: the window's state, and (UX wave U5, l6-artifacts-20) the folder the last export saved to.
+const MAIN_KEYS: ReadonlySet<string> = new Set<LayoutKey>([WINDOW_KEY, 'library.exportFolder']);
 
 export class LayoutFileStore implements LayoutStore {
   private readonly values: Map<string, unknown>;
@@ -127,13 +129,14 @@ function panelKeyAllowed(session: string, local: MachineRef, known: (appSessionI
   return machineOf(session) !== local || known(bareOf(session) as AppSessionId);
 }
 
-// `layout.get/set/list` for the renderer. `window.main` is main's own key: listed (it exists in the file), but never
-// read or written across IPC. A session's own panel key is written only while the session exists (`known`), so a write
-// already on its way when the session was removed cannot bring the key back. P5 O6 M2: a null value deletes the key (the
-// renderer's migration of a bare panel key to its address), whatever main knows of the session.
+// `layout.get/set/list` for the renderer. `window.main` and `library.exportFolder` are main's own keys: listed (they
+// exist in the file), but never read or written across IPC. A session's own panel key is written only while the session
+// exists (`known`), so a write already on its way when the session was removed cannot bring the key back. P5 O6 M2: a
+// null value deletes the key (the renderer's migration of a bare panel key to its address), whatever main knows of the
+// session.
 export function registerLayoutHandlers(store: LayoutStore, known: (appSessionId: AppSessionId) => boolean, local: MachineRef): void {
   const renderersOnly = (key: LayoutKey) => {
-    if (key === WINDOW_KEY) throw new Error(`${WINDOW_KEY} is main's own layout key`);
+    if (MAIN_KEYS.has(key)) throw new Error(`${key} is main's own layout key`);
   };
   registerMainHandler('layout.get', ({ key }) => {
     renderersOnly(key);

@@ -337,7 +337,7 @@ describe('startBrowser wires comment mode (E4d)', () => {
       (item) => item.label,
     );
 
-  it('registers browser.comment.set, the preload channel, the menu\'s Comment and the seam, and removes them at stop', async () => {
+  it('registers browser.comment.set and .card, the preload channel, the menu\'s Comment and the seam, and removes them at stop', async () => {
     const handlers = new Map<string, (input: unknown, context: unknown) => unknown>();
     const register = ((name: string, handler: (input: unknown, context: unknown) => unknown) => void handlers.set(name, handler)) as never;
     const browser = start(fakeIndex([A]).index, { register, env: { MAWS_E2E: '1' } });
@@ -351,6 +351,12 @@ describe('startBrowser wires comment mode (E4d)', () => {
     expect(globalThis.__maws_browser_comment!.state(tab.tabId)).toEqual({ armed: false, arming: false, epoch: 0, dropped: 1, webContentsId: 42 }); // nothing armed: dropped
     await expect(globalThis.__maws_browser_comment!.replayReport(tab.tabId, 'junk')).resolves.toBe(true);
     expect(globalThis.__maws_browser_comment!.state(tab.tabId)!.dropped).toBe(2);
+    // UX wave U5a (M4, §B.4): the card's opening and closing, forwarded to the tab's page
+    const send = vi.fn();
+    Object.assign(page, { send });
+    expect(handlers.get('browser.comment.card')!({ tabId: tab.tabId, open: { css: '#increment' } }, {})).toBeUndefined();
+    expect(handlers.get('browser.comment.card')!({ tabId: 'b_00000000000f', open: null }, {})).toBeUndefined(); // a tab it does not hold
+    expect(send.mock.calls).toEqual([[COMMENT_CHANNEL.toPreload, { type: 'card', open: true, css: '#increment' }]]);
     globalThis.__maws_browser_comment!.setControl(tab.tabId, 'agent');
     expect(browser.store.entry(tab.tabId)!.tab.control).toBe('agent');
     expect(globalThis.__maws_browser_comment!.state('b_00000000000f')).toBeNull();

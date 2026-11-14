@@ -196,8 +196,9 @@ describe('element pins on every board', () => {
 describe('the rail’s words for a design (Decision Log 29)', () => {
   it('names each thread’s board, shows a board or an element, and says which was deleted', async () => {
     const { doc, session, container } = mount();
-    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1 }, 'deck-comments');
-    addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1 }, 'deck-comments');
+    // UX wave U5a (M7; A3): a comment counts once it holds a message
+    addThread(doc, { threadId: 'tb', slideId: 'b2', elementId: ROOT, quote: 'Desktop', by: { kind: 'human' }, at: 1, body: 'Wider margins?' }, 'deck-comments');
+    addThread(doc, { threadId: 'te', slideId: 'b1', elementId: 'lede', quote: 'Ship the first week.', by: { kind: 'human' }, at: 1, body: 'Which week?' }, 'deck-comments');
     fireEvent.click(within(toolbar()).getByRole('button', { name: /^Comments/ }));
     const rail = await screen.findByRole('complementary', { name: 'Comments' });
     await act(async () => new Promise((r) => setTimeout(r, 80)));

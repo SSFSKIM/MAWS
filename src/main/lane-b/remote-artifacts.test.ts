@@ -299,6 +299,8 @@ describe('Save As of a remote artifact', () => {
       env: {},
       local: LOCAL,
       remote: (machine) => l.adapter.artifacts.files(machine),
+      layout: { get: () => null, set: () => {} }, // UX wave U5: no export folder kept
+      sessionFolder: () => null,
     });
     expect(await files.saveAs({ artifactId: A1, source: { export: { revision: 3, format: 'pdf' } } }, null, MINI)).toEqual({ saved: true, path: join(saves, 'Q3 plan.pdf') });
     expect(readFileSync(join(saves, 'Q3 plan.pdf')).equals(exported)).toBe(true);

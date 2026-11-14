@@ -161,3 +161,17 @@ describe('a session’s panel key', () => {
   });
 
 });
+
+describe('main’s own keys', () => {
+  // UX wave U5 (l6-artifacts-20): the last export's folder is main's, as the window's state is
+  it.each(['window.main', 'library.exportFolder'] as const)('%s is listed, and never read or written across IPC', (key) => {
+    const store = new LayoutFileStore(file);
+    registerLayoutHandlers(store, () => true, LOCAL);
+    store.set(key, key === 'window.main' ? WINDOW : { path: dir });
+    store.flush();
+    expect(handlers.get('layout.list')!(undefined)).toEqual({ keys: [key] });
+    expect(() => handlers.get('layout.get')!({ key })).toThrow(`${key} is main's own layout key`);
+    for (const value of [{ path: '/elsewhere' }, null]) expect(() => handlers.get('layout.set')!({ key, value })).toThrow(`${key} is main's own layout key`);
+    expect(new LayoutFileStore(file).get(key)).toEqual(key === 'window.main' ? WINDOW : { path: dir });
+  });
+});

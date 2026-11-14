@@ -52,6 +52,8 @@ async function ready(): Promise<Page> {
   return page;
 }
 
+// UX wave U5a: the comment a scene posts in a thread so that it counts (M7's rule: a thread counts once it holds a message).
+const POSTED = 'Keep this to one line.';
 const DECK_JSON = (order: string[]) => JSON.stringify({ v: 4, createdOnFiles: { v: 1, at: '2026-10-14T09:00:00Z' }, title: 'Q3 review', cover: 's1', order });
 const FILES: Record<string, string> = {
   'project/deck.json': DECK_JSON(['s1', 's2']),
@@ -175,6 +177,12 @@ test('comments on a deck’s elements: the card, the pin through a move, a resiz
   await expect(thread).toHaveAttribute('data-status', 'resolved');
   await thread.getByRole('button', { name: 'Reopen' }).click();
   await expect(thread).toHaveAttribute('data-status', 'open');
+  // UX wave U5a (A3; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M7's rule): a thread nothing was said
+  // in is no comment; once a comment is posted in it, the header counts it
+  await expect(panel.getByTitle(/^\d+ open comments?$/), 'a thread nothing was said in counts as none').toHaveCount(0);
+  await thread.getByRole('textbox', { name: 'Reply' }).fill(POSTED);
+  await thread.getByRole('textbox', { name: 'Reply' }).press('Enter');
+  await expect(thread.locator('.deck-thread-body')).toHaveText([POSTED]);
   await expect(panel.getByTitle('1 open comment', { exact: true })).toBeVisible(); // the header's count
 
   // the pin at the element's top-right
@@ -285,6 +293,12 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   const rail = deck.getByRole('complementary', { name: 'Comments' });
   await rail.locator('article[data-element="body"]').getByRole('button', { name: 'Reopen' }).click();
+  // UX wave U5a (M7's rule): a comment posted in it, so the badge counts it (a thread nothing was said in counts as none)
+  await expect(deck.locator('[data-slide-thumb="s1"] [data-comments-badge]'), 'no count for a thread nothing was said in').toHaveCount(0);
+  const railReply = rail.locator('article[data-element="body"]').getByRole('textbox', { name: 'Reply' });
+  await railReply.fill(POSTED);
+  await railReply.press('Enter');
+  await expect(rail.locator('article[data-element="body"] .deck-thread-body')).toHaveText([POSTED]);
   await toolbar.getByRole('button', { name: /^Comments/ }).click();
   await expect(rail).toHaveCount(0);
 
@@ -344,7 +358,7 @@ test('the pin popover: at the pin with its reply field focused, Escape keeps the
   // the reply posted from the popover; the last resolve: the popover, the pin and the badge go (V8)
   await pin.click();
   await reply.press('Enter');
-  await expect(popover.locator('.thread-card-body')).toHaveText(['Shorter?']);
+  await expect(popover.locator('.thread-card-body')).toHaveText([POSTED, 'Shorter?']);
   await popover.getByRole('button', { name: 'Resolve' }).click();
   await expect(popover).toHaveCount(0);
   await expect(pin).toHaveCount(0);

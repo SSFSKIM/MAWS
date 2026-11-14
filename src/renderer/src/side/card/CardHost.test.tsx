@@ -14,7 +14,10 @@ import { resetPanelStores } from '../../test-support/panel';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hideSideChild, showSideChild, useSidePane } from '../store';
 import { CommentCardHost, type CardFrame } from './CardHost';
-import { CLAIM_DEADLINE_MS, openCard, useCommentCard } from './store';
+import { CLAIM_DEADLINE_MS, closeCard, notePlace, openCard, passKey, resetPlaceNotes, useCommentCard } from './store';
+import { applyLaneAState, holdPendingSend, resetLaneAStore } from '../../stores/lane-a'; // UX wave U5a
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { shownSession } from '../../panel/host'; // UX wave U5a
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const CHILD = 'c5555555-5555-4555-8555-000000000001' as AppSessionId;
@@ -65,7 +68,7 @@ const frameOf = (key: string, locate?: CardFrame['locate']): CardFrame => ({ sca
 function Host({ frame }: { frame: CardFrame }) {
   return (
     <div className="relative">
-      <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
+      <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="anchored" accepts={() => true} frame={frame} visible />
     </div>
   );
 }
@@ -280,7 +283,7 @@ describe('the browser re-dock', () => {
   const ELEMENT: Anchor = { kind: 'browser-element', locator: '#increment', label: 'button “Increment”', pageUrl: PAGE, css: '#increment' };
   const Strip = ({ url }: { url: string }) => (
     <div data-column="">
-      <CommentCardHost hostId="pane-1" host="browser" mode="tab" layout="docked" accepts={(c) => c.target?.kind === 'browser' && c.target.pageUrl === url} frame={frameOf('k1')} visible />
+      <CommentCardHost subject="subject-1" hostId="pane-1" host="browser" mode="tab" layout="docked" accepts={(c) => c.target?.kind === 'browser' && c.target.pageUrl === url} frame={frameOf('k1')} visible />
     </div>
   );
   beforeEach(() => useSessions.setState({ records: new Map() }));
@@ -304,7 +307,7 @@ describe('the docked strip', () => {
   function Column() {
     return (
       <div data-column="">
-        <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
       </div>
     );
   }
@@ -343,7 +346,7 @@ describe('the margin layout', () => {
     return (
       <div className="ds-doc">
         <div data-margin-entry="t1">
-          <CommentCardHost hostId="h1" host="artifact-page" mode="panel" layout="margin" accepts={() => true} frame={frameOf('k1', locate)} visible />
+          <CommentCardHost subject="subject-1" hostId="h1" host="artifact-page" mode="panel" layout="margin" accepts={() => true} frame={frameOf('k1', locate)} visible />
         </div>
       </div>
     );
@@ -379,5 +382,78 @@ describe('the margin layout', () => {
     HOST_BOX.width = 220;
     act(() => resized?.());
     expect(card()!.style.width).toBe('220px');
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C "What the host draws"): after a send to
+// the main conversation the host draws its note in the card's place: the strip's line under a page, the top right corner
+// of an HTML page's box, where the card was over a document. A host draws only its own place's note, and the open card
+// before it.
+describe('the place’s note', () => {
+  beforeEach(() => {
+    resetPlaceNotes();
+    resetLaneAStore();
+  });
+  afterEach(() => resetPlaceNotes());
+  const sent = () => document.querySelector<HTMLElement>('[data-sent-note]');
+  // UX wave U5a (M3): a note is the pass's, drawn by every host of its subject
+  const place = (host: 'browser' | 'artifact-page' | 'artifact', subject = 'subject-1') => passKey(host, subject, PARENT);
+
+  it('docked, the line is in the strip, one line in flow; an open card is drawn in its stead', () => {
+    render(
+      <div data-column="">
+        <CommentCardHost subject="subject-1" hostId="h1" host="browser" mode="tab" layout="docked" accepts={() => true} frame={frameOf('k1')} visible />
+      </div>,
+    );
+    act(() => notePlace(place('browser'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    expect(sent()!.textContent).toBe('Sent to Q3 plan');
+    expect(sent()!.closest('[data-card-dock]')).not.toBeNull();
+    expect(sent()!.className).toContain('text-ui-sm');
+    expect(sent()!.className).toContain('text-fg-muted');
+    expect(sent()!.getAttribute('role')).toBe('status');
+    act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'browser', hostId: 'h1' } }));
+    expect(card()).not.toBeNull();
+    expect(sent()).toBeNull();
+    act(() => closeCard());
+    expect(sent()!.textContent).toBe('Sent to Q3 plan');
+  });
+
+  it('anchored over an HTML page, the line is in the box’s top right corner; another subject’s note is not drawn', () => {
+    render(<Host frame={frameOf('k1')} />);
+    act(() => notePlace(place('artifact-page', 'subject-2'), { kind: 'sent', text: 'Sent to elsewhere', at: Date.now() }));
+    expect(sent()).toBeNull();
+    act(() => notePlace(place('artifact-page'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() }));
+    expect(sent()!.className).toMatch(/\btop-2\b/);
+    expect(sent()!.className).toMatch(/\bright-2\b/);
+    expect(sent()!.className).toContain('pointer-events-auto');
+  });
+
+  it('anchored over a document, the line is where the card was', async () => {
+    render(
+      <div className="relative">
+        <CommentCardHost subject="subject-1" hostId="h1" host="artifact" mode="panel" layout="anchored" accepts={() => true} frame={frameOf('k1')} visible />
+      </div>,
+    );
+    act(() => openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'h1', rect: HERO } }));
+    const where = { left: card()!.style.left, top: card()!.style.top };
+    act(() => {
+      closeCard();
+      notePlace(place('artifact'), { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
+    });
+    expect({ left: sent()!.style.left, top: sent()!.style.top }).toEqual(where);
+  });
+
+  it('a pending line names its state in the session’s words, and Show brings that session’s tab to the front', () => {
+    const key = { writer: 'maws/m', seq: 1 };
+    useSessions.setState({ records: new Map() });
+    applyLaneAState(PARENT, laneAState(PARENT)); // the session's bridge, whose deliveries name nothing yet
+    holdPendingSend(PARENT, key, 'the words');
+    render(<Host frame={frameOf('k1')} />);
+    act(() => notePlace(place('artifact-page'), { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' }));
+    const line = document.querySelector<HTMLElement>('[data-pending-note]')!;
+    expect(line.textContent).toContain('Not confirmed yet in Q3 plan');
+    expect(sent()).toBeNull();
+    act(() => line.querySelector<HTMLButtonElement>('button')!.click());
+    expect(shownSession()).toBe(PARENT);
   });
 });

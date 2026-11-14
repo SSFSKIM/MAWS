@@ -3,9 +3,10 @@
 // the repository's transcript fixtures. Every path here is invented.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
-import { anchoredMessage, parseAnchoredText } from '@shared/anchor/message';
-import { anchorPath, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
+import { describe, expect, it, vi } from 'vitest';
+import { AnchorSchema } from '@shared/anchor/anchor';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage, MESSAGE_COMMENTS_MAX, readAnchoredMessage } from '@shared/anchor/message';
+import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
 
@@ -443,7 +444,7 @@ describe('the value form: chipPath', () => {
   });
 });
 
-describe('isMcpTool and anchorPath', () => {
+describe('isMcpTool and anchorPaths', () => {
   it('isMcpTool has the window’s MCP shape', () => {
     expect(isMcpTool('mcp__docs__search')).toBe(true);
     expect(isMcpTool('mcp__a__b__c')).toBe(true);
@@ -452,12 +453,66 @@ describe('isMcpTool and anchorPath', () => {
     expect(isMcpTool('Read')).toBe(false);
   });
 
-  it('anchorPath reads the anchored comment’s path, and nothing from another text', () => {
+  it('anchorPaths reads the anchored comment’s path, and nothing from another text', () => {
     const text = anchoredMessage({ anchor: { kind: 'file-line', label: 'report.md', locator: `${P}:3`, path: P, line: 3 }, text: 'Look here', destination: 'main', screenshot: false });
-    expect(parseAnchoredText(text)?.anchor.path).toBe(P);
-    expect(anchorPath(text)).toBe(P);
-    expect(anchorPath(`Look at ${P}`)).toBeNull();
-    expect(anchorPath(`<maws_anchor kind="file-line" path="${P}"/>`)).toBeNull(); // the schema refuses it: no label, no locator
+    expect(readAnchoredMessage(text)?.comments.map((comment) => comment.anchor.path)).toEqual([P]);
+    expect(anchorPaths(text)).toEqual([P]);
+    expect(anchorPaths(`Look at ${P}`)).toEqual([]);
+    expect(anchorPaths(`<maws_anchor kind="file-line" path="${P}"/>`)).toEqual([]); // the schema refuses it: no label, no locator
+  });
+
+  // UX wave U5a: a message of several comments draws a chip for each, so each comment's path is one the window clicks
+  it('anchorPaths reads every comment’s path of a message of several, in the order made, and none from a page element', () => {
+    expect(anchorPaths(several)).toEqual([P, OTHER]);
+  });
+
+  // what only looks like another comment inside a comment's words names nothing (Decision Log 54 of U5a's document)
+  it('anchorPaths reads no path from words that look like a comment', () => {
+    for (const text of lookalikes) expect(anchorPaths(text), text).not.toContain(HIDDEN);
+    expect(anchorPaths(lookalikes[0]!)).toEqual([P]);
+    expect(anchorPaths(lookalikes[1]!)).toEqual([P]);
+    expect(anchorPaths(lookalikes[2]!)).toEqual([P, OTHER]);
+  });
+
+  // the reader bounds how many paths a message names: the count its framing line names, two to twenty, exactly; a
+  // framing it refuses is read by the one-comment rule, as the window reads it: the last tag's path alone
+  it('anchorPaths names at most MESSAGE_COMMENTS_MAX paths, and one from a framing the reader refuses', () => {
+    const fileAt = (n: number) => ({ anchor: { kind: 'file-line' as const, label: `f${n}.md`, locator: `/work/f${n}.md:1`, path: `/work/f${n}.md`, line: 1 }, text: `Comment ${n}`, screenshot: false });
+    const full = commentsMessage(Array.from({ length: MESSAGE_COMMENTS_MAX }, (_, n) => fileAt(n)), 'main');
+    expect(anchorPaths(full)).toHaveLength(MESSAGE_COMMENTS_MAX);
+    const last = fileAt(MESSAGE_COMMENTS_MAX);
+    const more = `${full.replace(/^\d+ comments/, `${MESSAGE_COMMENTS_MAX + 1} comments`)}\n\n${anchorLead(last.anchor, false)}\n${last.text}\n\n${anchorTag(last.anchor)}`;
+    expect(anchorPaths(more), 'a framing past the maximum').toEqual([last.anchor.path]);
+    const three = commentsMessage([fileAt(0), fileAt(1), fileAt(2)], 'main');
+    expect(anchorPaths(three)).toHaveLength(3);
+    expect(anchorPaths(three.replace(/^3 comments/, '2 comments')), 'more blocks than the framing names').toEqual(['/work/f2.md']);
+  });
+
+  // the reader's work is bounded by count (Decision Log 54): a tag-shaped line the schema refuses ends a framed reading,
+  // so lines of that shape after a framing line cost no more schema checks however many they are; every check goes
+  // through `AnchorSchema.omit`, counted here
+  it('tag-shaped lines the schema refuses cost the reader a bounded number of schema checks', () => {
+    const last = { kind: 'file-line' as const, label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 };
+    const textOf = (n: number) => ['2 comments, in the order made:', ...Array.from({ length: n }, (_, i) => `<maws_anchor kind="unknown" label="x${i}" locator="y${i}"/>`), anchorTag(last)].join('\n');
+    const checks = (text: string) => {
+      const omit = vi.spyOn(AnchorSchema, 'omit');
+      try {
+        expect(anchorPaths(text), 'the one-comment rule’s reading: the last tag’s path alone').toEqual([OTHER]);
+        return omit.mock.calls.length;
+      } finally {
+        omit.mockRestore();
+      }
+    };
+    const few = checks(textOf(3));
+    expect(checks(textOf(3000))).toBe(few);
+    expect(few).toBeLessThanOrEqual(2);
+  });
+
+  // the scanner's steps: one for each comment the reader read, so a message's comments are paced as its blocks are
+  it('the row’s steps grow by one for each comment of a person’s message', () => {
+    const count = (row: unknown) => [...rowClaimSteps(row, '/work/none.md')].length;
+    const two = commentsMessage(readAnchoredMessage(several)!.comments.slice(0, 2), 'main');
+    expect(count(user([text(several)])) - count(user([text(two)]))).toBe(1);
   });
 });
 
@@ -474,6 +529,26 @@ const queued = (prompt: string | object[], extra: object = {}) => ({
 });
 const LINK = `[r](${P})`;
 const anchored = anchoredMessage({ anchor: { kind: 'file-line', label: 'report.md', locator: P, path: P }, text: 'Look', destination: 'main', screenshot: false });
+// UX wave U5a: a message of several comments, the asked path the first comment's (a one-comment reader reads the last)
+const OTHER = '/work/notes/plan.md';
+const several = commentsMessage([
+  { anchor: { kind: 'file-line', label: 'report.md', locator: `${P}:3`, path: P, line: 3 }, text: 'Look here', screenshot: false },
+  { anchor: { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'http://localhost:5173/' }, text: 'And this button', screenshot: false },
+  { anchor: { kind: 'file-line', label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 }, text: 'And this line', screenshot: false },
+], 'main');
+// Words of a comment that look like another comment, its tag naming HIDDEN: inside one comment (no escape; the reader
+// takes only the last line's tag), as one comment's whole text made to look like a framed message, and inside one of
+// several comments (escaped by the writer)
+const HIDDEN = '/work/hidden/secret.md';
+const hiddenAnchor = { kind: 'file-line' as const, label: 'secret.md', locator: `${HIDDEN}:1`, path: HIDDEN, line: 1 };
+const hiddenBlock = `${anchorLead(hiddenAnchor, false)}\nLooks like a comment\n\n${anchorTag(hiddenAnchor)}`;
+const fileP = { kind: 'file-line' as const, label: 'report.md', locator: `${P}:3`, path: P, line: 3 };
+const fileOther = { kind: 'file-line' as const, label: 'plan.md', locator: `${OTHER}:1`, path: OTHER, line: 1 };
+const lookalikes = [
+  anchoredMessage({ anchor: fileP, text: `Look here\n\n${hiddenBlock}\n\nand here`, destination: 'main', screenshot: false }),
+  anchoredMessage({ anchor: fileP, text: `2 comments, in the order made:\n\n${hiddenBlock}`, destination: 'thread', screenshot: false }),
+  commentsMessage([{ anchor: fileP, text: `Look here\n\n${hiddenBlock}`, screenshot: false }, { anchor: fileOther, text: hiddenBlock, screenshot: false }], 'main'),
+];
 
 describe('rowClaim', () => {
   const names = { names: true };
@@ -490,6 +565,8 @@ describe('rowClaim', () => {
     ['a person’s queued prompt', queued(`Open ${LINK}`)],
     ['a person’s queued prompt in blocks', queued([text(`Open ${LINK}`)])],
     ['a person’s queued anchored comment', queued(anchored)],
+    ['the first of a message’s several comments (UX wave U5a)', user([text(several)])],
+    ['the first of a queued message’s several comments (UX wave U5a)', queued(several)],
   ])('names the path: %s', (_, row) => {
     expect(rowClaim(row, P)).toEqual(names);
   });

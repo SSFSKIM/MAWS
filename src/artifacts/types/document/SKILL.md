@@ -27,7 +27,7 @@ The result gives the new revision, one line per op and the ids of the blocks you
 
 Comments are threads pinned to passages. A read marks open ones with `<c:ID>` and lists them in its footer; `artifact_comments` lists threads with their messages (`status: "open"` by default, orphaned ones included; `"resolved"` or `"all"`).
 
-A comment the user sends you arrives as a message beginning `Comment on "<title>, <tab>" (passage "<quote>" in document <id>, thread <id>):`. Read the document around the passage, then answer in that thread, where the user reads it: when the comment asks for a change, make it with `artifact_edit` and pass `answering: "<thread id>"`, which posts your result lines into the thread; otherwise reply with `artifact_reply`. Resolve a thread with `artifact_resolve` only when the user asked you to or it is your own; the person who commented usually resolves it.
+A comment the user sends you arrives as a message beginning `Comment on "<title>, <tab>" (passage "<quote>" in document <id>, thread <id>):`. Read the document around the passage, then answer in that thread, where the user reads it: when the comment asks for a change, make it with `artifact_edit` and pass `answering: "<thread id>"`, which posts your `reply` (one or two sentences in your own words) into the thread, else "Edited this passage."; otherwise reply with `artifact_reply`. Resolve a thread with `artifact_resolve` only when the user asked you to or it is your own; the person who commented usually resolves it.
 
 ## Working with a design system
 

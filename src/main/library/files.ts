@@ -9,13 +9,19 @@
 // and nothing beside them. The dialogs and the Replace question go through the client port (OX4), asked through the
 // requesting client. Under MAWS_E2E=1 MAWS_E2E_SAVE_PATH is the folder a save lands in without the dialog.
 //
+// UX wave U5 (l6-artifacts-20; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 14): the dialog
+// opens in the folder the last export saved to, kept across launches under main's layout key `library.exportFolder`
+// (written once a copy is in place, the e2e seam's included; a failed write is logged and the save stands). With none,
+// or one that is no longer a directory: for an artifact of this Mac, its Space's linked folder, else the working folder
+// of the session that made it, each only while it is a directory; else Downloads.
+//
 // P5 O7 M5a (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "Open a copy, and Save As of a remote artifact"):
 // `library.saveAs` is answered here for any machine (the router's allow-list). For an artifact on another machine
 // (`ctx.target`), its row, its stored file's name and the file itself (an export the renderer made there with
 // `artifacts.export {machine}`, or the stored file) come over that machine's link (`remote`, remote lane B's): the file is
 // paged into a temporary directory, then saved through the port as a local one is. A remote export is never removed after
 // (the renderer asks no `ownFile` of another machine: its export stays a row of that machine's library).
-import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, writeFile } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readFile, rename, rm, rmdir, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { BigIntStats } from 'node:fs';
 import JSZip from 'jszip';
@@ -23,13 +29,16 @@ import { basename, dirname, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import { isNoClient, type ClientPort } from '@shared/client/port';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
+import { ExportFolderSchema, type ExportFolder } from '@shared/ipc/schema/layout';
 import type { MachineRef } from '@shared/machine/ref';
 import { ARTIFACT_EXPORT_FORMATS, artifactExportName, type ArtifactExportFormat } from '@shared/maws/tools';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
+import type { LayoutStore } from '../layout/store';
 
 export interface LibraryFilesDeps {
   call<N extends CommandName>(name: N, input: CommandInput<N>): Promise<CommandResult<N>>; // the engine host's commands
@@ -40,6 +49,8 @@ export interface LibraryFilesDeps {
   env: NodeJS.ProcessEnv;
   local?: MachineRef; // P5 O7 M5a: this Mac; a Save As for another machine reads through `remote`
   remote?(machine: MachineRef): RemoteLibraryFiles | null; // P5 O7 M5a: remote lane B's, null while no link reaches it
+  layout: Pick<LayoutStore, 'get' | 'set'>; // UX wave U5: where the last export's folder is kept (main's layout store)
+  sessionFolder(appSessionId: AppSessionId): string | null; // UX wave U5: a session's working folder, null when this Mac knows none
 }
 
 /** P5 O7 M5a: what Save As reads of an artifact on another machine, over its link; a refusal throws `CommandFailure`. */
@@ -51,6 +62,7 @@ export interface RemoteLibraryFiles {
 }
 
 type Out<N extends CommandName> = Promise<CommandOutput<N>>;
+const EXPORT_FOLDER_KEY = 'library.exportFolder'; // UX wave U5: main's own layout key
 
 // A title as a file name: no path separator, colon or control character, at most 120 characters, never empty.
 export function fileNameOf(title: string): string {
@@ -71,13 +83,36 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
     return { revision: found.revision, kind: found.kind, name: found.name, path: found.path };
   };
 
-  let lastExportDirectory: string | null = null;
+  // UX wave U5: the folder the dialog opens in (above); `here` is the artifact when it is this Mac's, else null.
+  const storedFolder = (): string | null => ExportFolderSchema.safeParse(deps.layout.get(EXPORT_FOLDER_KEY)).data?.path ?? null;
+  const spaceFolder = async ({ spaceId }: ArtifactRow): Promise<string | null> => {
+    if (spaceId === undefined) return null;
+    const listed = await deps.call('spaces.list', undefined);
+    if (!listed.ok) return null;
+    return listed.value.spaces.find((space) => space.id === spaceId)?.linkedDir ?? null;
+  };
+  const makerFolder = ({ createdBy }: ArtifactRow): string | null => (createdBy.kind === 'session' ? deps.sessionFolder(createdBy.appSessionId) : null);
+  const startFolder = async (here: ArtifactRow | null): Promise<string> => {
+    const candidates = [storedFolder, ...(here === null ? [] : [() => spaceFolder(here), () => makerFolder(here)])];
+    for (const candidate of candidates) {
+      const folder = await candidate();
+      if (folder !== null && (await stat(folder).catch(() => null))?.isDirectory()) return folder;
+    }
+    return deps.downloads();
+  };
+  const remember = (folder: string): void => {
+    try {
+      deps.layout.set(EXPORT_FOLDER_KEY, { path: folder } satisfies ExportFolder);
+    } catch (error) {
+      console.error(`[library] cannot keep the export folder (${EXPORT_FOLDER_KEY}): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
 
   // Where the copy goes: the e2e seam's folder, else the dialog's choice (null when cancelled or no client could ask).
-  const destination = async (defaultName: string, client: ClientRef | null): Promise<string | null> => {
+  const destination = async (defaultName: string, client: ClientRef | null, here: ArtifactRow | null): Promise<string | null> => {
     const seamDir = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_SAVE_PATH : undefined;
     if (seamDir) return join(seamDir, defaultName);
-    const answer = await deps.port.save(client, { defaultPath: join(lastExportDirectory ?? deps.downloads(), defaultName) });
+    const answer = await deps.port.save(client, { defaultPath: join(await startFolder(here), defaultName) });
     return 'path' in answer ? answer.path : null;
   };
   // The owner's Replace for a slide folder already at the destination; no client to ask is no.
@@ -119,7 +154,7 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       // directory, so it goes once the save is done with it, copied, declined or failed; the cache name's never does
       const own = 'export' in source && source.export.exportId !== undefined ? from : null;
       try {
-        return await save(from, defaultName, 'export' in source && source.export.format === 'pngs', client);
+        return await save(from, defaultName, 'export' in source && source.export.format === 'pngs', client, artifact);
       } finally {
         if (own !== null) await rm(own, { force: true }).catch(() => {});
       }
@@ -127,8 +162,8 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
   };
 
   // The file at `from` copied to where the owner chose (a slide export's folder in place of its bundle).
-  async function save(from: string, defaultName: string, slides: boolean, client: ClientRef | null): Out<'library.saveAs'> {
-    const to = await destination(defaultName, client);
+  async function save(from: string, defaultName: string, slides: boolean, client: ClientRef | null, here: ArtifactRow | null): Out<'library.saveAs'> {
+    const to = await destination(defaultName, client, here);
     if (to === null) return { saved: false };
     if (slides) {
       if (!(await savePngFolder(from, to, () => confirmReplaceFolder(to, client)))) return { saved: false };
@@ -142,7 +177,7 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
         throw error;
       }
     }
-    lastExportDirectory = dirname(to);
+    remember(dirname(to));
     return { saved: true, path: to };
   }
 
@@ -157,13 +192,13 @@ export function createLibraryFiles(deps: LibraryFilesDeps) {
       if ('export' in source) {
         const from = join(dir, artifactExportName(source.export.revision, source.export.format, source.export.exportId));
         await remote.fetch({ artifactId, export: source.export }, from);
-        return await save(from, exportedName(artifact.title, source.export), source.export.format === 'pngs', client);
+        return await save(from, exportedName(artifact.title, source.export), source.export.format === 'pngs', client, null); // another machine's: no folder of this Mac's names it
       }
       const revision = source.content.revision;
       const stored = await remote.content({ artifactId, ...(revision !== undefined && { revision }) });
       const from = join(dir, fileNameOf(stored.name));
       await remote.fetch({ artifactId, ...(revision !== undefined && { revision }) }, from);
-      return await save(from, storedName(artifact, stored.name), false, client);
+      return await save(from, storedName(artifact, stored.name), false, client, null);
     } finally {
       await rm(dir, { recursive: true, force: true }).catch(() => {});
     }

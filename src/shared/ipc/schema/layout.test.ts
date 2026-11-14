@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, EMPTY_STRIP, events, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
+import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UNPINNABLE_KINDS, UsageBannersSchema, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -129,10 +129,16 @@ describe('layout value shapes', () => {
   });
 
   it('accepts the key grammar and nothing else', () => {
-    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */]) {
+    for (const key of ['regions', 'main.tabs', 'panel.pinned', 'panel.app-1', `panel.${at('app-1')}` /* P5 O6 M2 */, 'window.main', 'usage.banners' /* C7 */, 'library.exportFolder' /* UX wave U5 */]) {
       expect(LayoutKeySchema.safeParse(key).success, key).toBe(true);
     }
-    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+    for (const key of ['main', 'panel.', 'panel.a.b', 'window.other', 'x', 'usage.other' /* C7 */, 'panelTools.other' /* P4-B3 */, 'library.other' /* UX wave U5 */]) expect(LayoutKeySchema.safeParse(key).success, key).toBe(false);
+  });
+
+  // UX wave U5 (l6-artifacts-20): main's key for the last export's folder holds a path and nothing else
+  it('holds the last export’s folder as a path', () => {
+    expect(ExportFolderSchema.parse({ path: '/srv/exports' })).toEqual({ path: '/srv/exports' });
+    for (const value of [{ path: '' }, { path: '/a', at: 1 }, '/a', null]) expect(ExportFolderSchema.safeParse(value).success, JSON.stringify(value)).toBe(false);
   });
 
   // P4-B3 (Decision Log 22, X5 as amended): a panel tool's persisted params per panel tab, and the pin selection while no

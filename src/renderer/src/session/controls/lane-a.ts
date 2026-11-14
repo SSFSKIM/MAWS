@@ -189,7 +189,7 @@ function partsOf(content: string | readonly Block[], names: readonly string[] = 
   }
   return { text: content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n'), files };
 }
-const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX
+export const FILES_MAX = 4; // the bridge's MEDIA_FILES_MAX (UX wave U5a: exported, a comment's room for screenshots)
 
 // Whether lane A carries a card's answer on this request, and why not (Interfaces §D): the same rules main's driver
 // applies before it posts (src/main/lane-a/decisions.ts), checked here before the option is offered. U1a §G: an
@@ -394,8 +394,9 @@ export function laneAControls(state: LaneAState, record: SessionRecord | null, {
         const reason = out.reason ?? 'The session did not take the message';
         return refuse(files.length > 0 ? LANE_A_WORDS.wordsAfterFiles(reason) : reason);
       }
-      if (out.key !== null) holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
-      return { disposition: 'unconfirmed', started: false };
+      if (out.key === null) return { disposition: 'unconfirmed', started: false };
+      holdPendingSend(appSessionId, out.key, text); // its fate arrives in the state's deliveries
+      return { disposition: 'unconfirmed', started: false, pendingKey: out.key }; // UX wave U5a: the pending send's key
     },
     // The bridge holds no MAWS queue, so Stop and Esc both interrupt.
     async interrupt() {
