@@ -53,7 +53,7 @@ const HUB_URL = 'https://hub.example.test';
 const DAY_MS = 86_400_000;
 const iso = (ms: number) => new Date(ms).toISOString();
 const hex = () => Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
-const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const DEST: ProvisioningSecret = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
 const OWNER = hex();
 const SELF = { member: OWNER, device: 'dev-app' };
 
