@@ -6,7 +6,7 @@ import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useMachines } from '../stores/machines';
-import { project, record } from '../../../../test/support/builders';
+import { project, record, remoteRow } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { runSessionAction, sessionActionsFor } from '../app/session-actions';
 import { focusedProject, registerSessionCreator, runAction } from '../keymap/actions-runtime';
@@ -196,15 +196,41 @@ describe('the session and project entries', () => {
       expect(fake.machines('session.projects.remove')).toEqual([TEST_MACHINE]);
     });
 
-    it('archives the old sessions of the row’s projects on every machine that is up', async () => {
+    // The UX wave, U9 (R2, S-02): the project-wide acts stay this Mac's. "Archive sessions older than a week" asks this
+    // Mac's project only, and "Archive sessions" walks this Mac's records, its sheet saying the rest stay
+    it('archives the old sessions of this Mac’s project only, sending nothing to the other machine', async () => {
       roster('up');
       act(() => runProjectAction('archiveOlder', P1));
       await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));
       await act(() => fake.reply('session.archiveOlder', { archived: 1, skipped: 0 }));
-      await waitFor(() => expect(fake.pending('session.archiveOlder')).toBe(1));
-      await act(() => fake.reply('session.archiveOlder', { archived: 2, skipped: 1 }));
-      expect(fake.machines('session.archiveOlder')).toEqual([TEST_MACHINE, OTHER_MACHINE]);
-      expect(useNotices.getState().notices.some((n) => n.text === '3 sessions archived; 1 kept')).toBe(true);
+      expect(fake.machines('session.archiveOlder')).toEqual([TEST_MACHINE]);
+      expect(useNotices.getState().notices.some((n) => n.text === '1 sessions archived; 0 kept')).toBe(true);
+    });
+
+    it('Archive sessions walks this Mac’s records only, says the other machine’s are not archived from here, and sends nothing there', async () => {
+      roster('up');
+      fake = fakeClient({ 'session.archive': () => ({ archived: true }) });
+      install(fake);
+      act(() => runProjectAction('archiveSessions', P1));
+      await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Archive 1 session in maws?' }));
+      expect((useDialogs.getState().open as { body: string }).body).toBe(
+        'Running sessions stop; transcripts stay where Claude Code keeps them, and every session can be unarchived from Archived sessions. Sessions on other machines are not archived from here.',
+      );
+      act(() => (useDialogs.getState().open as { answer(yes: boolean): void }).answer(true));
+      await waitFor(() => expect(fake.invoked('session.archive')).toEqual([{ appSessionId: BARE_A }]));
+      expect(fake.machines('session.archive')).toEqual([TEST_MACHINE]);
+    });
+
+    it('says it of a project whose other machine holds only listings here', async () => {
+      roster('up');
+      useSessions.setState({ records: new Map([[A, record(A, { projectId: P1 })]]), listed: new Map([[B, { ...remoteRow(OTHER_MACHINE, BARE_A, { orgKey: org.key }), appId: B }]]) });
+      try {
+        act(() => runProjectAction('archiveSessions', P1));
+        await waitFor(() => expect(useDialogs.getState().open).toMatchObject({ kind: 'confirm', title: 'Archive 1 session in maws?' }));
+        expect((useDialogs.getState().open as { body: string }).body).toMatch(/ Sessions on other machines are not archived from here\.$/);
+      } finally {
+        useSessions.setState({ listed: new Map() });
+      }
     });
   });
 
@@ -249,5 +275,59 @@ describe("C7's resubmit seam", () => {
     install(fake);
     await expect(resubmitProvider.forkFrom({ appSessionId: A, messageUuid: EDITED as never, content: 'x' })).rejects.toThrow('a turn is running');
     expect(useNotices.getState().notices).toEqual([]);
+  });
+});
+
+// The UX wave, U9 (O-48, A8; Interfaces §5): a fork of a session on another machine is made there and adopts nothing
+// (its intent and its setup don't cross the link); its tab opens on the fork's address once the machine answers.
+describe('a fork of a session on another machine', () => {
+  const R = addressOf(OTHER_MACHINE, BARE_A);
+  const BARE_FORK = 'f2222222-2222-4222-8222-222222222222' as AppSessionId;
+  const FORK = addressOf(OTHER_MACHINE, BARE_FORK);
+  const EDITED = 'c2222222-2222-4222-8222-222222222222';
+  const texts = () => useNotices.getState().notices.map((n) => n.text);
+  const activeTab = () => {
+    const set = currentSet(useLayout.getState().main);
+    const pane = set.panes[set.focusedPane]!;
+    return pane.tabs.find((t) => t.id === pane.activeTabId);
+  };
+  beforeEach(() => {
+    useMachines.getState().applyRoster([
+      { ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-13T10:00:00Z', generation: 0 },
+      { ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities: ['rl2.session-acts'], owner: true },
+    ]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, BARE_A), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => {
+    useMachines.setState({ roster: 'unread', machines: new Map() });
+    useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+  });
+
+  it('makes the act on that machine, says so while it is out, and opens the fork’s tab on its address with nothing adopted', async () => {
+    act(() => runSessionAction('fork', R));
+    await waitFor(() => expect(fake.pending('session.fork')).toBe(1));
+    expect(fake.invoked('session.fork')).toEqual([{ appSessionId: BARE_A, target: { kind: 'inPlace' }, message: null, rewindTo: null }]);
+    expect(fake.machines('session.fork')).toEqual([OTHER_MACHINE]);
+    expect(texts()).toContain('Forking on Studio…');
+    await act(() => fake.reply('session.fork', { status: 'starting', appSessionId: BARE_FORK }));
+    expect(activeTab()).toMatchObject({ kind: 'session', appSessionId: FORK });
+    expect(fake.invoked('session.intent.get')).toEqual([]);
+    expect(useSessions.getState().unstarted.has(FORK)).toBe(false);
+    expect(texts()).not.toContain('Forking on Studio…');
+  });
+
+  it('words any other outcome as the act’s failure, and the edit’s fork throws it with the edit sent inside the act', async () => {
+    fake = fakeClient({ 'session.fork': () => ({ status: 'refused', appSessionId: BARE_A, reason: 'busy', message: 'the session has a turn running; fork it once the turn ends' }) });
+    install(fake);
+    await expect(resubmitProvider.forkFrom({ appSessionId: R, messageUuid: EDITED as never, content: 'say it there' })).rejects.toThrow('Not forked: the session has a turn running; fork it once the turn ends');
+    expect(fake.invoked('session.fork')).toEqual([{ appSessionId: BARE_A, target: { kind: 'inPlace' }, message: { content: 'say it there', display: 'say it there' }, rewindTo: EDITED }]);
+    expect(texts()).not.toContain('Forking on Studio…');
+  });
+
+  it('shows a refusal main worded as it is', async () => {
+    act(() => runSessionAction('fork', R));
+    await waitFor(() => expect(fake.pending('session.fork')).toBe(1));
+    await act(() => fake.fail('session.fork', 'Not forked: Studio is offline', 'host_unavailable', { refusal: 'offline' }));
+    expect(texts()).toEqual(['Not forked: Studio is offline']);
   });
 });

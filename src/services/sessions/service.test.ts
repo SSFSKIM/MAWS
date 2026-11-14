@@ -10,6 +10,7 @@ import { SessionHarness } from '../../../test/support/session-harness';
 import { installToHumanPlugin } from '../../../test/support/to-human-plugin'; // P4-R7z
 import { DOWN_RELAY, OK_RELAY } from '../../../test/support/session-host';
 import { storeLabel } from './record-actions';
+import { CeilingRefused } from './service'; // U9 (M2)
 import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
@@ -707,6 +708,84 @@ describe('session service', () => {
       const [a, b] = h.host.launches;
       expect(b).toMatchObject({ ...a, gateway: 'direct' });
       expect(h.host.calledWith('session.send')).toHaveLength(1);
+    });
+  });
+
+  // The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M2's Decisions): a fork another
+  // machine asked for (`session.fork` under an operation's claim), composed here and answered once its setup reached
+  // `launching`, so its record exists when the asking device opens its tab; held to the machine's ceiling, read when the
+  // fork is allocated, on the record it copies its mode from. A fork made in this machine's own window is not held to it.
+  describe('a fork from another machine', () => {
+    const SID = sessionIdFor(0xf9);
+    const refused = new Set<string>(); // the modes the machine's ceiling refuses to another machine
+    let gate: { reason: string; message: string } | null = null;
+    beforeEach(async () => {
+      h.dispose();
+      refused.clear();
+      gate = null;
+      h = await new SessionHarness({ aboveCeiling: (mode) => refused.has(mode), launchGate: async () => gate }).start();
+    });
+    const source = (trusted = true) => {
+      if (trusted) h.trustDirectory(h.work);
+      const record = h.index.sessions.upsertFromSummary(summary({ sessionId: SID, directory: h.work, customTitle: 'Plan' })).record;
+      h.writeTranscript(h.work, SID);
+      return record;
+    };
+    const intents = () => (existsSync(join(h.userData, 'sessions', 'intents')) ? readdirSync(join(h.userData, 'sessions', 'intents')).filter((f) => f.endsWith('.json')) : []);
+
+    it('answers `starting` once its setup reached `launching`, the record there, without waiting for the engine to be ready', async () => {
+      const src = source();
+      h.host.launchHangs = true; // the launch never answers: `launching` was told, `ready` never is
+      const outcome = await h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: OK_MESSAGE, rewindTo: null });
+      expect(outcome).toMatchObject({ status: 'starting' });
+      expect(outcome.appSessionId).not.toBe(src.appId);
+      expect(h.index.sessions.get(outcome.appSessionId)).toMatchObject({ appId: outcome.appSessionId, directory: h.work, permissionMode: src.permissionMode });
+      expect(h.index.sessions.get(outcome.appSessionId)!.launchedBy).toBeUndefined();
+      expect(h.setupEvents(outcome.appSessionId).map((e) => e.phase)).not.toContain('ready');
+    });
+
+    it('drops its intent for any guard outcome but `starting`, the trust card’s included, and answers it as it is', async () => {
+      const src = source(false); // an untrusted folder: the start asks for the trust card, which no other machine can draw
+      const outcome = await h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+      expect(outcome).toMatchObject({ status: 'needs_trust' });
+      expect(intents()).toEqual([]);
+      expect(await h.service.listIntents()).toEqual([]);
+      expect(h.host.launches).toEqual([]);
+    });
+
+    it('fails with the setup’s own sentence when the setup fails before its launch', async () => {
+      const src = source();
+      gate = { reason: 'engine-unconfigured', message: 'the engine is not configured yet' };
+      await expect(h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null })).rejects.toThrow('engine-unconfigured: the engine is not configured yet');
+      expect(h.host.launches).toEqual([]);
+    });
+
+    it('is refused `ceiling` with the mode above the machine’s ceiling, before anything is allocated', async () => {
+      const src = source();
+      h.index.sessions.applyEngineStatus(src.appId, { permissionMode: { requested: 'bypassPermissions', effective: 'bypassPermissions', refusal: null } });
+      refused.add('bypassPermissions');
+      const forking = h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+      await expect(forking).rejects.toBeInstanceOf(CeilingRefused);
+      await expect(forking).rejects.toMatchObject({ mode: 'bypassPermissions' });
+      expect(intents()).toEqual([]);
+      expect(h.events.filter((e) => e.name === 'session.intent.changed')).toEqual([]);
+      expect(h.host.launches).toEqual([]);
+    });
+
+    it('is refused every mode where the machine gives the service no ceiling to read', async () => {
+      h.dispose();
+      h = await new SessionHarness().start();
+      const src = source();
+      await expect(h.service.forkFromAnotherMachine(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null })).rejects.toMatchObject({ mode: src.permissionMode.requested });
+      expect(h.host.launches).toEqual([]);
+    });
+
+    it('leaves a fork made in this machine’s own window unheld by the ceiling', async () => {
+      const src = source();
+      refused.add(src.permissionMode.requested);
+      const outcome = await h.service.fork(src.appId, { kind: 'inPlace' }, { message: null, rewindTo: null });
+      expect(outcome).toMatchObject({ status: 'starting' });
+      expect(await h.settled(outcome.appSessionId)).toMatchObject({ phase: 'ready' });
     });
   });
 

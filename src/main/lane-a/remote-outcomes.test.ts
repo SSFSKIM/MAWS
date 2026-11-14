@@ -13,6 +13,15 @@ describe('a remote act’s outcome', () => {
     expect(controlOf({ state: 'unknown', reason: 'closed' }, 'mini')).toEqual({ state: 'unknown', why: 'gone' });
   });
 
+  // The UX wave (U9, UC-7.5): a Stop that ends without its effect says so as on lane B, "Not stopped: <reason>"
+  it('words an interrupt’s refusal as UC-7.5 says a Stop’s, and leaves every other control’s words', () => {
+    expect(controlOf({ state: 'refused', reason: 'offline' }, 'Loft', 'interrupt')).toEqual({ state: 'refused', code: 'offline', message: 'Not stopped: Loft is offline' });
+    expect(controlOf({ state: 'not-sent' }, 'Loft', 'interrupt')).toEqual({ state: 'refused', code: 'not-sent', message: 'Not stopped: Loft is offline' });
+    expect(controlOf({ state: 'failed', error: { code: 'read-only' } }, 'Loft', 'interrupt')).toEqual({ state: 'refused', code: 'read-only', message: 'Not stopped: Loft is in read-only mode' });
+    expect(controlOf({ state: 'refused', reason: 'grade' }, 'Loft', 'interrupt')).toMatchObject({ message: 'Not stopped: you can read this session but not act on it' });
+    expect(controlOf({ state: 'refused', reason: 'offline' }, 'Loft', 'btw')).toMatchObject({ message: 'Loft wasn’t reachable within a minute; nothing ran' });
+  });
+
   it('reads a send’s fate: entered with its row, unconfirmed past sminos’s bound or unknown, refused with its words', () => {
     expect(sendFate({ state: 'done', result: { entered: true, uuid: 'row-1' } }, 'mini')).toEqual({ state: 'entered', uuid: 'row-1' });
     expect(sendFate({ state: 'done', result: { submitted: true } }, 'mini')).toMatchObject({ state: 'unconfirmed' });

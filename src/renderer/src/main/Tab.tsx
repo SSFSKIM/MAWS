@@ -19,7 +19,8 @@ import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { machineOf } from '@shared/machine/address';
-import { selectOffline, useMachines } from '../stores/machines';
+import { useMachines } from '../stores/machines';
+import { selectShownOffline, usePhaseClock } from '../app/machine-mark'; // the UX wave, U9
 import { displayTitle } from '../sessions/title';
 // E5 start
 import { EDITOR_COPY } from '../tools/code/copy';
@@ -119,7 +120,8 @@ function useHolderMark(tab: TabRef): { text: string; title: string } | null {
 
 function useSessionOffline(tab: TabRef): boolean {
   const appSessionId = tab.kind === 'session' || tab.kind === 'agent' ? tab.appSessionId : null;
-  return useMachines((s) => appSessionId !== null && selectOffline(s, machineOf(appSessionId)));
+  const now = usePhaseClock(); // the UX wave, U9 (O-39): greyed only in the offline and removed phases
+  return useMachines((s) => appSessionId !== null && selectShownOffline(s, machineOf(appSessionId), now));
 }
 
 // A tab's full name, its accessible name, tooltip and All tabs line (U13a, §G): the title, then its place when the strip

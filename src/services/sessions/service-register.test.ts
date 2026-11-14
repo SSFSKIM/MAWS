@@ -1,6 +1,7 @@
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { CommandName } from '@shared/ipc/schema';
+import { endableClientRef, type HandlerContext } from '@shared/ipc/client';
 import { fakeBus } from '../../../test/support/fake-bus';
 import { SessionHarness } from '../../../test/support/session-harness';
 import { sessionIdFor, summary } from '../../../test/support/index-fixture'; // P2-A
@@ -29,6 +30,41 @@ describe('the session service’s commands, answered on the services bus', () =>
     expect(bad).toMatchObject({ ok: false, error: { code: 'invalid_input', message: expect.stringContaining('location: directory not found'), issues: [{ path: ['patch', 'location'] }] } });
     expect(await invoke('session.start', { appSessionId: id, message: null, options: {} })).toMatchObject({ ok: true, value: { status: 'needs_trust' } });
     expect(await invoke('session.trust.check', { directory: h.work })).toMatchObject({ ok: true, value: { trustKey: h.work, trusted: false } });
+  });
+
+  // The UX wave (U9, R9): a rename made under a reader (another machine's member, through the endpoint) answers the record
+  // as `session.get` answers that reader, read after the rename: a member is never answered the owners' reading.
+  it('answers a rename under a reader with the record as that reader reads it', async () => {
+    const B = 'b'.repeat(32);
+    const record = h.index.sessions.upsertFromSummary(summary({ directory: h.work })).record;
+    h.index.sessions.setPinned(record.appId, true);
+    const as = (reader: string): HandlerContext => ({ client: endableClientRef('endpoint:1'), remote: true, reader });
+    for (const [reader, title] of [[B, 'Loft notes'], ['owner', 'Studio notes']] as const) {
+      const renamed = (await bus.invoke('session.rename', { appSessionId: record.appId, title }, as(reader))) as Result;
+      expect(renamed, reader).toEqual({ ok: true, value: { record: h.index.sessions.get(record.appId, reader), via: 'override' } });
+    }
+    const asMember = (await bus.invoke('session.rename', { appSessionId: record.appId, title: 'Loft notes' }, as(B))) as Result;
+    expect((asMember.value as { record: { pinned: boolean } }).record.pinned).toBe(false);
+    expect(h.index.sessions.get(record.appId)!.pinned).toBe(true);
+  });
+
+  // The UX wave (U9, M2): a fork under an operation's claim is another machine's (`machine.op` hands the claim), composed
+  // here and held to the machine's ceiling; a fork above it is refused with the refusal and the mode in `issues`, which
+  // the asking device words. A fork with no claim is this machine's own window's, unheld by the ceiling.
+  it('holds a fork another machine asked for to the ceiling, the refusal and the mode in `issues`, and leaves a local fork as it was', async () => {
+    h.trustDirectory(h.work);
+    h.host.script = () => ({});
+    const engine = sessionIdFor(0x2f01);
+    const record = h.index.sessions.upsertFromSummary(summary({ sessionId: engine, directory: h.work })).record;
+    h.writeTranscript(h.work, engine);
+    const fork = { appSessionId: record.appId, target: { kind: 'inPlace' }, message: null, rewindTo: null };
+    const claimed: HandlerContext = { client: endableClientRef('endpoint:1'), remote: true, reader: 'owner', op: { opId: 'op-fork-1', opCreated: new Date().toISOString(), member: 'a'.repeat(32), device: 'dev-1', fingerprint: 'fp-1' } };
+    // this harness's service was given no ceiling to read: every fork from another machine is above it
+    expect(await bus.invoke('session.fork', fork, claimed)).toEqual({
+      ok: false,
+      error: { code: 'internal', message: expect.stringContaining(record.permissionMode.requested), issues: { refusal: 'ceiling', mode: record.permissionMode.requested } },
+    });
+    expect(await invoke('session.fork', fork)).toMatchObject({ ok: true, value: { status: 'starting' } });
   });
 
   it('refuses a patch while a start is in flight as internal `starting`', async () => {

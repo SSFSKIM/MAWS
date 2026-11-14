@@ -16,7 +16,8 @@ import { locationAddress, type HeldRemoval, type OrgProjectLocation, type OrgPro
 import { REGISTRY } from './registry-copy';
 
 export interface LocationView {
-  machine(ref: MachineRef): { name: string; local: boolean; up: boolean; since: string | null };
+  // `offline`: the UX wave, U9 (O-39): whether its words say offline, by its link's phase; absent: whenever it is not up
+  machine(ref: MachineRef): { name: string; local: boolean; up: boolean; since: string | null; offline?: boolean };
   seen: OrgProjects['seen'];
 }
 
@@ -49,7 +50,7 @@ export function lastSeen(view: LocationView, machine: MachineRef): string | null
 
 export function locationState(location: OrgProjectLocation, view: LocationView): LocationState {
   const machine = view.machine(location.machine);
-  if (!machine.up) {
+  if (machine.offline ?? !machine.up) { // the UX wave, U9 (O-39): by the link's phase, as the row's line reads it
     const since = lastSeen(view, location.machine);
     return { kind: 'offline', words: REGISTRY.offline, card: since === null ? REGISTRY.offline : REGISTRY.offlineSince(since) };
   }
@@ -99,7 +100,7 @@ export function machinesWords(machines: readonly MachineRef[], view: Pick<Locati
   if (machines.every((m) => view.machine(m).local)) return null;
   return REGISTRY.machines(machines.map((ref) => {
     const machine = view.machine(ref);
-    return machine.up ? machine.name : `${machine.name} ${REGISTRY.offline}`;
+    return (machine.offline ?? !machine.up) ? `${machine.name} ${REGISTRY.offline}` : machine.name;
   }));
 }
 

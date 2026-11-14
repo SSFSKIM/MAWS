@@ -16,6 +16,7 @@ import type { PanelHostProps } from '../panel/host-slot';
 import { useLayout } from '../stores/layout';
 import { cardColumnNow, useCardColumnShown, useShellView } from './shell-view';
 import { useSessions } from '../stores/sessions';
+import { useMachines } from '../stores/machines';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
 import { fakeClient } from '../../../../test/support/fake-client';
@@ -421,6 +422,42 @@ describe('another machine’s terminal session in the toolbar', () => {
   it('is titled by its listed row', () => {
     expect(toolbarTitle(sessionTab(REMOTE), new Map(), null, null, useSessions.getState().listed)).toEqual({ title: 'Ship the relay', branch: null });
     expect(toolbarTitle(sessionTab(A), new Map(), null, null, useSessions.getState().listed).title).toBe('New chat'); // no record, no row
+  });
+});
+
+// The UX wave, U9 (S-02, O-48; Interfaces §6): the title bar's session menu of another machine's lane B session offers its
+// acts over the link as its row's menu does (Rename… and Archive when its listing says it is yours), each disabled with
+// the helper's sentence in the gap its item draws: on a machine whose build doesn't list `rl2.session-acts`, the update
+// sentence (A14).
+describe('another machine’s lane B session in the toolbar', () => {
+  const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  beforeEach(() => {
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities: ['rl2.project-acts'], owner: true }]);
+    useSessions.setState({
+      records: new Map([[REMOTE, record(REMOTE, { title: { text: 'Studio build', source: 'user' } })]]),
+      listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-r', { title: 'Studio build' }), appId: REMOTE }]]),
+      listedMachines: new Set([OTHER_MACHINE]),
+    });
+  });
+  afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map() }));
+
+  it('holds Rename…, Fork and Archive, each disabled with the update sentence on a machine that doesn’t serve them', async () => {
+    const user = userEvent.setup();
+    offs.push(registerShellActions(fakeBridge()));
+    for (const id of ['rename', 'fork', 'archive'] as const) offs.push((await import('./session-actions')).registerSessionAction(id, vi.fn()));
+    renderShell();
+    act(() => useLayout.setState({ main: withActive(sessionTab(REMOTE)) }));
+    await user.click(screen.getByRole('button', { name: 'More surfaces' }));
+    const actions = await screen.findByRole('menuitem', { name: 'Session actions' });
+    act(() => actions.focus());
+    await user.keyboard('{ArrowRight}');
+    const menu = (await screen.findByRole('menuitem', { name: 'Rename…' })).closest<HTMLElement>('[role="menu"]')!;
+    const items = within(menu).getAllByRole('menuitem').filter((i) => ['Rename…', 'Fork', 'Archive'].includes(i.textContent ?? ''));
+    expect(items.map((i) => [i.textContent, i.getAttribute('aria-disabled'), i.getAttribute('title')])).toEqual([
+      ['Rename…', 'true', 'Can’t rename on Studio yet. Update MAWS on Studio and try again.'],
+      ['Fork', 'true', 'Can’t fork on Studio yet. Update MAWS on Studio and try again.'],
+      ['Archive', 'true', 'Can’t archive on Studio yet. Update MAWS on Studio and try again.'],
+    ]);
   });
 });
 

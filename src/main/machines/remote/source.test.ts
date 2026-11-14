@@ -73,11 +73,20 @@ describe('the roster', () => {
     const o = await org();
     expect(await rosterOf(await signedIn(o), o.LOCAL, new Date())).toEqual(
       [
-        { ref: o.MINI, name: 'mini' },
-        { ref: o.LIVE, name: 'vm-one' },
+        { ref: o.MINI, name: 'mini', owner: true },
+        { ref: o.LIVE, name: 'vm-one', owner: true },
       ].sort((a, b) => a.ref.localeCompare(b.ref)),
     );
     expect(await rosterOf(null, o.LOCAL, new Date())).toEqual([]);
+  });
+
+  // The UX wave (U9, Interfaces §8): whether the signed-in member is one of each machine's owners, read from the held
+  // state as `signsUnasked` reads it (an entry's owners, else its delegation's). It draws a control, never authorises.
+  it('says whether the signed-in member owns each machine', async () => {
+    const o = await org();
+    const held = await signedIn(o);
+    const other = { ...held, identity: { ...held.identity, member: memberId() } };
+    expect((await rosterOf(other, o.LOCAL, new Date())).map((m) => [m.name, m.owner]).sort()).toEqual([['mini', false], ['vm-one', false]]);
   });
 
   it('is recomputed at each change of the session, renames included, and empty signed out', async () => {
@@ -112,7 +121,7 @@ describe('the roster', () => {
     closers.push(() => source.close());
     await until(() => source.machines().some((m) => m.ref === o.LIVE));
     await until(() => !source.machines().some((m) => m.ref === o.LIVE), 4000);
-    expect(source.machines()).toEqual([{ ref: o.MINI, name: 'mini' }]);
+    expect(source.machines()).toEqual([{ ref: o.MINI, name: 'mini', owner: true }]);
   });
 });
 

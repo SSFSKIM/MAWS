@@ -56,6 +56,13 @@
 //   session's status and record are read again (`session.status`, `session.get`) and folded in, so a turn a dropped
 //   `turn.ended` left open closes by the machine's word; a status the stream delivers meanwhile stands over the re-read.
 // - `remote.session` at each change (the link's state and caps included), said once per change.
+// - The UX wave, U9 (M5, "The settled word"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md): one
+//   standing at any moment, read in one synchronous reading (`standing`). Placing from the first record read through
+//   every retry of it (a read in flight, the ladder's timer, the back-off after a transient failure) until the record is
+//   had and its subscription registered in the same step, or the session is given up (the ladder's end, `removed`,
+//   `closed`); awaiting while a subscription is out unanswered, which a kept subscription is again from main's word of a
+//   loss (`lost`) to its next `subbed`; quiet otherwise; none once let go. Each change is told (`standingChanged`) after
+//   what the session said for it, so the machine's round (./remote.ts) speaks after the answer that carried it.
 // - A replay (`replay`): the record, the last of each part and `remote.session` said again, for a page that has just
 //   subscribed (a reload, a second window); what it said before was said to no one listening.
 import { readTolerant } from '@shared/ipc/tolerant';
@@ -136,8 +143,13 @@ export interface RemoteSessionDeps {
    * across its records, so it only grows; absent, the record counts from 1.
    */
   nextAnswer?(): number;
+  /** The UX wave, U9 (M5): the lane's standing may have changed, told after what was said for it. */
+  standingChanged?(): void;
   log(line: string): void;
 }
+
+/** The UX wave, U9 (M5): a lane's part in its machine's settled word; `null` once let go. */
+export type LaneStanding = 'placing' | 'awaiting' | 'quiet';
 
 const events = codecOf(REGISTRY);
 const link = codecOf(LINK_REGISTRY);
@@ -171,6 +183,8 @@ export class RemoteSession {
   #started = false;
   /** The subscription out has had its `subbed`. */
   #answered = false;
+  /** The UX wave, U9 (M5): the subscription out is unanswered: since it was made, or since main's word of a loss. */
+  #awaiting = false;
   #backoffMs: number;
   #batch: SessionEvent[] = [];
   #flushTimer: ReturnType<typeof setTimeout> | null = null;
@@ -219,6 +233,7 @@ export class RemoteSession {
     this.publish();
     if (this.state.record === null) void this.#readRecord(0, this.#token);
     else this.#subscribe();
+    this.#deps.standingChanged?.();
   }
 
   /** Closes the stream; with `ended`, says so as its last state (the link closed), else quietly (the tab let it go). */
@@ -226,11 +241,30 @@ export class RemoteSession {
     this.#running = false;
     this.#halt();
     for (const off of this.#offs.splice(0)) off();
-    if (ended === undefined) return;
-    this.state.stream = 'ended';
-    this.state.ended = ended;
-    this.state.status = null;
-    this.publish(true);
+    if (ended !== undefined) {
+      this.state.stream = 'ended';
+      this.state.ended = ended;
+      this.state.status = null;
+      this.publish(true);
+    }
+    this.#deps.standingChanged?.();
+  }
+
+  /**
+   * The UX wave, U9 (M5): the lane's standing now: placing while its record is being had, awaiting while a subscription
+   * is out unanswered, quiet otherwise; null once let go (not running).
+   */
+  standing(): LaneStanding | null {
+    if (!this.#running) return null;
+    if (this.#sub !== null && this.#awaiting) return 'awaiting';
+    if (this.state.record === null && this.state.stream !== 'ended') return 'placing';
+    return 'quiet';
+  }
+
+  /** The UX wave, U9 (M5): main's word of the link's loss (`down` after `up`): a subscription kept across it awaits its next answer. */
+  lost(): void {
+    if (!this.#running || this.#sub === null) return;
+    this.#awaiting = true;
   }
 
   /** Subscribes at once if the stream waits to be subscribed again (a resume this app asked for completed). */
@@ -378,8 +412,9 @@ export class RemoteSession {
       if (read.ok && read.value !== null) {
         this.state.record = read.value as SessionRecord;
         this.#deps.emit(this.state.machine, 'session.changed', { record: this.state.record, cause: 'live', revision: this.#deps.revision() });
-        this.#subscribe();
+        this.#subscribe(); // the hand-over: the record had and its subscription out in one step
         this.publish();
+        this.#deps.standingChanged?.();
         return;
       }
       if (!read.ok) this.#deps.log(`lane B: ${this.link.name}/${this.state.app}: session.get answered a record that doesn't read: ${read.error.message}`);
@@ -395,6 +430,7 @@ export class RemoteSession {
       this.state.stream = 'ended';
       this.state.ended = 'unplaced';
       this.publish();
+      this.#deps.standingChanged?.();
       return;
     }
     this.#timer = setTimeout(() => {
@@ -409,6 +445,7 @@ export class RemoteSession {
     const token = {};
     this.#token = token;
     this.#answered = false;
+    this.#awaiting = true;
     const mine = () => this.#token === token && this.#running;
     let first = true; // this subscription's first `subbed`
     const carried = this.#cursor !== null;
@@ -420,6 +457,7 @@ export class RemoteSession {
         first = false;
         this.#started = false;
         this.#answered = true;
+        this.#awaiting = false;
         this.#backoffMs = this.#deps.timing.idleRetryMs[0];
         this.state.launch = at.epoch;
         this.#tellPendingGap();
@@ -435,6 +473,7 @@ export class RemoteSession {
         this.#openings += 1;
         this.#askOperations(token);
         if (this.#openings > 1) this.#relist(token);
+        this.#deps.standingChanged?.();
       },
       snapshot: (at, value) => {
         if (!mine()) return;
@@ -484,31 +523,38 @@ export class RemoteSession {
         this.#tellPendingGap();
         this.#cursor = this.#sub?.cursor() ?? this.#cursor;
         this.#sub = null;
+        this.#awaiting = false;
         this.#token = {}; // m8-3 review: a read made for this subscription (a gap's re-read, an operations ask) is not taken after its end
-        if (reason === 'removed' || reason === 'closed') return this.stop(reason);
-        // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
-        // it stood, and that opening asks for the completions it missed
-        if (reason === 'behind') return this.#behind();
-        this.state.status = null;
-        if (reason !== 'unavailable') {
-          this.state.stream = 'ended';
-          this.state.ended = reason;
-          this.#endAnswered('ended');
-          this.publish();
-          return;
-        }
-        this.state.stream = 'idle';
-        this.#endAnswered('unavailable');
-        this.publish();
-        if (this.#started) {
-          this.#started = false;
-          return this.#subscribe();
-        }
-        if (!this.#deps.followed?.()) this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
+        this.#ended(reason);
+        this.#deps.standingChanged?.();
       },
     };
     this.#sub = this.link.subscribe({ session: { lane: 'B', id: this.state.app }, view: 'full', cursor: this.#cursor }, sink);
     this.#deps.subscribed?.();
+  }
+
+  /** A subscription's end, its subscription already let go: stopped, opened again, idle or ended as the reason says. */
+  #ended(reason: string): void {
+    if (reason === 'removed' || reason === 'closed') return this.stop(reason);
+    // P5 O7 M8: the machine ended it past its notices' bound; the session runs on, so it is opened again from where
+    // it stood, and that opening asks for the completions it missed
+    if (reason === 'behind') return this.#behind();
+    this.state.status = null;
+    if (reason !== 'unavailable') {
+      this.state.stream = 'ended';
+      this.state.ended = reason;
+      this.#endAnswered('ended');
+      this.publish();
+      return;
+    }
+    this.state.stream = 'idle';
+    this.#endAnswered('unavailable');
+    this.publish();
+    if (this.#started) {
+      this.#started = false;
+      return this.#subscribe();
+    }
+    if (!this.#deps.followed?.()) this.#later(() => this.#subscribe(), this.#deps.timing.idleProbeMaxMs);
   }
 
   /** The replace-whole parts of a snapshot, the status first. */
@@ -765,6 +811,7 @@ export class RemoteSession {
     if (this.#sub !== null) this.#cursor = this.#sub.cursor() ?? this.#cursor;
     this.#sub?.close();
     this.#sub = null;
+    this.#awaiting = false;
     if (this.#timer !== null) clearTimeout(this.#timer);
     this.#timer = null;
     this.#flush();

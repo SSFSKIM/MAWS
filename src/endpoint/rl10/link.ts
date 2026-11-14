@@ -129,6 +129,8 @@ export type Rl10Context = {
   };
   machineOwners(): Promise<string[]>;
   dispatch: MembersContext['dispatch'];
+  /** U9: an operation's hold, around the members' listing rule's reads (MembersContext's `hold`). */
+  hold?: MembersContext['hold'];
   /** A read of the hub's org state, asked for an arriving event held for a key it may bring (log-relay.ts). */
   behind?(): void;
   /**
@@ -205,6 +207,7 @@ export class Rl10 {
     });
     this.members = new Members({
       dispatch: ctx.dispatch,
+      ...(ctx.hold === undefined ? {} : { hold: ctx.hold }),
       listings: ctx.listings,
       listed: () => ctx.listings.listedSessions(),
       forget: (s) => ctx.notifier.forget(s),

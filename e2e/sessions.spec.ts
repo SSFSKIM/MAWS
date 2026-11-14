@@ -24,6 +24,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, mainTabById, mainTabs } from './support/shell';
+import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 
@@ -170,7 +171,10 @@ async function watchTranscriptFailures(page: Page): Promise<void> {
     const note = () =>
       document.querySelectorAll('[role="alert"]').forEach((node) => {
         const text = (node.textContent ?? '').trim();
-        if (text.startsWith('Could not load this transcript') && !seen.includes(text)) seen.push(text);
+        // the alert's words (src/renderer/src/transcript/model/copy.ts's HYDRATION.failed) and, since the UX wave's U9, its
+        // reason in its title
+        const said = `${text} (${node.getAttribute('title') ?? ''})`;
+        if (text.startsWith('Couldn’t load this conversation') && !seen.includes(said)) seen.push(said);
       });
     new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true });
   });
@@ -1135,5 +1139,78 @@ test.describe('sessions', () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  // The UX wave, U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3; the section's A3 and A6, O-11b):
+  // a first read of a session on this Mac that fails because its engine host is away says "Loading…" while it waits, is
+  // made again at the host's next ready, and loads with no click; one that has waited past 15 s says "Couldn’t load this
+  // conversation" with Retry, and a later ready still loads it, again with no click. The host is taken away as C1's
+  // ladder leaves it: three unexpected exits within a minute and it stays crashed, so main answers its reads
+  // `host_unavailable` until Restart now (`host.restart`, the banners' and Diagnostics' act). Each step settles on what the
+  // app shows: the host's state as main reports it, and the pane's words and rows.
+  test('U9 A3 and A6: a first read the engine host’s absence failed says Loading…, and heals at the host’s next ready; one past 15 s says it could not load, and a later ready still loads it', async () => {
+    test.setTimeout(240_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const sids = { soon: '5e551011-0000-4000-8000-0000000000a6', late: '5e551011-0000-4000-8000-0000000000a7' } as const;
+    const words = { soon: 'Read again at the host’s next ready', late: 'Read again at a later ready' } as const;
+    for (const key of ['soon', 'late'] as const) {
+      const sid = sids[key];
+      await store.addTranscript(repo.root, sid, [{ type: 'user', uuid: `u-${sid}`, parentUuid: null, cwd: repo.root, sessionId: sid, timestamp: '2026-11-13T10:00:00.000Z', message: { role: 'user', content: words[key] } }]);
+    }
+    const launched = await launchCase({ fixtures: [], trusted: [repo.root], store });
+    current = { ...launched, repos: [repo] };
+    const { page } = launched;
+    const main = page.locator('[data-region="main"]');
+    await expect.poll(async () => value(await invoke(page, 'session.list', {})).sessions.filter((r) => r.engineSessionId === sids.soon || r.engineSessionId === sids.late).length, { timeout: 20_000 }).toBe(2);
+    const listed = value(await invoke(page, 'session.list', {})).sessions;
+    const appOf = (key: 'soon' | 'late') => listed.find((r) => r.engineSessionId === sids[key])!.appId;
+    const host = async () => value(await invoke(page, 'engine.hostState', undefined));
+    // C1's ladder to its limit: each exit is waited out to the successor's ready, and the third within the minute leaves
+    // the host crashed for good
+    const crashForGood = async () => {
+      let killed: number | null = null;
+      for (let exits = 0; exits < 5; exits++) {
+        let now = await host();
+        await expect
+          .poll(async () => ((now = await host()).state === 'crashed' || (now.state === 'ready' && now.pid !== killed) ? now.state : `${now.state} ${now.pid}`), { timeout: 30_000, message: `the engine host after ${exits} exits` })
+          .toMatch(/^(ready|crashed)$/);
+        if (now.state === 'crashed') return;
+        killed = now.pid!;
+        // only the scene's own engine host: a process whose command line names this launch's profile
+        expect(processesNaming(launched.maws.userData).map((p) => p.pid), `pid ${killed} is this launch's engine host`).toContain(killed);
+        process.kill(killed, 'SIGKILL');
+      }
+      throw new Error('the engine host was not left crashed by its exits');
+    };
+    const restart = async () => {
+      value(await invoke(page, 'host.restart', { stopSessions: true }));
+      await expect.poll(async () => (await host()).state, { timeout: 30_000, message: 'the engine host is ready again' }).toBe('ready');
+    };
+    // the transcript's words (src/renderer/src/transcript/model/copy.ts's HYDRATION)
+    const loading = main.getByRole('status').filter({ hasText: /^Loading…$/ });
+    const failed = main.getByRole('alert').filter({ hasText: 'Couldn’t load this conversation' });
+
+    await test.step('opened while the host is away: Loading…, and its rows once the host is back, with no click', async () => {
+      await crashForGood();
+      await (await sidebarRow(page, { appSessionId: appOf('soon') })).click();
+      await expect(loading, 'the pane says it is loading while its read waits for the host').toBeVisible({ timeout: 10_000 });
+      await expect(failed).toHaveCount(0);
+      await restart();
+      await expect(main.getByText(words.soon, { exact: true }), 'read again at the next ready').toBeVisible({ timeout: 30_000 });
+      await expect(loading).toHaveCount(0);
+      await expect(failed).toHaveCount(0);
+    });
+
+    await test.step('past 15 s with no ready: it could not load, with Retry; a later ready still loads it, with no click', async () => {
+      await crashForGood();
+      await (await sidebarRow(page, { appSessionId: appOf('late') })).click();
+      await expect(loading, 'Loading… while it waits').toBeVisible({ timeout: 10_000 });
+      await expect(failed, 'the wait ran out (15 s, and margin for a loaded Mac)').toBeVisible({ timeout: 45_000 });
+      await expect(failed.getByRole('button', { name: 'Retry', exact: true })).toBeVisible();
+      await restart();
+      await expect(main.getByText(words.late, { exact: true }), 'a later ready loads it').toBeVisible({ timeout: 30_000 });
+      await expect(failed).toHaveCount(0);
+    });
   });
 });

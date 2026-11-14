@@ -22,7 +22,7 @@ import type { FirstMessage, ForkTarget, Location, SetupIntent, SetupIntentPatch 
 import type { SetupResources, StartOutcome } from '@shared/sessions/setup';
 import type { TrustState } from '@shared/sessions/trust';
 import { isNoClient, NO_CLIENT_REASON } from '@shared/client/port';
-import type { ClientRef } from '@shared/ipc/client';
+import type { ClientRef, Reader } from '@shared/ipc/client';
 import type { ArchiveOutcome, DeleteOutcome, StartOptions } from '@shared/ipc/schema/session';
 import { emptyProgress, HostError, hostCall, STOP_WAIT_MS, WATCHDOG_MS, type SessionServiceDeps } from './context';
 import { DeletionManifests, type DeletionManifest } from './delete-manifest';
@@ -65,6 +65,7 @@ import { LaunchWatch } from './launch-watch';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema'; // P5 O3-D M4
 import { RewindNotes, type ConversationAct } from './rewind-note'; // P5 O3-D M4
 import { SpawnerProofs } from './spawner-proof'; // P5 O12 M11
+import { untilLaunching } from './until-launching'; // U9 (M2)
 
 // A refusal of an intent command, mapped to X2 by the registration: `invalid` is `invalid_input` naming the field;
 // `starting`, `retained_worktree` and the rest are `internal` with this message.
@@ -76,6 +77,16 @@ export class IntentRefused extends Error {
   ) {
     super(message);
     this.name = 'IntentRefused';
+  }
+}
+
+// The UX wave (U9, M2): a fork from another machine whose source's requested permission mode is above the machine's
+// ceiling, refused where the fork is allocated, before anything is written. The registration answers it with the refusal
+// `ceiling` and the mode in `issues`, which the asking device words.
+export class CeilingRefused extends Error {
+  constructor(readonly mode: string) {
+    super(`the session's permission mode ${mode} is above what this machine starts from another machine`);
+    this.name = 'CeilingRefused';
   }
 }
 
@@ -122,6 +133,7 @@ export class SessionService {
   private readonly spawnerProofs: SpawnerProofs; // P5 O12 M11: a remote spawn's proof, beside its record
   private offStatus: (() => void) | null = null;
   private readonly handoverResumes = new Set<string>(); // P5 O16 M3b (D58a): the launch ids already resumed after a failed re-initialize
+  private readonly setupListeners = new Set<(event: SetupEvent) => void>(); // U9 (M2): a fork from another machine waits for its `launching`
   private readonly now: () => string;
   private readonly log: (message: string) => void;
 
@@ -182,7 +194,11 @@ export class SessionService {
       git: this.deps.git,
       intents: this.deps.intents,
       bootstraps: this.deps.bootstraps,
-      emit: this.deps.emit,
+      emit: (name, payload) => {
+        const sent = this.deps.emit(name, payload);
+        if (name === 'session.setup') for (const listener of [...this.setupListeners]) listener(payload as SetupEvent); // U9 (M2)
+        return sent;
+      },
       env,
       replay: this.deps.replay ?? null,
       settings: this.deps.settings ?? readSettings,
@@ -974,17 +990,56 @@ export class SessionService {
   // start that is rejected or throws opens no tab, so the fork's intent goes before the answer (nothing launched: there
   // is nothing else to forget).
   async fork(appSessionId: AppSessionId, target: ForkTarget, args: { message: FirstMessage | null; rewindTo: MessageUuid | null }): Promise<StartOutcome> {
-    const allocated = await this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
+    const allocated = await this.allocateFork(appSessionId, target, args);
+    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
+  }
+
+  // The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M2's Decisions): `session.fork`
+  // asked from another machine (the handler's context carries the operation's claim). The source's requested mode is held
+  // to the machine's ceiling, read now (`aboveCeiling`; none, every mode refused), on the very record the fork copies it
+  // from, before anything is allocated (`CeilingRefused`): the fork launches with its intent's mode and never reads the
+  // source's again. No setup event crosses the link, so it answers `starting` once its setup reached `launching` (its
+  // record exists when the asking device opens its tab), and a setup that fails before then throws its own sentence. Any
+  // other guard outcome is answered as it is, its intent dropped: no card can be drawn for it on another machine.
+  async forkFromAnotherMachine(appSessionId: AppSessionId, target: ForkTarget, args: { message: FirstMessage | null; rewindTo: MessageUuid | null }): Promise<StartOutcome> {
+    const allocated = await this.allocateFork(appSessionId, target, args, (source) => {
+      const mode = source.permissionMode.requested;
+      if (this.deps.aboveCeiling?.(mode) ?? true) throw new CeilingRefused(mode);
+    });
+    if (typeof allocated !== 'string') return allocated;
+    const launching = untilLaunching((listener) => (this.setupListeners.add(listener), () => void this.setupListeners.delete(listener)), allocated);
+    let outcome: StartOutcome;
+    try {
+      outcome = await this.startSession(allocated, { message: null, options: {} });
+    } catch (error) {
+      launching.cancel();
+      await this.dropForkIntent(allocated);
+      throw error;
+    }
+    if (outcome.status !== 'starting') {
+      launching.cancel();
+      await this.dropForkIntent(allocated);
+      return outcome;
+    }
+    const failure = await launching.done;
+    if (failure !== null) throw new Error(failure);
+    return outcome;
+  }
+
+  // A fork's intent over the source read here, allocated unless a guard refuses or `judge` throws (each before anything
+  // is written); the outcome to answer instead, or the fork's id.
+  private allocateFork(appSessionId: AppSessionId, target: ForkTarget, args: { message: FirstMessage | null; rewindTo: MessageUuid | null }, judge?: (source: SessionRecord) => void): Promise<StartOutcome | AppSessionId> {
+    return this.serial(appSessionId, async (): Promise<StartOutcome | AppSessionId> => {
       const s = await this.ready();
       const source = s.sessions.get(appSessionId);
       const refusal = await forkRefusal(s, appSessionId);
       if (source === null || refusal !== null) return { status: 'refused', appSessionId, ...(refusal ?? { reason: 'unknown_session', message: `no session ${appSessionId}` }) };
+      judge?.(source); // U9 (M2): the snapshot judged is the one copied below
       const intent = await forkIntentOf(s, source, target, args);
       if ('invalid' in intent) return { status: 'invalid', appSessionId, field: 'target', message: intent.invalid };
       await this.putIntent(intent);
       return intent.appSessionId;
     });
-    return typeof allocated === 'string' ? this.startFork(allocated) : allocated;
   }
 
   // A fork's intent, started at once; one its start rejects or that throws is dropped before the answer.
@@ -1076,8 +1131,9 @@ export class SessionService {
   listDeletions = async (): Promise<DeletionManifest[]> => this.ready().then(() => this.manifests.list());
   keepDeletion = (appSessionId: AppSessionId): Promise<void> => this.serial(appSessionId, () => this.manifests.remove(appSessionId));
 
-  rename(appSessionId: AppSessionId, title: string): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
-    return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title));
+  // U9 (R9): `reader`, a remote rename's (the endpoint's), whose own reading of the record is the answer
+  rename(appSessionId: AppSessionId, title: string, reader?: Reader): Promise<{ record: SessionRecord; via: 'engine' | 'override' }> {
+    return this.serial(appSessionId, async () => renameRecord(await this.ready(), appSessionId, title, reader));
   }
 
   async revealPath(path: string, client: ClientRef | null): Promise<void> {

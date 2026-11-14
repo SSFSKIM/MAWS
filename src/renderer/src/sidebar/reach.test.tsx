@@ -22,6 +22,7 @@ import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, record, remoteRow } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
+import { remoteSessionActions, SESSION_ACTIONS } from '../app/session-actions';
 import { Toolbar } from '../app/Toolbar';
 import { queryClient } from '../ipc/query';
 import { closeDialog } from '../sessions/dialogs';
@@ -123,8 +124,34 @@ describe('the reach mark', () => {
   });
 });
 
+// The architect's ruling (2026-11-13, reversing the chain merge's order): U7's rule holds for a listed row too, Hide
+// following its opening items; then the acts over the link in `remoteSessionActions`' order (the UX wave, U9), then Share
+// and Add owner where the row offers them
+describe('a listed lane B row’s menu order', () => {
+  const actsOf = (mine: boolean) => remoteSessionActions({ lane: 'B', record: false, mine, remoteReading: true }).map((id) => SESSION_ACTIONS[id]);
+
+  it('is Open, Open in new tab, Hide, its acts, Share…, Add owner… for a row that is yours', async () => {
+    fill([mine('m', { title: 'Mine' })]);
+    render(<Sidebar />);
+    expect(actsOf(true)).toEqual(['Rename…', 'Fork', 'Archive']);
+    expect(within(await menuOf('Mine')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', ...actsOf(true), SHARE.menuItem, OWNER.menuItem]);
+    await userEvent.keyboard('{Escape}');
+  });
+
+  it('is Open, Open in new tab, Hide, Fork for another member’s row: no Rename…, no Archive, no Share', async () => {
+    fill([mine('t', { title: 'Theirs', owners: ['member-ana'], mine: false })]);
+    act(() => usePeople.setState({ on: new Set([ORG]) }));
+    render(<Sidebar />);
+    expect(actsOf(false)).toEqual(['Fork']);
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', ...actsOf(false)]);
+    await userEvent.keyboard('{Escape}');
+  });
+});
+
 describe('Share on a row', () => {
-  it('gives a listed row you own in a hub project Share after its opens, which opens the sheet; any other listed row’s menu has no Share', async () => {
+  // UX wave U7 (O-38, O-16): every listed row's menu opens with its two opens and Hide; the UX wave, U9 (Interfaces §6): the
+  // acts over the link follow, before Share and Add owner (the architect's ruling of 2026-11-13)
+  it('gives a listed row you own in a hub project Share after its opens, Hide and its acts, which opens the sheet; one in no hub project no Share', async () => {
     fill([mine('m', { title: 'Mine' }), mine('n', { title: 'No project', project: null, orgKey: null })]);
     render(
       <>
@@ -134,10 +161,10 @@ describe('Share on a row', () => {
     );
     expect(row('Mine').getAttribute('data-menu')).toBe(`session:${studio('m')}`);
     expect(row('No project').getAttribute('data-menu')).toBe(`session:${studio('n')}`); // UX wave U7, O-38: every listed row's menu
-    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide']); // UX wave U7, O-16: Hide after the opens
+    expect(within(await menuOf('No project')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive']);
     await userEvent.keyboard('{Escape}');
     const menu = await menuOf('Mine');
-    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', SHARE.menuItem, OWNER.menuItem]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Rename…', 'Fork', 'Archive', SHARE.menuItem, OWNER.menuItem]);
     fireEvent.click(within(menu).getByRole('menuitem', { name: SHARE.menuItem }));
     expect(await screen.findByRole('dialog', { name: SHARE.title })).toBeTruthy();
   });
@@ -209,11 +236,17 @@ describe('Add owner beside Share', () => {
     expect(await itemsOf('Here')).toEqual([]);
   });
 
+  // The UX wave, U9: another member's lane B listed row has the session menu, Fork alone
   it("is not on another member's listed row", async () => {
     fill([mine('t', { title: 'Theirs', owners: ['member-ana'], mine: false })]);
     act(() => usePeople.setState({ on: new Set([ORG]) }));
     render(<Sidebar />);
-    expect(await itemsOf('Theirs')).toEqual([]); // its menu holds the two opens alone (UX wave U7, O-38)
+    expect(row('Theirs').getAttribute('data-menu')).toBe(`session:${studio('t')}`);
+    expect(await itemsOf('Theirs')).toEqual([]);
+    // its menu holds the two opens (UX wave U7, O-38), Hide, then Fork, the one act over the link for a session another
+    // member owns (the UX wave, U9): the order ruled on 2026-11-13, with no Share or Add owner for a row not yours
+    expect(within(await menuOf('Theirs')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Open', 'Open in new tab', 'Hide', 'Fork']);
+    await userEvent.keyboard('{Escape}');
   });
 });
 

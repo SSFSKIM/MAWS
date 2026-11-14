@@ -13,7 +13,7 @@ import { HOME_CHECKOUT, SPAWN_HOME_CAPABILITY } from '@shared/ipc/schema/session
 import { ipc } from '../../ipc/client';
 import { useDialogs } from '../../sessions/dialogs';
 import { resetRemoteSpawn, SPAWN_WORDS, spawnTargetOf, useRemoteSpawn, type SpawnTarget } from '../../sessions/remote-spawn';
-import { SETUP_WORDS } from '../../sessions/remote-setup';
+import { forgetRemotePlaces, SETUP_WORDS } from '../../sessions/remote-setup';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import { resetShellStores } from '../../test-support/shell-stores';
@@ -227,9 +227,30 @@ describe('the project row on another machine', () => {
   const roster = (capabilities?: string[]) => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-06T00:00:00Z', generation: 0 }, mini(capabilities)]);
   afterEach(() => {
     resetRemoteSpawn();
+    forgetRemotePlaces(); // the UX wave, U9: the chooser's listing of this run
     useDialogs.setState({ open: null });
     useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
     vi.restoreAllMocks();
+  });
+
+  // The UX wave, U9 (O-39, A1; M5): the machine's projects show as they answer, the folder read holding nothing back;
+  // the two choices that need it wait for it
+  it('lists the machine’s projects before its folders answer, New project and Don’t work in a project disabled until they do', async () => {
+    roster();
+    let folders: (value: unknown) => void = () => {};
+    vi.spyOn(ipc, 'invoke').mockImplementation((async (name: string) => {
+      if (name === 'session.projects.list') return { ok: true, value: { projects: [theirs('notes', 'notes', '/Users/mini/notes')], revision: 1 } };
+      if (name === 'machine.folders.list') return new Promise((resolve) => (folders = resolve));
+      return { ok: false, error: { code: 'internal', message: `unexpected ${name}` } };
+    }) as never);
+    onMini();
+    render(<ProjectRow binding={binding()} appSessionId={TAB} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Choose a project' }));
+    await vi.waitFor(() => expect(rows()).toEqual(['notes', 'New project', "Don't work in a project"]));
+    expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['true', 'true']);
+    await act(async () => folders({ ok: true, value: HOME_PAGE }));
+    await vi.waitFor(() => expect(within(menu()).getAllByRole('option').slice(1).map((o) => o.getAttribute('aria-disabled'))).toEqual(['false', 'false']));
   });
 
   it('reads Choose a project there, lists that machine’s projects newest first, and a choice is the place there, no branch or Worktree box', async () => {

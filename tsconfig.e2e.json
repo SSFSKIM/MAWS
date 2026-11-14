@@ -103,6 +103,9 @@
     "test/support/index-fixture.ts",
     "test/support/spine-fixture.ts",
     "src/renderer/src/app/date-format.ts",
+    // the UX wave, U9: e2e:remote reads a listed row's acts over the link by their own labels and order, and the module's registry
+    "src/renderer/src/app/session-actions.ts",
+    "src/renderer/src/keymap/registry.ts",
     "src/renderer/src/composer/dev/resume-spec.ts",
     "src/renderer/src/harness/agents/api.ts",
     "src/renderer/src/harness/api.ts",

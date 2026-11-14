@@ -15,6 +15,7 @@ import 'streamdown/styles.css';
 import type { AgentId } from '@shared/graph/ids';
 import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION, OLDER, REACH } from '../model/copy';
+import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
@@ -483,6 +484,7 @@ export interface TranscriptProps {
 }
 
 const NO_ROWS: Row[] = [];
+export const LOADING_AFTER_MS = 300; // the UX wave, U9 (A3): how long a read with nothing to draw is out before the pane says so
 const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
 
 // The store key of a source: its own (`ipcSource` names the app session and agent), else one per source object.
@@ -550,6 +552,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
+  // The UX wave, U9 (O-39, A3): a read with nothing to draw says so once it has been out 300 ms, on every route
+  const reading = useTranscriptStore((state) => state.entries[storeKey] === undefined || state.entries[storeKey].phase === 'hydrating');
+  const loading = useAfter(reading && rows.length === 0, LOADING_AFTER_MS);
   const reach = useTranscriptStore((state) => state.entries[storeKey]?.reach ?? null);
   const [following, setFollowing] = useState(true);
   const listRef = useRef<TranscriptListHandle>(null);
@@ -669,9 +674,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
             </button>
           </div>
         )}
+        {loading && (
+          <p role="status" className="pointer-events-none absolute inset-0 m-0 flex items-center justify-center text-ui text-fg-muted">
+            {HYDRATION.loading}
+          </p>
+        )}
         {failed !== null && (
-          <div className="transcript-failed" role="alert">
-            <span>{HYDRATION.failed(failed)}</span>
+          <div className="transcript-failed" role="alert" title={failed}>
+            <span>{HYDRATION.failed}</span>
             <button type="button" className="transcript-button" onClick={() => void useTranscriptStore.getState().retry(storeKey)}>
               {HYDRATION.retry}
             </button>

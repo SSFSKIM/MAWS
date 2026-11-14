@@ -29,6 +29,7 @@ import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M9
 import { isRemoteLaneB } from '../lane-b/remote-session'; // P5 O7 M2
 import { useReaderRowsOf } from '../lane-b/reader-rows'; // P5 O8 M6a
+import { useSessionActionUnavailable } from '../lane-b/remote-unavailable'; // the UX wave, U9
 import { openAddOwner, openShare, useCanAddOwner, useCanShare } from '../sessions/share/target'; // P5 O8 M6b, M5b
 import { OWNER, SHARE } from '../sessions/share/copy'; // P5 O8 M6b, M5b
 import { displayTitle } from '../sessions/title';
@@ -202,6 +203,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
   const remoteReading = useReaderRowsOf(appSessionId) !== 'refused'; // P5 O8 M6a
   const shareable = useCanShare(appSessionId); // P5 O8 M6b
   const ownable = useCanAddOwner(appSessionId); // P5 O8 M5b
+  const mine = useSessions((s) => s.listed.get(appSessionId)?.mine ?? false); // the UX wave, U9: the listing's
   if (remote) {
     const takeOver = controls?.capability('take-over') ?? null;
     return <SessionMenu disabled={false}>
@@ -210,7 +212,7 @@ function SessionMenuOverflow({ appSessionId }: { appSessionId: AppSessionId }) {
       {ownable && <AddOwnerMenuItem appSessionId={appSessionId} />}
     </SessionMenu>;
   }
-  const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
+  const ids = record ? sessionActionsFor(record, { bridged, remote: isRemoteLaneB(record.appId) /* P5 O7 M2 */, remoteReading, mine }).filter((id) => id !== 'open' && id !== 'openInNewTab') : [];
   return <SessionMenu disabled={ids.length === 0 && !shareable}>
     {record && ids.map((id) => <SessionMenuItem key={id} id={id} appSessionId={record.appId} label={id === 'pin' && record.pinned ? 'Unpin' : SESSION_ACTIONS[id]} />)}
     {shareable && <ShareMenuItem appSessionId={appSessionId} />}
@@ -245,8 +247,11 @@ function SessionMenu({ disabled, children }: { disabled: boolean; children: Reac
   </DropdownMenu.Sub>;
 }
 
-// `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words.
-function SessionMenuItem({ id, appSessionId, label, gap = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
+// `gap`: why the session can't take the action at all (P5 O9 M9), shown in place of the unregistered words; the UX wave,
+// U9: else the window's helper's sentence for an act on another machine.
+function SessionMenuItem({ id, appSessionId, label, gap: given = null }: { id: SessionActionId; appSessionId: AppSessionId; label: string; gap?: string | null }) {
+  const remoteGap = useSessionActionUnavailable(id, appSessionId);
+  const gap = given ?? remoteGap;
   const enabled = useSessionActionEnabled(id) && gap === null;
   return (
     <DropdownMenu.Item

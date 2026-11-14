@@ -10,7 +10,7 @@ import type { HostState } from '@shared/ipc/schema';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import { HostCommandError } from '@shared/host/runtime';
 import type { ServicesBus } from '@shared/spine/bus';
-import { IntentRefused, type SessionService } from './service';
+import { CeilingRefused, IntentRefused, type SessionService } from './service';
 import { HostError } from './context'; // P2-A
 import { InvalidSideInput } from '../side/invalid'; // E3
 import type { LaunchMode } from '@shared/sessions/select-source'; // P5 O3-D M4
@@ -36,14 +36,16 @@ export function registerSessionServiceHandlers(service: SessionService, { regist
   // P2-A (X16): the one acquisition entry; a host that cannot answer is `host_unavailable`, so the supervisor's banner
   // returns for it as for the other launches (LAUNCHES in supervisor-notices.ts)
   register('session.acquire', ({ appSessionId, reason, options }) => relayHost(() => service.acquire(id(appSessionId), reason, options)));
-  register('session.fork', ({ appSessionId, target, message, rewindTo }) =>
-    relay(() => service.fork(id(appSessionId), target, { message, rewindTo: rewindTo as MessageUuid | null })),
-  );
+  // the UX wave (U9, M2): a fork under an operation's claim is another machine's, composed here and held to the ceiling
+  register('session.fork', ({ appSessionId, target, message, rewindTo }, { op }) => {
+    const args = { message, rewindTo: rewindTo as MessageUuid | null };
+    return op === undefined ? relay(() => service.fork(id(appSessionId), target, args)) : relayCeiling(() => service.forkFromAnotherMachine(id(appSessionId), target, args));
+  });
   register('session.archive', ({ appSessionId, onlyIfIdle }) => service.archive(id(appSessionId), { onlyIfIdle }));
   register('session.takeOverPane', ({ pid }) => service.takeOverPane(pid));
   register('session.takeOver', ({ appSessionId, holder, paneId }) => service.takeOver(id(appSessionId), holder, paneId)); // W7
   register('session.delete', ({ appSessionId, stopIfLive }) => service.remove(id(appSessionId), stopIfLive));
-  register('session.rename', ({ appSessionId, title }) => service.rename(id(appSessionId), title));
+  register('session.rename', ({ appSessionId, title }, { reader }) => service.rename(id(appSessionId), title, reader)); // U9 (R9): a reader's answer is their own reading
   register('session.revealPath', ({ path }, { client }) => service.revealPath(path, client));
   register('session.deletions.list', async () => ({ manifests: await service.listDeletions() }));
   register('session.deletions.keep', ({ appSessionId }) => service.keepDeletion(id(appSessionId)));
@@ -91,6 +93,17 @@ async function relaySide<T>(at: string[], call: () => Promise<T>): Promise<T> {
   } catch (error) {
     if (!(error instanceof InvalidSideInput)) throw error;
     throw new HostCommandError(ipcError('invalid_input', error.message, [{ path: [...at, ...error.path], message: error.message }]));
+  }
+}
+
+// The UX wave (U9, M2): a fork from another machine above the machine's ceiling is `internal` with the refusal and the
+// mode in `issues`, which the asking device words (src/main/lane-b/remote-outcomes.ts); every other throw as `relay`'s.
+async function relayCeiling<T>(call: () => Promise<T>): Promise<T> {
+  try {
+    return await relay(call);
+  } catch (error) {
+    if (error instanceof CeilingRefused) throw new HostCommandError(ipcError('internal', error.message, { refusal: 'ceiling', mode: error.mode }));
+    throw error;
   }
 }
 

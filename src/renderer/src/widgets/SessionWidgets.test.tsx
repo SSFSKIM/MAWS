@@ -17,8 +17,8 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { record, remoteRow } from '../../../../test/support/builders';
 import { EMPTY_REGISTRY, type OrgProjects } from '../stores/registry';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { registerSessionAction } from '../app/session-actions';
+import { useMachines } from '../stores/machines';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { RenameWidget } from './RenameWidget';
@@ -92,11 +92,12 @@ describe('rename widget', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toBe('Renamed · Settings probe, renamed'));
   });
 
-  // P5 O7 M8 ("The offer audit and its contract"): `session.rename` is declared not offered on another machine
-  // (REMOTE_UNAVAILABLE): nothing is asked, no dialog opens, and the field and Rename are greyed with the declared words
-  // (a lane A session there too: its adapter takes only laneA.*)
-  it.each(['B', 'A'] as const)('for a lane %s session on another machine, renames nothing and opens no dialog: Rename greyed with the declared reason', async (lane) => {
+  // P5 O7 M8 declared `session.rename` not offered on another machine; the UX wave, U9 (M1, M4) offers it behind
+  // `rl2.session-acts`: on a machine whose build doesn't list it, nothing is asked, no dialog opens, and the field and
+  // Rename are greyed with the update sentence (A14) (a lane A session there too: the helper reads the machine)
+  it.each(['B', 'A'] as const)('for a lane %s session on a machine that doesn’t serve the acts, renames nothing and opens no dialog: Rename greyed with the update sentence', async (lane) => {
     const remote = addressOf(OTHER_MACHINE, READY_ID);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities: ['rl2.project-acts'], owner: true }]);
     useSessions.setState({ records: new Map(useSessions.getState().records).set(remote, { ...useSessions.getState().records.get(READY)!, appId: remote }), listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, READY_ID, { lane }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]) });
     const dialog = vi.fn();
     const off = registerSessionAction('rename', dialog);
@@ -104,7 +105,7 @@ describe('rename widget', () => {
       mount(RenameWidget, remote, 'Over there');
       mount(RenameWidget, remote);
       expect(dialog).not.toHaveBeenCalled();
-      const words = REMOTE_UNAVAILABLE['session.rename']!;
+      const words = 'Can’t rename on Studio yet. Update MAWS on Studio and try again.';
       expect(screen.getAllByRole('status').map((s) => s.textContent)).toEqual([words, words]);
       const rename = screen.getByRole('button', { name: 'Rename' });
       expect(rename).toHaveProperty('disabled', true);
@@ -115,6 +116,7 @@ describe('rename widget', () => {
     } finally {
       off();
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+      useMachines.setState({ roster: 'unread', machines: new Map() });
     }
   });
 });

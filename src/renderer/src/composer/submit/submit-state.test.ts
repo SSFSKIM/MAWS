@@ -277,3 +277,30 @@ describe('a send carrying documents while a turn runs', () => {
     expect(submitState(input({ status: turning })).steer).toBe(true);
   });
 });
+
+// The UX wave, U9 (S-01 and the ticket on a pane kept through a link's loss; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M3): a Stop out for
+// more than 300 ms reads "Stopping…" and is disabled until it settles, whatever the draft; in its machine's offline phase
+// Send and Stop are disabled with UC-7.5's sentence (while it connects or reconnects nothing here changes: main holds the act).
+describe('Stopping…, and the offline phase of another machine', () => {
+  const offline = { send: 'Send is unavailable while mini is offline.', stop: 'Stop is unavailable while mini is offline.' };
+
+  it('reads Stopping…, disabled, while a Stop is on its way, whatever the turn or the draft', () => {
+    expect(row({ status: turning, empty: true, stopping: true })).toEqual(['stop', 'Stopping…', false, 'Stopping…', false]);
+    expect(row({ status: turning, empty: false, stopping: true })[1]).toBe('Stopping…');
+    expect(row({ status: idle, empty: true, stopping: true })[1], 'the turn ended before the act settled').toBe('Stopping…');
+    expect(row({ status: turning, empty: true, stopping: true, offline })[1], 'a Stop held into the offline phase still reads Stopping…').toBe('Stopping…');
+  });
+
+  it('closes Stop and Send with the phase’s sentence while the machine is offline', () => {
+    expect(row({ status: turning, empty: true, offline })).toEqual(['stop', 'Stop', false, offline.stop, false]);
+    expect(row({ status: turning, empty: false, offline })).toEqual(['send', 'Send', false, offline.send, false]);
+    expect(row({ status: idle, empty: false, offline })).toEqual(['send', 'Send', false, offline.send, false]);
+    expect(row({ status: null, availability: 'usable', empty: false, offline }), 'a released session, which a Send would start there').toEqual(['send', 'Send', false, offline.send, false]);
+    const driven = { running: true, send: { available: true } as const, stop: { available: true } as const };
+    expect(row({ status: null, availability: 'foreign_held', heldBy: 'terminal · 42', driven, empty: true, offline }), 'a terminal session there').toEqual(['stop', 'Stop', false, offline.stop, false]);
+  });
+
+  it('changes nothing without either', () => {
+    expect(row({ status: turning, empty: true, stopping: false, offline: null })).toEqual(['stop', 'Stop', true, null, false]);
+  });
+});

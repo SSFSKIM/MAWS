@@ -38,6 +38,14 @@
 // case, context only (docs/doperpowers/plans/2026-11-10-p5-o15-recomposition.md, Decision Log 33). In both modes a
 // session's whole launch read on B between the restore and that session's `subbed` fails the case (Decision Log 39): A's
 // tabs hold their panes' sessions through the stall, so the replay alone brings what the panes missed.
+//
+// The third test is UX wave U9's A5 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M5; #565), on the
+// wake case's scene and its stall and restore, on the direct carrier: A's left pane holds B's live session and its right
+// pane B's second session, cold (its engine stopped on B after its first turn), so only the live one has a stream to
+// resume. A asks B for no session's history (main's `lane B: timing history … asked`, said at each read's start whatever
+// B answers it from) between the restore and its `subbed` of the live session's stream, and B logs no whole-launch read
+// (`session.events <app> after start: from the journal`) before its own: the cold pane decides at main's settled word,
+// which follows that answer (test/support/remote-wake.ts, historyReadsBeside). No bound is timed, so no load is read.
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,7 +57,7 @@ import { FIXTURE_ENGINE_VERSION } from '../test/support/engine-pin';
 import { LATENCY_STUB, markerOf, writeLatencyEngine } from '../test/support/latency-engine';
 import { parseLogText, positionOf, readLogLines } from '../test/support/main-log';
 import { boundsOf, budgetMisses, CARRIERS, invalidReasons, loadVerdict, remoteLine, rttStats, type Bounds, type Carrier, type Exchange, type RemoteMeasures } from '../test/support/remote-latency';
-import { boundMissMessage, INJECT_AFTER_STALL_MS, lastPageIn, linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, WAKE_CASE, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadInstant, type LoadRead, type WakeRecord } from '../test/support/remote-wake';
+import { besideOutcome, boundMissMessage, historyReadsBeside, historySeen, INJECT_AFTER_STALL_MS, lastPageIn, linkPending, ruleBContext, RESUME_PAGE_EVENTS, markersNotOnce, placeOfEvent, readWake, sixMissing, sixSubscriptions, subscriptionsIn, unavailableSummary, VOID_LOAD, WAKE_CASE, wakeSummary, wakeTimingSummary, wakeVerdict, type LoadInstant, type LoadRead, type WakeRecord } from '../test/support/remote-wake';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { QUIET_BUDGET_MS, quietWait, type QuietAdmission } from './support/quiet';
 import { cleanupAll, lastTurn, linkOf, localCase, main, measureTurns, now, openToFirstRow, pings, probe, prompt, raw, roundTrips, statsOf, trust, TURN_MS, writtenOf, type CaseResult } from './support/remote-latency-page';
@@ -655,4 +663,97 @@ test('a wake after a silent cut: every subscription answered within 1 s of the r
   expect(failures, 'every line and count the wake case reads, per carrier').toEqual([]);
   expect(verdict.boundMisses, boundMissMessage(CARRIERS.flatMap((c) => (records[c] === undefined ? [] : [records[c]!])))).toEqual([]);
   expect(verdict.outsideMisses, `outside §F's conditions, neither a breach nor a pass of the bounds: a carrier whose wake met one of the conditions missed a bound (${verdict.outsideConditions.join('; ')}); no verdict`).toEqual([]);
+});
+
+// A5's timeout, from its waits: the scene and B's two sessions, about 2 min; the launch to both panes shown, 2 min; the
+// stall to the inject, INJECT_AFTER_STALL_MS (158 s; the live session's turns written inside it); the drawn wait, at most
+// 3 s; three bounded reads after the restore (B's subbed, the panes, the reading); the cleanup; a margin of 2 min.
+const BESIDE_TIMEOUT_MS = 2 * 60_000 + WAKE_LAUNCH_MS + INJECT_AFTER_STALL_MS + WAKE_CASE.restoreAfterMs.max + 3 * READ_WITHIN_MS + WAKE_CLEANUP_MS + 2 * 60_000;
+// the settled word's backstop (SETTLE_BACKSTOP_MS, 2 s, src/renderer/src/lane-b/remote-session.ts) and a margin: a tab
+// beside the live one reads by then whatever main says
+const PAST_BACKSTOP_MS = 3_000;
+const BESIDE_TURNS = 3; // the live session's turns unseen through the stall, so its resume replays something
+
+test('U9 A5: beside a live session’s resume, a cold session’s pane reads nothing on the other machine until that resume is answered', async () => {
+  test.setTimeout(BESIDE_TIMEOUT_MS);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-rb-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-rba-'));
+  const checkout = join(root, 'b-checkout');
+  mkdirSync(checkout);
+  const samplesDir = join(root, 'b-samples');
+  mkdirSync(samplesDir);
+  const bBin = writeSessionLatencyEngine(join(root, 'b-engine'), samplesDir);
+  let scene: RemoteScene | null = null;
+  let a: MawsLaunch | null = null;
+  try {
+    scene = await startRemoteScene({ scratch: join(root, 'scene'), aUserData, directPipe: true, b: { env: { MAWS_E2E_ENGINE_BIN: bBin }, prepare: trust(checkout) } });
+    const { b } = scene;
+    const direct = scene.aDirect!;
+    await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+    const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+    const live = await startBSession(scene, project.id, checkout, samplesDir, 'B’s live session');
+    const cold = await startBSession(scene, project.id, checkout, samplesDir, 'B’s cold session');
+    await b.request('session.stop', { appSessionId: cold.app, reason: 'stop' });
+    await expect.poll(async () => (await bStatusOf(b, cold.app))?.process ?? null, { timeout: TURN_MS, message: `B's session ${cold.app}'s engine stopped` }).toBe('exited');
+    const mainLog = () => readLogLines(MAIN_LOG(aUserData));
+    const hostLog = join(b.userData, 'supervisor', 'host.log');
+    const liveWhat = `session B:${live.app}`;
+
+    // 1. Up over the direct carrier, both sessions side by side and shown to their last turns, the live one subscribed
+    a = await launchMaws({ userData: aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(true), MAWS_MACHINE_NAME: 'A' } });
+    const { page, launchedAt } = a;
+    await expect.poll(async () => {
+      const m = await linkOf(page, b.ref);
+      return m === undefined ? null : `${m.state}/${m.carrier ?? ''}`;
+    }, { timeout: 60_000, message: "A's link to B comes up over direct" }).toBe('up/direct');
+    await openSideBySide(a, b.ref, [live, cold]);
+    const lastOf = (s: BSession) => markerOf(lastTurn(writtenOf(s.samples)), BENCH.markersPerTurn).trim();
+    for (const [i, s] of [live, cold].entries()) {
+      const last = lastOf(s);
+      await expect.poll(async () => (await paneText(page, i)).includes(last), { timeout: 60_000, message: `A's pane ${i} shows B's session ${s.app} to its last turn (${last})` }).toBe(true);
+    }
+    await expect.poll(() => subscriptionsIn(mainLog(), b.ref, launchedAt).has(liveWhat), { timeout: READ_WITHIN_MS, message: `main.log's subbed line for ${liveWhat} since the launch` }).toBe(true);
+    // the check below stands on A's history start lines: each pane's first read shows its start and its end before the stall
+    await expect.poll(() => historySeen(mainLog(), [live.app, cold.app], launchedAt, Infinity), { timeout: READ_WITHIN_MS, message: "main.log's history start and end lines of each pane's first read (received: the sessions without)" }).toEqual([]);
+
+    // 2. and 3. The wake case's stall, the live session's turns written unseen, B past its resume window, the hour asleep
+    const stalledAt = Date.now();
+    scene.aHub.stall();
+    direct.stall();
+    await writeTurns(b, live, BESIDE_TURNS);
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, stalledAt + INJECT_AFTER_STALL_MS - Date.now())));
+    const injectedAt = Date.now();
+    await a.app.evaluate((_electron, sleptMs) => {
+      const seam = (globalThis as { __maws_wake?: { inject(ms: number): void } }).__maws_wake;
+      if (seam === undefined) throw new Error('no wake seam in main (MAWS_E2E=1, unpackaged)');
+      seam.inject(sleptMs);
+    }, WAKE_CASE.sleptMs);
+
+    // 4. The way back after a drawn wait; the hub once the live session's stream is answered on B
+    const { min, max } = WAKE_CASE.restoreAfterMs;
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, injectedAt + min + Math.round(Math.random() * (max - min)) - Date.now())));
+    const restoredAt = Date.now();
+    direct.restore();
+    const endpointLog = () => parseLogText(b.log());
+    await expect.poll(() => subscriptionsIn(mainLog(), b.ref, restoredAt).has(liveWhat), { timeout: READ_WITHIN_MS, message: `main.log's subbed line for ${liveWhat} after the restore` }).toBe(true);
+    scene.aHub.restore();
+
+    // 5. Both panes whole after the return: the live one to the turns it missed, the cold one as it was
+    for (const [i, s] of [live, cold].entries()) {
+      const last = lastOf(s);
+      await expect.poll(async () => (await paneText(page, i)).includes(last), { timeout: READ_WITHIN_MS, message: `A's pane ${i} shows B's session ${s.app} to its last turn (${last}) after the return` }).toBe(true);
+    }
+
+    // 6. The logs: no history read A asked of B between the restore and its subbed of the live stream, and no whole-launch
+    //    read on B before B's; read once every read since the restore has ended (A's start and end lines pair) and past
+    //    the settled word's backstop after that subbed, so no read that would have started is still to come
+    const heardAt = Date.now();
+    const besideOf = () => historyReadsBeside({ carrier: 'direct', ref: b.ref, live: live.app, sessions: [live.app, cold.app], main: mainLog(), endpoint: endpointLog(), host: readLogLines(hostLog), launchedAt, stalledAt, restoredAt });
+    const final = await within(besideOf, (r) => r.inFlight.length === 0 && Date.now() >= heardAt + PAST_BACKSTOP_MS, READ_WITHIN_MS);
+    const reads = besideOutcome(final, READ_WITHIN_MS); // the reading completed, or why not
+    console.log(`[remote-beside] restore at +${restoredAt - stalledAt} ms after the stall; ${reads.length === 0 ? 'no history read beside the resume' : reads.join('; ')}`);
+    expect(reads, 'no history read asked or made between the restore and the live session’s subbed, and none left in flight').toEqual([]);
+  } finally {
+    await cleanupAll([() => a?.cleanup(), () => scene?.stop(), () => rmSync(aUserData, { recursive: true, force: true }), () => rmSync(root, { recursive: true, force: true })]);
+  }
 });

@@ -259,6 +259,14 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByTestId('hover-machine').textContent).toBe(`Studio · offline · last seen ${formatAgo(5 * 60_000, { narrow: true })}`);
   });
 
+  // The UX wave, U9 (O-39, A2): a machine reconnecting within the minute an act is held is not said to be offline
+  it('names a reconnecting machine without “offline”, its row not greyed', async () => {
+    withMain();
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'Studio', local: false, state: 'down', since: new Date().toISOString(), generation: 1 }]));
+    render(<Sidebar />);
+    expect(within(await open('Fix sidebar drag')).getByTestId('hover-machine').textContent).toBe('Studio');
+  });
+
   // P5 O7 M2 (A2): how this app reaches the machine, on the machine's line; a machine that removed this device greys its
   // rows with that in place of "offline"
   it('says the carrier an RL2 link is up over, nothing for a socket, and that the machine removed this device', async () => {

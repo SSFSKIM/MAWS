@@ -14,12 +14,13 @@
 // Each failure names the command and what it lacks.
 import { afterAll, describe, expect, it } from 'vitest';
 import { gradeOf } from '@shared/ipc/grades';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { REMOTE_NEEDS, REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import { REGISTRY } from '@shared/ipc/registry';
 import { routeOf } from '@shared/ipc/routes';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { addressedPaths } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
+import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { OFFERS } from '../../src/endpoint/offers';
 import type { MainContext } from '../../src/main/ipc/router';
 import { routeLaneA, type RemoteLaneA } from '../../src/main/lane-a/remote';
@@ -104,6 +105,19 @@ describe('what main answers itself (ANSWERED_IN_MAIN)', () => {
       if (laneB.handles(name) || (await laneATakes(name))) missing.push(`${name}: an adapter answers it with no offer row, and ANSWERED_IN_MAIN doesn’t say so`);
     }
     expect(missing).toEqual([]);
+  });
+});
+
+// The UX wave (U9, UC-7.2): an offer that came after an older build's names the capability its endpoint lists once it
+// serves it, which the device reads before it sends (REMOTE_NEEDS).
+describe('REMOTE_NEEDS', () => {
+  it('names only offered commands, each with a capability the endpoint lists', () => {
+    const listed: readonly string[] = ENDPOINT_CAPABILITIES;
+    const wrong = Object.entries(REMOTE_NEEDS).flatMap(([name, capability]) => [
+      ...(offered(name) ? [] : [`${name}: needs ${capability} but no row offers it`]),
+      ...(capability !== undefined && listed.includes(capability) ? [] : [`${name}: needs ${capability}, which ENDPOINT_CAPABILITIES doesn’t list`]),
+    ]);
+    expect(wrong).toEqual([]);
   });
 });
 

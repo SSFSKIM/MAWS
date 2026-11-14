@@ -278,3 +278,82 @@ describe('sessions store partitions its reconciliation by machine', () => {
     expect(store.getState().applyChanged({ record: record(onA('late')), cause: 'discovered', revision: 899 }, TEST_MACHINE)).toBe(false);
   });
 });
+
+// The UX wave, U9 (M4, "What this window did shows at once"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-
+// machines.md): a listed row follows the hub's listing, which arrives seconds after an act made here. The store keeps,
+// for this run, what this window did to an address and applies it where it builds its listings, until a newer listing
+// replaces it or an unarchive clears it; a record of another machine's held at the address takes it too.
+describe('what this window did to another machine’s session', () => {
+  const B1 = addressOf(OTHER_MACHINE, 'b1') as AppSessionId;
+  const B2 = addressOf(OTHER_MACHINE, 'b2') as AppSessionId;
+  const rows = (...listed: ReturnType<typeof remoteRow>[]) => ({ machines: [OTHER_MACHINE], rows: listed, complete: true, pending: [], members: [], member: 'member-1' });
+
+  it('drops an archived session’s listing at once, and keeps it gone while the listing that arrives is no newer', () => {
+    const store = createSessionsStore();
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 }), remoteRow(OTHER_MACHINE, 'b2')));
+    store.getState().noteArchived(B1);
+    expect([...store.getState().listed.keys()]).toEqual([B2]);
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 }), remoteRow(OTHER_MACHINE, 'b2')));
+    expect([...store.getState().listed.keys()]).toEqual([B2]);
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b2'))); // the machine withdrew it
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 }), remoteRow(OTHER_MACHINE, 'b2'))); // a stale copy again
+    expect([...store.getState().listed.keys()]).toEqual([B2]);
+  });
+
+  it('gives a renamed session’s listing the new title until a newer listing replaces it', () => {
+    const store = createSessionsStore();
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { title: 'Old title', revision: 4 })));
+    store.getState().noteRenamed(B1, 'New title');
+    expect(store.getState().listed.get(B1)?.title).toBe('New title');
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { title: 'Old title', revision: 4 })));
+    expect(store.getState().listed.get(B1)?.title).toBe('New title');
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { title: 'Named on the machine', revision: 5 })));
+    expect(store.getState().listed.get(B1)?.title).toBe('Named on the machine');
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { title: 'Old title', revision: 4 }))); // the note is spent
+    expect(store.getState().listed.get(B1)?.title).toBe('Old title');
+  });
+
+  it('lists an archived session again once a newer listing says it, or at an unarchive made here', () => {
+    const store = createSessionsStore();
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 })));
+    store.getState().noteArchived(B1);
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 6 })));
+    expect(store.getState().listed.has(B1)).toBe(true);
+    store.getState().noteArchived(B1);
+    expect(store.getState().listed.has(B1)).toBe(false);
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().listed.has(B1)).toBe(true);
+  });
+
+  // M5's review, finding 2: the archive keeps the listing as it was, its live word among it; the word is the window's
+  // to derive now, so the unarchive gives the listing the word the window holds at that moment, or none
+  it('lists an unarchived session with the live word the window holds now, not the one it had at the archive', () => {
+    const store = createSessionsStore();
+    store.getState().applyRows(rows(remoteRow(OTHER_MACHINE, 'b1', { revision: 4 })));
+    store.getState().applyLive(new Map([[B1, 'running']]));
+    expect(store.getState().listed.get(B1)?.live).toBe('running');
+    store.getState().noteArchived(B1);
+    store.getState().applyLive(new Map()); // the tab closed
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().listed.has(B1)).toBe(true);
+    expect(store.getState().listed.get(B1)).not.toHaveProperty('live');
+    store.getState().noteArchived(B1);
+    store.getState().applyLive(new Map([[B1, 'resting']]));
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().listed.get(B1)?.live).toBe('resting');
+  });
+
+  it('marks a held record at the address archived or renamed, and unarchived again, without its revision', () => {
+    const store = createSessionsStore();
+    store.getState().applyChanged({ record: record(B1, { title: { text: 'Old title', source: 'generated' } }), cause: 'live', revision: 3 }, OTHER_MACHINE);
+    store.getState().noteRenamed(B1, 'New title');
+    expect(store.getState().records.get(B1)?.title).toEqual({ text: 'New title', source: 'user' });
+    store.getState().noteArchived(B1);
+    expect(store.getState().records.get(B1)?.archived).toBe(true);
+    store.getState().noteUnarchived(B1);
+    expect(store.getState().records.get(B1)?.archived).toBe(false);
+    // what the machine says next still wins
+    expect(store.getState().applyChanged({ record: record(B1, { archived: true, title: { text: 'From the machine', source: 'user' } }), cause: 'live', revision: 4 }, OTHER_MACHINE)).toBe(true);
+    expect(store.getState().records.get(B1)).toMatchObject({ archived: true, title: { text: 'From the machine' } });
+  });
+});

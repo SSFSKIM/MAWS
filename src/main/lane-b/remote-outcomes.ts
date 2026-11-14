@@ -13,7 +13,9 @@
 // placed) closes every control; otherwise only what a session on another machine can't take yet is closed. A link that is
 // down or reconnecting closes nothing: an act waits under the link's hold (A4), and a session with a record and no status
 // (released, or opening) is resumed by the act that needs it.
+import { isRefusalReason } from '../../../apps/org-protocol/src/index.ts';
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
+import { ACT_WORDS, failureWords, refusalWords } from '@shared/ipc/remote-unavailable';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { CONTROL_KEYS, MACHINE_RIGHTS, REMOTE_TOO_LARGE_WORDS, type ControlKey, type RemoteCapability, type RemoteLinkState } from '@shared/ipc/schema/remote';
 import { READ_REFUSED } from '@shared/org/reader';
@@ -46,6 +48,17 @@ export const REMOTE_GAPS: Readonly<Partial<Record<ControlKey, string>>> = {
   reopen: 'not offered for a session on another machine',
 };
 
+/**
+ * The UX wave (U9, UC-7.5; Interfaces §3): a refusal of `name` by machine `machine` (or by the link, or by this device
+ * before a send), in the router's IPC codes as `refusalError` maps them. A command with words (ACT_WORDS) says UC-7.5's
+ * sentence, the code in `issues.refusal`, so a control shows `error.message` as it is; any other keeps today's sentence.
+ */
+export function refusalResult(name: CommandName, machine: string, code: string): CommandResult<CommandName> {
+  const today = code === 'offline' ? failure('host_unavailable', `Not sent: ${machine} is offline`) : code === 'not-sent' ? failure('host_unavailable', `Not sent: ${machine} never received it`) : refusalError(name, machine, { code });
+  if (today.ok || ACT_WORDS[name] === undefined) return today;
+  return failure(today.error.code, refusalWords(name, machine, code), { refusal: code });
+}
+
 /** An act's outcome as the command's result (§F, A4, the image bound, a lost answer). */
 export function outcomeAsResult(name: CommandName, machine: string, outcome: ActOutcome): CommandResult<CommandName> {
   switch (outcome.state) {
@@ -57,15 +70,24 @@ export function outcomeAsResult(name: CommandName, machine: string, outcome: Act
     case 'failed': {
       const error = record(outcome.error);
       const code = typeof error?.code === 'string' ? error.code : 'failed';
-      const message = typeof error?.message === 'string' ? error.message : `${name}: failed on machine ${machine}`;
+      const said = typeof error?.message === 'string' ? error.message : `${name}: failed on machine ${machine}`;
+      // U9 (M2): a failure of an act with words that names one of RL4's refusals (a fork above the machine's ceiling,
+      // refused where the services allocate it) keeps it, and reads as that refusal does, the mode it names included
+      const issues = record(error?.issues) ?? {};
+      const refusal = issues.refusal;
+      if (ACT_WORDS[name] !== undefined && isRefusalReason(refusal)) {
+        const mode = typeof issues.mode === 'string' ? { mode: issues.mode } : undefined;
+        return failure(isIpcCode(code) ? code : 'internal', refusalWords(name, machine, refusal, mode), { refusal });
+      }
+      // U9: the machine ran it and it failed: "Not <done>: <the machine's own sentence>"
+      const message = ACT_WORDS[name] === undefined ? said : failureWords(name, said);
       return isIpcCode(code) ? failure(code, message) : failure('internal', message, { refusal: code });
     }
     case 'refused':
-      if (outcome.reason === 'offline') return failure('host_unavailable', `Not sent: ${machine} is offline`);
       if (outcome.reason === 'too-large') return failure('invalid_input', TOO_LARGE_WORDS);
-      return refusalError(name, machine, { code: outcome.reason });
+      return refusalResult(name, machine, outcome.reason);
     case 'not-sent':
-      return failure('host_unavailable', `Not sent: ${machine} never received it`);
+      return refusalResult(name, machine, 'not-sent');
     case 'unknown':
       // P5 O7 M5c: a channel-bound act (a page's lease) whose channel ended with a copy out: it may have run
       if (outcome.reason === 'channel-lost') return failure('host_unavailable', `${name}: the connection to ${machine} ended before it answered; it is unknown whether it ran`);

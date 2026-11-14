@@ -279,7 +279,7 @@ describe('only what is offered crosses', () => {
   it('refuses a name the offer table doesn’t hold, graded or not (`not-offered`)', async () => {
     const f = await start();
     const a = await open(f, a1, A);
-    expect(await call(a, 'session.list', {})).toBe('not-offered');
+    expect(await call(a, 'session.deletions.list', {})).toBe('not-offered'); // U9 offers `session.list` (the archived read)
     expect(await call(a, 'files.reveal', { appSessionId: 'app-own', path: 'README.md' })).toBe('not-offered');
     expect(await call(a, 'pty.list', {})).toBe('not-offered');
     expect(await call(a, 'documents.open', {})).toBe('not-offered');

@@ -149,7 +149,7 @@ describe('a save', () => {
     w.reading(MINI, answer('eng-1', 4));
     await w.policies.set({ address: `${MINI}/eng-1`, access: 'private', shares: [{ member: ANA, grade: 'view' }, { member: BEN, grade: 'approve' }], policyRev: 4 });
     expect(w.prompts).toHaveLength(1);
-    expect(w.prompts[0].summary).toBe(`3 actions on machine ${MINI}`);
+    expect(w.prompts[0].summary).toBe(`3 actions on ${MINI}`);
     w.reading(LOCAL, answer('app-local', 1));
     await w.policies.set({ address: `${LOCAL}/app-local`, access: 'listed', shares: [{ member: BEN, grade: 'list' }], policyRev: 1 });
     expect(w.prompts).toHaveLength(2);

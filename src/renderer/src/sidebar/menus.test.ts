@@ -27,8 +27,10 @@ describe('withHide', () => {
 
   it('puts Hide after Pin for a record of another machine, or after Open in split where it has no Pin', () => {
     const remote = record('r');
-    expect(withHide(sessionActionsFor(remote, { remote: true, remoteReading: true }))).toEqual(['open', 'openInNewTab', 'openInSplit', 'pin', 'hide']);
-    expect(withHide(sessionActionsFor(remote, { remote: true }))).toEqual(['open', 'openInNewTab', 'openInSplit', 'hide']);
+    // the chain merge: U9's Fork follows (Rename… and Archive too, where the listing says the session is yours)
+    expect(withHide(sessionActionsFor(remote, { remote: true, remoteReading: true }))).toEqual(['open', 'openInNewTab', 'openInSplit', 'pin', 'hide', 'fork']);
+    expect(withHide(sessionActionsFor(remote, { remote: true }))).toEqual(['open', 'openInNewTab', 'openInSplit', 'hide', 'fork']);
+    expect(withHide(sessionActionsFor(remote, { remote: true, mine: true }))).toEqual(['open', 'openInNewTab', 'openInSplit', 'hide', 'rename', 'fork', 'archive']);
   });
 
   it('puts Hide after Resume for a session at rest, which has Resume among its opens', () => {

@@ -26,9 +26,9 @@
 import { useState } from 'react';
 import type { ProjectId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
-import { MACHINE_OFFLINE } from '../app/machine-mark';
+import { MACHINE_OFFLINE, selectShownOffline, usePhaseClock } from '../app/machine-mark';
 import { ipc } from '../ipc/client';
-import { selectOffline, useMachines } from '../stores/machines';
+import { useMachines } from '../stores/machines';
 import { usePeople } from '../stores/people'; // P5 O8 M5
 import { ChevronDownIcon, FolderIcon, Icon, PlusIcon, SearchIcon } from '../app/IconButton';
 import { newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
@@ -70,9 +70,10 @@ const NO_HIDDEN: HiddenRows = { count: 0, open: false, rows: [] };
 export function ProjectRow({ entry, open, sessions, more, hidden = NO_HIDDEN, matchCount, onToggle, onShowMore, onToggleHidden }: ProjectRowProps) {
   const { key, project, name, rollup } = entry;
   const people = usePeople((s) => (s.on.has(key) || entry.others > 0 ? s.on.has(key) : null)); // null: no toggle offered
+  const now = usePhaseClock(); // the UX wave, U9 (O-39): greyed only in the offline and removed phases
   const offline = useMachines((s) => {
     const machines = entry.machine !== null ? [entry.machine] : entry.org.checkouts.map((c) => c.machine);
-    return machines.length > 0 && machines.every((m) => selectOffline(s, m));
+    return machines.length > 0 && machines.every((m) => selectShownOffline(s, m, now));
   });
   const view = useLocationView();
   const machinesLine = entry.registry !== null ? machinesWords(entry.machines, view) : null; // signed out, a row names no machine, as before

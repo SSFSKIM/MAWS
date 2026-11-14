@@ -86,11 +86,45 @@ export interface SessionsState {
   applyTurnsSeen(batch: EventPayload<'session.eventBatch'>): void;
   addUnstarted(appSessionId: AppSessionId, entry: UnstartedSession): void;
   dropUnstarted(appSessionId: AppSessionId): void;
+  // The UX wave, U9 (M4, "What this window did shows at once"; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-
+  // machines.md): a listed row follows the hub's listing, which arrives seconds after an act made here on another
+  // machine's session. What this window did to an address (archived it; gave it a title) is kept for this run and applied
+  // where `applyRows` builds the listings, until a listing newer than the one held at the act replaces it, or an unarchive
+  // made here clears the archive. A record of another machine's held at the address is written the same at the act, with
+  // no revision, so what that machine says next still replaces it (a kept record's feed may have closed with its tab).
+  acted: ReadonlyMap<AppSessionId, ActedHere>;
+  noteArchived(appSessionId: AppSessionId): void;
+  noteRenamed(appSessionId: AppSessionId, title: string): void;
+  noteUnarchived(appSessionId: AppSessionId): void;
+  // The UX wave, U9 (S-05, M5; Interfaces §10; ../lane-b/live-word.ts): the live word of each listed session that takes
+  // one now, applied on its listing entry (`ListedSession.live`) here and at every `applyRows`, so the word is there from
+  // the moment the entry arrives and gone the moment the window stops deriving it.
+  liveWords: ReadonlyMap<AppSessionId, LiveWord>;
+  applyLive(words: ReadonlyMap<AppSessionId, LiveWord>): void;
+}
+
+/** What this window did to another machine's session (`acted`): `listedAt`, the revision of the listing held at the act. */
+export interface ActedHere {
+  archived: boolean;
+  title: string | null;
+  listedAt: number;
+  hidden: ListedSession | null; // the listing an archive took out, given back at an unarchive made here
 }
 
 // P5 O8 M2: a listed session is a `RemoteRow` with its address, never a `SessionRecord`: a listing has no directory, model,
-// mode, holder or lineage, and a record built from one would plant made-up values in their readers.
-export type ListedSession = RemoteRow & { appId: AppSessionId };
+// mode, holder or lineage, and a record built from one would plant made-up values in their readers. The UX wave, U9
+// (S-05): `live`, the turn of the session's open tab, while the window derives one (`applyLive`); state of the run.
+export type ListedSession = RemoteRow & { appId: AppSessionId; live?: LiveWord };
+/** The UX wave, U9 (S-05): a remote lane B session's open tab's turn, `running` while its held status has one. */
+export type LiveWord = 'running' | 'resting';
+/** The listing with the live word it takes now, or without one. */
+const withLive = (entry: ListedSession, word: LiveWord | undefined): ListedSession => {
+  if (entry.live === word) return entry;
+  if (word !== undefined) return { ...entry, live: word };
+  const rest = { ...entry };
+  delete rest.live;
+  return rest;
+};
 
 // A turn's start or end as the digest's fold reads it (src/services/sessions/digest.ts): the session's own, never a child
 // agent's, and an echo receipt is no turn.
@@ -151,6 +185,14 @@ export function createSessionsStore() {
   };
 
   return create<SessionsState>()((set, get) => {
+    // The UX wave, U9: a held record at `appSessionId` written as this window's act left it, its revision untouched, so
+    // what its machine says next replaces it (`noteArchived`, `noteRenamed`, `noteUnarchived`); nothing with none held.
+    const heldAs = (records: ReadonlyMap<AppSessionId, SessionRecord>, appSessionId: AppSessionId, write: (record: SessionRecord) => SessionRecord) => {
+      const held = records.get(appSessionId);
+      if (held === undefined) return {};
+      const next = write(held);
+      return next === held ? {} : { records: new Map(records).set(appSessionId, next), recordsVersion: get().recordsVersion + 1 };
+    };
     // A record arriving for an unstarted session makes it an ordinary session.
     const started = (records: Map<AppSessionId, SessionRecord>) => {
       const unstarted = get().unstarted;
@@ -230,6 +272,13 @@ export function createSessionsStore() {
       members: new Map(),
       member: null,
       registry: EMPTY_REGISTRY,
+      acted: new Map(),
+      liveWords: new Map(),
+      applyLive(words) {
+        const listed = new Map(get().listed);
+        for (const [appId, entry] of listed) listed.set(appId, withLive(entry, words.get(appId)));
+        set({ liveWords: words, listed });
+      },
       applyRegistry(registry, local) {
         fromRegistry = registryRecords(registry, local);
         set({ registry, projects: withRegistry(answered(get().projects)), projectsVersion: get().projectsVersion + 1 });
@@ -242,11 +291,50 @@ export function createSessionsStore() {
       },
       applyRows({ machines, rows, members, member }) {
         const listed = new Map<AppSessionId, ListedSession>();
+        const acted = new Map(get().acted);
         for (const row of rows) {
           const appId = addressOf(row.machine, row.session as AppSessionId);
-          listed.set(appId, { ...row, appId });
+          const entry: ListedSession = { ...row, appId };
+          const note = acted.get(appId); // the UX wave, U9: what this window did, until a newer listing says otherwise
+          if (note !== undefined && row.revision > note.listedAt) acted.delete(appId);
+          else if (note?.archived === true) {
+            acted.set(appId, { ...note, hidden: entry });
+            continue;
+          } else if (note?.title != null) entry.title = note.title;
+          listed.set(appId, withLive(entry, get().liveWords.get(appId)));
         }
-        set({ listed, listedMachines: new Set(machines), members: new Map(members.map((m) => [m.id, m])), member });
+        set({ listed, acted, listedMachines: new Set(machines), members: new Map(members.map((m) => [m.id, m])), member });
+      },
+      noteArchived(appSessionId) {
+        const { listed, acted, records } = get();
+        const listing = listed.get(appSessionId) ?? null;
+        const prior = acted.get(appSessionId);
+        const note: ActedHere = { archived: true, title: prior?.title ?? null, listedAt: listing?.revision ?? prior?.listedAt ?? -1, hidden: listing ?? prior?.hidden ?? null };
+        const nextListed = new Map(listed);
+        nextListed.delete(appSessionId);
+        set({ acted: new Map(acted).set(appSessionId, note), listed: nextListed, ...heldAs(records, appSessionId, (r) => ({ ...r, archived: true })) });
+      },
+      noteRenamed(appSessionId, title) {
+        const { listed, acted, records } = get();
+        const listing = listed.get(appSessionId);
+        const prior = acted.get(appSessionId);
+        const note: ActedHere = { archived: prior?.archived ?? false, title, listedAt: listing?.revision ?? prior?.listedAt ?? -1, hidden: prior?.hidden ?? null };
+        set({
+          acted: new Map(acted).set(appSessionId, note),
+          ...(listing === undefined ? {} : { listed: new Map(listed).set(appSessionId, { ...listing, title }) }),
+          ...heldAs(records, appSessionId, (r) => ({ ...r, title: { ...r.title, text: title, source: 'user' } })),
+        });
+      },
+      noteUnarchived(appSessionId) {
+        const { listed, acted, records } = get();
+        const prior = acted.get(appSessionId);
+        const nextActed = new Map(acted);
+        if (prior?.title != null) nextActed.set(appSessionId, { ...prior, archived: false, hidden: null });
+        else nextActed.delete(appSessionId);
+        // the listing as it was at the archive, with the live word the window holds now (the one kept is stale)
+        const restored = prior?.hidden == null ? null : withLive(prior.title === null ? prior.hidden : { ...prior.hidden, title: prior.title }, get().liveWords.get(appSessionId));
+        const back = restored !== null && !listed.has(appSessionId) ? { listed: new Map(listed).set(appSessionId, restored) } : {};
+        set({ acted: nextActed, ...back, ...heldAs(records, appSessionId, (r) => (r.archived ? { ...r, archived: false } : r)) });
       },
       applyList({ sessions, revision }, machine) {
         const p = partition(machine);
