@@ -776,6 +776,36 @@ describe('the project registry’s rows', () => {
     expect(row(new Set()).project).toBeNull(); // still no folder to act through
   });
 
+  // ticket 644: the registry places another machine's locations among the projects, so a record main read over that
+  // machine's link has a known project; its listing still decides its row, so the row stands where the listed row stood
+  // (the one the person clicked) when the record arrives. This Mac's record with a known project is filed by it, as before.
+  describe('a record at a listed address whose project the registry places', () => {
+    const listingAt = (machine: MachineRef, session: string, orgKey: OrgKey | null, project: string | null): ListedSession =>
+      ({ ...remoteRow(machine, session, { orgKey, project }), appId: addressOf(machine, session) as AppSessionId });
+    const held = sessionOn(OTHER_MACHINE, 'b1', { projectId: there('scrape') as ProjectId }); // its folder is the registry's location on B
+    const filed = (records: SessionRecord[], listing: ListedSession) =>
+      projectList(input({ records: new Map(records.map((r) => [r.appId, r])), digests: new Map(), projects: all, rows: [], registry, listed: new Map([[listing.appId, listing]]) }))
+        .filter((e) => e.sessions.length + e.listed.length > 0)
+        .map((e) => [e.key, e.sessions.map((r) => r.appId), e.listed.map((l) => l.appId)]);
+
+    it('keeps another machine’s session under its machine’s row when its listing’s key is none of the key table’s', () => {
+      const listing = listingAt(OTHER_MACHINE, 'b1', null, null);
+      expect(filed([], listing), 'listed only').toEqual([[machineKey(OTHER_MACHINE), [], [there('b1')]]]);
+      expect(filed([held], listing), 'its record held').toEqual([[machineKey(OTHER_MACHINE), [there('b1')], []]]);
+    });
+
+    it('files it under the registry project’s row when its listing and the registry agree on the key', () => {
+      const listing = listingAt(OTHER_MACHINE, 'b1', `id:${AWAY_ID}` as OrgKey, AWAY_ID);
+      expect(filed([], listing), 'listed only').toEqual([[`id:${AWAY_ID}`, [], [there('b1')]]]);
+      expect(filed([held], listing), 'its record held').toEqual([[`id:${AWAY_ID}`, [there('b1')], []]]);
+    });
+
+    it('files this Mac’s record by its known project, a listing at its address notwithstanding', () => {
+      const mine = sessionOn(TEST_MACHINE, 'a1', { projectId: app.id });
+      expect(filed([mine], listingAt(TEST_MACHINE, 'a1', null, null))).toEqual([['remote:example.org/app', [addr('a1')], []]]);
+    });
+  });
+
   it('signed out, rows are as before: by label, naming no registry and no machine beyond their checkouts', () => {
     const entries = projectList(input({ records: new Map(), digests: new Map(), projects: mapOf([app]), rows: [] }));
     expect(entries.map((e) => [e.key, e.name, e.machines, e.registry])).toEqual([['remote:example.org/app', 'app', [TEST_MACHINE], null]]);
