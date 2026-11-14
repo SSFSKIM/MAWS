@@ -385,7 +385,7 @@ describe('the /btw card for a terminal session', () => {
     expect(waiting(card()!)).toHaveLength(1);
     await settle();
     const msg = (body: unknown) => ({ project: '', machine: 'm', session: 'eng-1', kind: 'op', sub: 'w-1', n: 1, body });
-    act(() => fake.event('laneA.plane', { appSessionId: L, watch: 'w-1', messages: [msg({ rpc: 'cmd-9', op: 'btw', phase: 'end', id: 'cmd-9', text: 'Because.' })] }));
+    act(() => fake.event('laneA.plane', { appSessionId: bareOf(L) /* main's bare id */, watch: 'w-1', messages: [msg({ rpc: 'cmd-9', op: 'btw', phase: 'end', id: 'cmd-9', text: 'Because.' })] }));
     await screen.findByText('Because.');
     expect(waiting(card()!)).toEqual([]);
     expect(fake.invoked('side.question.list')).toEqual([]);
