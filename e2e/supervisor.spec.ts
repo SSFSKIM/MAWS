@@ -972,6 +972,9 @@ async function ringText(page: Page, ptyId: string): Promise<string> {
   }, ptyId);
 }
 
+// A path as one literal /bin/sh word: a scratch root is a tmpdir path, never expanded by the shell that reads it.
+const shellQuoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
 // (h) G4, inverted (acceptance 2): the terminals belong to `mawsd`'s pty host, not the app. After a
 // keep-quit the restored tab is alive, the same shell pid, and its ring holds what the shell printed while the app was
 // closed; a second terminal that wrote more than the ring and the watermark (about 2 MiB) with the app closed has
@@ -987,7 +990,7 @@ test('(h) G4, inverted: after a keep-quit the restored terminal is the same live
   await withScratch('terminal', async (s) => {
     const release = join(s.root, 'm7-release');
     const ended = [join(s.root, 'm7-closed.done'), join(s.root, 'm7-writer.done')];
-    const held = `echo m7-started-$((40+2)); sh -c 'until [ -e "$1" ]; do sleep 0.1; done' release "${release}"`;
+    const held = `echo m7-started-$((40+2)); sh -c 'until [ -e "$1" ]; do sleep 0.1; done' release ${shellQuoted(release)}`;
     const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
     const daemonPid = (await s.ready(first.page)).daemon!.pid;
     const id = await s.record(first.page);
@@ -1003,8 +1006,8 @@ test('(h) G4, inverted: after a keep-quit the restored terminal is the same live
       const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
-    value(await invoke(first.page, 'pty.write', { ptyId, data: `${held}; echo m7-closed-$((40+2)); : > "${ended[0]}"\n` }));
-    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `${held}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2)); : > "${ended[1]}"` }));
+    value(await invoke(first.page, 'pty.write', { ptyId, data: `${held}; echo m7-closed-$((40+2)); : > ${shellQuoted(ended[0])}\n` }));
+    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `${held}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2)); : > ${shellQuoted(ended[1])}` }));
     await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map((p) => ringText(first.page, p)))).every((text) => text.includes('m7-started-42')), { timeout: 15_000, message: 'both shells started their command' }).toBe(true);
     const report = () => first.maws.app.evaluate(() => (globalThis as unknown as { __maws_quit: { report(): Promise<{ busyTerminals: number; terminalsUnknown: boolean }> } }).__maws_quit.report());
     // what the quit's line is held to below, read as the guard reads it
