@@ -62,7 +62,7 @@ Public fields are exempt. The name, the type, the scope, the URL, the command, t
 
 What MAWS builds from the form (the command it shows, the request a window keeps after the send) is built by replacing the slots in the structure with `•••`, never by searching text.
 
-The one place a value could come back from is text the engine's CLI wrote. For this command MAWS forwards none of the CLI's standard output, words the success itself from public fields, and forwards a line of the CLI's error output only when that line contains no slot's content, as written or as JSON escapes it. A line that contains one is not repaired: the whole line is replaced by a fixed sentence. So a value of one character, or a value that is part of the connector's name, costs the person the engine's wording of a refusal and never the value. A value the CLI printed in some third form would not be recognised; "Engine facts", 7, lists what this command can print and is the ground for calling that a residue and not a hole.
+The one place a value could come back from is text the engine's CLI wrote. For this command MAWS forwards none of the CLI's standard output, words the success itself from public fields, and forwards a line of the CLI's error output only when that line, as the CLI wrote it and before anything trims it, contains no slot's content, as written or as JSON escapes it, and is not the engine's read-back error, whose reason text can quote the file (R10). A line that contains one, or is that error, is not repaired: the whole line is replaced by a fixed sentence. So a value of one character, or a value that is part of the connector's name, costs the person the engine's wording of a refusal and never the value. A value the CLI printed in some third form would not be recognised; "Engine facts", 7, lists what this command can print and is the ground for calling that a residue and not a hole.
 
 ### Where
 
@@ -213,6 +213,7 @@ After the adversarial review. Each ruling is built where the last column says; a
 | R7 | From the drawn sheet: one wording of the scope on both pages; how Details wraps; the warning under "Add to"; a sentence under Arguments; the two row states worded; a failed add's line in today's form; Details closed at opening; plain value fields unless the owner chooses otherwise. | "The form's fields"; §E; M2 |
 | R8 | M2 is released at these defaults. | Progress; Plan of Work |
 | R9 | The warning's sentence, and the note for a name the engine reads as empty toward a remote server. | "Secrets"; "A name the engine empties"; §A; §E |
+| R10 | A CLI error line that holds the engine's read-back phrase is withheld whole, by the one drop, with a sentence of its own; the list is read again after it as after a success. | "The rule about values"; §B; §C; M1's tests |
 
 Accepted as first written, without a ruling of their own: the new command `connectors.addJson` with the custom add running as the action `mcp-add`; a running or failed add's line at the head of the list; and that P4-R8's amendment goes with the landing that retires adding in Settings, this one carrying one dated line in U11a's execution document.
 
@@ -283,6 +284,8 @@ Expected size, lines added plus removed, tests included: M1 about 1,000, M2 abou
 - the emptied names (§A): the five names the record proves, in a header's value and in a URL, bare and with a fallback; lower case; one of the person's own, `GITHUB_TOKEN` and `GH_TOKEN` answering nothing;
 - the schema: the three types accepted; `ws`, an unknown key, a header on a local command, a variable on a remote one, each bound's first value over, a duplicate name, `maws` and a reserved name, `folder` null with a scope other than `user` refused;
 - **the three boundaries** (R2), one case each in `router.test.ts`, `front.test.ts` and `runtime.test.ts`: an entry refused for a value too long, and one refused for a control character in a value, answer an error, and neither that error nor any captured log line, serialised, contains the value;
+- R10: the 2.1.322 read-back sentence with a reason that quotes half of a header's value answers `readback_unconfirmed` with its sentence, and no part of the value is in the result, an `output` event, the replay or a log line; the duplicate-name line is still forwarded; the phrase is a constant beside the other engine texts, with the engine version it was read from, and a test pins it;
+- a value with a space, a tab or a non-breaking space at either end, in a header and in a variable, printed whole on stderr: no `output` event, `done` or replay holds it (the line is tested before it is trimmed);
 - the outcome of a custom add (`cli-result.test.ts`): exit 0 with stdout empty, and exit 0 with stdout holding a value, both answer the success worded from the input; exit 1 with a clean last error line answers that line; exit 1 with a line holding a value as written, and one holding it as JSON escapes it (a value with a quote and a backslash), answer the fixed sentence with the exit code and the shown command; a value that is part of the name, a one-character value, a value equal to `•••`, and two values of which one contains the other: each line that holds one is withheld whole, and the name, where it is shown, is shown as typed;
 - the runner, with the fake CLI: the arguments received, one by one; `changed()` told; no reload asked; with the CLI printing its whole argument list on stdout and on stderr over several lines, no `plugins.operation` event of any phase, no answer of `running()` and no captured `console.warn` holds a slot's content;
 - **held open**: the fake CLI prints an error line holding a value, then a clean one, and waits; `running()` asked at that moment answers the clean line or `started`, never the other; the CLI is released and the operation ends;
@@ -401,7 +404,7 @@ From the worktree of branch `ux-wave/U11g`. `vmcheck` below stands for `~/.local
 
 6. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e, engine or probe. The hand-back says: what exists, with the command and result that showed it; the master and the wire minor the branch stands on; what is not verified (every e2e scene); the decisions made; anything that contradicts this document; the residue. Residue known at authoring, each a row for the debt tracker at landing:
    - a value is readable in the CLI's arguments by the person's own processes while it runs (accepted by the design);
-   - a value the CLI printed in a form other than as written or as JSON escapes it would not be recognised, and its line would be forwarded; by Engine facts, 7, the one message of this command that can quote the configuration quotes it in the second of those forms;
+   - a value the CLI printed in a form other than as written or as JSON escapes it would not be recognised, and its line would be forwarded; by Engine facts, 7, the one message of this command that can quote the configuration, the read-back error, is withheld whole whatever it holds (R10);
    - a value of one character, or one that is part of the connector's name, costs the person the engine's wording of a refusal (the rule);
    - an argument, a URL and a command are public fields: a secret typed into one is shown back and kept as typed, which the sentence under Arguments says;
    - a caller that puts text into the name of a key is not this form; such a key's name is logged by the existing dropped-field line and named by the strict refusal, as for every command;
@@ -508,6 +511,7 @@ The engine host answers it with a receipt at once, then `plugins.operation` with
 | the check's read was not whole, or failed | `spawn_failed` | `configuration_unread` | `Not every configuration here could be read, so the name can’t be checked. Nothing was added.` |
 | the CLI exited with another code and its last error line holds no slot's content | `cli_failed` | none | that line |
 | the same, and the line holds one | `cli_failed` | `message_withheld` | `Claude Code exited <code>. Its message repeats a header or variable value, so it is not shown. To read it, run this in a terminal with your values in place of •••: <mcpShownCommand>` |
+| the CLI exited with another code and its last error line holds the read-back phrase `could not be read to confirm the change` (R10) | `cli_failed` | `readback_unconfirmed` | `Claude Code exited <code>. It could not read its configuration file back after writing it, and its message may quote that file, so it is not shown. The connector may have been added: check the list before adding it again.` (no shown command); the runner tells `changed()` as after every end, so the list is read again as after a success |
 | the CLI exited with another code and printed no error line | `no_result` | none | today's words |
 | the CLI could not be started and the system's message holds a slot's content | `spawn_failed` | `message_withheld` | `The command could not be started. The system’s message repeats a header or variable value, so it is not shown.` |
 
@@ -522,7 +526,7 @@ An operation carries `slots: readonly string[]`, `mcpValueSlotsOf(input)` for an
 | what leaves | the rule |
 |---|---|
 | the receipt; the event's `opId`, `action`, `target` | public: `target` is the name, shown as typed |
-| an `output` event | no line of stdout is emitted; a line of stderr is emitted, whole, only when `holdsValueSlot` is false for it, and is otherwise not emitted |
+| an `output` event | no line of stdout is emitted; a line of stderr is emitted, whole, only when `holdsValueSlot` is false for it, and is otherwise not emitted; the test reads the line as the CLI wrote it, before it is trimmed, and a line holding the read-back phrase (R10) is not emitted either |
 | the `done` event | §B's table; stdout is never read |
 | `running()`'s replay | `op.latest` holds only events made by the two rows above |
 | the engine host's log (`console.warn` in `start`) | the thrown error's message only when it holds no slot's content; otherwise that the message is withheld |
@@ -628,8 +632,10 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
   Evidence: `cli.pretty.js:475658` of 2.1.322, thrown at `:476792` with the read's own error as its reason (Engine facts, 7).
 - Observation: toward a remote server the engine reads a set of well-known variable names as empty and says so only in its debug file; the server still connects.
   Evidence: pass 3, `spikes/protocol-probe/fixtures/uxwave/u11-connector-scope3.ndjson` line 2, `remote`: `NPM_TOKEN`, `AWS_SECRET_ACCESS_KEY`, `ANTHROPIC_API_KEY`, `HTTPS_PROXY`, `OTEL_EXPORTER_OTLP_HEADERS` read `empty` in headers and URL; `cli.pretty.js:388426`.
-- Observation: inside the read-back error (Engine facts, 7), a JSON parse error can quote a fragment of the file, and a fragment that holds only part of a value is neither form the test recognises, so that line would be forwarded. It needs the configuration file to be unreadable at the read-back, right after the CLI wrote it; it narrows Concrete Steps 6's second residue and nothing extra was built for it (one mechanism, not two).
+- Observation: inside the read-back error (Engine facts, 7), a JSON parse error can quote any fragment of the file, and a fragment that holds only part of a value is neither form the test recognises. Ruled R10: such a line is withheld whole by the phrase it carries (Decision Log).
   Evidence: M1's executor's report; `cli.pretty.js:475658` of 2.1.322, thrown at `:476792`.
+- Observation: M1 tested a CLI line for a slot's content after trimming it, so a valid value with a space at its end, printed whole by the CLI, passed the test with its last character cut and was forwarded in an `output` event, the replay and the `done` message.
+  Evidence: M1's frontier review, reproduced on the VM with the fake CLI at `9dab464d7`.
 - Observation: no exit beyond §C's table and code statement 3's five places was found. Main's router, the host supervisor, the host runtime, the daemon's front and its engine requests log names, issues and ids, never an input; the issues are zod's, paths and messages with no received value. Route D (`src/engine-host/connectors/source-entry.ts`) reads configured entries' headers and variables to connect, for every connector however added, and copies none into an event, a log or a result.
   Evidence: M1's executor's report.
 
@@ -648,6 +654,12 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 - Decision: two rulings of the architect for M2 from the redrawn sheet. (1) Details' command line is built so that each piece between two spaces or commas is one unit with no break inside it, with a break opportunity after each space and each comma; only a piece longer than the line may break inside; a `•••` is never split. A browser breaks after a hyphen too (the drawing first broke `"--port"` as `"-` / `-port"`), so "where it can" needs this explicit handling. M2's component test asserts the structure, one unbreakable unit per piece, not pixel positions. (2) On the user configuration's page "Add to" draws its one choice, "All projects", as plain words under the label, not as a radio with nothing beside it; the label and the words stay as this document has them and the scope sent is still `user`; the scene and the component test read the words there, not a radio role.
   Rationale: what the drawing showed; everything else in it matched this document.
   Date/Author: 2026-11-14, the architect, recorded by the plan's controller.
+- Decision: R10, the architect's ruling of 2026-11-14 on M1's discovery. A CLI failure line of `connectors.addJson` that holds the fixed phrase `could not be read to confirm the change` is withheld whole, by the same drop as a line that holds a slot's content: nothing of it is forwarded in an `output` event, the replay, the result or a log line. The trigger decides the sentence: the result is `cli_failed` with `failureCode` `readback_unconfirmed` (a free string, as `message_withheld` is, so the wire is not touched) and the words of §B's new row, without the shown command, since running it again is not the advice. The list is read again after it as after a success: the runner's `changed()` already follows every end (code, 8), so nothing new is built for that. The phrase is a constant beside the other engine texts, with the engine version it was read from, so an engine that rewords it fails a test.
+  Rationale: `<reason>` is free text from the failed read and can quote any fragment of the file; no comparison with the slots can be complete for a fragment, so this is one more trigger of the one existing drop, not a second mechanism.
+  Date/Author: 2026-11-14, the architect, recorded by the plan's controller.
+- Decision: a CLI line is tested for a slot's content as the CLI wrote it, before it is trimmed, on the `output` path and the outcome's path alike; what is forwarded is still the trimmed line. For an operation with no slots nothing changes.
+  Rationale: M1's frontier review: a valid value with a space at an end is printed whole by the CLI, and MAWS's own trimming made it pass the test. This is MAWS altering the engine's recognised form, not the residue of a third form.
+  Date/Author: 2026-11-14, the plan's controller, on the review.
 
 ## Outcomes & Retrospective
 
