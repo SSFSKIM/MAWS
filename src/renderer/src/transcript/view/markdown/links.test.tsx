@@ -306,7 +306,7 @@ describe('openArtifactMention', () => {
   it('without ⌘ shows the open main tab when there is one, else opens beside the chat; a mount without the action opens beside the chat', () => {
     const shown = actionsWith(true);
     openArtifactMention(shown, REMOTE, { artifactId: ARTIFACT, at: { block: 'b7' } }, false);
-    expect(shown.showOpenArtifactTab!.mock.calls).toEqual([[REMOTE, ARTIFACT, { block: 'b7' }]]);
+    expect(vi.mocked(shown.showOpenArtifactTab!).mock.calls).toEqual([[REMOTE, ARTIFACT, { block: 'b7' }]]);
     expect(shown.openArtifact).not.toHaveBeenCalled();
     for (const actions of [actionsWith(false), actionsWith(undefined)]) {
       openArtifactMention(actions, SESSION, { artifactId: ARTIFACT }, false);
