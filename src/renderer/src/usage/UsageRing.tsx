@@ -7,6 +7,7 @@
 // sentence. A click opens the compact popover below it, at its right edge; the open state is a store, so the menu's and
 // the palette's Usage action open it too. Tokens only.
 import { Popover } from 'radix-ui';
+import { useRef } from 'react';
 import { USAGE } from '../accounts/copy';
 import { accountsViewModel, usagePill, type Severity } from '../accounts/model';
 import { POPOVER_TICK_MS, useNow } from '../statusline/use-now';
@@ -30,11 +31,13 @@ export function UsageRing() {
   const label =
     pill.percent !== null && pill.limit !== null && pill.account !== null ? USAGE.pill(pill.percent, pill.limit, pill.account) : pill.account !== null ? USAGE.pillNoReading(pill.account) : USAGE.pillNoData;
   const setOpen = (next: boolean) => useUsagePopover.getState().setOpen(next);
+  const trigger = useRef<HTMLButtonElement>(null);
   const percent = pill.percent === null ? null : Math.max(0, Math.min(100, pill.percent));
 
   return (
     <Popover.Root open={open} onOpenChange={setOpen}>
       <Popover.Trigger
+        ref={trigger}
         data-usage-ring={pill.percent ?? ''}
         data-severity={pill.severity ?? 'none'}
         aria-label={label}
@@ -61,7 +64,9 @@ export function UsageRing() {
       </Popover.Trigger>
       <Popover.Portal>
         <Popover.Content aria-label={USAGE.popoverTitle} side="bottom" align="end" sideOffset={4} collisionPadding={8} className={CONTENT}>
-          <UsagePopover close={() => setOpen(false)} />
+          {/* The ring takes the keyboard before the popover closes: its link opens Settings, which remembers the element that
+              holds the keyboard as the one to return to, and the link's button goes with the popover. */}
+          <UsagePopover close={() => { trigger.current?.focus({ preventScroll: true }); setOpen(false); }} />
         </Popover.Content>
       </Popover.Portal>
     </Popover.Root>

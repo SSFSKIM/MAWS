@@ -21,6 +21,8 @@ import { useUsageControlState } from './controls';
 import { useUsagePopover } from './popover';
 import { UsageRing } from './UsageRing';
 import { registerUsage } from '.';
+import { registerSlot, resetSlots } from '../app/slots';
+import { SettingsDialog } from '../destination/SettingsDialog';
 
 const NOW = Date.parse('2026-09-29T07:36:17Z');
 const CIRCUMFERENCE = 2 * Math.PI * 6; // a 14 px ring of a 2 px stroke
@@ -192,6 +194,30 @@ describe('the usage popover', () => {
     expect(useLayout.getState().settings).toEqual({ section: 'usage' });
     expect(useUsagePopover.getState().open).toBe(false);
     expect(screen.queryByRole('dialog', { name: 'Usage' })).toBeNull();
+  });
+
+  // The branch review: the link's button goes with the popover, so the ring holds the keyboard when Settings opens and
+  // gets it back when Settings closes.
+  it('“Usage settings” by keyboard: closing Settings gives the keyboard back to the ring', async () => {
+    registerSlot('settingsTab', ({ section }) => <p>section {String(section)}</p>);
+    try {
+      useUsage.setState({ snapshot: fixture });
+      render(<><UsageRing /><SettingsDialog /></>);
+      act(() => ring().focus());
+      fireEvent.click(ring());
+      await settle();
+      const link = within(screen.getByRole('dialog', { name: 'Usage' })).getByRole('button', { name: 'Usage settings' });
+      act(() => link.focus());
+      fireEvent.click(link);
+      await settle();
+      expect(screen.getByRole('dialog', { name: 'Settings' }).textContent).toContain('section usage');
+      act(() => useLayout.getState().closeSettings());
+      await settle();
+      expect(screen.queryByRole('dialog', { name: 'Settings' })).toBeNull();
+      expect(document.activeElement).toBe(ring());
+    } finally {
+      resetSlots();
+    }
   });
 
   it('is at most 320 px wide by its class, opening below the ring at its right edge', async () => {
