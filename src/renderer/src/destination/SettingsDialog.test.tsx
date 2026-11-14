@@ -107,7 +107,7 @@ describe('the Settings dialog', () => {
     expect(dialog()).not.toBeNull();
   });
 
-  it('row 4: a search field that holds text clears itself, and the dialog stays', () => {
+  it('row 4: a search field that holds text clears itself, and the dialog stays; the next Esc, in the empty field, closes it', async () => {
     render(<SettingsDialog />);
     open();
     const search = screen.getByRole('textbox', { name: 'Search settings' });
@@ -115,6 +115,8 @@ describe('the Settings dialog', () => {
     fireEvent.keyDown(search, { key: 'Escape' });
     expect(search).toHaveProperty('value', '');
     expect(dialog()).not.toBeNull();
+    fireEvent.keyDown(search, { key: 'Escape' });
+    await waitFor(() => expect(dialog()).toBeNull());
   });
 
   it('row 5: a field with an Esc of its own reverts and is left on the first press; the second closes the dialog', async () => {
@@ -132,12 +134,15 @@ describe('the Settings dialog', () => {
     await waitFor(() => expect(dialog()).toBeNull());
   });
 
-  it('row 6: Esc closes it, and the keyboard is back on the composer it was opened from', async () => {
+  // The Esc is pressed where the keyboard is after the open: the dialog's first field, its empty search (the wave
+  // architect's ruling on the first Mac run: an empty search field gives its Esc to the dialog).
+  it('row 6: opened with the keyboard in the composer, it lands in the empty search; one Esc closes it, and the keyboard is back on the composer', async () => {
     render(<><textarea aria-label="Composer" /><SettingsDialog /></>);
     const composer = screen.getByRole('textbox', { name: 'Composer' });
     composer.focus();
     open();
-    fireEvent.keyDown(dialog()!, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search settings' })));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(document.activeElement).toBe(composer);
   });

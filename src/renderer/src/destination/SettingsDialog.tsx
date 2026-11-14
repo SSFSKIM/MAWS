@@ -36,8 +36,7 @@ export function SettingsDialog() {
     else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
   };
   const onEscapeKeyDown = (event: KeyboardEvent) => {
-    if (event.isComposing) return event.preventDefault(); // an input method's Esc ends its composition, nothing else
-    const taker = escapeTaker(event.target);
+    const taker = escapeTaker(event.target, event); // an input method's Esc ends its composition, nothing else
     if (taker === null) return;
     event.preventDefault();
     if (taker === 'field') leaveField(event.target, () => content.current);

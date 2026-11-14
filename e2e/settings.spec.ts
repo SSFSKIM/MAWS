@@ -486,7 +486,7 @@ test('settings: the regrouped page; each note one line where the body has its 76
 // far down a short section lands with its section's heading in view, holds the keyboard and is marked for a moment; a
 // word behind a row's More opens it; the results scroll as the index's list does, the field and the footer staying; Esc
 // clears the field. UX wave U7b: in the Settings dialog (§H, rows 4 to 6) Esc with text in the field clears it and the
-// dialog stays, Esc in the empty field leaves the field, and the next closes the dialog. "usage" finds Usage's row
+// dialog stays, and the next Esc, in the empty field, closes the dialog (the wave architect's ruling on the first Mac run). "usage" finds Usage's row
 // (O-47); it also finds Gateway's "Direct login", whose line holds the word, so the step asks that Usage's result is
 // among the results. The narrow form (the field a first row, its results a list under it) was reached through a split;
 // no window reaches it in the dialog, and `SettingsSearch.test.tsx` keeps it.
@@ -564,10 +564,9 @@ test('settings: Search settings finds rows by their words; a choice lands under 
     await expect(field).toHaveValue('');
     await expect(nav.getByRole('button', { name: 'Appearance', exact: true })).toBeVisible();
     await expect(settingsDialog(page), 'clearing the field keeps the dialog').toBeVisible();
-    // Esc in the empty field leaves the field (row 5), and the next closes the dialog (row 6)
-    await page.keyboard.press('Escape');
-    await expect(field).not.toBeFocused();
-    await expect(settingsDialog(page), 'leaving the field keeps the dialog').toBeVisible();
+    // Esc in the empty field closes the dialog (row 6): ruled by the wave's architect on the first Mac run, an empty search
+    // field passes Esc to its host
+    await expect(field).toBeFocused();
     await page.keyboard.press('Escape');
     await expect(settingsDialog(page)).toHaveCount(0);
     expect(maws.consoleErrors()).toEqual([]);
