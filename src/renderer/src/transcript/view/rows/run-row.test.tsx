@@ -4,13 +4,14 @@
 // that neither opens nor closes it; the live thought under it and the thought lines of an opened run at their places.
 // Every command, word and number is invented, but for the one recorded session named (uxwave/u4p2-k-mcp-1).
 import { act, cleanup, fireEvent, render } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { loadUxwaveJournal } from '../../../../../../test/support/fixtures';
 import { useAttention } from '../../../stores/attention';
 import { useTranscriptStore } from '../../../stores/transcript';
+import { CLOSE_MOTION } from '../../../ui/disclosure';
 import { journalToEvents } from '../../dev/journal';
 import { turnDerivations } from '../../model/derive';
 import type { Row, TurnId } from '../../model/rows';
@@ -239,6 +240,36 @@ describe('a thought after a run, by prefixes of one turn’s events', () => {
     expect(s.run()).toBe(row);
     expect(row.dataset.state).toBe('completed');
     expect(s.blocks()).toEqual(['calls cell:t1,cell:t2', 'thought Thought for 12sComparing the two outputs.']);
+  });
+});
+
+// M4's review (Minor): the live thought of a run being folded is drawn once while the body's exit runs, inside the body,
+// and under the line once the body is gone; never in both places at once
+describe('a run folded while its thought streams', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('draws the live thought once through the body’s exit: in the body until it unmounts, then under the line', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const s = await scene((b) => { command(b, 't1'); command(b, 't2'); delta(b, 'm3', 0, 'Comparing the'); });
+    const thoughts = () => s.run().querySelectorAll('.transcript-thinking');
+    const body = () => s.run().querySelector(`[id="${s.line().getAttribute('aria-controls')!}"]`);
+    const folded = () => s.run().querySelectorAll(':scope > .transcript-thinking');
+    expect(thoughts()).toHaveLength(1);
+    expect(folded()).toHaveLength(1);
+    s.toggle();
+    act(() => vi.runOnlyPendingTimers()); // the opening motion ends
+    expect(thoughts()).toHaveLength(1);
+    expect(folded()).toHaveLength(0);
+    expect(s.blocks()).toEqual(['calls cell:t1,cell:t2', expect.stringMatching(/^thought Thinking with high effort · /)]);
+    s.toggle();
+    expect(s.line().getAttribute('aria-expanded')).toBe('false');
+    expect(body()).not.toBeNull(); // the body is still leaving
+    expect(thoughts()).toHaveLength(1);
+    expect(folded()).toHaveLength(0);
+    act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms));
+    expect(body()).toBeNull();
+    expect(thoughts()).toHaveLength(1);
+    expect(folded()).toHaveLength(1);
   });
 });
 
