@@ -2,7 +2,7 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 150 to build (142 of them in children now), 1 that still waits for the owner to answer (two of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 151 to build (143 of them in children now), none that still waits for the owner to answer (every question put to the owner is answered), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
 Built and on master, as the state column says: 81 items whole and 17 in part, from pull requests #604, #618, #623, #626, #631, #632, #634, #635, #637, #642, #643, #650, #651, #652, #655, #656 and #657 and the working-folder selector's landing (U8a, which has no pull request). Of an item built in part, the rest is owed by a later landing or a hands-on check, or the child's spec dropped it.
 
@@ -84,15 +84,13 @@ Verbatim, as chosen on the question cards; a note is the owner's own text. An an
 | Working folder landing, on the same drawn example: an agent often steps into a sub-folder of its checkout and back. How should the Environment card show the sub-folder? | In the folder row (Recommended) |  |
 | Do you want files the agent writes to open inside MAWS? | Not PDF alone (typed) | typed, not on a card, in reply to a list of the four questions still open: "MAWS preview shouldn't be limited to PDF, and agent's artifact mention opens in the side panel. for the rest, need more detail." |
 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | In the side panel (typed) | the same typed message as the answer above |
+| When you type yourself, Korean or English, in a MAWS deck or document, have you ever seen the first letter or a jamo of a word go missing? (The comparison of 10-23 reported it; it only reproduced under automated typing.) | No, never seen it |  |
+| Connector switches (ticket #476): which model? A running session cannot drop a connector, so a switch for one session restarts that session's engine process. | Two switches, as scopes (typed) | typed on the card in place of an option; the options were "Two switches (Recommended)" (a default per machine and a switch per session), "One switch, like Claude Desktop" and "Per-machine default only": "two switches mean that a connector can be installed like plugin -- user scope and project scope." |
+| Where should "Add custom connector…" write: Claude Code's own config, or the list MAWS keeps in Settings that only sessions MAWS starts can see? | Claude Code's config (Recommended) |  |
 
 ## Questions still open
 
-A question is put to the owner when its child starts, unless the last column says otherwise. The last one was raised when the spec was assembled or after it.
-
-| items | question | recommended answer | when |
-|---|---|---|---|
-| l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. | when its child starts |
-| #476, l8-settings-05 | Where should a per-chat connector switch sit, and does the Settings connector list go once "Add custom connector" moves to Customize? | Put to you with the result of the hands-on check of #476, which shows which switches can act on a running session. | after the hands-on check of #476 |
+None: every question put to the owner is answered.
 
 ## Decisions the sections made that the owner may see differently
 
@@ -379,7 +377,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l8-settings-13 | mark | build | A Space can carry instructions for the agent. |
 | l6-artifacts-09 | mark | build, after a check (U14) | Your P1. Probably one mechanism with l6-artifacts-07: a formatting cleanup written with no author, which the live document rejects and replicas echo back as writes nobody made. The work starts from a failing test. |
 | l6-artifacts-16 | mark | build, last | Check against the design law resolves real colours and shows the agent's verdict per rule. Large; scheduled last. |
-| l6-artifacts-14 | mark | question to the owner | Never reproduced. One fact only you hold decides it. |
+| l6-artifacts-14 | mark | closes, nothing to build | Never reproduced with a person's typing. You answered on 11-14 that you have never seen it yourself, so the tracker row closes as not reproduced. |
 | l6-artifacts-17 | mark | already built | Nothing left beyond l6-artifacts-07. |
 | l6-artifacts-04 | mark | already built | Fixed on 10-24; one hands-on look at the 1280 px layout is owed. |
 | l6-artifacts-02 | mark | keep | Kept. |
@@ -394,6 +392,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | X-184 | tracker | build | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-03 | mark | built, on master (#635) | The libraries work before the first message. |
 | l8-settings-04 | mark | built in part, on master (#635) | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
+| l8-settings-05 | mark | build | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope, as you confirmed on 11-14; the list MAWS keeps in Settings goes. |
 | #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
 | l8-settings-06 | mark | built, on master (#635) | Settings is regrouped and its long notes shortened, then gets a search. |
 | l8-settings-11 | mark | build | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
@@ -404,9 +403,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #456 | ticket | built, on master (#635) | The LiveQuery sheet gets its missing line for a paused query. |
 | S-09 | sitting | built, on master (#635) | The Channel tab says it is offline and retrying as soon as its read fails. |
 | S-10 | sitting | built, on master (#635) | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
-| l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
-| #476 | ticket | hands-on check (U14) | The ticket names switches that do not exist in MAWS, and no engine setting is yet shown to drop a server's tools at launch. A probe first, then its own design. |
+| #476 | ticket | hands-on check (U14) | You answered on 11-14: the two switches are scopes, as for a plugin: a connector is installed at user scope or at project scope. No engine setting is yet shown to keep an off connector's tools out of a session at launch. A probe first, then its own design. |
 | l8-settings-12 | mark | later | A project settings page: after the registry lands, because a project then has locations on several machines. |
 | l8-settings-02 | mark | already built | Built: Customize is the home for plugins, skills and connectors. |
 | l8-settings-08 | mark | keep | Kept. |
