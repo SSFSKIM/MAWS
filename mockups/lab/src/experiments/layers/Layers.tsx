@@ -27,7 +27,7 @@ import { Home, Modules, SIDE_ROOM_MS, Tabs, Waiting, type SideData, type TabItem
 import { itemsOf, Transcript } from './Transcript';
 import { Settings } from './Settings';
 import { Board, Yours, type BoardForm, type Grouping } from './Overview';
-import { FilePage, type CodeGround, type DiffForm } from './File';
+import { FilePage, type CodeGround, type DiffForm, type Numbers } from './File';
 import './layers.css';
 
 /** The owner's ground candidates. A chip names a light and a dark value; the scheme picks which one is painted. */
@@ -434,7 +434,8 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const board: BoardForm = knobs.sessions === 'cards' ? 'cards' : 'rows';
   const by: Grouping = knobs.by === 'project' ? 'project' : 'state';
   const diff: DiffForm = knobs.diff === 'sides' ? 'sides' : 'inline';
-  const codeGround: CodeGround = knobs.code === 'sheet' ? 'sheet' : 'field';
+  const codeGround: CodeGround = knobs.code === 'field' ? 'field' : 'card';
+  const numbers: Numbers = knobs.numbers === 'pointed' ? 'pointed' : 'gutter';
 
   // The modules leave before the main space takes their room, and arrive after it has given it back.
   const [sideLaid, setSideLaid] = useState(sideOpen);
@@ -449,7 +450,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   // A session and its files share the side column. On the Overview the room on the right is taken while
   // something waits, by the one piece of glass that holds it.
   const side = scene === 'overview' ? board === 'rows' && waiting.length > 0 : (scene === 'session' || scene === 'file') && sideLaid;
-  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${here}:${board}:${by}:${diff}:${codeGround}`;
+  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${here}:${board}:${by}:${diff}:${codeGround}:${numbers}`;
   const pose = flags.get('pose') === 'inactive' ? 'inactive' : flags.get('pose') === 'active' ? 'active' : 'auto';
   const tier = flags.get('tier') === 'css' ? 'css' : 'webgpu';
   const dev = flags.has('dev');
@@ -484,6 +485,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-sideform={sideForm === 'modules' ? undefined : sideForm}
             data-board={scene === 'overview' ? board : undefined}
             data-diff={scene === 'file' ? diff : undefined}
+            data-code={scene === 'file' ? codeGround : undefined}
             style={
               {
                 '--xl-ground': ground,
@@ -555,6 +557,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               by={by}
               diff={diff}
               codeGround={codeGround}
+              numbers={numbers}
               card={flags.get('card') ?? (x.includes('card') ? 's2' : undefined)}
               waitFirst={flags.get('wait') ?? undefined}
               section={section}
@@ -615,6 +618,7 @@ interface ShellProps {
   by: Grouping;
   diff: DiffForm;
   codeGround: CodeGround;
+  numbers: Numbers;
 }
 
 /** Everything inside the window root. A component of its own so its hooks run inside the glass root. */
@@ -650,11 +654,22 @@ function Shell(p: ShellProps) {
     ) : scene === 'overview' ? (
       <Board live={p.live} by={p.by} form={p.board} />
     ) : scene === 'file' ? (
-      <FilePage body={p.file} diff={p.diff} ground={p.codeGround} scroller={refs.scroller} picked={p.picked} onPick={p.setPicked} />
+      <FilePage
+        body={p.file}
+        diff={p.diff}
+        ground={p.codeGround}
+        numbers={p.numbers}
+        start={p.flags.includes('mid') ? 'mid' : p.flags.includes('end') ? 'end' : 'top'}
+        scroller={refs.scroller}
+        picked={p.picked}
+        onPick={p.setPicked}
+      />
     ) : null;
   // Only a page that stands blocks on glass needs the root inside the column: a transcript always, the Overview
-  // when its sessions are cards, a file when it is on a sheet.
-  const blocks = material === 'glass' && (scene === 'session' || (scene === 'overview' && p.board === 'cards') || (scene === 'file' && p.codeGround === 'sheet'));
+  // when its sessions are cards, a file when it is a card.
+  const blocks = material === 'glass' && (scene === 'session' || (scene === 'overview' && p.board === 'cards') || (scene === 'file' && p.codeGround === 'card'));
+  // A file's card stands still in the window and the code moves inside it: the page itself does not scroll.
+  const still = scene === 'file' && p.codeGround === 'card';
 
   // On the Overview what waits is the page's own glass, so the capsule that stands for it is not drawn.
   const capsule = scene !== 'settings' && scene !== 'overview' && p.waiting.length > 0 && (
@@ -687,7 +702,7 @@ function Shell(p: ShellProps) {
       {/* ---- The main space: prose on the field, blocks standing over it ---- */}
       <main className="xl-main">
         {scrolls && (
-          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1} data-foot={scene === 'overview' ? 'none' : undefined}>
+          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1} data-foot={scene === 'overview' ? 'none' : undefined} data-still={still || undefined}>
             {blocks ? (
               <GlassRoot
                 asChild

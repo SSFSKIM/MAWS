@@ -10,8 +10,8 @@ export const experiment: Experiment = {
   notes: [
     'New, and first: the two pages that were missing. Press "Overview" in the pane (key 4) and the bucket.ts tab (key 5). Both are meant to be this same design at the product\'s other scale; say where they are not.',
     'Overview: twenty sessions, and one piece of glass. A session that is the agents\' business is one line on the field (unread first, then working, then at rest, told apart by the dot alone). The three that wait stand on glass at the top right: it is the orange capsule\'s list standing open, so Approve, the question\'s chips and the plan are answered there, one item open at a time. Answer one and watch it join the working lines; answer all three and the glass is gone. Rest on a line for where it runs.',
-    'A file: bucket.ts is the whole file read on the field, with no glass under it; what the session changed is a bar in the margin. In the side column press keys.ts or index.ts for a file with lines taken out, and for the marks beside the column that show where its changes are. Rest on a line for its number; press a line and the composer names it. The composer is the session\'s, one line until you click in it. Back in the session, rest on an edit\'s caption for the arrow that opens its file.',
-    'Four new switches, each with the form I chose first: sessions as lines or as cards; grouped by state or by project; code on the field or on a sheet; changes in the file or side by side.',
+    'A file, corrected: you said it was only floating text and to put it on glass so it is clearly a file card. It is one now (the bucket.ts tab, key 5): a card of glass with all four edges in view, the file\'s name as its top, numbered lines, and the code scrolling inside it. In the side column press keys.ts or index.ts for a file with lines taken out and the marks at the card\'s right edge that show where its changes are. Press a line and the composer names it. The look you saw before is still on the switch ("File: code", On the field).',
+    'Five switches for the two pages, the form at rest first: sessions as lines or as cards; grouped by state or by project; a file as a card of glass or on the field; line numbers in a gutter or on the pointed line only; changes in the file or side by side.',
     'This is the design as you have answered it so far: Warm paper, the orange disc for "waiting on you", the drawing blurred behind text, everything lined up on the reading column, the right column as a button that opens, the system face. Every earlier position is still one chip away below.',
     'New, and first: the suggested set from the Choices board is in. Your own message is a wash, not glass; thinking is the first row of the run it led to; an edit is a caption and a sheet of code; what runs is a capsule; agents are chips; the queued message waits above the composer; the model appears as you approach the composer; stop and send are two things; usage is one drop. Tell me what looks wrong.',
     'The three sessions that wait can be opened now. Press "Fix flaky upload test", "Billing webhook audit" or "Offline sync design" in the pane (or their tabs, or the arrow in the list the orange capsule opens). Each is answered in its own composer: Approve or Deny, the question\'s chips one question at a time, Approve for the plan. Typing is always the other answer.',
@@ -44,10 +44,19 @@ export const experiment: Experiment = {
     {
       id: 'code',
       label: 'File: code',
-      default: 'field',
+      default: 'card',
       options: [
+        { value: 'card', label: 'A card of glass' },
         { value: 'field', label: 'On the field' },
-        { value: 'sheet', label: 'On a sheet' },
+      ],
+    },
+    {
+      id: 'numbers',
+      label: 'File: line numbers',
+      default: 'gutter',
+      options: [
+        { value: 'gutter', label: 'In a gutter' },
+        { value: 'pointed', label: 'On the pointed line' },
       ],
     },
     {

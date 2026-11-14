@@ -962,13 +962,50 @@
 .x-layers .xl-src[data-form='sides'] .xl-src-text { display: block; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent); }
 .x-layers .xl-src[data-form='sides'] .xl-src-line[data-none]::before { background: repeating-linear-gradient(135deg, transparent 0 5px, rgb(var(--xl-ink-rgb) / 0.05) 5px 6px); }
 
-/* On a sheet: the other form of the Code switch. The transcript's sheet at the length of a file. */
-.x-layers .xl-src-sheet { margin-top: 6px; padding: 12px 18px 14px 30px; overflow: hidden; }
-.x-layers .xl-src-sheet .xl-src { margin: 0 0 0 -30px; padding-left: 30px; }
-.x-layers .xl-src-sheet .xl-src-line i { left: -17px; }
-.x-layers .xl-src-sheet .xl-src-line[data-sign='+'] i { background: var(--xl-add); }
-.x-layers .xl-src-sheet .xl-src-line[data-sign='-'] i { background: var(--xl-del); }
-.x-layers .xl-src-sheet .xl-src-line::before { inset: 0 -18px 0 -30px; border-radius: 0 !important; }
+/* The file as one object (the Code switch's first position, and what the owner asked for): a card of glass between
+   the tabs and the composer, as wide as both, with all four of its edges in the window. The page does not scroll;
+   the code does, inside the card, and thins out under the card's top and at its foot. A file shorter than the room
+   is a card as tall as the file. */
+.x-layers .xl-scroll[data-still] { overflow: hidden; mask-image: none; }
+.x-layers[data-scene='file'][data-code='card'] .xl-column {
+  height: 100%; min-height: 0; padding: calc(var(--vitrea-bar-inset-top, 46px) + 12px) 0 calc(var(--vitrea-bar-inset-bottom, 64px) + 12px);
+}
+.x-layers .xl-file[data-ground='card'] { display: flex; flex-direction: column; min-height: 0; }
+.x-layers .xl-file-card { display: flex; flex-direction: column; min-height: 0; border-radius: 20px; overflow: hidden; }
+/* Its top is the file's: the name, where it is, and what changed, set as a module's head is in the side column. */
+.x-layers .xl-file-top { flex: none; display: flex; align-items: baseline; gap: 7px; height: 44px; padding: 14px 18px 0 20px; font-size: 13px; line-height: 18px; color: var(--xl-fg3); white-space: nowrap; }
+.x-layers .xl-file-name { color: var(--xl-fg); font-weight: var(--xl-w-label); font-size: 14px; }
+.x-layers .xl-file-dir { flex: 1; min-width: 0; overflow: hidden; mask-image: linear-gradient(to right, #000 calc(100% - 16px), transparent); }
+.x-layers .xl-src-scroll {
+  flex: 1; min-height: 0; overflow: auto; scrollbar-width: none; outline: none; padding: 4px 0 14px;
+  /* It thins out under the card's top and at its foot, and before the rail at its right edge, so a line longer than
+     the card is not cut by the card's corner or drawn under the marks. */
+  mask-image: linear-gradient(to bottom, transparent, #000 10px, #000 calc(100% - 16px), transparent), linear-gradient(to right, #000 calc(100% - 46px), transparent calc(100% - 22px));
+  mask-composite: intersect; -webkit-mask-composite: source-in;
+}
+.x-layers .xl-file-card .xl-src { margin: 0; padding: 0; overflow: visible; width: max-content; min-width: 100%; }
+/* A line: its number in the gutter, the bar of its change, the code. A line taken out has no number and keeps its
+   wash from edge to edge of the card. */
+.x-layers .xl-file-card .xl-src-line { width: auto; padding: 0 26px 0 60px; }
+.x-layers .xl-file-card .xl-src-line::before { inset: 0; border-radius: 0; }
+.x-layers .xl-file-card .xl-src-line:not([data-sign='-'], [data-none]):hover::before, .x-layers .xl-file-card .xl-src-line[data-picked]::before { border-radius: 0; }
+.x-layers .xl-file-card .xl-src-line i { left: 46px; }
+.x-layers .xl-file-card .xl-src-line[data-sign='+'] i { background: var(--xl-add); }
+.x-layers .xl-file-card .xl-src-line[data-sign='-'] i { background: var(--xl-del); }
+.x-layers .xl-file-card .xl-src-no { left: 0; right: auto; width: 36px; text-align: right; opacity: 1; font-size: 11px; color: var(--xl-fg3); }
+.x-layers .xl-file-card .xl-src-line:is(:hover, [data-picked]) .xl-src-no { color: var(--xl-fg); }
+/* Side by side, a line taken out keeps its old number, on its wash: a step up (4.50 at night in the quiet ink). */
+.x-layers .xl-file-card .xl-src-line[data-sign='-'] .xl-src-no { color: var(--xl-fg2); }
+/* The Numbers switch's other position: no gutter, and a line's number is its own, at its end, when it is pointed at. */
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line { padding-left: 34px; }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line i { left: 18px; }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-no { left: auto; right: 22px; width: auto; opacity: 0; color: var(--xl-fg3); }
+.x-layers .xl-file[data-nums='pointed'] .xl-file-card .xl-src-line:is(:hover, [data-picked]) .xl-src-no { opacity: 1; }
+/* Before and after inside the card: two files side by side, each with its own numbers, and nothing moves sideways. */
+.x-layers .xl-file-card .xl-src[data-form='sides'] { width: 100%; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-pair { column-gap: 0; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-line { padding-right: 10px; }
+.x-layers .xl-file-card .xl-src[data-form='sides'] .xl-src-pair > :last-child { padding-right: 26px; }
 
 /* Where the changes are in the whole file: the same bars at the file's scale, beside the column, with the part of
    the file that is in the window as a soft shape behind them. */
@@ -977,6 +1014,8 @@
   left: calc(var(--xl-main-l) + (100vw - var(--xl-main-l) - var(--xl-main-r)) / 2 + var(--xl-file-col) / 2 + 12px);
   transition: left var(--xl-t-shell) var(--xl-ease); animation: xl-yours-in 400ms ease 200ms backwards;
 }
+/* Inside the card it stands at the card's right edge, the length of the code. */
+.x-layers .xl-rail[data-in='card'] { position: absolute; z-index: 1; left: auto; right: 9px; top: 52px; bottom: 16px; }
 .x-layers .xl-rail-seen { position: absolute; left: -3px; right: -3px; border-radius: 6px; background: rgb(var(--xl-ink-rgb) / 0.07); transition: top 80ms linear, height 80ms linear; }
 .x-layers .xl-rail-mark { position: absolute; left: 0.5px; width: 4px; border-radius: 2px; background: var(--xl-add-field); transition: transform var(--xl-t-pop) var(--xl-spring); }
 .x-layers .xl-rail-mark[data-sign='-'] { background: var(--xl-del-field); }

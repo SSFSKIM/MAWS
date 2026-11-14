@@ -12,7 +12,8 @@ section 15. Paper has four warmer neighbours (section 14), of which the owner ch
 has a fourth position with no drawing at all, Open's plain ground (section 16). Then the smaller parts of the
 session went to a board of alternatives (`../choices/`), the owner took its suggested set, and those forms are the
 design now: section 17, which is read over sections 2, 3 and 5. Last, the product's other scene and the second
-surface of the first were drawn in the same design, the Overview and a file's page: section 18. Sections 0 to 11 are the experiment as it was built, under what is now
+surface of the first were drawn in the same design, the Overview and a file's page: section 18, whose file page
+the owner then asked to be a card of glass (18.10). Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -327,7 +328,7 @@ given), `card=<id>` (that row's card) and `wait=<id>` (the list's open item).
 
 Section 18 adds four knobs, one per fork on its two pages, with the chosen form first: sessions on the Overview as
 lines or as cards (`sessions`), grouped by state or by project (`by`), a file's code on the field or on a sheet
-(`code`), its changes in the file or side by side (`diff`). And three aids: `file=keys.ts` (the file its tab
+(`code`; since 18.10 a card of glass or on the field, with `numbers` for a gutter or the pointed line only), its changes in the file or side by side (`diff`). And three aids: `file=keys.ts` (the file its tab
 holds), `line=35` (a line pointed at), `x=end`; `wait=<id>` also names the open item of the Overview's glass.
 
 ## 11. Rejected
@@ -1534,6 +1535,11 @@ finds it without help. *Three answers open at once* was drawn (it is what Cards 
 
 **Its question: how does code at length sit in a design whose rule is prose on the field and blocks on glass?**
 
+*The answer below is the first one, and the owner overruled it the same day: the file is a card of glass now
+(18.10). What follows is how the page was first drawn, and is still what the Code switch's second position shows
+(`code=field`). The paragraphs on the change marks, on pointing at a line and on the session beside the file hold
+for both.*
+
 *It is read on the field, as prose is.* The sheet an edit stands on in the transcript is a passage lifted out of
 its file, and it needs an edge because prose runs above and below it. Opened as a tab the passage is back in its
 file, and a file has nothing to be told apart from: so the glass is gone and the code lies on the field at the
@@ -1566,10 +1572,13 @@ under the file.
 
 ### 18.5 The file page's forks
 
-**On the field, against on a sheet** (the "File: code" switch; `code=sheet`). The sheet is the transcript's
-block at a file's length, so it is the form that looks most like what was there. Besides the reasons above it
-costs 48 px of every line to its padding, which at 1280 by 800 with both panes open is the difference between 79
-columns and 72.
+**A card of glass, against on the field** (the "File: code" switch; `code=field`). As first built this fork read
+"on the field, against on a sheet", with the field chosen: the sheet was the transcript's block at a file's
+length, with its caption outside it and no foot, and it cost every line 48 px. The owner chose glass, and the
+card of 18.10 is what the sheet should have been. The field is kept as the switch's second position.
+
+**Numbers in a gutter, against on the pointed line only** (the "File: line numbers" switch;
+`numbers=pointed`). 18.10.
 
 **In the file, against side by side** (the "File: changes" switch; `diff=sides`). Side by side shows what was
 there beside what is, row against row, with the gaps hatched. It needs two columns of code: its column takes all
@@ -1674,6 +1683,104 @@ measured: both pages in the receded pose, on the CSS tier, under Paper and under
 - `src/lab/types.ts`, `src/lab/Lab.tsx`: two more scenes, their labels, keys 1 to 9. `BRIEF.md`: the two scenes
   named. `src/content/fixtures.ts`: `fleet`, `fileBodies` (additions).
 
+### 18.10 The owner's correction: the file is a card
+
+Added 2026-11-14, after the owner saw 18.4. Their words: "good -- for file editor, let's just make it look more
+like a file -- currently it's only floating texts. perhaps put the on the glass so that it's clear file card".
+They were looking at the file read on the field: a caption, then code lying on the warm ground with a green bar
+beside it and the drawing showing through under its last lines. 18.4 argued that a file needs no edge because it
+has nothing to be told apart from. The owner's eye says otherwise, and it is right about what was lost: with no
+edge, no numbers and no end, nothing on the page said "this is a file" except the tab. So the file is a card of
+glass now, and that is the Code switch's first position; the file on the field is its second (`code=field`), as
+it stood. The sheet of 18.5, which had the same glass and none of what follows, is gone from the switch.
+
+**What makes it a file and not a tinted area behind text.** The earlier sheet failed at exactly this: its caption
+stood outside it, it ran out under the composer with no bottom, and its lines had no numbers.
+
+- *All four edges are in the window.* The card stands still between the tabs and the composer, 12 px from each,
+  and the code moves inside it. The page itself does not scroll. A file shorter than the room is a card as tall as
+  the file, with the field under it; a longer one fills the room.
+- *The file's name is the card's own top.* Name, where it is, and the counts at the right end, set the way a
+  section's head is set in the side column. They stay while the code moves under them.
+- *Lines are numbered, in a gutter.* 18.4 gave a number only to the line pointed at, to save a column of sixty
+  numbers. That saving is what the owner read as floating text: numbers are one of the marks of a file. They are
+  in the quiet ink at 11 px, a line taken out has none (it is not in the file), and the line pointed at has its
+  number in the full ink. The earlier rule is the Numbers switch's second position (`numbers=pointed`).
+- *It is the transcript's sheet, grown.* The same glass, the same thickness, the same setting for code (12 on
+  20), the same bar for a run of changed lines and the same wash under a line taken out, now from edge to edge of
+  the card. Its corner is 20 where the sheet's is 18, as the side column's is: it is a surface of the window's
+  size, not a block in a column.
+
+**Where the rest went.**
+
+- *The bars* are between the gutter and the code, as in the sheet. *The rail* is inside the card at its right
+  edge, the length of the code, and its soft shape is now the card's own window on the file; so it is also what
+  says there is more file than card, and for that reason a file that is new from end to end keeps the rail with
+  no marks on it.
+- *Width.* The card is the reading column: its left edge is the tabs' and the composer's, its right edge the
+  composer's and the waiting capsule's. At 1280 by 800 with both panes open that is 572 px, of which the gutter
+  takes 60 and the rail's margin 46: 64 columns of code clear of the fade, where the field form has 79. At 1440
+  and above it is 744 px and 88 columns (103 on the field). A line longer than that thins out before the rail,
+  and the code moves sideways inside the card.
+- *Side by side* is two files in the one card, each with its own numbers and its own bars, the gaps hatched. The
+  card then takes all the room there is, as its column did before.
+- *Scrolling.* Because the card stands still, its glass is never asked to pass under the tabs or the composer,
+  which is the one thing the glass library cannot cut for a block inside a scroller (17.5). Inside, the code thins
+  out over 10 px under the card's top and 16 at its foot.
+- *The composer* is as before: one line at rest, whole under the caret or when its session waits; the card gives
+  up the height it takes.
+
+**Glass that is content.** Section 8 already records that this design puts content on glass against the
+guideline; this is the largest case of it, a surface of up to 744 by 1000 px holding nothing but text. What made
+it safe to do: the card's level is flat. Over the blurred drawing, at every size and in both schemes, the tenth
+and ninetieth percentile of its drawn level are within 0.05 of each other (0.91 to 0.96 by day, 0.21 to 0.26 at
+night), so a line at the foot of the card reads as a line at its top does. Glass did not fail anywhere it was measured, and nothing nearer had to be built.
+
+**Readings.** `measure.mjs`, Warm paper, the defaults, 1280 by 800, 1440 by 900 and 1728 by 1117; 22 routes at
+each: the card with a new file, a changed one at its top, mid-file with a line pointed at, at its end, a second
+changed one, a waiting session's, side by side at the top and at the end of another file, with the numbers on the
+pointed line only, and the field form twice; each in both schemes. 66 routes, 10,008 gated
+readings. Four were under their floor, one thing: side by side at night, a line taken out keeps its old number,
+and on the red wash that number read 4.50 in the quiet ink (at 1280 and at 1440; 4.51 at 1728). It is the second
+ink there now, and the four side-by-side routes were measured again at the three sizes (2,272 readings): none
+under.
+
+| on the card | light | dark |
+|---|---|---|
+| code, its lowest line | 7.25: a line taken out, in the second ink on its wash (15.4 in the full ink) | 5.56: the same (9.5 in the full ink) |
+| a line's number in the gutter | 5.74 | 5.19 |
+| where the file is, beside its name | 5.96 | 5.30 |
+| the counts | 5.70 (removed), 5.95 (added) | 6.06 (removed), 6.78 (added) |
+| the card's drawn level | 0.91 to 0.96 | 0.21 to 0.26 |
+
+Diagnostics with `dev=1`: none. The one that was by design on every page with a glass root in its column
+(`backdrop-root-at-container`) is not raised here, because the page no longer fades anything.
+
+**Not good about it.**
+
+- **Fifteen columns fewer.** 64 where the field form had 79 at 1280 by 800 with both panes open, 88 where it had
+  103 from 1440: the gutter and the rail's margin are paid on every line. At 1280 the longest lines of every file
+  here run into the fade; closing either pane gives them back.
+- **Two scrollers on one page are now one, but it is the inner one.** The wheel moves the code only while the
+  pointer is over the card. Over the field beside it nothing moves.
+- **The card of a short file stops where the file does**, so two files of different lengths give cards of
+  different heights when one replaces the other in the tab. It was not watched in motion.
+- **A flat sheet of glass this large shows little of what glass is.** It reads as a warm white card with a lit
+  rim; the lens has nothing to bend but a blurred drawing. Under the Painted form's "Everywhere" position the
+  drawing's line would pass behind code: not looked at.
+- **Side by side on a wide window is wider than the composer and the tabs**, which stay on the reading column:
+  the one place where the card and the column part.
+- **Still one ink.** Syntax colour is the next pass; on this card it would stand on a flat level, which is a
+  better place for it than the field was.
+- Measured under Warm paper only; seen at rest and in stills only.
+
+**What changed in the code.** `File.tsx`: the card (`xl-file-card`: its top, the scroller inside it, the rail
+inside it), the old line numbers for the "before" side, `Numbers`; the sheet form is gone. `Layers.tsx`: `code`
+defaults to the card, `numbers`, the page stands still under the card (`data-still`), and `x=mid` and `x=end`
+place the card's own scroll. `layers.css`: the card's rules in section 18's block, in place of the sheet's.
+`measure.mjs`: on a page that stands still, the faded bands are the card's own. `meta.ts`: the Code switch's
+positions, the Numbers switch, the note.
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -1739,9 +1846,10 @@ What the real renderer would need, against "The app today" in the brief.
   request card's own controls through the slot the cards use now, one open at a time. The board's keyboard model
   (one tab stop, arrows across cards) becomes arrows down a list. The toolbar's "needs you" count is not drawn
   while the Overview is open.
-- **A file's page** (section 18). The viewer and the diff tab become one surface: the file with its changes in
-  it, change bars in a margin that is inside the scrolling element, line numbers drawn for the pointed line only,
-  and a rail fed by the diff's hunks. The editor's own gutter, its themes and its merge view have to be brought
+- **A file's page** (section 18, as corrected in 18.10). The viewer and the diff tab become one surface: a glass
+  card registered in the shell's root (it stands still, so it needs no root inside a scroller), with the file's
+  name as its top, a scroller inside it holding the file with its changes, a gutter of line numbers, change bars
+  between the gutter and the code, and a rail at its right edge fed by the diff's hunks. The editor's own gutter, its themes and its merge view have to be brought
   to the same margin and the same two hues, and its syntax colours measured on the field. The session's composer
   is mounted on the file's page with a collapsed state, and an anchored line becomes a chip in it; the side
   column is kept mounted across a session and its files so that it does not leave and return.

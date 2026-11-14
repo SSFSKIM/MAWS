@@ -568,3 +568,9 @@ schemes.
   whenever glass overlaps it.
 - **Accessibility.** An app-level Reduce Transparency switch (the engine cannot always answer that query), and a
   pass over the authored fills under forced colours, which this lab wrote rules for and did not verify.
+
+## 11. Retired (2026-11-14)
+
+The owner retired Open ("retire it"). Layers is the one design that gets further work. What Layers took from Open:
+the alignment on the reading column and the round button that opens into one panel. Open's plain ground was not
+taken: the owner chose the blurred drawing. This folder stays as a record and is not maintained.

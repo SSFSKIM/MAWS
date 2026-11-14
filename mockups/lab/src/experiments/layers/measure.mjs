@@ -63,6 +63,14 @@ function collect() {
   const scroller = root.querySelector('.xl-scroll, .xl-page');
   const edgeOf = (el, r) => {
     if (!scroller || !scroller.contains(el)) return false;
+    // A page that stands still (a file's card) fades nothing itself; the card's own scroller fades its first 10 px
+    // and its last 16.
+    if (scroller.dataset.still !== undefined) {
+      const inner = el.closest('.xl-src-scroll');
+      if (!inner) return false;
+      const i = inner.getBoundingClientRect();
+      return r.top < i.top + 10 || r.bottom > i.bottom - 16;
+    }
     const b = scroller.getBoundingClientRect();
     const cs = getComputedStyle(scroller);
     const t = parseFloat(cs.getPropertyValue('--vitrea-bar-inset-top')) || 46;
