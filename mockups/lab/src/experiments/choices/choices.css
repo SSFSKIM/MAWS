@@ -73,12 +73,15 @@
 .x-choices[data-layout='grid'] .xc-page { display: grid; grid-template-columns: repeat(2, minmax(0, 520px)); gap: 30px 56px; align-items: end; align-content: center; min-height: 100%; padding-bottom: 96px; }
 .x-choices[data-layout='grid'] .xc-tag, .x-choices[data-layout='row'] .xc-tag { margin-bottom: 12px; }
 /* Where a thing opens upward, its tag stands under it, as a caption does, and the room above is the menu's. */
-.x-choices:is([data-layout='grid'], [data-part='usage'], [data-part='menu']) .xc-variant { display: flex; flex-direction: column; }
-.x-choices:is([data-layout='grid'], [data-part='usage'], [data-part='menu']) .xc-tag { order: 2; margin: 12px 0 0; }
+.x-choices:is([data-layout='grid'], [data-layout='ask'], [data-part='usage'], [data-part='menu']) .xc-variant { display: flex; flex-direction: column; }
+.x-choices:is([data-layout='grid'], [data-layout='ask'], [data-part='usage'], [data-part='menu']) .xc-tag { order: 2; margin: 12px 0 0; }
+.x-choices[data-layout='ask'] .xc-tag { margin-top: 10px; }
 .x-layers.x-choices:is([data-part='model'], [data-part='context']) .xc-page { row-gap: 214px; align-content: start; padding-top: 204px; padding-bottom: 24px; }
 .x-layers.x-choices[data-part='menu'] .xc-page { column-gap: 28px; }
 .x-choices[data-part='menu'] .xc-variant { width: 244px; }
-.x-choices:is([data-layout='grid'], [data-layout='row']) .xc-tag-name small { display: inline; margin-left: 8px; }
+.x-choices:is([data-layout='grid'], [data-layout='row'], [data-layout='ask']) .xc-tag-name small { display: inline; margin-left: 8px; }
+/* ask: the two "needs you" parts. Above, what the waiting capsule's list would hold; below, what the session holds. */
+.x-layers.x-choices[data-layout='ask'] .xc-page { display: grid; grid-template-columns: repeat(2, minmax(0, 520px)); gap: 22px 56px; align-items: end; padding: 6px 0 10px; }
 /* row: small things side by side */
 .x-choices[data-layout='row'] .xc-page { display: flex; flex-wrap: wrap; gap: 36px 40px; align-items: flex-end; align-content: center; min-height: 100%; padding-bottom: 96px; }
 
@@ -94,6 +97,10 @@
 .x-choices .xc-pane-clip > .xl-pane-in { width: var(--xl-pane-w); transition: opacity 200ms ease; }
 .x-choices .xc-picked { flex: none; width: 28px; margin-right: 3px; text-align: center; font: 600 12px/1 var(--xl-font); color: var(--xl-fg2); }
 .x-choices .xc-count { padding-right: 8px; color: var(--xl-fg3); font-size: 12px; }
+
+/* Sixteen rows in six groups: the groups stand a little closer than in a session's pane, so the index needs no scroll. */
+.x-choices .xl-pane .xl-group { margin-top: 8px; }
+.x-choices .xl-pane .xl-group-head { height: 26px; }
 
 /* ---- the person's own message ------------------------------------------------------------------------------------------ */
 
@@ -228,6 +235,7 @@
 .x-choices .xc-stop-ghost { color: var(--xl-fg2); }
 /* a tooltip held open while the page shows everything opened */
 .x-choices [data-tip][data-shown]::after { opacity: 1; transform: translate(-50%, 0) scale(1); }
+.x-choices [data-tip][data-shown]:is([data-tip-at='above-start'], [data-tip-at='above-end'], [data-tip-at='end'])::after { transform: translate(0, 0) scale(1); }
 
 
 /* ---- the usage mark ---------------------------------------------------------------------------------------------------------- */
@@ -301,3 +309,67 @@
 @media (width < 1180px) {
   .x-choices[data-layout='grid'] .xc-page { grid-template-columns: minmax(0, 520px); }
 }
+
+/* ---- a question, a plan: what waits for you ------------------------------------------------------------------------ */
+
+/* The capsule's list, standing in the page: Layers' platter and item, held still. */
+.x-choices .xc-platter.xl-pop { position: relative; z-index: auto; animation: none; transition: none; user-select: none; }
+.x-choices .xc-platter .xl-wait-item:hover { background: none; }
+.x-choices .xc-done { display: inline-flex; align-items: center; gap: 6px; height: 30px; color: var(--xl-fg2); font-size: 13px; font-weight: 520; animation: xc-fade-in 240ms ease; }
+.x-choices .xl-btn:disabled { color: var(--xl-fg3); background: var(--xl-well); box-shadow: none; }
+
+/* the question's parts, shared by the card, the form and the composer */
+.x-choices .xc-q-form { margin-top: 12px; }
+.x-choices .xc-q + .xc-q { margin-top: 12px; }
+.x-choices .xc-q-ask { margin: 0 2px 7px; color: var(--xl-fg); font-size: 13px; line-height: 18px; font-weight: 540; }
+/* A chip keeps its width when chosen, so a row of them never re-wraps under the pointer: the choice is a ring of the
+   ink and a wash, not a tick. The corner says the kind, as the marks of D do: squarer for "any of these". */
+.x-choices .xc-chip { position: relative; color: var(--xl-fg2); }
+.x-choices .xc-chip[data-multi] { border-radius: 10px; }
+.x-choices .xc-chip:hover { color: var(--xl-fg); background: var(--xl-hover); }
+.x-choices .xc-chip[aria-pressed='true'] { color: var(--xl-fg); background: color-mix(in srgb, var(--xl-fg) 8%, transparent); box-shadow: inset 0 0 0 1.5px var(--xl-fg); }
+.x-choices .xc-q-other { display: block; flex: none; width: 100%; margin-top: 12px; }
+/* D: a row per option, its sentence under its label; a square for "any of these", a circle for "one of these" */
+.x-choices .xc-q-sheet { padding: 14px 12px 12px; user-select: none; }
+.x-choices .xc-q-sheet .xc-q-form { margin-top: 0; }
+.x-choices .xc-q-sheet .xc-q-ask { margin: 0 8px 4px; font-size: 14px; line-height: 20px; font-weight: 560; }
+.x-choices .xc-q-sheet .xc-q + .xc-q { margin-top: 10px; }
+.x-choices .xc-opt { display: flex; align-items: flex-start; gap: 11px; width: 100%; padding: 5px 8px; border-radius: 13px; text-align: left; transition: background-color var(--xl-t-hover); }
+.x-choices .xc-opt:hover { background: var(--xl-hover); }
+.x-choices .xc-opt-mark { flex: none; display: grid; place-items: center; width: 17px; height: 17px; margin-top: 2px; border-radius: 50%; color: var(--xl-on-solid); box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xl-fg) 34%, transparent); transition: background-color var(--xl-t-hover), box-shadow var(--xl-t-hover); }
+.x-choices .xc-opt-mark svg { opacity: 0; transform: scale(0.6); transition: opacity var(--xl-t-hover), transform var(--xl-t-pop) var(--xl-spring); }
+.x-choices .xc-opt[aria-checked='true'] .xc-opt-mark svg { opacity: 1; transform: none; }
+.x-choices .xc-opt-mark[data-multi] { border-radius: 6px; }
+.x-choices .xc-opt[aria-checked='true'] .xc-opt-mark { background: var(--xl-solid); box-shadow: none; }
+.x-choices .xc-opt-text { flex: 1; min-width: 0; color: var(--xl-fg); font-size: 14px; line-height: 20px; }
+.x-choices .xc-opt-text small { display: block; color: var(--xl-fg3); font-size: 13px; line-height: 18px; }
+.x-choices .xc-q-sheet .xc-q-other { width: calc(100% - 16px); margin: 10px 8px 0; }
+.x-choices .xc-q-sheet .xl-ask-acts { margin: 10px 2px 0; }
+/* C: the question rides in the composer, over the field it is answered in */
+.x-choices .xc-q-bar { display: flex; align-items: center; gap: 10px; padding: 13px 16px 0 20px; }
+.x-choices .xc-q-bar .xc-q-ask { flex: 1; margin: 0; font-size: 14px; line-height: 20px; }
+.x-choices .xc-q-dots { display: inline-flex; gap: 2px; }
+.x-choices .xc-q-dots button { position: relative; width: 14px; height: 20px; }
+.x-choices .xc-q-dots button::after { content: ''; position: absolute; left: 4px; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: color-mix(in srgb, var(--xl-fg) 26%, transparent); transition: background-color var(--xl-t-pop), transform var(--xl-t-pop) var(--xl-spring); }
+.x-choices .xc-q-dots button[aria-current]::after { background: var(--xl-fg); transform: scale(1.15); }
+.x-choices .xc-q-chips { padding: 9px 14px 0 17px; animation: xc-row-in 280ms var(--xl-ease-open); }
+
+/* the plan's parts */
+.x-choices .xc-steps { margin: 0; padding: 0; list-style: none; counter-reset: xc-step; }
+.x-choices .xc-steps li { position: relative; padding: 3px 0 3px 26px; counter-increment: xc-step; }
+.x-choices .xc-steps li::before { content: counter(xc-step); position: absolute; left: 0; width: 16px; text-align: right; color: var(--xl-fg3); font-variant-numeric: tabular-nums; }
+.x-choices .xc-steps-card { margin: 10px 2px 0; color: var(--xl-fg); font-size: 13px; line-height: 18px; }
+.x-choices .xc-steps-card li { padding: 2px 0 2px 24px; }
+.x-choices .xc-plan-why { margin: 12px 0 0; }
+.x-choices .xc-plan-title { font: 620 15px/22px var(--xl-font); letter-spacing: -0.003em; color: var(--xl-fg); }
+/* D: a document on glass, which is prose on glass: Layers keeps prose off it everywhere else */
+.x-choices .xc-plan-sheet { padding: 16px 20px 14px; color: var(--xl-fg); font-size: 14px; line-height: 21px; }
+.x-choices .xc-plan-sheet .xc-plan-p { margin-top: 8px; text-wrap: pretty; }
+.x-choices .xc-plan-sheet .xc-steps { margin-top: 10px; }
+.x-choices .xc-plan-sheet .xl-ask-acts { margin-top: 12px; }
+/* C: the agent's own prose, on the field, and a composer whose one action is the decision */
+.x-choices .xc-plan-prose { margin-top: 0; }
+.x-choices .xc-plan-prose p + p { margin-top: 8px; }
+.x-choices .xc-plan-prose .xc-steps { margin-top: 10px; }
+.x-choices .xc-plan-composer { margin-top: 18px; }
+.x-choices .xc-plan-go { height: 32px; margin-left: 4px; padding: 0 15px; border-radius: 16px; }

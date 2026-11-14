@@ -16,6 +16,7 @@ import { BoardCtx, ClipCtx, type Board } from './board';
 import { ComposerPage } from './composer';
 import { GroundPage, paintBands } from './ground';
 import { MenuPage, PanePage, UsagePage, type PaneMotion } from './motion';
+import { PlanPage, QuestionPage } from './needs';
 import { GROUNDS, JUDGED, PARTS, partOf, SUGGESTED, type PartDef } from './parts';
 import { Together } from './together';
 import { AgentsPage, CommandPage, DiffPage, MessagePage, ThoughtPage } from './transcript';
@@ -119,6 +120,15 @@ function Scroller({ children, part }: { children: React.ReactNode; part: string 
     if (el) el.scrollTop = 0;
     kick(600);
   }, [part, kick, el]);
+  // A block that is moved by a neighbour's growth keeps its own size, which its observer does not report; the
+  // page's own box does change, so the glass is told to follow from that.
+  useEffect(() => {
+    const page = el?.firstElementChild;
+    if (!page) return;
+    const ro = new ResizeObserver(() => kick(360));
+    ro.observe(page);
+    return () => ro.disconnect();
+  }, [el, part, kick]);
   return (
     <div className="xc-scroll" ref={setEl} onScroll={() => kick(160)} tabIndex={-1}>
       <ClipCtx.Provider value={el}>{children}</ClipCtx.Provider>
@@ -383,6 +393,10 @@ function Page({ part, play }: { part: PartDef; play: (how: PaneMotion) => void }
     case 'context':
     case 'send':
       return <ComposerPage />;
+    case 'question':
+      return <QuestionPage />;
+    case 'plan':
+      return <PlanPage />;
     case 'usage':
       return <UsagePage />;
     case 'pane':
@@ -402,6 +416,7 @@ function Index({ part, picks, rail }: { part: PartDef; picks: Record<string, str
   const groups = [
     ['Transcript', 'Transcript'],
     ['Composer', 'Composer'],
+    ['Needs you', 'Needs you'],
     ['Pane', 'Pane'],
     ['Window', 'Window'],
     ['Sum', 'Your picks'],

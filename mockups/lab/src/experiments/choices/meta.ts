@@ -15,6 +15,7 @@ export const experiment: Experiment = {
     'Parts with something behind a click have a switch at the top right, At rest and Opened, that opens every variant at once (key O). Motion parts have Replay (key R).',
     'Dark ground: the Ground page shows Paper\'s own against the four candidates in one window; the knob below repaints the whole board on any one of them.',
     'Together, last in the pane, sets one transcript and its composer in the letters picked so far; its switch compares them with Layers today and with the builder\'s suggestion (DESIGN.md).',
+    'Needs you: a question and a plan, the two waiting states no round had drawn. Each page shows, above, what the waiting capsule\'s list would hold and, below, what the session would hold; choose where each is answered.',
     'Not judged here: anything the owner already chose (pane, tabs, the composer as a whole, the tool-run summary, the approval, settings).',
   ],
   scenes: ['session'],

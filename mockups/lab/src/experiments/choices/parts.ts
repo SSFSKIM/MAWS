@@ -5,13 +5,13 @@ export interface PartDef {
   id: string;
   /** The name in the index and at the head of its page. */
   name: string;
-  group: 'Transcript' | 'Composer' | 'Pane' | 'Window' | 'Sum';
+  group: 'Transcript' | 'Composer' | 'Needs you' | 'Pane' | 'Window' | 'Sum';
   /** Variant names in order; the letter is the position. */
   variants: string[];
   /** A few words under a name, where a variant shows nothing of itself at rest. A's note is always "today". */
   notes?: (string | null)[];
   /** How its page is laid out: full-width things stacked in the reading column, or smaller things side by side. */
-  layout: 'stack' | 'grid' | 'row' | 'bands' | 'column';
+  layout: 'stack' | 'grid' | 'ask' | 'row' | 'bands' | 'column';
   /** A motion part plays, and can be replayed. */
   motion?: boolean;
   /** Parts with something behind a click or a hover can be shown opened, all at once. */
@@ -28,6 +28,16 @@ export const PARTS: PartDef[] = [
   { id: 'model', name: 'Model picker', group: 'Composer', layout: 'grid', opens: true, variants: ['Chip', 'On approach', 'Spelled out', 'Behind the plus'], notes: [null, 'there on hover or focus', null, null] },
   { id: 'context', name: 'Context mark', group: 'Composer', layout: 'grid', opens: true, variants: ['Ring', 'Away', 'On the chip', 'Number'], notes: [null, 'in the menu until nearly full', null, null] },
   { id: 'send', name: 'Send and stop', group: 'Composer', layout: 'grid', variants: ['One solid button', 'Hollow stop', 'Two buttons'] },
+  {
+    id: 'question', name: 'A question', group: 'Needs you', layout: 'ask', opens: true,
+    variants: ['A line in the list', 'In the card', 'In the composer', 'A form in the transcript'],
+    notes: [null, 'answered from the capsule, as the approval is', 'one at a time; typing is the other answer', 'every sentence in sight'],
+  },
+  {
+    id: 'plan', name: 'A plan', group: 'Needs you', layout: 'ask', opens: true,
+    variants: ['A line in the list', 'In the card', 'Prose, and the composer', 'A document in the transcript'],
+    notes: [null, 'its steps, approved from the capsule', 'the composer holds the decision', 'on glass, with its own buttons'],
+  },
   { id: 'usage', name: 'Usage mark', group: 'Pane', layout: 'row', opens: true, variants: ['Two rings', 'One drop', 'Time left'], notes: [null, 'the nearer limit', 'until the five-hour reset'] },
   { id: 'pane', name: 'Pane collapse', group: 'Pane', layout: 'row', motion: true, variants: ['Slides away', 'Folds to a rail', 'Melts into its button'] },
   { id: 'menu', name: 'Menu motion', group: 'Window', layout: 'row', motion: true, variants: ['Grows from its corner', 'Unrolls', 'Becomes the menu', 'Glass'], notes: [null, null, null, "the library's platter"] },
@@ -40,7 +50,7 @@ export const JUDGED = PARTS.filter((p) => p.id !== 'together');
 
 /** The builder's own letters (DESIGN.md §2), shown only on the Together page, beside today's and the owner's. */
 export const SUGGESTED: Record<string, string> = {
-  message: 'B', thought: 'C', diff: 'C', command: 'C', agents: 'B', queued: 'B', model: 'B', context: 'B', send: 'C', usage: 'B', pane: 'A', menu: 'A', ground: 'A',
+  message: 'B', thought: 'C', diff: 'C', command: 'C', agents: 'B', queued: 'B', model: 'B', context: 'B', send: 'C', question: 'C', plan: 'C', usage: 'B', pane: 'A', menu: 'A', ground: 'A',
 };
 
 export const partOf = (id: string | undefined): PartDef => PARTS.find((p) => p.id === id) ?? PARTS[0]!;

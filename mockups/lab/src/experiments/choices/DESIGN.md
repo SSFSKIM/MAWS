@@ -3,7 +3,8 @@
 Record for `choices` (order 0.5, directly after Layers). The contract is `mockups/lab/BRIEF.md` and
 `mockups/lab/ROUND2.md`; the style it stands in is `../layers/DESIGN.md`, sections 0 to 12, under the Paper
 colouring. Variant names live in `parts.ts`, the frame in `board.tsx` and `Choices.tsx`, the variants in
-`transcript.tsx`, `composer.tsx`, `motion.tsx`, `ground.tsx` and `together.tsx`, their styles in `choices.css`.
+`transcript.tsx`, `composer.tsx`, `needs.tsx`, `motion.tsx`, `ground.tsx` and `together.tsx`, their styles in
+`choices.css`.
 
 ## 0. What this is
 
@@ -27,7 +28,7 @@ everything the board adds stays outside it.
 
 - **One window in the Layers style.** The same field (Paper's picture, painted by Layers' own painter), the same
   glass runtime with the same settings, Layers' stylesheet, Layers' pane. The pane is the index of parts; the main
-  space holds one part with all its variants together. Thirteen pages in four groups, and a fourteenth, Together.
+  space holds one part with all its variants together. Fifteen pages in five groups, and a sixteenth, Together.
 - **Paging: one part per page, not one long page.** Three reasons. A page's variants fit one window at 1440 by 900,
   so comparing needs no scrolling and no memory. The glass runtime carries a page's four to six surfaces easily,
   where thirty on one page would not be the app's own condition. And the part is in the address
@@ -36,7 +37,9 @@ everything the board adds stays outside it.
   the side column open (680 wide, centred between the pane and where the modules would be), so a block is over the
   same part of the field as in the app. Their tags stand to the right, where the modules would be. Composer parts
   are whole composers, two abreast at 520 wide (the composer is as wide as its column, which is that narrow in a
-  smaller window; every control in it is at its own size). Small parts stand side by side.
+  smaller window; every control in it is at its own size). Small parts stand side by side. The two "needs you"
+  parts (2.14, 2.15) take a page of four each: above, what the waiting capsule's list would hold, as Layers' own
+  platter at its own 348 px; below, what the session would hold, at the 520 px the composers use.
 - **A tag per variant**, outside the thing judged: a letter in a ring, a plain name, and where a variant shows
   nothing of itself at rest, a few words. Clicking a tag marks the pick: the ring fills, the letter appears on the
   part's row in the pane, and the button in the pane's foot copies all picks as one line ("your message B, diff C").
@@ -51,7 +54,7 @@ everything the board adds stays outside it.
   out as the session is (Layers' scroller, column and scroll rule; the composer at the foot of the window; read from
   its end). A switch chooses the set: Yours (the picks so far, A where nothing is picked), Today (all A, which is
   Layers' session as it stands) and Suggested (the picks of section 2). It is there because letters interact: a
-  tinted message and a dashed waiting message are one decision seen twice, and the sum of thirteen small removals is
+  tinted message and a dashed waiting message are one decision seen twice, and the sum of many small removals is
   only visible in one column. The board shows the builder's picks nowhere else.
 - **Both schemes.** D flips the scheme, as everywhere in the lab. Every variant was looked at and measured in both.
   The Ground page has different candidates in each scheme, so it keeps a letter for each.
@@ -224,15 +227,52 @@ In the light scheme the page shows three: Paper's ivory `#e8e1db` (glass 1.14:1 
 and `#ffffff` (1.02:1). It is Layers' finding (its section 12.2) in one picture: on white a glass block is its
 shadow and nothing else.
 
+### 2.14 A question (found; drawn on a second pass)
+
+A session waits on a question: one or several, each with a few options (a short label and a sentence), some of them
+"any of these", and always the option of answering in one's own words. It is a "needs you" state, as the approval
+is, and the owner already chose how the approval is found and answered: the waiting capsule at the top right opens
+a list in which it is answered in place, and the waiting row in the pane opens the same card. So each variant is
+also a statement about that capsule.
+
+| | argues | costs | beside the approval |
+|---|---|---|---|
+| **A A line in the list** (today) | What Layers implies: the capsule's list shows the session's one line, "Which events should retry?". | Nothing can be answered anywhere. The list says a question waits and stops there. | Found exactly as the approval is; not answered as it is. |
+| **B In the card** | A question is answered where the approval is: the list's item opens into the questions, each with its options as chips (labels only, the sentence on hover; squarer chips for "any of these", round ones for "one of these"; a chosen chip takes a ring of the ink and keeps its width), a field for "Something else", and Send. No visit to the session. | A form in a 348 px platter. The sentences that explain an option are a hover away, and the agent's reasoning above the question is a visit away. | The same place and the same gesture. The approval's card has two buttons; this one has five chips, a field and a button. |
+| **C In the composer** | Answering is replying, so the composer asks: one question at a time over the field, its options as chips, dots for how many. Typing is the "other" answer, which therefore needs no control of its own. Send goes to the next question, then sends. | One question in sight at a time; the sentences are a hover away. | The capsule and the row find it (A's line); the session answers it, with its transcript in view. One click more than the approval. |
+| **D A form in the transcript** | Everything in sight: every option a row with its sentence under its label, a square for "any of these", a circle for "one of these", the field, Send. The last block of the transcript. | The largest block the transcript has, all words, and it scrolls away with the transcript. | As C, and it has to be scrolled to. |
+
+**Pick: C,** with B as its remote: they are one component (chips, a field, Send) shown in two places, as the
+approval's two buttons are, so a short question can be answered from anywhere and any question in its session. D is
+the fallback for the question whose options cannot be told apart without their sentences.
+
+### 2.15 A plan (found; drawn on a second pass)
+
+A session waits with a plan: a document (here two paragraphs and five steps) that the agent wants approved before
+it acts. The person approves it, or sends it back with a comment.
+
+| | argues | costs | beside the approval |
+|---|---|---|---|
+| **A A line in the list** (today) | What Layers implies: "Plan is ready for review". | Nothing to read and nothing to approve. | Found as the approval is; not answered. |
+| **B In the card** | The steps are the part of a plan a person scans, so the card holds the steps and two buttons, Send back and Approve; Send back opens one field for the reason, in place. | It invites approving a plan whose paragraphs were never on screen. | The approval's card exactly: what will happen, then two answers. |
+| **C Prose, and the composer** | A plan is the agent's own prose, and Layers reads prose on the field, never on glass: a heading line, the paragraphs, a numbered list. The decision is the composer's one action: Approve while the field is empty; type, and the same button is Send back, with what was typed as the reason. | Approve lives in the composer, where a person does not expect a decision the first time. Nothing marks the plan as a thing apart from the answer above it but its heading. | The capsule and the row find it; the session decides it. |
+| **D A document in the transcript** | The plan is an object: a sheet of glass with its heading, paragraphs, steps and its own two buttons. | Prose on glass, which Layers keeps off glass everywhere else, and its largest block. A second place where buttons live. | As C, and it has to be scrolled to. |
+
+**Pick: C.** It adds no component: the plan is read where everything the agent writes is read, and sent back the
+way anything is said to the agent. B is its remote for a plan already read. Taken together with 2.14 the rule is
+one sentence: what a session waits on is answered in its composer, and the capsule's card is the same answer from
+elsewhere. The approval the owner chose is the second half of that sentence already; the first half would give it
+an Approve in the composer of its own session, which no round has drawn.
+
 ## 3. Found, and not found
 
 Put on the board though not on the list: **thinking** (2.2) and **agents started** (2.5). Both are transcript
 items in the fixtures that Layers draws and nobody judged.
 
-Found and not drawable from the fixtures: a session that **asked a question** and one whose **plan is ready** are
-states in the fixtures with one line each ("Which events should retry?", "Plan is ready for review") and no answer
-options and no plan body. How either is answered was never drawn in any round, and could not be drawn here without
-inventing content. They are the largest unjudged part of the session view.
+Found, and at first not drawable: a session that **asked a question** and one whose **plan is ready** are states
+in the fixtures with one line each and nothing to answer. No round had drawn how either is answered. Content for
+both was then added to the fixtures (two questions with their options; a plan of two paragraphs and five steps,
+and a comment a person might send back), and they are parts 2.14 and 2.15.
 
 Left out on purpose: tooltips, the row's hover card, the state glyphs and the tabs (chosen with Quiet's content and
 Instrument's capsule); the side column's contents (the owner: the app's own will be used).
@@ -254,8 +294,8 @@ surfaces at rest: the pane, and two to five blocks.
 | surface | path |
 |---|---|
 | the pane, the sidebar toggle | library glass, the host is the element (Layers' own) |
-| every block of a variant: bubbles, diff and command cards, the capsule, the composers, the pane-foot pieces, the menu page's strips | library glass, a decorative surface under an element in flow, through Layers' `GlassLayer` |
-| menus and popovers opened from a variant (model, usage, agents) | Layers' CSS platter, standing in the page instead of in a portal |
+| every block of a variant: bubbles, diff and command cards, the capsule, the composers, the pane-foot pieces, the menu page's strips, the question's form and the plan's sheet | library glass, a decorative surface under an element in flow, through Layers' `GlassLayer` |
+| menus and popovers opened from a variant (model, usage, agents), and the capsule's list as it stands on the two "needs you" pages | Layers' CSS platter, standing in the page instead of in a portal |
 | menu D | library glass platter (`GlassMenu`) |
 | the wash (2.1 B), chips (2.5 B), the dashed message (2.6 B), tags, the small drawings of the window | CSS fills on the field; no blur except the tags' |
 
@@ -264,7 +304,7 @@ four can share a page, and takes the page's ink, as a transcript block does. The
 of each other and every line was measured where it stands.
 
 What the runtime reported (`dev=1`, 1440 by 900): every group `webgpu`, refraction `true`, analysis `exact`, health
-`ok`, and no diagnostic on any page at rest, opened, scrolled, with the pane as a rail, or melted (33 routes in the
+`ok`, and no diagnostic on any page at rest, opened, scrolled, with the pane as a rail, or melted (36 routes in the
 last sweep, both schemes). One was met and
 removed: a melted pane left standing where blocks then came to stand (`same-plane-overlap`), so once it has
 dematerialised it steps out of the window without a slide.
@@ -273,17 +313,18 @@ dematerialised it steps out of the window without a slide.
 
 Layers' own `measure.mjs` (every line of text and every icon against the pixels behind it; floors 4.5 for text, 3
 for icons) was run on every page in both schemes, at rest and opened, on the send page's four states, on Together
-(today's letters and the suggested ones), on the rail, and on four pages over other dark grounds: 56 routes, 3,408
-gated readings, none under its floor.
+(today's letters and the suggested ones), on the rail, and on six pages over other dark grounds: 66 routes, 4,401
+gated readings, none under its floor (run on the merged lab, after Layers gained its five switches).
 
 | | light | dark |
 |---|---|---|
 | lowest text | 4.69: a count on the field (2.3 B, opened), where the picture's paper is in shadow | 4.74: the capsule's clock (2.4 C) on `#1f1f1f`, on Together |
-| lowest text on Paper's own ground | the same | 4.91: a row of the library's menu (2.12 D) |
+| lowest text on Paper's own ground | the same | 4.93: a row of the library's menu (2.12 D) |
 | lowest icon | 3.09: the caret in the pane-foot piece (Layers' own mark, at its own 70 %) | 3.43: the same |
 | glass and platter bodies, drawn level | 0.82 to 1.00 | 0.09 to 0.29 |
 
-No body is in the band where neither ink holds (0.39 to 0.49).
+No body is in the band where neither ink holds (0.39 to 0.49). On the two "needs you" pages the lowest lines are
+5.05 in light (prose on the field) and 5.25 in dark (an option's sentence on the form), 4.97 on `#1f1f1f`.
 
 Two things were changed by it. A count that stands on the field (2.3 B and C) read 3.71 in light where the picture's
 paper is in shadow, because Layers' green was chosen for glass; on the field it takes a deeper step (`#135a36`, and
@@ -312,6 +353,10 @@ those files gain switches. It does depend on the names of Layers' classes; a ren
 - **The context mark returning near full** (2.8 B) and a usage mark near its limit: the fixtures hold one value
   each, and a second value would be invented content.
 - **A removed line** in the diff: the fixture's edit only adds.
+- **A question and a plan in their own sessions.** The fixtures hold one transcript, another session's, so C and D of
+  2.14 and 2.15 stand without the transcript they would end, and neither is on Together (that session is running,
+  not waiting). The capsule itself is not drawn above the cards of A and B. After an answer the board shows one
+  mark and one word where the buttons were; what the transcript keeps of an answered question was not designed.
 - **Menu D from the composer**: the library does not put glass on glass, so it opens from a fill on a block.
 
 ## To ship this in the app
@@ -331,3 +376,6 @@ Per pick, against "The app today" in the brief; each is small beside the two gla
 - **Two buttons**: stop and send stop sharing one element.
 - **One drop**: a new glyph; the popover is unchanged.
 - **Counts on the field** need the deeper green and red in light (§5).
+- **A question and a plan in the composer**: the composer takes a state per waiting kind (a strip of chips with
+  steps; an action that is Approve or Send back), fed by the same data as the capsule's card, and the card takes
+  the same chips. The plan itself is ordinary assistant prose with a heading.

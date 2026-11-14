@@ -281,3 +281,64 @@ export const settingsNav = ['Engine', 'Gateway', 'Keyboard', 'Voice', 'Appearanc
 
 /** Usage, as the sidebar footer shows it. */
 export const usage = { fiveHour: 0.74, week: 0.82, resetsIn: '2h 37m' };
+
+// ---- What two waiting sessions wait on ----------------------------------------------------------------------------
+// Invented, like everything above. An experiment decides where each is answered and how much of it shows at rest.
+
+/** One choice the agent offers: a short label, and the sentence that says what choosing it means. */
+export interface QuestionOption {
+  label: string;
+  description: string;
+}
+
+export interface Question {
+  ask: string;
+  /** More than one option may be chosen. */
+  multi: boolean;
+  options: QuestionOption[];
+}
+
+/** What "Billing webhook audit" asked. The person may always answer in their own words instead of choosing. */
+export const question = {
+  session: 'Billing webhook audit',
+  waited: '14m',
+  questions: [
+    {
+      ask: 'Which events should retry?',
+      multi: true,
+      options: [
+        { label: 'Failed payments', description: 'The customer may fix the card, so a later try can succeed.' },
+        { label: 'Plan changes', description: 'Safe to repeat: the handler writes the same row each time.' },
+        { label: 'Refunds', description: 'Not safe to repeat without a check: money could move twice.' },
+      ],
+    },
+    {
+      ask: 'How long should a retry keep trying?',
+      multi: false,
+      options: [
+        { label: 'One day', description: 'Five tries with growing gaps. Covers a short outage.' },
+        { label: 'Three days', description: 'The same window the payment provider uses for its own.' },
+      ],
+    },
+  ] as Question[],
+};
+
+/** The plan "Offline sync design" wants approved before it acts. The person approves it, or sends it back with a comment. */
+export const plan = {
+  session: 'Offline sync design',
+  title: 'Offline sync for notes',
+  waited: '26m',
+  paragraphs: [
+    'Every edit goes to a queue on the device first and is sent when the connection returns. Each note carries a version, so a stale edit can be told from a fresh one.',
+    'Two people editing one note offline is the hard case. Both edits are kept and the second writer is asked to choose; nothing is merged silently.',
+  ],
+  steps: [
+    'Write every edit to a queue on the device',
+    'Send the queue in order when the connection returns',
+    'Give each note a version and refuse stale writes',
+    'Show both versions when two edits collide',
+    'Cover the queue and the collision with tests',
+  ],
+  /** What a person might write when sending it back. */
+  comment: 'Leave collisions for a second pass. Ship the queue first.',
+};
