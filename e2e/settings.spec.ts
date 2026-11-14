@@ -281,9 +281,13 @@ test('settings: Engine shows the resolved binary, its version and the tested one
   }
 });
 
-// WR #57: the first click after the native popup of a select was chosen from or dismissed is not swallowed. UX wave
-// U7b: the popup is inside the Settings dialog, and the click is one on a section link of its index, which moves the view.
-test('WR #57: first click after choosing or dismissing the design-system popup navigates', async () => {
+// WR #57: the first click after the native popup of a select closes is not swallowed, whether the popup closed on a
+// choice or with nothing changed. UX wave U7b: the popup is inside the Settings dialog, and the click is one on a section
+// link of its index, which moves the view. The popup closes with nothing changed by Enter on the option already chosen,
+// not by Esc: the gate cannot send a native Esc dismissal on macOS (Playwright's keys go to the page, not to the native
+// menu, so the dialog took the key on the first Mac run). That Esc with the popup open closes only the popup is a hand
+// check (docs/tech-debt-tracker.md, U14).
+test('WR #57: the first click after the design-system popup closes, on a choice or with nothing changed, navigates', async () => {
   const maws = await launchMaws();
   try {
     const { app, page } = maws;
@@ -294,16 +298,15 @@ test('WR #57: first click after choosing or dismissing the design-system popup n
     await expect(link('Artifacts')).toHaveAttribute('aria-current', 'true');
     const select = panel(page).getByRole('combobox', { name: 'Default design system', exact: true });
     await expect(select.locator('option', { hasText: 'Classroom' })).toHaveCount(1);
-    for (const [commit, target] of [[true, 'Keyboard'], [false, 'Appearance']] as const) {
-      // A real popup, not selectOption: its native dismissal is what is under test.
+    for (const [choose, target] of [[true, 'Keyboard'], [false, 'Appearance']] as const) {
+      // A real popup, not selectOption: its native closing is what is under test.
+      const before = await select.inputValue();
       await select.click();
-      if (commit) {
-        await page.keyboard.press('ArrowDown');
-        await page.keyboard.press('Enter');
-      } else {
-        await page.keyboard.press('Escape');
-      }
-      await expect(settingsDialog(page), 'the popup took its own Esc').toBeVisible();
+      if (choose) await page.keyboard.press('ArrowDown');
+      await page.keyboard.press('Enter');
+      if (choose) await expect(select, 'a choice changes the value').not.toHaveValue(before);
+      else await expect(select, 'Enter without moving changes nothing').toHaveValue(before);
+      await expect(settingsDialog(page), 'the popup closed alone').toBeVisible();
       // Exactly one click: no second click hides a swallowed one.
       await link(target).click();
       await expect(link(target)).toHaveAttribute('aria-current', 'true');
