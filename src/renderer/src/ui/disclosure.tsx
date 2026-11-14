@@ -131,11 +131,13 @@ export function useDisclosureMotion<T extends HTMLElement>(open: boolean, option
 }
 
 // A disclosure's body: its children while open and through the close, nothing once closed. `flow-root` keeps the
-// children's margins inside the measured box, so the height it opens to is the height it rests at.
+// children's margins inside the measured box, so the height it opens to is the height it rests at. `closed` is what
+// stands in its place once it has gone (a folded run's live thought, which its open body draws), so the two are never
+// drawn at once while the close runs.
 const BODY: CSSProperties = { display: 'flow-root' };
-export function DisclosureBody({ open, children, ...rest }: { open: boolean; children: ReactNode } & Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'style'>) {
+export function DisclosureBody({ open, closed = null, children, ...rest }: { open: boolean; closed?: ReactNode; children: ReactNode } & Omit<HTMLAttributes<HTMLDivElement>, 'children' | 'style'>) {
   const { ref, mounted } = useDisclosureMotion<HTMLDivElement>(open);
-  if (!mounted) return null;
+  if (!mounted) return closed;
   return (
     <div ref={ref} style={BODY} {...rest}>
       {children}

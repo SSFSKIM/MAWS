@@ -3,7 +3,7 @@
 // attention glyph in the warning tone; else the foreground call running now; else the run's caption with the lines its
 // finished edits changed. A click opens it onto its blocks of calls, each call's row as before, with a thought of ten
 // seconds or more at its place between them or under the last; another click closes it. While folded, a thought
-// streaming now has its line under the run's. The body mounts only while open, so a folded run mounts no call and asks
+// streaming now has its line under the run's, once the closing body that drew it has gone. The body mounts only while open, so a folded run mounts no call and asks
 // no ToolUse site.
 import { Fragment, type ReactNode } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
@@ -60,8 +60,7 @@ export function GroupRow({ row, renderCell }: { row: GroupRowData; renderCell?: 
           {line.kind === 'caption' && <LineCounts added={row.counts.added} removed={row.counts.removed} />}
           <Chevron />
         </button>
-        {live?.kind === 'thought' && <Thought segment={live} row={row} />}
-        <DisclosureBody open={row.expanded} id={bodyId}>
+        <DisclosureBody open={row.expanded} id={bodyId} closed={live?.kind === 'thought' && <Thought segment={live} row={row} />}>
           <RunBody row={row} draw={draw} />
         </DisclosureBody>
       </div>
