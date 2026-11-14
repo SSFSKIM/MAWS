@@ -236,6 +236,34 @@ export const promotable = (exchanges: readonly SideExchange[]): { question: stri
     .flatMap((e) => (e.state === 'answered' && e.response !== null ? [{ question: clip(e.question, SIDE_QUESTION_CAP), response: clip(e.response, SIDE_ANSWER_CAP) }] : []))
     .slice(-50);
 
+// The ids of the exchanges `promotable` carries, in its order.
+const promotedIds = (exchanges: readonly SideExchange[]): string[] =>
+  exchanges
+    .filter((e) => e.state === 'answered' && e.response !== null)
+    .slice(-50)
+    .map((e) => e.id);
+
+// The exchanges a "Continue as a side thread" in flight carries, per session (UX wave U4a, the panel's finding 9): here and
+// not in the component, so a fold and a reopen of the card (a new mount) still know one is under way, and a second press
+// opens no second thread; each press's fork is a thread of its own (`side.thread.open` does not deduplicate).
+export const usePromotions = create<{ inFlight: ReadonlyMap<AppSessionId, ReadonlySet<string>> }>()(() => ({ inFlight: new Map() }));
+
+/** Whether a promotion of any of these exchanges is under way. */
+export function promotionInFlight(state: { inFlight: ReadonlyMap<AppSessionId, ReadonlySet<string>> }, parent: AppSessionId, exchanges: readonly SideExchange[]): boolean {
+  const held = state.inFlight.get(parent);
+  return held !== undefined && promotedIds(exchanges).some((id) => held.has(id));
+}
+
+/** The promotion of these exchanges begun, and its end to call once it is answered; null while one of them is under way. */
+export function beginPromotion(parent: AppSessionId, exchanges: readonly SideExchange[]): (() => void) | null {
+  if (promotionInFlight(usePromotions.getState(), parent, exchanges)) return null;
+  const ids = promotedIds(exchanges);
+  const change = (keep: (held: ReadonlySet<string>) => Set<string>) =>
+    usePromotions.setState(({ inFlight }) => ({ inFlight: new Map(inFlight).set(parent, keep(inFlight.get(parent) ?? new Set())) }));
+  change((held) => new Set([...held, ...ids]));
+  return () => change((held) => new Set([...held].filter((id) => !ids.includes(id))));
+}
+
 // ---- the `/btw` card (UX wave U4a, decision 26) ------------------------------------------------------------------------
 
 // When this window first held each exchange pending (its id), the clock a session on another machine's wait is counted
@@ -321,5 +349,6 @@ export function resetSideQuestions(): void {
   listings.clear();
   heldSince.clear(); // UX wave U4a
   useBtwCards.setState({ cards: new Map() }); // UX wave U4a
+  usePromotions.setState({ inFlight: new Map() }); // UX wave U4a
   localSerial = 0;
 }

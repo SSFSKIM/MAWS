@@ -24,7 +24,7 @@ import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { sideBlock, startForSide, useDrivenAsk } from './btw';
 import { STARTING_SESSION } from '../sessions/acquire'; // P2-A
 import { SIDE_COPY } from './copy';
-import { askSide, btwCardOf, clearSide, promotable, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, useSidePane } from './store';
+import { askSide, beginPromotion, btwCardOf, clearSide, promotable, promotionInFlight, refreshSide, retrySide, sidePaneOf, takeBtwFocus, useBtwCards, usePromotions, useSidePane } from './store';
 
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
@@ -52,7 +52,6 @@ export function useSideAsk(parent: AppSessionId, kept?: Kept) {
   const [ownQuestion, setOwnQuestion] = useState('');
   const question = kept?.question ?? ownQuestion;
   const setQuestion = kept?.setQuestion ?? setOwnQuestion;
-  const [promoting, setPromoting] = useState(false);
   const [refusal, setRefusal] = useState<string | null>(null);
   const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
   // P5 O7 M8: an older machine with no side-question row greys Ask and Retry with its name (lane-b/remote-unavailable.ts)
@@ -96,16 +95,21 @@ export function useSideAsk(parent: AppSessionId, kept?: Kept) {
     void ask();
   };
   const note = blocked ?? (starting || availability === 'starting' ? STARTING_SESSION : ready ? null : STARTS);
+  // UX wave U4a (the panel's finding 9): the promotion in flight is the store's, so it outlives this mount (a card's fold)
+  const promoting = usePromotions((s) => promotionInFlight(s, parent, exchanges ?? []));
   const canPromote = !promoting && promotable(exchanges ?? []).length > 0 && promoteUnavailable === null;
   const promote = async () => {
-    if (!canPromote) return;
-    setPromoting(true);
+    const end = canPromote ? beginPromotion(parent, exchanges ?? []) : null;
+    if (end === null) return;
     setRefusal(null);
     const text = question.trim();
-    const result = await promoteSide(parent, text === '' ? null : text);
-    setPromoting(false);
-    if (result.ok) setQuestion('');
-    else setRefusal(result.error);
+    try {
+      const result = await promoteSide(parent, text === '' ? null : text);
+      if (result.ok) setQuestion('');
+      else setRefusal(result.error);
+    } finally {
+      end();
+    }
   };
   const canClear = !shown.every((e) => e.state === 'pending') && clearUnavailable === null;
   const clear = () => void clearSide(parent);
