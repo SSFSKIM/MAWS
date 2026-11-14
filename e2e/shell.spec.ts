@@ -731,6 +731,10 @@ test('Settings is a dialog', async () => {
     await dialog.getByRole('button', { name: 'Reset to defaults' }).click();
     const sheet = page.getByRole('dialog', { name: 'Reset every key binding?' });
     await expect(sheet).toBeVisible();
+    // the sheet is the top layer before the key (the second Mac run: Radix makes it so a few frames after it is drawn): it
+    // holds the keyboard, and the dialog under it takes no pointer
+    await expect(sheet.getByRole('button', { name: 'Cancel', exact: true })).toBeFocused();
+    await expect(page.locator('[data-settings-dialog]')).toHaveCSS('pointer-events', 'none');
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
     await expect(dialog, 'the dialog stays under the sheet it opened').toBeVisible();

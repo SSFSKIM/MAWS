@@ -20,6 +20,14 @@ import { currentSet } from '../stores/layout-model';
 import { DESTINATION } from './copy';
 import { escapeTaker, leaveField } from './escape';
 
+// An open dialog drawn after the Settings dialog and outside it: a layer opened over it, such as a sheet from one of its
+// sections, portaled after it.
+const layerOver = (content: HTMLElement | null): boolean =>
+  content !== null &&
+  [...document.querySelectorAll('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')].some(
+    (layer) => layer !== content && !content.contains(layer) && !layer.contains(content) && (content.compareDocumentPosition(layer) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+  );
+
 export function SettingsDialog() {
   const settings = useLayout((s) => s.settings);
   const focus = useDialogFocus();
@@ -36,6 +44,10 @@ export function SettingsDialog() {
     else focusPaneElement(currentSet(useLayout.getState().main).focusedPane);
   };
   const onEscapeKeyDown = (event: KeyboardEvent) => {
+    // §H row 2: a layer over the dialog takes Esc. Radix makes a sheet the top layer a few frames after it is drawn (its
+    // layer registers in an effect), and until then this listener is still the top one: an Esc in those frames is not
+    // the dialog's (the second Mac run, where it closed Settings with the sheet in it).
+    if (layerOver(content.current)) return event.preventDefault();
     const taker = escapeTaker(event.target, event); // an input method's Esc ends its composition, nothing else
     if (taker === null) return;
     event.preventDefault();

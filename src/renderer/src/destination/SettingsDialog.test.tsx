@@ -99,6 +99,26 @@ describe('the Settings dialog', () => {
     expect(useLayout.getState().settings).not.toBeNull();
   });
 
+  // The second Mac run: a sheet is drawn a few frames before Radix makes it the top layer (its layer registers in an
+  // effect, then the layers re-render), and an Esc in those frames reached the dialog, which closed with the sheet in it.
+  // Stood in for by a dialog drawn over Settings that is no Radix layer: the dialog's Esc listener is still the top one.
+  it('row 2, before the sheet is the top layer: a dialog drawn over it keeps the Esc from closing Settings', () => {
+    render(<SettingsDialog />);
+    open();
+    const late = document.createElement('div');
+    late.setAttribute('role', 'dialog');
+    late.setAttribute('data-state', 'open');
+    late.setAttribute('aria-label', 'A sheet not yet the top layer');
+    late.innerHTML = '<button type="button">Cancel</button>';
+    document.body.append(late);
+    const cancel = late.querySelector('button')!;
+    cancel.focus();
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    expect(dialog()).not.toBeNull();
+    expect(useLayout.getState().settings).not.toBeNull();
+    late.remove();
+  });
+
   it('row 3: the shortcut recorder and a marked element keep their Esc, and the dialog stays', () => {
     render(<SettingsDialog />);
     open();
