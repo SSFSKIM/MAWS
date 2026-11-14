@@ -57,8 +57,8 @@ describe('org projects', () => {
   });
 
   // P5 O7 M2 (one row per address): another machine's lane B session files where its listing does, before its record
-  // (the tab a click opens) and after (main read the record over the link; its project is unknown here, RL2 machines
-  // sending no projects), so neither its row nor its tab moves when the record arrives. A lane A listing keeps O9's rule.
+  // (the tab a click opens) and after (main read the record over the link), so neither its row nor its tab moves when
+  // the record arrives. A lane A listing keeps O9's rule.
   it('files a listed lane B session’s tabs where its listing is filed, with or without its record', () => {
     const listed = (session: string, lane: 'A' | 'B', orgKey: string | null): [AppSessionId, ListedSession] => {
       const appId = studio(session) as AppSessionId;
@@ -171,6 +171,28 @@ describe('the project registry: rows by project id', () => {
     expect(sessionSetKey(s, TEST_MACHINE, tab, () => undefined), 'a session not known now').toBeUndefined();
     const gone = { ...s, unstarted: new Map([[tab, { projectId: null, createdAt: 't', registry: OTHER_ID }]]) }; // no row of it now
     expect(sessionSetKey(gone, TEST_MACHINE, tab, () => null)).toBeNull();
+  });
+
+  // ticket 644: a tab of another machine's session files where the sidebar files its row (`rowOfListedRecord`): by its
+  // listing, though the registry places its project on that machine; this Mac's session by its known project, as before
+  it('files the tabs of another machine’s session at a listed address by its listing, though the registry knows its project', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const mine = project(at('app'), 0, { org: withId('remote:example.org/app', ID) });
+    const b = studio('b' as AppSessionId);
+    const a = at('a' as AppSessionId);
+    const s = (orgKey: OrgKey | null) => ({
+      projects: new Map([[mine.id, mine], ...registryRecords(registry, TEST_MACHINE)]),
+      registry,
+      records: new Map([[b, record(b, { projectId: studio('app') as ProjectId })], [a, record(a, { projectId: mine.id })]]),
+      listed: new Map<AppSessionId, ListedSession>([
+        [b, { ...remoteRow(OTHER_MACHINE, 'b', { orgKey, project: orgKey === null ? null : ID }), appId: b }],
+        [a, { ...remoteRow(TEST_MACHINE, 'a'), appId: a }],
+      ]),
+    });
+    const none = () => undefined;
+    expect(sessionSetKey(s(null), TEST_MACHINE, b, none), 'its listing’s key is none of the table’s').toBe(machineKey(OTHER_MACHINE));
+    expect(sessionSetKey(s('remote:example.org/app' as OrgKey), TEST_MACHINE, b, none), 'listing and registry agree').toBe('remote:example.org/app');
+    expect(sessionSetKey(s(null), TEST_MACHINE, a, none), 'this Mac’s, by its project').toBe('remote:example.org/app');
   });
 
   // panel scalpel-2#1: on a Mac signed in and not enrolled, a clone here carries no id; main computes it from the

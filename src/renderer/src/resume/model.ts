@@ -83,7 +83,7 @@ export const sessionBranch = (record: SessionRecord): string | null => branchLab
 // The candidates, newest first (ties by title, then id, so the order is stable while the stores change).
 //
 // P5 O7 M8: the listed sessions with no record here join them, filed as the sidebar files them (`rowOfListed`; a record
-// at a listed address whose project is not known here sits where its listing does, `rowOfListedRecord`). Another
+// at a listed address sits where its listing does, another machine's always, `rowOfListedRecord`). Another
 // member's session (its listing not yours), held as a listing or as a record, is listed only under a row whose People
 // toggle is on, whatever the toggles; a row nobody draws (an all-hidden project's) never lets it through. A listing
 // names no folder, worktree or branch: All worktrees keeps them, Current branch none.
