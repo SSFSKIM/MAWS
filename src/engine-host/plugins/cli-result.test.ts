@@ -255,7 +255,7 @@ describe('the outcome of a custom add', () => {
   it('withholds a line holding a value as written, and one holding it as JSON escapes it, with the exit code and the shown command', () => {
     expect(failed('could not be read to confirm the change (value-one)\n')).toEqual(withheld());
     const quoted: McpEntry = { ...stdio, env: [{ name: 'FILES_PROBE_KEY', value: 'say "hi" \\ there' }] };
-    const escaped = `MCP server "files-probe" may not have been saved: .claude.json could not be read to confirm the change (Unexpected token in ${JSON.stringify({ FILES_PROBE_KEY: 'say "hi" \\ there' })})`;
+    const escaped = `Invalid configuration: env.OTHER: Invalid input, near ${JSON.stringify({ FILES_PROBE_KEY: 'say "hi" \\ there' })}`; // not the read-back error, which R10 withholds by its phrase
     expect(escaped.includes('say "hi" \\ there')).toBe(false); // only its JSON form is in the line
     expect(failed(`${escaped}\n`, quoted)).toEqual(withheld(quoted));
     expect(failed('value-one\n', stdio, 'files-probe', 2)).toEqual(withheld(stdio, 'files-probe', 2));
@@ -277,8 +277,9 @@ describe('the outcome of a custom add', () => {
     expect(failed('saw value-on', nested)).toMatchObject({ ok: false, error: { message: 'saw value-on', failureCode: null } });
   });
 
-  it('tests the line as the CLI wrote it, before trimming: a value with a space, a tab or a Unicode space at either end is withheld', () => {
-    for (const value of ['value-one ', ' value-one', 'value-one\t', '\tvalue-one', 'value-one\u00a0', '\u2003value-one', 'value-one\u3000']) {
+  // a tab is a control character, which the entry's rule refuses before anything runs (mcpEntryProblem)
+  it('tests the line as the CLI wrote it, before trimming: a value with a space or a Unicode space at either end is withheld', () => {
+    for (const value of ['value-one ', ' value-one', 'value-one\u00a0', '\u2003value-one', 'value-one\u3000', '\u00a0value-one ']) {
       for (const entry of [{ ...stdio, env: [{ name: 'FILES_PROBE_KEY', value }] }, { ...http, headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
         const outcome = failed(`refused ${value}\n`, entry);
         expect(outcome, JSON.stringify(value)).toEqual(withheld(entry));
