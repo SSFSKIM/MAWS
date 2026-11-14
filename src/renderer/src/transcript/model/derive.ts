@@ -484,8 +484,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       // time MAWS measured from its first delta to its completion
       const recordedMs = block.recordedMs ?? null;
       // A completed thinking block with no text (a signature-only block) has nothing to disclose (W1). UX wave U2 (ticket 479):
-      // one with a recorded duration still travels, so inside a run it is merged and tested on its time; where it leaves
-      // the group machine as a row it is dropped there (groups.ts), so outside a run it has no row, as before.
+      // inside an opened run, a textless thought of ten seconds or more is a `Thought for Ns` line; elsewhere W1 holds. So
+      // one with a recorded duration still travels, to be merged inside a run and tested on its time; where it leaves the
+      // group machine as a row it is dropped there (groups.ts), so outside a run it has no row, as before.
       if (!live && block.buffer.trim() === '' && recordedMs === null) return null;
       const durationMs = recordedMs ?? (block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null);
       return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs, recordedMs } };

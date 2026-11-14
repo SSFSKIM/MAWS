@@ -98,9 +98,9 @@ const TABLE: Record<string, TableRow> = {
   // that Background work's `Open creating turn` jumps to (E7 execution document, Design §7)
   CronCreate: grouped('other'), CronList: grouped('other'), CronDelete: grouped('other'),
   // E7 end
-  // UX wave U2 (l6-artifacts-12): the `maws` server's plain artifact calls are steps of their run, as every other
-  // call is (E2, P3-B M7, P3-E and P4-B4 had made each a cell of its own). A screenshot stays one: its result is an
-  // image, which stands alone on every route
+  // UX wave U2 (l6-artifacts-12): the artifact namespace's plain calls join runs and are named by the artifact's title,
+  // as every other call is a step of its run (E2, P3-B M7, P3-E and P4-B4 had made each a cell of its own; each
+  // document records the reversal). A screenshot stays one: its result is an image, which stands alone on every route
   [MAWS_TOOL_USE.artifact_list]: grouped('other'),
   [MAWS_TOOL_USE.artifact_screenshot]: standalone('other'),
   [MAWS_TOOL_USE.artifact_describe_type]: grouped('other'),
