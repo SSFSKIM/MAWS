@@ -102,6 +102,21 @@ describe('the page', () => {
     expect(document.activeElement).toBe(page());
   });
 
+  // The branch review: another page in its place unmounts the body that held the keyboard; the new page's region takes
+  // it, and Back still returns it to where it was when the first page opened.
+  it('replaced by another page while the keyboard is in its body, the new page’s region takes it; Back gives it back to the composer', () => {
+    renderShell();
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    composer.focus();
+    openPage();
+    act(() => screen.getByRole('textbox', { name: 'Filter' }).focus());
+    act(() => useLayout.getState().openDestination({ kind: 'customize', view: 'mine', show: 'all' }));
+    expect(page()!.getAttribute('data-destination')).toBe('customize');
+    expect(document.activeElement).toBe(page());
+    act(() => useLayout.getState().closeDestination());
+    expect(document.activeElement).toBe(composer);
+  });
+
   it('left for a tab, the keyboard goes to that tab’s pane', () => {
     renderShell();
     screen.getByRole('textbox', { name: 'Composer' }).focus();

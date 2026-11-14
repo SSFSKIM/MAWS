@@ -38,9 +38,13 @@ function Page({ destination }: { destination: Destination }) {
   // Before the commit that makes what the page hides inert, which drops the keyboard from it.
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null));
 
+  // At the open, and when another page replaces this one's body (which takes the keyboard with it when it held it).
   useEffect(() => {
     const active = document.activeElement;
     if (active === null || active === document.body || active.closest('[inert]') !== null) region.current?.focus({ preventScroll: true });
+  }, [destination.kind]);
+
+  useEffect(() => {
     // Whether the write that closed the page also changed the strip: an act that showed a tab.
     let leftForTab = false;
     const off = useLayout.subscribe((state, previous) => {
