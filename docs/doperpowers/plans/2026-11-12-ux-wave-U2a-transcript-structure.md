@@ -27,7 +27,7 @@ The to-human view (the report bar, "Working record", "To you", the advertisement
 - [x] M1 — What a file must say as the wire does: a thought's recorded duration (X1) and a refused call's kind. (2026-11-13, reviewed clean: `7773a2e23..d029fceb0`, the stopped ask and the review's fixes `a0c3cf447..ce823c433`.)
 - [x] M2 — What joins a run, its caption, and the turn's line. (2026-11-13, reviewed clean: `b2d5b372c..c53ef340c`, the rulings' and review's fixes `645beb489..f20efe7a4`.)
 - [x] M3 — What a row reads: a shell call with no description, an artifact call, a failed call. (2026-11-13, reviewed clean: `a9df42ade..acd7855ae`, the review's fixes `373fdd01a..aaa551c94`; `titlesOfTurn` is cached per turn state, `derive.ts:1385-1391`.)
-- [ ] M4 — The run's row: one line, folded; thoughts in order; the running, the waiting and the thinking line.
+- [x] M4 — The run's row: one line, folded; thoughts in order; the running, the waiting and the thinking line. (2026-11-13, reviewed clean: `56020b7d8..b8c5a9cc6`.)
 - [ ] M5 — The e2e edits and scenes, the routes' proof whole, the record, and the acceptance run.
 
 ## One pull request or two
