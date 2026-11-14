@@ -122,6 +122,8 @@ const scenarios = [
   ['a Mac-only run asks for no pool boxes', 'Gates: static,unit,unit:darwin,probes,packaged\nClass1a: macos\nRunner: macos', 'none'],
   ['affected selection counts the single related-unit job', 'Gates: static,unit,probes\nSelection: affected\nAffected-Count: 1\nAffected: M\tsrc/shared/pool-demand.ts', '16x1 8x1 2x1'],
   ['an affected fallback still counts all unit shards', 'Gates: unit\nSelection: affected\nAffected-Count: 1\nAffected: M\tpackage.json', '8x4'],
+  // A guest mini copy (gate-plan.mjs) restores the out/ e2e-build makes, beside its hosted original's waiter.
+  ['a guest mini copy adds its e2e-build box beside the hosted waiter', 'Gates: e2e:to-human\nRunner: macos\nMiniCopy: to-human e2e/to-human.spec.ts', '4x1 2x1'],
   ['the VM lane needs one e2e-build box per variant, not one per guest group', 'Gates: e2e:document-app,e2e:widgets,e2e:to-human\nClass1a: linux\nRunner: macos\nLane: vm', '4x2'],
   ['hosted jobs and a hosted POOL_E2E group ask for no boxes', 'Gates: static,unit,probes,e2e:desk-web\nClass1a: linux\nRunner: linux', 'none'],
   // ci-kit's hosted-Mac spec: a hosted group's job is a waiter on one cpus-2 box, the code's own count of e2e entries.
