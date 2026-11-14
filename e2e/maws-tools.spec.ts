@@ -652,7 +652,7 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await expect(cell(/^Opened Terminal$/)).toBeVisible();
     // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not available")
     await expect(cell(/^Could not open pane: the artifact pane is not available in this build of MAWS$/)).toBeVisible();
-    await expect(cell(/^Could not open pane: unknown pane "nope"$/)).toBeVisible();
+    await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible(); // the host's words go on to list the known panes
     await shoot(s, 'pane');
   });
 });
