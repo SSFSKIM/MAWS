@@ -746,7 +746,7 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
 
     // A14.2: the long title wraps across lines as prose does and stays inside the text column
     const wrap = await chip(LONG_TITLE).evaluate((el) => {
-      const boxes = [...el.getClientRects()];
+      const boxes = Array.from(el.getClientRects());
       const column = (el.closest('.transcript-prose') ?? el.parentElement!).getBoundingClientRect();
       return { lineBoxes: boxes.length, rightmost: Math.max(...boxes.map((box) => box.right)), columnRight: column.right };
     });
