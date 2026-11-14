@@ -748,7 +748,7 @@ describe('Connectors › Add custom connector', () => {
     await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
     fireEvent.click(addButton(sheet));
     await waitFor(() => expect(line('connector:add:user:files-probe')?.textContent).toContain('Working…'));
-    await waitFor(() => expect(within(line('connector:add:user:files-probe')!).queryByRole('button', { name: 'Cancel' })).not.toBeNull());
+    await waitFor(() => expect(within(line('connector:add:user:files-probe')!).queryByRole('button', { name: 'Stop' })).not.toBeNull()); // today's line: Stop while the CLI runs
     emit('plugins.operation', { opId: 'add-1', action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'Checking the configuration' });
     expect(within(line('connector:add:user:files-probe')!).getByRole('status').textContent).toBe('Checking the configuration');
 
