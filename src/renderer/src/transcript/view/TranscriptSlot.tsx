@@ -98,11 +98,15 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const atRest = agentId === undefined && controls?.turn()?.running === false;
   const filesReason = filesGap !== null && !filesGap.available ? filesGap.reason : null;
   const rewind = useMemo(() => (agentId === undefined ? { ...ipcRewind(appSessionId), unavailable: filesReason } : undefined), [appSessionId, agentId, filesReason]);
-  // Where the session runs, from its record (its worktree's checkout when it has one): the engine's Bash input names no
-  // cwd, so a shell call shows this, labelled as the session's directory. Not for a child agent's transcript: a
+  // Where the session runs, from the selector: the engine's Bash input names no cwd, so a shell call shows the launch
+  // folder, labelled as the session's directory. UX wave U8c-2 (§K): the launch folder and the agent's folder are handed
+  // down only while the session is in its launch folder, and neither while it reads moved, so a live call never names a
+  // folder its command may not have run in (a call read from rows names its own). Not for a child agent's transcript: a
   // worktree-isolated subagent's shell ran elsewhere.
   const folder = useWorkingFolder(appSessionId);
-  const sessionDirectory = agentId === undefined ? (folder?.cwd ?? null) : null;
+  const here = agentId === undefined && folder !== null && !folder.moved ? folder : null;
+  const sessionDirectory = here?.launch ?? null;
+  const sessionCwd = here?.cwd ?? null;
   useEffect(() => (agentId === undefined ? attachQueue(appSessionId) : undefined), [appSessionId, agentId]);
   const queue = useQueueStore((state) => (agentId === undefined ? (state.bySession.get(appSessionId) ?? EMPTY_QUEUE) : EMPTY_QUEUE));
   const held = useMemo(() => queue.entries.filter((entry) => entry.state === 'queued' && !entry.uncertain), [queue.entries]);
@@ -132,6 +136,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       renderRequest={renderRequest}
       className={className}
       sessionDirectory={sessionDirectory}
+      sessionCwd={sessionCwd}
       tail={tail}
       withdrawn={withdrawn}
       effort={agentId === undefined ? effort : null}

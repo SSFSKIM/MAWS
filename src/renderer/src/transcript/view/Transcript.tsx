@@ -459,6 +459,7 @@ export interface TranscriptProps {
   className?: string;
   handle?: Ref<TranscriptListHandle>; // additive: the list's imperative handle (the harness and tests)
   sessionDirectory?: string | null; // additive: the session's directory, shown on a shell call whose input names no cwd
+  sessionCwd?: string | null; // additive (UX wave U8c-2, §K): the agent's folder while the session is in its launch folder
   // W1, additive: rows after the derived ones (the messages held in MAWS's queue, as dimmed bubbles), and the uuids of
   // prompts whose waiting or dropped bubble is not shown (held back into that queue)
   tail?: readonly Row[];
@@ -511,7 +512,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -642,8 +643,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, effort, motion, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, effort, motion, presentation, promptAuthor],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, presentation, promptAuthor],
   );
 
   return (
