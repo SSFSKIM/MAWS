@@ -130,6 +130,21 @@ describe('transcript surface adapters', () => {
     expect(groupInput(row, turn, pending)).toBeNull();
   });
 
+  // UX wave U2 (the U2a document, M4 "The mods' site"; C13): the run's real open state, and the jump's rule for the run
+  it('reports the run’s open state, and asks nothing for a run that is the tab’s revealed target or holds it', () => {
+    const b = builder(); b.turn('u');
+    b.toolUse('r1', 'Read', { file_path: '/a' }); b.result('r1', 'first');
+    b.toolUse('r2', 'Read', { file_path: '/b' }); b.result('r2', 'second');
+    const { rows, turn, state } = setup(b); const group = find(rows, 'group');
+    expect(groupInput({ ...group, expanded: true }, turn, state.pending)?.props.isExpanded).toBe(true);
+    expect(groupInput({ ...group, expanded: false }, turn, state.pending)?.props.isExpanded).toBe(false);
+    expect(groupInput(group, turn, state.pending, group.id)).toBeNull();
+    expect(groupInput(group, turn, state.pending, group.cells[1].id)).toBeNull();
+    const asked = groupInput(group, turn, state.pending, 'cell:elsewhere' as never);
+    expect(asked?.instanceId).toBe('group:r1');
+    expect(asked?.props.calls.map((call) => call.tool_use_id)).toEqual(['r1', 'r2']);
+  });
+
   it('retains newest calls within the character budget, retrying without output', () => {
     const b = builder(); b.turn('u');
     b.toolUse('old', 'Bash', { command: 'old', values: Array(5).fill('x'.repeat(60_000)) }); b.result('old', 'old');

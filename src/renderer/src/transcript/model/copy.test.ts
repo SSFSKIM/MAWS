@@ -3,7 +3,11 @@ import { describe, expect, it } from 'vitest';
 import type { CellId, ToolCategory } from './rows';
 import {
   boundaryCopy, cellLabel, dividerCopy, dividerHead, lineCountsCopy, liveThinkingLabel, plural, stoppedLabel, subagentSentence, thinkingLabel, thinkingTier, thinkingWarmth, turnSummaryCopy,
+  waitingLabel,
 } from './copy';
+import { rowsOf } from './derive';
+import { applyEvents, createState } from './reduce';
+import { builder } from './test-events';
 import { browserActivityLine } from './copy'; // E13
 
 const cell = (id: string) => id as CellId;
@@ -144,6 +148,25 @@ describe('cell lines', () => {
 
   it('warms to the warning colour between 10 and 20 s, in eighths', () => {
     expect([0, 10_000, 11_250, 12_000, 15_000, 19_000, 20_000, 60_000].map(thinkingWarmth)).toEqual([0, 0, 0.125, 0.25, 0.5, 0.875, 1, 1]);
+  });
+});
+
+// UX wave U2 (the U2a document, Interfaces §E; l4-approvals-04's words): what a call reads while it waits for approval
+describe('the waiting label', () => {
+  const callOf = (name: string, input: Record<string, unknown>) => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', name, input);
+    const row = rowsOf(applyEvents(createState(null, null), b.events)).find((r) => r.kind === 'group');
+    return row?.kind === 'group' ? row.cells[0] : (() => { throw new Error('no run'); })();
+  };
+
+  it('a shell call reads its command’s first line in code marks, a file change its file’s name, any other call its tool’s name', () => {
+    expect(waitingLabel(callOf('Bash', { command: 'pnpm test\npnpm lint', description: 'Run the checks' }))).toBe('Waiting for approval: `pnpm test`');
+    expect(waitingLabel(callOf('Edit', { file_path: '/w/src/app.ts', old_string: 'a', new_string: 'b' }))).toBe('Waiting for approval: app.ts');
+    expect(waitingLabel(callOf('Write', { file_path: '/w/notes.md', content: 'x' }))).toBe('Waiting for approval: notes.md');
+    expect(waitingLabel(callOf('WebFetch', { url: 'https://example.com', prompt: 'read' }))).toBe('Waiting for approval: WebFetch');
+    expect(waitingLabel(callOf('mcp__github__create_issue', { title: 'x' }))).toBe('Waiting for approval: github · create_issue');
   });
 });
 
