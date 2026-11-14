@@ -10,7 +10,7 @@
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
-import { mainTab, openArtifactInPanel } from './support/shell';
+import { activeMainTab, backToTabs, mainTab, openAppDestination, openArtifactInPanel } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,7 +21,8 @@ import { artifactUrl } from '../src/shared/artifacts/scheme';
 import { ADDED_COLUMNS, ADDED_TABLES, MIGRATIONS } from '../src/services/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
-import { invoke, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
+import { FIRST_REPLY, invoke, PARENT, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
+import { SideJournal } from './support/side-replay'; // UX wave U7b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
 import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show, viewerOf, type Scratch } from './support/maws-tools'; // M6b
 import { sidebarRow } from './support/sidebar'; // P4 W2-D
@@ -620,3 +621,48 @@ async function darkPixels(maws: MawsLaunch, element: Locator): Promise<number> {
     return dark;
   }, clip);
 }
+
+// UX wave U7b, O-40 (the same document, M8; A7): a destination page keeps the transcript it covers where it was. A
+// replayed session whose one reply is long enough to scroll, scrolled up from its end; Customize opens as a page and
+// Back returns to the same tab at the same scroll offset. shell.spec.ts's "a page beside the sidebar" proves the rest
+// of the page's return on the nine-sessions stub, which draws no transcript today.
+test('a replayed session’s transcript keeps its scroll offset across a page and Back', async () => {
+  test.setTimeout(120_000);
+  const paragraphs = Array.from({ length: 60 }, (_, n) => `Paragraph ${n + 1} of the long reply: the shell keeps each session’s place while the person moves between the pages beside the sidebar.`);
+  const c = await startSessionCase((cwd) => {
+    const journal = new SideJournal(PARENT, cwd);
+    const prompt = journal.prompt();
+    journal.reply(prompt, [FIRST_REPLY, ...paragraphs].join('\n\n'));
+    journal.completed(prompt);
+    return [journal];
+  });
+  cleanups.push(c.cleanup);
+  const { page } = c;
+  const scroller = page.locator('[data-region="main"] [data-transcript-scroller]');
+  await expect(scroller.locator('[data-row-id]').first(), 'the transcript’s rows are drawn').toBeVisible();
+  await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), { message: 'the transcript overflows its pane' }).toBeGreaterThan(0);
+  // The offset is read when the wheel's scroll has ended: the scroller's own `scrollend`, which the browser fires once a
+  // scroll, smooth or not, has finished (bounded, so a wheel that moved nothing fails here rather than at the timeout).
+  await scroller.evaluate((el) => {
+    (window as unknown as { __scrollEnded: Promise<number | null> }).__scrollEnded = new Promise((resolve) => {
+      el.addEventListener('scrollend', () => resolve(el.scrollTop), { once: true });
+      setTimeout(() => resolve(null), 10_000);
+    });
+  });
+  const box = (await scroller.boundingBox())!;
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -600);
+  const offset = await page.evaluate(() => (window as unknown as { __scrollEnded: Promise<number | null> }).__scrollEnded);
+  expect(offset, 'the wheel’s scroll ended').not.toBeNull();
+  expect(await scroller.evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop), 'the transcript scrolled up from its end').toBeGreaterThan(0);
+  const front = () => activeMainTab(page).getAttribute('aria-label');
+  const tab = await front();
+  expect(tab, 'the session’s tab is in front').toBeTruthy();
+
+  await openAppDestination(page, 'Customize');
+  await backToTabs(page);
+  await expect.poll(front, { message: 'the same tab in front' }).toBe(tab);
+  await expect(scroller).toBeVisible();
+  expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
+  expect(c.maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});

@@ -114,7 +114,7 @@ export function Toolbar() {
   const Usage = useSlot('topBarEnd');
 
   return (
-    <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
+    <header data-toolbar className={`${geometry.mainHidden || destination !== null ? 'col-start-1 col-span-3' : 'col-span-2'} row-start-1 flex h-(--toolbar-h) min-w-0 items-center border-b border-border bg-bg select-none [-webkit-app-region:drag]`}>
       <div
         className="flex h-full shrink-0 items-center justify-end gap-2 pr-3 pl-[78px]"
         style={{ width: leading }}

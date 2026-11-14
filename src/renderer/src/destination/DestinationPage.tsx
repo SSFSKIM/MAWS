@@ -72,11 +72,11 @@ function Page({ destination }: { destination: Destination }) {
 
   useEffect(() => {
     const escape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
       const state = useLayout.getState();
       // The dialog and the Overview are above the page in §H's table, and so is any layer or menu open over it.
       if (state.settings !== null || state.overviewOpen || document.querySelector('[aria-modal="true"], [role="menu"][data-state="open"]') !== null) return;
-      const taker = escapeTaker(event.target);
+      const taker = escapeTaker(event.target, event); // an input method's Esc ends its composition, nothing else
       if (taker === 'own') return;
       if (taker === 'field') {
         // A field inside the page is left first; a field elsewhere (the sidebar's search) keeps its key.

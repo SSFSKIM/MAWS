@@ -906,6 +906,23 @@ describe('a page beside the sidebar', () => {
     expect(hiddenNow(panel)).toEqual([false, false]);
   });
 
+  // The first Mac run (the wave architect's ruling): the side column holds column 3 of rows 1 to 3 whether it is drawn or
+  // not, so a span of three with no start of its own is placed past it, in columns the grid adds after the third, which
+  // take the main track's width and leave the page narrower than the window. Each spanning row starts at the first column.
+  it('the title bar and the banner row start at the first column under a page, beside the side column’s three rows', () => {
+    openSurface();
+    renderShell();
+    const banner = () => document.querySelector<HTMLElement>('[data-banner-host]')!;
+    const classes = (element: HTMLElement) => element.className.split(/\s+/);
+    expect(classes(region('panel')), 'the side column keeps column 3 of rows 1 to 3').toEqual(expect.arrayContaining(['col-start-3', 'row-span-3', 'row-start-1']));
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(classes(header())).toEqual(expect.arrayContaining(['col-start-1', 'col-span-3', 'row-start-1']));
+    expect(classes(banner())).toEqual(expect.arrayContaining(['col-start-1', 'col-span-3', 'row-start-2']));
+    act(() => useLayout.getState().closeDestination());
+    expect(classes(header())).toEqual(expect.arrayContaining(['col-span-2', 'row-start-1']));
+    expect(classes(banner())).toEqual(expect.arrayContaining(['col-span-2', 'row-start-2']));
+  });
+
   it('draws the page over the second and third columns of the third row, named by the title bar’s Back and heading', async () => {
     const user = userEvent.setup();
     useSessions.setState({ records: new Map([[A, record(A)]]) });

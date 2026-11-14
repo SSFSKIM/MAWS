@@ -27,12 +27,15 @@ const openPage = () => act(() => useLayout.getState().openDestination({ kind: 'l
 const escape = (target: Element, init: KeyboardEventInit = {}) => fireEvent.keyDown(target, { key: 'Escape', ...init });
 const nextTask = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
-// The library's content: a field with an Esc of its own, and an element marked as keeping its Esc.
+// The library's content: a field with an Esc of its own, a search field that clears on Esc (the libraries'
+// `SearchField`), and an element marked as keeping its Esc.
 function Library() {
   const [name, setName] = useState('kept');
+  const [query, setQuery] = useState('');
   return (
     <div>
       <input aria-label="Filter" value={name} onChange={(event) => setName(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { setName('kept'); event.currentTarget.blur(); } }} />
+      <input type="search" aria-label="Search artifacts" data-escape-clears value={query} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape' && query !== '') setQuery(''); }} />
       <button type="button" data-escape-own="">Confirm</button>
     </div>
   );
@@ -162,6 +165,20 @@ describe('the page', () => {
     expect(field).toHaveProperty('value', 'kept');
     expect(document.activeElement).toBe(page());
     escape(page()!);
+    expect(page()).toBeNull();
+  });
+
+  // The wave architect's ruling on the first Mac run: a search field that holds no text is not row 5's field.
+  it('a search field of the page clears its text on the first Esc and the page stays; in the empty field, Esc closes the page', () => {
+    renderShell();
+    openPage();
+    const search = screen.getByRole('searchbox', { name: 'Search artifacts' });
+    search.focus();
+    fireEvent.change(search, { target: { value: 'okapi' } });
+    escape(search);
+    expect(search).toHaveProperty('value', '');
+    expect(page()).not.toBeNull();
+    escape(search);
     expect(page()).toBeNull();
   });
 

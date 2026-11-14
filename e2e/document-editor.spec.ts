@@ -366,16 +366,29 @@ test.describe('the document editor', () => {
   // M4's fix wave, re-read for P4-B1's margin: in replica B a click on the passage A commented draws its thread active
   // in B's margin (the two replicas side by side leave no side space beside the page, so the margin is the icon rail
   // and the active thread's card is overlaid over its icon); a reply typed there lands in the thread (the host's and
-  // A's panel); a click on plain text draws none and the overlaid card goes.
+  // A's panel); a click on plain text draws none and the overlaid card goes. UX wave U5a
+  // (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md): `CardFrame` loses its opt-ins and "the draft rule
+  // is every host's" (Interfaces), so a card with nothing typed that loses the keyboard is discarded, and decision 17
+  // withdraws its new thread with it; the thread is kept first, as the next scene keeps its own: Resolve keeps it on
+  // purpose, and the panel's Reopen opens it again (Decision Log 56).
   test('a click on a highlighted passage draws its thread active in the margin, whose card takes a reply', async () => {
     const { page } = maws;
     const QUOTE = 'river runs north';
     await page.evaluate(([id, text]) => (window as unknown as HarnessWindow).__maws_document.selectText('a', id, text), ['para0002', QUOTE] as const);
     await toolbar(page, 'a').getByRole('button', { name: 'Add comment', exact: true }).click();
+    const composing = replica(page, 'a').locator('[data-comment-card]');
+    await expect(composing).toBeVisible();
+    await composing.getByRole('button', { name: 'Resolve' }).click();
+    await expect(composing).toHaveCount(0);
     // the thread is read from the host's doc, which has it once replica A's update arrived over its port
     const threads = () => page.evaluate(() => (window as unknown as HarnessWindow).__maws_document.threads());
     await expect.poll(async () => (await threads()).length, { message: 'the new thread at the host' }).toBe(1);
     const threadId = (await threads())[0]!.id;
+    await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
+    const panelA = replica(page, 'a').getByRole('complementary', { name: 'Comments' });
+    await panelA.locator(`article[data-thread="${threadId}"]`).getByRole('button', { name: 'Reopen' }).click();
+    await toolbar(page, 'a').getByRole('button', { name: /^Comments/ }).click();
+    await expect(panelA).toHaveCount(0);
     const passage = content(page, 'b').locator(`.comment-${threadId}`);
     await expect(passage).toHaveText(QUOTE);
     await expect(content(page, 'b').locator('.comment-active')).toHaveCount(0);

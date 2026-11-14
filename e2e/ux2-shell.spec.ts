@@ -409,9 +409,14 @@ test('U8b: three cards, Artifacts in More surfaces; tools are tabs with one in v
       await expect(page.getByRole('menuitem', { name: 'Move above', exact: true })).toBeVisible();
       await expect(page.getByRole('menuitem', { name: 'Move below', exact: true })).toHaveCount(0);
       await page.keyboard.press('Escape');
+      // The menu closed hands the keyboard back to the tab it was opened on, in a task after the close; so the scene waits
+      // for that before it takes the keyboard to the bar, or the hand-back lands between the bar's focus and the keys
+      await expect(page.getByRole('menu')).toHaveCount(0);
+      await expect(sideTab(sideGroup(page, 'lower'), 'Review'), 'the closed menu hands the keyboard back to its tab').toBeFocused();
       // the bar from the keyboard: the lower group grows by three steps
       const evenShare = Number(await bar.getAttribute('aria-valuenow'));
       await bar.focus();
+      await expect(bar).toBeFocused();
       for (let i = 0; i < 3; i++) await page.keyboard.press('ArrowUp');
       await expect.poll(async () => Number(await bar.getAttribute('aria-valuenow')), { message: 'the lower group’s share grew' }).toBeGreaterThan(evenShare);
       for (const { width, height } of SIZES) {
@@ -874,26 +879,30 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await settingsAddsNoTab(maws);
   // UX wave U7b (M5's observation; the branch review): Back shows the strip at the offset it had when the page opened.
   // With a side column open the title bar spans main's columns only, and a page widens it across the column, which
-  // clamps the hidden strip's offset. The strip is left a little short of its end with Diagnostics, its last tab, in
-  // front and in view: the wider strip under the page must clamp that offset, and keeping the tab in front in view
-  // after Back would scroll to the end, not to the offset.
+  // clamps the hidden strip's offset. The strip is left 40 px short of its end, and the tab drawn at its centre is put in
+  // front, wholly in view, so neither the click nor keeping the tab in front in view moves the strip: after Back only the
+  // restored offset puts it back where it was, since the clamp left it short of that. (The first Mac run: the strip's
+  // last tab cannot be in view 40 px short of the strip's end, which its own last 40 px are.)
   await openSurface(page, 'Background tasks');
   const list = page.locator('[data-chrome-tabs] [role="tablist"]');
-  const inFront = list.getByRole('tab', { name: 'Diagnostics', exact: true });
-  await expect(inFront).toHaveAttribute('aria-selected', 'true');
   const overflow = await list.evaluate((el) => el.scrollWidth - el.clientWidth);
   expect(overflow, 'the strip overflows by more than the step short of its end').toBeGreaterThan(80);
-  await list.evaluate((el) => { el.scrollLeft = el.scrollWidth - el.clientWidth - 40; });
-  let offset = -1;
-  await expect.poll(async () => {
-    const now = await list.evaluate((el) => el.scrollLeft);
-    const settled = now === offset;
-    offset = now;
-    return settled;
-  }, { message: 'the strip’s scroll has settled', intervals: [250] }).toBe(true);
-  expect(offset, 'the strip is scrolled, short of its end').toBe(overflow - 40);
+  // the offset the scene sets is known, so every read below waits on that value, not on two reads agreeing
+  const offset = overflow - 40;
+  await list.evaluate((el, to) => { el.scrollLeft = to; }, offset);
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'the strip is scrolled, short of its end' }).toBe(offset);
+  const centre = await list.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('[role="tab"]')?.getAttribute('data-tab-id') ?? null;
+  });
+  expect(centre, 'a tab is drawn at the strip’s centre').not.toBeNull();
+  const inFront = list.locator(`[role="tab"][data-tab-id="${centre}"]`);
+  await inFront.click();
+  await expect(inFront).toHaveAttribute('aria-selected', 'true');
+  await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'putting the tab in view in front moved nothing' }).toBe(offset);
   const [stripBox, tabBox] = [await box(list), await box(inFront)];
   expect(tabBox.x + tabBox.width, 'the tab in front is in view').toBeLessThanOrEqual(stripBox.x + stripBox.width + 1);
+  expect(tabBox.x, 'the tab in front is in view').toBeGreaterThanOrEqual(stripBox.x - 1);
   await openAppDestination(page, 'Customize');
   await expect.poll(() => list.evaluate((el) => el.scrollLeft), { message: 'the wider strip under the page clamps the offset' }).not.toBe(offset);
   await backToTabs(page);

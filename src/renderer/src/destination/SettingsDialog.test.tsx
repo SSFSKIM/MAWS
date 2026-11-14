@@ -99,6 +99,26 @@ describe('the Settings dialog', () => {
     expect(useLayout.getState().settings).not.toBeNull();
   });
 
+  // The second Mac run: a sheet is drawn a few frames before Radix makes it the top layer (its layer registers in an
+  // effect, then the layers re-render), and an Esc in those frames reached the dialog, which closed with the sheet in it.
+  // Stood in for by a dialog drawn over Settings that is no Radix layer: the dialog's Esc listener is still the top one.
+  it('row 2, before the sheet is the top layer: a dialog drawn over it keeps the Esc from closing Settings', () => {
+    render(<SettingsDialog />);
+    open();
+    const late = document.createElement('div');
+    late.setAttribute('role', 'dialog');
+    late.setAttribute('data-state', 'open');
+    late.setAttribute('aria-label', 'A sheet not yet the top layer');
+    late.innerHTML = '<button type="button">Cancel</button>';
+    document.body.append(late);
+    const cancel = late.querySelector('button')!;
+    cancel.focus();
+    fireEvent.keyDown(cancel, { key: 'Escape' });
+    expect(dialog()).not.toBeNull();
+    expect(useLayout.getState().settings).not.toBeNull();
+    late.remove();
+  });
+
   it('row 3: the shortcut recorder and a marked element keep their Esc, and the dialog stays', () => {
     render(<SettingsDialog />);
     open();
@@ -107,7 +127,7 @@ describe('the Settings dialog', () => {
     expect(dialog()).not.toBeNull();
   });
 
-  it('row 4: a search field that holds text clears itself, and the dialog stays', () => {
+  it('row 4: a search field that holds text clears itself, and the dialog stays; the next Esc, in the empty field, closes it', async () => {
     render(<SettingsDialog />);
     open();
     const search = screen.getByRole('textbox', { name: 'Search settings' });
@@ -115,6 +135,8 @@ describe('the Settings dialog', () => {
     fireEvent.keyDown(search, { key: 'Escape' });
     expect(search).toHaveProperty('value', '');
     expect(dialog()).not.toBeNull();
+    fireEvent.keyDown(search, { key: 'Escape' });
+    await waitFor(() => expect(dialog()).toBeNull());
   });
 
   it('row 5: a field with an Esc of its own reverts and is left on the first press; the second closes the dialog', async () => {
@@ -132,12 +154,15 @@ describe('the Settings dialog', () => {
     await waitFor(() => expect(dialog()).toBeNull());
   });
 
-  it('row 6: Esc closes it, and the keyboard is back on the composer it was opened from', async () => {
+  // The Esc is pressed where the keyboard is after the open: the dialog's first field, its empty search (the wave
+  // architect's ruling on the first Mac run: an empty search field gives its Esc to the dialog).
+  it('row 6: opened with the keyboard in the composer, it lands in the empty search; one Esc closes it, and the keyboard is back on the composer', async () => {
     render(<><textarea aria-label="Composer" /><SettingsDialog /></>);
     const composer = screen.getByRole('textbox', { name: 'Composer' });
     composer.focus();
     open();
-    fireEvent.keyDown(dialog()!, { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('textbox', { name: 'Search settings' })));
+    fireEvent.keyDown(document.activeElement!, { key: 'Escape' });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(document.activeElement).toBe(composer);
   });
