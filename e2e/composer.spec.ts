@@ -317,8 +317,13 @@ test('@ and / menus with the widget union', async ({ editor }) => {
   // once widgets are registered for them, `/model` is listed as MAWS's panel, and the same names open the widget (W3,
   // C6: as the floating dialog, never in the box). Which row opens the list here is the recency boost's: the names chosen
   // above rank first with nothing typed (decision 17 c), so the panels' declared order before any pick is the next
-  // scene's (the M8 review's finding 2; the CI run of b1bad4a07 read `/compact` first here)
+  // scene's (the M8 review's finding 2; the CI run of b1bad4a07 read `/compact` first here). The registrations land with
+  // the list closed and a fresh `/` opens it, as the app's own land at its start: an open list takes the editor's
+  // catalogue and panels when the suggestion renders, at a keystroke, not when a registration lands (popup.tsx)
+  await clearEditor(page);
+  await expect(commands).toBeHidden();
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
+  await page.keyboard.type('/');
   await expect(commands.getByRole('option', { name: '/model', exact: true })).toHaveAttribute('data-origin', 'widget');
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
