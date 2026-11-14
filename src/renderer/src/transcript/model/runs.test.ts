@@ -243,8 +243,8 @@ describe('a call the engine moved, in its run', () => {
     expect(run.cells[1]).toMatchObject({ moved: true, status: 'running', background: true });
     expect(run.cells[1].label).toMatch(MOVED);
     expect(runLine(run.cells, new Map(), false)).toEqual({ kind: 'caption' });
-    expect(run.summary).toBe('Read a file, ran a command');
-    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read a file, ran a command$/)]);
+    expect(run.summary).toBe('Read plan.md, ran a command');
+    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read plan.md, ran a command$/)]);
   });
 
   it('once its process exits before its task’s end: the moved call is a stopped step under the same words, on the run’s line and the turn’s', () => {
@@ -254,7 +254,7 @@ describe('a call the engine moved, in its run', () => {
     const [run] = runs(rows);
     expect(run.cells[1]).toMatchObject({ moved: true, status: 'stopped', background: false });
     expect(run.cells[1].label).toMatch(MOVED);
-    expect(run.summary).toBe('Read a file, ran a command (1 stopped)');
-    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read a file, ran a command \(1 stopped\)$/)]);
+    expect(run.summary).toBe('Read plan.md, ran a command (1 stopped)');
+    expect(lineOf(rows)).toEqual([expect.stringMatching(/^Ended for your message after [\dhms ]+ · Read plan.md, ran a command \(1 stopped\)$/)]);
   });
 });
