@@ -9,7 +9,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, addressOf, bareOf } from '@shared/machine/address';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
@@ -600,5 +600,193 @@ describe('Connectors', () => {
     expect(alert.textContent).toContain('Anthropic’s directory is unavailable.');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(backend.calls.some((call) => call.command === 'catalog.refresh')).toBe(true));
+  });
+});
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, "Where", "After Add", §D, §G): the
+// action at the head of My items, the read of what is configured here at each opening, the add's line at the head of
+// the list, and the engine host's refusal there.
+describe('Connectors › Add custom connector', () => {
+  const READY_ENV = { binary: '/engine/claude', binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' };
+  const NOTION = { name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' } as const;
+  const listed = (servers: readonly object[]) => ({ skills: [], servers, warnings: [], serversRead: true });
+  const deferred = () => {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise((done, failed) => ((resolve = done), (reject = failed)));
+    return { promise, resolve, reject };
+  };
+  let emit: (name: string, payload: unknown) => void;
+  beforeEach(() => {
+    backend.script('plugins.env', () => READY_ENV);
+    backend.script('customization.inventory', () => listed([NOTION]));
+    // the plugin events, sent by the test as the engine host would
+    const base = window.maws!;
+    const listeners = new Map<string, Set<(payload: unknown) => void>>();
+    window.maws = {
+      ...base,
+      on(name, listener) {
+        if (!name.startsWith('plugins.')) return base.on(name, listener);
+        const set = listeners.get(name) ?? new Set();
+        listeners.set(name, set);
+        const entry = listener as (payload: unknown) => void;
+        set.add(entry);
+        return () => void set.delete(entry);
+      },
+    };
+    emit = (name, payload) => act(() => listeners.get(name)?.forEach((listener) => listener(payload)));
+  });
+  const mountFresh = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section="mcp" /></QueryClientProvider>);
+  const inventoryReads = () => backend.calls.filter((call) => call.command === 'customization.inventory').length;
+  const openSheet = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add custom connector…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Add custom connector' });
+    await within(sheet).findByRole('button', { name: 'Details' }); // plugins.env answered
+    return sheet;
+  };
+  const type = (sheet: HTMLElement, selector: string, value: string) => fireEvent.change(sheet.querySelector(selector)!, { target: { value } });
+  const remote = (sheet: HTMLElement, name: string, value = 'value-one') => {
+    type(sheet, '[data-connector-name]', name);
+    type(sheet, '[data-connector-url-field]', 'https://files.example.test/mcp');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add header' }));
+    type(sheet, '[data-connector-row-name]', 'X-Probe-Key');
+    type(sheet, '[data-connector-value]', value);
+  };
+  const addButton = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Add' }) as HTMLButtonElement;
+  const line = (key: string) => document.querySelector(`[data-connector-adding="${key}"]`) as HTMLElement | null;
+  const done = (opId: string, outcome: unknown) => emit('plugins.operation', { opId, action: 'mcp-add', target: 'files-probe', phase: 'done', outcome });
+
+  it('stands at the head of My items before Refresh, on a project’s page and on the user configuration’s, not in Discover; it opens with Remote (HTTP), all projects and Details closed', async () => {
+    mountFresh();
+    const action = await screen.findByRole('button', { name: 'Add custom connector…' });
+    expect(action.closest('[data-customize-toolbar="mcp"]')).not.toBeNull();
+    expect(action.nextElementSibling!.textContent).toBe('Refresh');
+    let sheet = await openSheet();
+    expect((within(sheet).getByRole('radio', { name: 'Remote (HTTP)' }) as HTMLInputElement).checked).toBe(true);
+    expect((within(sheet).getByRole('radio', { name: 'All projects' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(sheet).getByRole('radio', { name: 'One only' })).toBeTruthy();
+    expect(within(sheet).getByRole('radio', { name: 'One, shared in its .mcp.json' })).toBeTruthy();
+    expect(within(sheet).getByRole('button', { name: 'Details' }).getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('radio', { name: 'Discover' }));
+    expect(screen.queryByRole('button', { name: 'Add custom connector…' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: '' } });
+    sheet = await openSheet();
+    expect(within(sheet).queryByRole('radio', { name: 'All projects' })).toBeNull();
+    expect(sheet.querySelector('[data-connector-add-to]')!.textContent).toBe('All projects');
+  });
+
+  it('held open: with an older answer in hand Add waits for the opening’s read; a name it holds is refused with that entry; without it Add is enabled; a failure offers Retry', async () => {
+    const reads: ReturnType<typeof deferred>[] = [];
+    let first = true;
+    backend.script('customization.inventory', () => {
+      if (first) return ((first = false), listed([NOTION]));
+      reads.push(deferred());
+      return reads.at(-1)!.promise;
+    });
+    mountFresh();
+    await waitFor(() => expect(document.querySelector('[data-connector="notion"]')).not.toBeNull());
+    const before = inventoryReads();
+    let sheet = await openSheet();
+    expect(inventoryReads()).toBe(before + 1); // the opening reads again
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true);
+    expect(within(sheet).getByRole('status').textContent).toBe('Reading what is configured here…');
+    await act(async () => reads[0].resolve(listed([NOTION, { name: 'files-probe', scope: 'project', path: '/one/.mcp.json', transport: 'http' }])));
+    await waitFor(() => expect(sheet.querySelector('[data-connector-problem]')?.textContent).toBe('This name is already configured here (project scope, /one/.mcp.json).'));
+    expect(addButton(sheet).disabled).toBe(true);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+
+    sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true); // the answer in hand holds the name, and vouches for nothing now
+    expect(sheet.querySelector('[data-connector-problem]')).toBeNull();
+    await act(async () => reads[1].resolve(listed([NOTION])));
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+
+    sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    await act(async () => reads[2].reject(new WidgetBackendError({ code: 'internal', message: 'the engine host is not running' })));
+    const alert = await within(sheet).findByRole('alert');
+    expect(alert.textContent).toContain('What is configured here couldn’t be read: the engine host is not running');
+    expect(addButton(sheet).disabled).toBe(true);
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(reads).toHaveLength(4));
+    expect(addButton(sheet).disabled).toBe(true);
+  });
+
+  it('held open: the name is added elsewhere after the sheet’s read; Add sends connectors.addJson, and the engine host’s refusal reads on the add’s line with its scope', async () => {
+    backend.script('connectors.addJson', () => ({ opId: 'add-1' }));
+    mountFresh();
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'One only' }));
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.addJson').map((call) => call.input)).toEqual([{ cwd: '/one', binary: '/engine/claude', name: 'files-probe', scope: 'local', entry: { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Probe-Key', value: 'value-one' }] }, folder: '/one' }]));
+    expect(backend.calls.filter((call) => call.command === 'connectors.add')).toEqual([]);
+    await waitFor(() => expect(line('connector:add:local:files-probe')?.textContent).toContain('Working…'));
+    done('add-1', { ok: false, error: { code: 'spawn_failed', message: 'files-probe is already configured here (user scope). Nothing was added.', failureCode: 'name_configured', shownCommand: null } });
+    const failed = line('connector:add:local:files-probe')!;
+    expect(failed.firstElementChild!.textContent).toBe('files-probe');
+    expect(within(failed).getByRole('status').textContent).toBe('files-probe is already configured here (user scope). Nothing was added. · name_configured');
+    expect(within(failed).getByRole('status').className).toContain('text-danger');
+  });
+
+  it('held open: two adds; the first fails in its words and code while the second works; the second ends well, its line leaves and its row comes with the list; nothing drawn holds a value', async () => {
+    let receipts = 0;
+    backend.script('connectors.addJson', () => ({ opId: `add-${++receipts}` }));
+    let servers: object[] = [NOTION];
+    backend.script('customization.inventory', () => listed(servers));
+    mountFresh();
+    let sheet = await openSheet();
+    remote(sheet, 'files-probe', 'value-one');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe')?.textContent).toContain('Working…'));
+    await waitFor(() => expect(within(line('connector:add:user:files-probe')!).queryByRole('button', { name: 'Cancel' })).not.toBeNull());
+    emit('plugins.operation', { opId: 'add-1', action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'Checking the configuration' });
+    expect(within(line('connector:add:user:files-probe')!).getByRole('status').textContent).toBe('Checking the configuration');
+
+    sheet = await openSheet();
+    type(sheet, '[data-connector-name]', 'files-probe-2');
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'Local command' }));
+    type(sheet, '[data-connector-command-field]', '/opt/probe/bin/files-probe');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add variable' }));
+    type(sheet, '[data-connector-row-name]', 'MODE');
+    type(sheet, '[data-connector-value]', 'value-two');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe-2')?.textContent).toContain('Working…'));
+
+    done('add-1', { ok: false, error: { code: 'cli_failed', message: 'MCP server files-probe already exists in user config', failureCode: null, shownCommand: null } });
+    expect(within(line('connector:add:user:files-probe')!).getByRole('status').textContent).toBe('MCP server files-probe already exists in user config · cli_failed');
+    expect(line('connector:add:user:files-probe-2')!.textContent).toContain('Working…');
+
+    servers = [NOTION, { name: 'files-probe-2', scope: 'user', path: '/config/.claude.json', transport: 'stdio' }];
+    emit('plugins.operation', { opId: 'add-2', action: 'mcp-add', target: 'files-probe-2', phase: 'done', outcome: { ok: true, result: { command: 'mcp add-json', outcome: 'ok', message: 'Added stdio MCP server files-probe-2 to user config', name: 'files-probe-2', scope: 'user' } } });
+    emit('plugins.changed', {});
+    expect(line('connector:add:user:files-probe-2')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-connector="files-probe-2"]')?.textContent).toContain('user scope · stdio'));
+    expect(within(document.querySelector<HTMLElement>('[data-connector="files-probe-2"]')!).getByRole('button', { name: 'Remove files-probe-2' })).toBeTruthy();
+    expect(line('connector:add:user:files-probe')).not.toBeNull(); // a failed line stays
+    expect(document.body.textContent).not.toMatch(/value-one|value-two/);
+  });
+
+  it('a refused send (an engine host of an older build) reads the transport’s words on the line, and nothing else changes', async () => {
+    backend.script('connectors.addJson', () => {
+      throw new WidgetBackendError({ code: 'unknown_command', message: 'connectors.addJson is not a command here' });
+    });
+    mountFresh();
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe')?.textContent).toContain('connectors.addJson is not a command here · showing the last value it reported'));
+    expect([...document.querySelectorAll('[data-connector]')].map((row) => row.getAttribute('data-connector'))).toEqual(['notion']);
   });
 });
