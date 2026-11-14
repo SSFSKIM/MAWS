@@ -60,7 +60,7 @@ const UNSENT = delegation({ id: D4, prefix: 'dc-', expires: IN_90_DAYS, hub: { e
 const RUN = { generation: 1, id: D4, hash: HASH };
 const REV = 1;
 const READ = { at: '2026-10-28T11:59:00.000Z', failed: false };
-const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const DEST: ProvisioningSecret = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
 const slotOf = (hash: string, delegation: string | null, version = 13, held = delegation !== null): Partial<Signer> => ({ ...ROOT, pending: { version, hash, fork: false, exposed: !held, refused: null, delegation, held } });
 const PENDING = slotOf(HASH, D4);
 const notSigning = { root: false, maySign: false } as const;
