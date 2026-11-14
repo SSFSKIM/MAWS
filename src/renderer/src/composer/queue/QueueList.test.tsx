@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PendingSteer, QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
@@ -13,6 +13,7 @@ import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetRemoteLaneBStore } from '../../lane-b/remote-session';
+import { remoteUnavailableOf } from '../../lane-b/remote-unavailable';
 import { resetComposerStore } from '../../stores/composer';
 import { useHosts } from '../../stores/hosts';
 import { useMachines } from '../../stores/machines';
@@ -306,26 +307,46 @@ describe('the stack’s refused controls', () => {
     delete (window as { maws?: unknown }).maws;
   });
 
-  it('on another machine closes a next-step row’s Send now, Edit and Delete with the helper’s sentences', async () => {
+  // From the master that holds U9 (the landing's edge): `session.steer.cancel` is offered behind `rl2.session-acts`, so
+  // Edit and Delete read U9's helper (its sentence on a machine that does not list the capability, nothing on one that
+  // does); Send now stays declared until U4b
+  it('on another machine closes a next-step row’s Send now with its declared sentence, and Edit and Delete with the helper’s where the machine does not take them back', async () => {
     window.maws = { localMachine: TEST_MACHINE } as never;
-    resetRemoteSurfaces();
-    resetRemoteLaneBStore();
-    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
-    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const machineLists = (capabilities: string[]) => {
+      resetRemoteSurfaces();
+      resetRemoteLaneBStore();
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities }]);
+      useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    };
     const { client, invoke } = bridge();
-    render(<QueueList appSessionId={R} busy queue={queue([entry('q-1', { appSessionId: R })], { steers: [steer(U1, 'remote steer')] })} client={client} />);
-    const [next, after] = rows();
+    const mount = () => render(<QueueList appSessionId={R} busy queue={queue([entry('q-1', { appSessionId: R })], { steers: [steer(U1, 'remote steer')] })} client={client} />);
+
+    machineLists([]); // a build that serves no session acts
+    const cancelWords = remoteUnavailableOf(R, 'session.steer.cancel');
+    expect(cancelWords).toContain('Update MAWS on mini');
+    let view = mount();
+    let [next, after] = rows();
     const send = within(next).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
     expect(send.disabled).toBe(true);
     expect(send.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.sendNow']);
     const del = within(next).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
-    expect(del.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.cancel']);
+    expect(del.getAttribute('title')).toBe(cancelWords);
     expect((within(after).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false);
     await userEvent.setup().click(within(next).getByRole('button', { name: 'More' }));
     const edit = await screen.findByRole('menuitem', { name: 'Edit' });
     expect(edit.getAttribute('aria-disabled')).toBe('true');
-    expect(edit.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.cancel']);
+    expect(edit.getAttribute('title')).toBe(cancelWords);
+    view.unmount();
+
+    machineLists([SESSION_ACTS_CAPABILITY]); // one that takes a waiting message back
+    expect(remoteUnavailableOf(R, 'session.steer.cancel')).toBeNull();
+    view = mount();
+    [next, after] = rows();
+    expect((within(next).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'Send now stays declared').toBe(true);
+    expect((within(next).getByRole('button', { name: 'Delete' }) as HTMLButtonElement).disabled).toBe(false);
+    await userEvent.setup().click(within(next).getByRole('button', { name: 'More' }));
+    expect((await screen.findByRole('menuitem', { name: 'Edit' })).getAttribute('aria-disabled')).not.toBe('true');
     expect(invoke).not.toHaveBeenCalled();
   });
 

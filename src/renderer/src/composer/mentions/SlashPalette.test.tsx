@@ -4,13 +4,14 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
 import { registerAction } from '../../keymap/actions-runtime';
 import { resetRemoteLaneBStore } from '../../lane-b/remote-session';
+import { remoteUnavailableOf } from '../../lane-b/remote-unavailable';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
@@ -140,18 +141,30 @@ describe('the highlighted row’s popover', () => {
     expect(popover()!.textContent).toBe('Check the setupTerminal only');
   });
 
-  it('greys /fork with the helper’s sentence for a session on another machine, and not on this Mac', () => {
-    resetRemoteSurfaces();
-    resetRemoteLaneBStore();
-    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
-    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far'), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  // From the master that holds U9 (the landing's edge): `session.fork` is offered behind `rl2.session-acts`, so the row
+  // reads U9's helper: its sentence on a machine that does not list the capability, nothing on one that does
+  it('greys /fork with the helper’s sentence for a session on a machine that cannot fork it, and not where it can or on this Mac', () => {
+    const machineLists = (capabilities: string[]) => {
+      resetRemoteSurfaces();
+      resetRemoteLaneBStore();
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities }]);
+      useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far'), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    };
     try {
+      machineLists([]); // a build that serves no session acts
+      const words = remoteUnavailableOf(REMOTE, 'session.fork');
+      expect(words).toContain('Update MAWS on mini');
       const far = open('fork', { appSessionId: REMOTE, widgets: PANELS });
       expect(far.options()[0].textContent).toBe('/fork');
       expect(far.options()[0].getAttribute('aria-disabled')).toBe('true');
-      expect(far.popover()!.textContent).toBe(`${declared('fork')}[prompt]${REMOTE_UNAVAILABLE['session.fork']}`);
+      expect(far.popover()!.textContent).toBe(`${declared('fork')}[prompt]${words}`);
       cleanup();
       expect(open('', { appSessionId: REMOTE, widgets: PANELS }).shown()).not.toContain('/fork');
+      cleanup();
+      machineLists([SESSION_ACTS_CAPABILITY]); // one that forks there
+      const there = open('fork', { appSessionId: REMOTE, widgets: PANELS });
+      expect(there.options()[0].getAttribute('aria-disabled')).toBeNull();
+      expect(there.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
       cleanup();
       const here = open('fork', { widgets: PANELS });
       expect(here.options()[0].getAttribute('aria-disabled')).toBeNull();
