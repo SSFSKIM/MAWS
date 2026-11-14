@@ -1177,6 +1177,17 @@ Found at the branch's base (2026-11-13), on the merged tree:
   - The script tests: 587 of 587.
   Rationale: the chain-merge brief.
   Date/Author: 2026-11-14, the controller.
+- Decision: the chain merge of `ux-wave/U8c-2` at `448453106` (`e8bb56a7d`, over `610d14e59`), which brings:
+  - the destinations landing's scroll-bar fix in `destination/SettingsDialog.tsx` and its test: under classic scroll bars the Settings body keeps 760 px, and the bar's width comes out of the dialog's right inset;
+  - one tracker row and the destinations document;
+  - the working-folder landing's Decision Log line.
+  The merge had no conflict. The only file both sides changed is `docs/tech-debt-tracker.md`, where the chain head's row sits with its own 2026-11-14 rows and before this landing's. Nothing under `e2e/` changed, and no wire file. The wire stays at 45: the manifest regenerated on the VM is byte-identical, fingerprint `9067289f901752d5`. Proof on the VM at `e8bb56a7d`:
+  - `tsc --noEmit -p tsconfig.web.json`: exit 0.
+  - eslint on `SettingsDialog.tsx` and its test: clean.
+  - vitest over `src/renderer/src/destination`, `src/renderer/src/app` and the two wire tests: 45 of 45 files, 529 tests.
+  - The script tests: 587 of 587.
+  Rationale: the chain-merge brief.
+  Date/Author: 2026-11-14, the controller.
 
 ## Outcomes & Retrospective
 
