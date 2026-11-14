@@ -14,7 +14,7 @@ import { ipc } from '../../ipc/client';
 import { queryClient } from '../../ipc/query';
 import { checkoutKey, machineFor } from '../../ipc/machine';
 import { useGit } from '../../stores/git';
-import { prStateKey, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
+import { prStateKey, refreshPrState, scmStatusKey, usePrState, useScmStatus } from '../../tools/scm/queries';
 import { openTerminal } from '../../tools/terminal';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, usePanelHost } from '../host';
@@ -84,11 +84,7 @@ function PrRow({ appSessionId, directory, branch }: { appSessionId: AppSessionId
   const refresh = async () => {
     setRefreshing(true);
     try {
-      if (scm.data?.trusted) {
-        const result = await ipc.invoke('scm.pr.state', { appSessionId, refresh: true });
-        if (result.ok) queryClient.setQueryData(prStateKey(appSessionId), result.value);
-        else await queryClient.invalidateQueries({ queryKey: prStateKey(appSessionId) });
-      }
+      if (scm.data?.trusted) await refreshPrState(appSessionId, ipc);
       await queryClient.invalidateQueries({ queryKey: scmStatusKey(appSessionId) });
     } finally {
       setRefreshing(false);

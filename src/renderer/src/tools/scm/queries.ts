@@ -70,6 +70,19 @@ export function refreshPublishedPrState(appSessionId: AppSessionId, published: E
   });
 }
 
+// The summary's Refresh (UX wave U8c-2, M6): gh asked again past main's kept answer, which is written only while no move
+// reset the PR state and no later lookup began meanwhile, under the generation the published lookup and the reset share.
+// A failed ask asks the query again, as before.
+export async function refreshPrState(appSessionId: AppSessionId, client: MawsBridge): Promise<void> {
+  const key = prStateKey(appSessionId);
+  const lookup = (lookups.get(appSessionId) ?? 0) + 1;
+  lookups.set(appSessionId, lookup);
+  const result = await client.invoke('scm.pr.state', { appSessionId, refresh: true });
+  if (lookups.get(appSessionId) !== lookup) return;
+  if (result.ok) queryClient.setQueryData(key, result.value);
+  else await queryClient.invalidateQueries({ queryKey: key });
+}
+
 // The checkout's `scm.status`. Read again when its repository's head or refs move (`git remote add`, a remote's URL or an
 // upstream set by a push change the remotes and defaults it answers; the watcher reads `config` as refs) and when a
 // session's setup records trust.

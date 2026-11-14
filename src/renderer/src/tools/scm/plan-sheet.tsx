@@ -3,7 +3,7 @@
 // runs its stored plan, never anything the renderer sends back). A refusal to plan shows in main's words with nothing to
 // submit. A refusal to run spends the token (main consumed it), so the sheet asks for a fresh plan and keeps main's
 // sentence of what changed above it; `busy` alone leaves the token unspent (main decides it first), and the plan stays.
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
@@ -32,17 +32,27 @@ export function plannedOf(result: CommandResult<'scm.push.plan'>): Planned {
 export function useRunPlan({ appSessionId, ui, replan }: { appSessionId: AppSessionId; ui: StoreApi<ScmUi>; replan(): void }) {
   const [submitting, setSubmitting] = useState(false);
   const [note, setNote] = useState<ScmNotice | null>(null);
+  // UX wave U8c-2 (M6): whether this sheet is still the one shown (a move closes it, and the page back in the launch
+  // folder may show a new one when an answer confirmed here lands), and the folder of the page it was confirmed on.
+  const shown = useRef(true);
+  useEffect(() => {
+    shown.current = true;
+    return () => void (shown.current = false);
+  }, []);
   const run = async (plan: RemotePlan) => {
     setSubmitting(true);
     setNote(null);
+    const asked = ui.getState().directory;
     const input = { appSessionId, token: plan.token };
     const result = await settled(plan.kind === 'push' ? ipc.invoke('scm.push', input) : ipc.invoke('scm.pr.create', input));
-    setSubmitting(false);
     if (ui.getState().session !== appSessionId) return; // a pinned tool moved on: its sheet is already gone
+    // The run started in the folder it was confirmed in: the page of that folder follows it, another folder's does not.
+    if (result.ok && 'started' in result.value && ui.getState().directory === asked) useScm.getState().started(appSessionId, plan);
+    if (!shown.current) return; // closed meanwhile: nothing of this answer is another sheet's
+    setSubmitting(false);
     if (!result.ok) return setNote({ kind: 'error', text: result.error.message, output: '' });
     const answer = result.value;
     if ('started' in answer) {
-      useScm.getState().started(appSessionId, plan);
       ui.setState({ sheet: null });
       return;
     }
