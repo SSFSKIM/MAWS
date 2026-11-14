@@ -4,6 +4,11 @@ Round 2 synthesis `open`, order 2. The parts are the owner's choices from round 
 here is the structure they stand in and what happens where they meet. Values live in `open.css` (tokens at the
 top) and `field.ts` (the light); this file says where each was lifted from, what changed, and why.
 
+Sections 0 to 9 describe the synthesis as it was built, in the dropped orange and in Figtree. Since then the
+owner dropped the orange, chose the system face, and kept Open for its plain ground. Section 10 is that work: the
+Colour switch, what Open's light becomes under each colouring, the typeface, and what still differs from Layers.
+Where the earlier sections name the orange, read "the colouring's"; the Tool blocks knob of section 7 is gone.
+
 ## 0. Thesis
 
 No sheet. The window is one plain ground. The colour field is not a surface under the window; it is light that
@@ -290,6 +295,193 @@ otherwise keeps (no glass in the content layer); the knob exists so the owner ca
   1340 px wide the column is what pays (620 px at 1280).
 - Weakest: the two small buttons on bare ground in light, and the dark bars' neutral body beside coloured panes.
 
+## 10. Colour, the typeface, and Open beside Layers
+
+Added 2026-11-14. The owner dropped `#FD780F`, chose Paper from Layers' Colour switch, and kept two finalists,
+Open and Layers, to be compared in the same colour. Their words on what to keep of Open: the plain ground ("no
+drawing in the background, only light gathered under the glass controls"). And on colour: "I'd make color more
+warmer perhaps by mixing older orange?"
+
+### 10.1 What Open takes from a colouring, and what it leaves
+
+Open has the same Colour switch as Layers and reads the same records (`../layers/colour`): `meta.ts` builds the
+switch from `COLOURINGS`, so a colouring added there appears here with no change in this folder. From a record
+Open takes four things and leaves one.
+
+| taken | how |
+|---|---|
+| the ground's tone | A colouring that names its ground (Paper's ivory `#e8e1db` and `#181614`, Cobalt's white and black) sets Open's one ground; the Ground knob is then not consulted. |
+| the ink, and the tint under shadows | `--xo-ink-rgb`, `--xo-shade-rgb`. Every neutral on the ground is a mix of the ink and the ground, so the page follows. |
+| the mark that means "it is your move" | The capsule's seed, the glyphs on waiting rows and tabs, Approve, Send once there is text, and focus. `stroke` colourings draw Quiet's glyph in the mark colour; `badge` colourings (Paper, Opal) reverse it out of a 20 px disc of the accent, 18 px in a tab, and inside the capsule it goes back to a plain glyph in the ink that goes on the accent. These are Layers' two forms, restated in `open.css`. |
+| what the light is made of | 10.2. |
+
+**Left: the painted form.** Paper's still life is not painted in Open, on any page, New chat included. I first
+built the other answer (the whole picture around a cleared reading column) and the owner ruled against it: the
+plain ground is what they keep Open for. So Open imports the colourings and nothing from the painters, and
+`field.ts` stays Open's own.
+
+### 10.2 The light under each colouring
+
+The light keeps Open's composition (section 3: one feathered gathering per piece of glass, each travelling with
+its surface, at the same shares of strength) and Field's painting. What changes is where its colours come from.
+
+**A colouring whose field is colour lends its colours.** Field's composition names seven places: four down the
+pane's column, two at the right edge, one under the composer. Layers' colourings keep that composition, so each
+of Open's seven roles takes the mass a colouring paints nearest that place (floors fainter than 12 % are passed
+over, which is what keeps Cobalt's two white floors out), at that mass's level against Field's own, held between
+0.6 and 1.5. Orange (was) therefore paints exactly what section 3 painted, and Peach, Honey, Rose, Blue hour, Opal
+and Cobalt paint their own dusk in the same places. Nothing of a colouring's four masses across the main space is
+used: that is where Open's ground is plain.
+
+**A colouring whose field is a picture has no colour to lend, so its light is a lamp.** This is Paper, and it is
+where the owner's wish for warmth is answered, since the gathered light is the one place Open has colour at all.
+
+- *Hue.* The room's own: in light the hue of the colouring's shadow tint (a shadow takes the colour of the room
+  it falls in; Paper's `84 62 42` is hue 63), in dark the hue of its ground (Paper's `#181614`, hue 68), kept
+  between 35 and 95 so a lamp stays between amber and gold. Where a colouring's accent is itself a warm colour
+  the hue is pulled a third of the way toward it; Paper's accent is ink, so it is not.
+- *Chroma.* A small floor, because a lamp is warm, plus twice the chroma of the colouring's ground. Paper's ivory
+  has a chroma of 0.011, so its lamp runs 0.058 to 0.077 by day and 0.055 to 0.095 by night. A Paper on a warmer
+  ground is answered with warmer light by the same arithmetic, with no change here.
+- *Down the pane's column,* light to shade: by day `rgb(255 241 226)`, `rgb(255 226 199)`, `rgb(251 201 161)`,
+  `rgb(221 176 146)`; by night `rgb(179 137 92)`, `rgb(157 102 55)`, `rgb(118 68 41)`, `rgb(80 45 35)`. By day
+  the hue barely moves as it deepens (69 to 55): a lamp that turns toward red on ivory reads as a blush, and what
+  was asked for is the older orange's warmth. By night it falls from 68 to 38, as embers do.
+- *The shade.* The light comes from the upper left, as in Paper's own picture, so by day each pane and the
+  composer lay a soft shade of the deepest tone under their far corner.
+- *Contours* are the shadow tint by day and a warm white by night, at 5 % and 4 %.
+
+For reference, this is the older orange (`#fd780f`: chroma 0.19, hue 49) at about a third of its chroma and
+fifteen degrees toward gold. It is a departure from Paper as Layers states it ("no hue"), made on the owner's
+word, and it is confined to the light: the ground, the glass and the ink are Paper's, and the mark is ink.
+Field strength scales it; at Whisper Open under Paper is ivory, glass and shadow, close to hueless.
+
+Under every colouring the light lies on a base of its own inside its feather: a shade under the ground by day
+(the ground at 0.95) and by night a floor no darker than `rgb(14 13 12)`, which keeps colour deep under dark
+glass and keeps a faint tail of colour from becoming a wash over Cobalt's pure black.
+
+**What glass picks up.** The two panes and the new-chat composer are made over their own gathering as a texture,
+so their bodies keep its hue: under Paper they are warm glass by day and by night. The tab capsule and the
+session composer sample the page, as before, so by night their bodies are neutral over a warm halo (section 9's
+cost, unchanged).
+
+**Paper's ground does for Open what it did for Layers.** Light glass draws at 0.93 to 0.97; on `#faf9f5` (0.98)
+nothing separated a bar from the reading ground, which was this synthesis's first risk. On the ivory (0.89) the
+tab capsule and the composer are the lighter thing at rest, with no light needed under them to be seen.
+
+### 10.3 The typeface
+
+The owner: "i'd use from Quiet. the one that's used for layer is too round". Quiet's face is the system face, so
+System is now the default of the Typeface knob; Figtree and Geist stay reachable. Section 2's conflict 10 is
+settled the other way round.
+
+What was tuned to Figtree and had to move: weights. The same number is darker on the page in SF Pro, so weights
+became roles set per face (`--xo-w`, `-tab`, `-mid`, `-strong`, `-title`), and under the system face they are
+the ones Quiet used: 400 for text, 450 for a tab's title, 500 for labels, buttons and the chosen option, 560 for
+an unread row, 600 for titles. Code is the system mono at 12 px. The new-chat line is 500 at 29/36 with −0.02em.
+Checked at rest in the three scenes and both schemes: the four tabs and the plus fit the capsule with their full
+titles at 1440 and the capsule still ends a seam before the waiting capsule; rows stay 34 px; the reading column
+and the composer are unchanged, since nothing in the layout is measured in ems.
+
+### 10.4 Readings
+
+Rendered contrast, as in section 4 (each line's tenth-percentile pixel; floors 4.5 for text, 3 for icons), 1440
+by 900 at 2x, WebGPU, the system face.
+
+Paper, at Field strength Full unless said:
+
+| | light | dark |
+|---|---|---|
+| drawn body: left pane / right pane | 0.93 to 0.96 / 0.94 to 0.95 | 0.21 to 0.22 / 0.20 |
+| drawn body: tabs / composer / capsule | 0.86 to 0.95 / 0.91 to 0.96 / 0.12 | 0.29 to 0.35 / 0.20 to 0.25 / 0.88 to 0.89 |
+| lowest text, session | 5.04 (a done to-do on the right pane) | 5.13 (an idle row on the left pane) |
+| lowest text, New chat | 5.04 (a group label on the pane) | 5.16 (an idle row) |
+| lowest text, Settings | 5.40 (a pill that is off) | 5.41 |
+| lowest icon | 3.52 (a group label's caret) | 4.11 (the model chip's chevron, New chat) |
+| at Vivid: lowest text / icon | 5.03 / 3.52 | 4.78 (a pane row) / 3.41 (the chevron on the new-chat composer) |
+| with the row card open, the list open, a tool run open | 4.76 (a diff's plus sign) | 5.03 (Deny, on the card) |
+
+At Vivid the dark new-chat composer's body reaches 0.33 to 0.35, the highest dark body on the page and the one
+nearest the band (0.39 to 0.49) where neither ink reads.
+
+The comparison set, session, New chat and Settings in both schemes at Full: no reading under its floor. Lowest
+text in light 5.00 to 5.09 for every colouring (a group label on the pane); in dark 4.83 to 5.24, the same line
+for all of them, a tab's title while prose passes under the capsule (Honey 4.83, Rose and Orange 4.86, Peach and
+Opal 4.87, Blue hour 4.90, Cobalt 5.24). Lowest icon 3.5 in light (the caret) and 3.78 in dark (Orange, the
+chevron on the new-chat composer). 58 routes in all, 4,713 gated readings, none under its floor.
+
+To hold these floors on a ground as deep as the ivory, the quiet tones on the ground stepped up (secondary 82 %,
+muted 70 %, marks 50 % of the ink in light; 78 %, 68 %, 44 % in dark), the two diff hues became Layers' (so a
+colouring is compared on the same content), a placeholder in a settings field is the ink at 76 %, and the
+current row's lift on a dark pane came down from 15 % to 12 % of white (at 15 % its fill sat at 0.40 under
+Orange, in the band where neither ink reads).
+
+Not measured: the receded pose, where Layers found Paper's ink capsule fall to 1.4:1 in dark; hover text; the
+state badges in the pane's slots, which the script cannot see (ink on the pane, about 13:1 by their tokens).
+
+### 10.5 Open beside Layers, in the same colour
+
+Layers now stands with the owner's picks: the painted form out of focus outside New chat, the top row on the
+reading column, the right column growing from a button. Both pages then share the pane, the column rule, the
+capsule and the growing pane (the last two are Open's, lifted). What a person still sees differ, under Paper:
+
+1. **Behind everything.** Layers: a drawing. On New chat the whole still life, an arch of paper and a leaf of
+   glass; behind a session and Settings the same drawing out of focus, a soft rise of shade at the lower left and
+   a breath of light at the right. Open: one flat ivory, and warm light only under the two panes and around the
+   composer. On Open's New chat there is an empty ground and one pool of light around the composer.
+2. **The transcript.** Layers: your message, a diff, a running command and an opened tool run are each a white
+   piece of glass with a shadow, standing over the field; prose is read between them on the field itself. Open:
+   prose and blocks are on the same ground; a block is a hairline ring with no fill and no shadow, and your
+   message is a tint of the ink. Layers' transcript has objects in it; Open's reads as one printed page.
+3. **Scrolling.** In Layers the blocks travel over a still field, and the lens moves across what is under them.
+   In Open nothing in the transcript is glass; what moves under glass is the text itself, under the tabs and the
+   composer.
+4. **Where the warmth is.** Layers under Paper has no hue anywhere; its warmth is the ivory and the brown of its
+   shadows. Open has a warm lamp under its glass, so its panes and composer are faintly amber, by night clearly.
+5. **How much is glass.** Layers: about ten surfaces at rest in a session, most of them in the transcript. Open:
+   five, all at the window's edges and on the column's two ends.
+6. **The face.** Open is now set in the system face; Layers, until it follows, in Figtree, the one the owner
+   found too round.
+7. **The right pane.** The same idea in both. Open's is the library's own morph (it lights at the press and
+   springs); Layers' grows on a CSS curve under a decorative surface.
+8. **Settings.** Layers' rows are read over the out-of-focus form; Open's on the flat ground, with the light
+   only at the left pane.
+
+What Open gives up beside Layers: the picture the owner sent is nowhere in it, so its New chat is the plainer
+page; and a tool run or a diff has less presence. What it gains: nothing is ever behind a word, and the page is
+quieter to read for hours.
+
+### 10.6 What changed in the code
+
+- `meta.ts`: the Colour switch, first, built from Layers' records and named from Layers' own switch; the Typeface
+  default; the Tool blocks knob is gone (four knobs: Colour, Field strength, Ground, Typeface). The owner now
+  describes Open by its quiet tool blocks, and glass blocks are what Layers is.
+- `field.ts`: `lightOf(field, tokens, ground, dark)` derives the light from a colouring; `paintGather` takes it.
+  The masses' places and shares are section 3's.
+- `Open.tsx`: reads the colouring, writes seven variables on the root (`--xo-ground`, `--xo-ink-rgb`,
+  `--xo-shade-rgb`, `--xo-accent`, `--xo-on-accent`, `--xo-accent-mark`, `--xo-focus`) with `data-colour` and
+  `data-mark`; the capsule's seed is the colouring's accent.
+- `open.css`: no rule names a hue; the badge form; weights as roles per face; the glass tool blocks removed.
+- `Session.tsx`: the card is a ring again and nothing else.
+
+Imports from Layers: `COLOURINGS`, `DEFAULT_COLOUR`, `colouringOf`, `oklch` and the `Field` and `Tokens` types
+from `colour.ts`, and the Colour knob's labels from `meta.ts`. Nothing from `paint.ts` or `paper.ts`.
+
+Captures of record, in `shots/open/`: `open-<scene>-colour-<id>.png` and `open-<scene>-scheme-dark-colour-<id>.png`;
+for Paper all three scenes, the states (`-card`, `-waiting`, `-fold`, `-pane-away`, `-side-away`), Whisper and
+Vivid, and 1280 by 800 and 1728 by 1117; for the others the session in both schemes.
+
+### 10.7 Not good yet
+
+- A colouring's warmth reaches Open only through its ground, its shadow tint and its accent. A warmer Paper that
+  keeps Paper's ground and tint and carries its warmth only in the painted form would look the same here as
+  Paper does.
+- By night the session composer and the tabs are neutral glass beside warm panes (section 9).
+- Under Paper the mark is ink, so the capsule is the darkest object on a light page and the lightest on a dark
+  one. That is Layers' default mark; its gold was not brought over, since the owner has not ruled on it.
+- With the left pane away its button stands on bare ivory; it reads better than it did on `#faf9f5`, by Paper's
+  lower ground alone.
+
 ## To ship this in the app
 
 - **The shell.** Today the toolbar, the tab strip, the sidebar and the window paint one flat ground in a grid, with
@@ -303,6 +495,9 @@ otherwise keeps (no glass in the content layer); the knob exists so the owner ca
   window transparency or vibrancy is needed: the light is the app's own.
 - **The light.** A small painter (one canvas per pane, one under the composer, one under the tabs), repainted on
   resize, scheme and strength, and an Appearance setting for its strength with an off position.
+- **Colour as one record.** A colouring (ground, ink, shadow tint, the mark and its form, what the light is made
+  of) per scheme, written to the root as variables; no component names a hue. The terracotta pair goes; under
+  Paper the mark is the ink, and the removed-line red is the only warm pigment left.
 - **Tabs** are square cells parted by rules by structure. They become fills inside one floating capsule.
 - **The side column** becomes a surface that opens from a control and is as tall as its content; the tools it
   hosts need to state a natural height.
@@ -317,7 +512,8 @@ otherwise keeps (no glass in the content layer); the knob exists so the owner ca
   has to be applied at every site.
 - **Rows.** The sidebar row loses its second line and age at rest and gains the trailing slot; the removed text
   moves to the card. The settings rows lose their printed help, which moves to the margin.
-- **Fonts.** Bundle the chosen family and Geist Mono locally (remote fonts cannot load).
+- **Fonts.** The system face, which the app already uses, so nothing is bundled; weights as roles (400, 450, 500,
+  560, 600) in place of today's single interface weight.
 - **Native views.** An embedded browser view is composited above the page and cannot sit under a bar, a pane or a
   platter. A tab that hosts one needs the bars to stand clear of it, or the existing cover-with-a-picture path
   whenever glass overlaps it.

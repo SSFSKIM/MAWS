@@ -41,13 +41,9 @@ function Folded({ caption, time, children }: { caption: string; time?: string; c
   );
 }
 
-/** A transcript card. A ring on the ground by default; with the Tool blocks knob on Glass, glass over its own light. */
+/** A transcript card: a ring on the ground, with no fill and no lift (Quiet's). */
 function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return (
-    <div className="xo-block">
-      <div className={cx('xo-card', className)}>{children}</div>
-    </div>
-  );
+  return <div className={cx('xo-card', className)}>{children}</div>;
 }
 
 function Edit({ item }: { item: Extract<TranscriptItem, { kind: 'edit' }> }) {
@@ -172,8 +168,8 @@ export function Transcript() {
 
 /**
  * What the composer carries (Quiet's): a queued message as a token above the field, attach, one model chip that
- * holds effort, mode, folder and branch, the context ring, and one button that stops while a turn runs and turns
- * orange to send once there is text. It stands on glass here, so every control is a fill and the menu is a platter.
+ * holds effort, mode, folder and branch, the context ring, and one button that stops while a turn runs and takes
+ * the accent to send once there is text. It stands on glass here, so every control is a fill and the menu is a platter.
  */
 export function ComposerBody({ running, placeholder, queued, fresh, hint }: { running: boolean; placeholder?: string; queued?: string; fresh?: boolean; hint: BackdropHint }) {
   const [text, setText] = useState('');

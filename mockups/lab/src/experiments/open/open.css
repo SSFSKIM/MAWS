@@ -1,5 +1,7 @@
 /* Open. Every rule is under .x-open; the glass planes are mounted inside that element, so the hosts and their
-   platters inherit these tokens. Values and where each was lifted from: DESIGN.md. */
+   platters inherit these tokens. Values and where each was lifted from: DESIGN.md. No rule here names a hue: the
+   ground, the ink, the shadow tint, the mark and focus come from the colouring (Open.tsx writes them on the root),
+   and so do the colours of the light (field.ts). */
 
 @font-face { font-family: 'XO Figtree'; font-style: normal; font-weight: 300 900; font-display: block;
   src: url('../../../node_modules/@fontsource-variable/figtree/files/figtree-latin-wght-normal.woff2') format('woff2-variations'); }
@@ -12,36 +14,44 @@
   position: absolute; inset: 0; overflow: hidden;
   background: var(--xo-ground);
 
-  /* Colour (Quiet's): two inputs per scheme, the ground (set inline from the knob) and the ink; every neutral on
-     the ground is a mix of the two. */
-  --xo-ink: #1b1a17;
-  --xo-ink-rgb: 27 26 23;
+  /* Colour. Two inputs, the ground and the ink, both from the colouring; every neutral on the ground is a mix of the
+     two (Quiet's scheme). The quiet tones are a step stronger than Quiet's, because a colouring may bring a ground
+     well below white (Paper's ivory) and they still have to hold 4.5:1 on it. */
+  --xo-ink-rgb: 33 30 27;
+  --xo-shade-rgb: 84 62 42;
+  --xo-ink: rgb(var(--xo-ink-rgb));
   --xo-raised: #ffffff;
   --xo-fg: var(--xo-ink);
-  --xo-fg2: color-mix(in srgb, var(--xo-ink) 76%, var(--xo-ground));
-  --xo-muted: color-mix(in srgb, var(--xo-ink) 62%, var(--xo-ground));
-  --xo-faint: color-mix(in srgb, var(--xo-ink) 42%, var(--xo-ground));
-  --xo-line: rgb(var(--xo-ink-rgb) / 0.09);
-  --xo-line-strong: rgb(var(--xo-ink-rgb) / 0.16);
+  --xo-fg2: color-mix(in srgb, var(--xo-ink) 82%, var(--xo-ground));
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 70%, var(--xo-ground));
+  --xo-faint: color-mix(in srgb, var(--xo-ink) 50%, var(--xo-ground));
+  --xo-line: rgb(var(--xo-ink-rgb) / 0.1);
+  --xo-line-strong: rgb(var(--xo-ink-rgb) / 0.18);
   --xo-hover: rgb(var(--xo-ink-rgb) / 0.045);
   --xo-selected: rgb(var(--xo-ink-rgb) / 0.075);
   --xo-well: rgb(var(--xo-ink-rgb) / 0.055);
-  /* Orange has one meaning: it is your move. The fill is the owner's value; marks on a light ground take a deeper
-     step of the same hue to be seen. */
-  --xo-accent: #fd780f;
-  --xo-accent-mark: #d95f06;
-  --xo-on-accent: #2a1300;
-  --xo-add: #1f7345;
-  --xo-del: #c0392b;
+  /* "It is your move": the colouring's accent as a fill, the ink on it, and the same meaning as a small stroke. */
+  --xo-accent: rgb(var(--xo-ink-rgb));
+  --xo-on-accent: var(--xo-ground);
+  --xo-accent-mark: var(--xo-accent);
+  --xo-focus: var(--xo-accent);
+  /* The two diff hues are fixed across the switch, and are the ones Layers uses. */
+  --xo-add: #1a6b40;
+  --xo-del: #b03424;
   --xo-del-wash: color-mix(in srgb, var(--xo-del) 7%, transparent);
   --xo-solid: var(--xo-ink);
-  --xo-on-solid: #ffffff;
+  --xo-on-solid: var(--xo-ground);
 
   /* Type: one sans and its mono; the knob swaps the family and nothing else. */
   --xo-font: 'XO Figtree', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif;
   --xo-mono: 'XO Geist Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-  --xo-w: 450;       /* interface weight */
-  --xo-w-strong: 580;
+  /* Weights are roles, set per face: the same number is a different colour on the page in each of the three. The
+     values on the root are Figtree's; the system face, which is the default, is set where the faces are. */
+  --xo-w: 450;        /* interface text */
+  --xo-w-tab: 500;    /* a tab's title */
+  --xo-w-mid: 550;    /* a label, a button, the chosen option */
+  --xo-w-strong: 580; /* an unread row */
+  --xo-w-title: 620;  /* a title */
   --xo-mono-size: 12.5px;
 
   /* Geometry. The left pane is Field's (20 px continuous corner, 8 px from the window); rows on it are that
@@ -83,27 +93,27 @@
   user-select: none;
 }
 .x-open[data-scheme='dark'] {
-  --xo-ink: #f4f2ed;
-  --xo-ink-rgb: 244 242 237;
   --xo-raised: color-mix(in srgb, var(--xo-ink) 7%, var(--xo-ground));
-  --xo-fg: color-mix(in srgb, var(--xo-ink) 93%, var(--xo-ground));
-  --xo-fg2: color-mix(in srgb, var(--xo-ink) 74%, var(--xo-ground));
-  --xo-muted: color-mix(in srgb, var(--xo-ink) 58%, var(--xo-ground));
-  --xo-faint: color-mix(in srgb, var(--xo-ink) 40%, var(--xo-ground));
+  --xo-fg: color-mix(in srgb, var(--xo-ink) 94%, var(--xo-ground));
+  --xo-fg2: color-mix(in srgb, var(--xo-ink) 78%, var(--xo-ground));
+  --xo-muted: color-mix(in srgb, var(--xo-ink) 68%, var(--xo-ground));
+  --xo-faint: color-mix(in srgb, var(--xo-ink) 44%, var(--xo-ground));
   --xo-line: rgb(var(--xo-ink-rgb) / 0.1);
   --xo-line-strong: rgb(var(--xo-ink-rgb) / 0.16);
   --xo-hover: rgb(var(--xo-ink-rgb) / 0.06);
   --xo-selected: rgb(var(--xo-ink-rgb) / 0.1);
   --xo-well: rgb(var(--xo-ink-rgb) / 0.075);
-  --xo-accent-mark: #fd780f;
-  --xo-add: #6fcf97;
-  --xo-del: #f08a7e;
-  --xo-del-wash: color-mix(in srgb, var(--xo-del) 8%, transparent);
-  --xo-solid: #f4f2ed;
-  --xo-on-solid: #191919;
+  --xo-add: #74d3a3;
+  --xo-del: #f6a092;
+  --xo-del-wash: color-mix(in srgb, var(--xo-del) 9%, transparent);
 }
-.x-open[data-face='geist'] { --xo-font: 'XO Geist', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif; --xo-w: 420; --xo-w-strong: 580; }
-.x-open[data-face='system'] { --xo-font: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif; --xo-mono: ui-monospace, 'SF Mono', Menlo, monospace; --xo-w: 400; --xo-w-strong: 560; --xo-mono-size: 12px; }
+.x-open[data-face='geist'] { --xo-font: 'XO Geist', system-ui, -apple-system, 'Apple SD Gothic Neo', sans-serif; --xo-w: 420; --xo-w-tab: 480; --xo-w-mid: 520; --xo-w-strong: 580; --xo-w-title: 600; }
+/* The system face (SF Pro on a Mac) is Quiet's, and the default. It is darker on the page than Figtree at the same
+   number, so every role steps down to the weights Quiet used: 400 text, 500 labels, 560 unread, 600 titles. */
+.x-open[data-face='system'] {
+  --xo-font: system-ui, -apple-system, 'SF Pro Text', 'Apple SD Gothic Neo', sans-serif; --xo-mono: ui-monospace, 'SF Mono', Menlo, monospace; --xo-mono-size: 12px;
+  --xo-w: 400; --xo-w-tab: 450; --xo-w-mid: 500; --xo-w-strong: 560; --xo-w-title: 600;
+}
 .x-open[data-pane='closed'] { --xo-left: 0px; }
 /* On the settings page the column is the page's, so the tabs stand on that one's edge. */
 .x-open[data-scene='settings'] { --xo-colm: max(var(--xo-air), (100vw - var(--xo-left) - 620px) / 2); }
@@ -117,8 +127,8 @@
 .x-open :where(p, h1, h2, h3, pre) { margin: 0; }
 .x-open :where(code, pre) { font-family: var(--xo-mono); font-size: var(--xo-mono-size); font-variant-ligatures: none; }
 .x-open :focus { outline: none; }
-.x-open :focus-visible { outline: 2px solid var(--xo-accent); outline-offset: 2px; }
-.x-open ::selection { background: rgb(253 120 15 / 0.26); }
+.x-open :focus-visible { outline: 2px solid var(--xo-focus); outline-offset: 2px; }
+.x-open ::selection { background: color-mix(in srgb, var(--xo-focus) 26%, transparent); }
 .x-open svg { display: block; flex: none; }
 /* Continuous corners on the rounded rectangles that are drawn here; circles and capsules stay what they are, and
    the glass draws its own. */
@@ -185,11 +195,11 @@
 }
 .x-open[data-scheme='dark'] :is(.xo-host, .xo-platter) {
   --xo-g2: color-mix(in srgb, var(--xo-g) 88%, transparent);
-  --xo-g3: color-mix(in srgb, var(--xo-g) 80%, transparent);
+  --xo-g3: color-mix(in srgb, var(--xo-g) 82%, transparent);
 }
 /* Fills on a pane that stands on its own light are lighter lifts, in both schemes (Field's). */
-.x-open :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.4); --xo-g-current: rgb(255 255 255 / 0.76); --xo-g-shadow: 0 1px 2px rgb(60 30 0 / 0.07); }
-.x-open[data-scheme='dark'] :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.07); --xo-g-current: rgb(255 255 255 / 0.15); --xo-g-shadow: none; }
+.x-open :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.4); --xo-g-current: rgb(255 255 255 / 0.76); --xo-g-shadow: 0 1px 2px rgb(var(--xo-shade-rgb) / 0.09); }
+.x-open[data-scheme='dark'] :is(.xo-pane, .xo-side) { --xo-g-hover: rgb(255 255 255 / 0.07); --xo-g-current: rgb(255 255 255 / 0.12); --xo-g-shadow: none; }
 
 /* A plain control on glass: a fill under the pointer, never glass of its own (Instrument's). */
 .x-open .xo-gbtn {
@@ -232,7 +242,7 @@
 .x-open .xo-group { margin-top: 18px; }
 .x-open .xo-group-head {
   display: flex; align-items: center; gap: 4px; width: 100%; height: 28px; padding: 0 6px 0 10px; border-radius: var(--xo-r-row);
-  color: var(--xo-g3); font: 550 12px/16px var(--xo-font); transition: color var(--xo-t-hover);
+  color: var(--xo-g3); font: var(--xo-w-mid) 12px/16px var(--xo-font); transition: color var(--xo-t-hover);
 }
 .x-open button.xo-group-head:hover { color: var(--xo-g); }
 .x-open .xo-group-head span { flex: 1; }
@@ -266,16 +276,22 @@
 .x-open .xo-row:is(:hover, :focus-within) .xo-slot-state, .x-open .xo-row:has([aria-expanded='true']) .xo-slot-state { opacity: 0; transform: scale(0.8); }
 .x-open .xo-row:is(:hover, :focus-within) .xo-slot-act, .x-open .xo-row .xo-slot-act[aria-expanded='true'] { opacity: 1; transform: scale(1); }
 
-/* State glyphs (Quiet's). Grey and breathing is the agent's business; orange with a shape is yours. */
+/* State glyphs (Quiet's). Grey and breathing is the agent's business; the mark with a shape is yours. */
 .x-open .xo-glyph { display: grid; place-items: center; width: 16px; height: 16px; animation: xo-glyph-in var(--xo-t-fold) var(--xo-ease); }
 @keyframes xo-glyph-in { from { opacity: 0; transform: scale(0.5); } }
 .x-open .xo-glyph[data-kind='yours'] { color: var(--xo-accent-mark); }
+/* A colouring whose accent cannot be a 15 px stroke (the ink itself) draws the same glyph reversed out of a small disc
+   of the accent (Layers' badge form): 20 px in a row, 18 in a tab. */
+.x-open[data-mark='badge'] .xo-glyph[data-kind='yours'] { width: 20px; height: 20px; border-radius: 50%; background: var(--xo-accent); color: var(--xo-on-accent); }
+.x-open[data-mark='badge'] .xo-glyph[data-kind='yours'] svg { width: 12px; height: 12px; stroke-width: 2.5; }
+.x-open[data-mark='badge'] .xo-tab-slot .xo-glyph[data-kind='yours'] { width: 18px; height: 18px; }
+.x-open[data-mark='badge'] .xo-tab-slot .xo-glyph[data-kind='yours'] svg { width: 11px; height: 11px; }
 .x-open .xo-dot { display: block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .x-open .xo-dot[data-run] { opacity: 0.7; animation: xo-breathe 1.8s ease-in-out infinite; }
 @keyframes xo-breathe { 0%, 100% { opacity: 0.28; transform: scale(0.82); } 50% { opacity: 0.8; transform: scale(1); } }
 
 .x-open .xo-pane-foot { flex: none; display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 10px 2px; }
-.x-open .xo-back { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; margin-bottom: 12px; border-radius: var(--xo-r-row); font-weight: 620; transition: background-color var(--xo-t-hover); }
+.x-open .xo-back { display: flex; align-items: center; gap: 10px; width: 100%; height: 34px; padding: 0 10px; margin-bottom: 12px; border-radius: var(--xo-r-row); font-weight: var(--xo-w-title); transition: background-color var(--xo-t-hover); }
 .x-open .xo-back:hover { background: var(--xo-g-hover); }
 .x-open .xo-back svg { opacity: 0.75; transition: transform var(--xo-t-pop) var(--xo-ease); }
 .x-open .xo-back:hover svg { transform: translateX(-2px); }
@@ -293,7 +309,7 @@
   top: var(--xo-bar-top); height: var(--xo-bar-h); padding: 3px; display: flex; align-items: center; gap: 1px;
   left: max(calc(var(--xo-left) + var(--xo-colm)), var(--xo-tabs-min, 0px));
   max-width: calc(min(var(--xo-col), 100vw - var(--xo-left) - var(--xo-right) - 2 * var(--xo-air)) - 92px - var(--xo-seam));
-  font-size: 13px; line-height: 18px; font-weight: 500;
+  font-size: 13px; line-height: 18px; font-weight: var(--xo-w-tab);
   transition: left var(--xo-t-pane) var(--xo-ease-pane);
 }
 .x-open[data-scene='settings'] .xo-tabs { max-width: calc(100vw - var(--xo-left) - var(--xo-colm) - 140px); }
@@ -324,7 +340,10 @@
 /* In a session it stands on the reading column's right edge, as the tabs stand on its left, and moves with them. */
 .x-open[data-scene='session'] .xo-wait-slot { right: max(calc(var(--xo-right) + var(--xo-colm)), calc(12px + var(--xo-bar-h) + var(--xo-seam))); }
 .x-open .xo-wait { height: var(--xo-bar-h); padding: 0 13px; display: inline-flex; align-items: center; gap: 8px; }
-.x-open .xo-wait .xo-glyph { color: var(--xo-g); animation: none; }
+/* The capsule's glass is seeded with the accent, so its glyphs take the ink that goes on the accent; and since the
+   capsule is already the filled thing, a badge inside it goes back to a plain glyph. */
+.x-open .xo-wait .xo-glyph, .x-open[data-mark='badge'] .xo-wait .xo-glyph[data-kind='yours'] { width: 16px; height: 16px; background: none; color: var(--xo-on-accent); animation: none; }
+.x-open[data-mark='badge'] .xo-wait .xo-glyph[data-kind='yours'] svg { width: 15px; height: 15px; stroke-width: 2; }
 .x-open .xo-waitlist { width: 348px; padding: 6px; }
 .x-open .xo-wait-item { padding: 10px; border-radius: 16px; transition: background-color var(--xo-t-hover); }
 .x-open .xo-wait-item + .xo-wait-item { margin-top: 2px; }
@@ -335,7 +354,7 @@
 .x-open .xo-wait-age { flex: none; color: var(--xo-g2); font-size: 12px; }
 
 /* The approval, wherever it is answered (Quiet's): the command, why, and two answers. */
-.x-open .xo-card-title { font-weight: 620; }
+.x-open .xo-card-title { font-weight: var(--xo-w-title); }
 .x-open .xo-card-line { margin-top: 2px; color: var(--xo-g2); }
 .x-open .xo-card-meta { display: flex; flex-wrap: wrap; gap: 4px 10px; margin-top: 8px; color: var(--xo-g2); font-size: 12px; line-height: 16px; }
 .x-open .xo-card-meta span { display: inline-flex; align-items: center; gap: 4px; }
@@ -346,7 +365,7 @@
 
 .x-open .xo-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0 13px; border-radius: var(--xo-r-ctl);
-  box-shadow: inset 0 0 0 0.5px var(--xo-line-strong); font-weight: 540; font-size: 13px; white-space: nowrap;
+  box-shadow: inset 0 0 0 0.5px var(--xo-line-strong); font-weight: var(--xo-w-mid); font-size: 13px; white-space: nowrap;
   transition: background-color var(--xo-t-hover), transform var(--xo-t-pop) var(--xo-spring);
 }
 .x-open .xo-btn:hover { background: var(--xo-hover); }
@@ -354,7 +373,7 @@
 .x-open .xo-btn[data-on='glass'] { box-shadow: none; background: var(--xo-g-current); }
 .x-open .xo-btn[data-on='glass']:hover { background: color-mix(in srgb, var(--xo-g) 16%, transparent); }
 .x-open .xo-btn[data-kind='go'] { background: var(--xo-accent); color: var(--xo-on-accent); box-shadow: none; }
-.x-open .xo-btn[data-kind='go']:hover { background: color-mix(in srgb, var(--xo-accent) 90%, #1b1a17); }
+.x-open .xo-btn[data-kind='go']:hover { background: color-mix(in srgb, var(--xo-accent) 88%, var(--xo-ground)); }
 
 /* The row's card, beside the pane and over the transcript. */
 .x-open .xo-rowcard { left: calc(var(--xo-left) + 10px); width: 300px; transition: top 200ms var(--xo-ease); }
@@ -409,7 +428,6 @@
 .x-open .xo-fold[data-open='true'] > .xo-fold-in { opacity: 1; transform: none; transition-delay: 40ms, 0ms; }
 
 /* A card is a ring on the ground. It does not lift (Quiet's). */
-.x-open .xo-block { position: relative; }
 .x-open .xo-card { position: relative; border-radius: var(--xo-r-card); box-shadow: inset 0 0 0 0.5px var(--xo-line-strong); overflow: hidden; }
 .x-open .xo-calls { margin-top: 6px; padding: 5px; }
 .x-open .xo-call { display: flex; align-items: baseline; gap: 10px; min-height: 30px; padding: 6px 10px; border-radius: 13px; font-size: 13px; line-height: 18px; }
@@ -440,43 +458,6 @@
 .x-open .xo-live-time { flex: none; color: var(--xo-muted); font: var(--xo-w) 12.5px/18px var(--xo-font); }
 .x-open .xo-tail { padding: 2px 16px 12px 33px; font: 400 var(--xo-mono-size)/20px var(--xo-mono); color: var(--xo-muted); white-space: pre-wrap; }
 .x-open .xo-tail div:last-child { color: var(--xo-fg2); }
-
-/* ---- The owner's suggestion, as a knob: the tool-run card, the diff and the running command as glass. These
-   scroll with the page and pass under the bars, so they are drawn on the CSS path (one backdrop blur, one tint, a
-   rim, a shadow that follows the span), each over a pool of the same light the panes stand on. ------------------ */
-
-.x-open[data-tools='glass'] .xo-block::before {
-  /* The pool stays inside the block's own height, because an opened fold clips there, and is feathered by a mask
-     rather than a blur so that nothing of it can be cut. */
-  content: ''; position: absolute; inset: 0 -34px; z-index: 0; pointer-events: none; opacity: var(--xo-pool, 0.5);
-  background:
-    radial-gradient(ellipse 46% 130% at 4% 30%, rgb(255 181 92 / 0.9), transparent 100%),
-    radial-gradient(ellipse 44% 130% at 97% 80%, rgb(250 116 112 / 0.66), transparent 100%),
-    radial-gradient(ellipse 40% 110% at 58% 110%, rgb(188 118 178 / 0.4), transparent 100%);
-  mask-image: linear-gradient(90deg, transparent, #000 44px, #000 calc(100% - 44px), transparent), linear-gradient(transparent, #000 18px, #000 calc(100% - 18px), transparent);
-  mask-composite: intersect;
-}
-.x-open[data-tools='glass'] .xo-block:has(> .xo-calls)::before { top: 6px; }
-.x-open[data-tools='glass'] .xo-block:has(> :is(.xo-edit, .xo-live))::before { top: 14px; }
-.x-open[data-scheme='dark'][data-tools='glass'] .xo-block::before {
-  --xo-pool: 0.4;
-  background:
-    radial-gradient(ellipse 46% 130% at 4% 30%, rgb(253 132 30 / 0.72), transparent 100%),
-    radial-gradient(ellipse 44% 130% at 97% 80%, rgb(206 44 84 / 0.6), transparent 100%),
-    radial-gradient(ellipse 40% 110% at 58% 110%, rgb(128 52 138 / 0.5), transparent 100%);
-}
-.x-open[data-tools='glass'] .xo-card {
-  /* Text on a tinted card steps up one level, so the quiet tones still hold 4.5:1 over the light. */
-  --xo-muted: color-mix(in srgb, var(--xo-ink) 76%, var(--xo-ground)); --xo-fg2: color-mix(in srgb, var(--xo-ink) 88%, var(--xo-ground)); --xo-add: #1b6a40; --xo-del: #ad2f22;
-  z-index: 1; background: rgb(255 255 255 / 0.52); backdrop-filter: blur(18px) saturate(1.5);
-  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.7), inset 0 1px 0 0 rgb(255 255 255 / 0.9), 0 0 0 0.5px rgb(60 30 0 / 0.1), 0 1px 2px rgb(60 30 0 / 0.05), 0 12px 26px -12px rgb(70 35 0 / 0.22);
-}
-.x-open[data-scheme='dark'][data-tools='glass'] .xo-card {
-  --xo-muted: color-mix(in srgb, var(--xo-ink) 84%, var(--xo-ground)); --xo-fg2: color-mix(in srgb, var(--xo-ink) 92%, var(--xo-ground)); --xo-add: #86dba9; --xo-del: #f6a096;
-  background: linear-gradient(rgb(255 255 255 / 0.05), rgb(255 255 255 / 0.05)), rgb(18 17 16 / 0.34);
-  box-shadow: inset 0 0 0 0.5px rgb(255 255 255 / 0.16), inset 0 1px 0 0 rgb(255 255 255 / 0.14), 0 1px 2px rgb(0 0 0 / 0.3), 0 14px 28px -12px rgb(0 0 0 / 0.6);
-}
-@supports not (backdrop-filter: blur(1px)) { .x-open[data-tools='glass'] .xo-card { background: var(--xo-raised); } }
 
 /* ---- The composer: one sheet of glass the transcript slides under (Instrument's host), carrying Quiet's
    controls. ------------------------------------------------------------------------------------------------------ */
@@ -523,6 +504,8 @@
 @keyframes xo-scene-in { from { opacity: 0; transform: translateY(8px); } }
 .x-open .xo-home > * { position: absolute; left: 0; right: 0; margin-inline: auto; width: min(680px, calc(100% - 2 * var(--xo-air))); pointer-events: auto; }
 .x-open .xo-home-ask { bottom: calc(50% + 80px + 18px); padding-left: 20px; font: 560 28px/34px var(--xo-font); letter-spacing: -0.015em; user-select: text; }
+/* In the system face the line is set as Quiet set its own: larger and lighter than a title, the one display line. */
+.x-open[data-face='system'] .xo-home-ask { font: 500 29px/36px var(--xo-font); letter-spacing: -0.02em; }
 .x-open .xo-where { top: calc(50% - 80px + var(--xo-composer-h, 104px) + 10px); display: flex; align-items: center; gap: 2px; padding-left: 9px; }
 
 /* ---- The right pane: one piece of glass that grows out of its button. Content is Desktop's, drawn plainly. ------ */
@@ -539,7 +522,7 @@
 .x-open .xo-side-scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: none; padding: 0 8px 10px; }
 .x-open .xo-side-group { margin-bottom: 14px; }
 .x-open .xo-side-group:last-child { margin-bottom: 4px; }
-.x-open .xo-side-label { display: flex; align-items: center; height: 26px; padding: 0 8px; font: 580 12px/16px var(--xo-font); color: var(--xo-g3); }
+.x-open .xo-side-label { display: flex; align-items: center; height: 26px; padding: 0 8px; font: var(--xo-w-mid) 12px/16px var(--xo-font); color: var(--xo-g3); }
 .x-open .xo-side-row { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 30px; padding: 0 8px; border-radius: var(--xo-r-row); }
 .x-open button.xo-side-row { transition: background-color var(--xo-t-hover); }
 .x-open button.xo-side-row:hover { background: var(--xo-g-hover); }
@@ -553,7 +536,7 @@
 .x-open .xo-side-aside { flex: none; font-size: 12px; color: var(--xo-g2); }
 .x-open .xo-todo { display: flex; align-items: flex-start; gap: 8px; padding: 5px 8px; }
 .x-open .xo-todo[data-done] { color: var(--xo-g3); }
-.x-open .xo-todo[data-now] { font-weight: 560; }
+.x-open .xo-todo[data-now] { font-weight: var(--xo-w-mid); }
 .x-open .xo-todo-mark { flex: none; width: 16px; height: 16px; margin-top: 1px; display: grid; place-items: center; border-radius: 50%; box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--xo-g) 34%, transparent); }
 .x-open .xo-todo[data-done] .xo-todo-mark { box-shadow: none; background: color-mix(in srgb, var(--xo-g) 18%, transparent); color: var(--xo-g); }
 .x-open .xo-todo[data-now] .xo-todo-mark { box-shadow: inset 0 0 0 1.5px var(--xo-g); }
@@ -565,7 +548,7 @@
 .x-open .xo-page-col { grid-column: 2; }
 .x-open .xo-section { scroll-margin-top: 62px; padding-top: 20px; }
 .x-open .xo-section + .xo-section { margin-top: 28px; }
-.x-open .xo-section-title { margin: 0 0 6px; font: 620 20px/28px var(--xo-font); letter-spacing: -0.012em; }
+.x-open .xo-section-title { margin: 0 0 6px; font: var(--xo-w-title) 20px/28px var(--xo-font); letter-spacing: -0.012em; }
 .x-open .xo-set { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px 28px; min-height: 54px; padding: 11px 0; border-top: 0.5px solid var(--xo-line); }
 .x-open .xo-section .xo-set:first-of-type { border-top-color: transparent; }
 .x-open .xo-set[data-stack='true'] { flex-direction: column; align-items: stretch; padding: 14px 0 15px; }
@@ -586,7 +569,7 @@
 
 .x-open .xo-seg { position: relative; flex: none; display: inline-flex; padding: 3px; border-radius: 17px; background: rgb(var(--xo-ink-rgb) / 0.06); }
 .x-open .xo-seg button { position: relative; z-index: 1; height: 28px; padding: 0 13px; border-radius: 14px; font-size: 13px; color: var(--xo-fg2); transition: color var(--xo-t-hover); }
-.x-open .xo-seg button[aria-checked='true'] { color: var(--xo-fg); font-weight: 540; }
+.x-open .xo-seg button[aria-checked='true'] { color: var(--xo-fg); font-weight: var(--xo-w-mid); }
 .x-open .xo-seg-thumb { position: absolute; top: 3px; left: 0; height: 28px; border-radius: 14px; background: var(--xo-thumb, #fff); box-shadow: 0 1px 2.5px rgb(0 0 0 / 0.12), 0 0 0 0.5px rgb(0 0 0 / 0.05); transition: transform 440ms var(--xo-spring), width 300ms var(--xo-ease-pane); }
 .x-open[data-scheme='dark'] { --xo-thumb: rgb(255 255 255 / 0.17); }
 
@@ -602,12 +585,12 @@
 
 .x-open .xo-input { flex: 0 1 284px; height: 32px; padding: 0 12px; border: 0; border-radius: var(--xo-r-ctl); background: rgb(var(--xo-ink-rgb) / 0.05); color: var(--xo-fg); font: var(--xo-w) 13px/18px var(--xo-font); cursor: text; user-select: text; transition: box-shadow var(--xo-t-hover), background-color var(--xo-t-hover); }
 .x-open .xo-input[data-mono='true'] { font: 400 var(--xo-mono-size)/18px var(--xo-mono); }
-.x-open .xo-input::placeholder { color: color-mix(in srgb, var(--xo-ink) 68%, var(--xo-ground)); }
+.x-open .xo-input::placeholder { color: color-mix(in srgb, var(--xo-ink) 76%, var(--xo-ground)); }
 .x-open .xo-input:focus-visible { outline: 0; background: transparent; box-shadow: inset 0 0 0 1.5px var(--xo-fg); }
 .x-open .xo-path { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .x-open .xo-path code { min-width: 0; color: var(--xo-fg2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .x-open .xo-badge { flex: none; padding: 1px 8px; border-radius: 10px; background: rgb(var(--xo-ink-rgb) / 0.06); font: 450 11.5px/18px var(--xo-mono); color: var(--xo-fg2); }
-.x-open .xo-select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; font-size: 13px; font-weight: 540; background: rgb(var(--xo-ink-rgb) / 0.06); transition: background-color var(--xo-t-hover); }
+.x-open .xo-select { display: inline-flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px 0 13px; border-radius: 15px; font-size: 13px; font-weight: var(--xo-w-mid); background: rgb(var(--xo-ink-rgb) / 0.06); transition: background-color var(--xo-t-hover); }
 .x-open .xo-select:is(:hover, [data-state='open'], [aria-expanded='true']) { background: rgb(var(--xo-ink-rgb) / 0.1); }
 .x-open .xo-select svg { width: 13px; height: 13px; stroke-width: 2; color: var(--xo-muted); }
 
@@ -617,7 +600,7 @@
   .x-open *, .x-open *::before, .x-open *::after { transition-duration: 1ms !important; transition-delay: 0ms !important; animation-duration: 1ms !important; animation-iteration-count: 1 !important; }
 }
 @media (forced-colors: active) {
-  .x-open .xo-gather, .x-open .xo-block::before { display: none; }
+  .x-open .xo-gather { display: none; }
   .x-open .xo-lights i, .x-open .xo-glyph, .x-open .xo-dot { forced-color-adjust: none; }
   .x-open :is(.xo-row[data-selected='true'], .xo-tab[aria-current='page'], .xo-seg-thumb) { outline: 2px solid Highlight; outline-offset: -2px; }
   .x-open :is(.xo-switch, .xo-pill, .xo-input, .xo-select, .xo-btn, .xo-seg, .xo-card, .xo-bubble) { border: 1px solid CanvasText; }

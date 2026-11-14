@@ -1,6 +1,7 @@
 // Open: one plain ground, the field as light that gathers under the glass, and the transcript running on the
 // ground between two panes and under two floating bars. This file is the shell: where each piece of glass stands,
-// what it is told is behind it, and how the layout moves. DESIGN.md records where every part was lifted from.
+// what it is told is behind it, and how the layout moves. DESIGN.md records where every part was lifted from; its
+// last section is the Colour switch: the ground, the ink, the light's colours and the mark come from a colouring.
 import { FileCode, GitBranch, Monitor, PanelLeft, PanelRight, Plus, SlidersHorizontal, X } from 'lucide-react';
 import { type CSSProperties, type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -23,7 +24,8 @@ import {
 } from '@vitreajs/vitrea-react';
 import { approval, composer, pinned, projects, type Session, tabs } from '../../content/fixtures';
 import type { ExperimentProps, SceneId, Scheme } from '../../lab/types';
-import { type GatherKind, hexRgb, levelUnder, luminanceOf, paintGather, register, type Shape, type Strength } from './field';
+import { colouringOf } from '../layers/colour';
+import { type GatherKind, hexRgb, levelUnder, type Light, lightOf, luminanceOf, paintGather, register, type Shape, type Strength, tripleRgb } from './field';
 import { cx, GBtn, isYours, StateGlyph, stateWord } from './parts';
 import { type Answer, Ask, ComposerBody, SidePanel, Transcript, Where } from './Session';
 import { sectionAt, SettingsPage } from './Settings';
@@ -37,16 +39,13 @@ const grounds: Record<string, Record<Scheme, string>> = {
   lifted: { light: '#ffffff', dark: '#1f1f1f' },
   pure: { light: '#ffffff', dark: '#000000' },
 };
-const INK: Record<Scheme, string> = { light: '#1b1a17', dark: '#f4f2ed' };
+const STRENGTHS = ['whisper', 'soft', 'warm', 'vivid'];
 const CLEARER = { light: { optics: { regular: { tintAlpha: 0.3 } } }, dark: { optics: { regular: { tintAlpha: 0.7 } } } } as const;
 /** The two panes are made over their own light as a texture (Field's path): the lens is real there and the body keeps the hue. */
 const LEFT = { kind: 'texture', id: 'xo-left' } as const;
 const RIGHT = { kind: 'texture', id: 'xo-right' } as const;
 /** On the new-chat page nothing passes under the composer, so it takes the same path over the scene's one pool of light. */
 const HOME = { kind: 'texture', id: 'xo-home' } as const;
-/** The waiting capsule's seed: the theme orange at part strength, so it reads as Quiet's soft capsule made of glass. */
-const TINT: Record<Scheme, string> = { light: 'rgb(253 120 15 / 46%)', dark: 'rgb(253 120 15 / 62%)' };
-
 // Every finding the runtime raises goes to the console, where the lab's capture tool prints it, and onto the window.
 const toConsole = consoleDiagnosticSink();
 const sink: VitreaDiagnosticSink = (event) => {
@@ -75,12 +74,12 @@ function hintOf(level: number): BackdropHint {
  * thins what is under a bar to about half. Re-read on scroll, on resize, when a gathering repaints and through a
  * layout change.
  */
-function useLevels(scroller: RefObject<HTMLElement | null>, boxes: Record<string, () => Box | null | undefined>, ground: string, scheme: Scheme, keys: readonly unknown[]) {
+function useLevels(scroller: RefObject<HTMLElement | null>, boxes: Record<string, () => Box | null | undefined>, ground: string, ink: string, keys: readonly unknown[]) {
   const [levels, setLevels] = useState<Record<string, number>>({});
   const boxesRef = useRef(boxes);
   boxesRef.current = boxes;
   const groundRgb = useMemo(() => hexRgb(ground), [ground]);
-  const inkL = useMemo(() => luminanceOf(hexRgb(INK[scheme])), [scheme]);
+  const inkL = useMemo(() => luminanceOf(tripleRgb(ink)), [ink]);
   useEffect(() => {
     const el = scroller.current;
     let frame = 0;
@@ -163,7 +162,7 @@ function useSize(el: HTMLElement | null): { w: number; h: number } {
  * with that surface because it is placed by the same layout variables. `shape` says where the surface is inside
  * the canvas; when the surface is put away the light goes with it (`away`).
  */
-function Gather({ kind, dark, strength, shape, shapeKey, reach, away, onPaint, texture, blank }: { kind: GatherKind; dark: boolean; strength: Strength; shape: (w: number, h: number) => Shape; shapeKey: string; reach: number; away?: boolean; onPaint: () => void; texture?: { id: string; ground?: string }; blank?: boolean }) {
+function Gather({ kind, light, dark, strength, shape, shapeKey, reach, away, onPaint, texture, blank }: { kind: GatherKind; light: Light; dark: boolean; strength: Strength; shape: (w: number, h: number) => Shape; shapeKey: string; reach: number; away?: boolean; onPaint: () => void; texture?: { id: string; ground?: string }; blank?: boolean }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const root = useGlassRoot();
   const textureId = texture?.id;
@@ -176,7 +175,7 @@ function Gather({ kind, dark, strength, shape, shapeKey, reach, away, onPaint, t
     let raf = 0;
     const draw = () => {
       raf = 0;
-      register(c, paintGather(c, kind, dark, strength, shapeRef.current(c.clientWidth, c.clientHeight), reach, textureId ? { ground: textureGround, blank } : undefined));
+      register(c, paintGather(c, kind, light, dark, strength, shapeRef.current(c.clientWidth, c.clientHeight), reach, textureId ? { ground: textureGround, blank } : undefined));
       // A pane's light is also what its glass is made over: the canvas is handed to the runtime in the frame that
       // paints it (Field's way), so the pane bends real pixels and keeps their hue.
       if (textureId) root?.setBackdropTexture(textureId, { kind: 'canvas', canvas: c });
@@ -192,7 +191,8 @@ function Gather({ kind, dark, strength, shape, shapeKey, reach, away, onPaint, t
       cancelAnimationFrame(raf);
       register(c, null);
     };
-  }, [kind, dark, strength, reach, shapeKey, onPaint, root, textureId, textureGround, blank]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [kind, light.key, dark, strength, reach, shapeKey, onPaint, root, textureId, textureGround, blank]);
   return <canvas ref={ref} className={`xo-gather xo-gather-${kind}`} data-away={away ? 'true' : undefined} aria-hidden="true" />;
 }
 
@@ -231,7 +231,15 @@ export default function Open({ scene, scheme, knobs }: ExperimentProps) {
   const [el, setEl] = useState<HTMLDivElement | null>(null);
   const [paneOpen, setPaneOpen] = useState(true);
   const [sideOpen, setSideOpen] = useState(true);
-  const ground = (grounds[knobs.ground ?? 'warm'] ?? grounds.warm!)[scheme];
+  // A colouring settles the ground's tone, the ink, what the light is made of and the mark, for both schemes; one
+  // that is about its ground also names it, and the Ground knob is then not consulted (Layers' rule and records).
+  const colour = colouringOf(knobs.colour);
+  const tokens = colour.tokens[scheme];
+  const ground = (colour.ground ?? grounds[knobs.ground ?? 'warm'] ?? grounds.warm!)[scheme];
+  const strength = (STRENGTHS.includes(knobs.field ?? '') ? knobs.field : 'warm') as Strength;
+  const field = colour.field[scheme];
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const light = useMemo(() => lightOf(field, tokens, ground, scheme === 'dark'), [field, tokens, ground, scheme]);
   const side = scene === 'session' && sideOpen;
   // The layout makes room before the pane arrives and closes up after it has gone, so the waiting capsule never
   // slides through the pane while it is still glass.
@@ -263,13 +271,25 @@ export default function Open({ scene, scheme, knobs }: ExperimentProps) {
       data-pane={paneOpen ? 'open' : 'closed'}
       data-side={laid ? 'open' : 'closed'}
       data-drift={travel.current.drift}
-      data-face={knobs.face ?? 'figtree'}
-      data-tools={knobs.tools ?? 'quiet'}
-      style={{ '--xo-ground': ground, colorScheme: scheme } as CSSProperties}
+      data-face={knobs.face ?? 'system'}
+      data-colour={colour.id}
+      data-mark={colour.mark}
+      style={
+        {
+          '--xo-ground': ground,
+          '--xo-ink-rgb': tokens.ink,
+          '--xo-shade-rgb': tokens.shade,
+          '--xo-accent': tokens.accent,
+          '--xo-on-accent': tokens.onAccent,
+          '--xo-accent-mark': tokens.mark,
+          '--xo-focus': tokens.focus,
+          colorScheme: scheme,
+        } as CSSProperties
+      }
     >
       {el && (
         <GlassRoot renderer={/[?&]tier=css/.test(window.location.hash) ? 'css' : 'webgpu'} colorScheme={scheme} container={el} devMode onDiagnostic={sink} materialProfile={/[?&]clear=1/.test(window.location.hash) ? CLEARER[scheme] : undefined}>
-          <Shell scene={scene} scheme={scheme} ground={ground} strength={(knobs.field as Strength) ?? 'warm'} host={el} paneOpen={paneOpen} setPaneOpen={setPaneOpen} sideOpen={side} sideLaid={laid} setSideOpen={setSideOpen} />
+          <Shell scene={scene} scheme={scheme} ground={ground} strength={strength} light={light} ink={tokens.ink} seed={tokens.accent} host={el} paneOpen={paneOpen} setPaneOpen={setPaneOpen} sideOpen={side} sideLaid={laid} setSideOpen={setSideOpen} />
         </GlassRoot>
       )}
     </div>
@@ -281,6 +301,10 @@ interface ShellProps {
   scheme: Scheme;
   ground: string;
   strength: Strength;
+  /** What the colouring lends: the light's colours, the ink as `r g b`, and the seed of the one tinted control. */
+  light: Light;
+  ink: string;
+  seed: string;
   host: HTMLElement;
   paneOpen: boolean;
   setPaneOpen: (v: boolean) => void;
@@ -290,7 +314,7 @@ interface ShellProps {
   setSideOpen: (v: boolean) => void;
 }
 
-function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, sideOpen, sideLaid, setSideOpen }: ShellProps) {
+function Shell({ scene, scheme, ground, strength, light, ink, seed, host, paneOpen, setPaneOpen, sideOpen, sideLaid, setSideOpen }: ShellProps) {
   const root = useGlassRoot();
   const dark = scheme === 'dark';
   const [answer, setAnswer] = useState<Answer>(null);
@@ -298,7 +322,7 @@ function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, s
   const [painted, setPainted] = useState(0);
   const onPaint = useCallback(() => setPainted((n) => n + 1), []);
 
-  // Answering the approval is real in the lab: the session goes back to work and its orange leaves the window (Quiet's).
+  // Answering the approval is real in the lab: the session goes back to work and its mark leaves the window (Quiet's).
   const live = useCallback(
     (x: Session): Session => {
       if (x.id !== 's2' || answer === null) return x;
@@ -426,7 +450,7 @@ function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, s
       lead: () => box(76, 12, 36, 36),
     },
     ground,
-    scheme,
+    ink,
     [painted, paneOpen, sideOpen, sideLaid, sideShown, scene, tabsSize.w, composerSize.h, sideH, paneEl, tabsEl, composerEl, waitEl],
   );
 
@@ -479,9 +503,10 @@ function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, s
   return (
     <>
       {/* ---- The light, under everything. ---- */}
-      <Gather kind="left" dark={dark} strength={strength} reach={92} away={!paneOpen} onPaint={onPaint} texture={{ id: 'xo-left', ground }} shapeKey="left" shape={(_w, h) => ({ x: -200, y: -200, w: 480, h: h + 400, r: 20 })} />
+      <Gather light={light} kind="left" dark={dark} strength={strength} reach={92} away={!paneOpen} onPaint={onPaint} texture={{ id: 'xo-left', ground }} shapeKey="left" shape={(_w, h) => ({ x: -200, y: -200, w: 480, h: h + 400, r: 20 })} />
       {session && (
         <Gather
+          light={light}
           kind="right"
           dark={dark}
           strength={strength}
@@ -496,17 +521,17 @@ function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, s
       )}
       {session && (
         <div className="xo-gather-seat xo-gather-seat-composer">
-          <Gather kind="composer" dark={dark} strength={strength} reach={120} onPaint={onPaint} shapeKey={`composer:${composerSize.w}:${composerSize.h}`} shape={(w, h) => ({ x: (w - composerSize.w) / 2, y: h - 16 - composerSize.h, w: composerSize.w, h: composerSize.h + 200, r: 26 })} />
+          <Gather light={light} kind="composer" dark={dark} strength={strength} reach={120} onPaint={onPaint} shapeKey={`composer:${composerSize.w}:${composerSize.h}`} shape={(w, h) => ({ x: (w - composerSize.w) / 2, y: h - 16 - composerSize.h, w: composerSize.w, h: composerSize.h + 200, r: 26 })} />
         </div>
       )}
       {scene === 'home' && (
         <div className="xo-gather-seat xo-gather-seat-home">
-          <Gather kind="home" dark={dark} strength={strength} reach={210} onPaint={onPaint} texture={{ id: 'xo-home' }} shapeKey={`home:${composerSize.w}:${composerSize.h}`} shape={(w, h) => ({ x: (w - composerSize.w) / 2, y: h / 2 - 80, w: composerSize.w, h: composerSize.h, r: 26 })} />
+          <Gather light={light} kind="home" dark={dark} strength={strength} reach={210} onPaint={onPaint} texture={{ id: 'xo-home' }} shapeKey={`home:${composerSize.w}:${composerSize.h}`} shape={(w, h) => ({ x: (w - composerSize.w) / 2, y: h / 2 - 80, w: composerSize.w, h: composerSize.h, r: 26 })} />
         </div>
       )}
       {scene !== 'home' && (
         <div className="xo-gather-seat xo-gather-seat-tabs" style={{ width: tabsSize.w + 180 }}>
-          <Gather kind="tabs" dark={dark} strength={strength} reach={78} onPaint={onPaint} shapeKey={`tabs:${tabsSize.w}`} shape={() => ({ x: 90, y: -160, w: tabsSize.w, h: 208, r: 18 })} />
+          <Gather light={light} kind="tabs" dark={dark} strength={strength} reach={78} onPaint={onPaint} shapeKey={`tabs:${tabsSize.w}`} shape={() => ({ x: 90, y: -160, w: tabsSize.w, h: 208, r: 18 })} />
         </div>
       )}
 
@@ -574,7 +599,7 @@ function Shell({ scene, scheme, ground, strength, host, paneOpen, setPaneOpen, s
       )}
 
       {/* What waits for you, as the glyphs the sidebar uses (Quiet's capsule), made of glass with the one tint. */}
-      {waiting.length > 0 && <Waiting waiting={waiting} onAnswer={setAnswer} slot={setWaitEl} hint={over('wait')} rows={rows} tint={TINT[scheme]} moved={`${paneOpen}:${sideLaid}:${scene}`} />}
+      {waiting.length > 0 && <Waiting waiting={waiting} onAnswer={setAnswer} slot={setWaitEl} hint={over('wait')} rows={rows} tint={seed} moved={`${paneOpen}:${sideLaid}:${scene}`} />}
 
       {session && (
         <div className="xo-side-slot">
