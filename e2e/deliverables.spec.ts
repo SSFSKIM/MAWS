@@ -913,9 +913,10 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
       ['terminal', 'panel-tool', null],
       ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
     ]);
-    // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no bodies
+    // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no bodies.
+    // Read on the cell's own label: the turn's line says what the turn did in its rows' words (UX wave U2, O-15)
     await unfoldWork(s.pane);
-    await expect(s.pane.getByText('Could not open pane: the artifact pane is not available in this build of MAWS')).toBeVisible();
+    await expect(s.pane.locator('.transcript-cell-label').filter({ hasText: /^Could not open pane: the artifact pane is not available in this build of MAWS$/ })).toBeVisible();
 
     await show(s, seeded);
     await replay(s, seeded, SHOW_PANE_ARTIFACT);

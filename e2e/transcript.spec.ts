@@ -1378,7 +1378,10 @@ for (const { site, component, outcome } of r3DomCases) {
         // the mod's rewrite says isExpanded, which opens the run (Rows.tsx, SurfaceGroupRow) onto its call's row
         await expect(group.locator('.transcript-run-line')).toHaveAttribute('aria-expanded', 'true');
         await expect(group.locator('.transcript-cell-line')).toBeVisible();
-        await expect(group.locator('.transcript-cell-line')).toContainText('Bash');
+        // the call's row in MAWS's words, drawn beside the mod's drawing (whose engine slot a drawing-only site leaves
+        // empty): UX wave U2 (M3) reads a shell call with no description by its short command, and `printf` is no
+        // command that rule knows, so `Ran a command` where the tool's name stood
+        await expect(group.locator('.transcript-cell-line')).toHaveText('Ran a command');
       } else if (component === 'ToolResult') {
         // X3 renders a completed one-tool run as a standalone cell, so opening it mounts ToolResult.
         const cell = pane.locator('[data-kind="cell"] .transcript-cell');
