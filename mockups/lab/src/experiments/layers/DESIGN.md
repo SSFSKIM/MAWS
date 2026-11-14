@@ -14,7 +14,8 @@ session went to a board of alternatives (`../choices/`), the owner took its sugg
 design now: section 17, which is read over sections 2, 3 and 5. Last, the product's other scene and the second
 surface of the first were drawn in the same design, the Overview and a file's page: section 18, whose file page
 the owner then asked to be a card of glass (18.10). Code is coloured (section 19), and the tab row has a rule for more
-tabs than fit (section 20). Sections 0 to 11 are the experiment as it was built, under what is now
+tabs than fit (section 20). The pane's last two destinations, Artifacts and Customize, are drawn in section 21, which
+lists every word and row they no longer show at rest for the owner to confirm. Sections 0 to 11 are the experiment as it was built, under what is now
 the switch's last position (Orange); where they name the orange, read "the colouring's accent".
 
 ## 0. Thesis
@@ -330,7 +331,9 @@ given), `card=<id>` (that row's card) and `wait=<id>` (the list's open item).
 Section 18 adds four knobs, one per fork on its two pages, with the chosen form first: sessions on the Overview as
 lines or as cards (`sessions`), grouped by state or by project (`by`), a file's code on the field or on a sheet
 (`code`; since 18.10 a card of glass or on the field, with `numbers` for a gutter or the pointed line only), its changes in the file or side by side (`diff`). Section 19 adds `syntax` (coloured or plain ink) and section 20 `tabs` (how many are
-open: 4, 6, 9, 14) with the aid `x=tabs`. And three aids: `file=keys.ts` (the file its tab
+open: 4, 6, 9, 14) with the aid `x=tabs`. Section 21 adds `shelf` (Artifacts by date or by Space), `skills` (a plugin's skills
+inside it or listed too) and `add` (the + card a button or open), with the aids `open=<name>` (a line open at once:
+`a7`, `ci-kit`, `Pagewise`), `x=empty` and `x=add`. And three aids: `file=keys.ts` (the file its tab
 holds), `line=35` (a line pointed at), `x=end`; `wait=<id>` also names the open item of the Overview's glass.
 
 ## 11. Rejected
@@ -2012,6 +2015,222 @@ list with the closed ones taken out, `pickTab` and `closeTab`, a file tab's own 
 the "Tabs open" switch. `Transcript.tsx`: `itemsOf` reads `moreTranscripts`. `layers.css`: section 20's block.
 `meta.ts`: the switch and the note. `fixtures.ts`: `moreTabs`, `moreTranscripts`.
 
+## 21. Artifacts and Customize
+
+Added 2026-11-14. The last two destinations in the pane that had no page. They are the two places where the app
+is most a wall of rows and words, which is what the owner's note on simplicity is about: too many words, most of
+them not needed; nothing on screen that does not have to be; progressive disclosure; less descriptive and more
+intuitive. What each page holds was read off the app's renderer (the library and the Customize view with their
+own lists of words), and is kept: nothing the pages do was dropped from the design. What changed is where it is
+said and how many steps away. Every word or row that is no longer on screen at rest is listed in 21.5 as a
+candidate, with its reason, because each cut is the owner's to confirm.
+
+### 21.1 One grammar for both, and it is the transcript's
+
+- **A thing is one line on the field.** Its mark, its name, and one thing at its end. This is the Overview's line.
+- **A press opens the line into a sheet of glass under it**, one at a time. The sheet holds everything else the
+  app's row prints at once, and every action the app keeps in a row's menu, as marks. This is how a tool run opens
+  in the transcript: a caption on the field, a sheet under it. Glass keeps its one meaning: something that was
+  opened.
+- **What the page makes or adds is one round button of glass at the top right**, where the side column's button
+  is on a session. It grows into a card the same way, and its plus turns to a cross.
+- **A line's mark is its exception, not its normal state.** A plugin that works, a connector that is connected:
+  no mark. A problem, an update, a sign-in that is the person's to do: a mark, and the last is the orange disc,
+  because that is what the orange means.
+- **The words that say what a thing is wait for the pointer.** At rest a line is a name. Under the pointer its
+  middle says what it is (who last edited an artifact; what a plugin does), as an Overview line at rest keeps
+  what it ended on. Open, the sheet says it.
+- **The head of the column is the search**, set on the field like the lines under it, with whatever narrows the
+  list beside it as a chip that is pressed to take it off.
+
+The pages take the session page's layout whole: the tabs on the column's left edge, the waiting capsule on its
+right, the round button at the window's top right. They add no tab (they are places in the pane, like the
+Overview), and no material, ink, radius or curve.
+
+### 21.2 Artifacts
+
+What the app's page holds: every artifact (documents, presentations, designs, design systems, dashboards, HTML
+pages, files) as a row with a kind tile, a title, a pin mark, a line of facts (kind, Space, project, "Edited ... by
+..."), the sessions that touched it as chips, a delivery receipt, and a menu; grouped by date with pinned first,
+or by Space; four views, a search, a type filter, a machine menu; a strip of seven cards to make something new,
+each with New and Ask Claude; Spaces, which can be mirrored into a project folder.
+
+Here:
+
+- **A line** is the kind's glyph, the title, the Space as a quiet word, the age. Twenty-two artifacts, grouped as
+  the app groups them (Pinned, Today, Yesterday, the weekdays, the months), read as one list.
+- **Opened**, the sheet has one line of facts (the kind in words, the Space, the project, who edited it and when,
+  where it was sent), the sessions that touched it as chips that open them (their roles under the pointer), and
+  the menu's actions as six marks (pin, rename, move, duplicate, export, delete) with one worded button, Open.
+- **The search** is the head. Beside it one mark opens what narrows and arranges the list: the seven kinds by
+  their glyphs and names, Pinned, by date or by Space, New Space, and whose library it is. A kind that is chosen
+  stands beside the search as a chip.
+- **By Space**, the groups are the Spaces, a Space that is mirrored into a folder carries a link mark (the folder
+  under the pointer), and what is in no Space is General.
+- **Making something new** is the round button: seven rows, a kind each. A press makes a blank one (or picks a
+  file); the spark at a row's end, there under the pointer, asks Claude for it.
+- **Empty**, the card stands open and the field says one sentence.
+
+### 21.3 Customize
+
+What the app's page holds, over three tabs (Plugins, Skills, Connectors) with a "Showing" selector for whose
+configuration and a "Live session" selector: for plugins a library with search, a Show filter, a sort, an Add
+menu, a "loaded in this session" line, seven groups by where a plugin came from, rows with author, counts and
+scope chips and a menu, and a detail page; the app's built-in mods with a switch for every session and a choice
+for this one; every skill on disk; connectors as configured on disk and, separately, as they are live in a
+session, with sign-in; and for each tab a Discover view over a catalog with its own filters, shelves, cards and
+detail.
+
+Here it is one column, four quiet heads:
+
+- **Plugins.** A line is the name and its switch. Marks: a problem, an update that is out, a small dot for one
+  that is new. Opened: what it does, what is inside it (its skills as the words that are typed, its commands,
+  agents, connectors and hooks), its version, who made it, where it is installed, whether it was reviewed and
+  whether it runs code on this Mac; Uninstall as a mark, and Update as the worded button when there is one.
+- **Built in.** The app's mods, the same line. Opened: the choice for the session that is running (as
+  everywhere, on, off).
+- **Skills.** Your own. A plugin's skills are inside the plugin, and the search finds a plugin by its skills.
+- **Connectors.** One list, not two. A line is the name; its mark is its state only when the state is news:
+  connecting (the breathing dot), failed (the warning mark, with Try again at the line's end), and sign-in
+  needed, which is the orange disc with a key, with Sign in on the line itself: the person's move, answered where
+  it is. Opened: its address, how it is reached, where it is configured, and its tools when a session has them.
+- **Whose configuration** is a chip beside the search (yours, or a project's), as the folder chip is on New chat.
+- **Discover** is the round button: the catalog's search and what its sources put first, each with a mark if it
+  was reviewed and a mark if it runs code, and a plus that adds it. One more row leads to the whole catalog.
+
+### 21.4 Forks
+
+- **A sheet in place, against a page of its own.** The app opens a plugin's detail as a page with a way back. In
+  place keeps the list in view and is the transcript's own move; a page of its own would be right only for
+  something as large as the catalog. Not a switch.
+- **Artifacts by date, against by Space** ("Artifacts: grouped", `shelf=space`; also in the page's own menu). By
+  date is what a person comes for most: the thing just made. By Space is the app's other view, kept whole.
+- **A plugin's skills inside it, against listed under Skills too** ("Customize: a plugin's skills",
+  `skills=listed`). Listed, the page is ten lines longer and every plugin is said twice; inside, a skill is found
+  by searching. The app lists them all.
+- **The + card as a button until pressed, against open at rest** (`add=open`). Open, the Artifacts page has the
+  app's "Make something new" always in view; as a button the page is its list. It is open on an empty page
+  either way.
+- **One column for Customize, against three sections.** Three tabs make the person choose a kind before seeing
+  anything; six plugins, three mods, two skills and five connectors are sixteen lines and fit one screen. It
+  stops being right at several dozen lines (21.7). Not a switch: the alternative is another page structure.
+- **Artifacts as lines, against tiles.** Tiles are worth their room when they show the thing. The lab has no
+  previews, and twenty tiles of glass holding a title would spend the page's material on nothing. Not built.
+
+### 21.5 Candidates: what is no longer on screen at rest
+
+Each is still reachable unless it says "not drawn". The owner makes the call on every one.
+
+**Artifacts**
+
+| in the app, at rest | here | why |
+|---|---|---|
+| The page's title | gone | the pane's row is the current one, and the search names what is searched |
+| The kind in words on every row | the glyph; the word is in the sheet, the menu and the + card | seven kinds, one glyph each, read faster than a word per row |
+| "Edited ... by ..." on every row | the age; the sentence is in the sheet, and who edited is under the pointer | the age is what orders the list |
+| The project on every row | in the sheet | the Space, when there is one, says where it belongs |
+| Session chips on every row, three and "+N" | in the sheet, all of them | they are for going to a session, which is a second act |
+| The delivery receipt on the row | in the sheet | rare, and not what a row is scanned for |
+| The row's menu | six marks and Open, in the sheet | one fewer place to look |
+| Seven "make" cards, always there, each with New and Ask Claude | the + card: a press, and a spark | it is used once per artifact, the list every visit |
+| Each kind's line of explanation | under the pointer in the + card | read once |
+| Four views as a row of tabs, and a type filter | one menu | they are settings of the list, not places |
+| "General" as a view of its own | the last group when grouped by Space | it is the same rows |
+| The machine menu in the header | a row of the same menu | used rarely |
+| "Mirrored to ..." under a Space's name | a link mark; the folder under the pointer | a fact about the Space, not a line of the page |
+| The empty page's two sentences (about thirty words), and those of an empty Pinned view and an empty Space | one sentence of six words; the others not drawn | the open card shows what can be done |
+| The passage that matched, under a search | not drawn | the lab searches titles only |
+| A Space's own menu (show only, rename, link a folder, unlink, delete) | not drawn | it needs a place: the group's head under the pointer |
+| Reading, failed and unreachable states; the rename, delete and new-Space dialogs | not drawn | |
+
+**Customize**
+
+| in the app, at rest | here | why |
+|---|---|---|
+| The page's title, and three tabs | one column, four heads | sixteen things do not need three places |
+| "My items" and "Discover" as a switch on each tab | the + card | what you have is the page; what you could add is one step away |
+| The Show filter (all, enabled, disabled, loaded in this session, other projects) and the sort | gone | the switch shows what is on; the list is short and has a search |
+| Groups by where a plugin came from (created by you, synced, from Anthropic and partners, from marketplaces you added) | gone; "Reviewed" and the maker are in the sheet | it sorts by a fact about the plugin, not by anything the person does here |
+| The group of plugins installed in other projects, to be managed there | gone | the chip beside the search goes there |
+| The "Live session" selector | gone: the page reads the place's running session and names it where that matters | one fewer thing to set. If two sessions run in one place, the choice between them is lost |
+| "N plugins loaded in this session, N problems" | a problem is a mark on its own line, and a sentence in its sheet | it says which one |
+| A row's maker, skill count, scope chips, and the words "Disabled" and "New" | the sheet; the switch; a dot | the switch already says off |
+| A row's menu (turn on or off, update, uninstall) | the switch on the line; Update and Uninstall in the sheet | |
+| The detail page: its way back, "On latest version", "Enabled for this project", "Loaded in this session", an "Overview" heading, a line explaining each kind of thing inside, the sentence on how skills are used | gone; what is inside is listed without explanation | the line's own state says the first four; the explanations are read once |
+| A mod's line on who gives the agent its instructions | gone | it explains the mechanism |
+| A mod's line that a change applies at the next start or the next compaction | not drawn | this one matters: a switch that has not taken effect yet. It should come back as a mark on the line |
+| Every skill on disk, under Skills | your own only; a plugin's are inside it (the switch shows the other) | each was said twice |
+| Connectors as two lists (configured on disk; live in the attached session) | one list: the live state is the line's mark and the tools are in the sheet | they are the same connectors |
+| "Connected", "No sign-in needed" and the scope on every connector | nothing at rest; in the sheet | no news is the normal state |
+| "Shadowed by ..." | not drawn | |
+| The steps of signing in (starting, opening your browser, finish in your browser, waiting for the server) | not drawn: the button is done at once | they belong on the line, where the button is |
+| Discover: who lists it as chips, a category, "Not installed", shelves with "See all", a count of results, a sort, installs and rank on each card, the trust label in words with its sentence, counts of what is inside | a search and five things, with a mark for reviewed and a mark for runs code; the rest behind "Everything, and its sources", not drawn | the front of a catalog is a few things; the whole of it is a page of its own |
+| The sheets that confirm adding a connector, installing and uninstalling; marketplaces to add and manage | not drawn | |
+| Refresh buttons; "Reading configuration", what could not be read, the note on coverage | not drawn | |
+
+### 21.6 Readings
+
+`measure.mjs`, Warm paper under the defaults, 1280 by 800, 1440 by 900 and 1728 by 1117, 28 routes at each.
+Artifacts: at rest, with a line open, with the + card and a line open, by Space, at its end, empty. Customize: at
+rest, with a plugin open, with the plugin that has a problem open, with the connector that needs a sign-in open
+beside the + card, with a mod open, with the failed connector open at the page's end, with a plugin's skills
+listed, empty. Each in both schemes. 84 routes, 6,042 gated readings. 36 were under their floor, all one thing:
+the catalog's search field stood inside its closed card, out of sight, and its placeholder was read as text at
+1.00. The field is there only while the card is now (the lesson of 17.6, met again). With it, a group's head by
+day went from the quiet ink to a little more (4.65 over the shaded side of the picture's paper, low on the page;
+5.22 after). The 30 routes the two touched were measured again at the three sizes (2,146 readings): none under.
+
+| lowest text | light | dark |
+|---|---|---|
+| Artifacts: a line's name | 5.87 | 6.2 or more |
+| Artifacts: a group's head | 5.22 | 5.27 |
+| Artifacts: a sheet's line of facts | 5.93 | 5.24 |
+| Customize: a line's name (a plugin that is off) | 5.17 | 5.58 |
+| Customize: a sheet's line of facts | 5.72 | 5.23 |
+| the search's placeholder, and the empty page's sentence | 5.48 | 6.2 or more |
+| the + card: a row, and a row's second line | 5.94 | 5.25 |
+
+The lowest icon is the chip's folder beside Customize's search, 3.72 by day against a floor of 3. The dots, the
+switch and the disc are drawn in CSS and are not read by the script, as before. Diagnostics with `dev=1`: the one
+by design (a glass root in the column, for the sheets) and nothing else, on both pages, empty, with a line open
+and with the card open.
+
+### 21.7 Not good about it
+
+- **Opening an artifact is two presses** where the app's is one: the line opens the sheet, and Open opens the
+  thing. The sheet is where everything about it is, so the line had to open the sheet; but the commonest act got
+  longer. An arrow at the line's end under the pointer, as the waiting list has, would give the one press back.
+  Not drawn.
+- **Nothing shows what an artifact looks like.** No preview in the line, the sheet or anywhere. The fixtures have
+  none; the sheet is where one belongs.
+- **Seven kind glyphs have to be learned.** Their names are in the sheet, the menu and the + card, never beside
+  the title.
+- **A name alone can say too little.** "ptc" at rest says nothing to someone who did not install it; what it does
+  is a pointer away, and on a touch screen or by keyboard it is only in the sheet.
+- **No mark means fine.** A connected connector and a working plugin are told apart from a broken one by the
+  absence of a mark. It has to be trusted, and a state that fails to load would look healthy.
+- **A second disc.** The key in the orange disc is the person's move, as the orange means; but the waiting
+  capsule counts sessions and does not count it, so this one is only seen by coming to the page.
+- **One column at this size only.** Sixteen lines. A project with forty plugins and sixty skills would want the
+  heads to fold, or to be jumped between; not drawn.
+- **Sheets only.** The whole catalog, adding a connector, the sign-in's steps, a Space's menu and every dialog
+  are named in 21.5 and not drawn.
+- **With the + card open at 1280 by 800 the column is 572 px and the tabs fold** (section 20); the page is drawn
+  for the card to be opened and closed, not left open there.
+- **Motion was not watched**: a line opening, the card growing, a chip arriving.
+- **Measured under Warm paper only.**
+
+### 21.8 What changed in the code
+
+`Shelf.tsx` (new): the line that opens into a sheet, the head with its search, the + card. `Artifacts.tsx`,
+`Customize.tsx` (new): the two pages and their cards. `Session.tsx`: the growing card is exported and takes its
+own mark and words. `Layers.tsx`: the two scenes (the column, the glass root in it, the + card in the side
+column's group, the capsule on the column), `open=<name>` for the line open at once, `x=empty`, `x=add`, and the
+three switches. `Sidebar.tsx`: every destination goes somewhere. `layers.css`: section 21's block; the column
+rule is keyed to these scenes too. `src/lab/types.ts`, `Lab.tsx`: two more scenes (keys 6 and 7). `meta.ts`: the
+scenes, the switches, the note. `fixtures.ts` (additions): `artifactKinds`, `artifactSpaces`, `artifacts`,
+`customize`.
+
 ## To ship this in the app
 
 What the real renderer would need, against "The app today" in the brief.
@@ -2091,5 +2310,10 @@ What the real renderer would need, against "The app today" in the brief.
   already knows; in the app the room is the strip's own slot. Tabs keep a mark for every kind of thing that can
   be a tab (a session's state, a file, a tool), since the mark is what survives. Closing, the overflow menu and
   a keyboard path along the row belong to the same piece of work.
+- **Artifacts and Customize** (section 21). Both become one list component: a line whose press opens a sheet in
+  place, registered as a glass block as a tool run's is, one open at a time. The library's row, its menu and its
+  header controls move into the line, the sheet and one menu; the "make" strip and each Discover view move behind
+  the round button, which is the side column's own growing surface. Customize's three tabs become one page that
+  reads the place's running session without being told which. Each cut in 21.5 is the owner's to confirm first.
 - **Measurement in CI.** `measure.mjs` should run against real content in both schemes before a field or a ground
   is changed: on this design a palette change is a legibility change.

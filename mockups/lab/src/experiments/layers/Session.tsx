@@ -391,7 +391,20 @@ function OneCard({ open, children }: { open: boolean; children: ReactNode }) {
  * its glass under that box frame by frame, as it does for a tool run that opens. The button never moves; the
  * glass grows out around it. The card is as tall as what it holds, so its foot is free.
  */
-function Growing({ open, onToggle, children }: { open: boolean; onToggle?: () => void; children: ReactNode }) {
+export function Growing({
+  open,
+  onToggle,
+  children,
+  icon,
+  words = { show: 'Show the side column', hide: 'Hide the side column', tipShow: 'Show details', tipHide: 'Hide details' },
+}: {
+  open: boolean;
+  onToggle?: () => void;
+  children: ReactNode;
+  /** The button's own mark, where it is not the side column's. */
+  icon?: ReactNode;
+  words?: { show: string; hide: string; tipShow: string; tipHide: string };
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   const kick = useKick();
@@ -426,8 +439,8 @@ function Growing({ open, onToggle, children }: { open: boolean; onToggle?: () =>
       <div className="xl-bud-in" ref={inner} inert={!grown}>
         {children}
       </div>
-      <button type="button" className="xl-bud-btn" aria-label={open ? 'Hide the side column' : 'Show the side column'} aria-expanded={open} data-tip={open ? 'Hide details' : 'Show details'} data-tip-at="end" onClick={onToggle}>
-        <PanelRight size={16} strokeWidth={1.75} />
+      <button type="button" className="xl-bud-btn" aria-label={open ? words.hide : words.show} aria-expanded={open} data-tip={open ? words.tipHide : words.tipShow} data-tip-at="end" onClick={onToggle}>
+        {icon ?? <PanelRight size={16} strokeWidth={1.75} />}
       </button>
     </div>
   );

@@ -613,12 +613,12 @@
 /* Alignment under Open's rule: the reading column is the join. The panes stand one derived room from it, the tabs
    start on its left edge, the waiting capsule ends on its right edge, and the composer is its width (it already
    was). The column takes what the panes leave, up to Open's 744. */
-.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file']) {
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file'], [data-shelf]) {
   --xl-col: min(744px, calc(100vw - var(--xl-main-l) - var(--xl-main-r) - 2 * var(--xl-room)));
   --xl-wait-r: calc(100vw - var(--xl-col-l) - var(--xl-col));
   --xl-tabs-r: calc(var(--xl-wait-r) + 84px + var(--xl-seam));
 }
-.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file']) .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
+.x-layers[data-align='column']:is([data-scene='session'], [data-scene='file'], [data-shelf]) .xl-waiting { right: var(--xl-wait-r); transition: right var(--xl-t-shell) var(--xl-ease); }
 /* Settings has a column of its own (620, kept clear of the margin note); the tabs start on that one. */
 .x-layers[data-align='column'][data-scene='settings'] {
   --xl-col-l: calc(var(--xl-main-l) + max(32px, min((100vw - var(--xl-main-l) - 620px) / 2, 100vw - var(--xl-main-l) - 892px)));
@@ -656,10 +656,10 @@
 .x-layers .xl-bud-btn:active { transform: scale(0.94); }
 /* With the capsule's place taken by the card, the capsule stands beside the card as its neighbour (12 px, as it
    stood above the modules), and the tabs keep a room from it. Under the column rule it is on the column instead. */
-.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) {
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) {
   --xl-tabs-r: max(calc(var(--xl-main-r) + 96px + var(--xl-room)), calc(var(--xl-gap) + 128px + var(--xl-room)));
 }
-.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) .xl-waiting {
+.x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) .xl-waiting {
   right: max(calc(var(--xl-main-r) + 12px), calc(var(--xl-gap) + var(--xl-bar-h) + 8px)); transition: right var(--xl-t-shell) var(--xl-ease);
 }
 
@@ -669,7 +669,7 @@
   .x-layers { --xl-main-r: 0px; }
   .x-layers .xl-side, .x-layers .xl-round { display: none; }
   .x-layers .xl-waiting { right: var(--xl-gap); }
-  .x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file']):not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
+  .x-layers[data-sideform='button']:is([data-scene='session'], [data-scene='file'], [data-shelf]):not([data-align='column']) .xl-waiting { right: var(--xl-gap); }
 }
 @media (width < 900px) {
   .x-layers { --xl-main-l: 0px; --xl-tabs-min: calc(84px + 36px + var(--xl-room)); }
@@ -1118,3 +1118,94 @@
 .x-layers .xl-tab-menu { min-width: 236px; max-height: min(60vh, 420px); overflow-y: auto; scrollbar-width: none; }
 .x-layers .xl-tab-menu .xl-tab-mark { color: var(--xl-fg2); }
 .x-layers .xl-tab-menu .xl-item svg { color: inherit; }
+
+/* ==== 21. Artifacts and Customize (DESIGN.md section 21) =========================================================
+   Two lists the app draws as walls of rows, said in the transcript's grammar: a thing is a line on the field, a
+   press opens it into a sheet of glass, and what the page makes or adds is one round button of glass at the top
+   right. The pages take the session page's layout whole (the column rule above is keyed to them too): tabs on the
+   column's left edge, the waiting capsule on its right, the button where the side column's is. */
+.x-layers[data-shelf] .xl-column { justify-content: flex-start; padding-bottom: 44px; }
+.x-layers .xl-shelf { user-select: none; }
+
+/* The head: the search, read on the field like the lines under it, and whatever narrows the list. */
+.x-layers .xl-find { display: flex; align-items: center; gap: 10px; height: 40px; margin: 0 -2px 14px; color: var(--xl-ink-3); }
+.x-layers .xl-find > svg { margin-left: 2px; }
+.x-layers .xl-find-in { flex: 1; min-width: 0; height: 36px; padding: 0; border: 0; background: none; color: var(--xl-ink); font: var(--xl-w) 15px/22px var(--xl-font); cursor: text; user-select: text; }
+.x-layers .xl-find-in::placeholder { color: var(--xl-ink-3); }
+.x-layers .xl-find-in:focus-visible { outline: none; }
+.x-layers .xl-find:focus-within > svg:first-child { color: var(--xl-ink); }
+.x-layers .xl-find .xl-icon { color: var(--xl-ink-2); }
+.x-layers .xl-s-narrow { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px 0 10px; border-radius: 14px; background: var(--xl-well); color: var(--xl-ink-2); font-size: 13px; line-height: 18px; white-space: nowrap; animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers .xl-s-narrow:hover { background: var(--xl-selected); color: var(--xl-ink); }
+.x-layers .xl-s-place { color: var(--xl-ink-2); }
+.x-layers .xl-s-menu { min-width: 208px; }
+.x-layers .xl-s-menu .xl-item > svg:last-child { color: var(--xl-fg2); }
+.x-layers .xl-s-none { margin: 28px 0 0; color: var(--xl-ink-3); font-size: 15px; line-height: 22px; }
+
+/* A line. It is the Overview's line; the press is its title, stretched over the row, so a control at the line's end
+   (a switch, a button) is its own press. */
+.x-layers .xl-s-row { position: relative; grid-template-columns: 16px minmax(0, max-content) minmax(0, 1fr) auto; }
+.x-layers .xl-s-row:focus-within { background: var(--xl-hover); color: var(--xl-ink); }
+.x-layers .xl-s-item[data-open='true'] > .xl-s-row { color: var(--xl-ink); }
+/* The words that say what a thing is wait for the pointer, as an Overview line at rest keeps what it ended on: at
+   rest a line is its mark, its name and its end. Open, the sheet says them, so the line does not. */
+.x-layers .xl-s-row .xl-o-line { opacity: 0; transition: opacity var(--xl-t-hover); }
+.x-layers .xl-s-row:is(:hover, :focus-within) .xl-o-line { opacity: 1; }
+.x-layers .xl-s-item[data-open='true'] > .xl-s-row .xl-o-line { opacity: 0; }
+.x-layers .xl-s-main .xl-o-title { flex: 0 1 auto; min-width: 0; padding-right: 14px; margin-right: -9px; }
+.x-layers .xl-s-main { display: flex; align-items: center; gap: 7px; min-width: 0; height: 100%; font-weight: inherit; }
+.x-layers .xl-s-main::after { content: ''; position: absolute; inset: 0; border-radius: inherit; }
+.x-layers .xl-s-main:focus-visible { outline: none; }
+.x-layers .xl-s-main:focus-visible::after { outline: 2px solid var(--xl-focus); outline-offset: -2px; }
+.x-layers .xl-s-row .xl-o-mark { color: var(--xl-ink-2); }
+.x-layers .xl-s-end { position: relative; z-index: 1; min-width: 0; }
+.x-layers .xl-s-end:has(> .xl-o-meta) { pointer-events: none; }
+.x-layers .xl-s-pin { flex: none; color: var(--xl-ink-3); }
+.x-layers .xl-s-new { flex: none; width: 6px; height: 6px; }
+.x-layers .xl-s-flag { position: relative; z-index: 1; display: grid; place-items: center; width: 16px; height: 16px; color: var(--xl-ink-2); }
+.x-layers .xl-s-do { height: 26px; padding: 0 12px; border-radius: 13px; }
+.x-layers .xl-s-mirror { position: relative; display: inline-grid; place-items: center; width: 22px; height: 22px; margin-left: 4px; border-radius: 8px; }
+
+/* The sheet a line opens into: the transcript's block. Facts are one quiet line; what it holds are chips; what can be
+   done is a row of marks, with the one worded button at its end. */
+.x-layers .xl-s-wrap { padding: 4px 0 22px; margin: 0 0 -10px 28px; }
+.x-layers .xl-s-sheet { padding: 13px 14px 10px 16px; font-size: 13px; line-height: 18px; user-select: text; }
+.x-layers .xl-s-about { color: var(--xl-fg); font-size: 14px; line-height: 20px; text-wrap: pretty; }
+.x-layers .xl-s-say { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--xl-fg); font-weight: var(--xl-w-label); }
+.x-layers .xl-s-facts { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; color: var(--xl-fg3); }
+.x-layers .xl-s-facts > span { display: inline-flex; align-items: center; gap: 5px; }
+.x-layers .xl-s-about + .xl-s-facts, .x-layers .xl-s-chips + .xl-s-facts, .x-layers .xl-ask-cmd + .xl-s-facts, .x-layers .xl-s-pick + .xl-s-facts { margin-top: 10px; }
+.x-layers .xl-s-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.x-layers .xl-s-chip { position: relative; display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 12px; background: var(--xl-well); color: var(--xl-fg2); font-size: 12px; line-height: 16px; white-space: nowrap; }
+.x-layers .xl-s-chip[data-mono] { font: 450 12px/16px var(--xl-mono); border-radius: 8px; }
+.x-layers button.xl-s-chip { transition: background-color var(--xl-t-hover), color var(--xl-t-hover); }
+.x-layers button.xl-s-chip:hover { background: var(--xl-selected); color: var(--xl-fg); }
+.x-layers .xl-s-acts { display: flex; align-items: center; gap: 2px; min-height: 30px; margin: 8px -6px 0; }
+.x-layers .xl-s-acts .xl-btn { margin-right: 6px; }
+.x-layers .xl-s-sheet .xl-ask-cmd { margin-top: 0; }
+.x-layers .xl-s-pick { display: flex; align-items: center; gap: 12px; margin-top: 10px; color: var(--xl-fg2); }
+
+/* The + card: what the page makes, or the front of the catalog. */
+.x-layers .xl-s-make { padding: 0 2px 0 0; gap: 0; }
+.x-layers .xl-s-make-main { position: relative; flex: 1; min-width: 0; display: flex; align-items: center; gap: 9px; min-height: 30px; padding: 5px 8px; border-radius: inherit; color: var(--xl-fg2); }
+.x-layers .xl-s-make-main > svg { color: var(--xl-fg3); }
+.x-layers .xl-s-make:hover .xl-s-make-main { color: var(--xl-fg); }
+.x-layers .xl-s-ask { width: 26px; height: 26px; opacity: 0; transition: opacity var(--xl-t-hover), background-color var(--xl-t-hover); }
+.x-layers .xl-s-make:is(:hover, :focus-within) .xl-s-ask { opacity: 1; }
+.x-layers .xl-s-seek { display: block; flex: none; width: calc(100% - 4px); margin: 2px 2px 6px; }
+.x-layers .xl-s-found { padding-right: 2px; }
+.x-layers .xl-s-found-name { display: flex; align-items: center; gap: 5px; color: var(--xl-fg); }
+.x-layers .xl-s-found-name > span { position: relative; display: inline-grid; color: var(--xl-fg3); }
+.x-layers .xl-s-found .xl-icon { margin-top: -2px; }
+.x-layers .xl-s-added { display: grid; place-items: center; width: 30px; height: 30px; margin-top: -2px; color: var(--xl-fg2); animation: xl-glyph-in var(--xl-t-fold) var(--xl-ease-open); }
+.x-layers .xl-s-all { margin-top: 4px; }
+/* Grown, the button that opened the card is what closes it: its plus turns to a cross. */
+.x-layers .xl-side[data-plus] .xl-bud-btn svg { transition: transform var(--xl-t-pop) var(--xl-ease-open); }
+.x-layers .xl-side[data-plus] .xl-bud[data-grown='true'] .xl-bud-btn svg { transform: rotate(45deg); }
+/* The line's middle starts a little after the longest of names, never against it. */
+.x-layers .xl-s-row .xl-o-line { padding-left: 8px; }
+@media (forced-colors: active) {
+  .x-layers :is(.xl-s-sheet, .xl-s-chip, .xl-s-narrow) { border: 1px solid CanvasText; }
+}
+/* A group's head low on these pages, by day, is the quiet ink over the shaded side of the picture's paper (4.65). */
+.x-layers[data-scheme='light'] .xl-shelf .xl-o-head { color: rgb(var(--xl-ink-rgb) / 0.76); }

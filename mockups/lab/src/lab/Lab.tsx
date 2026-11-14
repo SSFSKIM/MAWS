@@ -4,7 +4,7 @@ import { href, useRoute, type Route } from './route';
 import type { Experiment, SceneId } from './types';
 import './lab.css';
 
-const sceneLabel: Record<SceneId, string> = { session: 'Session', settings: 'Settings', home: 'New chat', overview: 'Overview', file: 'File' };
+const sceneLabel: Record<SceneId, string> = { session: 'Session', settings: 'Settings', home: 'New chat', overview: 'Overview', file: 'File', artifacts: 'Artifacts', customize: 'Customize' };
 
 function knobValues(exp: Experiment, route: Route): Record<string, string> {
   const out: Record<string, string> = {};

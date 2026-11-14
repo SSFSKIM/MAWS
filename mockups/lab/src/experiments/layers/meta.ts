@@ -8,6 +8,7 @@ export const experiment: Experiment = {
   thesis:
     'Glass taken into the transcript: the colour field runs under the whole window, prose is read directly on it, and what the agent made that can be opened (a tool run, an edit, a running command) is a piece of glass standing over it.',
   notes: [
+    'Newest: the last two places in the sidebar, Artifacts and Customize (keys 6 and 7). Both are said the way the transcript speaks: a thing is one line; press it and it opens into a sheet of glass with everything else about it and what can be done; the round + at the top right grows into what the page makes or adds. Rest on a line for what it is. On Customize a mark means something is wrong or yours to do: press Sign in on Pagewise. DESIGN.md 21.5 lists every word and row these pages no longer show at rest, each with its reason, for you to confirm or refuse.',
     'Newest: code is coloured. Three quiet hues and the ink: the language\'s words in a plum, values in a bronze, type names in a slate; comments in the quiet ink; nothing green, red or orange, which the page already spends. Look at the bucket.ts tab, then keys.ts and index.ts in the side column, and at an edit in the session. "Code: colour" switches back to plain ink to compare.',
     'Newest: more tabs than fit. Set "Tabs open" to 6, 9 and 14 and narrow the window. The tab you are on keeps its whole name; the others shorten together, then give their names up together and stand as their marks (the orange disc is never lost; rest on a mark for its name), then leave for a menu beside the plus. Tabs close now: rest on a tab\'s mark for the cross.',
     'New, and first: the two pages that were missing. Press "Overview" in the pane (key 4) and the bucket.ts tab (key 5). Both are meant to be this same design at the product\'s other scale; say where they are not.',
@@ -23,8 +24,35 @@ export const experiment: Experiment = {
     'Still true: scroll the transcript and the field stays still while the blocks travel over it; Blocks quiets them (Veil, Opaque); Field strength is how far the field departs from its ground. Reasons, costs and readings: DESIGN.md sections 13 to 18.',
     'Cost: content on glass breaks the glass guideline on purpose; a second glass root runs inside the transcript; legibility depends on the field staying graded.',
   ],
-  scenes: ['session', 'settings', 'home', 'overview', 'file'],
+  scenes: ['session', 'settings', 'home', 'overview', 'file', 'artifacts', 'customize'],
   knobs: [
+    {
+      id: 'shelf',
+      label: 'Artifacts: grouped',
+      default: 'date',
+      options: [
+        { value: 'date', label: 'By date' },
+        { value: 'space', label: 'By Space' },
+      ],
+    },
+    {
+      id: 'skills',
+      label: 'Customize: a plugin\'s skills',
+      default: 'inside',
+      options: [
+        { value: 'inside', label: 'Inside their plugin' },
+        { value: 'listed', label: 'Listed under Skills too' },
+      ],
+    },
+    {
+      id: 'add',
+      label: 'Artifacts, Customize: the + card',
+      default: 'button',
+      options: [
+        { value: 'button', label: 'A button until pressed' },
+        { value: 'open', label: 'Open at rest' },
+      ],
+    },
     {
       id: 'tabs',
       label: 'Tabs open',

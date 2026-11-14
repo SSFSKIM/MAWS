@@ -196,8 +196,8 @@ function Sessions({ scene, live, at, go, card: cardAtOnce }: Pick<Props, 'scene'
       {destinations.map((d) => {
         const Icon = destIcon[d.icon];
         return (
-          <div key={d.id} className="xl-row" data-selected={(d.id === 'new' && scene === 'home') || (d.id === 'overview' && scene === 'overview')}>
-            <button type="button" className="xl-row-main" aria-current={d.id === scene ? 'page' : undefined} onClick={() => (d.id === 'new' ? go('home') : d.id === 'overview' ? go('overview') : undefined)}>
+          <div key={d.id} className="xl-row" data-selected={(d.id === 'new' && scene === 'home') || d.id === scene}>
+            <button type="button" className="xl-row-main" aria-current={d.id === scene ? 'page' : undefined} onClick={() => go(d.id === 'new' ? 'home' : d.id)}>
               <Icon size={16} strokeWidth={1.75} />
               <span className="xl-fade">{d.label}</span>
             </button>

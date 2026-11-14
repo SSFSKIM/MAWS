@@ -1,6 +1,6 @@
 import type { ComponentType, LazyExoticComponent } from 'react';
 
-export type SceneId = 'session' | 'settings' | 'home' | 'overview' | 'file';
+export type SceneId = 'session' | 'settings' | 'home' | 'overview' | 'file' | 'artifacts' | 'customize';
 export type Scheme = 'light' | 'dark';
 
 /** A choice the viewer can flip while looking, e.g. the dark ground candidate. */

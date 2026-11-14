@@ -814,3 +814,141 @@ export const moreTranscripts: Record<string, TranscriptItem[]> = {
     { kind: 'assistant', paragraphs: ['One parser per controller, each answering with the same record: a time, a temperature and the segment of the firing. All three formats parse, and a file that matches none is refused with the line that failed.'] },
   ],
 };
+
+// ---- Artifacts: the library of what sessions made -------------------------------------------------------------------
+// Invented. What the app's Artifacts page lists: documents, decks, designs, dashboards, pages and files, each with
+// when it was last edited and by whom, the Space it is filed in, and the sessions that touched it. The dates are
+// written as the page would group them on Saturday 14 November.
+
+export type ArtifactKind = 'document' | 'presentation' | 'design' | 'design_system' | 'dashboard' | 'html' | 'file';
+
+export const artifactKinds: { kind: ArtifactKind; label: string; plural: string; blurb: string }[] = [
+  { kind: 'document', label: 'Document', plural: 'Documents', blurb: 'Notes, specs and reports' },
+  { kind: 'presentation', label: 'Presentation', plural: 'Presentations', blurb: 'A slide deck' },
+  { kind: 'design', label: 'Design', plural: 'Designs', blurb: 'Artboards on a canvas' },
+  { kind: 'design_system', label: 'Design system', plural: 'Design systems', blurb: 'Colours, type and components' },
+  { kind: 'dashboard', label: 'Dashboard', plural: 'Dashboards', blurb: 'Charts bound to data' },
+  { kind: 'html', label: 'HTML page', plural: 'HTML pages', blurb: 'A page Claude builds' },
+  { kind: 'file', label: 'File', plural: 'Files', blurb: 'Any file from your Mac' },
+];
+
+/** A Space is a named folder for artifacts; one linked to a project folder is mirrored into it. */
+export const artifactSpaces: { id: string; name: string; mirroredTo?: string }[] = [
+  { id: 'sp1', name: 'Atlas notes', mirroredTo: 'atlas-api/artifacts' },
+  { id: 'sp2', name: 'Field research', mirroredTo: 'field-notes/artifacts' },
+  { id: 'sp3', name: 'Kiln book' },
+];
+
+export interface Artifact {
+  id: string;
+  kind: ArtifactKind;
+  title: string;
+  /** The date group it falls in, as the page titles it. */
+  when: string;
+  /** Compact age, as a row shows it. */
+  age: string;
+  pinned?: boolean;
+  space?: string;
+  project?: string;
+  /** Who edited it last: "You", "Claude", or a session's title. */
+  by: string;
+  /** Sessions that touched it, by last touch. */
+  sessions?: { id: string; roles: ('created' | 'edited' | 'viewed' | 'commented')[] }[];
+  /** The latest delivery to a service. */
+  sent?: { to: string; age: string };
+}
+
+export const artifacts: Artifact[] = [
+  { id: 'a1', kind: 'document', title: 'Rate limiter design', when: 'Today', age: '3h', pinned: true, space: 'sp1', project: 'atlas-api', by: 'Rate limiter rewrite', sessions: [{ id: 's1', roles: ['created', 'edited'] }, { id: 's2', roles: ['viewed'] }] },
+  { id: 'a2', kind: 'design_system', title: 'House style', when: 'Thursday', age: '2d', pinned: true, by: 'You' },
+  { id: 'a3', kind: 'dashboard', title: 'Limiter load profile', when: 'Today', age: '12m', space: 'sp1', project: 'atlas-api', by: 'Rate limiter rewrite', sessions: [{ id: 's1', roles: ['created'] }] },
+  { id: 'a4', kind: 'document', title: 'Offline sync plan', when: 'Today', age: '26m', space: 'sp2', project: 'field-notes', by: 'Offline sync design', sessions: [{ id: 's5', roles: ['created', 'edited'] }] },
+  { id: 'a5', kind: 'html', title: 'Upload retry timeline', when: 'Today', age: '1h', project: 'atlas-api', by: 'Fix flaky upload test', sessions: [{ id: 's2', roles: ['created'] }] },
+  { id: 'a6', kind: 'file', title: 'incident-03-november.csv', when: 'Today', age: '2h', space: 'sp1', by: 'You', sessions: [{ id: 's1', roles: ['viewed'] }] },
+  { id: 'a7', kind: 'presentation', title: 'Billing webhooks, as found', when: 'Yesterday', age: '1d', project: 'atlas-api', by: 'Billing webhook audit', sessions: [{ id: 's3', roles: ['created', 'edited'] }, { id: 's1', roles: ['viewed'] }], sent: { to: 'Pagewise', age: '1d' } },
+  { id: 'a8', kind: 'document', title: 'Docker image diet', when: 'Yesterday', age: '1d', project: 'atlas-api', by: 'Trim the Docker image', sessions: [{ id: 's4', roles: ['created'] }] },
+  { id: 'a9', kind: 'design', title: 'Onboarding screens', when: 'Thursday', age: '2d', space: 'sp2', project: 'field-notes', by: 'Onboarding copy pass', sessions: [{ id: 's7', roles: ['edited', 'commented'] }] },
+  { id: 'a10', kind: 'document', title: 'Release notes, week of 9 November', when: 'Thursday', age: '2d', by: 'Claude' },
+  { id: 'a11', kind: 'dashboard', title: 'Tile cache hit rate', when: 'Wednesday', age: '3d', space: 'sp2', project: 'field-notes', by: 'Map tile caching', sessions: [{ id: 's6', roles: ['created'] }] },
+  { id: 'a12', kind: 'html', title: 'Glaze recipe browser', when: 'Tuesday', age: '4d', space: 'sp3', project: 'kiln', by: 'Glaze recipe importer', sessions: [{ id: 's8', roles: ['created', 'edited'] }] },
+  { id: 'a13', kind: 'file', title: 'controller-logs.zip', when: 'Tuesday', age: '4d', space: 'sp3', by: 'You', sessions: [{ id: 's10', roles: ['viewed'] }] },
+  { id: 'a14', kind: 'document', title: 'Firing schedule format', when: 'November', age: '8d', space: 'sp3', project: 'kiln', by: 'Firing schedule export', sessions: [{ id: 's9', roles: ['created'] }] },
+  { id: 'a15', kind: 'presentation', title: 'Press site, autumn refresh', when: 'November', age: '9d', project: 'press-site', by: 'You', sent: { to: 'Pagewise', age: '9d' } },
+  { id: 'a16', kind: 'design', title: 'Invoice layout', when: 'November', age: '11d', project: 'ledger', by: 'Invoice layout', sessions: [{ id: 's17', roles: ['created', 'edited'] }] },
+  { id: 'a17', kind: 'document', title: 'Year-end export checklist', when: 'October', age: '3w', project: 'ledger', by: 'Year-end export', sessions: [{ id: 's19', roles: ['created'] }] },
+  { id: 'a18', kind: 'dashboard', title: 'Bank feed match rate', when: 'October', age: '4w', project: 'ledger', by: 'Bank feed import', sessions: [{ id: 's20', roles: ['created'] }] },
+  { id: 'a19', kind: 'file', title: 'rates-2026.xlsx', when: 'October', age: '5w', by: 'You' },
+  { id: 'a20', kind: 'document', title: 'Zsh startup notes', when: 'October', age: '6w', project: 'dotfiles', by: 'Zsh startup time', sessions: [{ id: 's11', roles: ['created'] }] },
+  { id: 'a21', kind: 'design_system', title: 'Ledger print style', when: 'September', age: '2mo', project: 'ledger', by: 'You' },
+  { id: 'a22', kind: 'html', title: 'Map tile explorer', when: 'September', age: '2mo', space: 'sp2', project: 'field-notes', by: 'Map tile caching', sessions: [{ id: 's6', roles: ['created'] }] },
+];
+
+// ---- Customize: what Claude has been given here ---------------------------------------------------------------------
+// Invented. What the app's Customize page manages for one place (your own configuration, or a project's): plugins,
+// the app's own built-in mods, skills, and connectors, with a catalog to add from. The services are not real ones.
+
+export interface Plugin {
+  name: string;
+  about: string;
+  by: string;
+  version: string;
+  on: boolean;
+  /** Where it is installed: for you everywhere, for this project, or for this project and only you. */
+  scope: 'user' | 'project' | 'local';
+  /** Reviewed by the directory that lists it. */
+  verified?: boolean;
+  /** Added or updated in the last fortnight. */
+  isNew?: boolean;
+  /** A newer version that can be installed. */
+  update?: string;
+  /** Why the running session could not load it. */
+  problem?: string;
+  skills: string[];
+  commands?: number;
+  agents?: number;
+  /** Connectors it brings; `local` ones run on this computer. */
+  servers?: { name: string; local: boolean }[];
+  hooks?: boolean;
+}
+
+export const customize = {
+  /** The places whose configuration can be shown: your own, then each project's. */
+  places: ['Yours', 'atlas-api', 'field-notes', 'kiln', 'press-site', 'ledger'],
+  place: 'atlas-api',
+  /** The session of this place that is running; live states are read from it. */
+  session: 'Rate limiter rewrite',
+  plugins: [
+    { name: 'ci-kit', about: 'Sets up a repository\'s checks and runs them before a change lands.', by: 'Tooling group', version: '1.8.2', on: true, scope: 'project', verified: true, update: '1.9.0', skills: ['adopt', 'gate', 'report'], commands: 2, hooks: true },
+    { name: 'designer', about: 'Reads a project before touching it and commits to one visual stance.', by: 'Studio North', version: '2.6.3', on: true, scope: 'user', isNew: true, skills: ['designer', 'materialist'] },
+    { name: 'devcloud', about: 'Cloud machines for work too heavy or too long for this Mac.', by: 'Tooling group', version: '0.14.0', on: true, scope: 'user', skills: ['devenv', 'vm'], servers: [{ name: 'devcloud', local: true }] },
+    { name: 'ptc', about: 'A notebook kernel that keeps its state between turns.', by: 'Tooling group', version: '0.9.1', on: true, scope: 'local', problem: 'Its folder is missing', skills: ['ptc'], servers: [{ name: 'ptc', local: true }], hooks: true },
+    { name: 'eli5', about: 'Explains a topic in pictures a five-year-old could follow.', by: 'Studio North', version: '1.0.4', on: true, scope: 'user', verified: true, skills: ['eli5'] },
+    { name: 'exa-deep-research', about: 'Multi-step research on the web, with sources.', by: 'Longhand', version: '3.2.0', on: false, scope: 'user', verified: true, skills: ['search', 'agent'], agents: 1, servers: [{ name: 'exa', local: false }] },
+  ] as Plugin[],
+  /** Built into the app; each can also be set for one session. */
+  mods: [
+    { name: 'Messages to you', about: 'Agents send you a message, or ask a question you answer in place.', version: 3, on: true, inSession: 'default' as 'default' | 'on' | 'off' },
+    { name: 'Reports', about: 'A session can be read as the report of what it did.', version: 2, on: true, inSession: 'off' as 'default' | 'on' | 'off' },
+    { name: 'Budget notes', about: 'Says when a session has let go of memory to stay within its budget.', version: 1, on: false, inSession: 'default' as 'default' | 'on' | 'off' },
+  ],
+  /** Skills that are your own, not a plugin's. */
+  skills: [
+    { name: 'release-notes', about: 'Drafts the week\'s release notes from what was merged.', scope: 'user' as const },
+    { name: 'incident-review', about: 'Writes up an incident from its timeline, without blame.', scope: 'project' as const },
+  ],
+  connectors: [
+    { name: 'Cedar', about: 'Issues and projects', where: 'https://mcp.cedar.example/mcp', transport: 'HTTP', scope: 'user' as const, state: 'connected' as const, tools: ['search_issues', 'read_issue', 'create_issue', 'add_comment'] },
+    { name: 'Pagewise', about: 'Team documents', where: 'https://pagewise.example/sse', transport: 'SSE', scope: 'project' as const, state: 'signin' as const, tools: [] },
+    { name: 'Lookout', about: 'Error reports', where: 'https://mcp.lookout.example/mcp', transport: 'HTTP', scope: 'user' as const, state: 'failed' as const, failed: 'The server answered 503', tools: [] },
+    { name: 'Harbor', about: 'Container images', where: 'harbor-mcp --read-only', transport: 'On this computer', scope: 'project' as const, state: 'open' as const, tools: ['list_images', 'scan_image'] },
+    { name: 'Postbox', about: 'Mail', where: 'https://postbox.example/mcp', transport: 'HTTP', scope: 'user' as const, state: 'connecting' as const, tools: [] },
+  ],
+  /** The front of the catalog: what its sources feature. */
+  discover: [
+    { name: 'review-kit', kind: 'plugin' as const, about: 'Reviews a change the way a careful colleague would.', by: 'Tooling group', trust: 'verified' as const, installs: '48k', inside: '4 skills, 3 commands', runsCode: false },
+    { name: 'Timber', kind: 'connector' as const, about: 'Search your logs.', by: 'Timber', trust: 'partner' as const, installs: '31k', inside: 'Remote', runsCode: false },
+    { name: 'sql-notebook', kind: 'plugin' as const, about: 'Runs queries against a database and keeps the results.', by: 'Longhand', trust: 'community' as const, installs: '12k', inside: '2 skills, a local server', runsCode: true },
+    { name: 'figures', kind: 'plugin' as const, about: 'Draws charts that read as one system.', by: 'Studio North', trust: 'verified' as const, installs: '9.4k', inside: '1 skill', runsCode: false },
+    { name: 'Ferry', kind: 'connector' as const, about: 'Deployments and their logs.', by: 'Ferry', trust: 'community' as const, installs: '6.1k', inside: 'Remote, asks for your URL', runsCode: false },
+  ],
+};

@@ -28,6 +28,8 @@ import { itemsOf, Transcript } from './Transcript';
 import { Settings } from './Settings';
 import { Board, Yours, type BoardForm, type Grouping } from './Overview';
 import { FilePage, type CodeGround, type DiffForm, type Numbers } from './File';
+import { ArtifactsPage, MakeNew, type ShelfGroup } from './Artifacts';
+import { CustomizePage, Discover, type SkillsForm } from './Customize';
 import './layers.css';
 
 /** The owner's ground candidates. A chip names a light and a dark value; the scheme picks which one is painted. */
@@ -355,6 +357,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   // ---- Which session is on screen, and what has been answered ---------------------------------------------------
   // Four sessions can be opened: the one that runs, and the three that wait. A session is reached the way a person
   // reaches it: its tab, its row in the pane, or the arrow in the waiting list. `at=s3` opens one for a capture.
+  const shelf = scene === 'artifacts' || scene === 'customize';
   const all = useMemo(() => fleet.flatMap((p) => p.sessions), []);
   const asked = flags.get('at');
   // A file opens as a tab beside the session that changed it, and the window has one such tab: opening another
@@ -455,7 +458,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
     ...(scene === 'settings' ? [{ id: 'settings', title: 'Settings', kind: 'settings' }] : []),
   ];
   tabbed.current = tabList.map((t) => t.id);
-  const currentTab = scene === 'settings' ? 'settings' : scene === 'overview' || scene === 'home' ? '' : scene === 'file' ? fileTab : at;
+  const currentTab = scene === 'settings' ? 'settings' : scene === 'overview' || scene === 'home' || shelf ? '' : scene === 'file' ? fileTab : at;
   const pickTab = (id: string) => {
     const tab = tabList.find((t) => t.id === id);
     if (!tab || tab.kind === 'settings') return;
@@ -483,23 +486,32 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
   const board: BoardForm = knobs.sessions === 'cards' ? 'cards' : 'rows';
   const by: Grouping = knobs.by === 'project' ? 'project' : 'state';
   const diff: DiffForm = knobs.diff === 'sides' ? 'sides' : 'inline';
+  // Artifacts and Customize (DESIGN.md section 21): how the library is grouped is the page's own choice as well as a
+  // switch; the card that grows from the + is closed until pressed, unless the page is empty or the switch says so.
+  const [shelfGroup, setShelfGroup] = useState<ShelfGroup>(knobs.shelf === 'space' ? 'space' : 'date');
+  useEffect(() => setShelfGroup(knobs.shelf === 'space' ? 'space' : 'date'), [knobs.shelf]);
+  const skillsForm: SkillsForm = knobs.skills === 'listed' ? 'listed' : 'inside';
+  const [addOpen, setAddOpen] = useState(knobs.add === 'open' || x.includes('add') || x.includes('empty'));
+  useEffect(() => setAddOpen(knobs.add === 'open' || x.includes('add') || x.includes('empty')), [knobs.add, scene]); // eslint-disable-line react-hooks/exhaustive-deps
   const codeGround: CodeGround = knobs.code === 'field' ? 'field' : 'card';
   const numbers: Numbers = knobs.numbers === 'pointed' ? 'pointed' : 'gutter';
 
   // The modules leave before the main space takes their room, and arrive after it has given it back.
-  const [sideLaid, setSideLaid] = useState(sideOpen);
+  // On Artifacts and Customize the room on the right is the + card's, while it is open.
+  const sideWanted = shelf ? addOpen : sideOpen;
+  const [sideLaid, setSideLaid] = useState(sideWanted);
   useEffect(() => {
-    if (sideOpen) {
+    if (sideWanted) {
       setSideLaid(true);
       return;
     }
     const t = window.setTimeout(() => setSideLaid(false), SIDE_ROOM_MS);
     return () => window.clearTimeout(t);
-  }, [sideOpen]);
+  }, [sideWanted]);
   // A session and its files share the side column. On the Overview the room on the right is taken while
   // something waits, by the one piece of glass that holds it.
-  const side = scene === 'overview' ? board === 'rows' && waiting.length > 0 : (scene === 'session' || scene === 'file') && sideLaid;
-  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${here}:${board}:${by}:${diff}:${codeGround}:${numbers}`;
+  const side = scene === 'overview' ? board === 'rows' && waiting.length > 0 : (scene === 'session' || scene === 'file' || shelf) && sideLaid;
+  const layout = `${scene}:${paneOpen ? 1 : 0}:${side ? 1 : 0}:${here}:${board}:${by}:${diff}:${codeGround}:${numbers}:${shelfGroup}:${skillsForm}`;
   const pose = flags.get('pose') === 'inactive' ? 'inactive' : flags.get('pose') === 'active' ? 'active' : 'auto';
   const tier = flags.get('tier') === 'css' ? 'css' : 'webgpu';
   const dev = flags.has('dev');
@@ -533,6 +545,7 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
             data-align={align}
             data-sideform={sideForm === 'modules' ? undefined : sideForm}
             data-board={scene === 'overview' ? board : undefined}
+            data-shelf={shelf ? '' : undefined}
             data-diff={scene === 'file' ? diff : undefined}
             data-code={scene === 'file' ? codeGround : undefined}
             data-syntax={knobs.syntax === 'ink' ? 'ink' : undefined}
@@ -603,7 +616,13 @@ export default function Layers({ scene, scheme, knobs }: ExperimentProps) {
               diff={diff}
               codeGround={codeGround}
               numbers={numbers}
+              shelfGroup={shelfGroup}
+              setShelfGroup={setShelfGroup}
+              skillsForm={skillsForm}
+              addOpen={addOpen}
+              setAddOpen={setAddOpen}
               card={flags.get('card') ?? (x.includes('card') ? 's2' : undefined)}
+              opened={flags.get('open') ?? undefined}
               waitFirst={flags.get('wait') ?? undefined}
               section={section}
               setSection={setSection}
@@ -651,6 +670,8 @@ interface ShellProps {
   onCloseTab: (id: string) => void;
   /** Capture aids: the row whose card is open at once, and the item of the waiting list that is open at first. */
   card: string | undefined;
+  /** Capture aid: the line of Artifacts or Customize that is open at once. */
+  opened: string | undefined;
   waitFirst: string | undefined;
   section: string;
   setSection: (s: string) => void;
@@ -665,6 +686,11 @@ interface ShellProps {
   diff: DiffForm;
   codeGround: CodeGround;
   numbers: Numbers;
+  shelfGroup: ShelfGroup;
+  setShelfGroup: (g: ShelfGroup) => void;
+  skillsForm: SkillsForm;
+  addOpen: boolean;
+  setAddOpen: (v: boolean | ((v: boolean) => boolean)) => void;
 }
 
 /** Everything inside the window root. A component of its own so its hooks run inside the glass root. */
@@ -679,7 +705,9 @@ function Shell(p: ShellProps) {
 
   // A session and a file it changed are one place: the same side column, the same composer.
   const work = scene === 'session' || scene === 'file';
-  const scrolls = work || scene === 'overview';
+  // Artifacts and Customize: a column of lines that open into sheets, and one round button at the top right.
+  const shelf = scene === 'artifacts' || scene === 'customize';
+  const scrolls = work || scene === 'overview' || shelf;
 
   // A live session is read from its end; a file and the Overview from their start.
   useLayoutEffect(() => {
@@ -711,20 +739,24 @@ function Shell(p: ShellProps) {
         picked={p.picked}
         onPick={p.setPicked}
       />
+    ) : scene === 'artifacts' ? (
+      <ArtifactsPage group={p.shelfGroup} setGroup={p.setShelfGroup} empty={p.flags.includes('empty')} first={p.opened} />
+    ) : scene === 'customize' ? (
+      <CustomizePage skills={p.skillsForm} empty={p.flags.includes('empty')} first={p.opened} />
     ) : null;
   // Only a page that stands blocks on glass needs the root inside the column: a transcript always, the Overview
   // when its sessions are cards, a file when it is a card.
-  const blocks = material === 'glass' && (scene === 'session' || (scene === 'overview' && p.board === 'cards') || (scene === 'file' && p.codeGround === 'card'));
+  const blocks = material === 'glass' && (scene === 'session' || (scene === 'overview' && p.board === 'cards') || (scene === 'file' && p.codeGround === 'card') || shelf);
   // A file's card stands still in the window and the code moves inside it: the page itself does not scroll.
   const still = scene === 'file' && p.codeGround === 'card';
 
   // On the Overview what waits is the page's own glass, so the capsule that stands for it is not drawn.
   const capsule = scene !== 'settings' && scene !== 'overview' && p.waiting.length > 0 && (
-    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} open={p.flags.includes('waiting')} first={p.waitFirst} alone={!work} />
+    <Waiting key={p.tint ? 'tinted' : 'clear'} waiting={p.waiting} tint={p.tint} open={p.flags.includes('waiting')} first={p.waitFirst} alone={!work && !shelf} />
   );
   // Under the column rule the capsule is the tabs' neighbour on the reading column, not the side column's: it
   // leaves the side group, so the two capsules owe each other a small control's room and not a pane's.
-  const apart = p.own && work;
+  const apart = p.own && (work || shelf);
   // A file's page keeps its session's composer as one line, unless the session waits: then it is the answer, whole.
   const slim = scene === 'file' && !isYours(p.at.state);
   const toggle = () => p.setSideOpen((v) => !v);
@@ -749,7 +781,7 @@ function Shell(p: ShellProps) {
       {/* ---- The main space: prose on the field, blocks standing over it ---- */}
       <main className="xl-main">
         {scrolls && (
-          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1} data-foot={scene === 'overview' ? 'none' : undefined} data-still={still || undefined}>
+          <div className="xl-scroll" ref={refs.scroller} tabIndex={-1} data-foot={scene === 'overview' || shelf ? 'none' : undefined} data-still={still || undefined}>
             {blocks ? (
               <GlassRoot
                 asChild
@@ -787,6 +819,11 @@ function Shell(p: ShellProps) {
         <GlassLayer group="xl-side" space="viewport" layout={layout}>
           {trail}
           <Modules key={p.at.id} open={p.sideOpen} form={p.sideForm} onToggle={toggle} data={p.side} file={scene === 'file' ? p.file.path : undefined} onFile={(path) => p.openFile(path, p.at.id)} />
+        </GlassLayer>
+      ) : shelf ? (
+        <GlassLayer group="xl-side" space="viewport" layout={layout}>
+          {!apart && capsule}
+          {scene === 'artifacts' ? <MakeNew open={p.addOpen} onToggle={() => p.setAddOpen((v) => !v)} /> : <Discover open={p.addOpen} onToggle={() => p.setAddOpen((v) => !v)} />}
         </GlassLayer>
       ) : scene === 'overview' && p.board === 'rows' && p.waiting.length > 0 ? (
         <GlassLayer group="xl-side" space="viewport" layout={layout}>
