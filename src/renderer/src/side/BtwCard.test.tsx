@@ -177,6 +177,56 @@ describe('the /btw card', () => {
     expect(unseen()).toBe(false);
   });
 
+  // the panel's finding 9: the guard on a promotion in flight outlives the card's fold, so a second press opens no second thread
+  it('a “Continue as a side thread” in flight stays in flight across a fold: the button still reads Starting… and a second press asks nothing', async () => {
+    fake = fakeClient({ 'side.question.list': { exchanges: [exchange({})] } }); // `side.thread.open` left unanswered
+    window.maws = fake.client as unknown as PreloadBridge;
+    withProcess(A, 'ready');
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText('ZEBRA');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Continue as a side thread' }));
+    expect(fake.invoked('side.thread.open')).toHaveLength(1);
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    await userEvent.click(chip()!);
+    await screen.findByText('ZEBRA');
+    const again = within(card()!).getByRole('button', { name: 'Starting…' }) as HTMLButtonElement;
+    expect(again.disabled).toBe(true);
+    await userEvent.click(again);
+    expect(fake.invoked('side.thread.open')).toHaveLength(1);
+  });
+
+  // the panel's finding 8: a folded card mounted again (a remote session's tab reopened after its session was forgotten,
+  // whose first opening says no `remote.reopened`) lists the log, so the chip says what the host holds
+  it('a folded card mounted again lists the log: an answer that settled meanwhile ends the waiting line and sets the dot', async () => {
+    listing([pending()]);
+    act(() => openBtwCard(A));
+    const first = render(<BtwCard appSessionId={A} />);
+    await settle();
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    expect(waiting(chip()!)).toHaveLength(1);
+    first.unmount();
+    listing([exchange({})]); // answered while no pane drew the session, and no completion heard
+    render(<BtwCard appSessionId={A} />);
+    await settle();
+    expect(fake.invoked('side.question.list')).toEqual([{ appSessionId: A_ID }]);
+    expect(waiting(chip()!)).toEqual([]);
+    expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
+  });
+
+  // the panel's finding 10: a late answer to a question seen failed is new, though its exchange keeps its id
+  it('a late answer that replaces a failure seen in the open card sets the dot on the folded chip', async () => {
+    listing([exchange({ state: 'failed', response: null, error: 'The side question timed out' })]);
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText(/timed out/);
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    expect(chip()!.querySelector('[data-btw-unseen]')).toBeNull(); // the failure was seen
+    act(() => onSideOperation({ ...completion(A, 'op-1', answered('ZEBRA')), late: true }));
+    expect(sidePaneOf(useSidePane.getState(), A).exchanges).toEqual([expect.objectContaining({ id: 'op-1', state: 'answered', response: 'ZEBRA' })]);
+    expect(chip()!.querySelector('[data-btw-unseen]')).not.toBeNull();
+  });
+
   it('closing while an answer is awaited loses nothing: the exchange is there at the next open, unseen until then', async () => {
     withProcess(A, 'ready');
     listing([pending()]);

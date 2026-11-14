@@ -329,6 +329,28 @@ describe('the stack’s refused controls', () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
+  // the panel's finding 7: a next-step row can outlive its turn (the queue, the status and the lifecycles arrive apart),
+  // and its Send now still goes by `session.steer.sendNow`, so its refusal holds whether or not a turn runs
+  it('keeps a next-step row’s Send now refused, on another machine and under another build’s host, once no turn runs', async () => {
+    window.maws = { localMachine: TEST_MACHINE } as never;
+    resetRemoteSurfaces();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay' }]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const { client, invoke } = bridge();
+    const { unmount } = render(<QueueList appSessionId={R} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
+    const remote = within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
+    expect(remote.disabled).toBe(true);
+    expect(remote.getAttribute('title')).toBe(REMOTE_UNAVAILABLE['session.steer.sendNow']);
+    unmount();
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    render(<QueueList appSessionId={APP} busy={false} queue={queue([], { steers: [steer(U1, 'outlived its turn')] })} client={client} />);
+    const here = within(rows()[0]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
+    expect(here.disabled).toBe(true);
+    expect(here.getAttribute('title')).toBe(HOST_UPDATING);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
   it('under an engine host of another build closes a next-step row’s Send now only, and opens it when this build’s host serves', () => {
     useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
     const { client } = bridge();
