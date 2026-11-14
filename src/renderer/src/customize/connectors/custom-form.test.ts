@@ -64,7 +64,7 @@ describe('the URL', () => {
     expect(checkCustom(fields({ url: '' }), []).url).toBe('Enter the server’s URL.');
     for (const url of ['ftp://files.example.test', 'https://', 'not a url', ' https://files.example.test/mcp']) expect(checkCustom(fields({ url }), []).url, url).toBe('Enter an http or https URL.');
     expect(checkCustom(fields({ url: 'https://files.example.test/\nmcp' }), []).url).toBe('This field can’t hold a line break or a control character.');
-    expect(checkCustom(fields({ url: `https://files.example.test/${'a'.repeat(MCP_ENTRY_BOUNDS.url)}` }), []).url).toBe('This is too long to add.');
+    expect(checkCustom(fields({ url: `https://files.example.test/${'a'.repeat(MCP_ENTRY_BOUNDS.url)}` }), []).url).toBe('The URL is too long. The limit is 4,096 characters.');
     expect(checkCustom(fields({ url: 'http://localhost:7000/mcp' }), []).url).toBeNull();
   });
 
@@ -85,9 +85,9 @@ describe('the rows', () => {
     expect(twice.rows.map((row) => row.problem)).toEqual([null, 'Two headers are named x-probe.']);
     expect(checkCustom(local({ env: [{ name: 'MODE', value: 'value-one' }, { name: 'MODE', value: 'value-two' }] }), []).rows[1].problem).toBe('Two variables are named MODE.');
     expect(checkCustom(local({ env: [{ name: 'MODE', value: 'value\none' }] }), []).rows[0].problem).toBe('This field can’t hold a line break or a control character.');
-    expect(checkCustom(local({ env: [{ name: 'MODE', value: 'v'.repeat(MCP_ENTRY_BOUNDS.value + 1) }] }), []).rows[0].problem).toBe('This is too long to add.');
+    expect(checkCustom(local({ env: [{ name: 'MODE', value: 'v'.repeat(MCP_ENTRY_BOUNDS.value + 1) }] }), []).rows[0].problem).toBe('This value is too long. The limit is 8,192 characters.');
     const many = checkCustom(fields({ headers: Array.from({ length: MCP_ENTRY_BOUNDS.headers + 1 }, (_, i) => ({ name: `X-Probe-${i}`, value: 'value-one' })) }), []);
-    expect(many.rowsProblem).toBe('Too many rows to add.');
+    expect(many.rowsProblem).toBe('Too many headers. The limit is 64.');
     expect(many.entry).toBeNull();
   });
 
@@ -109,7 +109,7 @@ describe('the rows', () => {
     const value = 'v'.repeat(MCP_ENTRY_BOUNDS.value);
     const check = checkCustom(fields({ headers: Array.from({ length: 5 }, (_, i) => ({ name: `X-Probe-${i}`, value })) }), []);
     expect(check.rows.every((row) => row.problem === null)).toBe(true);
-    expect(check.entryProblem).toBe('This configuration is too large to add.');
+    expect(check.entryProblem).toBe('This configuration is too large to add. The limit is 32,768 bytes.');
     expect(check.entry).toBeNull();
   });
 });
@@ -118,7 +118,7 @@ describe('the command and the arguments', () => {
   it('an empty command, a control character, the bound; spaces at the ends dropped, inside a note', () => {
     expect(checkCustom(local({ command: '   ' }), []).command).toBe('Enter the command.');
     expect(checkCustom(local({ command: '/opt/x\tprobe' }), []).command).toBe('This field can’t hold a line break or a control character.');
-    expect(checkCustom(local({ command: `/${'a'.repeat(MCP_ENTRY_BOUNDS.command)}` }), []).command).toBe('This is too long to add.');
+    expect(checkCustom(local({ command: `/${'a'.repeat(MCP_ENTRY_BOUNDS.command)}` }), []).command).toBe('The command is too long. The limit is 4,096 characters.');
     expect(checkCustom(local({ command: ' /opt/x ' }), []).commandHasSpace).toBe(false);
   });
 
@@ -129,7 +129,7 @@ describe('the command and the arguments', () => {
     expect(checkCustom(local({ args: "--root '/tmp" }), []).args).toEqual({ ok: false, problem: 'The arguments end inside a quote.' });
     expect(checkCustom(local({ args: '--root \\' }), []).args).toEqual({ ok: false, problem: 'The arguments end with a backslash.' });
     expect(checkCustom(local({ args: '--root "/tmp/my' }), []).entry).toBeNull();
-    expect(checkCustom(local({ args: Array.from({ length: MCP_ENTRY_BOUNDS.args + 1 }, () => 'a').join(' ') }), []).argsProblem).toBe('This is too long to add.');
+    expect(checkCustom(local({ args: Array.from({ length: MCP_ENTRY_BOUNDS.args + 1 }, () => 'a').join(' ') }), []).argsProblem).toBe('Too many arguments. The limit is 256.');
   });
 });
 
@@ -165,5 +165,46 @@ describe('the sheet’s starting values and scopes', () => {
     expect(configuredSinceOpening(true, { isFetching: true, configured: read })).toEqual({ state: 'reading' });
     expect(configuredSinceOpening(true, { isFetching: false, configured: read })).toBe(read);
     expect(configuredSinceOpening(true, { isFetching: false, configured: { state: 'failed', message: 'unread' } })).toEqual({ state: 'failed', message: 'unread' });
+  });
+});
+
+// R11: a sentence over a bound names what is over, then the limit, read from MCP_ENTRY_BOUNDS (the constant the check
+// uses) with a comma between thousands.
+describe('over a bound (R11)', () => {
+  const B = MCP_ENTRY_BOUNDS;
+  const written = (n: number) => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  const pairs = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `ROW_${i}`, value: 'value-one' }));
+  const headerPairs = (count: number) => Array.from({ length: count }, (_, i) => ({ name: `X-Row-${i}`, value: 'value-one' }));
+  const cases: [string, string, string][] = [
+    ['arguments', checkCustom(local({ args: Array.from({ length: B.args + 1 }, () => 'a').join(' ') }), []).argsProblem!, `Too many arguments. The limit is ${written(B.args)}.`],
+    ['headers', checkCustom(fields({ headers: headerPairs(B.headers + 1) }), []).rowsProblem!, `Too many headers. The limit is ${written(B.headers)}.`],
+    ['variables', checkCustom(local({ env: pairs(B.env + 1) }), []).rowsProblem!, `Too many variables. The limit is ${written(B.env)}.`],
+    ['the URL', checkCustom(fields({ url: `https://files.example.test/${'a'.repeat(B.url)}` }), []).url!, `The URL is too long. The limit is ${written(B.url)} characters.`],
+    ['the command', checkCustom(local({ command: `/${'a'.repeat(B.command)}` }), []).command!, `The command is too long. The limit is ${written(B.command)} characters.`],
+    ['an argument', checkCustom(local({ args: `a b ${'c'.repeat(B.arg + 1)}` }), []).argsProblem!, `Argument 3 is too long. The limit is ${written(B.arg)} characters.`],
+    ['a value', checkCustom(fields({ headers: [{ name: 'X-Probe', value: 'v'.repeat(B.value + 1) }] }), []).rows[0].problem!, `This value is too long. The limit is ${written(B.value)} characters.`],
+    ['the whole', checkCustom(fields({ headers: Array.from({ length: 5 }, (_, i) => ({ name: `X-Probe-${i}`, value: 'v'.repeat(B.value) })) }), []).entryProblem!, `This configuration is too large to add. The limit is ${written(B.json)} bytes.`],
+  ];
+
+  it('each of §E’s eight sentences, its number the constant’s', () => {
+    for (const [what, said, expected] of cases) expect(said, what).toBe(expected);
+  });
+
+  it('as §E writes them', () => {
+    expect(cases.map(([, said]) => said)).toEqual([
+      'Too many arguments. The limit is 256.',
+      'Too many headers. The limit is 64.',
+      'Too many variables. The limit is 128.',
+      'The URL is too long. The limit is 4,096 characters.',
+      'The command is too long. The limit is 4,096 characters.',
+      'Argument 3 is too long. The limit is 8,192 characters.',
+      'This value is too long. The limit is 8,192 characters.',
+      'This configuration is too large to add. The limit is 32,768 bytes.',
+    ]);
+  });
+
+  it('a row’s name over its length is §A’s name rule, and reads as it', () => {
+    expect(checkCustom(fields({ headers: [{ name: `X-${'a'.repeat(B.pairName)}`, value: 'value-one' }] }), []).rows[0].problem).toBe('Use letters, digits and hyphens in a header name, without spaces.');
+    expect(checkCustom(local({ env: [{ name: `A${'a'.repeat(B.pairName)}`, value: 'value-one' }] }), []).rows[0].problem).toBe('Use letters, digits and underscores in a variable name, not starting with a digit.');
   });
 });

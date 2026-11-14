@@ -136,6 +136,39 @@ describe('the custom connector sheet', () => {
     expect(confirmed.folder).toBeNull();
   });
 
+  it('R11: Add stays unavailable while a required field is empty, untouched or emptied; its sentence shows only once it was typed in', () => {
+    const name_ = open();
+    type(field(name_.sheet, '[data-connector-url-field]'), 'https://files.example.test/mcp');
+    expect(add(name_.sheet).disabled).toBe(true); // the name untouched and empty
+    expect(problems(name_.sheet)).toEqual([]);
+    name(name_.sheet, 'files-probe');
+    expect(add(name_.sheet).disabled).toBe(false);
+    name(name_.sheet, '');
+    expect(add(name_.sheet).disabled).toBe(true);
+    expect(problems(name_.sheet)).toEqual(['Enter a name.']);
+    cleanup();
+    const url = open();
+    name(url.sheet, 'files-probe');
+    expect(add(url.sheet).disabled).toBe(true); // the URL untouched and empty
+    expect(problems(url.sheet)).toEqual([]);
+    type(field(url.sheet, '[data-connector-url-field]'), 'https://files.example.test/mcp');
+    expect(add(url.sheet).disabled).toBe(false);
+    type(field(url.sheet, '[data-connector-url-field]'), '');
+    expect(add(url.sheet).disabled).toBe(true);
+    expect(problems(url.sheet)).toEqual(['Enter the server’s URL.']);
+    cleanup();
+    const command = open();
+    name(command.sheet, 'files-probe');
+    choose(command.sheet, 'Local command');
+    expect(add(command.sheet).disabled).toBe(true); // the command untouched and empty
+    expect(problems(command.sheet)).toEqual([]);
+    type(field(command.sheet, '[data-connector-command-field]'), '/opt/x');
+    expect(add(command.sheet).disabled).toBe(false);
+    type(field(command.sheet, '[data-connector-command-field]'), '');
+    expect(add(command.sheet).disabled).toBe(true);
+    expect(problems(command.sheet)).toEqual(['Enter the command.']);
+  });
+
   describe('G3: each refusal says why, and Add waits', () => {
     const ready = (sheet: HTMLElement) => {
       name(sheet, 'files-probe');

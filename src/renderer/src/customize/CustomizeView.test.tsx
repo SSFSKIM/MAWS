@@ -718,6 +718,29 @@ describe('Connectors › Add custom connector', () => {
     expect(addButton(sheet).disabled).toBe(true);
   });
 
+  it('held open: opened during the page’s first read, that read’s answer alone does not enable Add; the read begun after it does', async () => {
+    const reads: ReturnType<typeof deferred>[] = [];
+    backend.script('customization.inventory', () => {
+      reads.push(deferred());
+      return reads.at(-1)!.promise;
+    });
+    mountFresh();
+    await waitFor(() => expect(reads).toHaveLength(1)); // the page's first read, out
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true);
+    await act(async () => reads[0].resolve(listed([NOTION])));
+    await waitFor(() => expect(reads).toHaveLength(2)); // a read begun after the first ended
+    expect(addButton(sheet).disabled).toBe(true);
+    expect(within(sheet).getByRole('status').textContent).toBe('Reading what is configured here…');
+    await act(async () => reads[1].resolve(listed([NOTION, { name: 'files-probe', scope: 'user', path: '/config/.claude.json', transport: 'http' }])));
+    await waitFor(() => expect(sheet.querySelector('[data-connector-problem]')?.textContent).toBe('This name is already configured here (user scope, /config/.claude.json).'));
+    expect(addButton(sheet).disabled).toBe(true);
+    type(sheet, '[data-connector-name]', 'files-probe-2');
+    expect(addButton(sheet).disabled).toBe(false);
+    expect(reads).toHaveLength(2);
+  });
+
   it('held open: the name is added elsewhere after the sheet’s read; Add sends connectors.addJson, and the engine host’s refusal reads on the add’s line with its scope', async () => {
     backend.script('connectors.addJson', () => ({ opId: 'add-1' }));
     mountFresh();
