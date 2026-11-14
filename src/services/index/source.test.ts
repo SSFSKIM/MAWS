@@ -605,6 +605,32 @@ describe('IndexSessionSource folds the host\'s events into the index and feeds t
       await vi.waitFor(() => expect(burst.every((s) => index.sessions.getByEngineId(s.sessionId) !== null)).toBe(true));
     });
 
+    // UX wave U8c-2 (§B): a summary whose home moved within its repository locates its first row's folder too (the
+    // launch folder), so the warm-up answers that folder as well and the index runs no git for it on main's thread.
+    it('warms the first row\'s folder beside the home for a summary whose home moved', async () => {
+      const fake = scriptedHost();
+      const warmed: string[][] = [];
+      let release: () => void = () => {};
+      source = new IndexSessionSource(index, fake.host, {
+        emit,
+        tickMs: 5,
+        warmLinkedWorktrees: (directories) => (warmed.push(directories), new Promise<void>((resolve) => (release = resolve))),
+      });
+      stop = source.start(recordingWriter().writer);
+      await settle();
+      warmed.length = 0;
+      const burst = [
+        summary({ directory: '/work/a', relocatedCwd: '/work/a/.claude/worktrees/w1', newestCwd: '/work/a/.claude/worktrees/w1' }),
+        summary({ directory: '/work/b', relocatedCwd: '/work/b', newestCwd: '/work/b/sub' }),
+        summary({ directory: '/work/c', newestCwd: '/work/c' }),
+      ];
+      for (const s of burst) fake.fire('fs.sessionChanged', { summary: s, appSessionId: null });
+      await settle();
+      expect(warmed).toEqual([['/work/a/.claude/worktrees/w1', '/work/a', '/work/b', '/work/c']]);
+      release();
+      await vi.waitFor(() => expect(burst.every((s) => index.sessions.getByEngineId(s.sessionId) !== null)).toBe(true));
+    });
+
     it('applies what is queued before any other event, so a removal right after its discovery still archives the record', async () => {
       const fake = scriptedHost();
       begin(fake.host);

@@ -67,6 +67,7 @@ import { waits } from '@shared/attention/kinds'; // UC-1
 import { outsideAnswers } from '@shared/attention/outside-answers'; // U1a §H
 // P2-C start (2026-10-10)
 import { bareOf } from '@shared/machine/address';
+import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { markIdOf } from '@shared/owner/marks';
 import { openAnchor, ownerAnchorOf, type ItemAnchor } from '../attention/anchor';
 import { markRead } from '../owner/report/answering';
@@ -434,9 +435,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           <CardButton onClick={() => void useAttention.getState().retryRequest(ipc, item)}>Retry</CardButton>
         </div>
       )}
-      {request?.kind === 'permission.requested' && hover && record && (
-        <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={record.directory}>
-          {record.directory}
+      {request?.kind === 'permission.requested' && hover && record && ( // UX wave U8c-2: where the call will run, the agent's folder
+        <p className="m-0 truncate font-mono text-ui-sm text-fg-muted" title={workingFolder(record).cwd}>
+          {workingFolder(record).cwd}
         </p>
       )}
       {hoverAllow && <Muted>Approve applies to this request only.</Muted>}

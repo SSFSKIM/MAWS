@@ -77,6 +77,14 @@ describe('overview board', () => {
     for (const text of ['Running bun test', '2 agents', 'ctx 41%', '$0.00 since seen']) expect(within(charter).getByText(text)).toBeTruthy();
   });
 
+  // UX wave U8c-2 (M4 decision 10): a card names the branch recorded for the working folder, where the agent is.
+  it('a card names the branch of the folder the agent works in', () => {
+    const charter = nine.sessions.find((r) => r.title.text === 'Charter + research')!.appId;
+    act(() => fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.appId === charter ? { ...r, branch: 'master', agentFolder: { checkout: '/work/wt', cwd: '/work/wt', branch: 'w1', linked: true } } : r)) }));
+    render(<Overview paneIndex={0} />);
+    expect(within(card('Charter + research')).getByText('⎇ w1')).toBeTruthy();
+  });
+
   it('a working card with a previous answer shows both lines', () => {
     render(<Overview paneIndex={0} />);
     const usage = card('Usage reset countdown');

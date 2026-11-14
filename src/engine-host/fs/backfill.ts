@@ -607,6 +607,10 @@ function taskState(blocks: TaskNotificationBlock[], ctx: BackfillContext, base: 
 }
 // UX wave U3 end
 
+// UX wave U8c-2 (M5, §K): the tools the transcript draws as a shell call. Such a call carries the folder its row
+// records, which says where the command ran even after the agent moved; no other call carries one.
+const SHELL_TOOLS: ReadonlySet<string> = new Set(['Bash', 'PowerShell', 'BashOutput', 'KillShell', 'Monitor']);
+
 function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const message = record.message as { id?: unknown; model?: unknown; content?: unknown } | undefined;
   const content = Array.isArray(message?.content) ? message.content.filter(isContentBlock) : [];
@@ -636,7 +640,7 @@ function assistantEvents(record: TranscriptRecord, uuid: MessageUuid, ctx: Backf
     if (block.type !== 'tool_use' || typeof block.id !== 'string' || block.id.length === 0) return;
     const toolUseId = block.id as ToolUseId;
     const toolName = typeof block.name === 'string' ? block.name : '';
-    events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid });
+    events.push({ ...base(), kind: 'tool.use', toolUseId, toolName, input: block.input, apiMessageId, messageUuid: uuid, ...(SHELL_TOOLS.has(toolName) && typeof record.cwd === 'string' && { cwd: record.cwd }) });
     if (toolName !== 'Agent') return;
     if (startSubagent(ctx, toolUseId, base, events) === null) ctx.pendingAgents.add(toolUseId);
   });

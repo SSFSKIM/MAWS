@@ -18,7 +18,7 @@ const rowHolding = (rows: Row[], id: string) => rows.find((row) => row.id === id
 
 // One closed turn from `build`, every turn and group expanded and the named cell's detail open; renders the row that
 // holds that cell.
-async function expandedCell(build: (b: Builder) => void, id: string, options: { sessionDirectory?: string } = {}) {
+async function expandedCell(build: (b: Builder) => void, id: string, options: { sessionDirectory?: string; sessionCwd?: string } = {}) {
   const b = builder();
   b.turn('u1');
   build(b);
@@ -28,7 +28,7 @@ async function expandedCell(build: (b: Builder) => void, id: string, options: { 
   state.expandAll(store.key);
   state.toggleCell(store.key, id as Cell['id']);
   const row = rowHolding(store.rows(), id);
-  const view = renderRow(row, { storeKey: store.key, sessionDirectory: options.sessionDirectory });
+  const view = renderRow(row, { storeKey: store.key, sessionDirectory: options.sessionDirectory, sessionCwd: options.sessionCwd });
   const cell = view.container.querySelector<HTMLElement>(`[data-cell-id="${id}"]`)!;
   return { ...view, store, cell, line: cell.querySelector('button')! };
 }
@@ -88,6 +88,52 @@ describe('shell detail', () => {
     cleanup();
     const neither = await expandedCell(run, 'cell:t1');
     expect(neither.cell.querySelector('.transcript-shell-meta')).toBeNull();
+  });
+
+  // UX wave U8c-2 (M5, §K): a call read from rows carries the folder its row records. It reads as the session
+  // directory's line only where the slot hands a directory down (the session is in its launch folder) and the row ran
+  // there or in the agent's folder now; everywhere else it names its own folder. A call with no folder (live) names the
+  // launch folder only while one is handed down. Invented folders.
+  describe('a call that carries its row’s folder (UX wave U8c-2)', () => {
+    const call = (rowCwd: string | undefined, input: Record<string, unknown> = { command: 'ls' }) => (b: Builder) => {
+      b.toolUse('t1', 'Bash', input);
+      if (rowCwd !== undefined) Object.assign(b.events.at(-1)!, { cwd: rowCwd }); // the tool.use event, as the file reader sets it
+      b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    };
+    const meta = async (build: (b: Builder) => void, options: { sessionDirectory?: string; sessionCwd?: string }) => {
+      const { cell } = await expandedCell(build, 'cell:t1', options);
+      const text = cell.querySelector('.transcript-shell-meta')?.textContent ?? null;
+      cleanup();
+      return text;
+    };
+    const here = { sessionDirectory: '/repo', sessionCwd: '/repo/packages/app' };
+    const worktree = '/repo/.claude/worktrees/w1';
+
+    it('the launch folder or the agent’s folder: the session directory’s line; another folder: its own', async () => {
+      expect(await meta(call('/repo'), here)).toBe('Session directory /repo');
+      expect(await meta(call('/repo/packages/app'), here)).toBe('Session directory /repo');
+      expect(await meta(call(worktree), here)).toBe(`cwd ${worktree}`);
+      expect(await meta(call('/repo/packages'), here)).toBe('cwd /repo/packages'); // a folder between the two is another folder
+    });
+
+    it('with nothing handed down (the session reads moved, or a child agent’s transcript), each call names its own folder', async () => {
+      for (const folder of ['/repo', '/repo/packages/app', worktree]) expect(await meta(call(folder), {})).toBe(`cwd ${folder}`);
+    });
+
+    it('the input’s folder comes first, whatever the row records', async () => {
+      expect(await meta(call('/repo', { command: 'ls', cwd: '/w/elsewhere' }), here)).toBe('cwd /w/elsewhere');
+    });
+
+    it('a call with no folder: the launch folder while one is handed down, never the agent’s folder; else no line', async () => {
+      expect(await meta(call(undefined), here)).toBe('Session directory /repo');
+      expect(await meta(call(undefined), {})).toBeNull();
+    });
+
+    it('compares the folders as Files compares a listed root with a record’s folder: case, and macOS’s /private prefix', async () => {
+      expect(await meta(call('/private/tmp/repo'), { sessionDirectory: '/tmp/repo' })).toBe('Session directory /tmp/repo');
+      expect(await meta(call('/Repo/Packages/App'), here)).toBe('Session directory /repo');
+      expect(await meta(call('/repo-other'), here)).toBe('cwd /repo-other'); // a folder that merely starts alike is another
+    });
   });
 
   it('a failing command reads its exit code, and output over 64 KB shows its head, tail and the omitted marker, with Open full log', async () => {

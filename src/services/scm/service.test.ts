@@ -1,15 +1,16 @@
 // The local service over a fake read runner, a fake status and a fake mutating runner: the argv of every mutation, the
 // trust gate's environment, the per-repository chain, the fresh-status rule and the watcher refresh. The real-repository
 // behaviour (hooks, the index on disk) is service.git.test.ts's.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import { GitFixture } from '../../../test/support/git-fixture';
 import { TrustStoreFixture } from '../../../test/support/trust-store';
 import { GitCommandError, GitTimeoutError, NotARepositoryError } from '../git/runner';
-import { ScmService, type ScmServiceDeps } from './service';
+import { AWAY_DETAIL, ScmService, type FolderGuard, type ScmServiceDeps } from './service';
 import { record as sessionRecord } from '../../../test/support/builders';
 import { fakeSpineView, type FakeSpineView } from '../../../test/support/fake-spine-view';
 
@@ -443,6 +444,45 @@ describe('scm service', () => {
       expect(commits()).toBe(3);
     });
 
+    // UX wave U8c-2, M3 fix wave 1: the deadline runs from the call through the request's capture of its folder (the
+    // admission's reads, the caller's guard) and the queue; a capture that ends past it starts nothing.
+    it('answers busy at the deadline for an act whose capture is held past it, and starts nothing once the capture ends', async () => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let fail!: (error: Error) => void;
+      const failing = new Promise<void>((_resolve, reject) => (fail = reject));
+      const scm = service({ admitMs: ADMIT_MS });
+      let judged = 0;
+      const holding: FolderGuard = () => {
+        judged++;
+        return held;
+      };
+      view.putRecord(at(OTHER, join(root, 'other'))); // a folder of its own, so its capture is not queued behind the held one
+      const answers = [
+        scm.stage({ appSessionId: ID, paths: ['a.txt'] }, holding),
+        scm.commit({ appSessionId: ID, message: 'x', noVerify: false }, holding),
+        scm.run({ appSessionId: ID, token: 'c4444444-4444-4444-8444-444444444444' }, 'push', holding),
+        scm.unstage({ appSessionId: OTHER, paths: ['s.ts'] }, () => failing),
+      ];
+      expect(await Promise.all(answers)).toMatchObject([{ refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }, { refused: 'busy' }]);
+      release();
+      fail(new Error('the guard refused after the deadline'));
+      await wait(20);
+      expect(judged).toBe(1); // the commit and the run waited behind the stage's capture in their folder's queue and never began theirs
+      expect(read).not.toHaveBeenCalled();
+      expect(readStatus).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true }); // nothing is left holding the queue
+    });
+
+    it('admits an act whose capture ends within the deadline, the deadline counted from the call', async () => {
+      const scm = service({ admitMs: ADMIT_MS });
+      const late: FolderGuard = async () => {
+        await wait(ADMIT_MS / 3);
+      };
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] }, late)).toMatchObject({ ok: true });
+    });
+
     it('lets a key resolution that fails within the deadline fail the call, as before', async () => {
       read.mockImplementation(async (_directory, args) => {
         if (args[0] === 'rev-parse' && args.includes('--git-common-dir')) throw new GitTimeoutError('git rev-parse timed out');
@@ -533,6 +573,141 @@ describe('scm service', () => {
       read.mockImplementation(async () => { throw new NotARepositoryError(); });
       expect(await service().status(ID)).toMatchObject({ directory: root, repository: false, trusted: true, remotes: [], defaultRemote: null, defaultBase: null });
       expect(read).toHaveBeenCalledOnce(); // the trust key's rev-parse
+    });
+  });
+
+  // UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 8; §G): one capture
+  // of the record per request gives the folder (the working folder as the admission takes it), whether the session is
+  // away from its launch folder, and the caller's guard on that folder; every act refuses while the session is away.
+  describe('a session whose agent works away from its launch folder', () => {
+    let repo: GitFixture;
+    let wt: string;
+    let second: string;
+    const TOKEN = 'c3333333-3333-4333-8333-333333333333';
+    const movedTo = (folder: string) => view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null, agentFolder: { checkout: folder, cwd: folder, branch: 'wt', linked: true } }));
+    const away = { refused: 'changed', detail: AWAY_DETAIL, output: '' };
+    beforeEach(async () => {
+      repo = await GitFixture.create();
+      wt = await repo.addWorktree('wt');
+      second = await repo.addWorktree('second');
+      trust.write({ [root]: { hasTrustDialogAccepted: true }, [repo.root]: { hasTrustDialogAccepted: true }, [wt]: { hasTrustDialogAccepted: true }, [second]: { hasTrustDialogAccepted: true } });
+    });
+    afterEach(() => repo.dispose());
+
+    it('refuses every act, running nothing and reading nothing', async () => {
+      movedTo(wt);
+      const scm = service();
+      expect(await scm.stage({ appSessionId: ID, paths: ['a.txt'] })).toEqual(away);
+      expect(await scm.unstage({ appSessionId: ID, paths: ['s.ts'] })).toEqual(away);
+      expect(await scm.discard({ appSessionId: ID, entries: [{ path: 'a.txt', group: 'unstaged' }] })).toEqual(away);
+      expect(await scm.commit({ appSessionId: ID, message: 'x', noVerify: false })).toEqual(away);
+      expect(await scm.planPush({ appSessionId: ID })).toEqual(away);
+      expect(await scm.planPr({ appSessionId: ID, title: 'T', body: '', base: 'main', draft: false })).toEqual(away);
+      expect(await scm.run({ appSessionId: ID, token: TOKEN }, 'push')).toEqual(away);
+      expect(await scm.run({ appSessionId: ID, token: TOKEN }, 'pr')).toEqual(away);
+      expect(mutate).not.toHaveBeenCalled();
+      expect(read).not.toHaveBeenCalled();
+      expect(readStatus).not.toHaveBeenCalled();
+      expect(refresh).not.toHaveBeenCalled();
+    });
+
+    it('finishes in the launch folder an act whose record moves after the service took its folder', async () => {
+      view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null }));
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      let reached!: () => void;
+      const reachedStatus = new Promise<void>((resolve) => (reached = resolve));
+      readStatus.mockImplementationOnce(async (directory) => {
+        reached();
+        await held;
+        return statusOf(directory);
+      });
+      const answer = service().stage({ appSessionId: ID, paths: ['a.txt'] });
+      await reachedStatus;
+      movedTo(wt); // the agent leaves while the stage is under way
+      release();
+      expect(await answer).toMatchObject({ ok: true });
+      expect(mutate).toHaveBeenCalledExactlyOnceWith(repo.root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
+      expect(readStatus.mock.calls.map(([directory]) => directory)).toEqual([repo.root, repo.root]);
+    });
+
+    it('reads in the working folder, and fails a read whose working folder is no worktree of the repository', async () => {
+      movedTo(wt);
+      expect(await service().status(ID)).toMatchObject({ directory: wt, trusted: true });
+      expect(new Set(read.mock.calls.map(([directory]) => directory))).toEqual(new Set([wt]));
+      const plain = realpathSync(mkdtempSync(join(tmpdir(), 'maws-scm-plain-')));
+      try {
+        movedTo(plain);
+        read.mockClear();
+        await expect(service().status(ID)).rejects.toThrow("path outside the session's directories");
+        await expect(service().last(ID)).rejects.toThrow("path outside the session's directories");
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        rmSync(plain, { recursive: true, force: true });
+      }
+    });
+
+    it('runs a read at the folder its guard judged, though the record changes while the guard is held, and nothing when the guard refuses', async () => {
+      movedTo(wt);
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const judged: string[] = [];
+      const guard: FolderGuard = async (folder) => {
+        judged.push(folder);
+        await held;
+      };
+      const answer = service().status(ID, {}, guard);
+      await vi.waitFor(() => expect(judged).toEqual([wt]));
+      movedTo(second);
+      release();
+      expect(await answer).toMatchObject({ directory: wt });
+      expect(read.mock.calls.filter(([directory]) => directory !== wt)).toEqual([]);
+
+      read.mockClear();
+      const refuse: FolderGuard = async () => {
+        throw new Error('refused by the guard');
+      };
+      await expect(service().status(ID, {}, refuse)).rejects.toThrow('refused by the guard');
+      await expect(service().stage({ appSessionId: ID, paths: ['a.txt'] }, refuse)).rejects.toThrow('refused by the guard');
+      expect(read).not.toHaveBeenCalled();
+      expect(mutate).not.toHaveBeenCalled();
+    });
+
+    // The branch review (finding 5): a mutation takes its place in its checkout's queue at the call and is admitted there,
+    // so a Stage whose folder admission answers last still runs before the Commit asked after it.
+    it("runs Stage then Commit in the order they were asked when Stage's folder admission answers last", async () => {
+      // filed in a worktree, the agent back in the launch checkout: not away, and the folder is admitted by reading git's files
+      view.putRecord(sessionRecord(ID, { directory: wt, worktree: { path: wt, branch: 'wt' }, launchFolder: repo.root, agentFolder: { checkout: repo.root, cwd: repo.root, branch: 'main', linked: false } }));
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const realpath = fs.promises.realpath;
+      let holding = true; // the first realpath of the folder, which is Stage's admission
+      const spy = vi.spyOn(fs.promises, 'realpath').mockImplementation((async (path: string, options?: unknown) => {
+        if (holding && path === repo.root) {
+          holding = false;
+          await held;
+        }
+        return realpath(path, options as never);
+      }) as typeof realpath);
+      try {
+        const scm = service();
+        const stage = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
+        const commit = scm.commit({ appSessionId: ID, message: 'x', noVerify: false });
+        await new Promise((resolve) => setTimeout(resolve, 100)); // long enough for the Commit to run if nothing held it
+        release();
+        expect(await Promise.all([stage, commit])).toMatchObject([{ ok: true }, { ok: true }]);
+        expect(mutate.mock.calls.map(([, args]) => args[0])).toEqual(['add', 'commit']);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('acts again once the agent is back in the launch folder', async () => {
+      movedTo(wt);
+      expect(await service().stage({ appSessionId: ID, paths: ['a.txt'] })).toEqual(away);
+      view.putRecord(sessionRecord(ID, { directory: repo.root, worktree: null }));
+      expect(await service().stage({ appSessionId: ID, paths: ['a.txt'] })).toMatchObject({ ok: true });
+      expect(mutate).toHaveBeenCalledExactlyOnceWith(repo.root, ['add', '--', ':(top,literal)a.txt'], { timeoutMs: 10_000 });
     });
   });
 });

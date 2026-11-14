@@ -20,7 +20,8 @@ import { revealRow, sidebarListsRow } from '../sidebar/reveal';
 import { selectNeedsYou, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { activeTab, currentSet } from '../stores/layout-model';
-import { branchLabel, recordBranch } from '../sessions/branch-label';
+import { branchLabel } from '../sessions/branch-label';
+import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { useSessions, type ListedSession } from '../stores/sessions';
 import { machineName, rowName, selectOrgIndex } from '../stores/org-projects'; // P5 O6 M5
 import { useMachines } from '../stores/machines';
@@ -70,7 +71,7 @@ export function toolbarTitle(
       const record = records.get(tab.appSessionId);
       const row = record ? undefined : listed.get(tab.appSessionId)?.title.trim(); // P5 O9 M9: a session of another machine has its row alone
       const title = row || displayTitle(record); // no record yet (an unstarted session) or no title yet: "New chat"
-      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(recordBranch(record)) }; // W9 (H2)
+      return { title: tab.kind === 'agent' ? `${title} · agent` : title, branch: branchLabel(record ? workingBranch(record) : null) }; // W9 (H2); UX wave U8c-2: the working folder's
     }
     case 'file':
       return { title: basename(tab.path), branch: null };

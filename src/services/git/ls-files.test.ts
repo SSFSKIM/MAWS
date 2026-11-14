@@ -1,14 +1,15 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionRecord } from '@shared/graph/session';
 import { LsFilesSchema } from '@shared/ipc/schema/git';
+import { admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { project, record } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { intentFor } from '../../../test/support/session-host';
-import { FileLister, followSpineRoots, listableRoots, spineRoots, WALK_MAX_ENTRIES } from './ls-files';
+import { FileLister, followSpineRoots, listableRoots, spineAdmitted, spineRoots, WALK_MAX_ENTRIES } from './ls-files';
 import { createGitRunner } from './runner';
 
 let repo: GitFixture;
@@ -148,5 +149,81 @@ describe('git lsFiles filters and falls back', () => {
     expect(invalidateRoots).toHaveBeenCalledTimes(4);
     stop();
     expect(view.listeners()).toBe(0);
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, decision 10 and §G): a
+// directory no kept root holds is listed only when, as its listing is loaded, it lies under a fact's folder that the
+// admission accepts then; that answer is never kept among the roots, so a registration removed stops the next load.
+describe('git lsFiles and the folders the records’ facts name', () => {
+  let repos: Awaited<ReturnType<typeof admissionRepos>>;
+  let p: AdmissionPaths;
+  beforeAll(async () => {
+    repos = await admissionRepos();
+    p = repos.paths;
+  });
+  afterAll(() => repos.dispose());
+
+  const movedTo = (folder: string, over: Partial<SessionRecord> = {}) =>
+    record('app-moved', { directory: p.main, agentFolder: { checkout: folder, cwd: folder, branch: null, linked: true }, ...over });
+  const listerOver = (view: ReturnType<typeof fakeSpineView>) =>
+    new FileLister({ run: createGitRunner({ env: { PATH: process.env.PATH, HOME: p.plain } }), roots: () => spineRoots(view), admitted: spineAdmitted(view) });
+  const deregistered = async (name: string, during: () => Promise<void>) => {
+    const away = join(p.base, `${name}-registration`);
+    renameSync(join(p.main, '.git/worktrees', name), away);
+    try {
+      await during();
+    } finally {
+      renameSync(away, join(p.main, '.git/worktrees', name));
+    }
+  };
+
+  it('lists a directory under a fact’s registered worktree that no kept root holds', async () => {
+    const view = fakeSpineView({ records: [movedTo(p.beside)] });
+    const l = listerOver(view);
+    expect((await l.list({ directory: join(p.beside, 'packages'), query: '', limit: 30 })).paths).toEqual(expect.arrayContaining(['app/index.ts', 'app/']));
+    expect((await l.list({ directory: p.beside, query: 'index', limit: 30 })).paths[0]).toBe('packages/app/index.ts');
+  });
+
+  it('lists no folder that holds a copied .git pointer, nor one whose repository’s config cannot be read, nor one an archived session’s fact names', async () => {
+    const copied = listerOver(fakeSpineView({ records: [movedTo(p.copy)] }));
+    await expect(copied.list({ directory: p.copy, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    const locked = listerOver(fakeSpineView({ records: [movedTo(p.lockedWt, { directory: p.locked })] })); // its repository's config cannot be read
+    await expect(locked.list({ directory: p.lockedWt, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    const archived = listerOver(fakeSpineView({ records: [movedTo(p.beside, { archived: true })] }));
+    await expect(archived.list({ directory: p.beside, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+  });
+
+  it('serves a loaded listing its ten seconds, and lists nothing at the next load once the worktree is deregistered', async () => {
+    const l = listerOver(fakeSpineView({ records: [movedTo(p.beside)] }));
+    expect((await l.list({ directory: p.beside, query: '', limit: 30 })).paths).toContain('README.md');
+    await deregistered('beside', async () => {
+      expect((await l.list({ directory: p.beside, query: '', limit: 30 })).paths).toContain('README.md'); // the listing already loaded
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + 10_001);
+      await expect(l.list({ directory: p.beside, query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    });
+  });
+
+  it('keeps no fact’s folder among its roots: a directory under it, not yet loaded, is refused once the registration is gone', async () => {
+    const view = fakeSpineView({ records: [movedTo(p.beside)] });
+    const l = listerOver(view);
+    expect((await l.list({ directory: p.beside, query: '', limit: 30 })).paths).toContain('README.md');
+    expect(spineRoots(view)).toEqual([p.main]);
+    await deregistered('beside', async () => {
+      await expect(l.list({ directory: join(p.beside, 'packages'), query: '', limit: 30 })).rejects.toThrow(/not a directory of any session or project/);
+    });
+  });
+
+  it('answers the admitted facts’ folders of unarchived records, and reads nothing for a record with none', async () => {
+    const view = fakeSpineView({
+      records: [
+        movedTo(p.beside),
+        record('app-launched', { directory: p.beside, worktree: { path: p.beside, branch: 'beside' }, launchFolder: p.main }),
+        record('app-plain', { directory: join(p.base, 'never-there') }),
+        record('app-forged', { directory: p.main, agentFolder: { checkout: p.nested, cwd: p.nested, branch: null, linked: false } }),
+      ],
+    });
+    expect((await spineAdmitted(view)()).sort()).toEqual([p.beside, p.main].sort());
   });
 });

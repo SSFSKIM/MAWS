@@ -119,9 +119,10 @@
 // (sidebar, both ways), and its rows are in the same table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
+import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
@@ -131,6 +132,8 @@ import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import { classifyWireChange, type WireManifest } from '@shared/ipc/wire';
 import { daemonPaths } from '@shared/daemon/files';
 import { RELAY_URL } from '../src/engine-host/launch'; // P5 O7 M9
+import { slugOf } from '../src/engine-host/fs/paths'; // UX wave U8c-2: the engine's project folder of a path
+import { isolatedGitEnv } from '../test/support/git-env'; // UX wave U8c-2
 import { CONNECTORS_CAPABILITY, CONNECTORS_CLIENT_CAPABILITY, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY } from '@shared/host/socket-protocol';
 import { DEFAULT_IDLE_EXIT_MS } from '../src/mawsd/clocks';
 import { reachMachine } from '../src/mawsd/machine-client';
@@ -147,12 +150,12 @@ import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { addressed } from './support/address'; // U13a
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
 import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -1740,6 +1743,9 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | `machine-route.json`                          | not covered: written only when the machine's default  | not covered                                        |
 //   |                                               | route is set, which neither this landing nor a scene   |                                                    |
 //   |                                               | does                                                  |                                                    |
+//   | the index: `sessions.launch_folder`,          | (moved, from this build): F shows the session where   | (moved, from this build): this build shows what F  |
+//   | `sessions.agent_folder` (UX wave U8c-2)       | its directory says, finds its transcript there (its   | shows for a session F filed last, and the facts    |
+//   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -1790,16 +1796,24 @@ async function closeOnPeer(page: Page, name: string): Promise<void> {
 }
 // A tool's own menu, as a person reaches it at any width: from its icon in the row, or, where a narrow row folds the
 // tool into "More surfaces" (the row's icons past its room, pinned and open ones among them), from its item there by
-// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx)
-async function openToolMenu(page: Page, name: string): Promise<void> {
-  const icon = surfaceRow(page).getByRole('button', { name, exact: true });
-  if (await icon.count()) await icon.click({ button: 'right' });
-  else {
-    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
-    const item = page.getByRole('menuitem', { name, exact: true });
-    await item.focus();
-    await item.press('Shift+F10');
-  }
+// Shift+F10, as e2e/support/shell.ts's pinSurfaceForSessions does; the same in both builds (panel/SurfaceRow.tsx).
+// UX wave U8c-2 (M6 decision 5): opened until it is open. `item` is the menu item the caller uses next (a string, or a
+// pattern where the caller accepts either of two); a menu whose item does not show (the open lost to a click or a
+// re-render, as U8b's "(side column, from the peer)" lost one) is closed and opened again.
+async function openToolMenu(page: Page, name: string, item: string | RegExp): Promise<void> {
+  await expect(async () => {
+    if (await page.getByRole('menu').count()) await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+    const icon = surfaceRow(page).getByRole('button', { name, exact: true });
+    if (await icon.count()) await icon.click({ button: 'right' });
+    else {
+      await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+      const entry = page.getByRole('menuitem', { name, exact: true });
+      await entry.focus();
+      await entry.press('Shift+F10');
+    }
+    await expect(page.getByRole('menuitem', { name: item, exact: typeof item === 'string' })).toBeVisible({ timeout: 2_000 });
+  }).toPass({ timeout: 20_000 });
 }
 async function closeMenus(page: Page): Promise<void> {
   await expect(async () => {
@@ -1811,13 +1825,13 @@ async function closeMenus(page: Page): Promise<void> {
 // four is listed only when pinned or open)
 async function pinToToolbar(page: Page, name: string, pin: boolean): Promise<void> {
   if (pin) await showTool(page, name);
-  await openToolMenu(page, name);
+  await openToolMenu(page, name, pin ? 'Pin to toolbar' : 'Unpin from toolbar');
   await page.getByRole('menuitem', { name: pin ? 'Pin to toolbar' : 'Unpin from toolbar', exact: true }).click();
   await closeMenus(page);
 }
 // Whether the tool is pinned as a person sees it at any width: its menu offers to unpin it, or to pin it
 async function expectToolPinned(page: Page, name: string, pinned: boolean, message: string): Promise<void> {
-  await openToolMenu(page, name);
+  await openToolMenu(page, name, /^(?:Pin to|Unpin from) toolbar$/);
   await expect(page.getByRole('menuitem', { name: pinned ? 'Unpin from toolbar' : 'Pin to toolbar', exact: true }), message).toBeVisible();
   await closeMenus(page);
 }
@@ -2437,7 +2451,7 @@ test('(side column, from the peer) two surfaces the peer stacked open as two gro
     await expect.poll(() => peerStack(old.page), { message: 'Review takes the lower place' }).toEqual(['Files', 'Review']);
     await showTool(old.page, 'Terminal');
     await expect.poll(() => peerStack(old.page), { message: 'the terminal takes the lower place' }).toEqual(['Files', 'Terminal']);
-    await openToolMenu(old.page, 'Terminal');
+    await openToolMenu(old.page, 'Terminal', 'Keep open for every session');
     await old.page.getByRole('menuitem', { name: 'Keep open for every session', exact: true }).click();
     await closeMenus(old.page);
     await showTool(old.page, 'Review');
@@ -2698,5 +2712,238 @@ test('(side column, to the peer) two groups, a hidden column, a folded card and 
     await s.quit(back);
     said.push(`  ${here.label} again: Review above, the artifact below, wide automatic (${wide}), the terminal wide too; Background tasks above drawn at the stored narrow 380, then closed`);
     record(said);
+  });
+});
+
+// ---- UX wave U8c-2: where a session's agent is, build F reads (UC-14) -------------------------------------------------
+// U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §C and §L's scenes 4 and 5) stores where a
+// session's agent is as two columns of the index, `sessions.launch_folder` and `sessions.agent_folder`, beside the
+// columns build F knows, which keep F's rule: a move by the engine's worktree tool re-files the record under the
+// worktree, a `cd` files nothing again. Its row is in U13a's table above. Both scenes run only with a peer older than
+// this landing (its src/services/index/migrations.ts names no `agent_folder`); the run of record is the one whose peer
+// is F (`--peer-exact f1852de3a`). No engine runs but the replay: a session is a transcript of invented rows in the
+// scratch store over the scratch's repository, made a git repository with a worktree under `.claude/worktrees/`; a move
+// by `cd` is rows with the worktree's `cwd`, a move by the tool the transcript and its folder renamed into the worktree's
+// project folder (`slugOf` of its path, as the engine names it) with a `relocated` row and a row there.
+//   (moved, from this build)     this build shows "moved from" for a session moved the tool's way, whose transcript holds
+//                                a prompt snapshot. The peer, before any other row, lists it with its worktree mark, opens
+//                                its transcript and resumes it on the replay: the launch decision it stores holds the
+//                                snapshot's state (`none`), which build F's `recordedOf` (services/owner/launch.ts) finds
+//                                only in the transcript at the path the record's directory gives (`unrecorded` where no
+//                                file is). A row appended while the peer runs is filed by it. This build then shows the
+//                                session with no "moved from" until one more row, and then shows it again.
+//   (build F's app, unit mawsd)  §C's second table: this build's `mawsd` as the profile's unit and the peer's app over it,
+//                                as (pre-O17 app, unit mawsd) stages it, for a session that reached the worktree by `cd`
+//                                and one that entered it by the tool. In the peer's window the Source control panel draws
+//                                its page with no error state, a Stage on a listed file draws M3 decision 8's sentence in
+//                                its notice line, and `git status` reads the same in both checkouts before and after; for
+//                                the first, Files draws the worktree among its roots. The panel's selectors are build
+//                                F's at f1852de3a (tools/scm: ScmShell's header and failed state, FileRow's Stage,
+//                                Notice's text; tools/files: a root's tree item).
+const filesAgentFolder = (build: Build) => {
+  const migrations = join(build.root ?? REPO_ROOT, 'src/services/index/migrations.ts');
+  return existsSync(migrations) && readFileSync(migrations, 'utf8').includes('agent_folder');
+};
+const filesAgentFolderWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names agent_folder in its src/services/index/migrations.ts: it files this landing's facts, not build F's record alone; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const AWAY_SENTENCE = 'The session is working in another folder now, so nothing was changed'; // src/services/scm/service.ts, AWAY_DETAIL (M3 decision 8)
+const gitAt = (cwd: string, ...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd, env: isolatedGitEnv(), encoding: 'utf8' });
+const transcriptIn = (s: Scratch, folder: string, sid: string) => join(s.userData, 'claude-config', 'projects', slugOf(folder), `${sid}.jsonl`);
+
+// The scratch's repository made a git repository (README.md and notes.txt committed on `main`) with the worktree `w1`
+// under `.claude/worktrees/` on `worktree-w1`, which the repository's own status leaves out; answers its path.
+function movingRepo(s: Scratch): string {
+  writeFileSync(join(s.repo, 'README.md'), 'hello\n');
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  mkdirSync(join(s.repo, '.git', 'info'), { recursive: true });
+  writeFileSync(join(s.repo, '.git', 'info', 'exclude'), '.claude/\n');
+  gitAt(s.repo, 'add', 'README.md', 'notes.txt');
+  gitAt(s.repo, 'commit', '-q', '-m', 'first');
+  gitAt(s.repo, 'worktree', 'add', '-q', '--no-track', '-b', 'worktree-w1', '.claude/worktrees/w1', 'HEAD');
+  return join(s.repo, '.claude', 'worktrees', 'w1');
+}
+// The folders marked trusted in the scratch engine store, as a terminal's first trust dialog would
+function trustIn(s: Scratch, folders: string[]): void {
+  const path = join(s.userData, 'claude-config', '.claude.json');
+  const state = (existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : {}) as { projects?: Record<string, unknown> };
+  writeFileSync(path, `${JSON.stringify({ ...state, projects: { ...state.projects, ...Object.fromEntries(folders.map((folder) => [folder, { hasTrustDialogAccepted: true }])) } }, null, 2)}\n`);
+}
+// One row appended to a transcript, chained to its last: a person's message (`text`), or the engine's prompt snapshot
+function appendTurn(path: string, sid: string, cwd: string, gitBranch: string, text: string | { snapshot: string }): void {
+  const rows = existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown }) : [];
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const said = typeof text === 'string' ? { type: 'user', message: { role: 'user', content: text } } : { type: 'attachment', attachment: { type: 'prompt_snapshot', systemPrompt: [text.snapshot] } };
+  mkdirSync(dirname(path), { recursive: true });
+  appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, ...said, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, gitBranch, sessionId: sid, version: '2.1.283' })}\n`);
+}
+// The engine's worktree tool, as M1's test plays it: the transcript and its folder renamed into `to`'s project folder,
+// then a `relocated` row and a row there; answers the transcript's new path
+function moveByTool(s: Scratch, sid: string, from: string, to: string, gitBranch: string, text: string): string {
+  const source = transcriptIn(s, from, sid);
+  const target = transcriptIn(s, to, sid);
+  mkdirSync(dirname(target), { recursive: true });
+  renameSync(source, target);
+  if (existsSync(join(dirname(source), sid))) renameSync(join(dirname(source), sid), join(dirname(target), sid));
+  appendFileSync(target, `${JSON.stringify({ type: 'relocated', relocatedCwd: to, sessionId: sid })}\n`);
+  appendTurn(target, sid, to, gitBranch, text);
+  return target;
+}
+// A journal of the replay as the seeded session's own: its recorded session id replaced by the scratch's engine id, so
+// the record, its transcript and the resume keep one engine session id (Scratch.asOwnSession, for a written journal)
+function ownJournal(s: Scratch, path: string): string {
+  const text = readFileSync(path, 'utf8');
+  const recorded = text.split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow).find((row) => row.direction === 'in' && typeof row.frame.session_id === 'string')?.frame.session_id as string | undefined;
+  const own = join(s.root, `own-${basename(path)}`);
+  writeFileSync(own, recorded === undefined ? text : text.replaceAll(recorded, s.engineId));
+  return own;
+}
+// One value of the profile's index as the build that wrote it left it (to-human-live's read of the launch decision)
+function indexed(s: Scratch, sql: string): unknown {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'index.sqlite'), sql], { encoding: 'utf8' }).trim();
+  const rows = (out === '' ? [] : JSON.parse(out)) as Record<string, unknown>[];
+  return rows.length === 0 ? null : Object.values(rows[0]!)[0] ?? null;
+}
+// The app id of the session filed for an engine session id, once the index lists it
+async function recordFor(page: Page, sid: string): Promise<AppSessionId> {
+  let id = '';
+  await expect
+    .poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.engineSessionId === sid)?.appId ?? ''), { timeout: 20_000, message: `the session ${sid} has a record` })
+    .not.toBe('');
+  return id as AppSessionId;
+}
+// This build's Environment card for the session in view, unfolded
+async function environmentOf(page: Page, id: AppSessionId): Promise<Locator> {
+  await (await sidebarRow(page, { appSessionId: id })).click();
+  await unfoldSessionCard(page, 'Environment');
+  return sessionCard(page, 'Environment');
+}
+
+test('(moved, from this build) a session moved the tool’s way here is listed by the peer with its mark, resumed over the transcript at its directory and filed on; this build then shows what the peer filed, and its facts again after the next row', async () => {
+  const { here, peer } = builds();
+  test.skip(filesAgentFolder(peer), filesAgentFolderWhy(peer));
+  test.setTimeout(300_000);
+  await withScratch('xb-moved', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) moves a session the tool's way; ${peer.label} (wire ${wireOf(peer)}) lists, resumes and files it; ${here.label} opens it again`];
+    const worktree = movingRepo(s);
+    trustIn(s, [s.repo, worktree]);
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', { snapshot: 'An invented system prompt for the cross-build scene.' });
+    const moved = `moved from ${basename(s.repo)}`;
+
+    // this build: the session at the repository, then moved the tool's way into the worktree
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    let card = await environmentOf(ours.page, id);
+    await expect(card.getByTestId('card-folder'), 'the card names the repository').toHaveText(s.repo, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from')).toHaveCount(0);
+    const transcript = moveByTool(s, s.engineId, s.repo, worktree, 'worktree-w1', 'Entered the worktree with the tool');
+    await expect(card.getByTestId('card-folder'), 'the card names the worktree').toHaveText(worktree, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from')).toHaveText(moved);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  ${here.label}: the transcript moved into ${slugOf(worktree)}, the card's folder the worktree, "${moved}"`);
+
+    // the peer, before any other row: listed with its mark, its transcript opened, resumed over the transcript there
+    const journal = ownJournal(s, turnsJournal(s.root, 'xb-moved-resume', 1)); // one turn the resume never sends: it holds at the prompt
+    const theirs = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: journal }, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    const row = await sidebarRow(theirs.page, { appSessionId: id });
+    await expect(row, `${peer.label} lists the session`).toBeVisible({ timeout: 20_000 });
+    await expect(row.getByRole('img', { name: 'Worktree', exact: true }), 'with its worktree mark').toBeVisible({ timeout: 20_000 });
+    await row.click();
+    await expect(theirs.page.getByText('Entered the worktree with the tool', { exact: true }).first(), `${peer.label} opens its transcript`).toBeVisible({ timeout: 20_000 });
+    expect(value(await invoke(theirs.page, 'session.start', { appSessionId: id, message: null, options: { gateway: 'direct', trust: 'accepted' } }))).toMatchObject({ status: 'starting' });
+    const processOf = async () => { const st = await invoke(theirs.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
+    await expect.poll(processOf, { timeout: 60_000, message: `${peer.label} resumes it on the replay` }).toBe('ready');
+    const decision = `select recorded from owner_channel_sessions where app_session_id = '${id}'`;
+    await expect.poll(() => indexed(s, decision), { timeout: 30_000, message: `the launch decision ${peer.label} stored for the resume: the snapshot read at the record's directory` }).toBe('none');
+    value(await invoke(theirs.page, 'session.stop', { appSessionId: id, reason: 'stop' }));
+    await expect.poll(processOf, { timeout: 60_000 }).not.toBe('ready');
+    appendTurn(transcript, s.engineId, worktree, 'worktree-w1', 'A row while the peer runs');
+    await expect.poll(() => indexed(s, `select transcript_size from sessions where app_id = '${id}'`), { timeout: 30_000, message: `${peer.label} files the row` }).toBe(statSync(transcript).size);
+    // Decision 7's own path is staged here (Decision Log 22): a session whose search text is behind its stored stamp is
+    // summarised again at this build's next start, which writes the facts at once. The peer re-indexes a transcript's
+    // text no sooner than 30 s after its last pass (SEARCH_REINDEX_DEBOUNCE_MS), so it quits only once its index holds
+    // the text at the stamp it filed; then nothing is read again, and the record stays as the peer filed it.
+    const textStamped = `select count(*) from session_text_state st join sessions s on s.app_id = st.app_id where st.app_id = '${id}' and st.status = 'ready' and st.size = s.transcript_size and st.mtime_ms = s.transcript_mtime_ms`;
+    await expect.poll(() => indexed(s, textStamped), { timeout: 60_000, message: `${peer.label}'s search text for the session at the stamp it filed (its 30 s re-index debounce)` }).toBe(1);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: listed with its mark, resumed with the recorded state none, the next row filed (${statSync(transcript).size} bytes), its search text at that stamp before it quits`);
+
+    // this build again: what the peer filed, then the facts after one more row
+    const again = await s.launch();
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    card = await environmentOf(again.page, id);
+    await expect(card.getByTestId('card-folder'), 'the folder the peer filed').toHaveText(worktree, { timeout: 20_000 });
+    await expect(card.getByTestId('moved-from'), 'no fact for a session the peer filed last').toHaveCount(0);
+    appendTurn(transcript, s.engineId, worktree, 'worktree-w1', 'One more row under this build');
+    await expect(card.getByTestId('moved-from'), 'the facts again after the session’s next row').toHaveText(moved, { timeout: 20_000 });
+    await expect(card.getByTestId('card-folder')).toHaveText(worktree);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the worktree with no "moved from", then "${moved}" after one more row`);
+    record(said);
+  });
+});
+
+test('(build F’s app, unit mawsd) a session whose agent moved: the peer’s Source control draws its page, an act draws the away sentence and changes nothing, and Files lists the worktree; the same for a session moved the tool’s way', async () => {
+  const { here, peer } = builds();
+  test.skip(filesAgentFolder(peer), filesAgentFolderWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(300_000);
+  await withScratch('xb-moved-unit', async (s) => {
+    const worktree = movingRepo(s);
+    writeFileSync(join(s.repo, 'README.md'), 'hello\nchanged in the repository\n');
+    writeFileSync(join(worktree, 'notes.txt'), 'notes\nchanged in the worktree\n');
+    trustIn(s, [s.repo, worktree]);
+    // the session that reached the worktree by `cd`: the seeded transcript, its last row in the worktree
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, worktree, 'main', 'Working in the worktree');
+    // the session that entered it through the tool: its transcript under the worktree's project folder
+    const toolSid = randomUUID();
+    appendTurn(transcriptIn(s, s.repo, toolSid), toolSid, s.repo, 'main', 'Started in the repository');
+    moveByTool(s, toolSid, s.repo, worktree, 'worktree-w1', 'Entered the worktree with the tool');
+    const statuses = () => ({ repository: gitAt(s.repo, 'status', '--porcelain'), worktree: gitAt(worktree, 'status', '--porcelain') });
+
+    await withUnit(s, here, 'xb-moved-unit', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const page = run.page;
+      const scm = toolBody(page, 'Source control');
+      // The session selected, its Source control page drawn on `branch` with `listed` and not `other`, and a Stage on
+      // `listed` answered with the sentence, both checkouts' status the same after it
+      const actRefused = async (id: AppSessionId, branch: string, listed: string, other: string) => {
+        await (await sidebarRow(page, { appSessionId: id })).click();
+        await showTool(page, 'Source control');
+        await expect(scm.locator('[data-scm-header]'), 'the page names the branch of the folder the record names').toContainText(`⎇ ${branch}`, { timeout: 20_000 });
+        const row = scm.locator(`li[data-scm-row][data-path=${JSON.stringify(listed)}]`);
+        await expect(row, `${listed} listed`).toBeVisible({ timeout: 20_000 });
+        await expect(scm.locator(`li[data-scm-row][data-path=${JSON.stringify(other)}]`)).toHaveCount(0);
+        await expect(scm.locator('[data-scm-status-failed]'), 'no error state').toHaveCount(0);
+        const before = statuses();
+        await row.hover();
+        await row.getByRole('button', { name: `Stage ${listed}`, exact: true }).click();
+        await expect(scm.locator('[data-scm-notice-text]'), 'the act answered in the notice line').toHaveText(AWAY_SENTENCE, { timeout: 20_000 });
+        expect(statuses(), 'nothing changed in either checkout').toEqual(before);
+      };
+
+      const cd = await s.record(page);
+      await actRefused(cd, 'main', 'README.md', 'notes.txt');
+      await showTool(page, 'Files');
+      await expect(toolBody(page, 'Files').locator(`[role="treeitem"][data-kind="root"][data-path=${JSON.stringify(worktree)}]`), 'Files lists the worktree among its roots').toBeVisible({ timeout: 20_000 });
+      said.push(`  by cd: the page on main with README.md, Stage answered "${AWAY_SENTENCE}", nothing changed; Files lists the worktree`);
+
+      const tool = await recordFor(page, toolSid);
+      await actRefused(tool, 'worktree-w1', 'notes.txt', 'README.md');
+      said.push(`  by the tool: the page on worktree-w1 with notes.txt, Stage answered the same sentence, nothing changed`);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      await s.quit(run);
+      record(said);
+    });
   });
 });

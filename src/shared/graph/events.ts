@@ -193,7 +193,9 @@ export const SessionEventSchema = z.discriminatedUnion('kind', [
     // unknown entries alone does neither
     arrival: z.array(ArrivalEntrySchema).optional(),
   }),
-  event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable() }),
+  // UX wave U8c-2 (M5, §K): `cwd` is the folder the call's row records, set by a producer that reads rows for a shell
+  // tool's call only; absent on the live route (the engine's wire names no folder per call) and from an older producer
+  event('tool.use', { toolUseId: ToolUseIdSchema, toolName: z.string(), input: z.unknown(), apiMessageId: ApiMessageIdSchema.nullable(), messageUuid: MessageUuidSchema.nullable(), cwd: z.string().optional() }),
   event('tool.safeguard', { toolUseId: ToolUseIdSchema, verdict: z.enum(['skipped', 'not_flagged', 'flagged']), lane: z.literal('server') }), // one per tool use named in a message_delta.safeguard_results entry
   event('tool.result', {
     toolUseId: ToolUseIdSchema, content: z.union([z.string(), z.array(ContentBlockSchema)]), isError: z.boolean(), structured: z.unknown(),

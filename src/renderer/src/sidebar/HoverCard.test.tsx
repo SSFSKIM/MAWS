@@ -5,6 +5,7 @@ import { REL } from '../test-support/relative-time';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, ProjectId, RequestId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { item, record, remoteRow, status, humanTurn } from '../../../../test/support/builders';
 import { addressOf } from '@shared/machine/address';
@@ -242,6 +243,33 @@ describe('a session row’s hover card', () => {
     expect(within(main).getByTestId('hover-place').textContent).toBe('⎇ master');
   });
 
+  // UX wave U8c-2 (M4 decision 11): the row's worktree mark and the card's "worktree <name>" follow the agent: a session
+  // whose agent reached a linked worktree by `cd` or by the tool shows both, and neither once the agent is back in its
+  // launch checkout, where the card keeps its branch line.
+  it('marks the row and names the worktree the agent reached by cd or by the tool, and neither once it is back', async () => {
+    withMain();
+    const charter = bareIdOf('Charter + research');
+    const W1 = '/work/repo/.claude/worktrees/w1';
+    const put = (over: Partial<SessionRecord>) =>
+      act(() => fillStores({ ...nine, sessions: nine.sessions.map((r) => (r.appId === charter ? { ...r, directory: '/work/repo', worktree: null, branch: 'master', ...over } : r)) }));
+    const mark = () => within(needsRow('Charter + research')).queryByTestId('row-branch');
+    const cases: [Partial<SessionRecord>, string | null, string][] = [
+      [{ agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } }, W1, '⎇ w1 · worktree w1'], // a cd
+      [{ directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/work/repo', branch: 'w1' }, W1, '⎇ w1 · worktree w1'], // the tool
+      [{ agentFolder: { checkout: '/work/repo', cwd: '/work/repo', branch: 'master', linked: false } }, null, '⎇ master'], // back by cd
+      [{ directory: W1, worktree: { path: W1, branch: 'w1' }, launchFolder: '/work/repo', branch: 'w1', agentFolder: { checkout: '/work/repo', cwd: '/work/repo', branch: 'master', linked: false } }, null, '⎇ master'], // filed in the worktree, back by cd
+    ];
+    for (const [over, worktree, place] of cases) {
+      put(over);
+      const view = render(<Sidebar />);
+      expect(mark() !== null).toBe(worktree !== null);
+      const card = await open('Charter + research');
+      expect(within(card).getByTestId('hover-place').textContent).toBe(place);
+      expect(within(card).getByTestId('hover-place').getAttribute('title')).toBe(worktree);
+      view.unmount();
+    }
+  });
+
   // P5 O6 M5: the card always names the session's machine; an offline one's also says when it was last seen
   it('names the session’s machine, and an offline machine’s last sighting', async () => {
     withMain();
@@ -391,6 +419,15 @@ describe('request preview', () => {
     const mcp = ev('permission.requested', { toolName: 'mcp__x__y', input: { a: 1 } });
     render(<RequestPreview item={itemFor('a1', 'permission', 'req_1')} request={mcp} placement="hover" paneIndex={null} />);
     expect(screen.getByTestId('request-input').textContent).toBe('{\n  "a": 1\n}');
+  });
+
+  // UX wave U8c-2 (M4 decision 3): the fallback preview's folder line says where the call will run, the agent's folder.
+  it('names the agent’s folder in its folder line after a move', () => {
+    const id = readAttention.items[0].appSessionId;
+    const W1 = '/work/repo/.claude/worktrees/w1';
+    act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(id, { ...s.records.get(id)!, directory: '/work/repo', worktree: null, agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } }), recordsVersion: s.recordsVersion + 1 })));
+    render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="card" paneIndex={null} />);
+    expect(screen.getByText(`${W1}/src`).getAttribute('title')).toBe(`${W1}/src`);
   });
 
   it('shows the item’s summary while the request is not known', () => {

@@ -2,10 +2,15 @@
 // into Review; UX wave U8b, l5-code-16), and the model row that opens Session info. The git facts are the git store's for
 // the summary's directory (Summary.tsx holds the watch); a failed watch says why in words and draws no branch, a failed
 // diff keeps the branch and says the change is unavailable.
+// UX wave U8c-2 (§H; the owner's answers, Decision Log 14 of docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md):
+// the folder row shows the agent's own folder (the selector's `cwd`), cut at its start when it does not fit and whole in
+// its tooltip, so after a move it names the worktree; while the working folder is not the launch folder, one muted line
+// "moved from <the launch folder's name>" sits directly under it. Every other row describes the checkout (`path`).
 import { EffortSchema } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { aliasOf, chipLabel } from '@shared/sessions/model-label';
+import type { WorkingFolder } from '@shared/sessions/working-folder';
 import { useMachineMark } from '../../app/machine-mark';
 import { catalogueRoute } from '../../gateway/observed-route'; // P5 O7 M9
 import { checkoutKey, machineFor } from '../../ipc/machine';
@@ -18,7 +23,8 @@ import { FloatingCard, type CardFold } from './FloatingCard';
 import { PushState } from './PushState';
 import { Row, ToolButton, ToolSummary, useToolSummary } from './Section';
 
-export function Environment({ appSessionId, record, directory, fold }: { appSessionId: AppSessionId; record: SessionRecord; directory: string; fold: CardFold }) {
+export function Environment({ appSessionId, record, folder, fold }: { appSessionId: AppSessionId; record: SessionRecord; folder: WorkingFolder; fold: CardFold }) {
+  const directory = folder.path; // the checkout
   const entry = useGit((s) => s.entries.get(checkoutKey(machineFor(appSessionId), directory)));
   const reviewSummary = useToolSummary('review');
   const status = entry?.status ?? null;
@@ -27,8 +33,16 @@ export function Environment({ appSessionId, record, directory, fold }: { appSess
     <FloatingCard title="Environment" summary={status ? (status.branch ?? SUMMARY_COPY.detached(status.head)) : watchFailure(entry)} {...fold}>
       <Row><span className="text-fg-muted">{machine.local ? 'This Mac' : machine.offline ? `${machine.name} · offline` : machine.name}</span></Row>
       <Row action={<ToolButton toolId="files" label="Files" appSessionId={appSessionId} />}>
-        <span className="block truncate" title={directory}>{directory}</span>
+        {/* the plain CSS cut at the start: right to left, the browser's ellipsis falls at the path's start; the path itself is isolated left to right */}
+        <span data-testid="card-folder" dir="rtl" className="block truncate text-left" title={folder.cwd}>
+          <bdi dir="ltr">{folder.cwd}</bdi>
+        </span>
       </Row>
+      {folder.moved && (
+        <p data-testid="moved-from" className="m-0 truncate text-ui-sm text-fg-muted" title={folder.launch}>
+          {SUMMARY_COPY.movedFrom(lastSegment(folder.launch))}
+        </p>
+      )}
       {status ? (
         <>
           <Row>
@@ -62,6 +76,8 @@ function ModelLine({ record, directory }: { record: SessionRecord; directory: st
     </span>
   );
 }
+
+const lastSegment = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 // No status: git has not answered yet, or the watch failed.
 function watchFailure(entry: GitEntry | undefined): string {

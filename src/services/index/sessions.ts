@@ -24,6 +24,7 @@ import { ObservedRouteSchema, RouteSchema, type Route } from '@shared/engine/rou
 import { countLines } from '@shared/composer/pasted-framing';
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { locate, type ProjectStore } from './projects';
+import { FolderReads, factsOf, folderColumns } from './folder-facts'; // UX wave U8c-2
 
 // The home directory as `locate` answers it (realpathed), which discovery never makes a project of; read once.
 let home: string | null | undefined;
@@ -80,6 +81,10 @@ interface SessionRow {
   launched_by: string | null; // P5 O7 M4 (an added column, ADDED_COLUMNS): a remote spawn's requester and signed action, as JSON
   gateway_route?: string | null; // P5 O7 M9 (added columns): the gateway's route and observed (JSON); absent before the opener adds them
   gateway_observed?: string | null;
+  // UX wave U8c-2 (added columns, §C): the record's two facts as JSON, each stamped with the transcript's size and mtime
+  // the same write stored (src/services/index/folder-facts.ts); absent before the opener adds them
+  launch_folder?: string | null;
+  agent_folder?: string | null;
 }
 
 export interface LaunchInit {
@@ -215,6 +220,7 @@ function toRecord(row: SessionRow): SessionRecord {
     },
     lineage: row.lineage === null ? null : (JSON.parse(row.lineage) as Lineage), // E3 (X11)
     ...(typeof row.launched_by === 'string' && { launchedBy: JSON.parse(row.launched_by) as LaunchedBy }), // P5 O7 M4
+    ...factsOf(row), // UX wave U8c-2: each fact only while its stamp is the row's size and mtime
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -325,6 +331,7 @@ export class SessionStore {
       // stored as -1, as migration 4 does, so the next scan reads it again and fills them while the row stays in `known`
       // and a removal is still seen.
       const preV4 = summary.birthtimeMs === undefined;
+      const stored = { size: summary.size, mtimeMs: preV4 ? -1 : summary.mtimeMs };
       const facts: Record<string, Value> = {
         project_id: projectId,
         directory: location.realpath ?? summary.relocatedCwd ?? summary.directory ?? existing?.directory ?? '',
@@ -338,13 +345,16 @@ export class SessionStore {
         engine_version: summary.engineVersion ?? existing?.engine_version ?? null,
         transcript_path: summary.transcriptPath,
         transcript_size: summary.size,
-        transcript_mtime_ms: preV4 ? -1 : summary.mtimeMs,
+        transcript_mtime_ms: stored.mtimeMs,
         first_record_at: summary.firstRecordAt,
         last_record_at: summary.lastRecordAt,
         last_assistant_text: summary.lastAssistantText,
         summary: JSON.stringify(summary),
         root_uuid: summary.rootUuid ?? null, // E3 (A-16)
         transcript_birthtime_ms: summary.birthtimeMs ?? null, // E3
+        // UX wave U8c-2 (§B): beside the columns above, which keep build F's rule, where the session was launched and
+        // where its agent is, stamped with the size and mtime this write stores
+        ...folderColumns(summary, location, stored, this.db.scoped('folder-reads', () => new FolderReads())),
       };
 
       if (!existing) {

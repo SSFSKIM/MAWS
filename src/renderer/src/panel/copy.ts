@@ -26,6 +26,7 @@ export const SUMMARY_COPY = {
   title: 'Session overview',
   sections: { environment: 'Environment', push: 'Push state', subagents: 'Subagents', background: 'Background tasks' /* UX wave U8b (M8): the card takes the tool's name */, sources: 'Sources', plugins: 'Plugins' /* R1 */, artifacts: 'Artifacts' /* E2's Deliverables; P3-L M6b */ },
   // Environment
+  movedFrom: (name: string) => `moved from ${name}`, // UX wave U8c-2 (§H): the launch folder's last segment, while the agent works elsewhere
   branch: (branch: string) => `⎇ ${branch}`,
   detached: (head: string) => `detached at ${head.slice(0, 7)}`,
   notRepository: 'Not a git repository',

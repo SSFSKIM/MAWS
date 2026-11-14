@@ -8,10 +8,11 @@ import fs, { appendFileSync, chmodSync, linkSync, mkdirSync, mkdtempSync, readFi
 import { lstat, readdir, readFile, realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { anchoredMessage } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_LIST_MAX_ENTRIES, FILES_READ_MAX_LENGTH, FILES_WRITE_MAX_BYTES, type FilesChanged } from '@shared/ipc/schema/files';
+import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { NO_LINK } from '../fs/no-link';
 import { StoreFixture } from '../../../test/support/store-fixture';
@@ -1486,5 +1487,74 @@ describe.runIf(process.platform === 'linux')('files service on Linux: no link on
         restore(inRoot('src'));
       }
     });
+  });
+});
+
+// UX wave U8c-2, M3 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §G and B-4): the launch folder
+// and the working folder, where a fact names them, are roots of `files.*` while the admission holds at the call, for this
+// machine's caller and for one on another machine (the home rule then applies to them as to any root).
+describe('files service: the folders the record’s two facts name', () => {
+  let repos: Awaited<ReturnType<typeof admissionRepos>>;
+  let p: AdmissionPaths;
+  beforeAll(async () => {
+    repos = await admissionRepos();
+    p = repos.paths;
+  });
+  afterAll(() => repos.dispose());
+  const HOMES = () => ['/nonexistent-home-of-this-suite'];
+  const rootNames = async (svc: ReturnType<typeof service>, remote: boolean) => (await svc.list({ appSessionId: A }, remote)).entries.map((entry) => entry.path);
+
+  it('lists and reads a registered worktree outside the launch folder while a fact names it, here and for a remote caller, and not once it is deregistered', async () => {
+    records.set(A, { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } });
+    const svc = service({ homes: HOMES });
+    for (const remote of [false, true]) {
+      expect(await rootNames(svc, remote), `remote ${remote}`).toEqual([p.main, p.beside]);
+      expect((await svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, remote)).content, `remote ${remote}`).toBe('hello\n');
+      expect((await svc.list({ appSessionId: A, path: join(p.beside, 'packages') }, remote)).root, `remote ${remote}`).toBe(p.beside);
+    }
+    const away = join(p.base, 'beside-registration');
+    renameSync(join(p.main, '.git/worktrees/beside'), away);
+    try {
+      expect(await rootNames(svc, false)).toEqual([p.main]);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') })).rejects.toThrow(OUT);
+      await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+    } finally {
+      renameSync(away, join(p.main, '.git/worktrees/beside'));
+    }
+  });
+
+  it('keeps the launch folder a root while the record is filed in a worktree, and refuses it once the record’s directory is in another repository', async () => {
+    records.set(A, { directory: p.beside, additionalDirectories: [], worktree: { path: p.beside, branch: 'beside' }, launchFolder: p.main });
+    const svc = service({ homes: HOMES });
+    expect(await rootNames(svc, false)).toEqual([p.beside, p.main]);
+    expect((await svc.read({ appSessionId: A, path: join(p.main, 'README.md') })).content).toBe('hello\n');
+    records.set(A, { directory: p.other, additionalDirectories: [], worktree: null, launchFolder: p.main });
+    expect(await rootNames(svc, false)).toEqual([p.other]);
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') })).rejects.toThrow(OUT);
+  });
+
+  it('admits the sub-folder a session was launched in, and not its repository’s root', async () => {
+    const app = join(p.main, 'packages/app');
+    records.set(A, { directory: p.w1, additionalDirectories: [], worktree: { path: p.w1, branch: 'w1' }, launchFolder: app });
+    const svc = service({ homes: HOMES });
+    expect(await rootNames(svc, true)).toEqual([p.w1, app]);
+    expect((await svc.read({ appSessionId: A, path: join(app, 'index.ts') }, true)).content).toBe('hello\n');
+    await expect(svc.read({ appSessionId: A, path: join(p.main, 'README.md') }, true)).rejects.toThrow(OUT);
+  });
+
+  it('drops an admitted folder that is a home of the machine for a remote caller, and keeps it for this machine’s', async () => {
+    records.set(A, { directory: p.main, additionalDirectories: [], worktree: null, agentFolder: { checkout: p.beside, cwd: p.beside, branch: 'beside', linked: true } });
+    const svc = service({ homes: () => [p.beside] });
+    expect(await rootNames(svc, false)).toEqual([p.main, p.beside]);
+    expect(await rootNames(svc, true)).toEqual([p.main]);
+    await expect(svc.read({ appSessionId: A, path: join(p.beside, 'README.md') }, true)).rejects.toThrow(OUT);
+  });
+
+  it.each(ADMISSION_CASES)('reads under a fact’s folder only where the table admits it: %s', async (_name, make) => {
+    const { record, admitted } = make(p);
+    records.set(A, record);
+    const svc = service({ homes: HOMES });
+    const roots = await rootNames(svc, true);
+    expect(roots.slice(1)).toEqual(admitted === null || admitted === roots[0] ? [] : [admitted]);
   });
 });

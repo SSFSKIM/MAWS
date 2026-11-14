@@ -181,7 +181,9 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
 
   // ---- what the frame binds to ------------------------------------------------------------------------------------
   const location = setup?.intent.location ?? null; // New chat: null until a project is chosen
-  const cwd = setup ? (location === null ? '' : locationPath(location)) : (status?.cwd ?? (record ? workingFolder(record).cwd : '')); // M4c fix wave 1: an idle worktree session runs in its worktree
+  // UX wave U8c-2 (M4 decision 1): the agent's folder the record says, which follows the agent on every route; the
+  // engine's status folder (a turn late, a session MAWS runs only) only while the window holds no record
+  const cwd = setup ? (location === null ? '' : locationPath(location)) : record ? workingFolder(record).cwd : (status?.cwd ?? '');
   const repo = useGitWatch(appSessionId, setup ? null : cwd || null, client);
   const [opened, setOpened] = useState({ models: false, rules: false });
   const ready = status?.process === 'ready';

@@ -16,7 +16,8 @@ import { waitingItem } from '../attention/derive';
 import { glyphFor, listedGlyph } from '../attention/glyph'; // P5 O7 M6: listedGlyph
 import { ipc } from '../ipc/client';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M6
-import { branchLabel, recordBranch } from '../sessions/branch-label';
+import { branchLabel } from '../sessions/branch-label';
+import { workingBranch } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLayout } from '../stores/layout';
 import { useSessions, type ListedSession } from '../stores/sessions'; // P5 O7 M6: ListedSession
@@ -55,7 +56,7 @@ export function SessionCard({ appSessionId, paneIndex, showProject, stop, onFocu
   const waiting = waitingItem(pending);
   const request = controlled && waiting?.tier === 1 ? waiting.oldest : null;
   const title = displayTitle(record);
-  const branch = branchLabel(recordBranch(record)); // W9 (H2)
+  const branch = branchLabel(workingBranch(record)); // W9 (H2); UX wave U8c-2: the working folder's
   const footer = cardFooter(digest);
 
   return (

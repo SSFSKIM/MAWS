@@ -8,10 +8,11 @@
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { lstatSync, readFileSync, realpathSync, statSync } from 'node:fs';
-import { basename, dirname, join, sep } from 'node:path';
+import { basename, dirname, join, resolve as resolvePath, sep } from 'node:path';
 import type { ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { ProjectOrg, ProjectRecord } from '@shared/ipc/schema/session';
+import { branchName } from '@shared/sessions/branch';
 import { indexTopLevelFiles, type TopLevelFile } from '@shared/machine/git-index';
 import { discoverRepo, GitLayoutError, worktreeList, type GitFiles } from '@shared/machine/git-reads';
 import type { OrgKey } from '@shared/machine/org-key';
@@ -348,6 +349,100 @@ function candidateRoot(directory: string): string | null {
     const entry = lstatSync(join(root, '.git'), { throwIfNoEntry: false });
     if (entry !== undefined) return entry.isFile() ? root : null;
     if (dirname(root) === root) return null;
+  }
+}
+
+// UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, §B): which repository a folder is
+// in, read from git's own files with no git run, as `locate`'s reads are synchronous (the index applies summaries inside
+// its transactions). Two folders are in the same repository when their common git directory is the same; the work tree
+// is the folder that holds the nearest `.git`. It mirrors only this much of git: no `core.worktree`, no bare repository,
+// no mount boundary. It is the files admission's predicate read once, when the record's facts are written; what may be
+// read, written or listed there is decided again at each act, with git's fuller reader (src/shared/machine/git-reads.ts).
+export interface Repository {
+  commonDir: string; // each path a realpath
+  workTree: string;
+  linked: boolean;
+}
+
+// The nearest `.git` at or above the folder's realpath. A directory: the main checkout's. A file `gitdir: <G>`: a linked
+// worktree's when `<G>/commondir` names another directory, which counts only while `<G>/gitdir` names this file back
+// (a copy of a worktree's pointer is in no repository); otherwise a submodule's or a separate git dir's, its own. None up
+// to the root, or anything unreadable: null.
+export function repositoryAt(folder: string): Repository | null {
+  try {
+    for (let root = canonical(folder); ; root = dirname(root)) {
+      const dotGit = join(root, '.git');
+      const entry = lstatSync(dotGit, { throwIfNoEntry: false });
+      if (entry?.isDirectory()) return { commonDir: canonical(dotGit), workTree: root, linked: false };
+      if (entry?.isFile()) return pointedRepository(root, dotGit);
+      if (entry !== undefined || dirname(root) === root) return null;
+    }
+  } catch {
+    return null;
+  }
+}
+
+function pointedRepository(workTree: string, dotGit: string): Repository | null {
+  const gitDir = canonical(resolvePath(workTree, pointer(dotGit, 'gitdir: ')));
+  const named = optionalPointer(join(gitDir, 'commondir'));
+  const commonDir = named === null ? gitDir : canonical(resolvePath(gitDir, named));
+  const linked = commonDir !== gitDir;
+  if (linked) {
+    const back = optionalPointer(join(gitDir, 'gitdir'));
+    if (back === null || canonical(resolvePath(gitDir, back)) !== canonical(dotGit)) return null;
+  }
+  return { commonDir, workTree, linked };
+}
+
+// A pointer file's one line, less `prefix`; throws when it is not one. Only a regular file is opened (its type read
+// first, links followed, without an open): these reads run inside the index's transaction, where opening a FIFO would
+// block for ever, so anything else is unreadable metadata (the branch review's P2).
+function pointer(path: string, prefix = ''): string {
+  if (!statSync(path).isFile()) throw new Error(`not a regular file: ${path}`);
+  const line = readFileSync(path, 'utf8').split('\n')[0].trimEnd();
+  if (!line.startsWith(prefix) || line.length === prefix.length) throw new Error(`not a pointer: ${path}`);
+  return line.slice(prefix.length);
+}
+
+const optionalPointer = (path: string): string | null => (exists(path) ? pointer(path) : null);
+
+// Where the agent's folder sits for a session launched in `launch` (a realpath): its checkout (the launch folder itself
+// inside the launch folder's own work tree, else the root of the work tree the folder is in), the folder's realpath, that
+// work tree, and whether it is a linked worktree. Null for a folder that does not resolve, is in another repository, or
+// is in none under a launch folder that is in one. "At or under" is at a segment boundary. `repositoryOf` is how a folder's
+// repository is read (a batch's shared reads, `folder-facts.ts`).
+export function checkoutIn(
+  launch: string,
+  folder: string,
+  repositoryOf: (folder: string) => Repository | null = repositoryAt,
+): { checkout: string; cwd: string; workTree: string | null; linked: boolean } | null {
+  let c: string;
+  try {
+    c = canonical(folder);
+  } catch {
+    return null;
+  }
+  const within = c === launch || c.startsWith(launch.endsWith(sep) ? launch : launch + sep);
+  const rc = repositoryOf(c);
+  const rl = repositoryOf(launch);
+  if (rl === null) return rc === null && within ? { checkout: launch, cwd: c, workTree: null, linked: false } : null;
+  if (rc === null || rc.commonDir !== rl.commonDir) return null;
+  if (rc.workTree === rl.workTree) return { checkout: within ? launch : rl.workTree, cwd: c, workTree: rl.workTree, linked: rl.linked };
+  return { checkout: rc.workTree, cwd: c, workTree: rc.workTree, linked: rc.linked };
+}
+
+// The branch `HEAD` names at a work tree (its git directory's `HEAD`, `ref: refs/heads/<name>`); null when it is
+// detached, unreadable or no work tree's.
+export function headBranch(workTree: string): string | null {
+  try {
+    const dotGit = join(workTree, '.git');
+    const entry = lstatSync(dotGit);
+    const gitDir = entry.isDirectory() ? dotGit : entry.isFile() ? resolvePath(workTree, pointer(dotGit, 'gitdir: ')) : null;
+    if (gitDir === null) return null;
+    const head = pointer(join(gitDir, 'HEAD'));
+    return head.startsWith('ref: refs/heads/') ? branchName(head.slice('ref: refs/heads/'.length)) : null;
+  } catch {
+    return null;
   }
 }
 

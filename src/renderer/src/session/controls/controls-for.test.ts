@@ -275,6 +275,23 @@ describe('useSessionControls', () => {
   });
 });
 
+// UX wave U8c-2 (M4 decision 9): a terminal session's controls are built again from the store's record at every render,
+// so its location chip follows the record's working folder with no edit of its own.
+describe('a terminal session’s chip follows its record', () => {
+  it('names the new working folder once the record says the agent moved, and the launch folder again after', () => {
+    const at = (checkout: string | null) => record(APP, { holder: terminal, directory: '/work/c', ...(checkout ? { agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } } : {}) });
+    useSessions.setState({ records: new Map([[APP, at(null)]]) });
+    applyLaneAState(APP, laneAState(APP));
+    const { client } = fakeClient({ 'laneA.catalog': null });
+    const { result } = renderHook(() => useSessionControls(APP, { client })?.bindings().location.path);
+    expect(result.current).toBe('/work/c');
+    act(() => useSessions.setState({ records: new Map([[APP, at('/work/c/.claude/worktrees/w1')]]) }));
+    expect(result.current).toBe('/work/c/.claude/worktrees/w1');
+    act(() => useSessions.setState({ records: new Map([[APP, at(null)]]) }));
+    expect(result.current).toBe('/work/c');
+  });
+});
+
 describe('a caller outside the pane', () => {
   it('reaches the session’s port from the stores', async () => {
     useSessions.setState({ records: new Map([[APP, record(APP)]]) });

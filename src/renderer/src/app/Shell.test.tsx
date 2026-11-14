@@ -286,6 +286,9 @@ describe('toolbar', () => {
     expect(toolbarTitle(channel, records).title).toBe('Channel');
     // W9 (H2): the engine's HEAD (a folder that is no repository) is no branch, so no chip
     expect(toolbarTitle(sessionTab(A), new Map([[A, record(A, { branch: 'HEAD' })]])).branch).toBeNull();
+    // UX wave U8c-2 (M4 decision 10): the branch recorded for the working folder, where the agent is
+    const moved = record(A, { branch: 'main', agentFolder: { checkout: '/work/wt', cwd: '/work/wt', branch: 'w1', linked: true } });
+    expect(toolbarTitle(sessionTab(A), new Map([[A, moved]])).branch).toBe('w1');
   });
 
   it('shows the focused pane’s tabs in the chrome without duplicating a title row', () => {

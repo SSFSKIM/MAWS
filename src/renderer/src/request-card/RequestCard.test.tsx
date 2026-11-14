@@ -838,6 +838,15 @@ describe('the permission card', () => {
       expect(screen.getByText('/work/the-folder')).toBeTruthy();
       expect(screen.queryByRole('heading', { name: 'Read a file' })).toBeNull();
     });
+
+    // UX wave U8c-2 (M4 decision 3): the kept folder line says where the call will run, the agent's folder.
+    it('the hover placement’s folder line names the agent’s folder after a move', () => {
+      const W1 = '/work/the-folder/.claude/worktrees/w1';
+      act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(APP, record(APP, { directory: '/work/the-folder', agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } })), recordsVersion: s.recordsVersion + 1 })));
+      mount(unflaggedRead, 'hover');
+      expect(screen.getByText(`${W1}/src`).getAttribute('title')).toBe(`${W1}/src`);
+      expect(screen.queryByText('/work/the-folder')).toBeNull();
+    });
   });
 
   describe('its buttons, from the scopes the request offers', () => {

@@ -3,9 +3,10 @@
 // components. Pure. Paths are absolute and POSIX; the renderer has no `node:path`.
 import type { SessionRecord } from '@shared/graph/session';
 import type { FilesEntry, FilesListOutput } from '@shared/ipc/schema/files';
+import { workingFolder } from '@shared/sessions/working-folder';
 
 export type Listing = { status: 'loading' } | { status: 'ok'; value: FilesListOutput } | { status: 'error'; message: string };
-export type RootRole = 'directory' | 'additional directory' | 'worktree';
+export type RootRole = 'directory' | 'additional directory' | 'worktree' | 'working folder';
 export interface RootCandidate {
   path: string;
   role: RootRole;
@@ -31,17 +32,37 @@ export function sameFile(real: string, given: string): boolean {
 }
 
 // The session's roots as the record declares them, in the service's order (directory, additional directories, the
-// worktree when it differs), each with the role its row names.
-export function rootsFor(record: Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'>): RootCandidate[] {
+// worktree when it differs), each with the role its row names. UX wave U8c-2 (§G): then the selector's launch folder and
+// working folder where a fact names them, as the files service appends them while its admission holds (the service
+// lists the root or does not); the record's word. While the session is moved (M4 decision 4) the working folder is
+// labelled `working folder` and the launch folder `directory`, whatever today's rule would call them; a session that has
+// not moved keeps today's labels.
+export function rootsFor(record: Pick<SessionRecord, 'directory' | 'additionalDirectories' | 'worktree'> & Partial<Pick<SessionRecord, 'launchFolder' | 'agentFolder'>>): RootCandidate[] {
+  const { launch, path, moved } = workingFolder(record);
   const out: RootCandidate[] = [];
-  const add = (path: string, role: RootRole) => {
-    if (!out.some((c) => c.path === path)) out.push({ path, role });
+  const add = (candidate: string, role: RootRole) => {
+    if (out.some((c) => c.path === candidate)) return;
+    out.push({ path: candidate, role: moved && candidate === path ? 'working folder' : moved && candidate === launch ? 'directory' : role });
   };
   add(record.directory, 'directory');
-  for (const path of record.additionalDirectories) add(path, 'additional directory');
+  for (const candidate of record.additionalDirectories) add(candidate, 'additional directory');
   if (record.worktree) add(record.worktree.path, 'worktree');
+  add(launch, 'directory');
+  add(path, 'working folder');
   return out;
 }
+
+// The root Files opens first, from the roots the service listed (UX wave U8c-2, M4 decision 4). While the session is
+// moved: the listed root that is the working folder (the one whose path equals it, else the one `sameFile` matches),
+// or null while none is (the listing lags the record: the root in use stays). Otherwise today's choice: the root whose
+// role is `worktree`, else the first.
+export function firstRoot(listed: readonly string[], roles: ReadonlyMap<string, RootRole>, folder: { path: string; moved: boolean } | null): string | null {
+  if (folder?.moved) return workingRoot(listed, folder.path);
+  return listed.find((root) => roles.get(root) === 'worktree') ?? listed[0] ?? null;
+}
+
+// The listed root that is the working folder: the one whose path equals it, else the one `sameFile` matches; null for none.
+export const workingRoot = (listed: readonly string[], path: string): string | null => listed.find((root) => root === path) ?? listed.find((root) => sameFile(root, path)) ?? null;
 
 // The role of a root the service listed (a realpath), from the record's candidates.
 export function roleOf(rootPath: string, candidates: readonly RootCandidate[]): RootRole | null {

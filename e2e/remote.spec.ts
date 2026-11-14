@@ -3490,3 +3490,71 @@ test('X-168 on B’s terminal session: the Subagents and Background tasks cards 
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// UX wave U8c-2 (§L, scene 3; docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md): a session MAWS
+// runs on B, the kind that has a record in A's window (a terminal session of B's has none: §E), whose agent reaches a
+// worktree beside B's checkout by `cd`. The replay writes the session's transcript in B's engine store; a row appended
+// there with the worktree's `cwd` is the move, as the engine records one. A's card names the worktree, Files lists it,
+// and a git read A makes there passes B's endpoint while git lists the worktree and is refused once its registration is
+// removed (the endpoint's admission, asked at each request).
+const MOVING_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e1';
+const MOVING_REPLY = 'B’s agent is about to move.';
+test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the worktree, Files lists it, and a git read there passes B’s endpoint only while it is registered', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-moved-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-moved-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const worktree = join(root, 'b-worktree'); // beside the repository
+    const journal = new SideJournal(MOVING_SESSION, checkout);
+    journal.turn(MOVING_REPLY);
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to move.', firstReply: MOVING_REPLY, title: 'B’s moving session' }, held);
+    // B's checkout made a repository now, with one worktree beside it on its own branch
+    git(checkout, 'init', '--quiet', '-b', 'main');
+    git(checkout, 'config', 'user.name', 'MAWS Fixture');
+    git(checkout, 'config', 'user.email', 'fixture@maws.invalid');
+    git(checkout, 'config', 'commit.gpgsign', 'false');
+    writeFileSync(join(checkout, NOTES), NOTES_TEXT);
+    git(checkout, 'add', '-A');
+    git(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
+    git(checkout, 'worktree', 'add', '--quiet', '-b', 'side', worktree);
+    const file = join(b.claudeConfigDir, 'projects', slugOf(checkout), `${MOVING_SESSION}.jsonl`);
+    await expect.poll(() => existsSync(file), { timeout: 30_000, message: `the replay wrote B’s transcript at ${file}` }).toBe(true);
+    const last = readFileSync(file, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { uuid?: string }).filter((row) => typeof row.uuid === 'string').at(-1);
+    const moved = { type: 'user', uuid: 'u8c2-remote-moved', parentUuid: last?.uuid ?? null, isSidechain: false, cwd: worktree, sessionId: MOVING_SESSION, version: '2.1.291', timestamp: new Date().toISOString(), userType: 'external', entrypoint: 'sdk-ts', message: { role: 'user', content: 'Now working beside the checkout.' } };
+    writeFileSync(file, `${JSON.stringify(moved)}\n`, { flag: 'a' });
+    type Folders = { agentFolder?: { checkout: string } };
+    await expect.poll(async () => (await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout ?? null, { timeout: 60_000, message: 'B’s record says where the agent is' }).toBe(worktree);
+
+    // A's card names the worktree, with the branch git reports there and where the session was launched
+    await showSessionCards(page);
+    const environment = sessionCard(page, 'Environment');
+    const fold = environment.getByRole('button').first();
+    if ((await fold.getAttribute('aria-expanded')) !== 'true') await fold.click();
+    await quoting(expect(environment.getByTestId('card-folder'), 'A’s card names the worktree').toHaveText(worktree, { timeout: 60_000 }), () => mainSaid(page));
+    await expect(environment.getByTestId('moved-from')).toHaveText('moved from b-checkout');
+    await quoting(expect(environment.getByText('⎇ side', { exact: true }), 'the branch git reports at the worktree, over the link').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    // Files lists it, first, as the working folder
+    await openSurface(page, 'Files');
+    const firstRoot = surface(page, 'files').locator('[role="treeitem"][data-kind="root"]').first();
+    await expect(firstRoot).toHaveAttribute('data-path', worktree, { timeout: 60_000 });
+    await expect(firstRoot).toContainText('working folder');
+
+    // A git read A makes at the worktree, as the session's: B's endpoint lets it through while git lists the worktree
+    const status = () => page.evaluate(([directory, machine, session]) => window.maws.invoke('git.status', { directory }, { machine, session } as never), [worktree, b.ref, app] as const);
+    const admitted = await status();
+    expect(admitted.ok, `the read passes while registered: ${JSON.stringify(admitted)}`).toBe(true);
+    // and refuses it once the registration is gone (the folder left as it is), asked again at this request: the
+    // endpoint's `no-target` (src/endpoint/authorize.ts, withinCheckout), which A's main hands on as the refusal
+    // (src/main/machines/remote/dispatch.ts, refusalError), not git's own failure at a folder it no longer knows
+    rmSync(join(checkout, '.git', 'worktrees', 'b-worktree'), { recursive: true, force: true });
+    const refusalOf = async () => { const answer = await status(); return answer.ok ? 'admitted' : ((answer.error.issues as { refusal?: unknown } | undefined)?.refusal ?? answer.error.message); }; // prettier-ignore
+    await expect.poll(refusalOf, { timeout: 30_000, message: 'the read is refused at B’s endpoint once the worktree is not registered' }).toBe('no-target');
+    expect((await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout, 'B’s record still names it: the refusal is the admission’s, at the act').toBe(worktree);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});

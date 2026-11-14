@@ -11,6 +11,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { normalizePath } from '@shared/sessions/trust';
+import { workingFolder } from '@shared/sessions/working-folder';
 import type { WorktreeOccupancy } from '@shared/sessions/worktree';
 import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall } from './context';
@@ -51,14 +52,20 @@ export async function holderAuthority(deps: HolderDeps, q: { engineSessionId: Se
 // `cd src && claude` runs inside the checkout a removal would delete), except under a `nested` directory the caller
 // names (another worktree inside this one: the main checkout holds `.claude/worktrees/*`), which answers for itself.
 // Records count when their `directory` or `worktree.path` is here; C4 stores both as realpaths, so only the directories
-// asked about and the processes' cwds are resolved. The registry is read whole (a handful of live processes), because
-// C4's directory filter is an exact match.
+// asked about and the processes' cwds are resolved. UX wave U8c-2 (M3 decision 9): and when the selector's working
+// folder or launch folder is (an agent that moved into a worktree by `cd` occupies it; a session occupies its launch
+// folder while its agent is away), the record's word, nothing read there. The registry is read whole (a handful of live
+// processes), because C4's directory filter is an exact match.
 export async function occupancyOf(deps: HolderDeps, directory: string, opts: { nested?: readonly string[] } = {}): Promise<WorktreeOccupancy> {
   const dir = await canonicalPath(directory);
   const nested = await Promise.all((opts.nested ?? []).map(canonicalPath));
   const isHere = (path: string) => within(path, dir) && !nested.some((n) => within(path, n));
   const all = deps.sessions.list({ includeArchived: true });
-  const here = all.filter((r) => isHere(normalizePath(r.directory)) || (r.worktree !== null && isHere(normalizePath(r.worktree.path))));
+  const folders = (r: SessionRecord) => {
+    const { path, launch } = workingFolder(r);
+    return [r.directory, ...(r.worktree !== null ? [r.worktree.path] : []), path, launch];
+  };
+  const here = all.filter((r) => folders(r).some((folder) => isHere(normalizePath(folder))));
   const hereIds = new Set<string>(here.map((r) => r.appId));
   const known = new Set<string>(all.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));
   const hereEngineIds = new Set<string>(here.flatMap((r) => (r.engineSessionId === null ? [] : [r.engineSessionId])));

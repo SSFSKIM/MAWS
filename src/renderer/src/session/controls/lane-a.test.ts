@@ -260,6 +260,15 @@ describe('the chips', () => {
     expect(bindings().location.path).toBe('/work/here');
   });
 
+  // UX wave U8c-2 (M4 decision 10): the location chip names the working folder and the branch recorded for it.
+  it('names the working folder and its recorded branch in the location chip', () => {
+    const state = laneAState(APP);
+    applyLaneAState(APP, state);
+    const moved = { ...rec, branch: 'main', agentFolder: { checkout: '/work/here/.claude/worktrees/w1', cwd: '/work/here/.claude/worktrees/w1/src', branch: 'w1', linked: true } };
+    const { client } = fakeClient({ 'laneA.catalog': laneACatalog() });
+    expect(laneAControls(state, moved, { appSessionId: APP, client }).bindings().location).toMatchObject({ path: '/work/here/.claude/worktrees/w1', branch: 'w1' });
+  });
+
   // sminos 1.27.14: the bridge reports the mode (main's state holds it only from such a bridge); MAWS shows it and when
   // it was reported, and still sets none
   it('names the mode the session reported, with when, its choice still closed', async () => {

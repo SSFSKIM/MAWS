@@ -22,8 +22,8 @@ export interface ReviewState {
 }
 
 // `params` is undefined for a tab restored from layout.json (X5); a request is applied against the shown session.
-function createState({ appSessionId, params }: PanelToolInit<ReviewParams>): ReviewState {
-  return { ui: createReviewUi({ session: appSessionId, params: params ?? null }) };
+function createState({ appSessionId, session, params }: PanelToolInit<ReviewParams>): ReviewState {
+  return { ui: createReviewUi({ session: appSessionId, directory: session ? workingFolder(session).path : null, params: params ?? null }) };
 }
 
 // Re-targeting (X5): a receipt's `{ scope: 'turn', turnId, path }`, C11's `{}` or `{ scope, path }`. Applied by the
@@ -43,24 +43,25 @@ export function ReviewIcon({ className }: { className?: string }) {
 function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext }) {
   const { ui } = state;
   const shown = ctx.appSessionId;
-  // A pinned tool shown for another session starts over there; an open() waiting is applied after that. A new session
-  // renders nothing until then, so no read is made for its old scope; the same session keeps its shell mounted while
-  // an open() re-targets it (the shell decides no default while the request waits).
-  const synced = useStore(ui, (s) => s.session === shown);
+  const directory = ctx.session ? workingFolder(ctx.session).path : null;
+  // A pinned tool shown for another session starts over there, and so does a session whose working folder changed (UX
+  // wave U8c-2: the agent moved); an open() waiting is applied after that. Until then nothing renders, so no read is made
+  // for the old scope and nothing chosen in the old folder is applied to the new one; the same session in the same folder
+  // keeps its shell mounted while an open() re-targets it (the shell decides no default while the request waits).
+  const synced = useStore(ui, (s) => s.session === shown && s.directory === directory);
   const requested = useStore(ui, (s) => s.request !== null);
   useEffect(() => {
     const current = ui.getState();
-    const next: Partial<ReviewUi> = current.session === shown ? {} : forSession(shown);
+    const next: Partial<ReviewUi> = current.session === shown && current.directory === directory ? {} : forSession(shown, directory);
     const merged = { ...current, ...next };
     if (merged.request) Object.assign(next, applyRequest(merged, merged.request));
     if (Object.keys(next).length > 0) ui.setState(next);
-  }, [ui, shown, synced, requested]);
+  }, [ui, shown, directory, synced, requested]);
 
-  if (shown === null || ctx.session === null) {
+  if (shown === null || directory === null) {
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{REVIEW_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  const directory = workingFolder(ctx.session).path;
   return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
 }
 

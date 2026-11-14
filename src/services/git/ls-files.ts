@@ -6,7 +6,8 @@
 // directory inside one an unarchived session or a project names is listed, so the command cannot enumerate arbitrary
 // paths; that root set is realpathed once and kept until a session, project or intent changes (`invalidateRoots`), and
 // read again when a directory falls outside it (a root added since, whose change has not yet arrived). P5 O3-C (reader
-// R13): the roots and their changes are read through the spine's view (`spineRoots`, `followSpineRoots`).
+// R13): the roots and their changes are read through the spine's view (`spineRoots`, `followSpineRoots`). UX wave U8c-2:
+// beyond them, a directory under a folder one of a record's two facts names, admitted at each load (`spineAdmitted`).
 import type { Dirent } from 'node:fs';
 import { readdir, realpath } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -14,6 +15,7 @@ import { rankPaths } from '@shared/composer/fuzzy';
 import type { LsFiles, LsFilesInput } from '@shared/ipc/schema/git';
 import type { SpineView } from '@shared/spine/view';
 import { knownSessionDirectories } from '@shared/sessions/directories';
+import { admittedFolder } from '../files/allowlist';
 import { NotARepositoryError, type GitRun } from './runner';
 
 export const CACHE_MS = 10_000;
@@ -24,6 +26,7 @@ const SKIPPED = new Set(['node_modules', '.git', 'dist']);
 export interface FileListerOptions {
   run: GitRun;
   roots: () => string[] | Promise<string[]>; // every unarchived session's, intent's and project's directories (spineRoots)
+  admitted?: () => Promise<string[]>; // the facts' folders that pass the admission now, as realpaths (spineAdmitted)
   walkMaxEntries?: number;
 }
 
@@ -44,6 +47,18 @@ export function spineRoots(view: Pick<SpineView, 'records' | 'intents' | 'projec
   return listableRoots([...knownSessionDirectories(view, { includeArchived: false }), ...intentDirectories], view.projectRows().map((project) => project.directory));
 }
 
+// UX wave U8c-2 (docs/doperpowers/plans/2026-11-12-ux-wave-U8c-live-working-folder.md, M3 decision 10): the folders the
+// records' two facts name that the admission accepts now (`admittedFolder`), for every unarchived record, as realpaths.
+// Asked only when a listing is to be loaded for a directory no kept root holds, and never kept: a record whose folders are
+// its own reads nothing here.
+export function spineAdmitted(view: Pick<SpineView, 'records'>): () => Promise<string[]> {
+  return async () => {
+    const live = view.records().filter((record) => !record.archived);
+    const answers = await Promise.all(live.flatMap((record) => [admittedFolder(record, 'launch'), admittedFolder(record, 'path')]));
+    return [...new Set(answers.flatMap((answer) => (answer?.checked === true ? [answer.folder] : [])))];
+  };
+}
+
 // The root set is read again after any record, project or intent change the view reports; the function returned stops.
 export function followSpineRoots(view: Pick<SpineView, 'on'>, lister: Pick<FileLister, 'invalidateRoots'>): () => void {
   const invalidate = () => lister.invalidateRoots();
@@ -56,6 +71,7 @@ interface Listing {
   paths: string[];
   source: LsFiles['source'];
   capped: boolean; // the walk stopped at its entry cap
+  admitted: boolean; // loaded for a directory no kept root held, under a fact's folder the admission accepted then
 }
 
 export class FileLister {
@@ -70,23 +86,32 @@ export class FileLister {
   }
 
   async list({ directory, query, limit }: LsFilesInput): Promise<LsFiles> {
-    const resolved = await this.allowed(directory);
-    let listing = this.cache.get(resolved);
-    if (!listing || Date.now() - listing.at > CACHE_MS) {
-      listing = await this.load(resolved);
+    const { resolved, kept } = await this.allowed(directory);
+    const cached = this.cache.get(resolved);
+    let listing: Listing;
+    if (cached !== undefined && Date.now() - cached.at <= CACHE_MS && (kept || cached.admitted)) listing = cached;
+    else {
+      // UX wave U8c-2 (M3 decision 10): outside every kept root, a directory is listed only under a fact's folder the
+      // admission accepts at this load; the answer is never kept among the roots, so a registration removed stops the
+      // next load, and a listing so loaded is served its ten seconds as every listing is
+      if (!kept && !(await this.admits(resolved))) throw new Error(`git.lsFiles: ${directory} is not a directory of any session or project`);
+      listing = { ...(await this.load(resolved)), admitted: !kept };
       this.cache.set(resolved, listing);
     }
     const ranked = rankPaths(query, listing.paths);
     return { paths: ranked.slice(0, limit), truncated: ranked.length > limit || listing.capped, source: listing.source };
   }
 
-  private async allowed(directory: string): Promise<string> {
+  // The directory's realpath, and whether a kept root holds it.
+  private async allowed(directory: string): Promise<{ resolved: string; kept: boolean }> {
     const resolved = await realpath(directory);
-    const inside = (roots: string[]) => roots.some((root) => resolved === root || resolved.startsWith(root.endsWith('/') ? root : `${root}/`));
-    if (inside(await this.realRoots())) return resolved;
+    if (inside(await this.realRoots(), resolved)) return { resolved, kept: true };
     this.invalidateRoots(); // perhaps a root added since the set was read
-    if (!inside(await this.realRoots())) throw new Error(`git.lsFiles: ${directory} is not a directory of any session or project`);
-    return resolved;
+    return { resolved, kept: inside(await this.realRoots(), resolved) };
+  }
+
+  private async admits(resolved: string): Promise<boolean> {
+    return this.opts.admitted !== undefined && inside(await this.opts.admitted(), resolved);
   }
 
   private realRoots(): Promise<string[]> {
@@ -102,7 +127,7 @@ export class FileLister {
     return set;
   }
 
-  private async load(directory: string): Promise<Listing> {
+  private async load(directory: string): Promise<Omit<Listing, 'admitted'>> {
     try {
       const files = (await this.opts.run(directory, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])).split('\0').filter((p) => p !== '');
       return { at: Date.now(), paths: withDirectories(files), source: 'git', capped: false };
@@ -112,6 +137,11 @@ export class FileLister {
     const { paths, capped } = await walk(directory, this.opts.walkMaxEntries ?? WALK_MAX_ENTRIES);
     return { at: Date.now(), paths, source: 'walk', capped };
   }
+}
+
+// Whether `resolved` is one of `roots` or lies under one, at a segment boundary.
+function inside(roots: readonly string[], resolved: string): boolean {
+  return roots.some((root) => resolved === root || resolved.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
 // The files and every directory above one of them, a directory written with its trailing `/`.

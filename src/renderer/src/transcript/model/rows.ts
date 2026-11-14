@@ -281,6 +281,7 @@ export type CellDetail =
   | {
       kind: 'shell'; command: string; description: string | null; cwd: string | null; stdout: string; stderr: string; exitCode: number | null; interrupted: boolean;
       backgroundTaskId: TaskId | null; truncated: Truncation | null; spill: Spill | null;
+      rowCwd?: string; // UX wave U8c-2 (§K): the folder the call's row records, where the call was read from rows; absent live
     }
   | { kind: 'edit'; filePath: string; change: 'create' | 'update' | 'delete'; hunks: Hunk[]; added: number; removed: number }
   | { kind: 'read'; files: { path: string; range: [number, number] | null }[]; preview: string | null; truncated: Truncation | null }

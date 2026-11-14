@@ -60,15 +60,18 @@ function SessionCards({ appSessionId, record }: { appSessionId: AppSessionId; re
   );
 }
 
+// UX wave U8c-2 (§H): the selector's answer once; every card's folder is the working folder, and Environment draws the
+// agent's folder and where the session was launched beside it.
 function RecordCards({ appSessionId, record }: { appSessionId: AppSessionId; record: SessionRecord }) {
-  const directory = workingFolder(record).path;
+  const folder = workingFolder(record);
+  const directory = folder.path;
   const machine = machineFor(appSessionId);
   useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
   const open = useLayout((s) => s.cardsOpen);
   const fold = (card: CardId): CardFold => ({ open: open.includes(card), onToggle: () => useLayout.getState().setCardOpen(card, !open.includes(card)) });
   return (
     <>
-      <Environment appSessionId={appSessionId} record={record} directory={directory} fold={fold('environment')} />
+      <Environment appSessionId={appSessionId} record={record} folder={folder} fold={fold('environment')} />
       <Context appSessionId={appSessionId} directory={directory} fold={fold('context')} />
       <Connectors appSessionId={appSessionId} fold={fold('connectors')} />
     </>

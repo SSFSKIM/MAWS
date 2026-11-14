@@ -175,6 +175,20 @@ describe('terminal tool state', () => {
     ]);
   });
 
+  // UX wave U8c-2 (M4 decision 7): with a record whose agent moved, a new terminal starts in the working folder, and an
+  // open one keeps its shell while its bar says where the session now runs.
+  it('starts a new terminal in the working folder of a session whose agent moved, and tells an open one so', () => {
+    const moved = { ...SESSION_A, agentFolder: { checkout: '/tmp/maws-harness/a-wt', cwd: '/tmp/maws-harness/a-wt/src', branch: 'w', linked: true } } as SessionRecord;
+    const open = newState();
+    newState({ session: moved, instanceId: 'terminal:4' });
+    expect(registry.terminals.open.mock.calls.map(([init]) => init)).toEqual([
+      { appSessionId: A, label: 'terminal:1', cwd: '/tmp/maws-harness/a' },
+      { appSessionId: A, label: 'terminal:4', cwd: '/tmp/maws-harness/a-wt' },
+    ]);
+    render(<View state={open} ctx={context({ session: moved })} />);
+    expect(screen.getByRole('status', { name: 'worktree warning' }).textContent).toBe('This terminal is in /tmp/maws-harness/a; the session now runs in /tmp/maws-harness/a-wt.New terminal here');
+  });
+
   it('takes over a re-adopted terminal whose label is the tab id instead of opening another', () => {
     const adopted = registry.terminals.open({ appSessionId: B, label: 'terminal:9', cwd: '/tmp/maws-harness/b' });
     registry.terminals.open.mockClear();

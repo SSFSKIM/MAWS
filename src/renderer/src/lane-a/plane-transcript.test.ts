@@ -812,3 +812,31 @@ describe('the exit a gone session leaves on another machine (X-168)', () => {
     child.close();
   });
 });
+
+// UX wave U8c-2 (M5, §K): a terminal session's rows from another machine pass through the same file reader as this
+// Mac's, so each shell call keeps the folder its own row records, and a call of another tool none. Invented folders.
+describe('a shell call from another machine keeps its row’s folder (UX wave U8c-2)', () => {
+  it('draws each shell cell with its row’s folder, as the file reader maps it here', async () => {
+    const answer = recording.session.findLast((row) => row.type === 'assistant')!;
+    const result = recording.session.find((row) => row.type === 'user' && JSON.stringify(row.message).includes('"tool_result"'))!;
+    const before = recording.session.slice(0, recording.session.indexOf(answer));
+    const ran = (id: string, name: string, cwd: string, parent: string): JsonObject[] => [
+      { ...answer, uuid: `call-${id}`, parentUuid: parent, cwd, apiBlockIndex: 0, message: { ...(answer.message as JsonObject), id: `msg_${id}`, content: [{ type: 'tool_use', id, name, input: { command: 'ls', file_path: '/repo/a.ts' } }] } },
+      { ...result, uuid: `done-${id}`, parentUuid: `call-${id}`, cwd, sourceToolAssistantUUID: `call-${id}`, toolUseResult: 'a', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'a' }] } },
+    ];
+    const rows = [
+      ...before,
+      ...ran('toolu_here', 'Bash', '/repo', String(before.at(-1)!.uuid)),
+      ...ran('toolu_moved', 'Bash', '/repo/.claude/worktrees/w1', 'done-toolu_here'),
+      ...ran('toolu_read', 'Read', '/repo/.claude/worktrees/w1', 'done-toolu_moved'),
+      { ...answer, parentUuid: 'done-toolu_read' },
+    ] as SessionBodies['row']['row'][];
+    const store = createTranscriptStore();
+    await store.getState().attach('fresh', freshSource(rows, TARGET.session, subagentLookupOf(metas)), { agentId: null });
+    const cells = drawnRows(withAllExpanded(store.getState().entries.fresh.state)).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' ? [row] : []));
+    const ours = cells.filter((cell) => ['toolu_here', 'toolu_moved', 'toolu_read'].some((id) => cell.id.endsWith(id)));
+    expect(ours.map((cell) => [cell.detail.kind, cell.detail.kind === 'shell' ? cell.detail.rowCwd : undefined])).toEqual([
+      ['shell', '/repo'], ['shell', '/repo/.claude/worktrees/w1'], ['read', undefined],
+    ]);
+  });
+});

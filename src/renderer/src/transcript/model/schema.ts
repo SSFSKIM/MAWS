@@ -30,6 +30,7 @@ export const CellDetailSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     kind: z.literal('shell'), command: z.string(), description: nullable(z.string()), cwd: nullable(z.string()), stdout: z.string(), stderr: z.string(), exitCode: nullable(z.number()),
     interrupted: z.boolean(), backgroundTaskId: nullable(z.string()), truncated: nullable(TruncationSchema), spill: nullable(SpillSchema),
+    rowCwd: z.string().optional(), // UX wave U8c-2
   }),
   z.strictObject({ kind: z.literal('edit'), filePath: z.string(), change: z.enum(['create', 'update', 'delete']), hunks: z.array(HunkSchema), added: z.number(), removed: z.number() }),
   z.strictObject({ kind: z.literal('read'), files: z.array(z.strictObject({ path: z.string(), range: nullable(z.tuple([z.number(), z.number()])) })), preview: nullable(z.string()), truncated: nullable(TruncationSchema) }),

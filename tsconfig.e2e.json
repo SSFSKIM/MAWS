@@ -87,6 +87,7 @@
     "src/services/index/replay-fixtures.ts",
     "src/services/index/session-search.ts",
     "src/services/index/sessions.ts",
+    "src/services/index/folder-facts.ts", // UX wave U8c-2 (M2): the record's two facts, which sessions.ts imports
     "src/services/index/side-threads.ts",
     // P5 registry M8: the stored statements, which index.ts, projects.ts and statements.ts import
     "src/services/index/add-folder.ts",

@@ -26,10 +26,11 @@ interface Props {
   directory: string;
   scm: { data: ScmStatus | undefined; error: string | undefined };
   trusted: boolean | null;
+  acts?: boolean; // UX wave U8c-2: false while the session works away from its launch folder; no Push and no Open PR then
 }
 
-export function RemoteActions({ appSessionId, ui, status, directory, scm, trusted }: Props) {
-  const prState = usePrState(appSessionId, { branch: status.branch, scm: scm.data });
+export function RemoteActions({ appSessionId, ui, status, directory, scm, trusted, acts = true }: Props) {
+  const prState = usePrState(appSessionId, { checkout: directory, branch: status.branch, scm: scm.data });
   const remotes = scm.data ? scm.data.remotes.map((remote) => remote.name) : null;
   const input = { status, remotes, trusted };
   const pr = openPrOf(prState.data);
@@ -57,14 +58,14 @@ export function RemoteActions({ appSessionId, ui, status, directory, scm, truste
           </button>
         </span>
       ) : null}
-      {action('push', pushAction(input), () => ui.setState({ sheet: { kind: 'push' } }))}
+      {acts && action('push', pushAction(input), () => ui.setState({ sheet: { kind: 'push' } }))}
       {pr !== null ? (
         <button type="button" data-scm-remote-action="pr-link" aria-label={SCM_COPY.prLinkLabel(pr.number)} title={pr.url} onClick={() => openLink(pr.url)} className={BUTTON}>
           {SCM_COPY.prLink(pr.number)}
         </button>
-      ) : (
+      ) : acts ? (
         action('pr', prAction(input), () => ui.setState({ sheet: { kind: 'pr' } }))
-      )}
+      ) : null}
     </div>
   );
 }

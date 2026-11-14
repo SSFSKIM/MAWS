@@ -111,6 +111,10 @@ export const TranscriptSummarySchema = z.strictObject({
   slug: z.string(),
   directory: z.string().nullable(), // first `cwd` in the head; null when the head has none
   relocatedCwd: z.string().nullable(), // last `relocated` record in the tail; overrides `directory` for project membership (SPEC 35.23)
+  // UX wave U8c-2 (§A): the `cwd` of the newest main-loop row the tail window holds (a sidechain row's skipped), where the
+  // agent is; null when the tail holds no row with a folder; absent from a producer of a build before it, since the
+  // summary is sent between builds (`fs.sessionChanged`) and kept as JSON in the index
+  newestCwd: z.string().nullable().optional(),
   size: z.number(),
   mtimeMs: z.number(),
   firstRecordAt: z.string().nullable(), // ISO timestamps of the first and last uuid-bearing record seen

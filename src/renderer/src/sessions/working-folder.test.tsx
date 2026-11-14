@@ -22,9 +22,10 @@ describe('useWorkingFolder', () => {
   });
 
   it("answers the record's working folder", () => {
-    hold(record(id, { directory: '/repo', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'worktree-w1' } }));
+    hold(record(id, { directory: '/repo/.claude/worktrees/w1/pkg', worktree: { path: '/repo/.claude/worktrees/w1', branch: 'worktree-w1' } }));
     const { result } = renderHook(() => useWorkingFolder(id));
-    expect(result.current).toEqual({ path: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', launch: '/repo/.claude/worktrees/w1', moved: false });
+    // U8c-2 (decision 9): the agent's folder is the record's directory, inside the worktree
+    expect(result.current).toEqual({ path: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1/pkg', launch: '/repo/.claude/worktrees/w1', moved: false });
   });
 
   it('keeps the same object while the folder is the same, and gives a new one when it changes', () => {
@@ -37,5 +38,17 @@ describe('useWorkingFolder', () => {
     act(() => hold({ ...before, worktree: { path: '/repo/.claude/worktrees/w1', branch: null } }));
     expect(result.current).not.toBe(first);
     expect(result.current?.path).toBe('/repo/.claude/worktrees/w1');
+  });
+
+  // U8c-2 (§D): a record that gains the agent's folder moves the answer, and one that loses it brings it back
+  it("follows the agent's folder as the record gains and loses it", () => {
+    const before = record(id, { directory: '/repo', worktree: null });
+    hold(before);
+    const { result } = renderHook(() => useWorkingFolder(id));
+    expect(result.current).toEqual({ path: '/repo', cwd: '/repo', launch: '/repo', moved: false });
+    act(() => hold({ ...before, agentFolder: { checkout: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', branch: 'w1', linked: true } }));
+    expect(result.current).toEqual({ path: '/repo/.claude/worktrees/w1', cwd: '/repo/.claude/worktrees/w1', launch: '/repo', moved: true });
+    act(() => hold(before));
+    expect(result.current).toEqual({ path: '/repo', cwd: '/repo', launch: '/repo', moved: false });
   });
 });

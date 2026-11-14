@@ -563,6 +563,18 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'gateway', cwd: '/work/app-a' });
   });
 
+  // UX wave U8c-2 (M4 decision 1): the composer's folder (its `@` list, its git watch, the catalogue it names models from)
+  // is the agent's folder the record says, ahead of the engine's status folder, which a session MAWS runs reports a turn late.
+  it('reads its folder from the record, not from the engine’s status folder', async () => {
+    const direct = { mode: 'direct' as const, baseUrl: null, verified: 'direct' as const, autoModeServer: 'unknown' as const, localLane: null };
+    const W1 = '/work/app-a/.claude/worktrees/w1';
+    live(A, { status: { cwd: '/work/app-a', gateway: direct }, record: { agentFolder: { checkout: W1, cwd: `${W1}/src`, branch: 'w1', linked: true } } });
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(invoked('engine.models')).toContainEqual({ refresh: false, gateway: 'direct', cwd: `${W1}/src` }));
+    expect(invoked('engine.models')).not.toContainEqual(expect.objectContaining({ cwd: '/work/app-a' }));
+    expect(invoked('git.watch')).toContainEqual({ directory: `${W1}/src` });
+  });
+
   // P2-F wave S (S-chip; the sitting's A1.6): after a set_model on a live session the chip names the model asked for,
   // marked as the selector marks its row, until an init frame reports running it
   it('the model chip names a model asked for and not yet reported, marked setting…, until the engine reports it', async () => {
@@ -1572,13 +1584,15 @@ describe('a lane B session on another machine', () => {
   // P5 O7 M4 (the M4b report's order for a spawn with attachments): the session a New chat tab spawned is handed that
   // tab's document; its composer, once open, sends it once through the remote path: the files up, then one message
   // M4c fix wave 1 (review finding 3): an idle worktree session (no engine status) runs in its worktree, where main
-  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from
+  // writes the uploads, so the mention is relative to the worktree, not to the checkout it was made from. The record is
+  // the index's shape: a session in a worktree has its directory inside it (UX wave U8c-2: the selector's `cwd` is the
+  // record's directory)
   const idleInWorktree = () => {
     const WT = '/work/app-r/.claude/worktrees/feature';
     const s = useSessions.getState();
     const engine = new Map(s.engine);
     engine.delete(R);
-    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: '/work/app-r', worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
+    useSessions.setState({ engine, records: new Map(s.records).set(R, addressing.output('session.get').lift({ ...record('app-r'), directory: WT, worktree: { path: WT, branch: 'feature' } }, OTHER_MACHINE)!), recordsVersion: s.recordsVersion + 1 });
     return `${WT}/.claude/desk-uploads/app-r/u.0.txt`;
   };
 

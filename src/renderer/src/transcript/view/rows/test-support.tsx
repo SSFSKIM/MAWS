@@ -53,6 +53,7 @@ export function renderRow(
   row: Row,
   options: {
     storeKey?: string; actions?: TranscriptActions; rewind?: RewindInterface; renderRequest?: (slot: Extract<Row, { kind: 'request_slot' }>) => ReactNode; sessionDirectory?: string;
+    sessionCwd?: string; // UX wave U8c-2: the agent's folder while the session is in its launch folder
     disclosures?: Disclosures; // shared across renders to stand for one transcript whose rows remount
     effort?: string; // W8: the session's effort, as the live thinking label names it
   } = {},
@@ -61,6 +62,7 @@ export function renderRow(
   const value = {
     storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null,
     disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null, effort: options.effort ?? null,
+    ...(options.sessionCwd !== undefined && { sessionCwd: options.sessionCwd }),
   };
   const view = render(
     <TranscriptProvider value={value}>
