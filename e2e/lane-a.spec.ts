@@ -166,6 +166,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await doctor.hover();
     await expect(doctor).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('tooltip'), 'listed with why').toContainText(/runs only in the terminal/i);
+    // the list and its popover close before the box is cleared: the popover stands over the box and takes its click
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await editor(page).pressSequentially('/rewind');
     const rewind = page.getByRole('option', { name: /rewind/ }).first();
@@ -174,6 +177,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(rewind).toHaveAttribute('aria-selected', 'true');
     await expect(page.getByRole('tooltip'), 'rewind, a terminal panel').toContainText('Rewind is a terminal panel: use /rewind there');
     await page.keyboard.press('Escape');
+    await expect(page.getByRole('listbox', { name: 'Commands' })).toBeHidden();
     await clear(editor(page));
     await main(page).getByRole('button', { name: 'Turn summary' }).last().click();
     const restore = page.getByRole('button', { name: 'Restore files to before this turn' });

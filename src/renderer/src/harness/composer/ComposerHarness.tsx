@@ -10,6 +10,9 @@
 // transcript above it on request (C6's slot, with the composer's edit-and-resubmit registered as the app registers it),
 // and can fail a composer's next `session.send` before it reaches main. W2: that composer sits in C5's own composer
 // column, as a started session pane holds it, and `wide` spans the page so the column reaches its cap.
+// UX wave U4a (M8): `stacked` mounts that transcript as the session's pane does (`waiting="stacked"`), so a message that
+// waits is drawn in the composer's stack alone; a replayed launch has no index record, so the `shell` pane, the real
+// SessionPane, shows its unstarted frame for it.
 // E9 (M5): the page mounts the app's dictation key and controller beside ComposerAppKeys, and reads its store; it
 // connects the settings store as App.tsx does, so a keymap override (the dictation key's binding) and the recognition
 // language reach the dispatcher and the controller.
@@ -212,7 +215,7 @@ export function ComposerHarness() {
                 </div>
               ) : 'composer' in pane ? (
                 <div className="mt-auto flex min-w-0 flex-col gap-3">
-                  {pane.transcript && <TranscriptSlot key={`transcript:${pane.composer}`} appSessionId={pane.composer as AppSessionId} className="h-72" />}
+                  {pane.transcript && <TranscriptSlot key={`transcript:${pane.composer}`} appSessionId={pane.composer as AppSessionId} className="h-72" waiting={pane.stacked ? 'stacked' : undefined} />}
                   {pane.transcript ? (
                     <ComposerColumn>
                       <Composer key={pane.composer} appSessionId={pane.composer as AppSessionId} paneIndex={index} client={composerClient} />

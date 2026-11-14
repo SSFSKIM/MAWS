@@ -314,15 +314,12 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
 
-  // once widgets are registered for them, `/model` (a panel, and the newest name chosen) opens the list, from MAWS, and
-  // the same names open the widget (W3, C6: as the floating dialog, never in the box). The panels' declared order before
-  // any pick is the next scene's: the names chosen above rank first with nothing typed (decision 17 c)
+  // once widgets are registered for them, `/model` is listed as MAWS's panel, and the same names open the widget (W3,
+  // C6: as the floating dialog, never in the box). Which row opens the list here is the recency boost's: the names chosen
+  // above rank first with nothing typed (decision 17 c), so the panels' declared order before any pick is the next
+  // scene's (the M8 review's finding 2; the CI run of b1bad4a07 read `/compact` first here)
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
-  await expect(commands.getByRole('option').nth(0)).toHaveAccessibleName('/model');
-  await expect(commands.getByRole('option').nth(0)).toHaveAttribute('data-origin', 'widget');
-  await expect(chosen).toHaveAccessibleName('/model');
-  await expect(detail).toContainText('Choose the model for this session');
-  await expect(detail).toContainText('MAWS');
+  await expect(commands.getByRole('option', { name: '/model', exact: true })).toHaveAttribute('data-origin', 'widget');
   for (const name of ['model', 'permissions']) {
     await page.keyboard.type(name);
     await expect(chosen).toContainText(`/${name}`); // C11: the chosen row
@@ -671,8 +668,10 @@ test('an unstarted session binds the frame to the intent, holds a starting state
 
 // ---- UX wave U4a: the stack, Send now, taking a message back, Stop ---------------------------------------------------
 // (docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md, M8's new scenes; C4: each runs alone on a Mac before its
-// group.) Each sits in C5's own session pane (a `shell` pane), which passes the transcript `waiting="stacked"`, so a
-// message that waits is drawn in the stack alone (decision 12).
+// group.) Each draws its session's transcript above the composer as the session's pane does (`transcript` with
+// `stacked`: the slot's `waiting="stacked"`), so a message that waits is drawn in the stack alone (decision 12). Not the
+// `shell` pane, the real SessionPane: a replayed launch writes no index record, and that pane shows a session with none
+// as unstarted (the CI and Mac runs of b1bad4a07).
 
 const stackOf = (page: Page, index: 0 | 1) => pane(page, index).getByRole('region', { name: 'Queued messages' });
 const transcriptOf = (page: Page, index: 0 | 1) => pane(page, index).locator('[data-transcript-scroller]');
@@ -682,7 +681,7 @@ const queueOf = async (page: Page, id: string) => value(await invoke(page, 'sess
 async function countRunning(page: Page, id: string, journal: string): Promise<void> {
   await openComposerPage(page);
   await launchReady(page, id, journal);
-  await showPanes(page, [{ composer: id, shell: true }, null]);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
   await messageIn(page, 0).click();
   await page.keyboard.type(COUNT);
   await page.keyboard.press('Enter');
@@ -733,7 +732,7 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   const id = 'u4a-send-now';
   await openComposerPage(page);
   await launchReady(page, id, sendNowJournal(scratch, id));
-  await showPanes(page, [{ composer: id, shell: true }, null]);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
   await messageIn(page, 0).click();
   await page.keyboard.type('Run the long command in the foreground.');
   await page.keyboard.press('Enter'); // seq 12; its Bash call then runs (32)
@@ -780,7 +779,7 @@ test('U4a, Send now: on an after-the-turn row it promotes the message at priorit
   const id = 'u4a-send-now-after';
   await openComposerPage(page);
   await launchReady(page, id, promoteNowJournal(scratch, id));
-  await showPanes(page, [{ composer: id, shell: true }, null]);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
   await messageIn(page, 0).click();
   await page.keyboard.type('Run the long command in the foreground.');
   await page.keyboard.press('Enter'); // seq 12; its Bash call then runs, a task from 37

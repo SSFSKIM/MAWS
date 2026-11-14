@@ -1,16 +1,17 @@
 // `/fork [prompt]` (UX wave U4a, decision 18; A20): picked or typed bare, the panel forks the conversation in place and
 // closes; typed with a prompt, its `apply` forks with the prompt as the fork's first message; either way through
-// today's `forkSession`, once. A refusal is a toast in the host's words. For a session on another machine the helper's
-// sentence greys it and nothing is forked.
+// today's `forkSession`, once. A refusal is a toast in the host's words. For a session on another machine U9's helper
+// decides: its sentence, and nothing forked, where the machine serves no session acts; a fork where it does.
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { resetRemoteLaneBStore } from '../lane-b/remote-session';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
 import { useMachines } from '../stores/machines';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -64,13 +65,33 @@ describe('/fork', () => {
     expect(useNotices.getState().notices.map((n) => [n.kind, n.level, n.text])).toEqual([['toast', 'danger', 'The session is held by a terminal']]);
   });
 
-  it('forks nothing for a session on another machine: the typed form opens the panel, which says why', async () => {
+  // From the master that holds U9 (the landing's edge, the `/fork` row): `session.fork` is offered behind
+  // `rl2.session-acts`, so the typed form reads U9's helper: its sentence where the machine lists no such capability,
+  // nothing where it does, and then it forks there.
+  const machineLists = (capabilities: string[]) => {
+    resetRemoteSurfaces();
+    resetRemoteLaneBStore();
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities }]);
+  };
+
+  it('forks nothing for a session on a machine that serves no session acts: the typed form opens the panel, which says why', async () => {
+    machineLists([]);
+    const words = remoteUnavailableOf(REMOTE, 'session.fork');
+    expect(words).toContain('Update MAWS on mini');
     await expect(applyFork(REMOTE, 'elsewhere')).resolves.toBe(false);
     const close = vi.fn();
     render(<ForkWidget appSessionId={REMOTE} args="elsewhere" close={close} />);
     await settle();
-    expect(screen.getByRole('status').textContent).toBe(REMOTE_UNAVAILABLE['session.fork']);
+    expect(screen.getByRole('status').textContent).toBe(words);
     expect(forkSession).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it('forks a session on a machine that lists rl2.session-acts, once, with the prompt as its first message', async () => {
+    machineLists([SESSION_ACTS_CAPABILITY]);
+    expect(remoteUnavailableOf(REMOTE, 'session.fork')).toBeNull();
+    await expect(applyFork(REMOTE, 'elsewhere')).resolves.toBe(true);
+    await settle();
+    expect(forkSession.mock.calls).toEqual([[REMOTE, { kind: 'inPlace' }, { message: { content: 'elsewhere', display: 'elsewhere' }, rewindTo: null }]]);
   });
 });
