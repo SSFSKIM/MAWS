@@ -333,18 +333,21 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
     expect(lineOf(b).caption).toBe('Ran an agent, messaged a subagent, messaged 2 other sessions');
   });
 
-  // The architect's ruling on M5 (G): an agent is a step of the turn that holds its launching call. Live, an agent the
-  // turn messaged starts again in that turn under the sending call's id; that start launched nothing here, so the turn
-  // reads its message only, as the file and another machine's rows read it (u3-tasks-r1's turn be122771)
-  describe('an agent is a step of the turn that launched it', () => {
+  // The architect's ruling on M5 (G), narrowed: every agent of the turn's subagent rows is a step, but one whose start
+  // names a call of this turn that launches nothing. Live, an agent the turn messaged starts again under the sending
+  // call's id (u3-tasks-r1's turn be122771); the message is the step, as the file and another machine's rows read it
+  describe('an agent a message of this turn re-started is no step of it', () => {
     const lines = (b: Builder) => drawn(b.events).filter((row): row is RowOf<'divider'> => row.kind === 'divider').map((row) => row.caption);
+    const launch = (t: Builder, call: string, agent: string) => {
+      t.toolUse(call, 'Agent', { description: 'Survey', prompt: 'p' });
+      t.emit('subagent.started', { taskId: task(agent), toolUseId: tool(call), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      t.result(call, 'Async agent launched.');
+    };
 
-    it('a turn that messages a subagent another turn launched, its start seen again, reads the message only', () => {
+    it('a start carrying the turn’s own SendMessage call reads the message only, and the launching turn its agent', () => {
       const b = builder();
       b.turn('u1');
-      b.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'p' });
-      b.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
-      b.result('a1', 'Async agent launched.');
+      launch(b, 'a1', 'k1');
       b.end(['u1']);
       b.turn('u2');
       b.toolUse('m1', 'SendMessage', { to: 'k1', message: 'one more thing' });
@@ -354,7 +357,15 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
       expect(lines(b)).toEqual(['Ran an agent', 'Messaged a subagent']);
     });
 
-    it('a workflow launched by its call in the turn still counts', () => {
+    it('a nested launch, its start naming a call this turn does not hold, counts with the agent that made it', () => {
+      const b = turnOf((t) => {
+        launch(t, 'a1', 'k1');
+        t.emit('subagent.started', { taskId: task('k2'), toolUseId: tool('a-inner'), description: 'Inner', subagentType: null, isBackground: true, spawnDepth: 2, prompt: null });
+      });
+      expect(lines(b)).toEqual(['Ran 2 agents']);
+    });
+
+    it('a workflow launched by its call in the turn counts', () => {
       const b = turnOf((t) => {
         t.toolUse('w1', 'Workflow', { workflow: 'maws-probe' });
         t.emit('task.started', { taskId: task('wf1'), toolUseId: tool('w1'), taskType: 'local_workflow', description: 'Two echo agents in one phase', isBackground: true, workflowName: 'maws-probe' });
@@ -363,12 +374,12 @@ describe('a turn’s line (acceptance 7, decisions 8 and 9)', () => {
       expect(lines(b)).toEqual(['Ran an agent']);
     });
 
-    it('an agent whose start names no call of the turn is no step', () => {
+    it('the rule’s known edge: a start that names no call counts as an agent', () => {
       const b = turnOf((t) => {
         t.emit('subagent.started', { taskId: task('k2'), toolUseId: null, description: 'Orphan', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
         run(t, 't1', 'pnpm test');
       });
-      expect(lines(b)).toEqual(['Ran a command']);
+      expect(lines(b)).toEqual(['Ran an agent, ran a command']);
     });
   });
 
