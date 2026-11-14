@@ -121,6 +121,28 @@ describe('the agent away from the launch folder', () => {
     expect(acts()).toBeGreaterThan(0);
   });
 
+  // The branch review (finding 6): a run of the launch folder's runs on after the agent moves, and its events name the
+  // session; the page of the folder the agent moved to takes none of them, so it draws no run and no Cancel that could
+  // not reach it. The launch folder's page takes them again once the agent is back.
+  it('takes no output of a run of the launch folder on the page of the folder the agent moved to', async () => {
+    openScm();
+    render(<TestHost />);
+    await waitFor(() => expect(unstaged()).toBeTruthy());
+    moveTo(WT);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(2)); // the worktree's page asked for its own run: none
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    act(() => main.emit('scm.remote.output', { appSessionId: A, token: TOKEN, seq: 4, kind: 'stdout', text: 'Writing objects: 100%\n' }));
+    expect(useScm.getState().runs.get(at(A))).toBeNull();
+    expect(document.querySelector('[data-scm-output]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Cancel the running command' })).toBeNull();
+    moveTo(null);
+    await waitFor(() => expect(main.callsOf('scm.remote.last')).toHaveLength(3));
+    await waitFor(() => expect(useScm.getState().runs.get(at(A))).toBeNull());
+    act(() => main.emit('scm.remote.output', { appSessionId: A, token: TOKEN, seq: 5, kind: 'stdout', text: 'done\n' }));
+    expect(useScm.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, running: true });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Cancel the running command' })).toBeTruthy());
+  });
+
   // Held open: a Discard sheet is open on the launch folder's page when the agent moves.
   it('closes a sheet open at a move and clears the selection, leaving no control to confirm it', async () => {
     openScm();

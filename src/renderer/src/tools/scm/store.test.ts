@@ -564,6 +564,37 @@ describe('source control store applies no status of its own and resumes a run fr
     release();
   });
 
+  // The branch review (finding 6): on the page of a folder that is not the session's launch folder (no act runs there,
+  // so no run of the session does), an event is taken only for the run that checkout's snapshot named.
+  it('takes no event of the session by its id alone where its own runs do not run, before the snapshot or after it', async () => {
+    let answer!: (value: unknown) => void;
+    const main = scmMain(async (name) => (name === 'scm.remote.last' ? ok(await new Promise((resolve) => (answer = resolve))) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(at(A), { ownRuns: false });
+    await tick();
+    main.emit('scm.remote.output', out(4, 'the launch folder’s push\n')); // before the snapshot answers
+    answer(null);
+    await tick();
+    expect(store.getState().runs.get(at(A))).toBeNull();
+    main.emit('scm.remote.output', out(5, 'still the launch folder’s\n')); // after it
+    expect(store.getState().runs.get(at(A))).toBeNull();
+    release();
+  });
+
+  it('follows the run its checkout’s snapshot named where the session’s own runs do not run', async () => {
+    const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
+    const store = createScmStore(validated(main.bridge));
+    const release = store.getState().resume(at(A), { ownRuns: false }); // the checkout's latest run is another session's
+    await tick();
+    main.emit('scm.remote.output', { ...out(4, 'four\n'), appSessionId: B });
+    main.emit('scm.remote.output', out(1, 'the launch folder’s\n', OTHER_TOKEN));
+    main.emit('scm.remote.output', { ...exit(5, 0), appSessionId: B });
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, seq: 5, lines: ['one', 'two', 'three', 'four', ''], running: false });
+    main.emit('scm.remote.output', out(1, 'the launch folder’s next\n', OTHER_TOKEN)); // the held run ended: still not this checkout's
+    expect(store.getState().runs.get(at(A))).toMatchObject({ token: TOKEN, seq: 5 });
+    release();
+  });
+
   it('follows the run it holds from another session on the same checkout, and nothing else of that session', async () => {
     const main = scmMain((name) => (name === 'scm.remote.last' ? ok(snapshot()) : ok()));
     const store = createScmStore(validated(main.bridge));
