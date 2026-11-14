@@ -6,15 +6,16 @@ import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
 import { ResumeChooser } from '../resume/ResumeChooser';
-import { rowOfSession, selectOrgIndex } from '../stores/org-projects';
+import { rowOfRecord, selectOrgIndex } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
 
-// P5 O6 M5: scoped to the session's sidebar row (its org project's, else its machine's own), as the row's Resume… is.
+// P5 O6 M5: scoped to the session's sidebar row (its org project's, else its machine's own; another machine's session at
+// a listed address, its listing's: `rowOfRecord`), as the row's Resume… is.
 export function ResumeWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const projectId = useSessions((s) => s.records.get(appSessionId)?.projectId ?? null);
   const row = useSessions((s) => {
     const record = s.records.get(appSessionId);
-    return record === undefined ? undefined : (rowOfSession(selectOrgIndex(s, ipc.localMachine), s.projects, record) ?? undefined);
+    return record === undefined ? undefined : (rowOfRecord(selectOrgIndex(s, ipc.localMachine), s.projects, record, s.listed) ?? undefined);
   });
   const context = useMemo(() => ({ projectId, row, exclude: appSessionId }), [projectId, row, appSessionId]);
   return (

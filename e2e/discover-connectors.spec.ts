@@ -44,7 +44,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
 import { firstRead } from './support/discover-read';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { mainTabById, openAppDestination } from './support/shell';
+import { mainTabById, openAppDestination, pageRegion } from './support/shell';
 import { addressed } from './support/address';
 import { engineKeychainCustody, readOAuthLog, startOAuthFixture, summarizeOAuthLog, type OAuthFixture } from './support/connector-oauth';
 import { assertEngineProcessKeychainEnv, guardKeychain, killTree } from './support/keychain-guard';
@@ -540,12 +540,14 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       const sessionRow = projectRow.locator(`[role="treeitem"][data-menu="session:${sessionAddress}"]`);
       await expect(sessionRow, 'the started session is listed under its project').toBeVisible({ timeout: 15_000 });
       await sessionRow.click();
+      // UX wave U7b (O-40): the session's row leaves the Customize page for the session's tab
+      await expect(pageRegion(page)).toHaveCount(0);
       await expect(mainTabById(page, `session:${sessionAddress}`)).toHaveAttribute('aria-selected', 'true', { timeout: 15_000 });
       const main = page.locator('[data-region="main"]');
       await main.getByRole('button', { name: 'Add files, photos or commands' }).click();
       await page.getByRole('menuitem', { name: 'Connectors', exact: true }).hover();
       await page.getByRole('menuitem', { name: /^Connectors in this chat…/ }).click();
-      // the floating dialog's, not Customize's live list kept mounted in its own tab
+      // the floating dialog's, not Customize's live list (its page is closed)
       const dialog = page.locator('[data-widget-dialog="mcp"] [data-widget="mcp"]');
       await expect(dialog).toBeVisible();
       for (const name of [PLUGIN, 'fx-own']) {

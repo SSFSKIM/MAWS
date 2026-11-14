@@ -1,6 +1,6 @@
 // Shell navigation only. Tests keep their assertions about the feature itself at the call site;
 // chrome placement and the route to an optional surface belong here.
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
 import { localRef } from './address';
 import { applicationOf } from './launch';
 import { menu } from './menu';
@@ -10,17 +10,42 @@ export const surface = (page: Page, toolId: string): Locator => page.locator(`[d
 export const mainTabs = (page: Page): Locator => page.locator('[data-chrome-tabs]');
 export const mainTab = (page: Page, name: string | RegExp): Locator => mainTabs(page).getByRole('tab', { name, exact: typeof name === 'string' });
 export const mainTabById = (page: Page, id: string): Locator => mainTabs(page).locator(`[role="tab"][data-tab-id="${id}"]`);
+// The strip's tabs as mounted, drawn or not. Under a page the strip is invisible, and under the Settings dialog everything
+// outside the dialog is hidden from accessibility, so a role query of the strip finds nothing there; an inventory of what
+// the strip holds counts hidden tabs too (UX wave U7b). A tab a person clicks is found by `mainTab`.
+export const mountedTabs = (page: Page): Locator => mainTabs(page).locator('[role="tab"]');
+export const mountedTab = (page: Page, name: string | RegExp): Locator => mainTabs(page).getByRole('tab', { name, exact: typeof name === 'string', includeHidden: true });
 export const activeMainTab = (page: Page): Locator => page.locator('[data-chrome-tabs]:has([data-focused="true"]) [data-focused="true"] [role="tab"][aria-selected="true"], [data-chrome-tabs]:not(:has([data-focused="true"])) [role="tab"][aria-selected="true"]').first();
 export const sessionCards = (page: Page): Locator => page.getByRole('complementary', { name: 'Session cards', exact: true });
 export const sidebarFooter = (page: Page): Locator => page.locator('[data-region="sidebar"] footer');
-export const usagePill = (page: Page): Locator => sidebarFooter(page).locator('[data-usage-pill]');
+// UX wave U7b (O-47): usage is a ring at the title bar's own right end; a click opens the compact popover "Usage".
+export const usageRing = (page: Page): Locator => page.locator('[data-toolbar] [data-usage-ring]');
 
-// Destinations remain reachable when the narrow layout puts the sidebar in an overlay.
+// UX wave U7b (O-40; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M8 decision 1):
+// Settings is a modal dialog over the window, named "Settings"; Customize, Projects and the Artifacts library are a page
+// right of the sidebar (`[data-region="page"]`), with Back and the page's name in the title bar where the strip was.
+export const settingsDialog = (page: Page): Locator => page.getByRole('dialog', { name: 'Settings', exact: true });
+export async function openSettings(app: ElectronApplication, page: Page): Promise<Locator> {
+  await menu(app, 'settings.open');
+  await expect(settingsDialog(page)).toBeVisible();
+  return settingsDialog(page);
+}
+export const pageRegion = (page: Page): Locator => page.locator('[data-region="page"]');
+export const pageTitle = (page: Page): Locator => page.locator('[data-toolbar] [data-page-title]');
+export async function backToTabs(page: Page): Promise<void> {
+  await pageTitle(page).getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(pageRegion(page)).toHaveCount(0);
+}
+
+// Destinations remain reachable when the narrow layout puts the sidebar in an overlay. Each opens a page, not a tab.
 export async function openAppDestination(page: Page, name: 'Projects' | 'Artifacts' | 'Customize'): Promise<void> {
   const entry = page.getByRole('navigation', { name: 'App destinations' }).getByRole('button', { name, exact: true });
   if (await page.locator('[data-region="sidebar"]').evaluate((element) => element.hasAttribute('inert'))) await menu(applicationOf(page), 'sidebar.toggle');
   await entry.click();
-  await expect(mainTab(page, new RegExp(name))).toHaveAttribute('aria-selected', 'true');
+  await expect(entry).toHaveAttribute('aria-current', 'page');
+  await expect(pageTitle(page).getByRole('heading', { level: 1, name, exact: true })).toBeVisible();
+  await expect(pageRegion(page)).toBeVisible();
+  await expect(mountedTab(page, name), 'no tab of the page is mounted in the strip').toHaveCount(0);
 }
 
 const namedSurface = (page: Page, name: string) => page.locator(`[data-region="panel"]:not([inert]) [data-surface][aria-label=${JSON.stringify(name)}]`);

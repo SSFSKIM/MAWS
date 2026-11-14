@@ -764,6 +764,18 @@ describe('terminal view', () => {
     expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
   });
 
+  // UX wave U7b (§N): a page covering the side column makes its tools not visible (`ctx.visible`, panel/ToolBody.tsx);
+  // the terminal then detaches its renderer, and mounts it again at Back.
+  it('detaches the renderer when it stops being visible, as behind a page, and mounts it again when it is visible again', () => {
+    const state = newState();
+    const { rerender } = render(<View state={state} ctx={context()} />);
+    expect(registry.terminals.mount).toHaveBeenCalledTimes(1);
+    rerender(<View state={state} ctx={context({ visible: false })} />);
+    expect(registry.terminals.unmount).toHaveBeenCalledWith(state.terminalId);
+    rerender(<View state={state} ctx={context()} />);
+    expect(registry.terminals.mount).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps a selected tab’s focus through StrictMode’s simulated remount', () => {
     const state = newState();
     render(

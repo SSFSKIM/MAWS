@@ -31,9 +31,9 @@ import { ipc } from '../ipc/client';
 import { sessionRow, subscribeSessionRows } from '../keymap/actions-runtime';
 import { selectOrgIndex, setKeyOfProject, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { useLayout, type LayoutState } from '../stores/layout';
+import { tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
-import { activeTab, allTabs, currentSet, locateTab } from '../stores/layout-model';
+import { allTabs, currentSet, locateTab } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { withdrawVersionRequest } from '../tools/artifacts/viewers/requests'; // P4-B4: a stale main ask goes with a move
@@ -294,7 +294,7 @@ useLayout.subscribe((state, before) => {
 // The keymap actions (M4; no default chords): the focused main tab into the panel, and the shown panel's Artifacts record
 // into a main tab (its selected tab when that is one, else the first the panel lists). A refusal says why in a toast.
 export function moveFocusedArtifactToPanel(): void {
-  const tab = activeTab(layout().main);
+  const tab = tabOnScreen(layout()); // UX wave U7b (§N): behind a page there is none, and the notice says so
   const refusal = tab ? transferRefusal({ to: 'panel', mainTabId: tab.id }) : TRANSFER_COPY.notArtifact;
   if (refusal !== null || !tab) return refused(refusal ?? TRANSFER_COPY.notArtifact);
   void moveArtifactToPanel(tab.id);

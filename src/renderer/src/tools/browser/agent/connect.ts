@@ -28,20 +28,22 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../../../ipc/client';
 import { panelHost, shownSession, usePanelHost } from '../../../panel/host';
-import { useLayout } from '../../../stores/layout';
+import { pageOpen, useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { browserTool, type BrowserParams } from '../BrowserTool';
 import { agentTabSelected } from '../store';
 
 const hasBrowserTool = (appSessionId: AppSessionId) => useLayout.getState().panelTabsOf(appSessionId).some((tab) => tab.toolId === browserTool.id);
 const inTurn = (appSessionId: AppSessionId) => useSessions.getState().engine.get(appSessionId)?.busy === true;
+// UX wave U7b (§N): the session the window shows, and not behind a page, where the Browser follows no agent.
+const onScreen = (appSessionId: AppSessionId) => shownSession() === appSessionId && !pageOpen(useLayout.getState());
 
 export function connectBrowserAgent(client: MawsBridge = ipc): () => void {
   // a session in a turn → the sessions whose Browser tool that turn has had its one open of (or found open)
   const followed = new Map<AppSessionId, Set<AppSessionId>>();
   const asking = new Map<AppSessionId, () => void>(); // the sessions whose opening waits for main's answer → stop watching
   let connected = true;
-  const mayOpen = (appSessionId: AppSessionId) => shownSession() === appSessionId && !hasBrowserTool(appSessionId) && usePanelHost.getState().tools.has(browserTool.id);
+  const mayOpen = (appSessionId: AppSessionId) => onScreen(appSessionId) && !hasBrowserTool(appSessionId) && usePanelHost.getState().tools.has(browserTool.id);
   // Whether the person acts on that Browser while the answer is out: any add or removal of the session's Browser tool
   // in this window, or any change of the session it shows, even one undone before the answer.
   const watch = (appSessionId: AppSessionId) => {
@@ -58,7 +60,7 @@ export function connectBrowserAgent(client: MawsBridge = ipc): () => void {
 
   const offs = [
     client.on('browser.agent.acting', ({ appSessionId, tabId, actingSessionId }) => {
-      if (shownSession() !== appSessionId) return;
+      if (!onScreen(appSessionId)) return;
       const turn = [actingSessionId, appSessionId].find(inTurn);
       if (turn !== undefined) {
         const opened = followed.get(turn) ?? new Set<AppSessionId>();
@@ -73,7 +75,9 @@ export function connectBrowserAgent(client: MawsBridge = ipc): () => void {
         person.off();
         if (!connected || person.moved() || !mayOpen(appSessionId)) return;
         if (selected?.tabId === tabId) agentTabSelected(selected);
-        panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId, params: { appSessionId }, activate: true });
+        // UX wave U7b (Interfaces §F): not the person's act. `mayOpen` already answered no behind a page, so this opens no
+        // session; the origin travels with the call all the same.
+        panelHost.addTool<BrowserParams>(browserTool.id, { appSessionId, params: { appSessionId }, activate: true, asked: 'agent' });
       };
       void client.invoke('browser.agent.show', { tabId }).then(
         (result) => answered(result.ok ? result.value.selected : null),

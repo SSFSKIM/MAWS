@@ -58,7 +58,7 @@
 //   (f) and (g) branch on `host.holder` (above): the older host's form is kept with an engine host that stands in for
 //        one before O16 (MAWS_E2E_HOST_WITHOUT_HOLDER, detached.ts).
 import { addressed } from './support/address';
-import { openSurface, sideColumn, surface } from './support/shell';
+import { openSurface, settingsDialog, sideColumn, surface } from './support/shell';
 import { createConnection } from 'node:net'; // P3-A M5
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -68,6 +68,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
 import type { AttentionItem } from '@shared/graph/attention';
 import { daemonPaths } from '@shared/daemon/files';
+import type { HostStatus } from '@shared/ipc/schema/host';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { DISCOVERY_WAKE_BOUND_MS } from '../src/mawsd/discovery-wake';
 import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
@@ -580,7 +581,8 @@ test('(d) G3: Settings’ Stop all stops the sessions and the supervisor; a fres
     await untilRequested(run.page, id);
 
     await menu(run.maws, 'settings.open');
-    const group = run.page.getByRole('group', { name: 'Background supervisor' });
+    // UX wave U7b: Settings is a dialog over the window, not a main tab
+    const group = settingsDialog(run.page).getByRole('group', { name: 'Background supervisor' });
     await expect(group.getByRole('status')).toHaveText(new RegExp(`^Running since ${CLOCK} · pid ${old} · 1 session · exits 10 min after the last session ends$`));
     await shots(run.maws, 'settings-supervisor', () => group);
 
@@ -728,6 +730,17 @@ async function keptMidTurn(s: Scratch, o: { env?: Record<string, string>; fixtur
 // P5 O16 M3c: the kept engine host stands in for one from before O16, whose welcome lists no `host.holder` (detached.ts)
 const OLDER_HOST = { MAWS_E2E_HOST_WITHOUT_HOLDER: '1' };
 
+// After an update (`MAWS_E2E_BUILD_ID: 'stale'`), the successor of `pid` once host.status reads it as the app's own build.
+// `matches` compares the successor's status with `mawsd`'s, two reports that reach main apart, and `mawsd`'s engine-host
+// build reads as the seam's until it has started a host of its own, so for a status or two after the pid moves it can
+// still read 'build'. The case waits for the reading it asserts, which a successor of another build never reaches.
+async function successorOfOwnBuild(s: Scratch, page: Page, pid: number): Promise<HostStatus> {
+  await s.ready(page, (st) => st.supervisor!.pid !== pid, 60_000);
+  let moved: HostStatus | null = null;
+  await expect.poll(async () => (moved = await s.ready(page, (st) => st.supervisor!.pid !== pid)).matches, { timeout: 30_000, message: 'the successor reads as the app’s own build' }).toBe('same');
+  return moved!;
+}
+
 test('(f) an update that changed no wire shape, met by an engine host without host.holder: the banner names the kept session; Restart now moves to a new supervisor', async () => {
   await withScratch('updated', async (s) => {
     const { pid } = await keptMidTurn(s, { env: OLDER_HOST });
@@ -742,7 +755,7 @@ test('(f) an update that changed no wire shape, met by an engine host without ho
     expect(fresh).not.toBe(pid);
     await expect.poll(() => isAlive(pid), { timeout: 10_000 }).toBe(false);
     await expect(notice).toHaveCount(0);
-    expect(await s.ready(run.page)).toMatchObject({ matches: 'same' });
+    await successorOfOwnBuild(s, run.page, pid);
     expect(run.maws.consoleErrors()).toEqual([]);
   });
 });
@@ -756,7 +769,7 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
     s.useStub();
     const { pid, id, engine, requestId } = await keptMidTurn(s);
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
-    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
+    const moved = await successorOfOwnBuild(s, run.page, pid);
     expect(moved, 'a supervisor of the app’s own build, nothing armed').toMatchObject({ matches: 'same', supervisor: { exitWhenIdle: false } });
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(s.log(), 'host.log: the old host drained at once').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
@@ -830,8 +843,7 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     expect(s.log(), 'host.log: nothing frozen while the call runs').not.toContain('handover armed');
 
     rmSync(hold); // the call finishes; the host's next status is quiet, and the handover follows
-    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
-    expect(moved).toMatchObject({ matches: 'same' });
+    const moved = await successorOfOwnBuild(s, run.page, pid);
     expect(moved.handover, 'nothing waited for any more').toBeUndefined();
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(s.log(), 'host.log: drained at once').toContain('handover armed: 2 hosted rows frozen, 0 calls in flight');
@@ -900,7 +912,7 @@ test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the fr
     expect(meanwhile.reason).toBeNull();
 
     rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
-    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await successorOfOwnBuild(s, run.page, pid);
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(isAlive(daemon), 'the same mawsd serves the successor').toBe(true);
     await heldCallAdopted(s, run, id, engine);
@@ -960,16 +972,25 @@ async function ringText(page: Page, ptyId: string): Promise<string> {
   }, ptyId);
 }
 
+// A path as one literal /bin/sh word: a scratch root is a tmpdir path, never expanded by the shell that reads it.
+const shellQuoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
 // (h) G4, inverted (acceptance 2): the terminals belong to `mawsd`'s pty host, not the app. After a
 // keep-quit the restored tab is alive, the same shell pid, and its ring holds what the shell printed while the app was
 // closed; a second terminal that wrote more than the ring and the watermark (about 2 MiB) with the app closed has
 // reached its end marker. The markers are computed by the shell, so the echoed command line never matches them.
-// A command written to a shell runs only once the shell reads it, and the quit's report takes milliseconds: the case
-// quits once both shells report a foreground command (C9's probe, the one the guard asks), so the report names both.
+// The quit's report names both shells busy only if both run their command when the guard probes them, and C9's probe
+// (`pty.foreground`, the one the guard asks) reads a shell busy while node-pty's helper execs it and while a startup
+// file runs a child, then idle until the shell reads the command it was given: a busy reading counts only once the
+// shell has printed the command's start. So each command prints that, then holds the terminal (one job, never the
+// shell itself between steps) until the case releases it after the quit, and the case quits once the guard's own report
+// counts both; the output lands while no app runs.
 test('(h) G4, inverted: after a keep-quit the restored terminal is the same live shell and holds what it printed while the app was closed; one that wrote past its ring reached its end', async () => {
-  const DELAY_S = 8; // after the shells' commands have started: the quit begins and the output lands while no app runs
   const WRITTEN = 3_000_000;
   await withScratch('terminal', async (s) => {
+    const release = join(s.root, 'm7-release');
+    const ended = [join(s.root, 'm7-closed.done'), join(s.root, 'm7-writer.done')];
+    const held = `echo m7-started-$((40+2)); sh -c 'until [ -e "$1" ]; do sleep 0.1; done' release ${shellQuoted(release)}`;
     const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
     const daemonPid = (await s.ready(first.page)).daemon!.pid;
     const id = await s.record(first.page);
@@ -985,16 +1006,19 @@ test('(h) G4, inverted: after a keep-quit the restored terminal is the same live
       const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
-    value(await invoke(first.page, 'pty.write', { ptyId, data: `sleep ${DELAY_S}; echo m7-closed-$((40+2))\n` }));
-    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `sleep ${DELAY_S}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2))` }));
-    const busy = async (id: typeof ptyId) => value(await invoke(first.page, 'pty.foreground', { ptyId: id })).busy;
-    await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map(busy))).every(Boolean), { message: 'both shells run their command' }).toBe(true);
+    value(await invoke(first.page, 'pty.write', { ptyId, data: `${held}; echo m7-closed-$((40+2)); : > ${shellQuoted(ended[0])}\n` }));
+    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `${held}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2)); : > ${shellQuoted(ended[1])}` }));
+    await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map((p) => ringText(first.page, p)))).every((text) => text.includes('m7-started-42')), { timeout: 15_000, message: 'both shells started their command' }).toBe(true);
+    const report = () => first.maws.app.evaluate(() => (globalThis as unknown as { __maws_quit: { report(): Promise<{ busyTerminals: number; terminalsUnknown: boolean }> } }).__maws_quit.report());
+    // what the quit's line is held to below, read as the guard reads it
+    await expect.poll(async () => { const r = await report(); return r.terminalsUnknown ? 'terminals unknown' : `${r.busyTerminals} busy`; }, { timeout: 15_000, message: 'the quit guard’s own report counts both shells busy' }).toMatch(/^(2 busy|terminals unknown)$/);
     await s.quit(first);
     // the two shells run a command, so the log names them; on the daemon shape they keep running and nothing is asked (P5 O3-D, Q1)
     expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (2 busy terminals|terminals unknown), not asked: they outlive the app$/));
     expect(isAlive(shellPid), 'the shell outlives the app').toBe(true);
     expect(isAlive(daemonPid), 'mawsd serves the terminals').toBe(true);
-    await new Promise((r) => setTimeout(r, (DELAY_S + 10) * 1_000)); // both commands run to their end with no app
+    writeFileSync(release, ''); // both commands run to their end with no app
+    await expect.poll(() => ended.every((path) => existsSync(path)), { timeout: 60_000, message: 'both commands ended while no app runs' }).toBe(true);
 
     const second = await s.launch();
     expect((await s.ready(second.page)).daemon!.pid, 'the same mawsd').toBe(daemonPid);

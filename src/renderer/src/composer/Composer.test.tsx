@@ -857,6 +857,21 @@ describe('one Stop handler for every pane', () => {
     first.unmount();
   });
 
+  // UX wave U7b (§N, the second table): ⌘. finds no session in front behind a page, as with a Customize tab in front;
+  // behind the Settings dialog the session is on screen and is stopped, as today.
+  it('⌘. interrupts nothing behind a page, and the working session behind the Settings dialog', async () => {
+    busy(A);
+    tabs(0);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    await key(document.body, { key: '.', code: 'Period', metaKey: true });
+    expect(invoked('session.interrupt')).toEqual([]);
+    act(() => useLayout.getState().closeDestination());
+    act(() => useLayout.getState().openSettings());
+    await key(document.body, { key: '.', code: 'Period', metaKey: true });
+    expect(invoked('session.interrupt')).toEqual([{ appSessionId: A_ID, cancelEngineQueued: false, holdEngineQueued: true }]);
+  });
+
   it('calls nothing for an unstarted focused session, and ⌘L focuses the focused pane’s editor', async () => {
     tabs(0);
     mount([{ index: 0, id: A }], <ComposerAppKeys />); // no status, no record: nothing to interrupt

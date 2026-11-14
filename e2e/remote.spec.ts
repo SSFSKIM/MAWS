@@ -66,6 +66,7 @@ import { isolatedGitEnv } from '../test/support/git-env';
 import type { MachineState } from '../src/shared/ipc/schema/machines';
 import type { SessionEvent } from '../src/shared/graph/events';
 import { addressOf } from '../src/shared/machine/address';
+import { machineProjectId } from '../src/shared/machine/project-ids'; // the UX wave, U9: a plain folder's project, as sminos derives it
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
@@ -87,7 +88,7 @@ import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-sce
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M10
-import { activeMainTab, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
+import { activeMainTab, backToTabs, hideSurface, mainTabById, mainTabs, moveSideTab, openSurface, sessionCard, showSessionCards, sideColumn, sideGroup, sideTab, surface } from './support/shell';
 import { backgroundAgentRecords, backgroundBashRecords, turnEndRecords, userRecord } from './support/lane-a'; // UX wave U8b M9
 import { seedTranscript, SIDE_QUESTION, SideJournal, slugOf, transcript } from './support/side-replay';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarOf } from './support/sidebar';
@@ -1040,7 +1041,10 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
       // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
-      await sessionTab.click();
+      // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
+      // again (the strip is inert under a page, so the tab is not clicked)
+      await backToTabs(again);
+      await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
       await openSurface(again, 'Files');
       const files = surface(again, 'files');
       const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
@@ -2388,9 +2392,10 @@ test('M9: "+ Session" on B with no registered checkout sets its folder up there:
 // its home, Trust and start sends again, and B starts the session in its home with no project. Claude Code never saves
 // trust for a home folder, so that start runs no bootstrap (services/sessions/launch-mapping.ts, `trustMapping`: each
 // launch attests it), and B's replay list holds none before the home session's journal.
-// In A's sidebar both sessions sit under B's machine row: A reads no project of a machine its org rows cover
-// (renderer/src/ipc/events.ts) and a listing joins only A's own projects (main/org/rows.ts), so a project B alone holds
-// has no row of A's, and a session in it or in none is filed under its machine (stores/org-projects.ts).
+// In A's sidebar both sessions sit under B's machine row: each is listed under a project the key table gives no row key
+// (a listing's `orgKey` is the table's entry for its project, main/org/rows.ts), so its listing files under its machine,
+// and the record A reads over the link files where its listing is, whether or not B's registry entry for the folder
+// has reached A (stores/org-projects.ts, ticket 644).
 const MF_FOLDER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000c8'; // the engine session ids the journals pin
 const MF_HOME_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000c9';
 const MF_FOLDER = ['Scratch', 'loose-notes'] as const; // the folder's path from B's home, no git repository on it
@@ -2540,7 +2545,7 @@ test('machine first: a New chat tab with no project starts on B, in a folder wit
       const record = await recordOnB(app);
       expect(record?.directory, 'it runs in the folder on B').toBe(folder);
       expect(record?.projectId, 'in the project B registered for the folder').toBe((await projectsOnB()).find((p) => p.directory === folder)?.id);
-      await underB(folderAddress, 'its row under B’s machine row: a project B alone holds has no row of A’s');
+      await underB(folderAddress, 'its row under B’s machine row: its listing’s project has no row key on A');
     });
 
     await test.step('a second New chat tab, B and Don’t work in a project: the first Send is refused untrusted, Review trust… shows B’s trust card for its home, and Trust and start sends again, so B starts the session in its home with no project', async () => {
@@ -2973,6 +2978,11 @@ async function readWhileDown(page: Page, electron: ElectronApplication, before: 
 /**
  * B's lane B session on `journal`, its first turn over and listed; A launched over the relay, the session open in A (with
  * `open: false`, left as A's listed row, no tab of it opened: the UX wave, U9, M4's acts scene).
+ *
+ * The checkout is a plain folder (no git, no `.smns`), so sminos lists the session under B's own project, its
+ * `machine_project_id` (src/shared/machine/project-ids.ts), which is also the project B's registry gives the folder. A
+ * machine's own project takes no row key on A, so the session's row stays under B's machine row however its listing,
+ * its record and B's registry entry reach A, and in whichever order they arrive (ticket 644's filing).
  */
 async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[] }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-checkout');
@@ -3013,7 +3023,8 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
   keepMainLines(a);
   const { page } = a;
   await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
-  await scene.sminos.list({ engine, app, owners: [scene.member], project: PROJECT, title: opts.title, cwd: checkout });
+  const bProject = machineProjectId((await scene.org.chain()).org, B_NAME);
+  await scene.sminos.list({ engine, app, owners: [scene.member], project: bProject, title: opts.title, cwd: checkout });
   await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === app), { timeout: 60_000, message: `B's session is a row of A's\n${mainSaid(page)}` }).toBe(true);
   await expandMachine(page, b.ref);
   const row = sessionRow(page, addressOf(b.ref, app));
@@ -3022,7 +3033,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
     await row.click();
     await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
   }
-  return { scene, b, page, electron: a.app, turnOver, sendOnB, app };
+  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject };
 }
 
 test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
@@ -3278,7 +3289,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
     journal.turn(ACTS_REPLY);
     journal.rename(RENAMED_ON_A); // a live session is renamed through its engine (the host's `rename_session`)
     const fork = new SideJournal(ACTS_FORK, join(root, 'b-checkout')); // the fork's engine: its prelude, no turn
-    const { scene, b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
+    const { scene, b, page, app, bProject } = await laneBOpened({ root, aUserData, journal, first: 'Get ready to be acted on.', firstReply: ACTS_REPLY, title: ACTS_TITLE, open: false, launches: [fork] }, held);
     const address = addressOf(b.ref, app);
     const row = sessionRow(page, address);
     type Record = { title: { text: string }; archived: boolean; lineage: { parentAppSessionId: string } | null };
@@ -3313,7 +3324,7 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await expect.poll(async () => (await onB(bare))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(app);
       expect(await sessionTabsOf(page), 'the source’s tab stays').toContain(address);
       // sminos lists the fork as it lists every session of B's: B's machine row keeps a row once the source is archived
-      await scene.sminos.list({ engine: ACTS_FORK, app: bare, owners: [scene.member], project: PROJECT, title: 'B’s fork', cwd: join(root, 'b-checkout') });
+      await scene.sminos.list({ engine: ACTS_FORK, app: bare, owners: [scene.member], project: bProject, title: 'B’s fork', cwd: join(root, 'b-checkout') });
       await quoting(expect(sessionRow(page, forked!), 'the fork’s row in A’s sidebar').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
     });
 
@@ -3327,7 +3338,8 @@ test('U9 A8, A9, A10: from A, Rename… on B’s listed row renames it on B; For
       await expect(row, 'the row leaves at once').toHaveCount(0, { timeout: 5_000 });
       await expect.poll(() => sessionTabsOf(page), { timeout: 10_000, message: 'the session’s tab is closed (the layout as main last saved it)' }).not.toContain(address);
       await expect.poll(async () => (await onB(app))?.archived ?? null, { timeout: 30_000, message: 'B’s record is archived' }).toBe(true);
-      await page.waitForTimeout(5_000); // the hub's listing has had its time: the row stays gone
+      // the hub's listing withdrawn as main holds the org's rows: the row stays gone once the hub has said so
+      await expect.poll(async () => (await rowsOf(page)).some((r) => r.machine === b.ref && r.session === app), { timeout: 30_000, message: 'the hub withdrew the session’s listing' }).toBe(false);
       await expect(row).toHaveCount(0);
     });
 

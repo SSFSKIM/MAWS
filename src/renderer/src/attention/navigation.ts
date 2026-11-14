@@ -19,8 +19,8 @@ import { registerAction } from '../keymap/actions-runtime';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { SIDE_TOOL_ID } from '../side/actions';
 import { selectNeedsYou, useAttention } from '../stores/attention';
-import { useLayout } from '../stores/layout';
-import { activeTab, currentSet, floatingPane } from '../stores/layout-model';
+import { pageOpen, tabOnScreen, useLayout } from '../stores/layout';
+import { currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { queueComposerAttachment } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
@@ -43,7 +43,9 @@ const openInFocusedPane = (appSessionId: AppSessionId) => {
 
 function openNextNeedsYou(): void {
   const rows = selectNeedsYou(useAttention.getState(), useSessions.getState());
-  const tab = activeTab(useLayout.getState().main);
+  // UX wave U7b (§N, the second table; the architect's ruling): behind a page no session is current, so the session
+  // behind it, when it waits, is opened first, which leaves the page.
+  const tab = tabOnScreen(useLayout.getState());
   const current = tab?.kind === 'session' ? tab.appSessionId : null;
   const next = nextNeedsYou(rows, current);
   if (next) openItem(next.appSessionId, next.oldest);
@@ -72,8 +74,10 @@ function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): 
 // scalpel-3#1: only a `maws` ask; the engine's AskUserQuestion is a `question` item as well, but its card docks in the
 // session's own composer (swap.ts), so the panel does not show it. Scale-review C scalpel-2#3: a side thread drawn in
 // the open panel's Side pane is its whole session pane, docked card included (visibility.ts counts it the same way).
+// UX wave U7b (§N): behind a page no request is on screen.
 function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undefined): boolean {
   const layout = useLayout.getState();
+  if (pageOpen(layout)) return false;
   const { main, regions } = layout;
   const context = surfaceSession(layout);
   const surfaces = surfaceTabs(layout, context);

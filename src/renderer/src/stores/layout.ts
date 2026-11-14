@@ -22,13 +22,16 @@ import {
   PanelParamsSchema,
   PanelPinnedSchema,
   MAIN_CARD_PREFIX,
+  pageAtStart,
   PanelSessionStateSchema,
+  StoredDestinationSchema,
   storedMain,
   storedMainSchema,
   storedPanelSurfacesSchema,
   storedRegionsSchema,
   stripOf,
   type CardId,
+  type Destination,
   type FloatingCardSize,
   type LayoutKey,
   type LayoutMain,
@@ -50,6 +53,7 @@ import * as model from './layout-model';
 import { rememberSurfaceContext, surfaceRefs, surfaceScope, surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { clampShare, groupOf, joinLower, repairScope, scopeValues, sideGroups, valuesOf, type ScopeValues, type SideGroup, type SideGroupName, type SideGroups } from '../panel/surface-model'; // UX wave U8b
 import { isWideColumn } from '../app/shell-geometry'; // UX wave U8b
+import type { SettingsSection } from '../settings-tab/SettingsView'; // UX wave U7b: a type only, so no view loads with the store
 
 type Pane = 0 | 1;
 
@@ -84,6 +88,17 @@ export interface LayoutState {
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
+  // UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F; the wave's
+  // UC-12): the page open beside the sidebar in place of the tabs (stored under `destination`), and the Settings dialog
+  // (never stored, as the Overview is not). Each is apart from the strip: opening or closing either leaves `main` as it
+  // is, and every act that brings a tab to the front (`commitShown`) closes both in the write that lands it.
+  destination: Destination | null;
+  settings: { section: SettingsSection | null } | null;
+  openDestination(target: Destination): void; // replaces an open one; the same kind again changes only its fields; closes the dialog
+  closeDestination(): void;
+  openSettings(section?: SettingsSection): void; // over the tabs or a page; open already: only a section that is given changes
+  closeSettings(): void;
+  closeFront(): boolean; // ⌘W: the dialog if it is open, else the page; false when neither was
   // `settle` runs once the reads are in, before `known` is first asked and the early changes are captured (debt wave 5:
   // the shell drains its batched record events there, and the removals that makes are replayed with the rest).
   // P5 O6 M5: `rekeyOf` answers what a project key from before M5 (a project's address) becomes (`model.RekeyOf`); every
@@ -239,6 +254,35 @@ export function reconcileFold(before: Strip, next: Pick<LayoutState, 'main' | 'r
 
 // U13a (the plan's §B): the id of the tab in front, the active tab of the focused pane; '' while that pane is empty.
 export const frontOf = (state: Pick<LayoutState, 'main'>): string => model.activeTab(state.main)?.id ?? '';
+
+// ---- UX wave U7b: the page and the dialog (its execution document, Interfaces §F and §N) -------------------------------
+
+/** The logical answer the readers of §N ask: a page is open, so nothing behind it is on screen. It decides the size of nothing and unmounts nothing a page hides: what is hidden stays mounted at its box (M5, decision 2). */
+export const pageOpen = (state: Pick<LayoutState, 'destination'>): boolean => state.destination !== null;
+
+/** What the person is looking at: 'settings', 'page:<kind>', or `frontOf(state)`. */
+export function placeOf(state: Pick<LayoutState, 'main' | 'destination' | 'settings'>): string {
+  if (state.settings !== null) return 'settings';
+  if (state.destination !== null) return `page:${state.destination.kind}`;
+  return frontOf(state);
+}
+
+/** The tab an act of the person's applies to when the act shows nothing: the tab in front, or null while a page covers it (§N, the second table). */
+export const tabOnScreen = (state: Pick<LayoutState, 'main' | 'destination'>): TabRef | null => (pageOpen(state) ? null : (model.activeTab(state.main) ?? null));
+
+// The side column docked: neither maximized nor floating, its width and collapsed as they were.
+const docked = (r: LayoutRegions): LayoutRegions => (r.panel.maximized || r.panel.floating ? { ...r, panel: { ...r.panel, maximized: false, floating: false } } : r);
+
+let quiet = 0;
+/** Runs `run` as something that is not the person's act: a tab it brings to the front closes neither the page nor the dialog. It holds only for what runs synchronously inside it. */
+export function quietly<T>(run: () => T): T {
+  quiet += 1;
+  try {
+    return run();
+  } finally {
+    quiet -= 1;
+  }
+}
 
 // A fold a stored value holds in any of its sets (P4-B3x): `stripOf` keeps only the float of the set that was showing,
 // so a fold made in another set before U13a ends with its float there.
@@ -436,9 +480,17 @@ export function createLayoutStore() {
     // P4-B3x: every change of the tabs or the regions lands through `commit`, so the fold rule holds at every state.
     // P5 O6 M2: every change lands with its session tabs titled, so a tab is titled when it opens
     let titleOf: TitleOf = () => undefined;
-    const commit = (nextMain: Strip, nextRegions: LayoutRegions) => {
-      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: nextRegions });
-      set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main) });
+    // The regions' changes made before the persisted value arrives, replayed over it (W5, below).
+    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
+    // `also`: what lands in the same write (U7b: the page and the dialog an act that shows a tab closes). UX wave U7b (the
+    // architect's ruling on M5): while the Overview is over the main region, the side column is docked. The Overview
+    // opened over a page docks nothing (the page writes nothing of the side column), so a write that closes the page
+    // under the Overview docks the column then.
+    const commit = (nextMain: Strip, nextRegions: LayoutRegions, also?: Partial<Pick<LayoutState, 'destination' | 'settings'>>) => {
+      const docks = also?.destination === null && get().destination !== null && get().overviewOpen;
+      if (docks && !get().hydrated) earlyRegions.push(docked);
+      const next = reconcileFold(get().main, { main: model.titleTabs(nextMain, titleOf), regions: docks ? docked(nextRegions) : nextRegions });
+      set({ ...next, panelSurfaces: rememberSurfaceContext(get(), next.main), ...also });
     };
     const earlySurfaces: ((state: PanelSurfaces) => PanelSurfaces)[] = [];
     const surfaces = (change: (state: PanelSurfaces) => PanelSurfaces, from = get().panelSurfaces) => {
@@ -460,17 +512,25 @@ export function createLayoutStore() {
     // UX wave U8b: a card opened or folded before the stored folds are read is replayed over them likewise.
     const earlyCards: ((open: CardId[]) => CardId[])[] = [];
     const early: ((m: Strip) => Strip)[] = [];
-    const main = (next: (m: Strip) => Strip) => {
+    const main = (next: (m: Strip) => Strip, also?: Partial<Pick<LayoutState, 'destination' | 'settings'>>) => {
       if (!get().hydrated) early.push(next);
-      commit(next(get().main), get().regions);
+      commit(next(get().main), get().regions, also);
     };
+    // UX wave U7b ("At hydration", rules 1 and 2): what the person did before the layout was read. `pageEarly`: a page
+    // opened or closed; `shownEarly`: an act that shows a tab, outside `quietly`. The replay of `early` changes the strip
+    // only, so what an early act closed is decided here and not replayed.
+    let pageEarly = false;
+    let shownEarly = false;
     // U13a (rule 7; the plan's §C and its table): every act that brings a tab to the front lands here, and nothing else
-    // does; it stands for the act, whether or not the strip changes with it. U7 clears its page and closes its dialog
-    // here, in the same store write; until then it is `main`.
-    const commitShown = (next: (m: Strip) => Strip) => main(next);
+    // does; it stands for the act, whether or not the strip changes with it. U7b: it closes the page and the dialog in the
+    // same store write, unless it runs inside `quietly` (an agent's or a mod's act, Interfaces §F).
+    const commitShown = (next: (m: Strip) => Strip) => {
+      if (quiet > 0) return main(next);
+      if (!get().hydrated) shownEarly = true;
+      main(next, { destination: null, settings: null });
+    };
     // The regions likewise (W5: a project opened in the sidebar, or a region toggled, before the persisted value arrives
     // is kept over it).
-    const earlyRegions: ((r: LayoutRegions) => LayoutRegions)[] = [];
     const regions = (next: (r: LayoutRegions) => LayoutRegions) => {
       if (!get().hydrated) earlyRegions.push(next);
       commit(get().main, next(get().regions));
@@ -506,6 +566,8 @@ export function createLayoutStore() {
       hydrated: false,
       dragging: null,
       overviewOpen: false,
+      destination: null,
+      settings: null,
 
       async hydrate(client, known, opts = {}) {
         set({ knownSession: known });
@@ -554,10 +616,11 @@ export function createLayoutStore() {
           : [];
         // UX wave U8b (Interfaces §A): the three keys of the side column; a profile without `panelTools.groups` is read
         // for the first time by this build (below).
-        const [storedGroups, storedWidths, storedCards] = await Promise.all([
+        const [storedGroups, storedWidths, storedCards, storedPage] = await Promise.all([
           readHeld('panelTools.groups', PanelGroupsSchema, PANEL_GROUPS_DEFAULT),
           readHeld('panelTools.widths', PanelWidthsSchema.nullable(), null),
           readHeld('cards.open', CardsOpenSchema, { version: 1, open: [...CARDS_OPEN_DEFAULT] }),
+          readHeld('destination', StoredDestinationSchema.nullable(), null), // UX wave U7b: read only where the file holds it
         ]);
         const [persistedRegions, persistedMain, panelPinned, storedParams, storedNoSession, storedSurfaces, ...panels] = await Promise.all([
           read('regions', storedRegionsSchema(local), LAYOUT_DEFAULTS.regions), // W5: a version-1 value is migrated
@@ -651,7 +714,16 @@ export function createLayoutStore() {
         const live = livePanelTabIds(hydratedPanels.panelPinned, hydratedPanels.panelBySession);
         const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
         const firstReadPending = !complete && !held.has('panelTools.groups');
-        set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, firstReadPending, hydrated: true });
+        // UX wave U7b ("At hydration"): the page to open is the first of these that applies. 1: what the person opened or
+        // closed before the read; 2: none after an act of theirs that showed a tab; then `pageAtStart`, over the stored
+        // value as it was read, before its retired tabs were dropped: 3, a retired tab in front (a Customize, Projects or
+        // Artifacts tab opens its page, a Settings tab none); 4, the stored page, when the stored tabs have the stored
+        // form's shape (`canonical`, a test of shape and not of who wrote them); 5, otherwise none.
+        // Rules 3 and 4 ask it of the stored value: a `main.tabs` that is absent or does not parse is not of that shape,
+        // though the default put in its place is, and has no tab in front.
+        const shaped = canonical && readAs.has('main.tabs');
+        const destination = pageEarly ? get().destination : shownEarly ? null : pageAtStart({ rawMain: readAs.get('main.tabs'), canonical: shaped, stored: storedPage?.destination ?? null });
+        set({ regions, main: hydratedMain, ...hydratedPanels, panelParams, panelWidths, cardsOpen, firstReadPending, destination, hydrated: true });
         // A first launch writes the defaults of the keys it lacks, so layout.json always holds the renderer's three
         // fixed keys (acceptance item 6 lists them). Tabs replayed over the saved ones differ from what layout.json holds,
         // and persistence takes the hydrated state as its baseline, so they are written here too. Everything after this
@@ -676,12 +748,18 @@ export function createLayoutStore() {
         if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
         if (!sameJson(cardsOpen, storedCards.open)) unsaved.add('cards.open'); // a fold made while the reads were pending
         for (const id of prunedPanels) unsaved.add(`panel.${id}`);
+        // UX wave U7b: `destination` is written, or deleted, where what hydration opened differs from the file; a stored
+        // value that does not parse (warned once above) is left in the file until the next page is opened or closed.
+        if (readAs.has('destination') ? !sameJson(storedValue('destination', destination), readAs.get('destination')) : destination !== null) unsaved.add('destination');
+        // A read of `main.tabs` that failed says nothing of the file (R9): no page opens by rule 4, and none is deleted,
+        // unless the person opened, closed or left one before the read (rules 1 and 2).
+        if (failed.includes('main.tabs') && !pageEarly && !shownEarly) unsaved.delete('destination');
         if (prunedPanels.length > 0 && Object.keys(panelParams).length !== Object.keys(storedParams.params).length) unsaved.add('panelTools.params');
         for (const key of failed) unsaved.delete(key); // UX wave U8b: hydration writes no default over a value it could not read
         const values: Partial<Record<LayoutKey, unknown>> = {
           regions, 'main.tabs': storedMain(get().main), 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
           'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
-          'panelTools.params': storedValue('panelTools.params', panelParams),
+          'panelTools.params': storedValue('panelTools.params', panelParams), destination: storedValue('destination', destination),
           ...Object.fromEntries(prunedPanels.map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
         };
         for (const key of unsaved) {
@@ -819,7 +897,7 @@ export function createLayoutStore() {
 
       setSidebar: (patch) => regions((r) => ({ ...r, sidebar: { ...r.sidebar, ...(typeof patch === 'function' ? patch(r.sidebar) : patch) } })),
       setPanel: (patch) => regions((r) => ({ ...r, panel: panelAfter(r.panel, patch) })),
-      revealMain: () => regions((r) => (r.panel.maximized || r.panel.floating ? { ...r, panel: { ...r.panel, maximized: false, floating: false } } : r)),
+      revealMain: () => regions(docked),
       setFloatingCardSize(key, size) {
         regions((r) => {
           const state = get();
@@ -829,9 +907,11 @@ export function createLayoutStore() {
         });
       },
       setOverviewOpen(overviewOpen) {
-        // Overview lives over main, so opening it restores main, including when regions are still hydrating.
-        if (overviewOpen) get().revealMain();
-        set({ overviewOpen });
+        // Overview lives over main, so opening it restores main, including when regions are still hydrating. UX wave
+        // U7b: it opens over a page, which stays, and closes the Settings dialog; over a page it docks nothing until the
+        // page closes under it (`commit`).
+        if (overviewOpen && get().destination === null) get().revealMain();
+        set({ overviewOpen, ...(overviewOpen && get().settings !== null ? { settings: null } : {}) });
       },
       setOverviewRect: (overview) => regions((r) => ({ ...r, overview })),
       setPanelTabPinned(appSessionId, tabId, pinned) {
@@ -894,6 +974,35 @@ export function createLayoutStore() {
       },
       setDragging: (dragging) => set({ dragging }),
 
+      // ---- UX wave U7b (Interfaces §F): the page and the dialog; none of these touches the strip ----
+      openDestination(target) {
+        if (!get().hydrated) pageEarly = true;
+        const { destination: now, settings } = get();
+        const destination = now !== null && sameJson(now, target) ? now : target;
+        if (destination !== now || settings !== null) set({ destination, settings: null });
+      },
+      closeDestination() {
+        if (get().destination === null) return;
+        if (!get().hydrated) pageEarly = true;
+        if (get().overviewOpen) commit(get().main, get().regions, { destination: null }); // the column docks under the Overview
+        else set({ destination: null });
+      },
+      openSettings(section) {
+        // Each request for a section is a new value, so the view lands on it even when it is the section already asked
+        // for: the person may have moved in the view since (the branch review). Open already, no section changes nothing.
+        if (get().settings === null) set({ settings: { section: section ?? null } });
+        else if (section !== undefined) set({ settings: { section } });
+      },
+      closeSettings() {
+        if (get().settings !== null) set({ settings: null });
+      },
+      closeFront() {
+        if (get().settings !== null) get().closeSettings();
+        else if (get().destination !== null) get().closeDestination();
+        else return false;
+        return true;
+      },
+
       // ---- UX wave U8b (Interfaces §B): the acts that change what is in view ----
       showSurfaceTab(appSessionId, tabId) {
         const groups = sideGroups(get(), appSessionId);
@@ -951,6 +1060,7 @@ function persistedKeys(state: LayoutState): Map<LayoutKey, unknown> {
     ['panelTools.groups', state.panelGroups], // UX wave U8b
     ['panelTools.widths', state.panelWidths],
     ['cards.open', state.cardsOpen],
+    ['destination', state.destination], // UX wave U7b: null while no page is open, which deletes the key
   ]);
   for (const [id, panel] of state.panelBySession) keys.set(`panel.${id}`, panel);
   return keys;
@@ -978,6 +1088,7 @@ function storedValue(key: LayoutKey, slice: unknown): unknown {
   if (key === 'panelTools.params') return { version: 1, params: slice };
   if (key === 'panelTools.activeNoSession') return { version: 1, activeTabId: slice };
   if (key === 'cards.open') return { version: 1, open: slice }; // UX wave U8b
+  if (key === 'destination') return slice === null ? null : { version: 1, destination: slice }; // UX wave U7b
   return slice;
 }
 

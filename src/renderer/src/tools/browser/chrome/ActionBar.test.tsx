@@ -33,6 +33,7 @@ let addressWidth: number;
 beforeEach(() => {
   resetBrowser();
   resetBrowserImport();
+  useLayout.setState({ destination: null, settings: null });
   actions = [
     { extensionId: PROBE, name: 'MAWS probe extension', title: 'MAWS probe', icon: null, hasPopup: true, hasOptions: true },
     { extensionId: PLAIN, name: 'Plain', title: 'Plain', icon: ICON, hasPopup: false, hasOptions: false },
@@ -178,8 +179,10 @@ describe('the extensions action bar', () => {
     expect(openTab).not.toHaveBeenCalled();
     act(() => main.emit('browser.extensions.reveal', { tabId: T1, show: { kind: 'tab', tab: options } }));
     expect(openTab).toHaveBeenLastCalledWith({ kind: 'browser', appSessionId: A, browserTabId: T2 });
+    const tabs = openTab.mock.calls.length;
     act(() => main.emit('browser.extensions.reveal', { tabId: T1, show: { kind: 'settings' } }));
-    expect(openTab).toHaveBeenLastCalledWith({ kind: 'settings', section: 'browser' });
+    expect(useLayout.getState().settings).toEqual({ section: 'browser' }); // UX wave U7b: the Settings dialog, no tab
+    expect(openTab).toHaveBeenCalledTimes(tabs);
   });
 });
 

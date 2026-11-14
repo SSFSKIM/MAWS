@@ -13,8 +13,8 @@ import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
 import type { PanelHostProps } from '../panel/host-slot';
-import { useLayout } from '../stores/layout';
-import { cardColumnNow, useCardColumnShown, useShellView } from './shell-view';
+import { persistLayout, useLayout } from '../stores/layout';
+import { cardColumnNow, useCardColumnShown } from './shell-view';
 import { useSessions } from '../stores/sessions';
 import { useMachines } from '../stores/machines';
 import { useSettings } from '../stores/settings';
@@ -38,6 +38,7 @@ import { toolbarTitle } from './Toolbar';
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { probeTool, ref, resetPanelStores } from '../test-support/panel';
 import { registerPanelTool } from '../panel/host';
+import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
@@ -149,15 +150,27 @@ describe('shell frame', () => {
     expect(region('main').inert).toBe(false);
   });
 
-  it('mounts the usage slot in the sidebar footer, not in the chrome row', () => {
+  // UX wave U7b (O-47; its execution document, M7 decision 1): the ring at the title bar's own right end, after the surface
+  // icons and outside their overflow; on a page, where the surface icons are not drawn, still at the end; the sidebar's
+  // foot holds the gear alone.
+  it('mounts the usage slot at the title bar’s right end, after the surface icons, with a page open too; the sidebar’s foot holds the gear alone', () => {
     registerSlot('topBarEnd', () => <button type="button">Usage</button>);
     renderShell();
     const toolbar = screen.getByRole('banner');
-    expect(within(toolbar).queryByRole('button', { name: 'Usage' })).toBeNull();
-    const usage = within(region('sidebar')).getByRole('button', { name: 'Usage' });
-    expect(usage.closest('footer')).toBeTruthy();
-    expect(usage.closest('[data-sidebar-usage]')!.nextElementSibling).toBe(within(region('sidebar')).getByRole('button', { name: 'Workspace settings' }));
-    expect(within(toolbar).getByRole('toolbar', { name: 'Session surfaces' })).toBeTruthy();
+    const usage = within(toolbar).getByRole('button', { name: 'Usage' });
+    const surfaces = within(toolbar).getByRole('toolbar', { name: 'Session surfaces' });
+    expect(surfaces.compareDocumentPosition(usage) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(surfaces.contains(usage)).toBe(false);
+    const last = (el: Element): Element => (el.lastElementChild ? last(el.lastElementChild) : el);
+    expect(last(toolbar)).toBe(usage);
+    const foot = region('sidebar').querySelector('footer')!;
+    expect(within(foot).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Workspace settings']);
+    expect(within(region('sidebar')).queryByRole('button', { name: 'Usage' })).toBeNull();
+
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    expect(within(toolbar).queryByRole('toolbar', { name: 'Session surfaces' })).toBeNull();
+    expect(last(toolbar)).toBe(within(toolbar).getByRole('button', { name: 'Usage' }));
+    expect(within(toolbar).getByRole('button', { name: 'Usage' }).closest('[inert]')).toBeNull();
   });
 
   it('uses remembered widths only for open regions, leaving no empty panel column', () => {
@@ -315,7 +328,8 @@ describe('toolbar', () => {
   });
 
   // UX wave U8b (UC-9, §C.2): the column, the icon and useCardColumnShown read one source, so a page that hides the
-  // column turns all three off in one render. The column's absence is not pinned: U7 decides how it hides under a page.
+  // column turns all three off in one render. UX wave U7b (M5, decision 4): the page is the layout store's, and the
+  // column keeps its place while it is not drawn: the same node, invisible and inert.
   it('a page open in the one source turns the cards off for the icon and useCardColumnShown in one render', () => {
     useSessions.setState({ records: new Map([[A, record(A)]]) });
     useLayout.setState({ main: withActive(sessionTab(A)) });
@@ -327,11 +341,15 @@ describe('toolbar', () => {
     }
     render(<QueryClientProvider client={queryClient}><Shell /><Reader /></QueryClientProvider>);
     const cards = within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+    const column = region('cards');
     expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['true', true, true]);
-    act(() => useShellView.setState({ pageOpen: true }));
-    expect([cards.getAttribute('aria-pressed'), seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth).shown]).toEqual(['false', false, false]);
-    act(() => useShellView.setState({ pageOpen: false }));
-    expect([cards.getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    expect([seen.at(-1), cardColumnNow(useLayout.getState(), window.innerWidth)]).toEqual([false, expect.objectContaining({ placed: true, shown: false })]);
+    expect(region('cards')).toBe(column);
+    expect([column.classList.contains('invisible'), column.hasAttribute('inert')]).toEqual([true, true]);
+    act(() => useLayout.getState().closeDestination());
+    expect([within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' }).getAttribute('aria-pressed'), seen.at(-1)]).toEqual(['true', true]);
+    expect([region('cards'), column.classList.contains('invisible'), column.hasAttribute('inert')]).toEqual([column, false, false]);
   });
 
   it('shows a rebound chord in the tooltip', () => {
@@ -605,10 +623,10 @@ describe('right panel', () => {
 // P3-G (§D5, acceptance 12): the sidebar's Artifacts destination opens the Artifacts main tab, a
 // singleton that a second open activates, showing P3-L's library as App.tsx registers it (the slot's fallback where no
 // host registers it).
+// UX wave U7b (O-40): the library is a page beside the sidebar, opened by the row, the action and "Open library"; it adds
+// no tab, and a maximized or floating side column is left as it is (a page covers it, and Back finds it as it was).
 describe('the Artifacts entry', () => {
-  const artifactsTabs = () => useLayout.getState().main.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'artifacts'));
-
-  it('the sidebar row opens the Artifacts tab once, titled and showing the library; a second click activates it', async () => {
+  it('the sidebar row opens the library’s page, named in the title bar, and adds no tab; a second click keeps it', async () => {
     const user = userEvent.setup();
     const previousBridge = window.maws;
     const counts = { document: 0, presentation: 0, design: 0, design_system: 0, dashboard: 0, html: 0, file: 0 };
@@ -619,85 +637,76 @@ describe('the Artifacts entry', () => {
     });
     registerSlot('artifactsLibrary', Library);
     renderShell();
+    const strip = useLayout.getState().main;
     const sidebar = region('sidebar');
     const row = within(sidebar).getByRole('button', { name: 'Artifacts' });
     expect(within(sidebar).getByRole('button', { name: 'Projects' }).nextElementSibling).toBe(row);
     expect(row.getAttribute('aria-current')).toBeNull();
 
     await user.click(row);
-    expect(artifactsTabs()).toEqual([{ id: 'artifacts', kind: 'artifacts', pinned: false }]);
-    expect(within(chromeTabs()).getByRole('tab', { name: 'Artifacts' }).getAttribute('aria-selected')).toBe('true');
-    expect(within(screen.getByRole('banner')).getByText('Artifacts')).toBeTruthy();
-    const panel = within(region('main')).getByRole('tabpanel');
-    expect(within(panel).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
-    expect(within(panel).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
-    expect(within(panel).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
+    const header = document.querySelector<HTMLElement>('[data-toolbar]')!;
+    expect(within(header).getByRole('heading', { level: 1, name: 'Artifacts' })).toBeTruthy();
+    const page = document.getElementById('region-page')!;
+    expect(within(page).getByRole('radiogroup', { name: 'View' })).toBeTruthy();
+    expect(within(page).getByRole('searchbox', { name: 'Search artifacts' })).toBeTruthy();
     expect(row.getAttribute('aria-current')).toBe('page');
 
-    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }));
-    expect(row.getAttribute('aria-current')).toBeNull();
     await user.click(row);
-    expect(artifactsTabs()).toHaveLength(1);
-    expect(within(chromeTabs()).getAllByRole('tab').map((tab) => [tab.getAttribute('aria-label'), tab.getAttribute('aria-selected')])).toEqual([
-      ['Artifacts', 'true'],
-      ['Diagnostics', 'false'],
-    ]);
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
     expect(row.getAttribute('aria-current')).toBe('page');
   });
 
-  // M5's review: the tab lives in the main area, so opening it from a maximized or floating panel docks the panel first;
-  // otherwise it would be selected behind an inert, zero-width main region while the card kept its session.
   describe.each([
     ['floating', { floating: true }],
     ['maximized', { maximized: true }],
-  ] as const)('from a %s panel', (_, patch) => {
-    const placeholder = 'Artifacts unavailable';
+  ] as const)('from a %s panel', (how, patch) => {
     const startHidden = () => {
       openSurface();
       useLayout.getState().setPanel(patch);
       renderShell();
       expect(region('main').inert).toBe(true);
     };
-    const expectShown = () => {
-      expect(useLayout.getState().regions.panel).toMatchObject({ floating: false, maximized: false, collapsed: false });
-      expect(region('main').inert).toBe(false);
-      expect(grid().style.gridTemplateColumns).toBe('240px minmax(0, 1fr) 360px'); // UX wave U8b: a narrow tool's automatic width
-      expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
-      expect(within(within(region('main')).getByRole('tabpanel')).getByText(placeholder)).toBeTruthy();
+    const expectPage = () => {
+      expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+      expect(useLayout.getState().regions.panel[how], 'the side column is left as it was').toBe(true);
+      expect(document.getElementById('region-page')).not.toBeNull();
     };
 
-    it('the sidebar row docks the panel and shows the Artifacts tab', async () => {
+    it('the sidebar row opens the library’s page and leaves the panel as it was', async () => {
       const user = userEvent.setup();
       startHidden();
-      if ('floating' in patch) expect(screen.getByRole('region', { name: 'Session card' })).toBeTruthy();
       await user.click(within(region('sidebar')).getByRole('button', { name: 'Artifacts' }));
-      expectShown();
+      expectPage();
     });
 
-    it('the artifacts.open action docks the panel and shows the Artifacts tab', () => {
+    it('the artifacts.open action opens the library’s page and leaves the panel as it was', () => {
       offs.push(registerShellActions(fakeBridge()));
       startHidden();
       act(() => runAction('artifacts.open'));
-      expectShown();
+      expectPage();
     });
   });
 
-  it('draws the library a later child registers into the slot', () => {
+  it('draws the library a later child registers into the slot, on its page', () => {
     registerSlot('artifactsLibrary', () => <section aria-label="Library">library</section>);
-    useLayout.setState({ main: withActive({ id: 'artifacts', kind: 'artifacts', pinned: false }) });
+    useLayout.setState({ destination: { kind: 'library' } });
     renderShell();
-    expect(within(region('main')).getByRole('region', { name: 'Library' })).toBeTruthy();
+    expect(within(document.getElementById('region-page')!).getByRole('region', { name: 'Library' })).toBeTruthy();
     expect(screen.queryByText('Artifacts unavailable')).toBeNull();
   });
 
-  it('the artifacts.open action opens or activates the same tab', () => {
+  it('the artifacts.open action opens the library’s page over the tabs, which it leaves as they were', () => {
     offs.push(registerShellActions(fakeBridge()));
-    runAction('artifacts.open');
     useLayout.getState().openTab({ kind: 'diagnostics' });
+    const strip = useLayout.getState().main;
     runAction('artifacts.open');
-    expect(artifactsTabs()).toHaveLength(1);
-    expect(toolbarTitle(useLayout.getState().main.panes[0].tabs.find((tab) => tab.id === 'artifacts')!, new Map()).title).toBe('Artifacts');
-    expect(useLayout.getState().main.panes[0].activeTabId).toBe('artifacts');
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    runAction('artifacts.open');
+    expect(useLayout.getState().destination).toEqual({ kind: 'library' });
+    expect(useLayout.getState().main).toBe(strip);
   });
 });
 
@@ -843,4 +852,245 @@ it.each([true, false])('context-menu Close restores pane focus when the closing 
     await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   });
   expect(document.activeElement).toBe(screen.getByRole('tab', { name: 'menu-survivor.ts' }));
+});
+
+// UX wave U7b (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decisions 2, 3 and 5):
+// a page takes everything right of the sidebar. What it covers stays mounted at its box, invisible and inert, and nothing
+// of the side column is written; Back shows it all again without a remount.
+describe('a page beside the sidebar', () => {
+  const PAGE = { kind: 'projects' } as const;
+  // The shell's wrapper around the main area's content; the title bar by its mark (a page may hold a banner of its own).
+  const mainArea = () => document.querySelector<HTMLElement>('[data-behind-page]')!;
+  const hiddenNow = (element: HTMLElement) => [element.classList.contains('invisible'), element.hasAttribute('inert')];
+  const header = () => document.querySelector<HTMLElement>('[data-toolbar]')!;
+  const strips = () => header().querySelector<HTMLElement>('[data-chrome-tabs]')!;
+
+  it('with the card column drawn: the main area and the column keep their nodes, the grid and the padding, hidden; Back shows them', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    const [area, cards, columns] = [mainArea(), region('cards'), grid().style.gridTemplateColumns];
+    const padding = area.parentElement!.style.paddingRight;
+    expect(padding).toBe('304px');
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect([mainArea(), region('cards')]).toEqual([area, cards]);
+    expect([hiddenNow(area), hiddenNow(cards)]).toEqual([[true, true], [true, true]]);
+    expect([grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([columns, padding]);
+    expect(region('main').hasAttribute('inert'), 'the main region stays as it is: only its content is hidden').toBe(false);
+    expect(header().className).toContain('col-span-3');
+    act(() => useLayout.getState().closeDestination());
+    expect([mainArea(), region('cards')]).toEqual([area, cards]);
+    expect([hiddenNow(area), hiddenNow(cards)]).toEqual([[false, false], [false, false]]);
+    expect(header().className).toContain('col-span-2');
+  });
+
+  it('with a side surface open: the side column is not drawn and nothing of it is written; Back restores it as it was', () => {
+    openSurface();
+    renderShell();
+    const fake = fakeClient({ 'layout.set': undefined });
+    offs.push(persistLayout(fake.client, useLayout)); // from here, what the visit writes
+    const panel = region('panel');
+    const columns = grid().style.gridTemplateColumns;
+    const before = { regions: useLayout.getState().regions, surfaces: useLayout.getState().panelSurfaces, tabs: useLayout.getState().panelBySession.get(A)!.tabs };
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(region('panel')).toBe(panel);
+    expect(hiddenNow(panel)).toEqual([true, true]);
+    expect(grid().style.gridTemplateColumns).toBe(columns);
+    expect(header().className, 'the title bar spans to the window’s right edge').toContain('col-span-3');
+    act(() => useLayout.getState().closeDestination());
+    window.dispatchEvent(new Event('beforeunload'));
+    const after = { regions: useLayout.getState().regions, surfaces: useLayout.getState().panelSurfaces, tabs: useLayout.getState().panelBySession.get(A)!.tabs };
+    expect([after.regions === before.regions, after.surfaces === before.surfaces, after.tabs === before.tabs]).toEqual([true, true, true]);
+    expect((fake.invoked('layout.set') as { key: string }[]).map((write) => write.key).filter((key) => key !== 'destination')).toEqual([]);
+    expect(region('panel')).toBe(panel);
+    expect(hiddenNow(panel)).toEqual([false, false]);
+  });
+
+  it('draws the page over the second and third columns of the third row, named by the title bar’s Back and heading', async () => {
+    const user = userEvent.setup();
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    const page = document.getElementById('region-page')!;
+    expect(page.getAttribute('aria-labelledby')).toBe(within(header()).getByRole('heading', { level: 1 }).id);
+    expect(page.className).toContain('col-[2/-1]');
+    expect(page.className).toContain('row-start-3');
+    expect(within(header()).getByRole('heading', { level: 1, name: 'Projects' })).toBeTruthy();
+    expect(within(header()).queryByRole('button', { name: 'Session cards' }), 'the surface icons are not drawn').toBeNull();
+    expect(within(header()).queryByRole('button', { name: /in sidebar$/ }), 'nor the project chip').toBeNull();
+    expect(hiddenNow(strips()), 'the strips stay mounted, hidden').toEqual([true, true]);
+    expect(within(header()).getByRole('button', { name: 'Back' }).getAttribute('title')).toBe('Back · Esc');
+    await user.click(within(header()).getByRole('button', { name: 'Back' }));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(hiddenNow(strips())).toEqual([false, false]);
+  });
+
+  it('the Overview opened over a page is inside no inert element, and the page stays', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const overview = document.querySelector<HTMLElement>('[data-overview-panel]')!;
+    expect(overview).not.toBeNull();
+    expect(overview.closest('[inert]')).toBeNull();
+    expect(useLayout.getState().destination).toEqual(PAGE);
+  });
+
+  // The M5 review: a maximized or floating side column leaves the main track 0 px wide, so over a page the Overview's one
+  // host is placed over the page's box (fixed, at the page region's rect); it stays in the main region and is never
+  // remounted, and the main area keeps its node, its box and the grid.
+  const PAGE_BOX = { left: 240, top: 40, width: 1200, height: 860 };
+  const measured = () => vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const { left, top, width, height } = this.id === 'region-page' ? PAGE_BOX : { left: 0, top: 0, width: 0, height: 0 };
+    return { left, top, width, height, x: left, y: top, right: left + width, bottom: top + height, toJSON: () => ({}) } as DOMRect;
+  });
+  const host = () => document.querySelector<HTMLElement>('[data-overview-host]')!;
+  const overviewPanel = () => document.querySelector<HTMLElement>('[data-overview-panel]');
+
+  it.each(['maximized', 'floating'] as const)('with the side surface %s, the Overview over a page is placed over the page’s box, not the main track', (how) => {
+    const rect = measured();
+    openSurface();
+    useLayout.getState().setPanel({ collapsed: false, [how]: true });
+    renderShell();
+    const [area, columns] = [mainArea(), grid().style.gridTemplateColumns];
+    const padding = area.parentElement!.style.paddingRight;
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'inset-0']));
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().setOverviewOpen(true));
+    expect(useLayout.getState().regions.panel[how], 'the Overview over a page docks nothing').toBe(true);
+    const overview = overviewPanel()!;
+    expect(overview.closest('[data-overview-host]')).toBe(host());
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['fixed', 'z-30']));
+    expect([host().style.left, host().style.top, host().style.width, host().style.height]).toEqual(['240px', '40px', '1200px', '860px']);
+    expect(region('main').contains(overview), 'still in the main region').toBe(true);
+    expect(overview.closest('[inert]')).toBeNull();
+    expect([mainArea(), grid().style.gridTemplateColumns, area.parentElement!.style.paddingRight]).toEqual([area, columns, padding]);
+    act(() => useLayout.getState().setOverviewOpen(false));
+    act(() => useLayout.getState().closeDestination());
+    expect(useLayout.getState().regions.panel[how], 'Back shows the column as it was').toBe(true);
+    expect(host().className.split(' ')).toEqual(expect.arrayContaining(['absolute', 'inset-0']));
+    expect(host().getAttribute('style')).toBeNull();
+    rect.mockRestore();
+  });
+
+  it('a page opened with the Overview open from a focused sidebar row leaves the keyboard on the row and the Overview the same node; Back does not pull the keyboard into it', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().setOverviewOpen(true));
+    const overview = overviewPanel()!;
+    const row = within(region('sidebar')).getByRole('button', { name: 'Projects' });
+    act(() => row.focus());
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(document.activeElement).toBe(row);
+    expect(overviewPanel()).toBe(overview);
+    act(() => useLayout.getState().closeDestination());
+    expect(document.activeElement).toBe(row);
+    expect(overviewPanel()).toBe(overview);
+    expect(useLayout.getState().overviewOpen).toBe(true);
+  });
+
+  // The branch review: the Overview opened from what a page then covers cannot give the keyboard back there; it goes to
+  // the page.
+  it('the Overview closed while a page covers the element it opened from gives the keyboard to the page', () => {
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    const tab = within(chromeTabs()).getByRole('tab', { selected: true });
+    act(() => tab.focus());
+    act(() => useLayout.getState().setOverviewOpen(true));
+    expect(document.activeElement).toBe(overviewPanel());
+    act(() => useLayout.getState().openDestination(PAGE));
+    expect(tab.closest('[inert]'), 'the opener is under the page').not.toBeNull();
+    act(() => useLayout.getState().setOverviewOpen(false));
+    expect(overviewPanel()).toBeNull();
+    expect(document.activeElement).toBe(document.getElementById('region-page'));
+  });
+
+  it('⌘W closes the Settings dialog, then the page, and only then the tab in front', () => {
+    offs.push(registerShellActions(fakeClient({}).client));
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    renderShell();
+    act(() => useLayout.getState().openDestination(PAGE));
+    act(() => useLayout.getState().openSettings());
+    act(() => runAction('tab.close'));
+    expect([useLayout.getState().settings, useLayout.getState().destination]).toEqual([null, PAGE]);
+    act(() => runAction('tab.close'));
+    expect(useLayout.getState().destination).toBeNull();
+    expect(useLayout.getState().main.panes[0].tabs.map((tab) => tab.id)).toEqual([`session:${A}`]);
+  });
+
+  // §N, the second table: an act of the person's that shows nothing finds no tab in front behind a page.
+  it('⌥⌘U marks nothing unread behind a page, and marks the session once the page is left', () => {
+    const fake = fakeClient({ 'session.update': undefined });
+    offs.push(registerShellActions(fake.client));
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+    useLayout.getState().openDestination(PAGE);
+    runAction('session.markUnread');
+    expect(fake.invoked('session.update')).toEqual([]);
+    useLayout.getState().closeDestination();
+    runAction('session.markUnread');
+    expect(fake.invoked('session.update')).toEqual([{ appSessionId: A, patch: { unread: true } }]);
+  });
+
+  // M6, decision 6 (the owner's answer to question 4): with a page open the acts on the side column only show. The page
+  // is left and what was asked for ends in view; under the Settings dialog they run as today.
+  describe('the side column’s acts with a page open', () => {
+    const inView = (toolId: string) => !useLayout.getState().regions.panel.collapsed && surfaceTabs(useLayout.getState(), A).some((tab) => tab.toolId === toolId);
+    beforeEach(() => offs.push(registerShellActions(fakeClient({}).client)));
+
+    it('a surface’s key for a tool in view behind the page leaves the page, and the tool stays in view', () => {
+      openSurface('terminal');
+      renderShell();
+      expect(inView('terminal')).toBe(true);
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('surface.terminal'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(inView('terminal')).toBe(true);
+    });
+
+    it('a surface’s key for a tool not in view leaves the page and shows the tool', () => {
+      offs.push(registerPanelTool(probeTool('files').tool));
+      openSurface('terminal');
+      renderShell();
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('surface.files'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(inView('files')).toBe(true);
+    });
+
+    it('Session cards with the card column placed behind the page leaves the page, and the column is still shown', () => {
+      useSessions.setState({ records: new Map([[A, record(A)]]) });
+      useLayout.setState({ main: withActive(sessionTab(A)) });
+      renderShell();
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth).shown).toBe(true);
+      act(() => useLayout.getState().openDestination(PAGE));
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth)).toMatchObject({ placed: true, shown: false });
+      act(() => runAction('panel.toggle'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(cardColumnNow(useLayout.getState(), window.innerWidth).shown).toBe(true);
+    });
+
+    it('Maximize leaves the page, then maximizes the side column', () => {
+      openSurface();
+      renderShell();
+      act(() => useLayout.getState().openDestination(PAGE));
+      act(() => runAction('panel.maximize'));
+      expect(useLayout.getState().destination).toBeNull();
+      expect(useLayout.getState().regions.panel).toMatchObject({ maximized: true, collapsed: false });
+    });
+
+    it('under the Settings dialog, with no page, a surface’s key hides a tool in view, as today', () => {
+      openSurface('terminal');
+      renderShell();
+      act(() => useLayout.getState().openSettings());
+      act(() => runAction('surface.terminal'));
+      expect(inView('terminal')).toBe(false);
+      expect(useLayout.getState().settings).toEqual({ section: null });
+    });
+  });
 });

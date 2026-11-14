@@ -22,7 +22,6 @@ import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useReducer,
 import { FolderIcon, GearIcon, IconButton, SortIcon } from '../app/IconButton';
 import { openCustomize, openProjects } from '../customize/open';
 import { useChordHint } from '../app/IconButton'; // C11
-import { useSlot } from '../app/slots';
 import { NEW_CHAT, newChat, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime'; // C11: the footer's gear opens Settings
 import { ipc } from '../ipc/client';
@@ -33,8 +32,7 @@ import { issuedAt, lastActivity, seenActivity, type SidebarSort } from '../overv
 import { useNowEvery } from '../app/use-now';
 import { selectGreyedNeedsYou, selectNeedsYou, useAttention } from '../stores/attention';
 import { useSpawnedHere } from '../sessions/spawned-here'; // P5 O7 M8
-import { useLayout } from '../stores/layout';
-import { activeTab } from '../stores/layout-model';
+import { pageOpen, tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
 import { openArtifacts } from '../main/artifacts'; // P3-G
 import { selectHiddenProjects, selectProjectOrder, useSessions } from '../stores/sessions';
 import { usePeople } from '../stores/people'; // P5 O8 M5
@@ -42,6 +40,7 @@ import { useHidden } from '../stores/hidden'; // UX wave U7, O-16
 import { openDialog } from '../sessions/dialogs';
 import { filterProjectList, isListedRow, listedMatcher, nestItems, projectItems, projectList, projectSessions, PROJECTS_FIRST, sessionMatcher, shownTrees, sidebarSessionId, splitHidden, type ProjectEntry, type ProjectKey, type SidebarSession, type SidebarTreeRow } from './derive';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Destination } from '@shared/ipc/schema/layout';
 import { menuTargetOf, SidebarMenuContent, type MenuTarget } from './menus';
 import { ProjectRow, ShowMoreRow, type HiddenRows } from './ProjectRow';
 import { ResumeChooserHost } from '../resume/host'; // P2-D
@@ -118,8 +117,9 @@ function SidebarBody() {
   const local = ipc.localMachine;
   const index = useSessions((s) => selectOrgIndex(s, local));
   const sidebar = useLayout((s) => s.regions.sidebar);
+  // UX wave U7b: under a page no session row is selected (the tab behind it is not on screen).
   const selectedTab = useLayout((s) => {
-    const tab = activeTab(s.main);
+    const tab = tabOnScreen(s);
     return tab?.kind === 'session' ? tab.appSessionId : null;
   });
   // P5 O8 M2: a listed row clicked with no opener for its lane is the selection until the shown tab changes or another
@@ -128,7 +128,8 @@ function SidebarBody() {
   // bring it back (React's state adjusted while rendering: this render is discarded for the one without it).
   const [picked, setPicked] = useState<{ id: AppSessionId; over: AppSessionId | null } | null>(null);
   if (picked !== null && picked.over !== selectedTab) setPicked(null);
-  const selected = picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
+  const page = useLayout(pageOpen); // UX wave U7b: nor a listed row picked over no tab, while a page is open
+  const selected = page ? null : picked !== null && picked.over === selectedTab ? picked.id : selectedTab;
 
   const [query, setQuery] = useState('');
   const [allProjects, setAllProjects] = useState(false); // the list's own "Show more" (transient)
@@ -599,8 +600,11 @@ function SidebarDestinations({ children }: { children: ReactNode }) {
   </nav>;
 }
 
+// UX wave U7b: a row is current while its page is open.
+const isCurrent = (state: LayoutState, page: Destination['kind']): boolean => state.destination?.kind === page;
+
 function DestinationRow({ kind }: { kind: 'projects' | 'customize' }) {
-  const current = useLayout((s) => activeTab(s.main)?.kind === kind);
+  const current = useLayout((s) => isCurrent(s, kind));
   const label = { projects: 'Projects', customize: 'Customize' }[kind];
   const open = () => { if (kind === 'projects') openProjects(); else openCustomize(); };
   return <button type="button" aria-current={current ? 'page' : undefined} onClick={open}
@@ -644,7 +648,7 @@ const NewChatIcon = ({ className }: { className?: string }) => (
 // `artifacts.open` does the same from the palette and the View menu); it reads as the current page while that tab is
 // the one shown.
 function ArtifactsRow() {
-  const current = useLayout((s) => activeTab(s.main)?.kind === 'artifacts');
+  const current = useLayout((s) => isCurrent(s, 'library'));
   return (
     <button
       type="button"
@@ -689,16 +693,12 @@ function SidebarSkeleton() {
   );
 }
 
+// UX wave U7b (O-47): the gear alone; the usage reading is the title bar's ring.
 function Footer() {
-  const Usage = useSlot('topBarEnd');
   const settings = useActionEnabled('settings.open'); // C11
   const chord = useChordHint('settings.open'); // C11
   return (
     <footer className="flex min-h-[43px] items-center gap-2 border-t border-border px-4 py-[7px] text-ui-sm text-fg-muted">
-      <div data-sidebar-usage className="flex min-w-0 items-center">
-        {/* eslint-disable-next-line react-hooks/static-components -- the usage slot is registered once at composition */}
-        <Usage />
-      </div>
       {/* C11 start: the gear opens the Settings tab (settings.open) once C11's handler is registered */}
       <button
         type="button"

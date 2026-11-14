@@ -23,7 +23,7 @@ afterAll(() => {
 });
 afterEach(resetHarness);
 
-const DEST: ProvisioningSecret = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+const DEST: ProvisioningSecret = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
 const ID = '0123456789abcdef0123456789abcdef';
 // What the code looks like, were it ever to reach the renderer (org-protocol's PROVISIONING_CODE_V2_PREFIX, then base64url).
 const CODE = 'smns-provision-v2:eyJodWIiOiJodHRwczovL2Rlc2suZXhhbXBsZSIsInRva2VuIjoic2VjcmV0In0';
@@ -77,7 +77,7 @@ describe('Settings › Org: the create sheet (M4c)', () => {
   it('its fields inside the bounds, the destination named, devcloud’s condition said; Create sends the fields as asked, and success reaches the page with the code’s version and time', async () => {
     renderSection(signing(ROOT), { 'org.provisioningSecret.get': () => DEST, 'org.delegation.create': () => OK });
     const sheet = await openSheet();
-    expect(within(sheet).getByText('The code goes to ytdownload-505811/desk-provisioning-v2 as a new version. It is never shown here.')).toBeTruthy();
+    expect(within(sheet).getByText('The code goes to maws-example-prod/desk-provisioning-v2 as a new version. It is never shown here.')).toBeTruthy();
     expect(within(sheet).getByText('Devcloud uses it only if the profile’s [desk] delegation_id names this delegation.')).toBeTruthy();
     expect((within(sheet).getByRole('spinbutton', { name: 'Expires in' }) as HTMLInputElement).value).toBe('90');
     expect((within(sheet).getByRole('radio', { name: 'No cap' }) as HTMLInputElement).checked).toBe(true);

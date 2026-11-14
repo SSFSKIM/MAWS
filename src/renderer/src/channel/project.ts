@@ -33,7 +33,7 @@
 // Placement is by time: each goes before the first log entry said after it, the words the log doesn't hold yet last.
 //
 // `waitingFor` is the "Waiting on you" section's filter: the open requests of the sessions the sidebar files under this
-// org project, this Mac's and other machines' (`rowOfSession`, `rowOfListed`), a greyed machine's left out (nothing
+// org project, this Mac's and other machines' (`rowOfRecord`, `rowOfListed`), a greyed machine's left out (nothing
 // there can be answered now).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
@@ -44,7 +44,7 @@ import { waitsOnAnswer } from '@shared/attention/kinds';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { displayTitle, listedTitle } from '../sessions/title';
-import { rowOfListed, rowOfListedRecord, rowOfSession, type OrgIndex, type RowKey } from '../stores/org-projects';
+import { rowOfListed, rowOfRecord, type OrgIndex, type RowKey } from '../stores/org-projects';
 import type { ListedSession } from '../stores/sessions';
 import { CHANNEL } from './copy';
 
@@ -252,10 +252,7 @@ export function waitingFor(input: {
   if (rows.size === 0) return [];
   const rowOf = (appSessionId: AppSessionId): RowKey | null => {
     const record = input.records.get(appSessionId);
-    if (record !== undefined) {
-      const filed = rowOfListedRecord(input.index, input.projects, record, input.listed);
-      return filed === undefined ? rowOfSession(input.index, input.projects, record) : filed;
-    }
+    if (record !== undefined) return rowOfRecord(input.index, input.projects, record, input.listed);
     const listing = input.listed.get(appSessionId);
     return listing === undefined ? null : rowOfListed(input.index, listing);
   };

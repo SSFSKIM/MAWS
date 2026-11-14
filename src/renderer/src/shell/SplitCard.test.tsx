@@ -1,7 +1,8 @@
 // P4-B3 M2 (X37, the prior art's §3.3 from "release armed" on, its round trip): the main split's floating card inside
-// C5's real Shell. S (session A) on the left beside Settings on the right (an editor that registers X32, so its header
-// draws Expand), the main area 1500 px wide, its content row 1000 × 700. The composer slot is a probe that registers a
-// focus target as C7's composer does and counts its mounts, so "one composer per session" is counted at every commit.
+// C5's real Shell. S (session A) on the left beside a file tab of no session on the right (an editor that registers X32,
+// so its header draws Expand; UX wave U7b: it was the retired Settings tab), the main area 1500 px wide, its content row
+// 1000 × 700. The composer slot is a probe that registers a focus target as C7's composer does and counts its mounts, so
+// "one composer per session" is counted at every commit.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -11,7 +12,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef, storedMain } from '@shared/ipc/schema/layout';
 import { item as attention, record, T0 } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
-import { at } from '../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { registerShellActions } from '../app/shell-actions';
 import { Shell } from '../app/Shell';
@@ -44,7 +45,7 @@ const B = at('app-b' as AppSessionId);
 const permissionOfA = () => { const item = attention(A, 'permission', T0); return { ...item, id: at(item.id) }; };
 const W = 1500;
 const S: TabRef = { id: tabId({ kind: 'session', appSessionId: A }), kind: 'session', appSessionId: A, pinned: false };
-const SETTINGS: TabRef = { id: 'settings', kind: 'settings', section: null, pinned: false };
+const PREFS: TabRef = { id: `file:${TEST_MACHINE}:/invented/prefs.md`, kind: 'file', path: '/invented/prefs.md', line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false };
 const DIAGNOSTICS: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
 
 // Every composer of A mounted at once, at its most (a pane's and the card's, across every commit of a transition).
@@ -62,10 +63,10 @@ function ProbeComposer({ appSessionId }: { appSessionId: AppSessionId; paneIndex
   useEffect(() => registerFocusTarget(appSessionId, { focusFrame: () => void focused.push(appSessionId) } as unknown as Parameters<typeof registerFocusTarget>[1]), [appSessionId]);
   return <div data-testid="composer" data-session={appSessionId} />;
 }
-// Settings as an editor that registers X32 (so its pane header, with Expand, is drawn).
-function SettingsEditor() {
+// The file tab as an editor that registers X32 (so its pane header, with Expand, is drawn).
+function FileEditor() {
   useEditorHost(useEditorHostScope(), { title: 'Preferences' });
-  return <p>settings body</p>;
+  return <p>file body</p>;
 }
 
 const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main"]')!;
@@ -76,7 +77,7 @@ const pill = () => screen.queryByRole('button', { name: 'Show session card' });
 const composers = () => screen.queryAllByTestId('composer').map((el) => el.dataset.session);
 const set = () => currentSet(useLayout.getState().main);
 const divider = () => within(mainRegion()).getByRole('separator', { name: 'Resize panes' });
-const splitOf = (right: TabRef = SETTINGS, ratio = 0.4): Strip => ({
+const splitOf = (right: TabRef = PREFS, ratio = 0.4): Strip => ({
   ...LAYOUT_DEFAULTS.main,
   panes: [{ tabs: [S], activeTabId: S.id }, { tabs: [right], activeTabId: right.id }], focusedPane: 1, splitRatio: ratio,
 });
@@ -99,7 +100,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(() => size.width);
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockImplementation(() => size.height);
   registerSlot('composer', ProbeComposer);
-  registerSlot('settingsTab', SettingsEditor);
+  registerSlot('fileTab', FileEditor);
   off = registerShellActions(fakeClient({}).client);
 });
 afterEach(() => {
@@ -153,7 +154,7 @@ describe('the armed drag’s outline of the card', () => {
   });
 
   it('takes the stored size of what the card will sit over; a cancel takes it away and writes nothing', () => {
-    useLayout.getState().setFloatingCardSize(`main:${SETTINGS.id}`, { w: 470, h: 300 });
+    useLayout.getState().setFloatingCardSize(`main:${PREFS.id}`, { w: 470, h: 300 });
     shell();
     const before = useLayout.getState().main;
     press();
@@ -224,7 +225,7 @@ describe('the split’s floating card in the Shell', () => {
     shell();
     dragTo(150);
     await user.click(within(card()!).getByRole('button', { name: 'Dock session' }));
-    act(() => runAction('main.expandArtifactPane')); // S's pane is focused: the pane beside it (Settings) has no session
+    act(() => runAction('main.expandArtifactPane')); // S's pane is focused: the pane beside it (the file tab) has no session
     act(() => useLayout.getState().focusPane(1));
     act(() => runAction('main.expandArtifactPane'));
     expect(card()).toBeNull();
@@ -294,13 +295,13 @@ describe('the split’s floating card in the Shell', () => {
     act(() => void fireEvent.pointerDown(corner, { pointerId: 1, button: 0, clientX: 500, clientY: 300 }));
     act(() => void fireEvent.pointerMove(corner, { pointerId: 1, clientX: 550, clientY: 340 }));
     act(() => void fireEvent.pointerUp(corner, { pointerId: 1, clientX: 550, clientY: 340 }));
-    expect(useLayout.getState().regions.floatingCard).toEqual({ [`main:${SETTINGS.id}`]: { w: 510, h: 328 } });
+    expect(useLayout.getState().regions.floatingCard).toEqual({ [`main:${PREFS.id}`]: { w: 510, h: 328 } });
   });
 
   it('A’s last tab closing shows S full width, the card gone; S’s session tab closing takes the card and the pill with it', () => {
     shell();
     dragTo(150);
-    act(() => useLayout.getState().closeTab(SETTINGS.id));
+    act(() => useLayout.getState().closeTab(PREFS.id));
     expect(card()).toBeNull();
     expect(columns()).toBe('minmax(0, 1fr)');
     expect(composers()).toEqual([A]);
@@ -367,7 +368,7 @@ describe('the split’s floating card in the Shell', () => {
     expect(set().floating).toBeUndefined();
     expect(card()).toBeNull();
     expect(columns()).toBe('600px 1px minmax(0, 1fr)');
-    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 0 })); // no session beside Settings now
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 0 })); // no session beside the file tab now
     expect(within(header()).queryByRole('button', { name: /Expand pane|Restore split/ })).toBeNull();
   });
 

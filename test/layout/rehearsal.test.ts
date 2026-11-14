@@ -5,8 +5,8 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { storedMain, stripOf, type Strip } from '@shared/ipc/schema/layout';
-import { rehearsalLines, rehearse, runRehearsal } from './rehearsal';
+import { pageAtStart, storedMain, stripOf, type Strip } from '@shared/ipc/schema/layout';
+import { type Converters, type Outcome, rehearsalLines, rehearse, runRehearsal } from './rehearsal';
 
 const SENTINEL = 'zq7SentinelVx';
 const L = 'LocalMachineRef0000000';
@@ -77,10 +77,10 @@ describe('the rehearsal', () => {
     const result = rehearse(dir);
     expect(result.files.map((f) => [f.label, f.outcome])).toEqual([['file 1 of 2', 'pass'], ['file 2 of 2', 'pass']]);
     expect(rehearsalLines(result)).toEqual([
-      'file 1 of 2  main.tabs v3: 3 sets, 7 tabs, 6 distinct (session 4, agent 1, file 1, artifacts 1), 2 pinned, 1 closed, 0 reader warnings',
-      '             -> strip: 6 tabs, 2 panes, merged yes, canonical no; missing 0, added 0, twice 0; 2 machine views: held here 3 = 3, held elsewhere 3 = 3; contexts 3 -> 1   pass',
-      'file 2 of 2  main.tabs v2: 1 set, 1 tab (session 1), 0 pinned, 0 closed, 0 reader warnings',
-      '             -> strip: 1 tab, 1 pane, merged no, canonical no; missing 0, added 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent   pass',
+      'file 1 of 2  main.tabs v3: 3 sets, 6 tabs, 5 distinct (session 4, agent 1, file 1), 2 pinned, 1 closed, 0 reader warnings; retired 1 open (artifacts 1), 0 closed; front other, expected none',
+      '             -> strip: 5 tabs, 2 panes, merged yes, canonical no; missing 0, added 0, twice 0; 2 machine views: held here 3 = 3, held elsewhere 3 = 3; contexts 3 -> 1; active in every pane yes; page none   pass',
+      'file 2 of 2  main.tabs v2: 1 set, 1 tab (session 1), 0 pinned, 0 closed, 0 reader warnings; retired 0 open, 0 closed; front other, expected none',
+      '             -> strip: 1 tab, 1 pane, merged no, canonical no; missing 0, added 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent; active in every pane yes; page none   pass',
     ]);
     const { output, failure } = heard(() => runRehearsal(dir));
     expect(failure).toBe('');
@@ -133,11 +133,11 @@ describe('the rehearsal', () => {
       throw new Error(`cannot read ${SENTINEL} at ${dir}`);
     };
     const cases = [
-      [{ stripOf: dropping, storedMain }, 'tab-missing'],
-      [{ stripOf: adding, storedMain }, 'tab-added'],
-      [{ stripOf, storedMain: moving }, 'sessions-differ'],
-      [{ stripOf, storedMain: keyed }, 'not-stored-form'],
-      [{ stripOf: throwing, storedMain }, 'internal'],
+      [{ stripOf: dropping, storedMain, pageAtStart }, 'tab-missing'],
+      [{ stripOf: adding, storedMain, pageAtStart }, 'tab-added'],
+      [{ stripOf, storedMain: moving, pageAtStart }, 'sessions-differ'],
+      [{ stripOf, storedMain: keyed, pageAtStart }, 'not-stored-form'],
+      [{ stripOf: throwing, storedMain, pageAtStart }, 'internal'],
     ] as const;
     for (const [converters, word] of cases) {
       const result = rehearse(dir, converters);
@@ -164,5 +164,96 @@ describe('the rehearsal', () => {
         expect(text).not.toContain(dir);
       }
     }
+  });
+
+  // UX wave U7b (M6, decision 4; Interfaces §G, "The rehearsal"): a layout F wrote with tabs of the four retired kinds.
+  // They are counted from the raw value; which was in front, and the page it calls for, are the rehearsal's own reading,
+  // compared with the page `pageAtStart` answers. A sentinel in a retired tab's fields reaches no output.
+  describe('the four retired tab kinds', () => {
+    const settings = { id: 'settings', kind: 'settings', section: 'engine', pinned: false, note: SENTINEL };
+    const customize = (section: string) => ({ id: 'customize', kind: 'customize', section, pinned: false });
+    const projects = { id: 'projects', kind: 'projects', pinned: false };
+    // One set under `none` (the stored form's shape), Customize in front, the library in the closed history.
+    const fWrote = (front: Tab) => ({
+      version: 3,
+      current: 'none',
+      sets: { none: { panes: [{ tabs: [session(`${L}/s1`), settings, front], activeTabId: front.id }, { tabs: [projects, file('/invented/notes.md')], activeTabId: 'projects' }], focusedPane: 0, splitRatio: 0.5 } },
+      closedTabs: [artifacts, { ...artifacts, id: SENTINEL }, session(`${L}/s9`)],
+    });
+    const library = { version: 1, destination: { kind: 'library' } };
+
+    it('counts them from the raw value, and passes a file whose page is the one its front calls for', () => {
+      const dir = directoryOf({
+        'a.json': JSON.stringify({ 'main.tabs': fWrote(customize('skills')), destination: library }),
+        'b.json': JSON.stringify({ 'main.tabs': fWrote(session(`${L}/s2`)), destination: library }),
+        'c.json': JSON.stringify({ 'main.tabs': fWrote(settings), destination: library }),
+      });
+      const result = rehearse(dir);
+      expect(result.files.map((f) => f.outcome)).toEqual(['pass', 'pass', 'pass']);
+      expect(rehearsalLines(result)).toEqual([
+        'file 1 of 3  main.tabs v3: 1 set, 2 tabs (session 1, file 1), 0 pinned, 1 closed, 0 reader warnings; retired 3 open (settings 1, customize 1, projects 1), 2 closed; front customize, expected customize skills',
+        '             -> strip: 2 tabs, 2 panes, merged no, canonical yes; missing 0, added 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent; active in every pane yes; page customize skills   pass',
+        'file 2 of 3  main.tabs v3: 1 set, 3 tabs (session 2, file 1), 0 pinned, 1 closed, 0 reader warnings; retired 2 open (settings 1, projects 1), 2 closed; front other, expected library',
+        '             -> strip: 3 tabs, 2 panes, merged no, canonical yes; missing 0, added 0, twice 0; 1 machine view: held here 2 = 2, held elsewhere 0 = 0; contexts absent; active in every pane yes; page library   pass',
+        'file 3 of 3  main.tabs v3: 1 set, 2 tabs (session 1, file 1), 0 pinned, 1 closed, 0 reader warnings; retired 3 open (settings 2, projects 1), 2 closed; front settings, expected none',
+        '             -> strip: 2 tabs, 2 panes, merged no, canonical yes; missing 0, added 0, twice 0; 1 machine view: held here 1 = 1, held elsewhere 0 = 0; contexts absent; active in every pane yes; page none   pass',
+      ]);
+      const { output, failure } = heard(() => runRehearsal(dir));
+      expect(failure).toBe('');
+      expect(output).not.toContain(SENTINEL);
+    });
+
+    it('fails a page other than the one expected, a retired tab kept and a pane with no tab active, and says only which', () => {
+      const dir = directoryOf({ 'one.json': JSON.stringify({ 'main.tabs': fWrote(customize(SENTINEL)) }) });
+      const retaining: typeof stripOf = (stored) => {
+        const read = stripOf(stored);
+        const [first, ...rest] = read.strip.panes;
+        return { ...read, strip: { ...read.strip, panes: [{ ...first, tabs: [...first.tabs, { id: 'customize', kind: 'diagnostics', pinned: false } as never] }, ...rest] as Strip['panes'] } } as ReturnType<typeof stripOf>;
+      };
+      const inactive: typeof stripOf = (stored) => {
+        const read = stripOf(stored);
+        return { ...read, strip: { ...read.strip, panes: read.strip.panes.map((p) => ({ ...p, activeTabId: SENTINEL })) as Strip['panes'] } };
+      };
+      const cases: [Converters, Outcome][] = [
+        [{ stripOf, storedMain, pageAtStart: () => null }, 'destination-mismatch'],
+        [{ stripOf, storedMain, pageAtStart: () => ({ kind: 'projects' }) }, 'destination-mismatch'],
+        [{ stripOf: retaining, storedMain, pageAtStart }, 'retired-kept'],
+        [{ stripOf: inactive, storedMain, pageAtStart }, 'no-active-tab'],
+      ];
+      for (const [converters, word] of cases) {
+        const result = rehearse(dir, converters);
+        expect(result.files.map((f) => f.outcome)).toEqual([word]);
+        expect(rehearsalLines(result)).toEqual([`file 1 of 1  ${word}`]);
+        const { output, failure } = heard(() => runRehearsal(dir, converters));
+        expect(failure).not.toBe('');
+        for (const text of [output, failure]) {
+          expect(text).not.toContain(SENTINEL);
+          expect(text).not.toContain(dir);
+        }
+      }
+      // with the real converters the same file passes: an unknown section reads as Plugins on both sides
+      const passed = rehearse(dir);
+      expect(passed.files.map((f) => f.outcome)).toEqual(['pass']);
+      expect(rehearsalLines(passed).join('\n')).toContain('front customize, expected customize plugins');
+      expect(rehearsalLines(passed).join('\n')).not.toContain(SENTINEL);
+    });
+
+    it('compares the whole page, so a converter that changes only its view fails the file', () => {
+      const discover = { version: 1, destination: { kind: 'customize', view: 'discover', show: 'connectors' } };
+      const dir = directoryOf({
+        'a.json': JSON.stringify({ 'main.tabs': fWrote(customize('skills')) }),
+        'b.json': JSON.stringify({ 'main.tabs': fWrote(session(`${L}/s2`)), destination: discover }),
+      });
+      const real = rehearse(dir);
+      expect(real.files.map((f) => f.outcome)).toEqual(['pass', 'pass']);
+      expect(rehearsalLines(real).filter((line) => line.includes('expected customize'))).toHaveLength(2);
+      // a retired Customize tab answered at Discover, and a stored Discover page answered at Mine; the show is right in both
+      const atView = (view: 'mine' | 'discover'): typeof pageAtStart => (input) => {
+        const page = pageAtStart(input);
+        return page?.kind === 'customize' ? { ...page, view } : page;
+      };
+      expect(rehearse(dir, { stripOf, storedMain, pageAtStart: atView('discover') }).files.map((f) => f.outcome)).toEqual(['destination-mismatch', 'pass']);
+      expect(rehearse(dir, { stripOf, storedMain, pageAtStart: atView('mine') }).files.map((f) => f.outcome)).toEqual(['pass', 'destination-mismatch']);
+    });
   });
 });

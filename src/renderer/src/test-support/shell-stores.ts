@@ -69,7 +69,7 @@ export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): voi
 }
 
 export function resetShellStores(): void {
-  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false, pageOpen: false });
+  useShellView.setState({ sidebarOverlay: false, cardsOverlay: false });
   projectReveal.setState({ pending: null });
   fillStores({ projects: [], sessions: [], digests: [], engine: [], attention: [], timeline: [] }, { loaded: false });
   useSessions.setState({ indexing: null, reconnecting: false, listed: new Map(), listedMachines: new Set(), members: new Map(), member: null, turnsSeen: new Map(), acted: new Map() }); // P5 O8 M2, M5: no other machine's rows; P5 O7 M10: no turns seen; UX wave U7 (ticket 407): no refused read; the UX wave, U9: nothing this window did
@@ -93,6 +93,8 @@ export function resetShellStores(): void {
     dragging: null, // P4-B3
     hydrated: true,
     overviewOpen: false,
+    destination: null, // UX wave U7b: no page, no Settings dialog
+    settings: null,
   });
   resetPlaceNotes(); // UX wave U5a: the comment card's passes and place lines are window state a suite must not inherit
 }

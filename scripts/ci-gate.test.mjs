@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import { Buffer } from 'node:buffer';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import process from 'node:process';
@@ -63,7 +63,7 @@ ${polls.map((answer, i) => `      ${i + 1}) ${pollAnswers[answer]} ;;`).join('\n
 // ci-gate.sh on a one-commit tree with `args` after the tree. Returns its status and output, the gh calls, the refs the
 // origin holds and the pushed commit's message (empty when nothing was pushed). With `change`, the origin's master holds
 // a first commit of `base` (path → content) and the tested commit is `change(tree, git)` on top of it.
-function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', miniOverflow = '', interrupt = false, runAfter = 0, played, keep = true } = {}) {
+function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hostedCap = '', hostedRepos = '', macEc2 = '', miniOverflow = '', interrupt = false, runAfter = 0, played, keep = true, bare = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ci-gate-'));
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, XDG_CACHE_HOME: join(dir, 'cache'), MAWS_GATE_RUNNER: '', MAWS_GATE_IGNORE_ALERTS: alerts ? '' : '1' };
   for (const role of ['AUTHOR', 'COMMITTER']) Object.assign(env, { [`GIT_${role}_NAME`]: 'ci-gate test', [`GIT_${role}_EMAIL`]: 'ci-gate@test.invalid' });
@@ -79,6 +79,15 @@ function gate(args, { alerts = false, base = {}, change, backlog, originUrl, hos
     // Every launched tree has a workflow: peer preflight reads its PEER_E2E even for a non-peer e2e request.
     mkdirSync(join(tree, '.github/workflows'), { recursive: true });
     writeFileSync(join(tree, '.github/workflows/gate.yml'), 'env:\n  PEER_E2E: cross-build\n');
+    // A bare-sha call runs the tested checkout's own copy of the script, as `scripts/ci-gate.sh <sha>` does.
+    if (bare) {
+      for (const part of ['scripts', '.github/scripts']) cpSync(join(root, part), join(tree, part), { recursive: true });
+      // The tree's own scripts find TypeScript where this checkout does (here, or its primary checkout), never committed.
+      const common = dirname(execFileSync('git', ['-C', root, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { encoding: 'utf8' }).trim());
+      const modules = [join(root, 'node_modules'), join(common, 'node_modules')].find((path) => existsSync(path));
+      if (modules) symlinkSync(modules, join(tree, 'node_modules'));
+      writeFileSync(join(tree, '.gitignore'), 'node_modules\n');
+    }
     git('-C', tree, 'add', '-A');
     if (change) {
       for (const [path, content] of Object.entries(base)) {
@@ -123,7 +132,7 @@ exec '${process.execPath}' "$@"
     writeFileSync(join(dir, 'sleep'), `#!/bin/sh\necho "$1" >> '${join(dir, 'sleeps')}'\n`); // the polls for the run, at once
     chmodSync(join(dir, 'gh'), 0o755);
     chmodSync(join(dir, 'sleep'), 0o755);
-    const run = spawnSync('bash', [join(root, 'scripts/ci-gate.sh'), tree, ...args, ...(keep ? ['--keep'] : [])], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
+    const run = spawnSync('bash', bare ? [join(tree, 'scripts/ci-gate.sh'), git('-C', tree, 'rev-parse', 'HEAD'), ...args, ...(keep ? ['--keep'] : [])] : [join(root, 'scripts/ci-gate.sh'), tree, ...args, ...(keep ? ['--keep'] : [])], { encoding: 'utf8', env, maxBuffer: 8 << 20 });
     transcript = /^ci-gate: transcript in (.+)$/m.exec(run.stdout)?.[1] ?? '';
     const refs = git('--git-dir', origin, 'for-each-ref', '--format=%(refname)').split('\n').filter((ref) => ref && ref !== 'refs/heads/master');
     const calls = join(dir, 'gh-calls');
@@ -576,4 +585,70 @@ test('a budget spent past the bound while looking for the run keeps the ref, sin
   assert.equal(result.calls.filter((call) => call.startsWith('api rate_limit ')).length, 1);
   assert.match(result.stdout, keptLine);
   assert.equal(result.refs.length, 1);
+});
+
+// Mini copies: the e2e groups the call asks for whose specs reach a changed path under e2e/ go in `MiniCopy:` trailers,
+// which the plan reads; --no-mini-copy writes `none` with its reason instead.
+const copyTree = {
+  'package.json': JSON.stringify({ scripts: { e2e: 'playwright test', 'e2e:one': 'playwright test e2e/one.spec.ts', 'e2e:two': 'playwright test e2e/two.spec.ts', 'e2e:three': 'playwright test e2e/three.spec.ts' } }),
+  'playwright.config.ts': "export default { testDir: 'e2e' };",
+  'e2e/one.spec.ts': "import './support/scene';",
+  'e2e/two.spec.ts': "import '../src/endpoint';",
+  'e2e/three.spec.ts': "import './support/scene';",
+  'e2e/support/scene.ts': 'export const scene = 1;',
+  'src/endpoint.ts': 'export const endpoint = 1;',
+};
+const copiesOf = (message) => message.split('\n').filter((line) => line.startsWith('MiniCopy:'));
+
+test('a change under e2e/ puts a MiniCopy: trailer on each asked-for group whose specs reach it, and a change elsewhere none', () => {
+  const edited = gate(['--gates', 'static,e2e:one,e2e:two', '--peer', 'none'], {
+    base: copyTree,
+    change(tree) { writeFileSync(join(tree, 'e2e/support/scene.ts'), 'export const scene = 2;'); writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(edited.refs.length, 1, edited.stdout + edited.stderr);
+  // three reaches the edit too, but the call did not ask for it; two reaches only src/.
+  assert.deepEqual(copiesOf(edited.message), ['MiniCopy: one e2e/support/scene.ts']);
+  assert.match(edited.stdout, /^ci-gate: mini copy: e2e:one e2e\/support\/scene\.ts$/m);
+  const elsewhere = gate(['--gates', 'e2e:two', '--peer', 'none'], { base: copyTree, change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); } });
+  assert.deepEqual(copiesOf(elsewhere.message), []);
+  // Without a merge base nothing is copied, and the run's summary is told why.
+  const unreadable = gate(['--gates', 'e2e:one', '--peer', 'none']);
+  assert.deepEqual(copiesOf(unreadable.message), []);
+  assert.match(unreadable.message, /^E2E-Coverage: note: mini copies not computed: /m);
+});
+
+// ux-wave, 2026-11-14: a bare sha ran git from scripts/, whose `git archive` held no package.json, so no copies.
+test('a bare-sha call computes the same mini copies as a worktree call', () => {
+  const change = (tree) => writeFileSync(join(tree, 'e2e/support/scene.ts'), 'export const scene = 2;');
+  const bare = gate(['--gates', 'e2e:one', '--peer', 'none'], { base: copyTree, change, bare: true });
+  assert.deepEqual(copiesOf(bare.message), ['MiniCopy: one e2e/support/scene.ts'], bare.stdout + bare.stderr);
+  assert.doesNotMatch(bare.stdout + bare.stderr, /mini copies not computed/);
+});
+
+test('--no-mini-copy writes MiniCopy: none with its reason, computes nothing, and refuses a reason a relaunch line could not carry', () => {
+  const result = gate(['--gates', 'e2e:one', '--peer', 'none', '--no-mini-copy', 'copies stand on 0123abcd'], {
+    base: copyTree,
+    change(tree) { writeFileSync(join(tree, 'e2e/support/scene.ts'), 'export const scene = 2;'); },
+  });
+  assert.deepEqual(copiesOf(result.message), ['MiniCopy: none (copies stand on 0123abcd)']);
+  assert.match(result.stdout, /^ci-gate: no mini copies: copies stand on 0123abcd$/m);
+  assert.doesNotMatch(result.stdout, /^ci-gate: mini copy:/m);
+  assert.match(planOf({ HEAD_MESSAGE: `${result.message}\nRunner: macos` }, { e2e: 'x', 'e2e:one': 'x' }).summary, /\nMini copies: none \(copies stand on 0123abcd\)\.\n/);
+  for (const reason of ["it's done", 'a; b', 'a\nb']) {
+    const refused = gate(['--gates', 'e2e:one', '--no-mini-copy', reason]);
+    assert.equal(refused.status, 2, reason);
+    assert.match(refused.stderr, /^ci-gate: --no-mini-copy takes a reason of /m, reason);
+    assert.deepEqual(refused.refs, [], reason);
+  }
+});
+
+test("the alert refusal's push-anyway line quotes each argument, so a reason's spaces and its # survive a paste", () => {
+  const result = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd'], { alerts: true });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  const line = /^ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts\/ci-gate\.sh (.*)$/m.exec(result.stderr)?.[1];
+  assert.ok(line, result.stderr);
+  // The line's words, as a shell reads them back: the call's own arguments, then the peer as resolved.
+  const words = execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\n' "$@"`], { encoding: 'utf8' }).trimEnd().split('\n');
+  assert.deepEqual(words.slice(1, 9), ['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd']);
+  assert.deepEqual(words.slice(-2), ['--peer', 'none']);
 });

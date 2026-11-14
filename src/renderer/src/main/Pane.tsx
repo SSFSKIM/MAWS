@@ -28,8 +28,6 @@ import { focusPaneElement, paneDomId } from './pane-dom';
 import { TabStrip } from './TabStrip';
 import { createPortal } from 'react-dom';
 import { useChromeTabs } from './chrome-tabs';
-import { ProjectsView } from '../projects/ProjectsView';
-import { CustomizeView } from '../customize/CustomizeView';
 import { ChannelView } from '../channel/ChannelView'; // P5 O8 M7a
 
 type PaneIndex = 0 | 1;
@@ -166,14 +164,6 @@ function TabContent({ tab, paneIndex }: { tab: TabRef; paneIndex: PaneIndex }) {
           <Diagnostics />
         </div>
       );
-    case 'settings':
-      return <SettingsTab section={tab.section} />;
-    case 'projects':
-      return <ProjectsView />;
-    case 'customize':
-      return <CustomizeView section={tab.section} />;
-    case 'artifacts': // P3-G (§D5)
-      return <ArtifactsTab />;
     case 'artifact': // P3-L: one artifact in its kind's editor
       return <ArtifactTab tab={tab} />;
     case 'browser': // E4a
@@ -228,19 +218,6 @@ function EmptyPane() {
       </div>
     </div>
   );
-}
-
-function SettingsTab({ section }: { section: Extract<TabRef, { kind: 'settings' }>['section'] }) {
-  const Slot = useSlot('settingsTab');
-  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
-  return <Slot section={section} />;
-}
-
-// P3-G (§D5): the Artifacts library, the slot P3-L registers (a placeholder until then).
-function ArtifactsTab() {
-  const Slot = useSlot('artifactsLibrary');
-  // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
-  return <Slot />;
 }
 
 // A child agent's transcript in the main area (C6's child variant): the transcript slot alone, since nobody types to a

@@ -75,6 +75,9 @@ export function settingsBridge(initial: Settings = SETTINGS_DEFAULTS_V21): Setti
     'library.spaces': () => ({ spaces: [] }),
     // P3-D end
     'org.status': () => ({ state: 'none' }), // P5 O8 M1: Settings › Org reads this Mac's place in the org (none by default)
+    // UX wave U7b (O-47): Settings › Usage, the usage panel, reads ClaudeUsage's status and asks for its control route
+    'settings.claudeUsage.status': () => ({ installed: true, running: true, bundleId: 'com.haegi.ClaudeUsage', dataDirPresent: true, checkedAt: new Date().toISOString() }),
+    'settings.usageControls': () => ({ available: false, reason: 'no_route', state: null }),
   };
   const bridge = {
     invoke: vi.fn(async (name: string, input: unknown) => {

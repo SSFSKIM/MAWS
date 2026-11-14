@@ -3466,7 +3466,7 @@ exit 0
 `;
 
 describe('M4c: delegations through the session', () => {
-  const DEST = { project: 'ytdownload-505811', secret: 'desk-provisioning-v2', account: 'cli-owner@ytdownload-505811.iam.gserviceaccount.com' };
+  const DEST = { project: 'maws-example-prod', secret: 'desk-provisioning-v2', account: 'cli-owner@maws-example-prod.iam.gserviceaccount.com' };
   const CREATE = { label: 'devcloud VMs', prefix: 'dc-', ttlDays: 30, maxUses: null, owners: [] as string[] };
   let bin: string;
   beforeEach(async () => {

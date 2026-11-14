@@ -8,6 +8,7 @@ import { useLayout } from '../stores/layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import { connectKeys, dispatchKey, keymapBinds, releaseHold } from './dispatcher';
 import { useKeyChord } from './useKeyChord';
+import { SettingsDialog } from '../destination/SettingsDialog';
 import { currentSet } from '../stores/layout-model';
 
 // The shell's own `useKeyChord`, bound the way C7's docked card and Overview cards will bind it: to the element that
@@ -167,6 +168,20 @@ describe('key dispatch follows DOM focus', () => {
     const enter = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true });
     card.dispatchEvent(enter);
     expect(enter.defaultPrevented).toBe(true);
+  });
+
+  // UX wave U7b (Interfaces §H, row 9): what belongs to what is behind the Settings dialog does not act while it is open.
+  it('with the Settings dialog open, Esc does not decline a docked request', () => {
+    const decline = vi.fn();
+    render(<Bound id="request.decline" label="docked request" spy={decline} />);
+    const dock = screen.getByLabelText('docked request');
+    act(() => dock.focus());
+    fireEvent.keyDown(dock, { key: 'Escape', code: 'Escape' });
+    expect(decline).toHaveBeenCalledTimes(1); // without the dialog, the docked request declines
+    render(<SettingsDialog />);
+    act(() => useLayout.getState().openSettings());
+    fireEvent.keyDown(dock, { key: 'Escape', code: 'Escape' });
+    expect(decline).toHaveBeenCalledTimes(1);
   });
 
   it('a key it does not handle keeps its default', () => {

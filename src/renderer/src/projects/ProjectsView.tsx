@@ -1,4 +1,4 @@
-import { useId, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { ProjectRecord } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import { SECONDARY } from '../sessions/ui';
@@ -11,9 +11,10 @@ import { SearchField } from '../widgets/plugins/LibraryHeader';
 import { machineOf } from '@shared/machine/address';
 
 // UX2-K: UX1's Add-project chooser as an app destination. Discovery is a choice, not sidebar membership;
-// only the add command promotes it. Removal and the native chooser keep the shell's existing action paths.
+// only the add command promotes it. Removal and the native chooser keep the shell's existing action paths. UX wave U7b
+// (O-40; its execution document, M6, decision 9): the page's name is drawn once, as the title bar's level-1 heading,
+// which labels the page's region; the view draws no heading of its own.
 export function ProjectsView() {
-  const heading = useId();
   const projects = useSessions((s) => s.projects);
   const loaded = useSessions((s) => s.loaded);
   const groups = useMemo(() => projectGroups([...projects.values()]), [projects]);
@@ -37,10 +38,9 @@ export function ProjectsView() {
   };
 
   return (
-    <section aria-labelledby={heading} className="@container/projects flex h-full min-h-0 min-w-0 flex-col bg-bg text-ui text-fg">
+    <div className="@container/projects flex h-full min-h-0 min-w-0 flex-col bg-bg text-ui text-fg">
       <header className="shrink-0 border-b border-border">
         <div className="mx-auto flex w-full max-w-(--measure-wide) flex-wrap items-center gap-x-3 gap-y-2 px-6 py-3 @max-lg/projects:px-3">
-          <h1 id={heading} className="m-0 text-ui font-semibold">Projects</h1>
           <div className="ml-auto flex min-w-0 items-center gap-2 @max-lg/projects:ml-0 @max-lg/projects:w-full @max-lg/projects:flex-wrap [&>label]:max-w-full @max-lg/projects:[&>label]:flex-1">
             <SearchField label="Search projects" value={query} onChange={setQuery} />
             <button type="button" disabled={!canChooseFolder || busy} title={canChooseFolder ? undefined : 'Not available here'} onClick={runAddProject} className={`${SECONDARY} text-ui-sm`}>
@@ -94,6 +94,6 @@ export function ProjectsView() {
           )}
         </div>
       </div>
-    </section>
+    </div>
   );
 }

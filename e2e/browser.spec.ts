@@ -9,7 +9,7 @@
 // themes (shots under MAWS_E4A_SHOTS=1); (9) U12a: show_pane on a page already open, device sizes, Copy screenshot.
 // Runs under `pnpm e2e:browser` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch passes
 // MAWS_HARNESS=0, so the window is the product app.
-import { hideSurface, openSurface, sideGroup, surfaceRow, usagePill } from './support/shell';
+import { hideSurface, openSurface, sideGroup, surfaceRow, usageRing } from './support/shell';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -409,15 +409,19 @@ test('the cover: the palette hides the view within 200 ms behind its picture and
     await s.page.keyboard.press('Escape');
     await expect(s.page.getByRole('dialog', { name: 'Model and effort' })).toHaveCount(0);
 
-    // UX2-L moved Usage to the left sidebar footer, away from the right Browser pane: no cover.
-    await usagePill(s.page).click();
-    const usage = s.page.getByRole('dialog', { name: 'Claude Usage' });
+    // UX wave U7b (O-47): Usage is the title bar's ring, and its compact popover opens under it at its right edge. With a
+    // side surface open the title bar ends where the side column begins (the column spans the window's height), so the
+    // popover stands left of the Browser pane: a popover elsewhere, no cover. The pane's own menu above is the one that
+    // overlaps and covers.
+    await usageRing(s.page).click();
+    const usage = s.page.getByRole('dialog', { name: 'Usage', exact: true });
     await expect(usage).toBeVisible();
     await s.page.waitForTimeout(300); // past the popper's two-frame measure, as for the composer popover above
     const [usageBox, browserBox] = [(await usage.boundingBox())!, (await pane.boundingBox())!];
-    expect(usageBox.x + usageBox.width).toBeLessThanOrEqual(browserBox.x);
-    await covered(false, 'the sidebar Usage popover');
+    expect(usageBox.x + usageBox.width, 'the usage popover ends left of the Browser page').toBeLessThanOrEqual(browserBox.x);
+    await covered(false, 'the title bar\'s Usage popover');
     await s.page.keyboard.press('Escape');
+    await expect(usage).toHaveCount(0);
     await covered(false, 'the usage popover closed');
 
     // the Rename sheet

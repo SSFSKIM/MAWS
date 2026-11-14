@@ -29,11 +29,10 @@ const AgentTabSchema = z.strictObject({ id: z.string(), kind: z.literal('agent')
 const FileTabV2Schema = z.strictObject({ id: z.string(), kind: z.literal('file'),    path: z.string(), line: z.number().int().nullable(), appSessionId: AppSessionIdSchema.nullable(), pinned: z.boolean() });
 const DiffTabSchema = z.strictObject({ id: z.string(), kind: z.literal('diff'),    appSessionId: AppSessionIdSchema, ref: z.string(), pinned: z.boolean() });
 const DiagnosticsTabSchema = z.strictObject({ id: z.literal('diagnostics'), kind: z.literal('diagnostics'), pinned: z.boolean() });
-const SettingsTabSchema = z.strictObject({ id: z.literal('settings'), kind: z.literal('settings'), section: z.enum(['engine', 'gateway', 'keyboard', 'appearance', 'notifications', 'voice', 'browser', 'artifacts', 'sessions', 'org']).nullable(), pinned: z.literal(false) });   // C11: singleton; a second openTab activates it and updates `section`; titled 'Settings'; E9: 'voice' appended (the index places it after Keyboard); E4a: 'browser' appended (Settings › Browser, Task 3.4); P3-D: 'artifacts' appended (Settings › Artifacts, the design-system defaults); P5 O8 M1: 'org' appended (Settings › Org, the sign-in to the org)
-// P3-G (§D5): the Artifacts library, a singleton like Settings; its content is the `artifactsLibrary` slot P3-L fills
-const ArtifactsTabSchema = z.strictObject({ id: z.literal('artifacts'), kind: z.literal('artifacts'), pinned: z.literal(false) });
-const ProjectsTabSchema = z.strictObject({ id: z.literal('projects'), kind: z.literal('projects'), pinned: z.literal(false) });
-const CustomizeTabSchema = z.strictObject({ id: z.literal('customize'), kind: z.literal('customize'), section: z.enum(['plugins', 'skills', 'mcp']), pinned: z.literal(false) });
+// UX wave U7b (O-40; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M6 and Interfaces
+// §G): the Settings, Artifacts library, Projects and Customize tabs retired. Settings is a dialog over the window, and
+// the other three are pages beside the sidebar (`DestinationSchema`, below); a stored tab of any of the four is dropped at
+// read, with no warning, as the Overview's is (`RETIRED_KINDS`), and `retiredFront` reads which of them was in front.
 // P3-L (Decision Log 7, 8): one artifact in its kind's editor, one tab per artifact; the workspace's, not a session's
 // (it follows the current tab set as the library does), pinnable like a file tab
 const ArtifactTabV2Schema = z.strictObject({ id: z.string(), kind: z.literal('artifact'), artifactId: z.string(), pinned: z.boolean() });
@@ -50,14 +49,12 @@ const SessionTabV3Schema = SessionTabSchema.extend({ title: z.string().optional(
 // a build that doesn't know the kind drops the tab (`dropUnknownTabs`).
 const ChannelTabSchema = z.strictObject({ id: z.string(), kind: z.literal('channel'), project: z.string().min(1), pinned: z.boolean() });
 export const TabRefSchema = z.discriminatedUnion('kind', [
-  SessionTabV3Schema, AgentTabSchema, FileTabV2Schema.extend({ machine: MachineRefSchema }), DiffTabSchema, DiagnosticsTabSchema, SettingsTabSchema,
-  ArtifactsTabSchema, ProjectsTabSchema, CustomizeTabSchema, ArtifactTabV2Schema.extend({ machine: MachineRefSchema }), BrowserTabSchema,
-  ChannelTabSchema,
+  SessionTabV3Schema, AgentTabSchema, FileTabV2Schema.extend({ machine: MachineRefSchema }), DiffTabSchema, DiagnosticsTabSchema,
+  ArtifactTabV2Schema.extend({ machine: MachineRefSchema }), BrowserTabSchema, ChannelTabSchema,
 ]);
 export type TabRef = z.infer<typeof TabRefSchema>;
 const TabRefV2Schema = z.discriminatedUnion('kind', [
-  SessionTabSchema, AgentTabSchema, FileTabV2Schema, DiffTabSchema, DiagnosticsTabSchema, SettingsTabSchema,
-  ArtifactsTabSchema, ProjectsTabSchema, CustomizeTabSchema, ArtifactTabV2Schema, BrowserTabSchema,
+  SessionTabSchema, AgentTabSchema, FileTabV2Schema, DiffTabSchema, DiagnosticsTabSchema, ArtifactTabV2Schema, BrowserTabSchema,
 ]);
 type TabRefV2 = z.infer<typeof TabRefV2Schema>;
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
@@ -76,14 +73,6 @@ export function tabId(tab: TabTarget): string {
       return `diff:${tab.appSessionId}:${tab.ref}`;
     case 'diagnostics':
       return 'diagnostics';
-    case 'settings':
-      return 'settings';
-    case 'artifacts': // P3-G
-      return 'artifacts';
-    case 'projects':
-      return 'projects';
-    case 'customize':
-      return 'customize';
     case 'artifact': // P3-L; P5 O6 M2: with its machine
       return `artifact:${tab.machine}:${tab.artifactId}`;
     // E4a start
@@ -94,9 +83,6 @@ export function tabId(tab: TabTarget): string {
       return `channel:${tab.project}`;
   }
 }
-
-// Tab kinds the pin control never applies to: C11's singleton (the Accounts tab, the other, retired with W6) and P3-G's.
-export const UNPINNABLE_KINDS: ReadonlySet<TabRef['kind']> = new Set(['settings', 'artifacts', 'projects', 'customize']);
 
 // A pane holds at least one tab, except that the only pane may be empty (W5: with the Overview out of the strip, closing
 // the last tab leaves an empty main area; `activeTabId` is '' then).
@@ -304,7 +290,8 @@ function liftingWith(local: MachineRef) {
 // What hydration reads from `main.tabs`, either version: a tab whose kind this build does not name is dropped from the
 // panes and the closed-tab history (a pane it leaves empty goes, focusing pane 0; a pane whose active tab it was
 // activates its first tab), and everything else is kept. That covers the retired kinds, the Overview's (every layout
-// before W5 held it) and the Accounts tab's (W6), and, since P3-G (§D5; the coordinator's condition, 2026-10-12), a
+// before W5 held it), the Accounts tab's (W6) and UX wave U7b's four (Settings, the Artifacts library, Projects and
+// Customize), and, since P3-G (§D5; the coordinator's condition, 2026-10-12), a
 // later build's kind read after a downgrade: one unknown tab no longer fails the whole value back to the default. A
 // read that drops a kind other than a retired one warns once. A tab of a known kind that breaks its schema still fails
 // the read. The rewrite is total: a pane or tab that is not an object passes through untouched for the schema to
@@ -312,7 +299,7 @@ function liftingWith(local: MachineRef) {
 type Entries = { tabs: unknown[]; activeTabId?: unknown };
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 const KNOWN_KINDS: ReadonlySet<unknown> = new Set(TabRefSchema.options.map((option) => option.shape.kind.value));
-const RETIRED_KINDS: ReadonlySet<unknown> = new Set(['overview', 'accounts']);
+const RETIRED_KINDS: ReadonlySet<unknown> = new Set(['overview', 'accounts', 'settings', 'artifacts', 'projects', 'customize']);
 const hasTabs = (pane: unknown): pane is Entries => isRecord(pane) && Array.isArray(pane.tabs);
 const idOf = (tab: unknown) => (isRecord(tab) ? tab.id : undefined);
 
@@ -627,6 +614,7 @@ export const LayoutKeySchema = z.union([
   z.literal('sidebar.hidden'), // UX wave U7 (O-16): SidebarHiddenSchema
   z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
   z.literal('library.exportFolder'), // UX wave U5: ExportFolderSchema, main's own key
+  z.literal('destination'), // UX wave U7b (O-40): StoredDestinationSchema
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
 // and machines' row keys) whose People toggle is on, written by `stores/people.ts`; an absent key means every toggle off.
@@ -647,6 +635,53 @@ export type SidebarHidden = z.infer<typeof SidebarHiddenSchema>;
 // is: written by main after each export's copy and never read or written across IPC (src/main/layout/store.ts).
 export const ExportFolderSchema = z.strictObject({ path: z.string().min(1) });   // key `library.exportFolder`
 export type ExportFolder = z.infer<typeof ExportFolderSchema>;
+// UX wave U7b, O-40 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F and
+// §G; the wave's UC-12): the page open beside the sidebar in place of the tabs, a place that is not a tab. Stored while a
+// page is open and deleted when none is; build F never asks for the key and its main keeps it through its own writes.
+// The Settings dialog is never stored.
+export const DestinationSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('customize'), view: z.enum(['mine', 'discover']), show: z.enum(['all', 'plugins', 'skills', 'connectors']) }),
+  z.strictObject({ kind: z.literal('library') }),
+  z.strictObject({ kind: z.literal('projects') }),
+]);
+export type Destination = z.infer<typeof DestinationSchema>;
+export const StoredDestinationSchema = z.strictObject({ version: z.literal(1), destination: DestinationSchema });   // key `destination`; absent: the tabs show
+
+// UX wave U7b (M6, decision 3; Interfaces §F, "At hydration", and §G): a stored `main.tabs` read before its retired tabs
+// are dropped. The set that was showing (version 1's value is its own), that set's focused pane, and the tab its
+// `activeTabId` names: a Customize tab at its section (`mcp` as `connectors`; any other section as Plugins, Customize's
+// own default), and Projects and the library each its page.
+const CUSTOMIZE_SHOW: Readonly<Record<string, Extract<Destination, { kind: 'customize' }>['show']>> = { plugins: 'plugins', skills: 'skills', mcp: 'connectors' };
+/** What a stored value's tab in front was, read before retired kinds are dropped: the page of a Customize, Projects or Artifacts tab; 'settings' for a Settings tab; null for anything else. Total: it never throws. */
+export function retiredFront(stored: unknown): { page: Destination } | 'settings' | null {
+  if (!isRecord(stored) || (stored.version !== 1 && stored.version !== 2 && stored.version !== 3)) return null;
+  const sets = stored.sets;
+  const layout = stored.version === 1 ? stored : isRecord(sets) && typeof stored.current === 'string' && Object.hasOwn(sets, stored.current) ? sets[stored.current] : null;
+  if (!isRecord(layout) || !Array.isArray(layout.panes)) return null;
+  const pane: unknown = layout.panes[layout.focusedPane === 1 ? 1 : 0];
+  if (!hasTabs(pane)) return null;
+  const tab = pane.tabs.find((entry) => idOf(entry) === pane.activeTabId);
+  if (!isRecord(tab)) return null;
+  switch (tab.kind) {
+    case 'settings':
+      return 'settings';
+    case 'customize':
+      return { page: { kind: 'customize', view: 'mine', show: (typeof tab.section === 'string' && Object.hasOwn(CUSTOMIZE_SHOW, tab.section) ? CUSTOMIZE_SHOW[tab.section] : undefined) ?? 'plugins' } };
+    case 'projects':
+      return { page: { kind: 'projects' } };
+    case 'artifacts':
+      return { page: { kind: 'library' } };
+    default:
+      return null;
+  }
+}
+/** The page hydration opens by rules 3 to 5 of "At hydration". Pure, so the store and the rehearsal run the same code. */
+export function pageAtStart(input: { rawMain: unknown; canonical: boolean; stored: Destination | null }): Destination | null {
+  const front = retiredFront(input.rawMain);
+  if (front === 'settings') return null; // rule 3: a Settings tab in front opens none, and no stored page over it
+  if (front !== null) return front.page; // rule 3: a Customize, Projects or Artifacts tab in front opens its page (A8)
+  return input.canonical ? input.stored : null; // rules 4 and 5: the stored page over tabs of the stored form's shape
+}
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
 
 // C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2
