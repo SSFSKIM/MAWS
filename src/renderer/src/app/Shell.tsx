@@ -4,7 +4,9 @@
 // screen by one mechanism, mounted, invisible and inert: the main area (a wrapper around `MainArea`, not the main region,
 // which holds the Overview's layer, drawn over the page), the card column and the side column (`PanelRegion`'s own). The
 // grid's tracks, the main area's padding and the card column's place (`placed`) do not change, so each keeps its box and
-// its scroll. The title bar and the banner row span every column. The Settings dialog is mounted here once.
+// its scroll. The title bar and the banner row span every column from the first: the side column keeps column 3 of rows 1
+// to 3 under a page, so a span of three with no start would be placed past it, in columns the grid adds, which take the
+// main track's width (the first Mac run). The Settings dialog is mounted here once.
 import { useEffect } from 'react';
 import { BannerHost } from './BannerHost';
 import { MainArea } from '../main/MainArea';
@@ -53,7 +55,7 @@ export function Shell() {
   return (
     <div data-shell className="relative grid h-full grid-rows-[var(--toolbar-h)_auto_minmax(0,1fr)] bg-bg text-fg" style={{ gridTemplateColumns: geometry.columns }}>
       <Toolbar />
-      <BannerHost className={`${page ? 'col-span-3' : 'col-span-2'} row-start-2`} />
+      <BannerHost className={`${page ? 'col-start-1 col-span-3' : 'col-span-2'} row-start-2`} />
       {geometry.sidebarAside && overlay && <button aria-label="Close sidebar overlay" onClick={() => useShellView.setState({ sidebarOverlay: false })} className="absolute inset-0 top-(--toolbar-h) z-30 bg-fg/10" />}
       <SidebarRegion />
       <section id={MAIN_REGION_ID} data-region="main" aria-label="Main" inert={!page && (geometry.mainHidden || geometry.sheet)} className="relative col-start-2 row-start-3 flex min-h-0 min-w-0 flex-col overflow-hidden">
