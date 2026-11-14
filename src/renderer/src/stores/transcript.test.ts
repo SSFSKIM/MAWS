@@ -75,6 +75,21 @@ describe('transcript store', () => {
     expect(store.getState().rows(KEY).length).toBeGreaterThan(0);
   });
 
+  // UX wave U5a (Decision Log 52): a selector over `attached` (the refusal dialog's) hears the last holder go
+  it('the last detach tells the store’s subscribers that the key is no longer attached; an earlier one tells nothing', async () => {
+    const store = createTranscriptStore();
+    const fake = pushSource(twoTurns().events);
+    await store.getState().attach(KEY, fake.source);
+    await store.getState().attach(KEY, fake.source); // a second holder of the same source
+    const heard: boolean[] = [];
+    const off = store.subscribe((state) => heard.push(state.attached(KEY)));
+    store.getState().detach(KEY);
+    expect(heard).toEqual([]);
+    store.getState().detach(KEY);
+    expect(heard).toEqual([false]);
+    off();
+  });
+
   it('toggles a turn, a group and a cell, and later batches still apply (the lineage is kept)', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();
@@ -155,6 +170,78 @@ describe('transcript store', () => {
     expect(store.getState().entries[KEY].jump).toBeNull();
   });
 
+  // UX wave U3 (O-12): a message from another session folds with its turn now, so a jump to it opens that turn
+  it('jumpTo a message line inside a folded turn opens the turn and lands on the line', async () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'peer' });
+    const message = b.emit('peer.message', { messageUuid: uuid('p1'), from: 'uds:/tmp/socks/9.sock', fromSession: null, fromName: 'docs', fromMode: null, fromPlugin: null, hopChain: [], text: 'the index is stale', midTurn: false, lineage: 'peer', replyable: true });
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.end([], { origin: 'peer' });
+    b.turn('u2');
+    b.text('m2', 0, 'Done');
+    b.end(['u2']);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const target = rowId.agentMessage(message.id);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(false);
+    store.getState().jumpTo(KEY, target);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(true);
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: target });
+    expect(store.getState().entries[KEY].state.ui.revealed).toBe(target); // UX wave U3 (M5): the jump's target is revealed
+  });
+
+  // UX wave U3 (the U3a document, M5; Interfaces F): so is a task's end with no outcome, which folds with its turn
+  it('jumpTo a notice inside a folded turn opens the turn, lands on the line and reveals it', async () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: null, origin: 'engine' });
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.emit('user.message', { messageUuid: uuid('n1'), content: '<task-notification>…</task-notification>', isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [{ class: 'task', taskId: 'bm1', toolUseId: null, runId: null, outcome: null, summary: 'Monitor "watch logs" event: a line arrived', durationMs: null, outputFile: null, detail: null }] });
+    b.end([], { origin: 'engine' });
+    b.turn('u2');
+    b.end(['u2']);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const target = rowId.notice(null, uuid('n1'), 0);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(false);
+    store.getState().jumpTo(KEY, target);
+    expect(store.getState().rows(KEY).some((row) => row.id === target)).toBe(true);
+    expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: target });
+    expect(store.getState().entries[KEY].state.ui.revealed).toBe(target);
+  });
+
+  // UX wave U3 (the U3a document, M5; Interfaces F): a mod may draw a fold MAWS cannot open, so the target of the tab's
+  // last jump asks no site and MAWS draws it; each jump replaces it, and only the turns of the old and the new target
+  // derive again
+  it('every jump path records its target as the tab’s revealed row, and the next jump replaces it', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(twoTurns().events).source);
+    const ui = () => store.getState().entries[KEY].state.ui;
+    const [first, second] = [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))];
+    expect(ui().revealed).toBeUndefined();
+    const stamps = () => [ui().stamps.get(first) ?? 0, ui().stamps.get(second) ?? 0];
+
+    const cell = cellId.tool(tool('t2'));
+    store.getState().jumpTo(KEY, cell); // the cell jump: a cell in a group of the first turn
+    expect(ui().revealed).toBe(cell);
+    const afterCell = stamps();
+
+    expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m3-u0'), blockIndex: 0 })).toBe(true); // the second turn's answer
+    expect(ui().revealed).toBe(rowId.text(api('m3'), 0));
+    expect(stamps()).toEqual([afterCell[0] + 1, afterCell[1] + 1]); // the old target's turn and the new one's
+    const global = ui().global;
+
+    const user = rowId.user(uuid('u2'));
+    store.getState().jumpTo(KEY, user);
+    expect(ui().revealed).toBe(user);
+    expect(stamps()).toEqual([afterCell[0] + 1, afterCell[1] + 2]); // both targets in the second turn: it alone derives again, once
+    expect(ui().global).toBe(global);
+
+    store.getState().expandAll(KEY); // any other change of the reader's keeps it
+    expect(ui().revealed).toBe(user);
+  });
+
   it('jumpTo with the owning turn named locates the cell in that turn alone, and falls back when the hint misses', async () => {
     for (const hint of [turnId.ofMessage(uuid('u1')), turnId.ofMessage(uuid('u2'))]) {
       const store = createTranscriptStore();
@@ -168,15 +255,21 @@ describe('transcript store', () => {
     }
   });
 
-  it('jumpTo a visible row only records the request', async () => {
+  // UX wave U3 (the U3a document, M5; Interfaces F): it reveals the row too, so the target's turn derives again; nothing
+  // opens and no other turn's rows change
+  it('jumpTo a visible row records the request and reveals the row, opening nothing', async () => {
     const b = twoTurns();
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(b.events).source);
     const before = store.getState().rows(KEY);
     const user = rowId.user(uuid('u2'));
     store.getState().jumpTo(KEY, user, { align: 'start' });
-    expect(store.getState().rows(KEY)).toBe(before);
+    const after = store.getState().rows(KEY);
+    expect(after.map((row) => row.id)).toEqual(before.map((row) => row.id));
+    const second = turnId.ofMessage(uuid('u2'));
+    for (const [i, row] of after.entries()) if (row.turnId !== second) expect(row, row.id).toBe(before[i]);
     expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: user, focus: user, align: 'start' });
+    expect(store.getState().entries[KEY].state.ui.revealed).toBe(user);
   });
 
   it('expandAll opens every turn and group', async () => {
@@ -335,15 +428,15 @@ describe('transcript store', () => {
     const store = createTranscriptStore();
     store.getState().setAgents(KEY, lookup);
     await store.getState().attach(KEY, pushSource(b.events).source);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi'); // UX wave U3 (O-12): the message line's words
     store.getState().setAgents(KEY, undefined);
-    expect(sent()).toBe('Sent to a912e224: hi');
+    expect(sent()).toBe('Sent to @a912e224: hi');
     store.getState().setAgents(KEY, lookup);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi');
     store.getState().detach(KEY);
     await store.getState().attach(KEY, pushSource(b.events.map((event) => ({ ...event, id: `disk:${event.id}` as EventId, seq: null }))).source); // staged restart
     expect(store.getState().entries[KEY].state.seen.has(`disk:${b.events[0].id}` as EventId)).toBe(true);
-    expect(sent()).toBe('Sent message to Survey src: hi');
+    expect(sent()).toBe('Sent to Survey src: hi');
   });
 
   it('drops a duplicate event id in a live batch', async () => {

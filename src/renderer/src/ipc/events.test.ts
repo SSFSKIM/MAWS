@@ -66,7 +66,7 @@ describe('shell event subscription', () => {
     const subscriptions = fake.calls.slice(0, firstInvoke);
     expect(subscriptions.sort()).toEqual(
       [
-        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.projects.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
+        'attention.changed', 'attention.notified', 'engine.hostState', 'fs.scanProgress', 'host.status', 'machines.changed', 'org.projects.changed', 'org.rows.changed', 'remote.attention', 'remote.session', 'remote.settled', 'session.changed', 'session.digest', 'session.eventBatch', 'session.projects.changed', 'session.removed', 'session.status',
       ].map((n) => `on ${n}`),
     );
     expect(fake.calls.slice(firstInvoke).filter((c) => c.startsWith('on'))).toEqual([]);

@@ -15,6 +15,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ListingSection } from './agent-listing'; // E7
 import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
+import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U3
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -42,6 +43,14 @@ export interface AnchorFrame {
   screenshot: boolean;
 }
 
+// UX wave U5a (Interfaces §H, decision 13): one comment of a message that carried several, in the order made; `attachment`
+// is the index in the row's `attachments` of the screenshot its lead announced, when every announced one can be paired
+export interface UserComment {
+  anchor: Anchor;
+  text: string;
+  attachment?: number;
+}
+
 export interface RowBase {
   id: RowId;
   turnId: TurnId | null;
@@ -59,11 +68,19 @@ export type Row = RowBase &
         anchor?: Anchor;
         anchorFrame?: AnchorFrame; // E11 (scale-review C scalpel-2#1): how MAWS framed it, beside `anchor`, so an edit resends the comment framed again
         // E3 end
+        comments?: UserComment[]; // UX wave U5a (§H): a message of two or more comments, which then has no `anchor` and no `anchorFrame`
+        commentsTo?: 'thread'; // UX wave U5a (M5's review): such a message framed for a side thread, which only a thread opens with
+        // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): the prompt is MAWS's "Approve and retry" for
+        // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
+        consent?: { kind: 'command' | 'call'; subject: string };
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' /* E11: present when the engine, not the reader, stopped it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
+        // UX wave U3 (UC-2, "The rows"): on a turn the person did not start, what stands at its head and opened it, for U2
+        // to name the turn from: that arrival's class and its row's words (no lead mark, no owners)
+        opener?: { class: Arrival['class']; line: string };
       }
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; activeLabel: string | null; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
@@ -72,7 +89,7 @@ export type Row = RowBase &
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report
-        body?: string; // E7: an in-process agent's whole message, when the text shows only its preview
+        body?: string; // E7: an in-process agent's whole message; U3 (O-12): of every message to or from a subagent, which its line opens to
       }
     | { kind: 'thinking'; messageUuid: MessageUuid | null; text: string; live: boolean; durationMs: number | null; clock?: 'wall' } // clock (P5 O7 M10): a terminal session's streamed block (lane A's overlay), its `at` this window's time when first drawn, not an event's
     | { kind: 'plan'; toolUseId: ToolUseId; plan: string; outcome: (typeof PLAN_OUTCOMES)[number] | null; feedback: string | null }
@@ -89,6 +106,14 @@ export type Row = RowBase &
     | { kind: 'gap'; text: string } // P5 O7 M2: events here were not delivered (model/gap.ts): "Earlier history isn't available"
     | { kind: 'boundary'; boundaryKind: 'compaction' | 'reset' | 'retraction' | 'rewind'; text: string; secondary?: string; detail: string | null; hiddenRows: number; revealed: boolean }
     | { kind: 'bash'; command: string; stdout: string; stderr: string; exitCode: number | null; cwd: string | null }
+    // UX wave U3 (UC-2, "The rows"; the U3a document, Interfaces D): what the engine told the agent of a background task's
+    // end, a scheduled prompt's firing, an answer to a question asked without waiting, or the sminos bridge's wake, as one
+    // line. `text` is the engine's sentence for a task; `detail` what it delivered with it (opened under the line);
+    // `outputFile` the task's output, which "Open output" opens where the mount gives an act for it
+    | {
+        kind: 'notice'; class: 'task' | 'schedule' | 'answer' | 'wake'; outcome: 'completed' | 'failed' | 'stopped' | null;
+        text: string; durationMs: number | null; detail: string | null; taskId: TaskId | null; toolUseId: ToolUseId | null; outputFile: string | null;
+      }
     | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string } // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; a replayed row, never a bubble
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
@@ -169,7 +194,7 @@ export interface PeerMessage {
   sender: { name: string | null; address: string; session: string | null; owners: string[] | null } | null;
   recipient: { name: string | null; address: string } | null;
   body: string;
-  preview: string; // the body's first line, cut to 120 columns
+  preview: string; // the body's first line, cut to 120 columns; U3 (O-12): without a leading `@address` token, which the opened body keeps
   replyTo: string | null;
   toolUseId: ToolUseId | null;
   messageUuid: MessageUuid | null;
@@ -181,6 +206,27 @@ export interface PeerMessage {
 // Whether a message's preview leaves some of its body out (more lines, or a cut first line): then the row offers the
 // whole of it and the markdown copy quotes it. Surrounding whitespace hides nothing.
 export const previewHidesBody = (body: string, preview: string): boolean => body.trim() !== preview;
+// A text's first line cut to 120 columns, as the TUI previews a message (the line's ellipsis at the column's edge is the
+// view's). UX wave U3 (O-12): a message's preview leaves out a leading `@address` token, which names whom it was sent to;
+// the opened message keeps it.
+const PREVIEW_COLUMNS = 120;
+export function firstLineOf(text: string): string {
+  const line = text.trimStart().split('\n')[0]!.trimEnd();
+  return line.length > PREVIEW_COLUMNS ? `${line.slice(0, PREVIEW_COLUMNS - 1)}…` : line;
+}
+const LEADING_ADDRESS = /^@\S+\s+/;
+export function previewOf(body: string): string {
+  const rest = body.trimStart().replace(LEADING_ADDRESS, '');
+  return firstLineOf(rest.trim() === '' ? body : rest);
+}
+
+// UX wave U3 (O-12): what a message's line leaves out, for the markdown copy: a hand-back's report, or the whole message
+// when its line shows only part of it; null when the line holds it all. Opened, the line always shows the whole message.
+export function messageMore(row: Extract<Row, { kind: 'agent_message' }>): string | null {
+  if (row.report !== undefined) return row.report;
+  const body = row.peer?.body ?? row.body;
+  return body !== undefined && previewHidesBody(body, row.peer?.preview ?? previewOf(body)) ? body : null;
+}
 // E7 end
 
 export type RowKind = Row['kind'];

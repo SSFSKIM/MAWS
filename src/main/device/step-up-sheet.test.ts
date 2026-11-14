@@ -15,7 +15,7 @@ import { harnessConfirmation, sheetConfirmation } from './step-up-sheet';
 import { createStateSigner, createStepUp, renderAction, type Confirm, type StepUpPrompt } from './step-up';
 
 const WINDOW = { id: 7 } as unknown as BrowserWindow;
-const PROMPT: StepUpPrompt = { summary: 'sminos.spawn on machine mref-test-0000001', text: 'Action: sminos.spawn\nMachine: mref-test-0000001\nbrief: "fix the tests"' };
+const PROMPT: StepUpPrompt = { summary: 'Start a terminal session on mini', text: 'Action: sminos.spawn\nMachine: mini (mref-test-0000001)\nbrief: "fix the tests"' };
 
 /** A sheet answered with `response` (0 Continue, 1 Cancel), and Touch ID answered `touchID`; every step in `seen`. */
 function harness(response: number, options: { window?: BrowserWindow | null; touchID?: Awaited<ReturnType<Confirm>> } = {}) {

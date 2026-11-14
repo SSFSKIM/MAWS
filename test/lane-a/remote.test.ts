@@ -503,7 +503,8 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     await watched(l, 'la-v');
     expect(stateNow(l, 'la-v')).toMatchObject({ bridge: 'live', launch: 'LV' });
     const words = { state: 'refused', code: 'grade', message: 'you can’t do that on this session' };
-    expect(await l.cmd('laneA.interrupt', { appSessionId: 'la-v' })).toEqual(words);
+    // Stop's refusal is UC-7.5's (UX wave U9, M1); the rest keep the grade's words
+    expect(await l.cmd('laneA.interrupt', { appSessionId: 'la-v' })).toEqual({ ...words, message: 'Not stopped: you can read this session but not act on it' });
     expect(await l.cmd('laneA.command', { appSessionId: 'la-v', name: 'rename', args: 'x' })).toEqual(words);
     expect(stateNow(l, 'la-v')!.acts).toEqual([]);
     const sent = (await l.cmd('laneA.send', { appSessionId: 'la-v', text: 'hello' })) as { key: { writer: string; seq: number }; state: string; code?: string; reason?: string };

@@ -9,7 +9,8 @@ import { fakeClient, type FakeClient } from '../../../../../test/support/fake-cl
 import { item, remoteRow } from '../../../../../test/support/builders';
 import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
-import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
 import { NoticeBody } from './Notice';
 import { REL } from '../../test-support/relative-time';
@@ -43,22 +44,39 @@ describe('an error notice', () => {
     expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }]);
   });
 
-  // P5 O7 M8: `attention.acknowledge` is declared not offered on another machine (REMOTE_UNAVAILABLE): Dismiss is
-  // greyed with the declared words, and nothing is acknowledged
-  // (a lane A session there too: its adapter takes only laneA.*)
-  it.each(['B', 'A'] as const)('for a lane %s session on another machine, greys Dismiss with the declared reason and acknowledges nothing', async (lane) => {
+  // P5 O7 M8 declared `attention.acknowledge` not offered on another machine; the UX wave, U9 (M1, M4) offers it behind
+  // `rl2.session-acts`: on a machine whose build doesn't list it Dismiss is greyed with the update sentence (A14) and
+  // nothing is acknowledged (a lane A session there too: the helper reads the machine, not the lane); on one that lists
+  // it, a lane B session's Dismiss acknowledges there.
+  const studio = (capabilities: string[]) => useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: '2026-11-13T10:00:00Z', generation: 1, capabilities, owner: true }]);
+  const onStudio = (lane: 'A' | 'B') => {
     const remote = addressOf(OTHER_MACHINE, APP);
     useSessions.setState({ listed: new Map([[remote as never, { ...remoteRow(OTHER_MACHINE, APP, { lane }), appId: remote as never }]]), listedMachines: new Set([OTHER_MACHINE]) });
-    try {
-      render(<NoticeBody item={error({ appSessionId: remote as never, id: addressOf(OTHER_MACHINE, `${APP}:error:e1`) as never })} seenHere />);
-      const dismiss = screen.getByRole('button', { name: 'Dismiss' });
-      expect(dismiss).toHaveProperty('disabled', true);
-      expect(dismiss.title).toBe(REMOTE_UNAVAILABLE['attention.acknowledge']);
-      await act(async () => fireEvent.click(dismiss));
-      expect(acknowledged()).toEqual([]);
-    } finally {
-      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
-    }
+    return error({ appSessionId: remote as never, id: addressOf(OTHER_MACHINE, `${APP}:error:e1`) as never });
+  };
+  afterEach(() => {
+    useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    useMachines.setState({ roster: 'unread', machines: new Map() });
+  });
+
+  it.each(['B', 'A'] as const)('for a lane %s session on a machine that doesn’t serve the acts, greys Dismiss with the update sentence and acknowledges nothing', async (lane) => {
+    studio(['rl2.project-acts']);
+    render(<NoticeBody item={onStudio(lane)} seenHere />);
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' });
+    expect(dismiss).toHaveProperty('disabled', true);
+    expect(dismiss.title).toBe('Can’t dismiss on Studio yet. Update MAWS on Studio and try again.');
+    await act(async () => fireEvent.click(dismiss));
+    expect(acknowledged()).toEqual([]);
+  });
+
+  it('for a lane B session on a machine that serves the acts, dismisses there', async () => {
+    studio([SESSION_ACTS_CAPABILITY]);
+    render(<NoticeBody item={onStudio('B')} seenHere />);
+    const dismiss = screen.getByRole('button', { name: 'Dismiss' });
+    expect(dismiss).toHaveProperty('disabled', false);
+    await act(async () => fireEvent.click(dismiss));
+    expect(acknowledged()).toEqual([{ appSessionId: APP, attentionId: `${APP}:error:e1`, how: 'dismissed' }]);
+    expect(fake.machines('attention.acknowledge')).toEqual([OTHER_MACHINE]);
   });
 
   // L102 (P2-F wave S; the owner at the sitting, B6: "2초 확인 후 해제"): seen only after two continuous seconds in

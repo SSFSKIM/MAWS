@@ -320,7 +320,9 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expect(sheet).toHaveAttribute('data-anchor-kind', 'file-line');
       await expect(sheet).toHaveAttribute('data-anchor-locator', `${path}#L3`);
       await expect(sheet.getByText(`${path}#L3`)).toBeVisible();
-      await expect(sheet.getByRole('radio', { name: /Side thread/ })).toBeChecked();
+      // UX wave U5a (A1): one "Send to main" checkbox, unchecked (a side thread), in place of the two segments
+      await expect(sheet.getByRole('checkbox', { name: 'Send to main' })).not.toBeChecked();
+      await expect(sheet.getByRole('radio')).toHaveCount(0);
       await expect(sheet.getByRole('button', { name: 'Send' })).toBeDisabled();
       await sheet.getByRole('button', { name: 'Cancel' }).click();
       await expect(sheet).toHaveCount(0);

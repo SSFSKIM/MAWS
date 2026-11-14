@@ -19,6 +19,7 @@ import { useLayoutEffect, useRef, useSyncExternalStore, type ComponentType } fro
 import { create } from 'zustand';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { EditorHostScope } from '../panel/editor-host';
+import { dropSubject } from '../side/card/store'; // UX wave U5a
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 
@@ -128,6 +129,21 @@ function disposeHold(hold: ArtifactEditorHold, key: string): void {
   } catch (error) {
     console.error(`[artifacts] disposing the ${hold.kind} editor's state for ${key} failed`, error);
   }
+  endCommentsOnceUnshown(hold.artifactId);
+}
+
+/** UX wave U5a: how many tabs show the artifact now (a close guard asks about its unsent comment only for the last). */
+export const artifactViews = (artifactId: string): number => [...holds.values(), ...staged.values()].filter((each) => each.artifactId === artifactId).length;
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §F, decision 17): an artifact no tab shows
+// any more ends its unsent comments' passes, for both of its card hosts' kinds (a document withdraws their threads
+// through the replica each one holds). Asked once the task's moves are done (a move holds the state staged meanwhile).
+function endCommentsOnceUnshown(artifactId: string): void {
+  queueMicrotask(() => {
+    if (artifactViews(artifactId) > 0) return;
+    dropSubject('artifact', artifactId);
+    dropSubject('artifact-page', artifactId);
+  });
 }
 
 // The scope's state for this artifact and editor: the one held when the scope already shows them, else one staged by a

@@ -141,7 +141,7 @@ test('a document a session made, opened as its own tab with no chat shown: Comme
       await expect(named, 'the card names the artifact’s own session').toHaveAttribute('data-card-parent', await addressed(s.page, id)); // P5 O6 M2: the page names it by its address
       const title = await titleOf(s.page, id);
       await expect(named).toHaveText(`Session: ${title.trim() === '' ? 'New chat' : title}`);
-      await expect(card.getByRole('radio', { name: 'Side thread' })).toBeChecked();
+      await expect(card.getByRole('checkbox', { name: 'Send to main' }), 'UX wave U5a (A1): unchecked, a side thread').not.toBeChecked();
       await expect(marks(text).filter({ hasText: QUOTE })).toHaveCount(1);
       await test.info().attach('standalone-card-own-session', { body: await s.page.screenshot(), contentType: 'image/png' });
 
@@ -233,7 +233,7 @@ for (const [answer, trust] of [['Trust and start', 'accepted'], ['Start without 
         await expect(notice).toHaveCount(0);
         await expect(card).toHaveAttribute('data-anchor-kind', 'artifact-comment');
         await expect(card).toHaveAttribute('data-anchor-locator', QUOTE);
-        await expect(card.getByRole('radio', { name: 'Send to main' })).toBeChecked();
+        await expect(card.getByRole('checkbox', { name: 'Send to main' }), 'UX wave U5a: the surface asked for main').toBeChecked();
         await expect(marks(text).filter({ hasText: QUOTE }), 'on the same passage, one mark').toHaveCount(1);
         const started = bareOf((await card.locator('[data-card-parent]').getAttribute('data-card-parent'))!) as AppSessionId; // P5 O6 M2: the journal is the bare id's
         // the owner's answer reached the engine as the composer's card sends it: attested on Trust and start, absent without

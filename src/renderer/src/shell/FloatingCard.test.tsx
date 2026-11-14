@@ -493,7 +493,7 @@ describe('a mark-up still taken under the open card', () => {
     useRegionMarkupSurface(body, 'Sales dashboard', true);
     return (
       <div ref={body} data-probe-viewer>
-        <CommentCardHost hostId="viewer" host="artifact-page" mode="panel" layout="anchored" accepts={() => false} frame={{ scale: 1, offset: { x: 0, y: 0 }, key: 'v2' }} visible />
+        <CommentCardHost subject="subject-1" hostId="viewer" host="artifact-page" mode="panel" layout="anchored" accepts={() => false} frame={{ scale: 1, offset: { x: 0, y: 0 }, key: 'v2' }} visible />
       </div>
     );
   }

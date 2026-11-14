@@ -22,6 +22,10 @@ import { docMarkdown, stripMilestones } from './markdown';
 import { nanoid8, schemaFor } from './schema';
 import { blockThreads, getThread } from './threads';
 
+// UX wave U5 (l6-artifacts-20): a batch's message in the thread it answers when the agent gave no `reply` (the tool posts
+// the reply in its place): a sentence the card, the margin and the Word export read, never the result lines.
+export const ANSWERED_WITHOUT_REPLY = 'Edited this passage.';
+
 // ── cells of ProseMirror textblocks ──
 export interface PMCell extends DiffCell {
   marks: readonly Mark[];
@@ -947,7 +951,7 @@ class Planner {
       keyOf: (top) => this.keyOf(top),
       results: this.results,
       orphaned,
-      answer: answering === undefined ? null : { threadId: answering, body: this.results.map((result) => result.line).join('\n') },
+      answer: answering === undefined ? null : { threadId: answering, body: ANSWERED_WITHOUT_REPLY },
       mergeWhitespace: this.mergeWhitespace,
     };
   }

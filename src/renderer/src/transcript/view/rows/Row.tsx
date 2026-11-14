@@ -10,7 +10,6 @@ import { NOT_IN_CONTEXT } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { rowElementId, useTranscriptContext, useWorkMotion } from '../context';
 import { inWorkArea } from '../motion';
-import { AgentMessageRow } from './AgentMessage';
 import { AskCapsule } from './AskCapsule'; // E1
 import { DeliveryRowView } from './Delivery'; // E1
 import { SideThreadRow } from './SideThread'; // E3
@@ -19,7 +18,7 @@ import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
 import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
-import { FoldedAssistantProbes, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
+import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
@@ -45,8 +44,9 @@ function body(row: Row) {
     case 'cell': return <CellRow row={row} />;
     case 'receipt': return null; // legacy X3 row; file changes are tool rows now
     case 'subagent': return <SubagentRow row={row} />;
-    case 'agent_message': return <AgentMessageRow row={row} />;
+    case 'agent_message': return <SurfaceAgentMessageRow row={row} />;
     case 'bash': return <BashRow row={row} />;
+    case 'notice': return <SurfaceNoticeRow row={row} />; // UX wave U3: a task's end, a scheduled fire, an answer, the bridge's wake
     case 'local_command': return <SurfaceCommandRow row={row} />;
     case 'plan': return <PlanRow row={row} />;
     case 'question': return <SurfaceQuestionRow row={row} />;

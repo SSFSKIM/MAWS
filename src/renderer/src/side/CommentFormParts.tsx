@@ -1,14 +1,13 @@
 // The comment form's parts, drawn alike by the sheet and the card (P2-E1 document, D5): the producer's screenshot as a
-// thumbnail, the destination control and the refusal. The card draws the destination compact, its captions moved into
-// each segment's title; its accessible structure (two radios named "Side thread" and "Send to main", each label carrying
-// `data-destination`) is the sheet's either way, so every locator written for the sheet's form finds the card's.
-import { useEffect, useId, useState } from 'react';
+// thumbnail, the checkbox for where the comment goes, the lines that say why a send can't go as it stands, and the
+// refusal. UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M2): one checkbox, "Send to main"
+// (`input[data-send-to-main]`), in place of the two radios; its caption is its title in both presentations (decision 19).
+import { useEffect, useState } from 'react';
 import type { AnchorScreenshot } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
-import { QUIET, SECONDARY } from '../sessions/ui';
-import type { CommentDestination } from './actions';
+import { CHOICE, QUIET, SECONDARY } from '../sessions/ui';
 import type { CommentForm } from './comment-form';
 import { SIDE_COPY } from './copy';
 
@@ -47,50 +46,50 @@ export function ScreenshotThumbnail({ parent, screenshot, disabled, onRemove }: 
   );
 }
 
-// Two radios drawn as a segmented control: where the comment goes. The sheet shows each one-line caption under its
-// label; the compact control (the card's) keeps the caption as the segment's title.
-export function DestinationControl({ form, compact = false }: { form: CommentForm; compact?: boolean }) {
-  const name = useId();
-  const options: { to: CommentDestination; label: string; caption: string; enabled: boolean }[] = [
-    { to: 'thread', label: COPY.thread, caption: form.threadCaption, enabled: form.threadEnabled }, // P5 O7 M8: threadEnabled
-    { to: 'main', label: COPY.main, caption: form.mainCaption, enabled: form.mainEnabled }, // P2-A: mainEnabled
-  ];
+// UX wave U5a: where the comment goes, as the app's checkbox: ticked, the session's own conversation; unchecked, a side
+// thread. Its title says what a tick does now, or why the box is fixed.
+export function SendToMainBox({ form }: { form: CommentForm }) {
   return (
-    <fieldset className="m-0 min-w-0 border-0 p-0" disabled={form.sending}>
-      <legend className={compact ? 'sr-only' : 'mb-1.5 p-0 text-ui-sm text-fg-muted'}>{COPY.destination}</legend>
-      <div className="grid grid-cols-2 gap-1 rounded-md border border-border bg-bg p-0.5">
-        {options.map((option) => (
-          <label
-            key={option.to}
-            data-destination={option.to}
-            title={compact ? option.caption : undefined}
-            className={`flex min-w-0 cursor-default flex-col gap-0.5 rounded-sm border outline-accent has-[:focus-visible]:outline-2 ${compact ? 'px-2 py-0.5' : 'px-2.5 py-1.5'} ${
-              form.destination === option.to ? 'border-border-strong bg-bg-active' : 'border-transparent hover:bg-bg-hover'
-            } ${option.enabled ? '' : 'opacity-60'}`}
-          >
-            <input type="radio" name={name} value={option.to} checked={form.destination === option.to} disabled={!option.enabled} onChange={() => form.setDestination(option.to)} className="sr-only" />
-            <span className={`truncate text-fg ${compact ? 'text-ui-sm' : 'text-ui'}`}>{option.label}</span>
-            {!compact && <span className="text-ui-sm text-fg-muted">{option.caption}</span>}
-          </label>
-        ))}
-      </div>
-    </fieldset>
+    <label title={form.toMainTitle} className={`flex min-w-0 items-center gap-1.5 text-ui-sm ${form.toMainFixed ? 'text-fg-muted' : 'text-fg'}`}>
+      <input type="checkbox" data-send-to-main="" checked={form.toMain} disabled={form.toMainFixed} onChange={(event) => form.setToMain(event.target.checked)} className={CHOICE} />
+      <span className="truncate">{COPY.main}</span>
+    </label>
+  );
+}
+
+// UX wave U5a: under the row with the checkbox and Send, why the send can't go as it stands (neither state can send, or
+// the one it is in can't), and the screenshots the route will leave out (decision 9).
+export function CommentFormLines({ form }: { form: CommentForm }) {
+  return (
+    <>
+      {form.unsendable !== null && (
+        <p data-comment-unsendable="" className="m-0 text-ui-sm text-fg-muted">
+          {form.unsendable}
+        </p>
+      )}
+      {form.leftOut !== null && (
+        <p data-left-out="" className="m-0 text-ui-sm text-fg-muted">
+          {COPY.leftOut(form.leftOut.count, form.leftOut.reason)}
+        </p>
+      )}
+    </>
   );
 }
 
 // A refused send, under the form: its reason, Retry (disabled once its destination cannot send) and, for a side thread
-// while the parent runs, Send to main instead.
-export function CommentRefusal({ form }: { form: CommentForm }) {
+// while a tick can send, Send to main instead. `onSend`: the presentation's own send (the card's), else the form's.
+export function CommentRefusal({ form, onSend }: { form: CommentForm; onSend?(to: 'thread' | 'main'): void }) {
   const { phase } = form;
   if (phase.kind !== 'refused') return null;
+  const send = onSend ?? ((to: 'thread' | 'main') => void form.send(to));
   return (
     <div role="alert" className="flex flex-wrap items-center gap-2 rounded-sm border border-danger px-2.5 py-1.5 text-ui-sm text-danger">
       <span className="min-w-0 flex-1 break-words">{phase.error}</span>
-      <button type="button" className={SECONDARY} disabled={!form.canSend(phase.destination)} onClick={() => void form.send(phase.destination)}>
+      <button type="button" className={SECONDARY} disabled={!form.canSend(phase.destination)} onClick={() => send(phase.destination)}>
         {COPY.retry}
       </button>
       {phase.destination === 'thread' && form.mainEnabled && ( /* P2-A: mainEnabled */
-        <button type="button" className={SECONDARY} onClick={() => void form.send('main')}>
+        <button type="button" className={SECONDARY} onClick={() => send('main')}>
           {COPY.mainInstead}
         </button>
       )}

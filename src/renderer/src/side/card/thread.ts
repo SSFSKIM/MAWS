@@ -1,5 +1,6 @@
 // The comment card's thread, as pure readings (P2-E1 document, D6): where the thread's own rows begin, what the
 // needs-you strip says, and how the human send seam's answer reads in the card.
+import type { Anchor } from '@shared/anchor/anchor';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
 import { waitingItem } from '../../attention/derive';
@@ -16,14 +17,15 @@ const NEEDS = SIDE_COPY.card.needs;
 // kind, locator and label, its destination a thread). The last, because a thread of a thread copies its parent's
 // anchored prompt first; a thread read from disk begins with the parent's copied history, which the card leaves out.
 // Null while nothing is loaded and no such prompt has arrived; once loaded with none, everything from 0 (showing too
-// much is recoverable, hiding the thread is not). A thread with no anchor (a promotion) starts at 0.
+// much is recoverable, hiding the thread is not). A thread with no anchor (a promotion) starts at 0. UX wave U5a (M5): a
+// thread opened from several comments starts at its prompt of several comments framed for a thread (`commentsTo`), whose
+// first comment's anchor is the lineage's; a pass later sent to the main conversation on the same anchor is not one.
 export function threadStartOf(lineage: Lineage | null): (rows: readonly Row[], loaded: boolean) => number | null {
   const anchor = lineage?.anchor;
   if (anchor === undefined) return () => 0;
+  const same = (other: Anchor | undefined) => other?.kind === anchor.kind && other.locator === anchor.locator && other.label === anchor.label;
   return (rows, loaded) => {
-    const index = rows.findLastIndex(
-      (row) => row.kind === 'user' && row.anchorFrame?.destination === 'thread' && row.anchor?.kind === anchor.kind && row.anchor.locator === anchor.locator && row.anchor.label === anchor.label,
-    );
+    const index = rows.findLastIndex((row) => row.kind === 'user' && (row.comments !== undefined ? row.commentsTo === 'thread' && same(row.comments[0]?.anchor) : row.anchorFrame?.destination === 'thread' && same(row.anchor)));
     if (index >= 0) return index;
     return loaded ? 0 : null;
   };

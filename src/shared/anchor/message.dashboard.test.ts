@@ -4,7 +4,7 @@
 // lead is stripped only when it is the one this wording writes; every other kind's lead is as it was.
 import { describe, expect, it } from 'vitest';
 import type { Anchor } from './anchor';
-import { anchorLead, anchoredMessage, anchorTag, parseAnchoredText } from './message';
+import { anchorLead, anchoredMessage, anchorTag, readAnchoredMessage } from './message';
 
 const block: Anchor = { kind: 'artifact-comment', label: 'Growth board, Main', locator: 'chart: Sales by region', artifactId: 'art-d1', threadId: 'k2m9x0qa', artifactKind: 'dashboard' };
 const prose: Anchor = { ...block, locator: 'rose in every region' };
@@ -20,7 +20,7 @@ describe('a dashboard comment’s lead (P3-E)', () => {
     expect(anchorTag(block)).toBe('<maws_anchor kind="artifact-comment" label="Growth board, Main" locator="chart: Sales by region" artifactId="art-d1" threadId="k2m9x0qa" artifactKind="dashboard"/>');
     const message = anchoredMessage({ anchor: block, text: 'Why the dip in the west?', destination: 'main', screenshot: false });
     expect(message.split('\n')[0]).toBe(anchorLead(block, false));
-    expect(parseAnchoredText(message)).toEqual({ anchor: block, text: 'Why the dip in the west?', destination: 'main' });
+    expect(readAnchoredMessage(message)).toEqual({ comments: [{ anchor: block, text: 'Why the dip in the west?', screenshot: false }], destination: 'main' });
   });
 
   it('leaves the document’s and the presentation’s leads as they were', () => {

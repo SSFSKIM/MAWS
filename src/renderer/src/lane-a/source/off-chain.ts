@@ -33,7 +33,8 @@ import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import type { TranscriptRecord } from '@shared/wire/transcript';
 import type { JsonObject } from 'desk-hub/protocol';
 import { eventBase, isTaskNotification, localCommandKind, startsTurn, type BackfillContext } from '../../../../engine-host/fs/backfill';
-import { deliveryAsDrawn, deliveryFrame, supersededDeliveries } from '../conversation/delivery-frame';
+import { readArrivals, type Arrival } from '@shared/engine/arrival';
+import { supersededDeliveries } from '../conversation/delivery-frame';
 import { bridgeRowKind, steerContent } from './bridge-rows';
 
 /** What the desk says under an owner input the session never read: its turn was undone first. */
@@ -79,16 +80,24 @@ function typedPrompt(row: JsonObject): OwnerInput | null {
 
 const inputs = new WeakMap<JsonObject, OwnerInput | null>();
 
-/** The owner input a held row is — a typed prompt, a steer, a delivery of the owner's words — or null. */
+// What the arrivals reader leaves the person's own (UX wave U3, UC-2): MAWS's consent message and answer envelope
+const isPersons = (arrival: Arrival) => arrival.class === 'consent' || (arrival.class === 'answer' && arrival.tool === 'maws');
+
+/**
+ * The owner input a held row is — a typed prompt, a steer, a delivery of the owner's words — or null. Who a delivery is
+ * from is the arrivals reader's (UX wave U3, UC-2): the owner's words sminos delivered are their words without the
+ * frame line, through whichever carrier (a background session's prompt included); anything else that arrived — a peer's
+ * message, the bridge's wake, a task's end — is no owner input. A row no class claims is the older steer or a prompt
+ * typed at the terminal, as before.
+ */
 export function ownerInput(row: JsonObject): OwnerInput | null {
   if (inputs.has(row)) return inputs.get(row)!;
   let found: OwnerInput | null;
-  const frame = deliveryFrame(row);
-  if (frame !== null) {
-    // The owner's send, drawn without its frame line; a peer's is no owner input.
-    const drawn = frame.own ? deliveryAsDrawn(row) : null;
-    found = drawn === null ? null : input(drawn.type === 'attachment' ? object(drawn.attachment)?.prompt : object(drawn.message)?.content);
-  } else {
+  const arrivals = readArrivals(row);
+  const own = arrivals.find((arrival) => arrival.class === 'own');
+  if (own !== undefined) found = input(own.words);
+  else if (arrivals.some((arrival) => !isPersons(arrival))) found = null;
+  else {
     const kind = bridgeRowKind(row);
     found = kind === 'steer' ? input(steerContent(row)) : kind === null ? typedPrompt(row) : null;
   }

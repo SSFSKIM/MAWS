@@ -84,13 +84,23 @@ export const SPAWN_FIELDS: ReadonlySet<string> = new Set(['checkout', 'worktree'
  */
 export function spawnRefusal(args: Readonly<Record<string, unknown>>, policy: Policy, settingsMode: () => string, checkouts: CheckoutSource, ownerSpawn = false): 'spec-field' | 'ceiling' | 'unknown-checkout' | null {
   if (Object.keys(args).some((field) => !SPAWN_FIELDS.has(field) && !(ownerSpawn && field === 'trust'))) return 'spec-field';
-  const modes: readonly string[] = PERMISSION_MODES;
-  const ceiling = policy.ceiling === 'settings' ? settingsMode() : policy.ceiling;
-  const mode = args.permission_mode ?? ceiling;
-  if (!modes.includes(ceiling) || typeof mode !== 'string' || !modes.includes(mode) || modes.indexOf(mode) > modes.indexOf(ceiling)) return 'ceiling';
+  if (aboveCeiling(args.permission_mode, policy, settingsMode)) return 'ceiling';
   if (ownerSpawn && args.checkout === HOME_CHECKOUT) return null;
   if (typeof args.checkout !== 'string' || !checkouts.known(args.checkout)) return 'unknown-checkout';
   return null;
+}
+
+/**
+ * Whether a session started from another machine in `mode` is looser than the ceiling (`settings`: the machine's
+ * `defaultMode`), by the order above; a mode not asked (undefined) is the ceiling's own. The spawn guard's rule, and
+ * (the UX wave, U9 M2) the one the services hold a fork from another machine to where they allocate it
+ * (`Endpoint.aboveCeiling`).
+ */
+export function aboveCeiling(mode: unknown, policy: Policy, settingsMode: () => string): boolean {
+  const modes: readonly string[] = PERMISSION_MODES;
+  const ceiling = policy.ceiling === 'settings' ? settingsMode() : policy.ceiling;
+  const asked = mode ?? ceiling;
+  return !modes.includes(ceiling) || typeof asked !== 'string' || !modes.includes(asked) || modes.indexOf(asked) > modes.indexOf(ceiling);
 }
 
 /** The setup rows that name a directory, held to `setupRefusal`. */

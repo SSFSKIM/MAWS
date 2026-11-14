@@ -3,6 +3,9 @@
 // member this device's step-up key belongs to is signed with that key and no prompt. Every other act main steps up
 // still asks, and a declined prompt signs nothing. Nothing the renderer can put in a request moves that line: the
 // exemption is judged from the action as built and the held head, never from a flag.
+//
+// The UX wave (U9, M2; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, "`signsUnasked` gains one name"):
+// a `session.fork` in place on an owned machine is signed unasked too, by the same conditions; nothing else is.
 import { describe, expect, it, vi } from 'vitest';
 import {
   generateSigningKey,
@@ -124,7 +127,7 @@ describe('a session.spawn on a machine the member owns', () => {
     const h = harness();
     const stepUp = await signer(h.confirm, () => view);
     expect((await stepUp.sign(spawnOn(THEIRS))).ok).toBe(true);
-    expect(h.prompts.map((p) => p.summary)).toEqual([`session.spawn on machine ${THEIRS}`]);
+    expect(h.prompts.map((p) => p.summary)).toEqual(['Start a session on theirs']); // S-13: the machine by its name
 
     // ME becomes an owner of THEIRS, and stops being one of MINE
     const next = await successor(genesis, admin, (state) => {
@@ -138,7 +141,7 @@ describe('a session.spawn on a machine the member owns', () => {
     expect((await stepUp.sign(spawnOn(THEIRS))).ok).toBe(true);
     expect(h.prompts).toEqual([]);
     expect((await stepUp.sign(spawnOn(MINE))).ok).toBe(true);
-    expect(h.prompts.map((p) => p.summary)).toEqual([`session.spawn on machine ${MINE}`]);
+    expect(h.prompts.map((p) => p.summary)).toEqual(['Start a session on mine']);
   });
 
   it('asks when main holds no org view (signed out, or none given)', async () => {
@@ -163,6 +166,41 @@ describe('a session.spawn on a machine the member owns', () => {
     const foreign = createStepUp({ device: { org: 'org-another', device: 'dev-mac' }, key: (await org()).me, confirm: h.confirm, now: () => NOW, org: () => view });
     expect((await foreign.sign(spawnOn(MINE))).ok).toBe(true);
     expect(h.prompts).toHaveLength(3);
+  });
+});
+
+const forkOn = (machine: string): StepUpRequest => ({ machine, action: 'session.fork', args: { appSessionId: 'app-session-1', target: { kind: 'inPlace' }, message: null, rewindTo: null } });
+
+describe('a session.fork on a machine the member owns', () => {
+  it('is signed with the step-up key and no prompt, as a spawn is', async () => {
+    const h = harness();
+    const stepUp = await signer(h.confirm);
+    for (const machine of [MINE, SHARED]) {
+      const signed = await stepUp.sign(forkOn(machine));
+      if (!signed.ok) throw new Error(`refused: ${signed.reason}`);
+      expect(signed.action).toMatchObject({ org: ORG, device: 'dev-mac', machine, action: 'session.fork', args: forkOn(machine).args });
+      expect(await verifyStepUp(signed.action, (await org()).me.pub)).toEqual({ ok: true });
+    }
+    expect(h.prompts).toEqual([]);
+  });
+
+  it('asks on another person’s machine, an org-owned one and an unlisted one, naming the machine; declined it signs nothing', async () => {
+    const h = harness({ ok: false, reason: 'cancelled' });
+    const stepUp = await signer(h.confirm);
+    for (const machine of [THEIRS, ORGS, UNLISTED]) {
+      const { value, signatures } = await counted(() => stepUp.sign(forkOn(machine)));
+      expect([machine, value, signatures]).toEqual([machine, { ok: false, reason: 'cancelled' }, 0]);
+    }
+    expect(h.prompts.map((p) => p.summary)).toEqual(['Fork a session on theirs', 'Fork a session on orgs', `Fork a session on ${UNLISTED}`]);
+  });
+
+  it('asks when it carries any field of a session’s act: a session, a launch context or a request digest', async () => {
+    const h = harness();
+    const stepUp = await signer(h.confirm);
+    const lane = { session: 'app-session-1', context: { lane: 'B' as const, launchId: 'launch-1', engineSessionId: 'engine-1' } };
+    await stepUp.sign({ ...forkOn(MINE), ...lane });
+    await stepUp.sign({ ...forkOn(MINE), requestDigest: { session: 'engine-1', request: 'toolu_1', tool: 'Bash', input_sha256: 'a'.repeat(64) } });
+    expect(h.prompts).toHaveLength(2);
   });
 });
 

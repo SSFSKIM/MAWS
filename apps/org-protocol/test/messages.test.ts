@@ -197,8 +197,8 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 13 of major 1 (the project registry’s acts: `rl2.project-acts`, after the project channel’s `rl2.channel` at 12)', () => {
-    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 13 });
+  it('is at minor 14 of major 1 (the UX wave’s session acts: `rl2.session-acts`, after the project registry’s `rl2.project-acts` at 13)', () => {
+    expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 14 });
   });
 });
 

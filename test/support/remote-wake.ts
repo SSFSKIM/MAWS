@@ -10,6 +10,9 @@
 // - `conditions` keeps the lines from the inject on that show which of §F's six conditions a wake missed (a catch-up, a
 //   failed attempt or a spent lane of the lane adopted, more than 4 KiB ahead of the subscriptions), so a miss outside
 //   them is read as neither pass nor fail (Decision Log 33 (d)); the floor and today's attempts are context.
+// - `historyReadsBeside` is the third test's reading (UX wave U9 M5, A5, #565): no history read of any session asked by
+//   A between the restore and its `subbed` of the live session's stream, and no whole-launch read on B before B's own,
+//   where a cold or idle tab's read would contend; and the reads still in flight, so the case can wait them out.
 // - `wakeVerdict` voids the run on the 1-minute load read at the instants that bracket each carrier's timed windows
 //   (Decision Log 33 (c)), labels a miss outside §F's conditions, and otherwise gives the verdict.
 // - `bLines` and `streams` are context, never conditions (Decision Log 37): B's own lines from the stall on (its idle
@@ -440,6 +443,101 @@ export function wakeMisses(record: WakeRecord): string[] {
 export function boundMissMessage(records: readonly WakeRecord[]): string {
   const js = records.map((r) => `${r.carrier} ${r.streams.map((s) => `${s.app} ${s.jMs === null ? 'none' : `${s.jMs} ms`}`).join(', ')}`);
   return `every subscription within ${WAKE_CASE.linkWithinMs / 1_000} s of the restore and the feed within ${WAKE_CASE.feedWithinMs / 1_000} s of the hub’s, per carrier; each stream's J: ${js.join('; ')}`;
+}
+
+export interface BesideInput {
+  carrier: Carrier;
+  ref: string;
+  /** The bare app id of the live session: its stream resumes at the restore. */
+  live: string;
+  /** Every session whose pane the case opened (the live one among them): each first read shows before the stall. */
+  sessions: readonly string[];
+  /** A's main.log, B's mawsd.log and host.log, whole. */
+  main: readonly LogLine[];
+  endpoint: readonly LogLine[];
+  host: readonly LogLine[];
+  launchedAt: number;
+  stalledAt: number;
+  restoredAt: number;
+}
+
+// A's history reads of B's sessions, by their timing lines (src/main/lane-b/remote-timing.ts): the start, said before
+// the first page goes out, and the end
+const HISTORY_ASKED = /^(?:\[lane-b\] )?lane B: timing history B\/(\S+): asked$/;
+const HISTORY_READ = /^(?:\[lane-b\] )?lane B: timing history B\/(\S+): (?:whole|paged|budgeted window|budgeted launch), \d+ pages, \d+ bytes, \d+ ms$/;
+
+/** A's history reads of B's sessions in main.log from `from` until `to`: each start and end, by bare app id. */
+function historyLines(main: readonly LogLine[], from: number, to: number): { asks: { app: string; at: number }[]; ends: { app: string; at: number }[] } {
+  const asks: { app: string; at: number }[] = [];
+  const ends: { app: string; at: number }[] = [];
+  for (const { at, text } of main) {
+    if (at < from || at >= to) continue;
+    const start = HISTORY_ASKED.exec(text);
+    if (start !== null) asks.push({ app: start[1]!, at });
+    const end = HISTORY_READ.exec(text);
+    if (end !== null) ends.push({ app: end[1]!, at });
+  }
+  return { asks, ends };
+}
+
+/** Of `apps`, those main.log shows no history read of from `from` until `to`: a start line with its end after it. */
+export function historySeen(main: readonly LogLine[], apps: readonly string[], from: number, to: number): string[] {
+  const { asks, ends } = historyLines(main, from, to);
+  return apps.filter((app) => !asks.some((ask) => ask.app === app && ends.some((end) => end.app === app && end.at >= ask.at)));
+}
+
+/**
+ * The case's verdict on its bounded wait for the reading: the reading's failures when the wait completed (nothing in
+ * flight, its observation period over); otherwise why it did not, since the last read that answered may be an early
+ * one that every later read failed to repeat.
+ */
+export function besideOutcome(bounded: { done: boolean; last: { failures: string[]; inFlight: string[] } | null; error: string | null }, withinMs: number): string[] {
+  const { done, last, error } = bounded;
+  if (done && last !== null) return [...last.failures, ...last.inFlight.map((r) => `still in flight: ${r}`)];
+  const why = error ?? (last === null ? 'no answer' : last.inFlight.length > 0 ? `still in flight: ${last.inFlight.join(', ')}` : 'its observation period did not end');
+  return [`the reading did not complete within ${withinMs} ms: ${why}`];
+}
+
+/**
+ * A5's reading. It stands on each opened session's first read before the stall: without those start lines (a timing
+ * log not reached, a changed format) it would see no read at all. `failures`: each history read A asked of B (its start line, whatever B answers it from: its ring, its
+ * journal or disk) between the restore and A's `subbed` of the live session's stream; and each whole-launch read on B
+ * (`session.events <app> after start`) between the restore and B's own `subbed` of it, which B writes at the read's end,
+ * so one that began before that subbed and ended after the restore counts. `inFlight`: each read asked since the restore
+ * with no end line yet. The tab beside the live one reads at main's settled word, which follows A's subbed.
+ */
+export function historyReadsBeside(input: BesideInput): { failures: string[]; inFlight: string[] } {
+  const { carrier, ref, live, restoredAt } = input;
+  const what = `session B:${live}`;
+  const ms = (at: number) => at - restoredAt;
+  const failures: string[] = [];
+  const heard = kindOf(readAll(input.main).filter(ofLink(ref)), 'subbed').find((r) => r.line.what === what && r.at >= restoredAt);
+  const answered = kindOf(readAll(input.endpoint), 'endpoint-subbed').find((r) => r.line.what === what && r.at >= restoredAt);
+  if (heard === undefined) failures.push(`${carrier}: main.log has no subscription … ${what}: subbed line after the restore`);
+  if (answered === undefined) failures.push(`${carrier}: B's mawsd.log has no sub … ${what}: subbed line after the restore`);
+  for (const app of historySeen(input.main, input.sessions, input.launchedAt, input.stalledAt)) {
+    failures.push(`${carrier}: main.log has no history read of session ${app} between the launch and the stall (an asked line and its end): the check would see no read`);
+  }
+  const { asks, ends } = historyLines(input.main, restoredAt, Infinity);
+  if (heard !== undefined) {
+    for (const ask of asks.filter((a) => a.at < heard.at)) failures.push(`${carrier}: A asked B for session ${ask.app}'s history at +${ms(ask.at)} ms, before it heard B's subbed of the live session ${live} at +${ms(heard.at)} ms`);
+  }
+  if (answered !== undefined) {
+    for (const r of kindOf(readAll(input.host), 'journal').filter((r) => r.line.after === null && r.at >= restoredAt && r.at - r.line.ms < answered.at)) {
+      failures.push(`${carrier}: B read session ${r.line.app}'s whole launch (session.events ${r.line.app} after start, ${r.line.rows} rows in ${r.line.ms} ms, from +${ms(r.at - r.line.ms)} ms to +${ms(r.at)} ms) before B's subbed of the live session ${live} at +${ms(answered.at)} ms`);
+    }
+  }
+  // each start paired with the first end of its session after it
+  const unpaired = [...ends];
+  const inFlight = asks.flatMap((ask) => {
+    const end = unpaired.findIndex((e) => e.app === ask.app && e.at >= ask.at);
+    if (end >= 0) {
+      unpaired.splice(end, 1);
+      return [];
+    }
+    return [`${ask.app} (asked at +${ms(ask.at)} ms)`];
+  });
+  return { failures, inFlight };
 }
 
 /** Whether main's log has the feed's `[org-feed] listings: last page` line at or after `from` (the hub's restore). */

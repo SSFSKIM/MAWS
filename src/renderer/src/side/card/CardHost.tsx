@@ -24,15 +24,31 @@
 // P4-B1 (D7 of docs/doperpowers/plans/2026-10-20-p4-b1-margin-comments.md): in a document's margin the host is a block
 // in flow in the stack's entry the margin placed (`layout="margin"`), as the docked strip is in its column: the card at
 // the entry's width (`marginCard`), its height capped by the page's scroll box (`.ds-doc`), never pinned, nothing
-// located. The document host also opts into X36's draft rule (`keepDraftOnEscape`, `discardOnBlurEmpty`, `onDraft`).
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+// located.
+//
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C "What the host draws", decision 8): with
+// no card of its own open, the host draws its place's note there: "Sent to <title>" for a confirmed delivery, or the
+// pending line of a terminal session's hand-off with Show. Docked it is one line in the strip, in a margin a line in
+// the entry, over an HTML page the top right corner of the box, over a document where the card was. The host supplies
+// nothing for it; `namesParent` went (the card names the receiving session by one rule).
+//
+// UX wave U5a (M3; §C, §F): a host shows a `subject` (an artifact's id, a browser tab's id) and registers it, with how
+// many unsent comments it keeps (`holds`) and its frame's callbacks, while mounted. X36's draft rule is every host's: its
+// unmounting leaves its card (the comment stays in its pass) rather than closing it. With no card of its own open and no
+// line to draw, a pass of its subject that holds comments is a chip, "N unsent comments", which opens the card on the
+// newest: in the strip, in the margin's entry, at the top right of an HTML page, at the passage over a document.
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
-import { caretOf, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax } from './placement';
-import { claimCard, closeCard, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard } from './store';
+import { caretOf, cardPosition, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax, type CardPin, type CardStyle } from './placement';
+import { cardHostEntry, claimCard, closeCard, composingOf, editComment, leaveCard, placeNoteOf, registerCardHost, unsentOf, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard, type PassComment, type PlaceNote, targetOf } from './store';
+import { QUIET } from '../../sessions/ui'; // UX wave U5a
+import { sameKey, useLaneA } from '../../stores/lane-a';
+import { useLayout } from '../../stores/layout';
+import { pendingWords, SIDE_COPY } from '../copy';
 
 export interface CardFrame {
   scale: number;
@@ -48,17 +64,12 @@ export interface CardFrame {
   actions?(card: OpenCard): ReactNode;
   onSending?(card: OpenCard, sending: { text: string; destination: 'thread' | 'main' }): (went: boolean) => void;
   // P3-B end
-  // P3-F1 (the P3 interface ledger's X23 row of fix 2): the host has no chat beside it, so the composing card names the
-  // session its comment goes to
-  namesParent?: true;
-  // P4-B1 start (D8; X36's draft rule, which the document host opts into): the composing field's text as it changes
-  // (`draftOf` gives a remounted card its text back), Escape on a non-empty field returning the keyboard to the host's
-  // control and keeping the card, and focus leaving the card for elsewhere with an empty field discarding it (C4, C6)
-  onDraft?(card: OpenCard, text: string): void;
-  draftOf?(card: OpenCard): string;
-  keepDraftOnEscape?: true;
-  discardOnBlurEmpty?: true;
-  // P4-B1 end
+  // UX wave U5a start (§C): how many unsent comments the host keeps (absent: many; an editor that keeps one says 'one'),
+  // its card going for whatever reason, and the person dropping a comment of its pass (a document withdraws its thread)
+  holds?: 'one' | 'many';
+  onClosed?(card: OpenCard): void;
+  onDiscarded?(comment: PassComment): void;
+  // UX wave U5a end
 }
 
 type Layout = 'anchored' | 'docked' | 'margin'; // P4-B1: margin
@@ -72,11 +83,14 @@ interface Props {
   frame: CardFrame;
   visible: boolean; // the host is on screen (the panel tool's `ctx.visible`, a main tab's active state)
   restoreFocus?(): void; // after Close, Escape or a send dismissed this host's card: the producer's control
+  subject: string; // UX wave U5a: what the host shows, whose passes it draws (an artifact's id, a browser tab's id)
 }
 
-const mountedHosts = new Set<string>();
+// A comment of a pass as the frame's card callbacks take it: the card it would be (its anchor and target).
+const cardOfComment = (card: OpenCard | null, comment: PassComment, host: CardHostKind, hostId: string): OpenCard =>
+  card !== null && composingOf(card)?.comment.id === comment.id ? card : { serial: 0, parent: '' as OpenCard['parent'], anchor: comment.anchor, host, hostId, claimMode: null, openedAt: 0, target: targetOf(comment.anchor), rect: comment.rect, phase: { kind: 'composing', pass: '', comment: comment.id } };
 
-export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, visible, restoreFocus }: Props) {
+export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, visible, restoreFocus, subject }: Props) {
   const open = useCommentCard((s) => s.open);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
@@ -102,32 +116,85 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     if (claimable !== null) claimCard(claimable, hostId);
   }, [claimable, hostId]);
 
+  // UX wave U5a: registered while mounted, with the latest frame's callbacks for a comment of its pass. Its unmounting
+  // leaves its card (the comment stays in its pass); the check waits a microtask, so StrictMode's replay and a remount
+  // under the same id (a tab switch) keep it open
+  const latest = useRef(frame);
+  useLayoutEffect(() => {
+    latest.current = frame;
+  });
+  const holds = frame.holds ?? 'many';
   useEffect(() => {
-    mountedHosts.add(hostId);
+    const off = registerCardHost(hostId, {
+      kind: host,
+      subject,
+      holds,
+      sending: (comment, sending) => latest.current.onSending?.(cardOfComment(useCommentCard.getState().open, comment, host, hostId), sending) ?? (() => {}),
+      discarded: (comment) => latest.current.onDiscarded?.(comment),
+    });
     return () => {
-      mountedHosts.delete(hostId);
+      off();
       queueMicrotask(() => {
-        if (mountedHosts.has(hostId)) return;
         const card = useCommentCard.getState().open;
-        if (card?.hostId === hostId) closeCard(card.serial);
+        if (card?.hostId !== hostId || hostOf(hostId)) return;
+        if (card.phase.kind === 'composing') leaveCard(card.serial);
+        else closeCard(card.serial);
       });
     };
-  }, [hostId]);
+  }, [hostId, host, subject, holds]);
 
   const card = open?.hostId === hostId ? open : null;
+  // UX wave U5a (§C): told once when this host's card went, for whatever reason (closed, sent, replaced, handed to another
+  // host, the host gone). Asked a microtask after the effect's cleanup, as the unmount's leave is: a StrictMode replay or
+  // a remount under the same id, which keep the card open on this host, report nothing; the mount drawing it then does.
+  const shownCard = card?.serial ?? null;
+  useEffect(() => {
+    if (shownCard === null) return;
+    const went = useCommentCard.getState().open;
+    if (went?.serial !== shownCard) return;
+    // Drawing it again (a card handed back to this host): its next loss is a new one to report.
+    if (reportedClosed.get(hostId) === shownCard) reportedClosed.delete(hostId);
+    return () => {
+      queueMicrotask(() => {
+        const open = useCommentCard.getState().open;
+        if (reportedClosed.get(hostId) === shownCard) return; // another mount of this host id told it already
+        if (open?.serial === shownCard && open.hostId === hostId && hostOf(hostId)) return; // still this host's
+        reportedClosed.set(hostId, shownCard);
+        latest.current.onClosed?.(went);
+      });
+    };
+  }, [shownCard, hostId]);
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
   const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : placeCard(box, pin);
-  const dismiss = (serial: number) => {
-    closeCard(serial);
-    restoreFocus?.();
-  };
-  // P4-B1: what the card is told beside its dismissal: Escape kept a draft (the keyboard goes back to the host's control)
-  const cardProps = (open: OpenCard) => ({ frame, visible, onDismiss: () => dismiss(open.serial), onDiscard: () => closeCard(open.serial), ...(restoreFocus && { onEscapeKept: restoreFocus }) });
+  // UX wave U5a: the place's note, drawn while no card of this host's is open; over a document where its card last was
+  // pinned (kept from the renders that drew it, React's pattern for information from earlier renders)
+  const note = useCommentCard((s) => placeNoteOf(s.notes, host, subject));
+  const [lastPin, setLastPin] = useState<CardPin | null>(null);
+  if (card !== null && pin !== null && (lastPin === null || pin.x !== lastPin.x || pin.y !== lastPin.y || pin.top !== lastPin.top)) setLastPin(pin);
+  const placeNote = card === null && note !== null ? note : null;
+  // UX wave U5a (§C): the chip, while no card is open on this subject's passes and no line is drawn
+  const passes = useCommentCard((s) => s.passes);
+  const composing = composingOf(open, { passes });
+  const onSubject = composing !== null && composing.pass.host === host && composing.pass.subject === subject;
+  const chip = card === null && placeNote === null && !onSubject ? unsentOf(passes, host, subject) : null;
+  const chipAt = useChipPin(chip === null || layout !== 'anchored' || host !== 'artifact' ? null : chip.newest, frame, box);
+  const openChip = () => chip && editComment(chip.newest.pass, chip.newest.comment, hostId);
+  const cardProps = (open: OpenCard) => ({
+    frame,
+    visible,
+    onDismiss: () => {
+      closeCard(open.serial);
+      restoreFocus?.();
+    },
+    ...(restoreFocus && { restoreFocus }),
+  });
   if (layout === 'margin') {
     return (
       <div ref={ref} data-card-host={host} data-card-margin="" className="relative">
         {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card)} />}
+        {placeNote && <PlaceLine note={placeNote} className="py-1" /> /* UX wave U5a */}
+        {chip && <UnsentChip count={chip.count} onOpen={openChip} className="my-1" />}
       </div>
     );
   }
@@ -143,6 +210,8 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
       >
         {caret !== null && <Caret x={caret} />}
         {card && <CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card) /* P4-B1 */} />}
+        {placeNote && <PlaceLine note={placeNote} className="px-3 py-1" /> /* UX wave U5a: one line in the strip */}
+        {chip && <UnsentChip count={chip.count} onOpen={openChip} className="mx-3 my-1" />}
       </div>
     );
   }
@@ -150,6 +219,89 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     // P3-G (§D4.1): the anchored card floats over the viewer's body, so a mark-up still of that body is taken without it
     <div ref={ref} data-card-host={host} data-markup-occluder className="pointer-events-none absolute inset-0 z-10 overflow-hidden">
       {card && <CommentCard key={card.serial} card={card} style={style} pinned={pin !== null && style.mode !== 'docked'} {...cardProps(card) /* P4-B1 */} />}
+      {placeNote && <FloatingLine note={placeNote} where={host === 'artifact' && lastPin !== null ? placeCard(box, lastPin) : null} /> /* UX wave U5a */}
+      {chip && <FloatingChip count={chip.count} onOpen={openChip} where={host !== 'artifact' ? null : chipAt !== null ? placeCard(box, pinOf(chipAt, frame)) : lastPin !== null ? placeCard(box, lastPin) : null} />}
+    </div>
+  );
+}
+
+const hostOf = (hostId: string): boolean => cardHostEntry(hostId) !== null;
+
+// The last card each host id told it lost (`onClosed`), by its serial: several mounts of a host (StrictMode's replay, a
+// remount under the same id) may each ask after the card went, and one loss is told once. Kept per host id, since a card
+// handed to another host (`handCardTo`) keeps its serial and is that host's to lose next; a host draws one card at a
+// time, so this is one entry per host id.
+const reportedClosed = new Map<string, number>();
+
+// UX wave U5a (§C): the chip of a pass with no card open; a click opens the card on its newest comment.
+function UnsentChip({ count, onOpen, className, style }: { count: number; onOpen(): void; className: string; style?: CSSProperties }) {
+  return (
+    <button type="button" data-unsent-chip={count} style={style} onClick={onOpen} className={`${QUIET} text-ui-sm ${className}`}>
+      {SIDE_COPY.card.unsent(count)}
+    </button>
+  );
+}
+
+// Over a frame the chip floats raised, as the line does: at the passage over a document, else the box's top right.
+function FloatingChip({ count, onOpen, where }: { count: number; onOpen(): void; where: CardStyle | null }) {
+  const chip = 'pointer-events-auto absolute rounded-sm border border-border bg-bg-raised shadow-float';
+  if (where === null || where.mode === 'strip' || where.mode === 'margin') return <UnsentChip count={count} onOpen={onOpen} className={`${chip} top-2 right-2`} />;
+  const { left, top, bottom } = cardPosition(where);
+  return <UnsentChip count={count} onOpen={onOpen} className={chip} style={{ left, top, bottom }} />;
+}
+
+// Where the newest unsent comment's passage is, over a document, located as a card's would be (the frame finds the
+// document's unsent comment with no card open); null until found, or with nothing to find.
+function useChipPin(newest: { pass: string; comment: string } | null, frame: CardFrame, box: { width: number; height: number }): CardRect | null {
+  const [found, setFound] = useState<{ comment: string; rect: CardRect | null } | null>(null);
+  const comment = newest?.comment ?? null;
+  const { key, locate } = frame;
+  const { width, height } = box;
+  const selector = useCommentCard((s) => (newest === null ? null : (s.passes.get(newest.pass)?.comments.find((each) => each.id === newest.comment)?.anchor.locator ?? null)));
+  useEffect(() => {
+    if (comment === null || selector === null || locate === undefined) return;
+    let live = true;
+    void locate(selector).then((rect) => {
+      if (live) setFound({ comment, rect });
+    });
+    return () => {
+      live = false;
+    };
+  }, [comment, selector, key, locate, width, height]);
+  return found !== null && found.comment === comment ? found.rect : null;
+}
+
+// UX wave U5a: over a frame the line floats as a small raised chip, where the card last was over a document (its
+// corner's offsets, not its size), else in the box's top right corner.
+function FloatingLine({ note, where }: { note: PlaceNote; where: CardStyle | null }) {
+  const chip = 'pointer-events-auto absolute rounded-sm border border-border bg-bg-raised px-2 py-0.5 shadow-float';
+  if (where === null || where.mode === 'strip' || where.mode === 'margin') return <PlaceLine note={note} className={`${chip} top-2 right-2`} />;
+  const { left, top, bottom } = cardPosition(where);
+  return <PlaceLine note={note} className={chip} style={{ left, top, bottom }} />;
+}
+
+// UX wave U5a: the line itself. A sent line is its words; a pending one is its pending send's state in the strip's
+// words, followed by key, with Show, which brings the session's tab (and its composer's strip) to the front.
+function PlaceLine({ note, className, style }: { note: PlaceNote; className: string; style?: CSSProperties }) {
+  if (note.kind === 'sent') {
+    return (
+      <p role="status" data-sent-note="" style={style} className={`m-0 truncate text-ui-sm text-fg-muted ${className}`}>
+        {note.text}
+      </p>
+    );
+  }
+  return <PendingLine note={note} className={className} {...(style && { style })} />;
+}
+
+function PendingLine({ note, className, style }: { note: Extract<PlaceNote, { kind: 'pending' }>; className: string; style?: CSSProperties }) {
+  const send = useLaneA((s) => s.pendingSends.get(note.appSessionId)?.find((held) => sameKey(held.key, note.key)) ?? null);
+  if (send === null) return null; // its send left: the store turns the line into the sent one, or drops it
+  return (
+    <div role="status" data-pending-note={send.state} style={style} className={`flex min-w-0 items-baseline gap-2 text-ui-sm ${send.state === 'refused' ? 'text-danger' : 'text-fg-muted'} ${className}`}>
+      <span className="min-w-0 truncate">{pendingWords(send, note.title)}</span>
+      <button type="button" className={`${QUIET} shrink-0 text-ui-sm`} onClick={() => useLayout.getState().openSession(note.appSessionId)}>
+        {SIDE_COPY.place.show}
+      </button>
     </div>
   );
 }

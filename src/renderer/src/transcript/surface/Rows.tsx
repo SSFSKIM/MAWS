@@ -14,24 +14,69 @@ import { hasClosedMarks } from '../../owner/to-human/message-ink';
 import { expandedTurnRows, turnRows } from '../model/derive';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../model/rows';
+import { AgentMessageRow } from '../view/rows/AgentMessage'; // UX wave U3
 import { AssistantTextRow } from '../view/rows/AssistantText';
 import { GroupRow } from '../view/rows/Group';
 import { LocalCommandRow } from '../view/rows/LocalCommand';
+import { NoticeRow } from '../view/rows/Notice'; // UX wave U3
 import { QuestionRow } from '../view/rows/Question';
 import { UserRow } from '../view/rows/User';
-import { assistantInput, commandInput, groupInput, questionInput, userInput } from './adapters';
+import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, userInput } from './adapters';
+import { setCarrierConcealed, useCarrierConcealed } from './carrier-drawing'; // UX wave U3
 import { SurfaceCellLine } from './Tools';
 
-import { useTranscriptContext } from '../view/context';
+import { useDisclosure, useTranscriptContext } from '../view/context';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
-  const { appSessionId, turn } = useTranscriptSurface(row);
-  const input = userInput(row, turn);
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = userInput(row, turn, state?.ui.revealed);
   if (!input) return <UserRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<UserRow row={{ ...row, text: '…', attachments: [], placeholders: [] }} />}>
     {(props) => <UserRow row={props.text === row.text ? row : { ...row, text: props.text, placeholders: [], attachments: row.attachments.filter((a) => a.kind !== 'text') }} />}
   </SurfaceRow>;
+}
+
+// UX wave U3 (UC-3; the U3a document, M5): a message line and a notice ask the engine's UserMessage site where the
+// engine's own transcript draws their carrier through it, and a message the agent sent asks ToolUse (adapters.ts says
+// which); MAWS's line is the native drawing, so no hook, or one that keeps the engine's drawing, leaves it, and a mod's
+// own drawing replaces it. The tab's revealed jump target asks nothing. The line's words are MAWS's reading of the
+// carrier and stay as they are under a rewrite of the site's text.
+export function SurfaceAgentMessageRow({ row }: { row: Extract<Row, { kind: 'agent_message' }> }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const [expanded] = useDisclosure(`line:${row.id}`);
+  const revealed = state?.ui.revealed;
+  const sent = sentInput(row, turn, revealed);
+  if (sent) return <SurfaceRow appSessionId={appSessionId} component="ToolUse" {...sent} placeholder={<span className="text-fg-faint">…</span>}>{() => <AgentMessageRow row={row} />}</SurfaceRow>;
+  const input = arrivalInput(row, turn, { revealed, expanded });
+  if (!input) return <AgentMessageRow row={row} />;
+  return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} placeholder={<span className="text-fg-faint">…</span>}>{() => <AgentMessageRow row={row} />}</SurfaceRow>;
+}
+
+export function SurfaceNoticeRow({ row }: { row: Extract<Row, { kind: 'notice' }> }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const [expanded] = useDisclosure(`line:${row.id}`);
+  const revealed = state?.ui.revealed;
+  const drawn = state && turn ? turnRows(state, turn.id) : undefined; // the turn after its fold: its notices elect the carrier's owner
+  const follows = noticeFollows(row, turn, revealed, drawn);
+  const input = arrivalInput(row, turn, { revealed, expanded, drawn });
+  const instanceId = input?.instanceId ?? null;
+  // The carrier's other notices follow the drawing this one applied (carrier-drawing.ts); it conceals nothing once gone.
+  const report = useCallback((_ink: boolean, native: { visible: boolean }) => {
+    if (appSessionId !== null && instanceId !== null) setCarrierConcealed(appSessionId, instanceId, !native.visible);
+  }, [appSessionId, instanceId]);
+  useEffect(() => () => {
+    if (appSessionId !== null && instanceId !== null) setCarrierConcealed(appSessionId, instanceId, false);
+  }, [appSessionId, instanceId]);
+  if (follows !== null) return <FollowingNotice row={row} appSessionId={appSessionId} instanceId={follows} />;
+  if (!input) return <NoticeRow row={row} />;
+  return <SurfaceRow appSessionId={appSessionId} component="UserMessage" {...input} onInk={report} placeholder={<span className="text-fg-faint">…</span>}>{() => <NoticeRow row={row} />}</SurfaceRow>;
+}
+
+// A notice its carrier's other notice asks for: hidden where that notice's applied drawing conceals MAWS's own (a mod
+// replaced or hid the carrier), MAWS's line wherever that notice shows its own line.
+function FollowingNotice({ row, appSessionId, instanceId }: { row: Extract<Row, { kind: 'notice' }>; appSessionId: AppSessionId | null; instanceId: string }) {
+  return useCarrierConcealed(appSessionId, instanceId) ? null : <NoticeRow row={row} />;
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
@@ -41,7 +86,8 @@ function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
   const appSessionId = variant === 'session' && storeKey && !forcedLocal ? storeKey as AppSessionId : null;
   const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
-  const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn);
+  const revealed = useTranscriptStore((s) => s.entries[storeKey]?.state.ui.revealed); // UX wave U3
+  const input = assistantInput({ ...row, markdown: live ?? row.markdown }, turn, revealed);
   const attached = useSurfaceAttached(appSessionId);
   const text = live ?? row.markdown;
   const reportInk = useCallback((ink: boolean) => {
@@ -99,7 +145,7 @@ export function SurfaceAssistantRow({ row }: { row: Extract<Row, { kind: 'assist
 
 export function SurfaceCommandRow({ row }: { row: Extract<Row, { kind: 'local_command' }> }) {
   const { appSessionId, state } = useTranscriptSurface(row);
-  const input = commandInput(row, state);
+  const input = commandInput(row, state, state?.ui.revealed);
   if (!input) return <LocalCommandRow row={row} />;
   return <SurfaceRow appSessionId={appSessionId} component="CommandOutput" {...input} placeholder={<LocalCommandRow row={{ ...row, text: '…' }} />}>
     {(props) => <LocalCommandRow row={props.text === row.text ? row : { ...row, text: props.text }} />}
@@ -107,8 +153,10 @@ export function SurfaceCommandRow({ row }: { row: Extract<Row, { kind: 'local_co
 }
 
 export function SurfaceQuestionRow({ row }: { row: Extract<Row, { kind: 'question' }> }) {
-  const { appSessionId, turn } = useTranscriptSurface(row);
-  const { props } = questionInput(row, turn);
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = questionInput(row, turn, state?.ui.revealed);
+  if (!input) return <QuestionRow row={row} />;
+  const { props } = input;
   return <SurfaceRow appSessionId={appSessionId} component="AskUserQuestion" instanceId={row.toolUseId} props={props} placeholder={<span className="text-fg-faint">…</span>}>
     {(rewritten) => <QuestionRow row={rewritten === props ? row : { ...row, questions: nativeQuestionsOf(rewritten.questions) ?? row.questions }} />}
   </SurfaceRow>;

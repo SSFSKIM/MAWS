@@ -223,7 +223,7 @@ export async function runIntentSetup(s: Setup, appSessionId: AppSessionId, attem
       permissionMode: { requested: mode, effective: mode, refusal: null },
       // W11 (I1): the row's title until the transcript's first summary. E3 (M5): a side thread's is its name, never its
       // anchored first message (whose lead, preamble and tag would title it until the engine's title is read back)
-      firstPrompt: intent.lineage?.kind === 'side-thread' ? sideThreadTitle(intent.lineage) : (intent.message?.display ?? null),
+      firstPrompt: intent.lineage?.kind === 'side-thread' ? sideThreadTitle(intent.lineage, intent.message?.display ?? null) : (intent.message?.display ?? null),
       lineage: intent.lineage ?? null, // E3 (X11): the record carries it before the engine runs
       ...(intent.launchedBy && { launchedBy: intent.launchedBy }), // P5 O7 M4: a remote spawn's requester, for O12's observer
     });
@@ -298,7 +298,7 @@ export async function rewindFork(s: Setup, appSessionId: AppSessionId, rewindTo:
 async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engineSessionId: SessionId, firstTurn: 'sent' | 'queued' | 'none'): Promise<void> {
   const { appSessionId } = run;
   // E3: a side thread is named for what it is about and shown in its parent's transcript
-  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage);
+  if (intent.lineage?.kind === 'side-thread') await bindSideThread(s, appSessionId, intent.lineage, intent.message?.display ?? null);
   else if (intent.kind === 'fork' && intent.source !== null) {
     const title = s.sessions.get(intent.source.appSessionId)?.title;
     if (title?.source === 'user' && title.text !== '') {
@@ -318,8 +318,8 @@ async function finishBinding(s: Setup, run: IntentRun, intent: SetupIntent, engi
 // index's override when the engine refuses: the copied history would otherwise title it by the parent's prompt), then
 // its row in the parent's transcript. Nothing here rolls back: the thread runs whatever the bookkeeping does. E11: the
 // start-time recovery binds a thread the quit cut short here too (recovery.ts); each step is idempotent.
-export async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage): Promise<void> {
-  const title = sideThreadTitle(lineage);
+export async function bindSideThread(s: Setup, appSessionId: AppSessionId, lineage: Lineage, firstMessage: string | null /* UX wave U5a: the title's count */): Promise<void> {
+  const title = sideThreadTitle(lineage, firstMessage);
   await hostCall(s.dispatch, 'session.renameSession', { appSessionId, title }).catch((error: unknown) => {
     s.log(`the side thread ${appSessionId} is named in the index, since the engine refused: ${messageOf(error)}`);
     try {

@@ -4,6 +4,7 @@
 // `side.thread.summarised` by the tap below, once per live turn end of a side thread. Both mirror the index's
 // `side_threads` row, from which `sideThreadEvents` re-synthesises them for a transcript's snapshot with the ids and
 // times the live run emitted (so they bypass the read model's capped store of app events).
+import { readAnchoredMessage } from '@shared/anchor/message'; // UX wave U5a
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId, SessionId } from '@shared/graph/ids';
 import type { Lineage, SessionRecord } from '@shared/graph/session';
@@ -17,9 +18,13 @@ export const SIDE_QUESTION_TITLE = 'Side question';
 
 // A side thread's name: what `finishBinding` renames it to through the engine, and (M5) the first prompt its record is
 // created with, so the row is never titled by the anchored text (its lead, preamble and tag) before the engine's title
-// is read back from its store.
-export function sideThreadTitle(lineage: Pick<Lineage, 'openedBy' | 'anchor'>): string {
-  return lineage.openedBy === 'btw' ? SIDE_QUESTION_TITLE : lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;
+// is read back from its store. UX wave U5a (decision 11): a thread opened from several comments is "<the first's label>
+// and N more", the count read from its first message, since its lineage keeps the first comment's anchor alone.
+export function sideThreadTitle(lineage: Pick<Lineage, 'openedBy' | 'anchor'>, firstMessage: string | null): string {
+  if (lineage.openedBy === 'btw') return SIDE_QUESTION_TITLE;
+  const label = lineage.anchor?.label.trim() || SIDE_QUESTION_TITLE;
+  const others = (firstMessage === null ? 0 : (readAnchoredMessage(firstMessage)?.comments.length ?? 1)) - 1;
+  return others > 0 ? `${label} and ${others} more` : label;
 }
 
 export const isSideThreadEvent = (event: SessionEvent): boolean => event.kind === 'side.thread.opened' || event.kind === 'side.thread.summarised';

@@ -6,7 +6,8 @@
 // listing-capable session menu, menus.tsx). UX wave U7 (O-38, ticket 559): it opens like a local row, through its lane's opener
 // (`openListed`): its menu (always named) and its three dots offer Open and Open in new tab, and a ⌘-click or a middle click
 // asks for a tab of its own; with no opener each of them selects the row and shows its card, as a click does. UX wave U7
-// (O-16): under its project's Hidden row it is `indented` one step.
+// (O-16): under its project's Hidden row it is `indented` one step. The UX wave, U9: its menu also holds the acts
+// another machine offers for a listing (Fork, and Rename… and Archive for one you own).
 import { useState } from 'react';
 import { MachineChip } from '../app/MachineChip';
 import { greyWords, useMachineMark } from '../app/machine-mark';

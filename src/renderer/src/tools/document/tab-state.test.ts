@@ -3,6 +3,7 @@
 // (title, the last view read before this showing, the suggestions setting), the rail the header toggles, an export's
 // progress, the close guard reading all of it, and the handle kept alive until a comment's sends settle.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { AppSessionId } from '@shared/graph/ids';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { addThread, getThread, reply } from '@artifacts/document/threads';
 import type { PortProvider } from '@artifacts/provider/port';
@@ -14,7 +15,8 @@ import { newDoc } from '@artifacts/yjs';
 import type { CommandName, EventName, EventSource, MawsBridge } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
-import { recordCommentDraft } from './comment-drafts'; // P4-B1
+import { useCommentCard } from '../../side/card/store'; // P4-B1; UX wave U5a: the unsent comment is the card's pass's
+import { holdArtifactEditorState, releaseArtifactEditorState } from '../../artifacts/registry'; // UX wave U5a
 import { DocumentTabState, type DocumentTabDeps } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -147,8 +149,9 @@ describe('a document tab’s state', () => {
     await ready(state);
     const handle = w.handles[0];
     createDocument(handle.doc, { title: 'Launch', id: 'tab00001', generateID: () => 'p1' });
-    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1 });
-    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2 });
+    // UX wave U5a (M7; A3): a comment counts once it holds a message
+    addThread(handle.doc, { threadId: 'th1', tabId: 'tab00001', blockId: 'p1', quote: 'q', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 1, body: 'Shorter?' });
+    addThread(handle.doc, { threadId: 'th2', tabId: 'tab00001', blockId: 'gone', quote: 'Gone', anchor: { kind: 'block' }, by: { kind: 'human' }, at: 2, body: 'Why?' });
     expect(state.snapshot().unresolved).toBe(1);
     const block = tabBody(handle.doc, 'tab00001')!.get(0) as import('@artifacts/yjs').Node;
     block.setAttr('id', 'replacement');
@@ -352,32 +355,57 @@ describe('a document tab’s state', () => {
     expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'no export 7-pdf.pdf of a; export it again' });
   });
 
-  // P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about before the rest
+  // P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about before the rest.
+  // UX wave U5a: the comment is the artifact's pass's (one per artifact), whichever view's card it was written in.
+  const unsent = (text: string) =>
+    useCommentCard.setState({
+      passes: new Map([
+        [
+          'the pass',
+          {
+            host: 'artifact',
+            subject: A,
+            appSessionId: 'a1111111-1111-4111-8111-111111111111' as AppSessionId,
+            toMain: false,
+            comments: [{ id: '1', anchor: { kind: 'artifact-comment', locator: 'ships quarterly', label: 'Launch plan', artifactId: A, threadId: 'k2m9x0qa' }, text, screenshot: null, rect: null, flight: null, refused: null }],
+          },
+        ],
+      ]),
+    });
+  afterEach(() => useCommentCard.setState({ passes: new Map() }));
+
   it('asks before an unsent comment is lost, and closes as before once it is discarded or when there is none', async () => {
     const w = world();
     const state = w.open();
     await ready(state);
-    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    unsent('Monthly?');
     expect(await state.closeGuard()).toBe(false);
     expect(w.confirm).toHaveBeenCalledWith('Discard your unsent comment?');
     w.confirm.mockReturnValueOnce(true);
     expect(await state.closeGuard()).toBe(true); // nothing unsaved besides
-    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: '' });
+    unsent('');
     w.confirm.mockClear();
     expect(await state.closeGuard()).toBe(true);
     expect(w.confirm).not.toHaveBeenCalled();
   });
 
-  // P4-B3 (its Decision Log 39): the document open in another view too, the comment on that view's card goes nowhere
-  // when this tab closes, so this tab's guard does not ask about it.
-  it('does not ask about an unsent comment on another view’s card', async () => {
+  // P4-B3 (its Decision Log 39); UX wave U5a: with another view of the document open, the comment outlives this tab's
+  // close (its pass ends with the artifact's last view), so this tab's guard does not ask about it.
+  it('does not ask about the unsent comment while another view of the document is open', async () => {
     const w = world();
     const state = w.open();
     await ready(state);
-    recordCommentDraft(A, { hostId: 'document:another-view', serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
-    expect(await state.closeGuard()).toBe(true);
-    expect(w.confirm).not.toHaveBeenCalled();
-    recordCommentDraft(A, { hostId: 'document:another-view', serial: 1, threadId: 'k2m9x0qa', text: '' });
+    const views = { Panel: () => null, createState: () => null };
+    holdArtifactEditorState({ surface: 'panel', tabId: 'view-1' }, A, 'document', views);
+    holdArtifactEditorState({ surface: 'main', tabId: 'view-2' }, A, 'document', views);
+    try {
+      unsent('Monthly?');
+      expect(await state.closeGuard()).toBe(true);
+      expect(w.confirm).not.toHaveBeenCalled();
+    } finally {
+      releaseArtifactEditorState({ surface: 'panel', tabId: 'view-1' });
+      releaseArtifactEditorState({ surface: 'main', tabId: 'view-2' });
+    }
   });
 
   // P4-B3 (its Decision Log 39): asked as a move's (the move hands this tab's card to the view it keeps), the guard
@@ -386,7 +414,7 @@ describe('a document tab’s state', () => {
     const w = world();
     const state = w.open();
     await ready(state);
-    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: 'Monthly?' });
+    unsent('Monthly?');
     expect(await state.closeGuard({ moving: true })).toBe(true);
     expect(w.confirm).not.toHaveBeenCalled();
     w.memory.dropConnections();
@@ -395,7 +423,6 @@ describe('a document tab’s state', () => {
     vi.useFakeTimers({ shouldAdvanceTime: true, advanceTimeDelta: 50 });
     expect(await state.closeGuard({ moving: true })).toBe(false);
     expect(w.confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Launch plan'));
-    recordCommentDraft(A, { hostId: state.commentHostId, serial: 1, threadId: 'k2m9x0qa', text: '' });
   });
 
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {

@@ -1,7 +1,7 @@
 // X2 `layout.*` (C5 execution document, Interfaces "X2 — `layout.*`"). C5 owns the namespace: a key/value store over
 // main's `<userData>/layout.json` (§4.4 as amended; wave-2 ledger ruling 10), one opaque JSON value per key, whose
 // shapes are defined here and validated by the reader. There is no `layout.changed`: the renderer is the only writer
-// and hydrates from the snapshot. `window.main` is main's own key and never crosses IPC.
+// and hydrates from the snapshot. `window.main` and `library.exportFolder` are main's own keys and never cross IPC.
 import * as z from 'zod';
 import { AgentIdSchema, AppSessionIdSchema, ProjectIdSchema } from '../../graph/ids';
 import { ACTION_IDS } from '../../keymap/actions';
@@ -613,6 +613,7 @@ export const LayoutKeySchema = z.union([
   z.literal('sidebar.people'), // P5 O8 M5: SidebarPeopleSchema
   z.literal('sidebar.hidden'), // UX wave U7 (O-16): SidebarHiddenSchema
   z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
+  z.literal('library.exportFolder'), // UX wave U5: ExportFolderSchema, main's own key
   z.literal('destination'), // UX wave U7b (O-40): StoredDestinationSchema
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
@@ -629,6 +630,11 @@ export const SidebarHiddenSchema = z.strictObject({
   hidden: z.record(z.string().min(1), z.strictObject({ at: z.string(), armedAt: z.string().nullable() })),
 });   // key `sidebar.hidden`
 export type SidebarHidden = z.infer<typeof SidebarHiddenSchema>;
+// UX wave U5 (l6-artifacts-20; docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 14): the folder
+// the last export saved to, where the next export's dialog opens, also after a relaunch. Main's own key, as `window.main`
+// is: written by main after each export's copy and never read or written across IPC (src/main/layout/store.ts).
+export const ExportFolderSchema = z.strictObject({ path: z.string().min(1) });   // key `library.exportFolder`
+export type ExportFolder = z.infer<typeof ExportFolderSchema>;
 // UX wave U7b, O-40 (docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, Interfaces §F and
 // §G; the wave's UC-12): the page open beside the sidebar in place of the tabs, a place that is not a tab. Stored while a
 // page is open and deleted when none is; build F never asks for the key and its main keeps it through its own writes.

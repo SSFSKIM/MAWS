@@ -48,14 +48,10 @@
   },
   {
     "at": "2026-10-29T06:55:02.892Z",
-    "blockIndex": 0,
-    "id": "text:ff584ea5-9f72-4321-aea7-35ce34e9d6bb:0",
-    "kind": "assistant_text",
-    "live": false,
-    "markdown": "Session renamed to: E312 slash name",
+    "id": "local:54ea7128-6390-42c7-92a7-a878191e6250",
+    "kind": "local_command",
     "messageUuid": "54ea7128-6390-42c7-92a7-a878191e6250",
-    "model": "<synthetic>",
-    "phase": "answer",
+    "text": "Session renamed to: E312 slash name",
     "turnId": "turn:21bdf7c8-01aa-4e28-a60e-de13c16c8065"
   },
   {

@@ -6,11 +6,11 @@
 //   (a) start: `mawsd` and the engine host each in a group of their own, their files and modes; after an unbusy quit
 //       `mawsd` parks the engine host and exits once idle; a kill -9 of the app leaves both serving; a kill -9 of
 //       `mawsd` leaves a stale lock the next start replaces, the engine host adopted;
-//   (b) G2: a paced session kept across a quit streams on unobserved (a background task's failure and the permission
-//       request land while the app is closed, and a second client of machine.sock reads their items), the relaunch
-//       connects to the same pid through the same `mawsd`, the failure's Needs-you item (derived only from the
-//       undelivered tail) and the request's show once each, `engine.budget` answers from the kept supervisor, rows keep
-//       arriving, and the finished transcript equals a control run's without the quit;
+//   (b) G2: a paced session kept across a quit streams on unobserved (a tool result denied because auto mode is
+//       unavailable and the permission request land while the app is closed, and a second client of machine.sock reads
+//       their items), the relaunch connects to the same pid through the same `mawsd`, the denial's Needs-you item
+//       (derived only from the undelivered tail) and the request's show once each, `engine.budget` answers from the
+//       kept supervisor, rows keep arriving, and the finished transcript equals a control run's without the quit;
 //   (c) G3: kill -9 of the engine host mid-turn with a replay session nothing can adopt: the crash toast says it was
 //       interrupted, Diagnostics shows the new pid and its crash line, the session is not live;
 //   (d) G3: Settings' Stop all: the old supervisor exits, a fresh one starts under the same `mawsd` and launches;
@@ -68,6 +68,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { CONNECTORS_CLIENT_CAPABILITY, MACHINE_SPINE_CAPABILITY, SOCKET_PROTOCOL } from '@shared/host/socket-protocol'; // P3-A M5
 import type { AttentionItem } from '@shared/graph/attention';
 import { daemonPaths } from '@shared/daemon/files';
+import type { HostStatus } from '@shared/ipc/schema/host';
 import { reachMachine } from '../src/mawsd/machine-client';
 import { DISCOVERY_WAKE_BOUND_MS } from '../src/mawsd/discovery-wake';
 import { WIRE_MINOR } from '@shared/ipc/wire'; // P3-A M5; P5 O1 M6: the hello's minor
@@ -80,7 +81,7 @@ import { isAlive, ps } from './support/processes';
 import { sidebarRow } from './support/sidebar';
 import { FakeObserver } from '../src/engine-host/holder/fake-observer'; // O16 M5
 // the case's scratch profile, its supervisors and the kept session's fixtures (moved there for e2e/cross-build.spec.ts)
-import { adoptedOf, attentionOf, eventsOf, firstPrompt, isRequestRow, isTaskFailureRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, tailFixture, TASK_FAILED, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, firstPrompt, isRequestRow, isTailItemRow, keptQuitLine, pendingPermissions, PERMISSION, PROMPT, startTurn, statusOf, suffix, TAIL_ITEM, TAIL_TOOL_USE, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { CLOCK } from './support/clock'; // L129
 // P5 O17 M8 start
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine';
@@ -295,9 +296,9 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     const requested = await untilRequested(run.page, id);
     value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
     await finished(run.page, id);
-    // the owner's ruling (2026-10-30): with its session shown in front, the fixture's failure is seen as it arrives (or
-    // retired once the session shows, had it arrived first): nothing of it waits in Needs you
-    expect((await attentionOf(run.page, id, 'error')).filter((i) => i.state !== 'retired'), 'the failure with its session shown leaves no open item').toEqual([]);
+    // UX wave U3a (decision 16): the tail's item is the auto-mode denial's, which seeing its session does not retire (the
+    // owner's ruling of 2026-10-30 retires a seen error; the unit suite holds it for a turn's error), so the control no
+    // longer checks that ruling here
     const events = await eventsOf(run.page, id);
     control.order = fixtureOrder(events);
     control.suffixes = events.map((e) => suffix(e.id));
@@ -308,7 +309,7 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
 
   await withScratch('keep', async (s) => {
     s.useStub({ rowMs: Number(ROW_MS) }); // O16 M2b
-    const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION} with one background task failure inserted before its request, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
+    const log: string[] = ['E10 G2: a kept session across a quit and a relaunch (e2e/supervisor.spec.ts case (b))', `fixture ${PERMISSION} with one tool result denied as auto mode unavailable inserted before its request, MAWS_E2E_REPLAY_ROW_MS=${ROW_MS}`, ''];
     const first = await s.launch({ ...pace, MAWS_E2E_QUIT_ANSWER: 'keep' });
     const firstStatus = await s.ready(first.page);
     const pid = firstStatus.supervisor!.pid;
@@ -320,19 +321,19 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     await s.quit(first);
     expect(first.quitLines()).toEqual([keptQuitLine()]);
     expect(isAlive(pid), 'the supervisor outlives the app').toBe(true);
-    // the precondition, read once the app has exited: neither the failure nor the request is journaled yet
+    // the precondition, read once the app has exited: neither the denial nor the request is journaled yet
     const atQuit = s.journal(id);
     const seqAtQuit = Math.max(...atQuit.map((r) => r.seq));
-    expect(atQuit.filter((r) => isTaskFailureRow(r) || isRequestRow(r)), 'the failure and the request come after the app has exited').toEqual([]);
-    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events read just before ⌘Q`, keptQuitLine(), `after the app exited: pid ${pid} alive ${isAlive(pid)}; journal at seq ${seqAtQuit}, holding neither the task failure nor the permission request`);
+    expect(atQuit.filter((r) => isTailItemRow(r) || isRequestRow(r)), 'the denial and the request come after the app has exited').toEqual([]);
+    log.push(`first run: supervisor pid ${pid}; ${seenBeforeQuit} events read just before ⌘Q`, keptQuitLine(), `after the app exited: pid ${pid} alive ${isAlive(pid)}; journal at seq ${seqAtQuit}, holding neither the auto-mode denial nor the permission request`);
 
-    // unobserved: the replay streams on; the failure and the request land while no app is connected
+    // unobserved: the replay streams on; the denial and the request land while no app is connected
     await expect.poll(() => s.journal(id).some(isRequestRow), { timeout: 30_000, message: 'the request reaches the journal while the app is closed' }).toBe(true);
     const closed = s.journal(id);
-    log.push(`while closed: ${closed.length - atQuit.length} journal rows written, the task failure (seq ${closed.find(isTaskFailureRow)!.seq}) and the permission request (seq ${closed.find(isRequestRow)!.seq}) among them`);
+    log.push(`while closed: ${closed.length - atQuit.length} journal rows written, the auto-mode denial (seq ${closed.find(isTailItemRow)!.seq}) and the permission request (seq ${closed.find(isRequestRow)!.seq}) among them`);
     // P5 O3-D (acceptance 1): with no app, `mawsd`'s spine derives the session's items; a second client of machine.sock reads them
-    await expect.poll(async () => (await attentionWithNoApp(s)).filter((i) => i.appSessionId === id).map((i) => i.kind), { timeout: 15_000, message: 'attention.list over machine.sock shows the failure and the request raised while away' }).toEqual(expect.arrayContaining(['error', 'permission']));
-    log.push('while closed: attention.list over machine.sock, a second client, shows the task failure’s item and the pending request');
+    await expect.poll(async () => (await attentionWithNoApp(s)).filter((i) => i.appSessionId === id).map((i) => i.kind), { timeout: 15_000, message: 'attention.list over machine.sock shows the denial and the request raised while away' }).toEqual(expect.arrayContaining(['auto_mode_unavailable', 'permission']));
+    log.push('while closed: attention.list over machine.sock, a second client, shows the auto-mode denial’s item and the pending request');
 
     const second = await s.launch(pace);
     const status = await s.ready(second.page);
@@ -359,23 +360,22 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(live).toMatchObject({ process: 'ready', turn: expect.anything() });
     log.push('', `relaunch: the same supervisor pid ${status.supervisor!.pid}; ${atRelaunch.length} events in the launch at the connect; between ${afterExit} (from rows journaled after the app had exited) and ${atRelaunch.length - seenBeforeQuit} (all after the last read before ⌘Q) streamed while the app was closed`);
 
-    // the undelivered tail reached main's `session.eventBatch` listeners: the failure's error item, which only the
+    // the undelivered tail reached main's `session.eventBatch` listeners: the denial's auto-mode item, which only the
     // attention service's derivation of the live tail raises (the first app never saw the event; the resync folds the
-    // digest only), from the event journaled while the app was closed; one item (derived items are keyed by event id)
-    const failure = atRelaunch.find((e) => e.kind === 'task.notification')!;
-    expect(seqOf(failure), 'the failure event was journaled after the app had exited').toBeGreaterThan(seqAtQuit);
-    await expect.poll(async () => (await attentionOf(second.page, id, 'error')).map((i) => i.id), { message: 'the failure’s Needs-you item, derived from the tail' }).toEqual([`${id}:error:${failure.id}`]);
-    const [errorItem] = await attentionOf(second.page, id, 'error');
-    expect(errorItem!.summary).toBe(`Background task failed: ${TASK_FAILED}`);
+    // digest only), from the event journaled while the app was closed; one item (keyed by the denied call's id)
+    const denial = atRelaunch.find((e) => e.kind === 'tool.result' && e.denial === 'automode-unavailable')!;
+    expect(seqOf(denial), 'the denial event was journaled after the app had exited').toBeGreaterThan(seqAtQuit);
+    await expect.poll(async () => (await attentionOf(second.page, id, 'auto_mode_unavailable')).map((i) => i.id), { message: 'the denial’s Needs-you item, derived from the tail' }).toEqual([`${id}:auto_mode_unavailable:${TAIL_TOOL_USE}`]);
+    const [tailItem] = await attentionOf(second.page, id, 'auto_mode_unavailable');
+    expect(tailItem!.summary).toBe(TAIL_ITEM);
     // the request's item comes from the burst's broker items (host-held state re-listed at the connect)
     await expect.poll(async () => (await pendingPermissions(second.page, id)).length, { message: 'the Needs-you item of the request raised while away' }).toBe(1);
-    // The owner's ruling (2026-10-30): the failure came while nobody was looking (journaled after the app had exited, so
-    // after the session's last-seen mark), so it was raised; the relaunch restores this session's tab, and shown there in
-    // front the session is seen, which retires the error for good, and the glyph reads the pending request, never an
-    // ended session
-    await expect.poll(async () => (await attentionOf(second.page, id, 'error'))[0]?.state, { timeout: 10_000, message: 'seen once its restored session shows' }).toBe('retired');
+    // The relaunch restores this session's tab. UX wave U3a (decision 16): the owner's ruling of 2026-10-30, that an error
+    // seen once its session shows retires for good, is no longer checked here, since the tail's item is the auto-mode
+    // denial's, which seeing does not retire (the unit suite holds the ruling for a turn's error). The glyph reads that
+    // open item, which outranks the pending request, never an ended session
     const row = await rowOf(second.page, id);
-    await expect(glyphOf(row), 'the glyph reads the request, not the seen error').toHaveAttribute('aria-label', 'Needs approval');
+    await expect(glyphOf(row), 'the glyph reads the tail’s open item, not an ended session').toHaveAttribute('aria-label', 'Needs you: auto mode unavailable');
     await row.click();
     // E11 W-E: the liveness G2's glyph showed before the error item outranked it, read from main's digest after the
     // resync: the turn open with the one request pending. The phase is `working` (the fold's `turn.started`), never
@@ -391,9 +391,9 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
     expect(items.map((i) => i.state), 'one Needs-you item for the request').toEqual(['pending']);
     const requested = atRelaunch.find((e) => e.kind === 'permission.requested') as Extract<SessionEvent, { kind: 'permission.requested' }>;
     expect(items[0]!.request.requestId).toBe(requested.requestId);
-    expect(await attentionOf(second.page, id, 'error'), 'still one error item after a settle').toHaveLength(1);
+    expect(await attentionOf(second.page, id, 'auto_mode_unavailable'), 'still one auto-mode item after a settle').toHaveLength(1);
     log.push(
-      `the tail reached main's listeners: the error item "${errorItem!.summary}" (id …:error:${suffix(failure.id)}), from the failure event journaled at seq ${seqOf(failure)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'error'))[0]?.state}: retired once its restored session showed); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
+      `the tail reached main's listeners: the auto-mode item "${tailItem!.summary}" (id …:auto_mode_unavailable:${TAIL_TOOL_USE}), from the denial event journaled at seq ${seqOf(denial)} after the app had exited, 1 item (${(await attentionOf(second.page, id, 'auto_mode_unavailable'))[0]?.state}); main's digest after the resync: phase ${digest.phase}, ${digest.pendingRequests} pending request`,
       `the request's Needs-you item (from the host's re-listed broker items): ${items.length} (${items[0]!.state})`,
     );
 
@@ -437,10 +437,10 @@ test('(b) G2: a kept session streams on while the app is closed; the relaunch re
       `rendered transcript rows: ${rows.length} [${rows.join(', ')}], equal to the control run's ${control.rows.length}: ${JSON.stringify(rows) === JSON.stringify(control.rows)}`,
       '',
       'What this proves: the session kept, the supervisor surviving the app, the same pid at the relaunch, its state re-listed',
-      '(status, broker items, budget), the undelivered tail reaching main\'s session.eventBatch listeners (the error item only',
+      '(status, broker items, budget), the undelivered tail reaching main\'s session.eventBatch listeners (the auto-mode item only',
       'it raises), the host\'s stream equal to the control\'s, no event twice in the window\'s live batches. That no tail',
       'event reaches a listener twice rests on the delivered cursor\'s units (Task 2.1) and the live probe\'s Q6: derived',
-      'items are keyed by event id and rendered rows by row id, so neither would show a doubled event.',
+      'items are keyed by their event\'s ids and rendered rows by row id, so neither would show a doubled event.',
       '',
       'host.log (the supervisor across both app runs):',
       ...s.log().split('\n').filter(Boolean).map((l) => `  ${l}`),
@@ -730,6 +730,17 @@ async function keptMidTurn(s: Scratch, o: { env?: Record<string, string>; fixtur
 // P5 O16 M3c: the kept engine host stands in for one from before O16, whose welcome lists no `host.holder` (detached.ts)
 const OLDER_HOST = { MAWS_E2E_HOST_WITHOUT_HOLDER: '1' };
 
+// After an update (`MAWS_E2E_BUILD_ID: 'stale'`), the successor of `pid` once host.status reads it as the app's own build.
+// `matches` compares the successor's status with `mawsd`'s, two reports that reach main apart, and `mawsd`'s engine-host
+// build reads as the seam's until it has started a host of its own, so for a status or two after the pid moves it can
+// still read 'build'. The case waits for the reading it asserts, which a successor of another build never reaches.
+async function successorOfOwnBuild(s: Scratch, page: Page, pid: number): Promise<HostStatus> {
+  await s.ready(page, (st) => st.supervisor!.pid !== pid, 60_000);
+  let moved: HostStatus | null = null;
+  await expect.poll(async () => (moved = await s.ready(page, (st) => st.supervisor!.pid !== pid)).matches, { timeout: 30_000, message: 'the successor reads as the app’s own build' }).toBe('same');
+  return moved!;
+}
+
 test('(f) an update that changed no wire shape, met by an engine host without host.holder: the banner names the kept session; Restart now moves to a new supervisor', async () => {
   await withScratch('updated', async (s) => {
     const { pid } = await keptMidTurn(s, { env: OLDER_HOST });
@@ -744,7 +755,7 @@ test('(f) an update that changed no wire shape, met by an engine host without ho
     expect(fresh).not.toBe(pid);
     await expect.poll(() => isAlive(pid), { timeout: 10_000 }).toBe(false);
     await expect(notice).toHaveCount(0);
-    expect(await s.ready(run.page)).toMatchObject({ matches: 'same' });
+    await successorOfOwnBuild(s, run.page, pid);
     expect(run.maws.consoleErrors()).toEqual([]);
   });
 });
@@ -758,7 +769,7 @@ test('(f) P5 O16 M3: an update with a session live: the engine host hands it ove
     s.useStub();
     const { pid, id, engine, requestId } = await keptMidTurn(s);
     const run = await s.launch({ MAWS_E2E_BUILD_ID: 'stale' });
-    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
+    const moved = await successorOfOwnBuild(s, run.page, pid);
     expect(moved, 'a supervisor of the app’s own build, nothing armed').toMatchObject({ matches: 'same', supervisor: { exitWhenIdle: false } });
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(s.log(), 'host.log: the old host drained at once').toContain('handover armed: 1 hosted rows frozen, 0 calls in flight');
@@ -832,8 +843,7 @@ test('(f) P5 O16 M3c: an update waits for a running tool call: the old build ser
     expect(s.log(), 'host.log: nothing frozen while the call runs').not.toContain('handover armed');
 
     rmSync(hold); // the call finishes; the host's next status is quiet, and the handover follows
-    const moved = await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000);
-    expect(moved).toMatchObject({ matches: 'same' });
+    const moved = await successorOfOwnBuild(s, run.page, pid);
     expect(moved.handover, 'nothing waited for any more').toBeUndefined();
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(s.log(), 'host.log: drained at once').toContain('handover armed: 2 hosted rows frozen, 0 calls in flight');
@@ -902,7 +912,7 @@ test('(f) P5 O16 M3c: an update’s short deferral: a call that starts at the fr
     expect(meanwhile.reason).toBeNull();
 
     rmSync(hold); // the call finishes on the old host; its drain settles and it leaves
-    expect(await s.ready(run.page, (st) => st.supervisor!.pid !== pid, 60_000)).toMatchObject({ matches: 'same' });
+    await successorOfOwnBuild(s, run.page, pid);
     await expect.poll(() => isAlive(pid), { timeout: 10_000, message: 'the old engine host is gone' }).toBe(false);
     expect(isAlive(daemon), 'the same mawsd serves the successor').toBe(true);
     await heldCallAdopted(s, run, id, engine);
@@ -962,16 +972,25 @@ async function ringText(page: Page, ptyId: string): Promise<string> {
   }, ptyId);
 }
 
+// A path as one literal /bin/sh word: a scratch root is a tmpdir path, never expanded by the shell that reads it.
+const shellQuoted = (value: string): string => `'${value.replaceAll("'", "'\\''")}'`;
+
 // (h) G4, inverted (acceptance 2): the terminals belong to `mawsd`'s pty host, not the app. After a
 // keep-quit the restored tab is alive, the same shell pid, and its ring holds what the shell printed while the app was
 // closed; a second terminal that wrote more than the ring and the watermark (about 2 MiB) with the app closed has
 // reached its end marker. The markers are computed by the shell, so the echoed command line never matches them.
-// A command written to a shell runs only once the shell reads it, and the quit's report takes milliseconds: the case
-// quits once both shells report a foreground command (C9's probe, the one the guard asks), so the report names both.
+// The quit's report names both shells busy only if both run their command when the guard probes them, and C9's probe
+// (`pty.foreground`, the one the guard asks) reads a shell busy while node-pty's helper execs it and while a startup
+// file runs a child, then idle until the shell reads the command it was given: a busy reading counts only once the
+// shell has printed the command's start. So each command prints that, then holds the terminal (one job, never the
+// shell itself between steps) until the case releases it after the quit, and the case quits once the guard's own report
+// counts both; the output lands while no app runs.
 test('(h) G4, inverted: after a keep-quit the restored terminal is the same live shell and holds what it printed while the app was closed; one that wrote past its ring reached its end', async () => {
-  const DELAY_S = 8; // after the shells' commands have started: the quit begins and the output lands while no app runs
   const WRITTEN = 3_000_000;
   await withScratch('terminal', async (s) => {
+    const release = join(s.root, 'm7-release');
+    const ended = [join(s.root, 'm7-closed.done'), join(s.root, 'm7-writer.done')];
+    const held = `echo m7-started-$((40+2)); sh -c 'until [ -e "$1" ]; do sleep 0.1; done' release ${shellQuoted(release)}`;
     const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
     const daemonPid = (await s.ready(first.page)).daemon!.pid;
     const id = await s.record(first.page);
@@ -987,16 +1006,19 @@ test('(h) G4, inverted: after a keep-quit the restored terminal is the same live
       const layout = value(await invoke(first.page, 'layout.get', { key: `panel.${await addressed(first.page, id)}` })).value as { tabs: { id: string }[] } | null;
       return layout?.tabs.map((t) => t.id) ?? [];
     }, { message: 'the tab reaches layout.json' }).toContain(label);
-    value(await invoke(first.page, 'pty.write', { ptyId, data: `sleep ${DELAY_S}; echo m7-closed-$((40+2))\n` }));
-    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `sleep ${DELAY_S}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2))` }));
-    const busy = async (id: typeof ptyId) => value(await invoke(first.page, 'pty.foreground', { ptyId: id })).busy;
-    await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map(busy))).every(Boolean), { message: 'both shells run their command' }).toBe(true);
+    value(await invoke(first.page, 'pty.write', { ptyId, data: `${held}; echo m7-closed-$((40+2)); : > ${shellQuoted(ended[0])}\n` }));
+    const writer = value(await invoke(first.page, 'pty.spawn', { appSessionId: id, label: 'm7-writer', cwd: s.repo, cols: 80, rows: 24, shell: '/bin/sh', args: [], command: `${held}; head -c ${WRITTEN} /dev/zero | tr '\\0' x; echo; echo m7-end-$((40+2)); : > ${shellQuoted(ended[1])}` }));
+    await expect.poll(async () => (await Promise.all([ptyId, writer.ptyId].map((p) => ringText(first.page, p)))).every((text) => text.includes('m7-started-42')), { timeout: 15_000, message: 'both shells started their command' }).toBe(true);
+    const report = () => first.maws.app.evaluate(() => (globalThis as unknown as { __maws_quit: { report(): Promise<{ busyTerminals: number; terminalsUnknown: boolean }> } }).__maws_quit.report());
+    // what the quit's line is held to below, read as the guard reads it
+    await expect.poll(async () => { const r = await report(); return r.terminalsUnknown ? 'terminals unknown' : `${r.busyTerminals} busy`; }, { timeout: 15_000, message: 'the quit guard’s own report counts both shells busy' }).toMatch(/^(2 busy|terminals unknown)$/);
     await s.quit(first);
     // the two shells run a command, so the log names them; on the daemon shape they keep running and nothing is asked (P5 O3-D, Q1)
     expect(first.quitLines()).toContainEqual(expect.stringMatching(/^quit-guard: 1 mid-turn, (2 busy terminals|terminals unknown), not asked: they outlive the app$/));
     expect(isAlive(shellPid), 'the shell outlives the app').toBe(true);
     expect(isAlive(daemonPid), 'mawsd serves the terminals').toBe(true);
-    await new Promise((r) => setTimeout(r, (DELAY_S + 10) * 1_000)); // both commands run to their end with no app
+    writeFileSync(release, ''); // both commands run to their end with no app
+    await expect.poll(() => ended.every((path) => existsSync(path)), { timeout: 60_000, message: 'both commands ended while no app runs' }).toBe(true);
 
     const second = await s.launch();
     expect((await s.ready(second.page)).daemon!.pid, 'the same mawsd').toBe(daemonPid);

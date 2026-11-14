@@ -7,7 +7,9 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { deliverableUrl } from '@shared/maws/deliverable';
 import { artifactUrl } from '@shared/artifacts/scheme'; // P3-L (M5b)
 import { fileLineAnchor } from '../../tools/code/anchor/anchor';
-import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, openCard, targetOf, useCommentCard } from './store';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { applyLaneAState, dismissPendingSend, holdPendingSend, resetLaneAStore } from '../../stores/lane-a';
+import { CLAIM_DEADLINE_MS, cardGone, claimCard, closeCard, discardComment, dropSession, dropSubject, flightRefused, launchFlight, leaveCard, notePlace, openCard, passKey, placeNoteOf, registerCardHost, resetPlaceNotes, SENT_NOTE_MS, setCommentText, setPassToMain, targetOf, useCommentCard } from './store';
 
 const PARENT = 'a1111111-1111-4111-8111-111111111111' as AppSessionId;
 const RECORD = '00000000-0000-4000-8000-000000000001';
@@ -130,5 +132,176 @@ describe('an unhosted card', () => {
     redock();
     vi.advanceTimersByTime(CLAIM_DEADLINE_MS / 2);
     expect(open()).not.toBeNull();
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, §C and decision 8): the line a host draws
+// in its card's place after a send to the main conversation, by the place it belongs to
+describe('the place’s note', () => {
+  const KEY = { writer: 'maws/m', seq: 4 };
+  const AT = '2026-11-12T10:00:00.000Z';
+  const note = (place: string) => useCommentCard.getState().notes.get(place) ?? null;
+  const pending = { kind: 'pending', appSessionId: PARENT, key: KEY, title: 'Q3 plan' } as const;
+
+  beforeEach(() => {
+    resetPlaceNotes();
+    resetLaneAStore();
+  });
+
+  it('a sent line leaves after SENT_NOTE_MS; a newer line at the place is not taken by the older one’s timer', () => {
+    vi.useFakeTimers();
+    notePlace('h1', { kind: 'sent', text: 'Sent to Q3 plan', at: Date.now() });
+    vi.advanceTimersByTime(SENT_NOTE_MS - 1);
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+    notePlace('h1', { kind: 'sent', text: 'Sent to Q4 plan', at: Date.now() });
+    vi.advanceTimersByTime(1);
+    expect(note('h1')).toMatchObject({ text: 'Sent to Q4 plan' });
+    vi.advanceTimersByTime(SENT_NOTE_MS);
+    expect(note('h1')).toBeNull();
+    expect(SENT_NOTE_MS).toBe(4_000);
+  });
+
+  it('a pending line follows its pending send by key: it stays through every fate but entry, then is the sent line', () => {
+    vi.useFakeTimers();
+    holdPendingSend(PARENT, KEY, 'the words');
+    notePlace('h1', pending);
+    vi.advanceTimersByTime(60_000);
+    expect(note('h1')).toEqual(pending); // never leaves by itself
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'refused', reason: 'too busy' }] }));
+    expect(note('h1')).toEqual(pending);
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'entered' }] }));
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+    vi.advanceTimersByTime(SENT_NOTE_MS);
+    expect(note('h1')).toBeNull();
+  });
+
+  it('a pending line leaves with its pending send when the person dismisses or resends it, and follows no other key', () => {
+    const other = { writer: 'maws/m', seq: 3 };
+    holdPendingSend(PARENT, other, 'the words'); // the same text, an older send
+    holdPendingSend(PARENT, KEY, 'the words');
+    notePlace('h1', pending);
+    dismissPendingSend(PARENT, other);
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: other, at: AT, state: 'entered' }] }));
+    expect(note('h1')).toEqual(pending);
+    dismissPendingSend(PARENT, KEY);
+    expect(note('h1')).toBeNull();
+  });
+
+  // M3's review, finding 3: a place's line is the newest set for its subject, a key set again counting as new
+  it('draws the newest line of a subject: A, then B, then A again draws A’s, a durable pending one included', () => {
+    const other = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
+    const a = passKey('browser', 'tab-1', PARENT);
+    const b = passKey('browser', 'tab-1', other);
+    const key = { writer: 'maws/m', seq: 7 };
+    applyLaneAState(PARENT, laneAState(PARENT));
+    holdPendingSend(PARENT, key, 'the words');
+    const drawn = () => placeNoteOf(useCommentCard.getState().notes, 'browser', 'tab-1');
+    notePlace(a, { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' });
+    notePlace(b, { kind: 'sent', text: 'Sent to B', at: Date.now() });
+    expect(drawn()).toMatchObject({ kind: 'sent', text: 'Sent to B' });
+    notePlace(a, { kind: 'pending', appSessionId: PARENT, key, title: 'Q3 plan' });
+    expect(drawn()).toMatchObject({ kind: 'pending', appSessionId: PARENT });
+    notePlace(b, { kind: 'sent', text: 'Sent to B again', at: Date.now() });
+    expect(drawn()).toMatchObject({ text: 'Sent to B again' });
+    notePlace(a, { kind: 'sent', text: 'Sent to A', at: Date.now() });
+    expect(drawn()).toMatchObject({ text: 'Sent to A' });
+  });
+
+  it('a pending send whose words entered before its line was set makes the line the sent one at once', () => {
+    holdPendingSend(PARENT, KEY, 'the words');
+    applyLaneAState(PARENT, laneAState(PARENT, { deliveries: [{ key: KEY, at: AT, state: 'entered' }] }));
+    notePlace('h1', pending);
+    expect(note('h1')).toMatchObject({ kind: 'sent', text: 'Sent to Q3 plan' });
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M3; §C): the pass. A composing open adds a
+// comment to the pass of its host's subject; a host that keeps one unsent comment returns the person to it; a card that
+// goes leaves its comment unless nothing is typed in it; a subject or a session that ends takes its passes with it.
+describe('the pass', () => {
+  const doc = (threadId: string): Anchor => ({ kind: 'artifact-comment', locator: 'ships quarterly', label: 'Q3 plan', artifactId: 'art-1', threadId });
+  const docKey = passKey('artifact', 'art-1', PARENT);
+  const offs: (() => void)[] = [];
+  const host = (hostId: string, holds: 'one' | 'many', subject = 'art-1') => offs.push(registerCardHost(hostId, { kind: holds === 'one' ? 'artifact' : 'artifact-page', subject, holds }));
+  beforeEach(() => resetPlaceNotes());
+  afterEach(() => offs.splice(0).forEach((off) => off()));
+  const texts = (key: string) => useCommentCard.getState().passes.get(key)?.comments.map((c) => c.text) ?? null;
+  const editingNow = () => {
+    const phase = open()?.phase;
+    return phase?.kind === 'composing' ? phase.comment : null;
+  };
+
+  it('a `one` host with an unsent comment that has text opens the card on it and adds nothing; one with nothing typed is replaced', () => {
+    host('d1', 'one');
+    openCard(doc('t1'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    const first = editingNow();
+    openCard(doc('t2'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    expect(texts(docKey), 'nothing typed in the first: the second takes its place').toEqual(['']);
+    expect(editingNow()).not.toBe(first);
+    setCommentText(docKey, editingNow()!, 'Monthly?');
+    const typed = editingNow();
+    closeCard();
+    openCard(doc('t3'), { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact', hostId: 'd1' } });
+    expect(texts(docKey)).toEqual(['Monthly?']);
+    expect(editingNow()).toBe(typed);
+  });
+
+  it('a `many` host’s pass grows; the card that goes keeps a comment with text and drops one without', () => {
+    host('p1', 'many', RECORD);
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1', rect: RECT } });
+    setCommentText(key, editingNow()!, 'Bolder');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1', rect: RECT } });
+    expect(texts(key)).toEqual(['Bolder', '']);
+    leaveCard();
+    expect(open()).toBeNull();
+    expect(texts(key)).toEqual(['Bolder']);
+    expect(useCommentCard.getState().passes.get(key)?.comments[0]?.rect).toEqual(RECT);
+  });
+
+  it('starts the checkbox at the surface’s default, and moves only by the pass', () => {
+    host('p1', 'many', RECORD);
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, destination: 'main', placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    expect(useCommentCard.getState().passes.get(key)?.toMain).toBe(true);
+    setPassToMain(key, false);
+    expect(useCommentCard.getState().passes.get(key)?.toMain).toBe(false);
+  });
+
+  it('a subject that ends, or a session, ends its passes and the card on them; another subject’s stays', () => {
+    host('p1', 'many', RECORD);
+    host('p2', 'many', 'other-record');
+    const key = passKey('artifact-page', RECORD, PARENT);
+    const other = passKey('artifact-page', 'other-record', PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p2' } });
+    setCommentText(other, editingNow()!, 'Elsewhere');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    setCommentText(key, editingNow()!, 'Bolder');
+    dropSubject('artifact-page', RECORD);
+    expect(texts(key)).toBeNull();
+    expect(open()).toBeNull();
+    expect(texts(other)).toEqual(['Elsewhere']);
+    dropSession(PARENT);
+    expect(texts(other)).toBeNull();
+  });
+
+  it('the person’s discard tells the pass’s mounted host; a comment in flight cannot be discarded', () => {
+    const discarded: string[] = [];
+    offs.push(registerCardHost('p1', { kind: 'artifact-page', subject: RECORD, holds: 'many', discarded: (c) => discarded.push(c.text) }));
+    const key = passKey('artifact-page', RECORD, PARENT);
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    const first = editingNow()!;
+    setCommentText(key, first, 'Bolder');
+    openCard(ANCHOR, { appSessionId: PARENT, placement: { kind: 'card', host: 'artifact-page', hostId: 'p1' } });
+    setCommentText(key, editingNow()!, 'Left');
+    const flight = launchFlight(key)!;
+    expect(flight.comments.map((c) => c.text)).toEqual(['Bolder', 'Left']);
+    expect(launchFlight(key), 'one flight per pass').toBeNull();
+    discardComment(key, first);
+    expect(texts(key)).toEqual(['Bolder', 'Left']);
+    flightRefused(flight, 'no');
+    discardComment(key, first);
+    expect(texts(key)).toEqual(['Left']);
+    expect(discarded).toEqual(['Bolder']);
   });
 });

@@ -1,6 +1,7 @@
 // Pure helpers the normaliser's mapping uses: token usage, the spill path, the `!` bash tags, denial kinds. Each is a
 // wire-to-X1 projection with its evidence named (C3 execution document, Interfaces "Normaliser").
 import { DENIAL_KINDS, type DenialKind } from '@shared/graph/enums';
+import { INTERRUPT_MARKER } from '@shared/engine/engine-markers';
 import type { ContentBlock, EventPayload, TaskUsage, TokenUsage } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId } from '@shared/graph/ids';
 
@@ -62,7 +63,7 @@ export function bashPartOf(content: string | ContentBlock[]): BashPart | null {
 // (`pass2/per-task-stop-on` seq 65; `… for tool use` in `per-task-stop-off` seq 71). Null for every other frame.
 export type EngineUserMarker = { origin: 'local-command'; content: string } | { origin: 'interrupt-marker'; content: string | ContentBlock[] };
 const LOCAL_COMMAND_STDOUT = /^<local-command-stdout>([\s\S]*)<\/local-command-stdout>\s*$/;
-export const INTERRUPT_MARKER = /^\[Request interrupted by user[^\]]*\]$/;
+export { INTERRUPT_MARKER }; // the pattern is shared (`@shared/engine/engine-markers`); its callers here import it from this module
 export function engineUserMarkerOf(content: string | ContentBlock[]): EngineUserMarker | null {
   const text = typeof content === 'string' ? content : content.length === 1 && content[0]!.type === 'text' && typeof content[0]!.text === 'string' ? content[0]!.text : null;
   if (text === null) return null;

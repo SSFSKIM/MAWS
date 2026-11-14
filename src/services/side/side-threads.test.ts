@@ -10,7 +10,8 @@ import type { Lineage, SessionRecord } from '@shared/graph/session';
 import type { EventName, EventPayload } from '@shared/ipc/schema';
 import { sessionIdFor, summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
-import { openedEvent, sideThreadEvents, startSideThreads, summaryText } from './side-threads';
+import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message'; // UX wave U5a
+import { openedEvent, sideThreadEvents, sideThreadTitle, startSideThreads, summaryText } from './side-threads';
 
 const ANCHOR = { kind: 'file-line', locator: '/r/x.ts#L42', label: 'x.ts:42', path: '/r/x.ts', line: 42 } as const;
 
@@ -180,5 +181,30 @@ describe('side-thread rows in the parent’s stream', () => {
     expect(summaryText(tokens)).toBe(`${tokens.slice(0, 399)}…`);
     const after = `${'a'.repeat(210)} in src/main/index.ts. Then ${'b'.repeat(300)}`;
     expect(summaryText(after)).toBe(`${'a'.repeat(210)} in src/main/index.ts.`);
+  });
+});
+
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, decision 11): a thread of several comments
+// is titled by its first comment's label and the count of the others, read from its first message, since its lineage
+// carries the first comment's anchor alone
+describe('a side thread’s title', () => {
+  const lineage = { openedBy: 'comment', anchor: ANCHOR } as const;
+  const other = { ...ANCHOR, locator: '/r/y.ts#L7', label: 'y.ts:7', path: '/r/y.ts', line: 7 };
+
+  it('is the anchor’s label for one comment, with or without its first message', () => {
+    expect(sideThreadTitle(lineage, null)).toBe('x.ts:42');
+    expect(sideThreadTitle(lineage, anchoredMessage({ anchor: ANCHOR, text: 'Why?', destination: 'thread', screenshot: false }))).toBe('x.ts:42');
+    expect(sideThreadTitle(lineage, 'words no writer of MAWS produced')).toBe('x.ts:42');
+  });
+
+  it('names how many more comments a message of several holds', () => {
+    const three = commentsMessage([ANCHOR, other, other].map((anchor) => ({ anchor, text: 'Why?', screenshot: false })), 'thread');
+    expect(sideThreadTitle(lineage, three)).toBe('x.ts:42 and 2 more');
+    expect(sideThreadTitle(lineage, commentsMessage([{ anchor: ANCHOR, text: 'a', screenshot: false }, { anchor: other, text: 'b', screenshot: true }], 'thread'))).toBe('x.ts:42 and 1 more');
+  });
+
+  it('is "Side question" for a promotion, whatever its message', () => {
+    expect(sideThreadTitle({ openedBy: 'btw' }, promotionMessage([{ question: 'q', response: 'r' }], null))).toBe('Side question');
+    expect(sideThreadTitle({ openedBy: 'btw' }, null)).toBe('Side question');
   });
 });

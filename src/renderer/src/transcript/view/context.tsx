@@ -8,6 +8,7 @@ import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { TaskId } from '@shared/graph/ids'; // UX wave U3
 import { WorkMotion } from './motion';
 
 export interface TranscriptActions {
@@ -59,6 +60,18 @@ export interface TranscriptActions {
   // Why a dropped prompt never ran, when its mount knows (the desk: its turn was undone before the session read it), said
   // in place of Not sent; Not sent when omitted or null
   droppedRowMark?(row: Extract<Row, { kind: 'user' }>): string | null;
+  // UX wave U3 (the U3a document, decision 22, Interfaces I): what opens a background task's output for the row's
+  // session, or null where this mount cannot open one. Optional, with no default: a mount that omits it draws no
+  // "Open output" on a task's notice.
+  outputAction?(appSessionId: AppSessionId | null): ((output: TaskOutput) => void) | null;
+}
+
+// UX wave U3: a task notice's output, as "Open output" hands it to the mount: the file the engine named, the task's id
+// and the line's words as the view's title.
+export interface TaskOutput {
+  taskId: TaskId | null;
+  path: string;
+  title: string;
 }
 
 // E7 start: who a Reply or a Message goes to, and what became of the last one to that address (E7 execution document,

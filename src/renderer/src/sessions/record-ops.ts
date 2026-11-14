@@ -4,13 +4,17 @@
 import { useEffect, useState } from 'react';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ForeignHolder, SessionRecord } from '@shared/graph/session';
-import type { DeleteOutcome } from '@shared/ipc/schema/session';
+import type { ArchiveOutcome, DeleteOutcome } from '@shared/ipc/schema/session';
 import type { FirstMessage, ForkTarget } from '@shared/sessions/intent';
 import type { StartOutcome } from '@shared/sessions/setup';
 import type { ResubmitProvider } from '../composer/resubmit-seam';
+import { failureWords } from '@shared/ipc/remote-unavailable';
 import { ipc } from '../ipc/client';
+import { isRemoteLaneB } from '../lane-b/remote-session'; // the UX wave, U9
 import { useLayout } from '../stores/layout';
-import { toast } from '../stores/notices';
+import { useMachines } from '../stores/machines'; // the UX wave, U9
+import { toast, useNotices } from '../stores/notices';
+import { machineName } from '../stores/org-projects'; // the UX wave, U9
 import { useSessions } from '../stores/sessions';
 import { firstMessageOf } from './first-message';
 import { holderWords } from './holder-words';
@@ -19,7 +23,7 @@ import { confirm } from './dialogs'; // W7
 import { resumeSession } from './setup-actions'; // W7
 import { displayTitle } from './title';
 import { terminals } from '../terminal/registry';
-import { machineOf } from '@shared/machine/address';
+import { isAddress, machineOf } from '@shared/machine/address';
 
 const fail = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -27,6 +31,9 @@ export const titleOf = (appSessionId: AppSessionId): string => {
   const record = useSessions.getState().records.get(appSessionId);
   return record ? displayTitle(record) : 'this session';
 };
+
+// A session on another machine (the UX wave, U9): what this window does to one is noted in the sessions store at once.
+export const onAnotherMachine = (appSessionId: AppSessionId): boolean => isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
 
 // A record that leaves the sidebar (archived or deleted) takes its tabs along.
 export function dropTabs(appSessionId: AppSessionId): void {
@@ -40,11 +47,21 @@ export async function archiveSession(appSessionId: AppSessionId, opts: { onlyIfI
   const outcome = result.value;
   if ('archived' in outcome) {
     dropTabs(appSessionId);
+    // the UX wave, U9: another machine's session leaves this sidebar at once, before its listing does
+    if (onAnotherMachine(appSessionId)) useSessions.getState().noteArchived(appSessionId);
     return { archived: true };
   }
+  // the UX wave, U9 (UC-7.5's second table): another machine's typed refusal reads as the act not done
+  if (onAnotherMachine(appSessionId)) return { error: failureWords('session.archive', remoteArchiveRefusal(outcome)) };
   if (outcome.status === 'skipped_ineligible') return { skipped: 'Session is no longer eligible for archive' };
   if (outcome.status === 'skipped_live') return { skipped: holderWords(outcome.holder) };
   return { error: `Held by ${holderWords(outcome.holder)}; archive it where it runs` };
+}
+
+function remoteArchiveRefusal(outcome: Exclude<ArchiveOutcome, { archived: true }>): string {
+  if (outcome.status === 'skipped_ineligible') return 'the session is no longer eligible for archive';
+  if (outcome.status === 'skipped_live') return `it is live in ${holderWords(outcome.holder)}`;
+  return `held by ${holderWords(outcome.holder)}; archive it where it runs`;
 }
 
 // `session.delete`: whole or not at all. A delete that finished drops the tabs and any interrupted-delete note; one that
@@ -80,17 +97,49 @@ export function deleteOutcomeWords(outcome: DeleteOutcome | { status: 'error'; e
 }
 
 // `session.fork`: the fork's tab opens as soon as its setup starts; a refusal is in words. `first` is a resubmit's: the
-// edited message the fork sends at `ready`, and the message it rewinds to before that (C7's resubmit seam).
+// edited message the fork sends at `ready`, and the message it rewinds to before that (C7's resubmit seam). The one entry
+// for every route (the UX wave, U9, Interfaces §5): a session MAWS runs on another machine forks there (`forkThere`).
 export async function forkSession(
   appSessionId: AppSessionId,
   target: ForkTarget,
   first: { message: FirstMessage | null; rewindTo: MessageUuid | null } = { message: null, rewindTo: null },
 ): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }> {
+  if (isRemoteLaneB(appSessionId)) return forkThere(appSessionId, target, first);
   const result = await ipc.invoke('session.fork', { appSessionId, target, message: first.message, rewindTo: first.rewindTo });
   if (!result.ok) return { ok: false, error: result.error.message };
   const adopted = await adoptFork(appSessionId, result.value, first.message);
   if (adopted.ok) useLayout.getState().openTab({ kind: 'session', appSessionId: adopted.appSessionId });
   return adopted;
+}
+
+// The UX wave, U9 (O-48; Interfaces §5): a fork of a session MAWS runs on another machine is composed there and answered
+// once it is launching, so nothing is adopted (its intent and its setup don't cross the link). A quiet notice says it is
+// out; on `starting` the fork's tab opens at its address there, which reads "Opening on <machine>…" until main has read
+// its record. A refusal is main's sentence already (UC-7.5); any other outcome is the machine's own, as the act's failure.
+async function forkThere(
+  appSessionId: AppSessionId,
+  target: ForkTarget,
+  first: { message: FirstMessage | null; rewindTo: MessageUuid | null },
+): Promise<{ ok: true; appSessionId: AppSessionId } | { ok: false; error: string }> {
+  const machine = machineName(useMachines.getState().machines, machineOf(appSessionId), ipc.localMachine);
+  const notice = toast({ level: 'info', text: `Forking on ${machine}…`, actions: [], dismissible: false });
+  try {
+    const result = await ipc.invoke('session.fork', { appSessionId, target, message: first.message, rewindTo: first.rewindTo });
+    if (!result.ok) return { ok: false, error: result.error.message };
+    if (result.value.status !== 'starting') return { ok: false, error: failureWords('session.fork', startRefusalWords(result.value)) };
+    const fork = result.value.appSessionId as AppSessionId;
+    useLayout.getState().openTab({ kind: 'session', appSessionId: fork });
+    return { ok: true, appSessionId: fork };
+  } finally {
+    useNotices.getState().dismiss(notice);
+  }
+}
+
+// A start outcome that started nothing, in words.
+function startRefusalWords(outcome: StartOutcome): string {
+  if (outcome.status === 'invalid' || outcome.status === 'refused') return outcome.message;
+  if (outcome.status === 'missing_directory') return `Directory not found: ${outcome.directory}`;
+  return `The fork did not start (${outcome.status})`;
 }
 
 // A fork's start outcome, taken up by the window that asked for it (`session.fork`, and E3's `side.thread.open`, which
@@ -111,13 +160,7 @@ export async function adoptFork(source: AppSessionId, outcome: StartOutcome, mes
     useSessions.getState().addUnstarted(fork, { projectId: useSessions.getState().records.get(source)?.projectId ?? null, createdAt: new Date().toISOString() });
     return { ok: true, appSessionId: fork };
   }
-  const error =
-    outcome.status === 'invalid' || outcome.status === 'refused'
-      ? outcome.message
-      : outcome.status === 'missing_directory'
-        ? `Directory not found: ${outcome.directory}`
-        : `The fork did not start (${outcome.status})`;
-  return { ok: false, error };
+  return { ok: false, error: startRefusalWords(outcome) };
 }
 
 // A session's record: the shell's copy, else (an archived session, which the shell's list leaves out) main's.

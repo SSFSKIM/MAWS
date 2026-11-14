@@ -2,9 +2,10 @@
 // ledger): the one Needs-you list per session. The engine host's broker sends its items whole (`session.brokerItems`);
 // this service keeps the ones still waiting on the human (pending and delivered: a confirmed item is one the engine
 // moved past) and derives the other kinds from what the host emits: `error` from a failed turn (an error result or a
-// hard-failure terminal reason, SPEC 45.25.4's set) or a failed background task, `auto_mode_unavailable` from a tool
-// result denied that way, `interrupted` from an exit that lost approvals (the summary string is the contract), and
-// `held_peer_message` from the status's held messages. Error-like items retire when the session's next human turn
+// hard-failure terminal reason, SPEC 45.25.4's set; a failed task raises nothing, UX wave U3, O-34: its line in the
+// transcript says it), `auto_mode_unavailable` from a tool result denied that way, `interrupted` from an exit that lost
+// approvals (the summary string is the contract), and `held_peer_message` from the status's held messages. Error-like
+// items retire when the session's next human turn
 // starts (a prompt read back from disk included) or the session is stopped, each retiring what came before it; an archive (`session.forgotten`, or an
 // archive exit) retires everything. The owner's ruling (2026-10-30; it replaces E11 F2b's "ended with an error" fact):
 // an `error` is raised only when it is newer than the last time the session was seen (`seenAt`, the unread rule's
@@ -24,10 +25,10 @@
 import type { AttentionItem } from '@shared/graph/attention';
 import { waits } from '@shared/attention/kinds';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, AttentionId, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { CommandInput, CommandName, CommandOutput, EventName, EventPayload } from '@shared/ipc/schema';
-import { messageLine, previewLine } from '@shared/owner/preview';
+import { messageLine } from '@shared/owner/preview';
 import type { AttentionStore } from './store';
 import type { Settling } from '../work'; // P5 O3-D M2
 import type { HostSupervisor } from '@shared/host/host-supervisor';
@@ -282,9 +283,6 @@ export function startAttentionService(deps: AttentionServiceDeps): AttentionServ
           derive(id, state, event.id, { ...base, kind: 'error', summary: turnErrorSummary(event, apiError) });
           break;
         }
-        case 'task.notification':
-          if (event.status === 'failed') derive(id, state, event.id, { ...base, kind: 'error', summary: `Background task failed: ${previewLine(event.summary, SUMMARY_MAX) ?? ''}`.trimEnd(), request: { ...noRequest, taskId: event.taskId as TaskId } });
-          break;
         case 'tool.result':
           if (event.denial === 'automode-unavailable') {
             derive(id, state, event.toolUseId, { ...base, kind: 'auto_mode_unavailable', summary: 'Auto mode unavailable: switch out of auto mode to continue', request: { ...noRequest, toolUseId: event.toolUseId as ToolUseId } });

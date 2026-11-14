@@ -69,6 +69,7 @@
 // their answer, lane A's until sminos's result or its channel's close (sminos keeps its result, and a reconnecting device
 // asks). `stop()` takes no action more (`restart`) and waits up to STOP_WAIT_MS for those in flight.
 import { actionFingerprint, type ActMessage, type RefusalReason } from 'org-protocol';
+import { DRAIN_REPLIES } from '@shared/host/host-supervisor'; // UX wave U9: a completion's act reads no status
 import type { ArtifactTarget } from './authorize';
 import { doneMessage } from './bytes';
 import type { RemoteChannel } from './channels';
@@ -374,12 +375,21 @@ export class Actions {
     const context = action.context;
     const appSessionId = decision.target?.lane === 'B' ? decision.target.appSessionId : undefined;
     if (context?.lane !== 'B' || appSessionId === undefined) return refuse('malformed');
-    const status = await dispatch('engine-host', 'session.status', { appSessionId });
-    if (!status.ok) return refuse(status.error.code === 'host_unavailable' || status.error.code === 'timeout' ? 'unavailable' : 'context');
-    const now = isObject(status.value) ? status.value : {};
-    // The engine session authorization placed (the index's) must be the one running, else the index lags a change of it.
-    if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
-    if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
+    if (DRAIN_REPLIES.has(action.action)) {
+      // UX wave U9 (docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, M1): a completion of the engine host's
+      // own request (a pane's answer) reads no status first. During a handover's drain the host that raised the request
+      // still holds its call, and the supervisor sends the op there by the completion's route, while a status read waits
+      // for the successor, which comes only once that call has settled. The claim checks the context against the session
+      // in the host that holds the request; here, only that the action was sealed for the session authorization placed.
+      if (context.engineSessionId !== decision.target?.session) return refuse('context');
+    } else {
+      const status = await dispatch('engine-host', 'session.status', { appSessionId });
+      if (!status.ok) return refuse(status.error.code === 'host_unavailable' || status.error.code === 'timeout' ? 'unavailable' : 'context');
+      const now = isObject(status.value) ? status.value : {};
+      // The engine session authorization placed (the index's) must be the one running, else the index lags a change of it.
+      if (now.engineSessionId !== decision.target?.session) return refuse('unavailable');
+      if (now.launchId !== context.launchId || now.engineSessionId !== context.engineSessionId) return refuse('context');
+    }
     // P5 O7 M8: a send's uploads read into its content here, so the engine host queues the blocks themselves
     // (send-uploads.ts); one the files service refuses is the act's `malformed`, and nothing is queued
     const read = action.action === 'session.send' ? await readSendUploads(action.args, appSessionId, dispatch) : { ok: true as const, args: action.args };

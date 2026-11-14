@@ -5,17 +5,19 @@
 // checkpoint, pass3/rewind-files seq 141-142), or both (`session.rewind` with `files`). Files only while the session
 // checkpoints them: without it `rewind_files` answers "File rewinding is not enabled." (pass2/rewind seq 38). After a
 // conversation rewind the composer holds the engine's `prefillText`, the chosen message's text, as the Edit path does;
-// the transcript hides the rewound turns from C3's boundary. Nothing is issued while a turn runs.
+// the transcript hides the rewound turns from C3's boundary. Nothing is issued while a turn runs. UX wave U5a (Decision
+// Log 49): a message of several comments is a target too, and a rewind onto it leaves the composer as it is, since its
+// `prefillText` is MAWS's framed comments, never what the person typed.
 import { useState } from 'react';
 import { formatClock } from '@shared/app/date-format';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { prefillComposer } from '../composer';
-import { newestUserUuid, type UserRow } from '../composer/edit-prefill';
+import { isOwnPrompt, newestUserUuid, type UserRow } from '../composer/edit-prefill';
 import { typedFromRowText } from '../composer/editor/recall';
 import { ipc } from '../ipc/client';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
-import { useTranscriptStore } from '../transcript';
+import { useTranscriptStore, type Row } from '../transcript';
 import { REWIND, WIDGET_TITLE } from './copy';
 import { useDormant } from './read';
 import { WidgetFrame } from './WidgetFrame';
@@ -26,7 +28,7 @@ const NO_ROWS: readonly unknown[] = [];
 
 // The human's own prompts, newest first.
 export function rewindTargets(rows: readonly { kind: string }[]): (UserRow & { messageUuid: MessageUuid })[] {
-  return (rows as UserRow[]).filter((r): r is UserRow & { messageUuid: MessageUuid } => r.kind === 'user' && r.messageUuid !== null && r.editable && !r.pending).reverse();
+  return (rows as Row[]).filter((r): r is UserRow & { messageUuid: MessageUuid } => isOwnPrompt(r) && !r.pending).reverse();
 }
 
 export function RewindWidget({ appSessionId, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
@@ -59,7 +61,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
       const result = await ipc.invoke('session.rewind', { appSessionId, targetMessageUuid: target.messageUuid, lastSeenMessageUuid: lastSeen, files: what === 'both' });
       if (!result.ok) return setRefusal(result.error.message);
       if (!result.value.rewound) return setRefusal(REWIND.refused(result.value.reason ?? result.value.error ?? REWIND.noReason));
-      if (result.value.prefillText !== null) prefillComposer(appSessionId, { text: result.value.prefillText });
+      if (result.value.prefillText !== null && target.editable) prefillComposer(appSessionId, { text: result.value.prefillText }); // UX wave U5a
       const files = result.value.files;
       if (files !== null && !files.canRewind) toast({ level: 'warning', text: REWIND.filesNotRestored(files.error ?? REWIND.noReason), actions: [], dismissible: true });
       close();

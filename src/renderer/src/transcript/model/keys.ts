@@ -39,6 +39,9 @@ export const rowId = {
   boundary: (id: EventId) => row(`boundary:${id}`),
   bash: (inputMessage: MessageUuid) => row(`bash:${inputMessage}`),
   bashOfEvent: (id: EventId) => row(`bash:${id}`),
+  // UX wave U3 (the U3a document, decision 11): a notice by what both forms of a session share, the run a task's end names,
+  // else its carrier (its message's uuid, or the event's id when it has none) and its place in the carrier's arrivals
+  notice: (runId: string | null, carrier: MessageUuid | EventId, index: number) => row(runId !== null ? `notice:${runId}` : `notice:${carrier}:${index}`),
   local: (message: MessageUuid) => row(`local:${message}`), // a local-command echo row
   localOfEvent: (id: EventId) => row(`local:${id}`),
   cut: (id: EventId) => row(`cut:${id}`), // P5 O9: a reply an interrupt cut off, as the sminos bridge records it

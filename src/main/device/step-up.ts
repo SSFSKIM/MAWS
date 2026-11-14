@@ -15,10 +15,17 @@
 // The key never leaves this module (P5 Decision Log 53): the org signer composes the state and its words and hands both
 // in, and gets back only the signed state.
 //
-// One act is signed without asking (P5 O7 M10 B, the owner's ruling "Not on my machines"): a `session.spawn` on a machine
-// whose owners, in the org state main holds, include the member this step-up key belongs to (`signsUnasked`). Its
-// signature is the one a confirmed act gets, so the machines that verify it, and the ownership proof it makes (attest.ts's
-// `SPAWN_ACTIONS`), don't change. The exemption is judged here, on the action as built, and on nothing a caller says.
+// Two acts are signed without asking (P5 O7 M10 B, the owner's ruling "Not on my machines"; the UX wave, U9 M2, its
+// extension to a fork): a `session.spawn` or a `session.fork` on a machine whose owners, in the org state main holds,
+// include the member this step-up key belongs to (`signsUnasked`). Its signature is the one a confirmed act gets, so the
+// machines that verify it, and the ownership proof a spawn makes (attest.ts's `SPAWN_ACTIONS`, which a fork is not in),
+// don't change. The exemption is judged here, on the action as built, and on nothing a caller says.
+//
+// The words (the UX wave, U9 S-13): the message is a person's sentence for the action naming the machine by its name, as
+// the org view main holds gives it (the head's machine entry, else its certificate, else the ref), its ref beside it when
+// two machines share the name; the detail keeps every signed field, the machine as `<name> (<ref>)`. The ref is what is
+// signed and the name is not, so the name never replaces the ref in the detail. A name is escaped as every shown value is
+// (./prompt-text.ts): a member wrote it.
 //
 // P5 O8 M6b: several acts under one confirmation (`signActions`, a Share sheet's save). The person confirms every act's
 // text at once (`renderActions`), and each canonical copy is then signed, all stamped at the confirmation. Nothing in a
@@ -92,23 +99,24 @@ export function promptTouchIDConfirmation(prefs: Pick<SystemPreferences, 'prompt
 /** The org view main holds for this device's session (`SignedIn.view`), read at each signature: null while signed out. */
 export type HeldOrgView = () => Pick<OrgView, 'head' | 'certificates'> | null;
 
-/** The one action name signed without a prompt, and only on an owned machine (see `signsUnasked`). */
-const OWNED_SPAWN = 'session.spawn';
+/** The action names signed without a prompt, and only on an owned machine (see `signsUnasked`). */
+const OWNED_STARTS: ReadonlySet<string> = new Set(['session.spawn', 'session.fork']);
 
 /**
- * Whether `action` is signed without asking the person (P5 O7 M10 B): a `session.spawn` on a machine whose owners in the
- * held head include the member this step-up key belongs to. The trust boundary sits here:
+ * Whether `action` is signed without asking the person (P5 O7 M10 B; U9 M2): a `session.spawn` or a `session.fork` on a
+ * machine whose owners in the held head include the member this step-up key belongs to. The trust boundary sits here:
  * - `action` is the private canonical copy main built from typed fields, the very object that is sealed and signed, so
  *   the name and machine judged are the ones signed; nothing else a request carries (a flag, a claim in its args) is read.
  * - The member is the one the head lists this device under with this step-up key (as attest.ts's `proofSigner` finds the
  *   signer), never a member a caller names; the owners are the head's (`machineOwners` and `ownerMembers`, as the
  *   endpoint's `machineOwnerMembers` reads them: an org-owned machine's are the admins), read when the act is signed, so
  *   an owner removed by a newer head is asked again.
- * - Only the shape the app's spawn has: no session, launch context or request digest. Anything else, or any doubt (no
- *   view, another org, the device or key unlisted, the machine unplaced, an error) asks.
+ * - Only the shape the app's spawn and fork have (`machine` acts, placed by their args): no session, launch context or
+ *   request digest. Anything else, or any doubt (no view, another org, the device or key unlisted, the machine unplaced,
+ *   an error) asks.
  */
 async function signsUnasked(action: Action, held: HeldOrgView | undefined, pub: string, now: Date): Promise<boolean> {
-  if (action.action !== OWNED_SPAWN || action.session !== undefined || action.context !== undefined || action.requestDigest !== undefined) return false;
+  if (!OWNED_STARTS.has(action.action) || action.session !== undefined || action.context !== undefined || action.requestDigest !== undefined) return false;
   try {
     const view = held?.() ?? null;
     if (view === null) return false;
@@ -185,7 +193,7 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const shown = build(request);
       if (shown === null) return { ok: false, reason: 'malformed' };
       // Judged on `shown`, the copy that is sealed below, never on the request: what is exempted is what is signed.
-      const answer: Confirmation = (await signsUnasked(shown.action, deps.org, deps.key.pub, now())) ? { ok: true } : await ask(renderAction(shown.action));
+      const answer: Confirmation = (await signsUnasked(shown.action, deps.org, deps.key.pub, now())) ? { ok: true } : await ask(renderAction(shown.action, heldView(deps.org)));
       if (!answer.ok) return answer;
       const signed = await seal(shown, now().toISOString());
       return signed === null ? { ok: false, reason: 'malformed' } : { ok: true, action: signed };
@@ -194,7 +202,7 @@ export function createStepUp(deps: { device: { org: string; device: string }; ke
       const shown = requests.map(build);
       if (shown.length === 0 || shown.some((action) => action === null)) return { ok: false, reason: 'malformed' };
       const asked = shown as Shown[];
-      const answer = await ask(renderActions(asked.map((one) => one.action)));
+      const answer = await ask(renderActions(asked.map((one) => one.action), heldView(deps.org)));
       if (!answer.ok) return answer;
       const sealedAt = now().toISOString();
       const signed: Action[] = [];
@@ -308,13 +316,87 @@ export async function createRecordSigner(deps: { key: SigningKey; confirm?: Conf
   };
 }
 
+/** The org view the words name machines from: the one held now, or none (signed out, or a view that can't be read). */
+type NamingView = ReturnType<HeldOrgView>;
+function heldView(held: HeldOrgView | undefined): NamingView {
+  try {
+    return held?.() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Every machine the view names, by ref: the head's entries, then the certificates of machines the head doesn't list. */
+function machineNames(view: NamingView): ReadonlyMap<string, string> {
+  const names = new Map<string, string>();
+  if (view === null) return names;
+  try {
+    for (const m of view.head().state.machines) names.set(m.ref, m.name);
+    for (const c of view.certificates().certs) if (!names.has(c.body.machine)) names.set(c.body.machine, c.body.name);
+  } catch {
+    names.clear();
+  }
+  return names;
+}
+
+/**
+ * How a machine is named (U9 S-13): `message` in the sheet's sentence (its name, its ref beside it when another machine
+ * shares the name; the ref where none is known), `detail` on its `Machine:` line (`<name> (<ref>)`, or the ref). Escaped.
+ */
+function machineLabel(ref: string, names: ReadonlyMap<string, string>): { message: string; detail: string } {
+  const name = names.get(ref);
+  if (name === undefined) return { message: shown(ref), detail: shown(ref) };
+  const both = `${shown(name)} (${shown(ref)})`;
+  const shared = [...names].some(([other, otherName]) => other !== ref && otherName === name);
+  return { message: shared ? both : shown(name), detail: both };
+}
+
+/** S-13's sentence for an action, up to the machine's name; null: `<action> on <machine>`. */
+function sentenceOf(action: string): string | null {
+  switch (action) {
+    case 'session.spawn':
+      return 'Start a session on';
+    case 'sminos.spawn':
+      return 'Start a terminal session on';
+    case 'session.fork':
+      return 'Fork a session on';
+    case 'session.projects.addFolder':
+      return 'Add a project folder on';
+    case 'session.projects.link':
+      return 'Link a project folder on';
+    case 'session.projects.relocate':
+      return 'Point a project at its folder on';
+    case 'session.answer':
+    case 'sminos.decide':
+      return 'Approve a request on';
+    case 'record.access':
+    case 'record.shares':
+    case 'record.owners':
+      return 'Change who can reach a session on';
+    case 'forward.open':
+      return 'Forward a port from';
+    case 'artifacts.grantConnectorTool':
+    case 'artifacts.revokeConnectorTool':
+      return 'Change connectors on';
+  }
+  if (action.startsWith('pty.')) return 'Use a terminal on';
+  if (action.startsWith('connectors.')) return 'Change connectors on';
+  return null;
+}
+
 /**
  * The text of an action as the person confirms it: every field it binds except what a reseal changes (its opId, nonce
  * and times), one per line, each value in JSON so a line break or a bidi or other invisible control inside a value is
- * escaped and can't forge another line.
+ * escaped and can't forge another line. The summary is S-13's sentence naming the machine as `view` names it (none: by
+ * its ref).
  */
-export function renderAction(a: Action): StepUpPrompt {
-  const lines = [`Action: ${shown(a.action)}`, `Machine: ${shown(a.machine)}`, `Org: ${shown(a.org)}`, `Device: ${shown(a.device)}`];
+export function renderAction(a: Action, view: NamingView = null): StepUpPrompt {
+  return renderNamed(a, machineNames(view));
+}
+
+function renderNamed(a: Action, names: ReadonlyMap<string, string>): StepUpPrompt {
+  const machine = machineLabel(a.machine, names);
+  const lines = [`Action: ${shown(a.action)}`, `Machine: ${machine.detail}`, `Org: ${shown(a.org)}`, `Device: ${shown(a.device)}`];
   if (a.session !== undefined) lines.push(`Session: ${shown(a.session)}`);
   if (a.context?.lane === 'A') lines.push(`Launch: ${shown(a.context.launch)} (lane A session ${shown(a.context.session)})`);
   if (a.context?.lane === 'B') lines.push(`Launch: ${shown(a.context.launchId)} (engine session ${shown(a.context.engineSessionId)})`);
@@ -324,19 +406,20 @@ export function renderAction(a: Action): StepUpPrompt {
   }
   // An undefined value is absent from the canonical form the signature covers, so it is not shown either.
   for (const name of Object.keys(a.args).filter((key) => a.args[key] !== undefined).sort()) lines.push(`${/^[A-Za-z0-9_.-]+$/.test(name) ? name : json(name)}: ${json(a.args[name])}`);
-  return { summary: `${shown(a.action)} on machine ${shown(a.machine)}`, text: lines.join('\n') };
+  return { summary: `${sentenceOf(a.action) ?? `${shown(a.action)} on`} ${machine.message}`, text: lines.join('\n') };
 }
 
 /**
  * M6b: the text of several acts confirmed at once: one act's own text, or each act's under its place ("1 of 3"), and a
- * summary naming the count and each machine once.
+ * summary naming the count and each machine once (U9 S-13: by its name, as `view` names it).
  */
-export function renderActions(actions: readonly Action[]): StepUpPrompt {
-  if (actions.length === 1) return renderAction(actions[0]);
-  const machines = [...new Set(actions.map((a) => shown(a.machine)))];
+export function renderActions(actions: readonly Action[], view: NamingView = null): StepUpPrompt {
+  const names = machineNames(view);
+  if (actions.length === 1) return renderNamed(actions[0], names);
+  const machines = [...new Set(actions.map((a) => a.machine))].map((ref) => machineLabel(ref, names).message);
   const n = actions.length;
   return {
-    summary: `${n} actions on ${machines.length === 1 ? 'machine' : 'machines'} ${machines.join(', ')}`,
-    text: actions.map((a, i) => `${i + 1} of ${n}\n${renderAction(a).text}`).join('\n\n'),
+    summary: `${n} actions on ${machines.join(', ')}`,
+    text: actions.map((a, i) => `${i + 1} of ${n}\n${renderNamed(a, names).text}`).join('\n\n'),
   };
 }

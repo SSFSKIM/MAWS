@@ -1,5 +1,6 @@
 // Comment mode in main (E4d execution document, Design §1; Interfaces "Main"; Decision Log 26(b)), started from
-// `startBrowser`'s E4d block: the mode and its gate (mode.ts) over E4a's tab store, `browser.comment.set`, the listener
+// `startBrowser`'s E4d block: the mode and its gate (mode.ts) over E4a's tab store, `browser.comment.set` (and UX wave
+// U5a's `browser.comment.card`, the window's word that the tab's card opened or closed, for its page), the listener
 // on the preload's channel, the context menu's Comment (menu.ts), the crops' directory and its boot sweep (crop.ts), and
 // under MAWS_E2E=1 the e2e's seam `globalThis.__maws_browser_comment`.
 //
@@ -62,6 +63,7 @@ export function startCommentMode({ store, emit, register, userData, env, away }:
     ...(away && { away }),
   });
   register('browser.comment.set', ({ tabId, on }) => mode.set(tabId, on));
+  register('browser.comment.card', ({ tabId, open }) => mode.card(tabId, open)); // UX wave U5a (X-216)
   const ignoredAcks = new Set<string>(); // filled only by the e2e seam's `ignoreAcks`
   const receive = withIgnoredAcks(ignoredAcks, (sender: WebContents) => store.entryOf(sender)?.tab.tabId, (sender, message) => void mode.receive(sender, message));
   const onPreload = (event: IpcMainEvent, message: unknown) => receive(event.sender, message);

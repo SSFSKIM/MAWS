@@ -3,6 +3,7 @@
 // endpoint keeps the whole outcome for the sender's `query`), so the words are made here from the code; the renderer may
 // re-word by `code` (M3's `words.ts`). Also the link itself as a remote session's state shows it, with the reason, when
 // there is one, that no control acts from this device ("Capabilities": a link down or refused disables every control).
+import { refusalWords as actRefusalWords } from '@shared/ipc/remote-unavailable';
 import type { ControlResult, LaneADelivery, LaneALink } from '@shared/ipc/schema/lane-a';
 import type { ActOutcome, RemoteLink } from '../machines/remote/link';
 
@@ -47,6 +48,12 @@ export function refusalWords(code: string, machine: string, rpc?: string): strin
   }
 }
 
+/**
+ * A control's refusal in words: an interrupt's as UC-7.5 says a Stop's on either lane (the UX wave, U9, Interfaces §3:
+ * "Not stopped: <reason>"), every other control's as above.
+ */
+const controlWords = (code: string, machine: string, rpc?: string): string => (rpc === 'interrupt' ? actRefusalWords('session.interrupt', machine, code) : refusalWords(code, machine, rpc));
+
 /** An act's outcome as the port's `ControlResult`. */
 export function controlOf(outcome: ActOutcome, machine: string, rpc?: string): ControlResult {
   switch (outcome.state) {
@@ -54,12 +61,12 @@ export function controlOf(outcome: ActOutcome, machine: string, rpc?: string): C
       return { state: 'done', result: outcome.result ?? null };
     case 'failed': {
       const code = record(outcome.error)?.code;
-      return typeof code === 'string' ? refused(code, refusalWords(code, machine, rpc)) : refused('failed', refusalWords('failed', machine, rpc));
+      return typeof code === 'string' ? refused(code, controlWords(code, machine, rpc)) : refused('failed', controlWords('failed', machine, rpc));
     }
     case 'refused':
-      return refused(outcome.reason, refusalWords(outcome.reason, machine, rpc));
+      return refused(outcome.reason, controlWords(outcome.reason, machine, rpc));
     case 'not-sent':
-      return refused('not-sent', refusalWords('not-sent', machine, rpc));
+      return refused('not-sent', controlWords('not-sent', machine, rpc));
     case 'unknown':
       return { state: 'unknown', why: outcome.reason === 'expired' ? 'expired' : 'gone' };
   }

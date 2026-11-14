@@ -868,8 +868,9 @@ function PageFrame({ editor, live, previewEditor, handle, author, comments, tabI
       },
       discard: (threadId) => void (writable() && discardThread(doc, threadId, COMMENTS_ORIGIN)),
       focus: () => void (!editor.isDestroyed && editor.commands.focus()),
+      flash: (threadId) => void (editor === live && !live.isDestroyed && live.commands.flashThread(threadId)), // UX wave U5a (M7): the live text only, not a version shown
     };
-  }, [editor, handle, author]);
+  }, [editor, live /* UX wave U5a */, handle, author]);
 
   // a version is drawn with the design-system tokens it pinned (and its own overrides): by the page's scope when there is
   // one (F, S-RESTYLE: the scope resolves them, a bundled family under its face's private name, which a declaration on

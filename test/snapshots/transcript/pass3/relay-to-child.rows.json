@@ -211,11 +211,12 @@
   },
   {
     "at": "2026-09-29T15:47:32.278Z",
+    "body": "Say PING in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:196:1",
     "kind": "agent_message",
-    "text": "Sent message to Loop rounds until stop.txt: Say PING in your next inbox line",
+    "text": "Sent to Loop rounds until stop.txt: Say PING in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -355,11 +356,12 @@
   },
   {
     "at": "2026-09-29T15:48:27.124Z",
+    "body": "Say PONG in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:315:1",
     "kind": "agent_message",
-    "text": "Sent message to Loop rounds until stop.txt: Say PONG in your next inbox line",
+    "text": "Sent to Loop rounds until stop.txt: Say PONG in your next inbox line",
     "to": {
       "agentId": "a7aea42f9bed9b3ea",
       "glyph": 3,
@@ -488,11 +490,12 @@
   },
   {
     "at": "2026-09-29T15:49:21.212Z",
+    "body": "Say PANG in your next inbox line",
     "direction": "to_child",
     "from": null,
     "id": "agentmsg:replay:journal:543:1",
     "kind": "agent_message",
-    "text": "Sent message to Read file after sleep: Say PANG in your next inbox line",
+    "text": "Sent to Read file after sleep: Say PANG in your next inbox line",
     "to": {
       "agentId": "accea5ba03e220b64",
       "glyph": 5,

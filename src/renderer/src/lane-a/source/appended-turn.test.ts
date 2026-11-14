@@ -7,10 +7,11 @@ import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import { reportRows } from '../../owner/report/project';
 import { createTranscriptStore } from '../../stores/transcript';
+import { rowsOf, withAllExpanded } from '../../transcript/model/derive';
 import type { Row } from '../../transcript/model/rows';
 import { Chain, frame, SESSION, wakeAfterStop, wakeForNote } from '../test-support/chain-rows';
 import { FakePlane, mount, settle } from '../test-support/fake-plane';
-import { WAKE_SENDER, WAKE_TEXT } from './bridge-wake';
+import { NOTICE } from '../../transcript/model/copy';
 import { PlaneTranscript, freshSource, subagentLookupOf } from '../plane-transcript';
 
 type User = Extract<Row, { kind: 'user' }>;
@@ -20,15 +21,15 @@ async function drawn(rows: JsonObject[], off: JsonObject[] = []) {
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([]), null, new Set(off.map((row) => row.uuid as string))), { agentId: null as never });
   const entry = store.getState().entries.fresh;
   const turns = entry.state.order.map((id) => entry.state.turns.get(id)!);
-  return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}), entry, turns };
+  // a notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): `expanded` reads it unfolded
+  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}), entry, turns };
 }
 const user = (rows: Row[], text: string) => rows.find((row): row is User => row.kind === 'user' && row.text === text);
-const notices = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'error' ? [row.text] : []));
 /** The notices the store holds, folded turns' too: the bridge's mirror lines would be among them. */
 const held = (entry: { state: { turns: Map<unknown, { events: { kind: string }[] }>; loose: { kind: string }[] } }) =>
   [...[...entry.state.turns.values()].flatMap((turn) => turn.events), ...entry.state.loose].flatMap((event) => (event.kind === 'notice.posted' ? [(event as unknown as { text: string }).text] : []));
 const turnOf = (rows: Row[], text: string) => rows.find((row) => row.kind === 'assistant_text' && row.markdown === text)?.turnId;
-const LINE = `${WAKE_SENDER}: ${WAKE_TEXT}`;
+const LINE = NOTICE.wake; // the wake's notice (UX wave U3, UC-2, class `wake`)
 
 describe('a row the bridge appended while no turn ran', () => {
   // Under either plugin the bridge runs in: doperpowers before the roll, sminos after (doperpowers' sminos plugin design, §11).
@@ -49,14 +50,14 @@ describe('a row the bridge appended while no turn ran', () => {
     c.userWake(wakeForNote);
     c.answer('Switching to the split store.');
     c.end();
-    const { rows, report, turns, entry } = await drawn(c.rows);
+    const { rows, expanded, report, turns, entry } = await drawn(c.rows);
     for (const drawnRows of [rows, report]) {
       const bubble = user(drawnRows, 'use the split store')!;
       expect(bubble).toMatchObject({ steer: false, dropped: false, messageUuid: steer.uuid });
       expect(bubble.pending).toBeUndefined();
       expect(bubble.turnId).toBe(turnOf(drawnRows, 'Switching to the split store.'));
-      expect(notices(drawnRows)).toEqual([LINE]);
     }
+    expect(expanded.flatMap((row) => (row.kind === 'notice' ? [[row.text, row.turnId]] : []))).toEqual([[LINE, user(rows, 'use the split store')!.turnId]]);
     expect(turns.map((turn) => [turn.state, turn.accepted, turn.origin])).toEqual([
       ['closed', true, 'human'],
       ['closed', true, 'human'],
@@ -77,14 +78,14 @@ describe('a row the bridge appended while no turn ran', () => {
     c.assistant([{ type: 'thinking', thinking: 'The message asks for a word.', signature: 'sig' }]);
     c.answer('LYCHEE. The sleep command was interrupted before it ran.');
     c.end();
-    const { rows, report, turns, entry } = await drawn(c.rows);
+    const { rows, expanded, report, turns, entry } = await drawn(c.rows);
     for (const drawnRows of [rows, report]) {
       const bubble = user(drawnRows, 'Include the word LYCHEE in your reply.')!;
       expect(bubble).toMatchObject({ steer: false, dropped: false, messageUuid: delivery.uuid });
       expect(bubble.pending).toBeUndefined();
       expect(bubble.turnId).toBe(turnOf(drawnRows, 'LYCHEE. The sleep command was interrupted before it ran.'));
-      expect(notices(drawnRows)).toEqual([LINE]);
     }
+    expect(expanded.flatMap((row) => (row.kind === 'notice' ? [[row.text, row.turnId]] : []))).toEqual([[LINE, user(rows, 'Include the word LYCHEE in your reply.')!.turnId]]);
     // The mirror line is the terminal's: the bubble is drawn, the line is not.
     expect(held(entry)).toEqual([]);
     expect(turns.map((turn) => turn.state)).toEqual(['closed', 'closed']);
@@ -110,7 +111,8 @@ describe('a row the bridge appended while no turn ran', () => {
     expect(bubble).toMatchObject({ steer: false, dropped: false, messageUuid: words.uuid, turnId: turnOf(rows, '1, 2, 3.') });
     expect(bubble.pending).toBeUndefined();
     expect(turns.map((turn) => turn.state)).toEqual(['closed', 'closed']);
-    expect(rows.flatMap((row) => (row.kind === 'divider' ? [row.state] : []))).toEqual(['stopped']);
+    // the wake's notice is work of the turn it opened (UX wave U3, UC-2, class `wake`), which so draws its divider
+    expect(rows.flatMap((row) => (row.kind === 'divider' ? [row.state] : []))).toEqual(['stopped', 'completed']);
     expect(entry.working).toBe(false);
   });
 

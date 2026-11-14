@@ -10,6 +10,9 @@ import type { ArtifactKind } from '../artifacts/entity'; // P3-C
 export type Destination = 'thread' | 'main';
 
 export const SIDE_THREAD_PREAMBLE = 'You are in a side thread forked from the main conversation to handle this one comment. Address it here; the main conversation continues separately and is not waiting on you.';
+// UX wave U5a (§A): a thread opened from several comments, in their last block; its own constant, a persisted text the
+// reader matches exactly, as the one above
+export const SIDE_THREAD_PREAMBLE_MANY = 'You are in a side thread forked from the main conversation to handle these comments. Address them here; the main conversation continues separately and is not waiting on you.';
 
 const SCREENSHOT_SENTENCE = '. A screenshot of it is attached:';
 const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
@@ -57,7 +60,7 @@ const ARTIFACT_COMMENT_LEADS: { document: CommentLead } & Partial<Record<Artifac
 
 // `Comment on "<label>" (<parts>):`, or `Comment:` for the anchorless kind; with a screenshot the final colon becomes
 // `. A screenshot of it is attached:`. The label is always quoted, so it is never read as part of the sentence.
-// A persisted-format contract: the engine's transcripts keep these leads, and `parseAnchoredText` strips one only when it
+// A persisted-format contract: the engine's transcripts keep these leads, and `readOneComment` strips one only when it
 // equals the lead this function writes now, so a change of wording leaves every older transcript's lead as text.
 export function anchorLead(anchor: Anchor, screenshot: boolean): string {
   const parts = leadParts(anchor);
@@ -130,7 +133,10 @@ const isBlank = (line: string) => line.trim() === '';
 // independently, the paragraph before the tag only when it is the preamble, which is what says the destination was a
 // side thread. A lead that does not match stays in the text; without the preamble the destination is then unknown
 // (null): a `/btw` promotion.
-export function parseAnchoredText(text: string): { anchor: Anchor; text: string; destination: Destination | null } | null {
+// UX wave U5a (decision 15): the one-comment rule, renamed in M8 and unchanged in behaviour. A caller
+// reads a message by `readAnchoredMessage`, which takes this rule for every message that is not framed; it stays exported
+// because it is also build F's reader to the byte (§J), which the tests pin against framed messages.
+export function readOneComment(text: string): { anchor: Anchor; text: string; destination: Destination | null } | null {
   const lines = text.split('\n');
   while (lines.length > 0 && isBlank(lines.at(-1)!)) lines.pop();
   const tagLine = lines.pop();
@@ -145,3 +151,101 @@ export function parseAnchoredText(text: string): { anchor: Anchor; text: string;
   if (thread) lines.pop();
   return { anchor, text: lines.join('\n').trim(), destination: thread ? 'thread' : led ? 'main' : null };
 }
+
+// UX wave U5a start (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, Interfaces §A; M1): a message of
+// several comments. One comment is `anchoredMessage`'s text to the byte. Two to twenty open with a framing line no
+// single-comment writer ever opened a message with (`anchoredMessage` opens with a lead, which begins `Comment`; a
+// promotion with its own head), then one block a comment (lead, comment, blank line, tag), a blank line between blocks,
+// the plural preamble once, in the last block, for a thread. Inside such a message every line of a comment that begins
+// with `<maws_anchor` after zero or more backslashes takes one more backslash, so the only lines beginning with a bare
+// `<maws_anchor` are the blocks' own tags and no words of a person's can end a block. The framing is plain words: the
+// agent reads the line as what it says.
+export interface MessageComment {
+  anchor: Anchor;
+  text: string;
+  screenshot: boolean;
+}
+
+export const MESSAGE_COMMENTS_MAX = 20;
+const FRAMING_LINE = /^([1-9][0-9]*) comments, in the order made:$/;
+const framingLine = (count: number) => `${count} comments, in the order made:`;
+const ESCAPED_OR_NOT = /^\\*<maws_anchor/; // a line the escape takes one more backslash in front of
+const ESCAPED = /^\\+<maws_anchor/; // a line the reader takes one backslash off
+const escapeLine = (line: string) => (ESCAPED_OR_NOT.test(line) ? `\\${line}` : line);
+const unescapeLine = (line: string) => (ESCAPED.test(line) ? line.slice(1) : line);
+
+/** The text of one message carrying `comments` (1 to 20), oldest first. */
+export function commentsMessage(comments: readonly MessageComment[], destination: Destination): string {
+  if (comments.length < 1 || comments.length > MESSAGE_COMMENTS_MAX) throw new RangeError(`a message carries 1 to ${MESSAGE_COMMENTS_MAX} comments, not ${comments.length}`);
+  if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination });
+  const blocks = comments.map(({ anchor, text, screenshot }, index) => {
+    const preamble = destination === 'thread' && index === comments.length - 1 ? `\n\n${SIDE_THREAD_PREAMBLE_MANY}` : '';
+    return `${anchorLead(anchor, screenshot)}\n${text.trim().split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
+  });
+  return [framingLine(comments.length), ...blocks].join('\n\n');
+}
+
+/** Every comment of a message MAWS wrote, else null. */
+export function readAnchoredMessage(text: string): { comments: MessageComment[]; destination: Destination | null } | null {
+  return readFramed(text) ?? readOne(text);
+}
+
+// A message of one comment, by `readOneComment`'s rule exactly; its lead carried the screenshot sentence when the
+// message's first line is that lead (the line `readOneComment` strips, the tag being the last)
+function readOne(text: string): { comments: MessageComment[]; destination: Destination | null } | null {
+  const read = readOneComment(text);
+  if (read === null) return null;
+  const screenshot = text.split('\n')[0] === anchorLead(read.anchor, true);
+  return { comments: [{ anchor: read.anchor, text: read.text, screenshot }], destination: read.destination };
+}
+
+// The framed reading, taken only when the whole structure checks: the framing line first, with N from 2 to 20; then
+// exactly N blocks, each ending at the next line that is an exact tag; each block's first non-blank line its own tag's
+// lead; no line of a comment a bare `<maws_anchor` (the writer escapes every such line); nothing but blank lines after the
+// last tag. Anything else is no framed message, and the one-comment rule reads it.
+// Its work, bounded by count (Decision Log 54): one pass over the lines, and the schema consulted at most once for each
+// tag it accepts and once for the line that ends the reading, at most 21 times a message (MESSAGE_COMMENTS_MAX tags,
+// and one more past them or one that fails); the one-comment rule's fallback then reads the last line's tag once.
+function readFramed(text: string): { comments: MessageComment[]; destination: Destination } | null {
+  const lines = text.split('\n');
+  const framing = FRAMING_LINE.exec(lines[0]!);
+  const count = framing === null ? 0 : Number(framing[1]);
+  if (count < 2 || count > MESSAGE_COMMENTS_MAX) return null;
+  while (lines.length > 1 && isBlank(lines.at(-1)!)) lines.pop();
+  const blocks: { anchor: Anchor; body: string[] }[] = [];
+  let body: string[] = [];
+  for (const line of lines.slice(1)) {
+    const anchor = parseTag(line);
+    if (anchor === null) {
+      // a bare `<maws_anchor` line that is no exact tag is refused below whatever follows (a block's lead it is not, a
+      // comment's words never hold one, nothing may follow the last tag), so the reading ends here
+      if (line.startsWith('<maws_anchor')) return null;
+      body.push(line);
+      continue;
+    }
+    blocks.push({ anchor, body });
+    body = [];
+    if (blocks.length > count) return null; // more tags than the framing names: not a message MAWS wrote, read no further
+  }
+  if (body.length > 0 || blocks.length !== count) return null;
+  let destination: Destination = 'main';
+  const comments: MessageComment[] = [];
+  for (const [index, { anchor, body: block }] of blocks.entries()) {
+    const start = block.findIndex((line) => !isBlank(line));
+    const lead = block[start];
+    const screenshot = lead === anchorLead(anchor, true);
+    if (lead === undefined || (!screenshot && lead !== anchorLead(anchor, false))) return null;
+    const words = block.slice(start + 1);
+    if (words.some((line) => line.startsWith('<maws_anchor'))) return null;
+    if (index === blocks.length - 1) {
+      while (words.length > 0 && isBlank(words.at(-1)!)) words.pop();
+      if (words.at(-1) === SIDE_THREAD_PREAMBLE_MANY && (words.length === 1 || isBlank(words.at(-2)!))) {
+        words.pop();
+        destination = 'thread';
+      }
+    }
+    comments.push({ anchor, text: words.map(unescapeLine).join('\n').trim(), screenshot });
+  }
+  return { comments, destination };
+}
+// UX wave U5a end

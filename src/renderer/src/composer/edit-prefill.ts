@@ -9,6 +9,14 @@ import { typedFromRowText } from './editor/recall';
 
 export type UserRow = Extract<Row, { kind: 'user' }>;
 
+// The person's own prompt (UX wave U5a, Decision Log 49): a `user` row with a message uuid that is `editable`, or a
+// message of several comments, whose text cannot be edited in place (one text cannot hold their framing) and which is
+// still the person's message. What `/rewind` targets and what a refusal interrupted; `editable` means only that the
+// row's text can be edited in place.
+export function isOwnPrompt(row: Row): row is UserRow & { messageUuid: MessageUuid } {
+  return row.kind === 'user' && row.messageUuid !== null && (row.editable || row.comments !== undefined);
+}
+
 // `data:<mediaType>;base64,<data>` → its parts; null for anything else.
 function dataUrlParts(url: string): { mediaType: string; data: string } | null {
   const match = /^data:([^;,]+);base64,(.*)$/s.exec(url);

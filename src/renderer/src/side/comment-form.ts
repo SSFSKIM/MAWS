@@ -1,18 +1,41 @@
 // The comment form's logic, shared by its two presentations (P2-E1 document, D5): E3's sheet and P2-E1's card call this
-// one hook, so their phases and sends cannot drift. The form takes a comment, a destination (Side thread by default;
-// Send to main while the parent is ready or, P2-A, the Send can start it) and a producer's screenshot the person may remove; Enter sends
-// (P4-B1: ⌘Enter too), Shift+Enter breaks a line, an input method's composition keeps its Enter. While a side thread starts the form is
-// disabled; a refusal stays in the form with Retry and, while Send to main is offered, Send to main instead; a refusal arriving
-// after the presentation went (closed or replaced: `gone`) is a toast, so the comment is never lost unseen.
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+// one hook, so their phases and sends cannot drift. The form takes a comment, where it goes and a producer's screenshot
+// the person may remove; Enter sends (P4-B1: ⌘Enter too), Shift+Enter breaks a line, an input method's composition keeps
+// its Enter. While a send is on its way the form is disabled; a refusal stays in the form with Retry and, while a send to
+// main is offered, Send to main instead; a refusal arriving after the presentation went (closed or replaced: `gone`) is
+// a toast, so the comment is never lost unseen.
+//
+// UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M2; decisions 6 to 10): where it goes is one
+// checkbox, "Send to main", unchecked unless the surface asked for main. Whether a tick can send is the session's port's
+// answer (`capability('send')`), the composer's own, so one rule covers a session MAWS runs, a terminal session and one
+// on another machine; whether unchecked can is known here for an archived session, one with no conversation to fork,
+// and one on another machine (where the box is ticked and locked). The box cannot be moved into a state that can't
+// send, its reason the box's title; a state it is in that can't send says why in a line under the field. A tick sends
+// through `sendComments`, which starts a session that is not running itself (the button reads Starting… meanwhile);
+// the sheet says what is not a plain delivery as a toast.
+//
+// UX wave U5a (M3; §C, §D, decision 4): the card's form is its pass's (`usePassForm`): the comment's text, its
+// screenshot, the checkbox and the send's state live in the card's store, and Send is the pass's (`sendPass`), so
+// nothing typed or sent depends on what is mounted. The sheet keeps its own state, as before.
+import { useState, type KeyboardEvent } from 'react';
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message'; // Decision Log 52
 import type { AppSessionId } from '@shared/graph/ids';
-import { STARTS } from '../composer/submit/submit-state'; // P2-A
-import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
-import { availabilityRefusal, useAvailability } from '../sessions/availability'; // P2-A
+import type { SessionRecord } from '@shared/graph/session';
+import { isAddress, machineOf } from '@shared/machine/address';
+import { ARCHIVED, STARTS, submitState, type SubmitInput } from '../composer/submit/submit-state'; // P2-A; UX wave U5a: submitState
+import { ipc } from '../ipc/client';
+import { useIsRemoteLaneB } from '../lane-b/remote-session';
+import { heldWords, screenshotRoom, useSessionControls } from '../session/controls/controls-for';
+import { useAvailability } from '../sessions/availability'; // P2-A
+import { holderWords } from '../sessions/holder-words';
+import { useReaderClosed } from '../sessions/share/reader';
+import { useMachines } from '../stores/machines';
 import { toast } from '../stores/notices';
+import { machineName } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { sendComment, type CommentDestination } from './actions';
+import { sendComments, sendPass, tellWhere, type CommentDestination } from './actions';
+import { flightToMain, removeScreenshot, setCommentText, setPassToMain, useCommentCard, type PassComment } from './card/store';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable'; // P5 O7 M8
 import { SIDE_COPY } from './copy';
 
@@ -28,175 +51,170 @@ export interface CommentFormInput {
   parent: AppSessionId;
   gone(): boolean; // the presentation was closed or replaced while the send was on its way
   onSent(sent: { child?: AppSessionId; text: string }): void; // a send that went (the side thread it opened, the text sent)
-  // asked when a side thread's fork answers: whether to reveal it in the parent's Side pane (the sheet: always; the card:
-  // only once it is gone, since it shows the thread itself)
-  reveal?: () => boolean;
-  // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md, D9): told as a send sets out; the call it returns is told
-  // whether the send went, whether or not the presentation is still there (a document keeps the thread the comment names)
-  onSending?: (sending: { text: string; destination: CommentDestination }) => (went: boolean) => void;
-  destination?: CommentDestination; // P3-F1: the one the form starts on (CommentContext's), Side thread when absent
-  text?: string; // P4-B1: the text the form starts with (a remounted card's kept draft), empty when absent
-  /**
-   * P4-B3 (its Decision Log 37): what the form's send belongs to beyond this mount (a card's serial). A presentation can
-   * remount while its send is on its way (a document moved to another pane or surface keeps its card); the send is then
-   * kept here, so a form mounting under the same key starts sending (disabled: no second send), and the answer reaches
-   * the form mounted when it arrives. Without one, the send is the mount's own, as before.
-   */
-  sendKey?: string;
+  destination?: CommentDestination; // P3-F1: the one the form starts on (CommentContext's), unchecked when absent
 }
 
-// P4-B3: the sends on their way by `sendKey`, and their answers until a mounted form takes them.
-type Answer = { ok: true; sent: { child?: AppSessionId; text: string } } | { ok: false; destination: CommentDestination; error: string };
-interface Flight {
-  destination: CommentDestination;
-  answer: Answer | null;
+// UX wave U5a (decision 6): the composer's submit table asked for a typed message (Send, the box not empty, no setup
+// intent: a card's session has its record), its reason when it may not go.
+function refusalOfTable(i: { status: SubmitInput['status']; availability: SubmitInput['availability']; holder: SessionRecord['holder'] | null; closed: string | null; driven: SubmitInput['driven'] }): string | null {
+  const heldBy = i.holder !== null && (i.holder.kind === 'terminal' || i.holder.kind === 'background_job') ? holderWords(i.holder) : null;
+  const decision = submitState({ status: i.status, intent: null, queue: { entries: [], paused: false }, empty: false, mode: 'send', availability: i.availability, heldBy, driven: i.driven ?? null, closed: i.closed });
+  return decision.enabled ? null : (decision.reason ?? COPY.notSent);
 }
-const flights = new Map<string, Flight>();
-const flightListeners = new Set<() => void>();
-const changed = () => {
-  for (const listener of flightListeners) listener();
-};
-const subscribeFlights = (listener: () => void) => {
-  flightListeners.add(listener);
-  return () => void flightListeners.delete(listener);
-};
-/** Whether a send under `key` is on its way (no answer yet). */
-export const sendingUnder = (key: string): boolean => flights.get(key)?.answer === null;
 
-export function useCommentForm({ anchor, parent, gone, onSent, reveal, onSending, destination: initial, text: initialText, sendKey /* P4-B3 */ }: CommentFormInput) { // P3-F1: initial; P4-B1: initialText
+// UX wave U5a start (decisions 6, 7, 9): what each state of the checkbox can do now for `parent`, shared by the sheet and
+// the card.
+function useRoute(parent: AppSessionId) {
   const status = useSessions((s) => s.engine.get(parent) ?? null);
-  const [text, setText] = useState(initialText ?? ''); // P4-B1: initialText
-  const [destination, setDestination] = useState<CommentDestination>(initial ?? 'thread'); // P3-F1: initial
-  const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
-  const [local, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
-  // P4-B3: a send kept by key outlives this mount: while it is on its way the form is sending, and its answer is taken
-  // by whichever form is mounted under the key when it arrives
-  const flight = useSyncExternalStore(subscribeFlights, () => (sendKey === undefined ? undefined : flights.get(sendKey)));
-  const phase: CommentFormPhase = flight && flight.answer === null ? { kind: 'sending', destination: flight.destination } : local;
-  const sentRef = useRef(onSent);
-  useLayoutEffect(() => {
-    sentRef.current = onSent;
-  });
-  useEffect(() => {
-    if (sendKey === undefined) return;
-    // the answer, once, by the form mounted when it is there (one that came while none was mounted, at the next mount)
-    const take = () => {
-      const kept = flights.get(sendKey);
-      if (!kept?.answer) return;
-      flights.delete(sendKey);
-      changed();
-      const { answer } = kept;
-      if (answer.ok) sentRef.current(answer.sent);
-      else setPhase({ kind: 'refused', destination: answer.destination, error: answer.error });
-    };
-    const off = subscribeFlights(take);
-    queueMicrotask(take);
-    return off;
-  }, [sendKey]);
-  const ready = status?.process === 'ready';
-  // P2-A start (2026-10-09; the execution document §5.6): Send to main is offered for every parent it can start (a
-  // record with no ready process starts on the Send); a terminal or job holding it, or an archive, says why
-  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const controls = useSessionControls(parent);
+  const remoteLaneB = useIsRemoteLaneB(parent);
   const availability = useAvailability(parent);
-  const mainBlocked = availabilityRefusal(availability, holder, COPY.mainNotRunning);
-  // P5 O7 M8: a parent on another machine takes neither destination yet (lane-b/remote-unavailable.ts): each is greyed
-  // with its reason, said as its caption
-  const threadUnavailable = useRemoteUnavailable(parent, 'side.thread.open');
-  const mainUnavailable = useRemoteUnavailable(parent, 'side.sendToMain');
-  const mainEnabled = (ready || mainBlocked === null) && mainUnavailable === null;
-  const threadEnabled = threadUnavailable === null;
-  // P2-A end
+  const forkable = useSessions((s) => s.records.get(parent)?.engineSessionId !== null); // no record: the machine side says
+  const threadRemote = useRemoteUnavailable(parent, 'side.thread.open'); // P5 O7 M8: not on another machine yet
+  const machine = useMachines((s) => (isAddress(parent) ? machineName(s.machines, machineOf(parent), ipc.localMachine) : ''));
+  const holder = useSessions((s) => s.records.get(parent)?.holder ?? null);
+  const closed = useReaderClosed(parent); // board 525: another member's session that refused the member's words
+  const turn = controls?.turn() ?? null; // a bridged session's own turn; null where the status says it (lane B)
+  // decision 6: whether a tick can send is the composer's own decision, its submit table over the inputs the composer
+  // reads (a session another process drives first, then the availability of one with no ready process), for a typed
+  // message; with no port, nothing sends, as the composer's Enter does nothing
+  const mainRefusal = controls ? refusalOfTable({ status, availability, holder, closed, driven: turn && { running: turn.running, send: controls.capability('send'), stop: controls.capability('interrupt') } }) : heldWords(parent);
+  const threadRefusal = threadRemote !== null ? COPY.threadRemote(machine) : availability === 'archived' ? ARCHIVED : forkable ? null : COPY.noConversation;
+  const ready = status?.process === 'ready';
+  return {
+    threadRemote,
+    mainRefusal,
+    threadRefusal,
+    refusalOf: (to: CommentDestination) => (to === 'main' ? mainRefusal : threadRefusal),
+    ready,
+    running: turn ? turn.running : ready && Boolean(status?.turn),
+    starts: turn === null && !remoteLaneB && !ready, // the send acquires it first (lane B on this Mac)
+    room: (toMain: boolean) => (toMain ? screenshotRoom(parent, controls) : null),
+  };
+}
+
+// What the form draws, from the route and the state it is in (one shape for the sheet and the card).
+function formOf(route: ReturnType<typeof useRoute>, state: { wantsMain: boolean; screenshot: AnchorScreenshot | null; screenshots: number; flightTo: CommentDestination | null; withText: number; boxHeld: boolean }) {
+  const { threadRemote, mainRefusal, threadRefusal, refusalOf, starts, running } = route;
+  // ticked and locked for another machine's session (no side thread there yet, whatever its port says meanwhile);
+  // otherwise the person's choice, which cannot be moved into a state that can't send
+  const toMain = threadRemote !== null || state.wantsMain;
+  const destination: CommentDestination = toMain ? 'main' : 'thread';
+  const otherRefusal = refusalOf(toMain ? 'thread' : 'main');
+  const room = route.room(toMain);
+  const busy = state.flightTo !== null; // a send is on its way
+  return {
+    destination,
+    toMain,
+    // UX wave U5a: the box is off where the state it would move to can't send, and while the sheet's send is on its way
+    // (`boxHeld`); a card's pass may change it during a flight (§D), which keeps the destination it set out with
+    toMainFixed: state.boxHeld || otherRefusal !== null,
+    // its title: why a tick can't send, or why it can't be left, else what a tick does now (the composer's words)
+    toMainTitle: (threadRemote !== null ? threadRefusal : null) ?? mainRefusal ?? (toMain ? threadRefusal : null) ?? (starts ? STARTS : running ? COPY.mainBusy : COPY.mainIdle),
+    unsendable: refusalOf(destination), // the line under the field when the state it is in can't send
+    mainEnabled: mainRefusal === null,
+    // decision 9: a screenshot the route can never carry is not drawn, and the ones past its room are said before the send
+    showScreenshot: state.screenshot !== null && room?.max !== 0,
+    leftOut: room !== null && state.screenshots > room.max ? { count: state.screenshots - room.max, reason: room.reason } : null,
+    ready: route.ready,
+    // Decision Log 52 (2): never more comments than a message carries, which both destinations would refuse
+    canSend: (to: CommentDestination) => state.withText > 0 && state.withText <= MESSAGE_COMMENTS_MAX && !busy && refusalOf(to) === null,
+    // P2-A: a send that starts its session (a side thread, or main on a session that is not running) reads Starting…;
+    // UX wave U5a: a pass of several comments with text reads how many go
+    submitLabel: busy ? (state.flightTo === 'thread' || starts ? COPY.starting : COPY.sending) : state.withText > 1 ? COPY.sendMany(state.withText) : COPY.send,
+  };
+}
+// UX wave U5a end
+
+// Enter sends (P4-B1 C3: ⌘Enter, Ctrl+Enter too, a Shift held with it or not), Shift+Enter breaks a line, an input
+// method's composition keeps its Enter.
+const sendsOnEnter = (send: () => void) => (event: KeyboardEvent<HTMLTextAreaElement>) => {
+  if (event.key !== 'Enter' || (event.shiftKey && !event.metaKey && !event.ctrlKey) || event.nativeEvent.isComposing) return;
+  event.preventDefault();
+  send();
+};
+
+/** The sheet's form: its own state, one comment, sent as it stands. */
+export function useCommentForm({ anchor, parent, gone, onSent, destination: initial }: CommentFormInput) { // P3-F1: initial
+  const [text, setText] = useState('');
+  const [wantsMain, setWantsMain] = useState(initial === 'main'); // P3-F1: initial; UX wave U5a: the checkbox as the person set it
+  const [screenshot, setScreenshot] = useState<AnchorScreenshot | null>(anchor.screenshot ?? null);
+  const [phase, setPhase] = useState<CommentFormPhase>({ kind: 'editing' });
+  const route = useRoute(parent);
   const sending = phase.kind === 'sending';
-  const canSend = (to: CommentDestination) => text.trim() !== '' && !sending && (to === 'thread' ? threadEnabled : mainEnabled);
+  const form = formOf(route, { wantsMain, screenshot, screenshots: screenshot === null ? 0 : 1, flightTo: phase.kind === 'sending' ? phase.destination : null, withText: text.trim() === '' ? 0 : 1, boxHeld: sending });
 
   const send = async (to: CommentDestination) => {
-    if (!canSend(to)) return;
-    setDestination(to);
+    if (!form.canSend(to)) return;
+    setWantsMain(to === 'main');
     setPhase({ kind: 'sending', destination: to });
     const sent = text.trim();
-    const settled = onSending?.({ text: sent, destination: to }); // P3-B
-    // P4-B3: kept by key, the answer goes to the form mounted when it comes (never to this mount's state once it went)
-    const kept = sendKey === undefined ? null : { destination: to, answer: null as Answer | null };
-    if (kept && sendKey !== undefined) {
-      flights.set(sendKey, kept);
-      changed();
-    }
-    const answer = (value: Answer) => {
-      if (!kept || sendKey === undefined || flights.get(sendKey) !== kept) return false;
-      kept.answer = value;
-      flights.set(sendKey, { ...kept }); // a new object: the forms' snapshots see the change
-      changed();
-      return true;
-    };
-    const dropKept = () => {
-      if (kept && sendKey !== undefined && flights.get(sendKey) === kept) {
-        flights.delete(sendKey);
-        changed();
-      }
-    };
-    // Send to main's acquisition of a parent that is not ready (P2-A, A's §5.6) runs here, before sendComment's
-    // `side.sendToMain`, so the sheet and the card inherit it alike.
-    // P2-A start (2026-10-09; the execution document §5.6): Send to main on a parent with no ready process starts it
-    // first, the Send being the gesture (`acquireSession(parent, 'side')`, then the existing `side.sendToMain` through
-    // sendComment); a refused start stays in the form in its words (a card's, when one docked), the comment kept, and
-    // after the presentation went it is a toast.
-    if (to === 'main' && useSessions.getState().engine.get(parent)?.process !== 'ready') {
-      let refusal: string | null;
-      try {
-        refusal = refusalWords(await acquireSession(parent, 'side'));
-      } catch (error) {
-        refusal = error instanceof Error ? error.message : String(error);
-      }
-      if (refusal !== null) {
-        settled?.(false); // P3-B
-        if (gone()) {
-          dropKept(); // P4-B3
-          toast({ level: 'warning', text: COPY.refusedAfterClose(refusal), actions: [], dismissible: true });
-        } else if (!answer({ ok: false, destination: to, error: refusal })) setPhase({ kind: 'refused', destination: to, error: refusal });
-        return;
-      }
-    }
-    // P2-A end
-    const result = await sendComment(to, { parent, anchor, text: sent, screenshot }, reveal ? { reveal } : {});
-    settled?.(result.ok); // P3-B
+    const result = await sendComments(parent, [{ anchor, text: sent, screenshot }], to === 'main'); // UX wave U5a
+    if (result.ok && result.to === 'main') tellWhere(undefined, undefined, parent, result); // UX wave U5a: whether or not the sheet is still there
     if (gone()) {
-      dropKept(); // P4-B3
       if (!result.ok) toast({ level: 'warning', text: COPY.refusedAfterClose(result.error), actions: [], dismissible: true });
       return;
     }
-    const sentAs = { ...(result.ok && result.child && { child: result.child }), text: sent };
-    if (answer(result.ok ? { ok: true, sent: sentAs } : { ok: false, destination: to, error: result.error })) return; // P4-B3
-    if (result.ok) onSent(sentAs);
+    if (result.ok) onSent({ ...(result.to === 'thread' && { child: result.child }), text: sent });
     else setPhase({ kind: 'refused', destination: to, error: result.error });
   };
 
-  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    // P4-B1 (C3): ⌘Enter (Ctrl+Enter) posts beside Enter, a Shift held with it or not
-    if (event.key !== 'Enter' || (event.shiftKey && !event.metaKey && !event.ctrlKey) || event.nativeEvent.isComposing) return;
-    event.preventDefault();
-    void send(destination);
-  };
-
   return {
+    ...form,
     text,
-    setText,
-    destination,
-    setDestination,
+    setText: (value: string) => setText(value),
+    setToMain: (toMain: boolean) => setWantsMain(toMain),
     screenshot,
     removeScreenshot: () => setScreenshot(null),
     phase,
-    ready,
-    mainEnabled, // P2-A: Send to main is offered (ready, or a parent the Send can start)
-    threadEnabled, // P5 O7 M8: a side thread is offered (not for a parent on another machine yet)
-    threadCaption: threadUnavailable ?? COPY.threadCaption, // P5 O7 M8
     sending,
-    canSend,
     send,
-    onKeyDown,
-    // P2-A: Send to main reads Starting… while its parent starts
-    submitLabel: sending ? (phase.destination === 'thread' || !ready ? COPY.starting : COPY.sending) : COPY.send,
-    mainCaption: mainUnavailable ?? (ready ? (status?.turn ? COPY.mainBusy : COPY.mainIdle) : (mainBlocked ?? STARTS)), // P2-A; P5 O7 M8: mainUnavailable
+    onKeyDown: sendsOnEnter(() => void send(form.destination)),
   };
 }
 
 export type CommentForm = ReturnType<typeof useCommentForm>;
+
+/**
+ * UX wave U5a (§C, §D): the card's form over one comment of a pass. The text, the screenshot and the checkbox are the
+ * store's; Send sends the pass (every comment with text), and is off while any comment of it is in flight. The phase is
+ * the comment's own: sending while it is in flight, refused with the reason of its last flight.
+ */
+export function usePassForm(passKey: string, commentId: string): CommentForm & { comment: PassComment | null; others: PassComment[] } {
+  const pass = useCommentCard((s) => s.passes.get(passKey) ?? null);
+  const comment = pass?.comments.find((each) => each.id === commentId) ?? null;
+  const parent = pass?.appSessionId ?? ('' as AppSessionId);
+  const route = useRoute(parent);
+  const flying = pass?.comments.find((each) => each.flight !== null)?.flight ?? null;
+  const flightTo: CommentDestination | null = flying === null ? null : flightToMain(flying) ? 'main' : 'thread';
+  const phase: CommentFormPhase =
+    comment?.flight != null ? { kind: 'sending', destination: flightTo ?? 'thread' } : comment?.refused && flying === null ? { kind: 'refused', destination: comment.refused.toMain ? 'main' : 'thread', error: comment.refused.error } : { kind: 'editing' };
+  const comments = pass?.comments ?? [];
+  const form = formOf(route, {
+    wantsMain: pass?.toMain ?? false,
+    screenshot: comment?.screenshot ?? null,
+    screenshots: comments.filter((each) => each.screenshot !== null).length,
+    flightTo,
+    withText: comments.filter((each) => each.text.trim() !== '').length,
+    boxHeld: false, // §D: the next send's destination, never the flight's
+  });
+  const send = async (to: CommentDestination) => {
+    if (!form.canSend(to)) return;
+    setPassToMain(passKey, to === 'main');
+    await sendPass(passKey);
+  };
+  return {
+    ...form,
+    text: comment?.text ?? '',
+    setText: (value: string) => setCommentText(passKey, commentId, value),
+    setToMain: (toMain: boolean) => setPassToMain(passKey, toMain),
+    screenshot: comment?.screenshot ?? null,
+    removeScreenshot: () => removeScreenshot(passKey, commentId),
+    phase,
+    sending: comment?.flight != null, // this comment's field, Remove and screenshot are off while it is in flight
+    send,
+    onKeyDown: sendsOnEnter(() => void send(form.destination)),
+    comment,
+    others: comments.filter((each) => each.id !== commentId),
+  };
+}

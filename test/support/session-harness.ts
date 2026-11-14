@@ -43,6 +43,7 @@ export interface HarnessOptions {
   readModel?: SessionReadModel; // P2-A M3: main's read model, fed by the index source and the service's acquisition memory (its digests carry availability)
   port?: SessionServiceDeps['port']; // P5 O1 M3: the client port's reveal (default: revealed)
   env?: Record<string, string>; // P5 O7 M9: more of the engine's environment (e.g. CLAUDE_CODE_CUSTOM_OAUTH_URL)
+  aboveCeiling?: SessionServiceDeps['aboveCeiling']; // the UX wave (U9, M2): the machine's ceiling for a fork from another machine
 }
 
 export class SessionHarness {
@@ -133,6 +134,7 @@ export class SessionHarness {
       timing: { watchdogMs: this.opts.watchdogMs ?? 2_000, stopWaitMs: this.opts.stopWaitMs ?? 200, ...(this.opts.exitWaitMs !== undefined && { exitWaitMs: this.opts.exitWaitMs }) },
       log: () => {},
       systemRoot: join(this.root, 'system'), // P5 O7 M9: never the machine's own managed settings
+      ...(this.opts.aboveCeiling === undefined ? {} : { aboveCeiling: this.opts.aboveCeiling }), // U9 (M2)
     });
   }
 

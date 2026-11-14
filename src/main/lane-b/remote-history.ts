@@ -45,12 +45,16 @@
 //   listing it, a budgeted page refused `malformed`, or `invalid_input` (an older engine host behind a current endpoint,
 //   which `mawsd` may serve across a swap). The gaps a budgeted read found are said only once it answers, so a read
 //   started again says each once. A subagent's slice ignores the budget, so it keeps that path too.
+//
+// The UX wave, U9 (M5, A15): each read ends with one `lane B: timing history` line (./remote-timing.ts): the path that
+// answered it, the pages that crossed, their bytes and how long the read took, for the O-39 sitting.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import type { SessionEvent } from '@shared/graph/events';
 import { peerLists } from '../machines/remote/capabilities';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
+import { historyAskedLine, historyLine, type HistoryPath } from './remote-timing';
 
 /** One-row pages refused with no page crossing between them, at most, before a read ends with the bar (a disk item). */
 export const LEFT_OUT_IN_A_ROW = 3;
@@ -89,19 +93,34 @@ const fromDisk = (page: Events) => page.events.length > 0 && page.events.every((
 const plus = (a: Omitted | undefined, b: Omitted | undefined): Omitted | undefined =>
   a === undefined ? b : b === undefined ? a : { events: a.events + b.events, bytes: a.bytes + b.bytes, seq: b.seq ?? a.seq };
 
-export async function readEventsInPages(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result> {
-  if (deps.budget === true && input.agentId === undefined) {
-    const read = await readWithinBudget(link, input, deps);
-    if (read !== null) return read;
+/** What one read carried, for its timing line: the path that answered, the pages that crossed and their bytes. */
+type Count = { path: HistoryPath; pages: number; bytes: number };
+/** One page over the link, counted once it crossed. */
+async function pageOver(link: RemoteLink, count: Count, fields: Record<string, unknown>, lacking?: { capability: string; input: unknown }) {
+  const result = await dispatchOverLink(link, 'session.events', fields, undefined, lacking);
+  if (result.ok) {
+    count.pages += 1;
+    count.bytes += Buffer.byteLength(JSON.stringify(result.value));
   }
-  return readWhole(link, input, deps);
+  return result;
+}
+
+export async function readEventsInPages(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result> {
+  const startedAt = Date.now();
+  const count: Count = { path: 'whole', pages: 0, bytes: 0 };
+  deps.log(historyAskedLine(link.name, String(input.appSessionId)));
+  let answer: Result | null = null;
+  if (deps.budget === true && input.agentId === undefined) answer = await readWithinBudget(link, input, deps, count);
+  answer ??= await readWhole(link, input, deps, count);
+  deps.log(historyLine(link.name, String(input.appSessionId), count.path, count.pages, count.bytes, Date.now() - startedAt));
+  return answer;
 }
 
 /** A page that met a peer without the budget: the read starts again without it. */
 const DOWNGRADED = Symbol('downgraded');
 
 /** Every window within the byte budget; null when a page met a peer, or an engine host, without the budget. */
-async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result | null> {
+async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps, count: Count): Promise<Result | null> {
   const app = String(input.appSessionId);
   const said = `lane B: session.events of ${link.name}/${app}`;
   const maxBytes = deps.pageBytes ?? HISTORY_PAGE_BYTES;
@@ -110,7 +129,7 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
       deps.log(`${said}: the channel's peer no longer takes the byte budget; read again without it`);
       return DOWNGRADED;
     }
-    const result = await dispatchOverLink(link, 'session.events', { ...fields, maxBytes }, undefined, { capability: 'rl2.events-budget', input: fields });
+    const result = await pageOver(link, count, { ...fields, maxBytes }, { capability: 'rl2.events-budget', input: fields });
     if (result.fellBack === true) {
       deps.log(`${said}: a page went to a peer that doesn't take the byte budget; read again without it`);
       return DOWNGRADED;
@@ -125,6 +144,7 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
   if (first === DOWNGRADED) return null;
   if (!first.ok) return first;
   let page = first.value as Events;
+  count.path = page.lastSeq === 0 ? 'budgeted window' : 'budgeted launch';
 
   // A window from the transcript (every disk answer's `lastSeq` is 0; a live page that read anything is past 0). An item
   // alone past the budget leaves its page empty with `earlier` past it: the page before is read, so the answer has rows.
@@ -177,10 +197,12 @@ async function readWithinBudget(link: RemoteLink, input: Record<string, unknown>
 }
 
 /** M2's read: one call, and the launch in pages of whole rows when it is refused `too-large`. */
-async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps): Promise<Result> {
+async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps: HistoryDeps, count: Count): Promise<Result> {
   const app = String(input.appSessionId);
-  const whole = await dispatchOverLink(link, 'session.events', input);
+  count.path = 'whole';
+  const whole = await pageOver(link, count, input);
   if (!tooLarge(whole)) return whole;
+  count.path = 'paged';
   const said = `lane B: session.events of ${link.name}/${app}`;
   const agentId = input.agentId;
   // the remote drill-in (2026-11-06): a subagent's slice of a live launch pages as the launch does, each page naming it
@@ -199,7 +221,7 @@ async function readWhole(link: RemoteLink, input: Record<string, unknown>, deps:
   let lost = false;
   let leftOut: Array<[string, { seq: number }] | null> = []; // since the last page that crossed; null: no launch to name
   for (;;) {
-    const read = await dispatchOverLink(link, 'session.events', { appSessionId: app, afterSeq: cursor, limit: size, ...(agentId !== undefined && { agentId }) });
+    const read = await pageOver(link, count, { appSessionId: app, afterSeq: cursor, limit: size, ...(agentId !== undefined && { agentId }) });
     if (tooLarge(read)) {
       if (size > 1) {
         size = Math.floor(size / 2);

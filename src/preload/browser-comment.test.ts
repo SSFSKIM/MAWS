@@ -8,7 +8,7 @@
 import type { CSSStyleDeclaration, Document as HappyDocument, Element as HappyElement, Event as HappyEvent, Window as HappyWindow } from 'happy-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PickRefusedSchema, PickReportSchema } from '@shared/browser/comment';
-import { COMMENT_CHANNEL, COMMENT_NODES, COMMENT_WORDS, type PreloadMessage, type ToPreload } from '@shared/browser/comment-protocol';
+import { COMMENT_CHANNEL, COMMENT_NODES, COMMENT_WORDS, PICK_GRACE_MS, type PreloadMessage, type ToPreload } from '@shared/browser/comment-protocol';
 import { installCommentMode, type CommentPage, type PreloadIpc } from './browser-comment';
 
 const win = (): HappyWindow => globalThis as unknown as HappyWindow;
@@ -740,9 +740,10 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 162));
   });
 
-  it('keeps the pick a subject while the card’s strip holds the page’s bottom, its height changing', () => {
+  it('keeps the pick a subject while its card is open, the strip’s height changing', () => {
     pickAt(510, 610); // #long: 600 to 630
-    viewport(568); // the card opens
+    ipc.deliver({ type: 'card', open: true, css: '#long' }); // UX wave U5a: the card opened on it
+    viewport(568); // the strip opens
     viewport(668); // it shrinks (a sent comment's field cleared): the page grows, still short of its height at the pick
     place(byId('long'), { left: 500, top: 640, width: 100, height: 30 }); // and its content moved meanwhile
     win().dispatchEvent(new (win().Event)('scroll'));
@@ -750,10 +751,12 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     expect(scrollBy.mock.calls).toEqual([[step(0, 62)], [step(0, 100)]]); // what showed before (down to 668) back in view
   });
 
-  it('forgets the pick when the viewport is back to its height at the pick (the card closed): a later shrink moves nothing', () => {
+  it('forgets the pick when its card closes: a later shrink moves nothing', () => {
     pickAt(510, 610);
+    ipc.deliver({ type: 'card', open: true, css: '#long' });
     viewport(568);
-    viewport(768); // the card closed
+    ipc.deliver({ type: 'card', open: false }); // UX wave U5a: told, not guessed from the height
+    viewport(768);
     place(byId('long'), { left: 500, top: 600, width: 100, height: 30 });
     win().dispatchEvent(new (win().Event)('scroll'));
     viewport(568); // the window made shorter, no card open
@@ -767,6 +770,119 @@ describe('a viewport that shrinks under the picked element (P2-F L147: the comme
     pickAt(250, 40); // #increment replaces #long
     viewport(568);
     expect(scrollBy).not.toHaveBeenCalled();
+  });
+
+  // UX wave U5a (docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md, M4, X-216, Interfaces §G): the page is
+  // told when its card opens (with the open comment's css) and closes, and keeps an element in view only from the pick
+  // for PICK_GRACE_MS, and beyond that only while it has been told a card is open. Nothing is read from the viewport's
+  // height any more.
+  describe('the card’s opening and closing, told by main (UX wave U5a M4, §G)', () => {
+    const card = (css: string) => ipc.deliver({ type: 'card', open: true, css });
+    const closed = () => ipc.deliver({ type: 'card', open: false });
+    beforeEach(() => void vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] }));
+    afterEach(() => {
+      uninstall(); // its timer cleared under the fake clock that set it
+      uninstall = () => undefined;
+      vi.useRealTimers();
+    });
+
+    it('A5: a window made shorter after the card closed does not scroll the page, though the close gave back less than the strip took', () => {
+      pickAt(510, 610); // #long: 600 to 630
+      card('#long');
+      viewport(568); // the strip opens under the page: 62 px brings #long back
+      viewport(518); // the window is made shorter, the card open: 50 px more
+      closed();
+      viewport(718); // the strip goes, giving back its 200 px, less than the 250 px the page lost
+      viewport(418); // the window is made shorter again, no card open
+      expect(scrollBy.mock.calls).toEqual([[step(0, 62)], [step(0, 50)]]);
+    });
+
+    it('a pick counts at once, before the word that its card opened, for PICK_GRACE_MS', () => {
+      pickAt(510, 610);
+      vi.advanceTimersByTime(PICK_GRACE_MS - 1);
+      viewport(568); // the strip grew before the word reached the page
+      expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 62));
+    });
+
+    it('a pick that opens no card (the sheet) is forgotten after PICK_GRACE_MS', () => {
+      pickAt(510, 610);
+      vi.advanceTimersByTime(PICK_GRACE_MS);
+      viewport(568);
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('a card that opened keeps its element past the grace, for as long as it is open; a viewport that grows changes nothing', () => {
+      pickAt(510, 610);
+      card('#long');
+      vi.advanceTimersByTime(PICK_GRACE_MS * 5);
+      viewport(568);
+      expect(scrollBy).toHaveBeenLastCalledWith(step(0, 62)); // #long now 538 to 568
+      viewport(768); // taller: back to the height at the pick, with the card still open
+      viewport(500);
+      expect(scrollBy.mock.calls).toEqual([[step(0, 62)], [step(0, 68)]]);
+    });
+
+    it('the subject is the element the open comment’s css finds: another comment’s element when the card moves to it', () => {
+      pickAt(250, 40); // #increment
+      card('#long'); // the card opened on an earlier comment of the pass
+      viewport(568);
+      expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 62));
+    });
+
+    it('an area pick keeps its marquee when the css names the element holding it', () => {
+      ipc.deliver({ type: 'arm', epoch: 2 });
+      pointer('pointerdown', { x: 22, y: 122 });
+      pointer('pointermove', { x: 200, y: 230 });
+      pointer('pointerup', { x: 200, y: 230 });
+      frame();
+      frame();
+      card('body > main > section:nth-of-type(2) > ul');
+      vi.advanceTimersByTime(PICK_GRACE_MS);
+      viewport(200); // the marquee runs from 122 to 230 (the list, 120 to 240, would need 40)
+      expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 30));
+    });
+
+    it('a css that finds nothing, or that is no selector, leaves no subject', () => {
+      for (const css of ['#gone', '##not[a selector']) {
+        viewport(768);
+        pickAt(510, 610); // #long, showing
+        expect(() => card(css)).not.toThrow();
+        viewport(568);
+      }
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('a card’s close forgets the subject at once, within the grace too, and its timer with it', () => {
+      pickAt(510, 610);
+      closed();
+      expect(vi.getTimerCount()).toBe(0);
+      viewport(568);
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('a card opened with no pick in this page holds the element its css finds', () => {
+      card('#long');
+      viewport(568);
+      expect(scrollBy).toHaveBeenCalledExactlyOnceWith(step(0, 62));
+    });
+
+    it('ignores a card message it cannot read, and the pick’s grace runs on', () => {
+      pickAt(510, 610);
+      ipc.deliver({ type: 'card', open: 'yes', css: '#long' });
+      ipc.deliver({ type: 'card', open: true });
+      ipc.deliver({ type: 'card', open: true, css: 7 });
+      vi.advanceTimersByTime(PICK_GRACE_MS);
+      viewport(568);
+      expect(scrollBy).not.toHaveBeenCalled();
+    });
+
+    it('uninstall clears the pick’s timer', () => {
+      pickAt(510, 610);
+      expect(vi.getTimerCount()).toBe(1);
+      uninstall();
+      uninstall = () => undefined;
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });
 

@@ -132,7 +132,7 @@ describe('synthetic journals', () => {
     expect(subagents).toHaveLength(1);
     expect(subagents[0].agents.map((a) => [a.taskId, a.name, a.agentId])).toEqual([['ad1synthagent0001', 'Survey src for TODOs', 'ad1synthagent0001'], ['ad2synthagent0002', 'List the tests', 'ad2synthagent0002']]);
     expect(subagents[0]).toMatchObject({ status: 'finished', sentence: 'Survey src for TODOs and List the tests finished' });
-    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Sent message to Survey src for TODOs: Skip node_modules entirely.' }); // P3-F L260: by the ref's name
+    expect(ofKind(rows, 'agent_message')[0]).toMatchObject({ direction: 'to_child', text: 'Sent to Survey src for TODOs: Skip node_modules entirely.' }); // P3-F L260: by the ref's name; U3 (O-12): the message line's words
     expect(cellsOf(rows).some((c) => c.toolName === 'Agent' || c.toolName === 'Grep')).toBe(false); // the child's Grep is never a parent cell
     expect(state.turns.get(state.order[0])!.children.get('toolu_synth_agent_1' as never)?.length).toBeGreaterThan(0);
     expect(ofKind(rows, 'user')).toHaveLength(1);
@@ -597,7 +597,8 @@ describe('FX8 disk conversation history', () => {
 // E7 start (E7 execution document, Design §4, §8 and G3): session A of M0's peer probe, live (its journal through C3's
 // normaliser) and from disk (its JSONL through C4's follower). The messages between sessions draw the same rows on both
 // paths: two inbound (idle, then mid-turn), A's own answer, the owner's reply and a send no session could take; the
-// inbound ones stay in view with every turn folded; the listing is a row; no envelope is ever a bubble.
+// inbound ones fold with their turns (UX wave U3, O-12, reversing E7's rule that kept them in view); the listing is a
+// row; no envelope is ever a bubble.
 describe('cross-session rows (E7)', () => {
   const SESSION_A = 'db45d92e-e979-4edf-a62a-61f21dc01acb';
   const B = 'uds:/tmp/cc-socks/10562.sock';
@@ -605,11 +606,11 @@ describe('cross-session rows (E7)', () => {
     direction, text, sender: peer?.sender ?? null, recipient: peer?.recipient ?? null, replyTo: peer?.replyTo ?? null, result: peer?.result ?? null, resultText: peer?.resultText ?? null,
   }));
   const EXPECTED = [
-    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Sent to repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
-    { direction: 'between', text: 'Message from repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
-    { direction: 'between', text: 'Sent to nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
+    { direction: 'between', text: 'Message from @repo-b-gen1il-79: E7 probe: hello from B', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Sent to @repo-b-gen1il-79: Hello from A — received your probe message.', sender: null, recipient: { name: null, address: 'repo-b-gen1il-79' }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Sent to @repo-b-gen1il-79: E7 probe: reply from A', sender: null, recipient: { name: 'repo-b-gen1il-79', address: B }, replyTo: null, result: 'sent', resultText: null },
+    { direction: 'between', text: 'Message from @repo-b-gen1il-79: E7 probe: second message while you work', sender: { name: 'repo-b-gen1il-79', address: B, session: null, owners: null }, recipient: null, replyTo: B, result: null, resultText: null },
+    { direction: 'between', text: 'Sent to @nobody-e7: E7 probe: nobody', sender: null, recipient: { name: null, address: 'nobody-e7' }, replyTo: null, result: 'failed', resultText: "No agent named 'nobody-e7' is reachable.\nUse ListAgents to see everyone you can message." },
   ];
   const LISTING = { self: 'repo-h6xooi-51 [804260]', sections: [{ title: 'Peer sessions', count: 1, rows: [{ name: 'repo-b-gen1il-79', ref: '61303a', extras: ['interactive', 'idle', 'started 2s ago'] }] }], notes: [], pending: false };
 
@@ -625,14 +626,14 @@ describe('cross-session rows (E7)', () => {
   it.each([
     ['live', async () => journalToEvents(loadJournal('pass3', 'e7-peer-a'))],
     ['from disk', disk],
-  ])('%s: the messages, the listing, no envelope bubble, and the inbound rows kept when every turn folds', async (_, load) => {
+  ])('%s: the messages, the listing, no envelope bubble, and the inbound rows folding with their turns (U3, O-12)', async (_, load) => {
     const state = stateOf(await load());
     const rows = rowsOf(withAllExpanded(state));
     expect(messages(rows)).toEqual(EXPECTED);
     expect(ofKind(rows, 'agent_list').map(({ self, sections, notes, pending }) => ({ self, sections, notes, pending }))).toEqual([LISTING]);
     expect(ofKind(rows, 'user').filter((row) => row.text.includes('cross-session-message'))).toEqual([]);
     expect(cellsOf(rows).filter((cell) => cell.toolName === 'ListAgents' || cell.toolName === 'SendMessage')).toEqual([]);
-    expect(messages(rowsOf(state)).filter((row) => row.sender !== null)).toEqual([EXPECTED[0], EXPECTED[3]]);
+    expect(messages(rowsOf(state)).filter((row) => row.sender !== null)).toEqual([]);
   });
 
   // E11 S2(d): the lead of a team an interactive terminal formed (2.1.293), from disk. Its teammate's report, a plain user
@@ -646,7 +647,7 @@ describe('cross-session rows (E7)', () => {
     follower.stop();
     const rows = rowsFor(events);
     expect(messages(rows)).toEqual([
-      { direction: 'between', text: 'Message from scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null, owners: null }, recipient: null, replyTo: null, result: null, resultText: null },
+      { direction: 'between', text: 'Message from @scout: one.txt contains a single line: "ONE" (followed by a trailing newline).', sender: { name: 'scout', address: '', session: null, owners: null }, recipient: null, replyTo: null, result: null, resultText: null },
     ]);
     expect(ofKind(rows, 'user').map((row) => row.text)).toEqual([expect.stringMatching(/^Spawn a general-purpose Agent named "scout"/)]);
     expect(ofKind(rows, 'divider').map((row) => row.origin)).toEqual(['human', 'peer']);

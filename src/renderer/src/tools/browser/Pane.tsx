@@ -216,7 +216,7 @@ function PlacedPane({ tab, surface, onOwns, onRoom }: { tab: BrowserTab; surface
             {mode === 'elsewhere' ? <ShownElsewhere onShowHere={() => placement.current?.showHere()} /> : <TabPage tab={tab} />}
           </div>
         </div>
-        {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} />}
+        {mode !== 'elsewhere' && <CommentCardHost hostId={hostId} host="browser" mode={surface === 'main' ? 'tab' : 'panel'} layout="docked" accepts={accepts} frame={frame} visible={mode === 'owner'} restoreFocus={restoreFocus} subject={tabId} /* UX wave U5a: the tab's pass */ />}
       </div>
       {column !== null && (
         <div ref={spacer} aria-hidden data-browser-reserved-column="" className="shrink-0" style={{ width: column, maxWidth: `calc(100% - ${COLUMN_PAGE_MIN}px)` }} />

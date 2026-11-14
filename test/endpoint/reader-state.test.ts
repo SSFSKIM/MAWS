@@ -209,8 +209,9 @@ describe('what a remote reader may send', () => {
     expect(f.host.calls.filter((c) => c.name === 'session.reader.update')).toEqual([]);
     expect(index.sessions.get(app)).toMatchObject({ ...NONE, archived: false });
     expect(readerFields(index.sessions.get(app, org.B)!)).toEqual(NONE);
-    // `session.update` (the record, `title`, `archived`) is not offered, to an owner or anyone else.
-    for (const r of [a, b]) for (const patch of [{ pinned: true }, { title: null }, { archived: true }]) expect(code(await call(r, 'session.update', { appSessionId: app, patch }))).toBe('not-offered');
+    // `session.update` (the record, `title`, `archived`) is no call, to an owner or anyone else: the UX wave offers it as
+    // an act, an unarchive alone (U9, M1; test/endpoint/session-acts.test.ts).
+    for (const r of [a, b]) for (const patch of [{ pinned: true }, { title: null }, { archived: true }, { archived: false }]) expect(code(await call(r, 'session.update', { appSessionId: app, patch }))).toBe('act-required');
   });
 
   it('grades a reader’s update `list`, a draft’s read `view` and its write `converse`', async () => {
@@ -559,7 +560,9 @@ describe('every record a member is sent carries their own reading', () => {
   });
 
   // A supplementary guard: what the offered commands answer and the events carry, by their schemas. Only the record's
-  // carry reader fields (`unread`, `lastSeen`): `session.get`'s and `session.reader.update`'s answers and `session.changed`;
+  // carry reader fields (`unread`, `lastSeen`): `session.get`'s and `session.reader.update`'s answers, the record acts' since
+  // UX wave U9 (`session.update`, `session.rename`, each answering the caller's reading, and the archived read
+  // `session.list`, cut per record), and `session.changed`;
   // `ownerChannel.changed` is the owner channel's own, which no feed carries. `pinned` beside them is also an artifact
   // version's pin. A schema the scan can't read (beyond `void`) is named, so a new one is looked at rather than passed.
   it('the schemas: only the record’s answers and `session.changed` carry reader fields', () => {
@@ -576,10 +579,10 @@ describe('every record a member is sent carries their own reading', () => {
     const outputs = new Map(offered.map((name) => [name, json(name, REGISTRY.commands[name].output)]));
     const events = new Map((Object.keys(REGISTRY.events) as Array<keyof typeof REGISTRY.events>).map((name) => [name, json(name, REGISTRY.events[name])]));
     const reading = (text: string) => text.includes('"unread"') || text.includes('"lastSeen"');
-    expect([...outputs].filter(([, text]) => reading(text)).map(([name]) => name)).toEqual(['session.get', 'session.reader.update']);
+    expect([...outputs].filter(([, text]) => reading(text)).map(([name]) => name)).toEqual(['session.get', 'session.reader.update', 'session.update', 'session.rename', 'session.list']);
     expect([...events].filter(([, text]) => reading(text)).map(([name]) => name).sort()).toEqual(['ownerChannel.changed', 'session.changed']);
     const ARTIFACT_PINS = ['artifacts.create', 'artifacts.duplicate', 'artifacts.get', 'artifacts.list', 'artifacts.update', 'library.get', 'library.list'];
-    expect([...outputs].filter(([, text]) => text.includes('"pinned"')).map(([name]) => name).sort()).toEqual(['session.get', 'session.reader.update', ...ARTIFACT_PINS].sort());
+    expect([...outputs].filter(([, text]) => text.includes('"pinned"')).map(([name]) => name).sort()).toEqual(['session.get', 'session.reader.update', 'session.update', 'session.rename', 'session.list', ...ARTIFACT_PINS].sort());
     // Bytes (`pty.attach`'s, an artifact's state and attributions, a terminal's and a browser's frames): no reading in them.
     expect(unreadable.sort()).toEqual(['artifacts.attributions', 'artifacts.versionState', 'browser.remote.frame', 'pty.attach', 'pty.data']);
   });

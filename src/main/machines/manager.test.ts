@@ -75,10 +75,10 @@ afterEach(() => {
 
 // The RL2 source the test drives (P5 O7 M1): `roster` is what the org session lists; `set` changes it.
 interface FakeRemote extends RemoteSource {
-  set(roster: { ref: MachineRef; name: string }[]): void;
+  set(roster: { ref: MachineRef; name: string; owner?: boolean }[]): void;
   links: Map<MachineRef, FakeLink & { carrierNow: string | null; refusalNow: string | null; carrier(): string | null; refusal(): string | null }>;
 }
-function fakeRemote(initial: { ref: MachineRef; name: string }[] = []): FakeRemote {
+function fakeRemote(initial: { ref: MachineRef; name: string; owner?: boolean }[] = []): FakeRemote {
   let roster = initial;
   const listeners = new Set<() => void>();
   const links: FakeRemote['links'] = new Map();
@@ -305,6 +305,18 @@ describe('RL2 machines (P5 O7 M1)', () => {
     remote.set([]);
     expect(link.closed).toBe(true);
     expect(m.manager.list().map((x) => x.ref)).toEqual([LOCAL]);
+  });
+
+  // The UX wave (U9, Interfaces §8): whether the signed-in member is one of an RL2 machine's owners, as the roster reads it
+  // from the held state; absent where it doesn't say. It draws a control, never authorises.
+  it('says whether the signed-in member owns an RL2 machine, whatever its link’s state, and again when that moves', () => {
+    const remote = fakeRemote([{ ref: D, name: 'mini', owner: true }, { ref: E, name: 'loft' }]);
+    const m = manager([], undefined, remote);
+    expect(m.manager.list().find((x) => x.ref === D)).toMatchObject({ state: 'connecting', owner: true });
+    expect(m.manager.list().find((x) => x.ref === E)).not.toHaveProperty('owner');
+    remote.set([{ ref: D, name: 'mini', owner: false }, { ref: E, name: 'loft' }]);
+    expect(m.changes.at(-1)!.find((x) => x.ref === D)).toMatchObject({ owner: false });
+    expect(m.manager.list()[0]).not.toHaveProperty('owner'); // this Mac
   });
 
   // 2026-11-06 (the New chat's machine first): the machine menu reads who may start a session there and what its endpoint
