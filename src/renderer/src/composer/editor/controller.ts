@@ -418,6 +418,19 @@ export class EditorController {
   setDisabled(disabled: string | null): void {
     if (disabled !== null) this.endDictation('keep'); // E9: the words heard so far stay
     if (!this.busy) this.editor?.setEditable(disabled === null);
+    if (disabled === null) this.payFocusOwed();
+  }
+
+  // UX wave U4a (the panel's finding 5): a load asks for the focus, which a held (read-only) view cannot take; the hold
+  // ending gives it, unless the focus has gone somewhere since (a dialog, another field), which is the person's
+  private focusOwed: { from: Element | null } | null = null;
+  private payFocusOwed(): void {
+    const owed = this.focusOwed;
+    const editor = this.editor;
+    this.focusOwed = null;
+    if (owed === null || !editor || !editor.isEditable || document.activeElement !== owed.from) return;
+    editor.view.focus();
+    if (editor.view.hasFocus()) editor.view.dispatch(editor.state.tr.scrollIntoView());
   }
 
   // ---- behaviour ------------------------------------------------------------------------------------------------
@@ -998,6 +1011,7 @@ export class EditorController {
         this.nav = { index: null, draft: null };
         this.search = null;
         this.setDoc(doc, { silently: true, caret: 'end' });
+        this.focusOwed = current.view.hasFocus() ? null : { from: document.activeElement };
         return true;
       },
       replaceDoc: (doc) => this.replaceDoc(doc),
