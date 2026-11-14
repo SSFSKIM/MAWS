@@ -11,6 +11,7 @@
 // page's from a window listener, as the Overview's is, after every taker above it in §H's table.
 import { useEffect, useRef, useState } from 'react';
 import type { Destination } from '@shared/ipc/schema/layout';
+import { useShellView } from '../app/shell-view';
 import { useSlot } from '../app/slots';
 import { CustomizeView } from '../customize/CustomizeView';
 import { focusPaneElement, paneDomId } from '../main/pane-dom';
@@ -38,11 +39,14 @@ function Page({ destination }: { destination: Destination }) {
   // Before the commit that makes what the page hides inert, which drops the keyboard from it.
   const [opener] = useState(() => (document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null));
 
-  // At the open, and when another page replaces this one's body (which takes the keyboard with it when it held it).
+  // At the open, when another page replaces this one's body (which takes the keyboard with it when it held it), and when
+  // the sidebar drawn over a narrow window goes (the shell closes it in its own effect after this one ran, so the row it
+  // was opened from is made inert only in the commit that runs this again).
+  const overlay = useShellView((s) => s.sidebarOverlay);
   useEffect(() => {
     const active = document.activeElement;
     if (active === null || active === document.body || active.closest('[inert]') !== null) region.current?.focus({ preventScroll: true });
-  }, [destination.kind]);
+  }, [destination.kind, overlay]);
 
   useEffect(() => {
     // Whether the write that closed the page also changed the strip: an act that showed a tab.

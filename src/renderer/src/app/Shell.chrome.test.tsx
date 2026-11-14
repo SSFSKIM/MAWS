@@ -236,6 +236,24 @@ it('in a narrow window, a page and Settings each dismiss the sidebar drawn over 
   expect(screen.queryByRole('button', { name: 'Close sidebar overlay' })).toBeNull();
 });
 
+// The review of the fix wave: a row of the sidebar drawn over the window opens a page, and the overlay goes with it;
+// the page then takes the keyboard on its region, as it does when it opens with the keyboard in what it hides. Where
+// the sidebar stays in view, the keyboard stays on the row.
+it.each([
+  [620, 'the page’s region'],
+  [1440, 'the row'],
+] as const)('a page opened by keyboard from a sidebar row, in a window %i px wide, leaves the keyboard on %s', async (width, target) => {
+  setWidth(width);
+  renderShell();
+  if (width === 620) act(() => useShellView.setState({ sidebarOverlay: true }));
+  const row = within(document.getElementById('region-sidebar')!).getByRole('button', { name: 'Projects' });
+  act(() => row.focus());
+  await userEvent.keyboard('{Enter}');
+  expect(useLayout.getState().destination).toEqual({ kind: 'projects' });
+  expect(useShellView.getState().sidebarOverlay).toBe(false);
+  expect(document.activeElement).toBe(target === 'the row' ? row : document.getElementById('region-page'));
+});
+
 // The overlay goes with Settings opened from its gear, so the gear is folded away when Settings closes: the keyboard
 // lands in what is on screen, not on the folded gear and not nowhere.
 it('Settings opened from the gear of the sidebar drawn over the window gives the keyboard, at its close, to what is on screen', async () => {
