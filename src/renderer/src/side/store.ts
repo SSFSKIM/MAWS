@@ -88,7 +88,10 @@ const localsOf = (parent: AppSessionId) => locals.get(parent) ?? [];
 // Keeps the parent's locals `keep` accepts; a dropped one stands in for nothing any more.
 function keepLocals(parent: AppSessionId, keep: (local: SideExchange) => boolean): void {
   const [kept, dropped] = [localsOf(parent).filter(keep), localsOf(parent).filter((e) => !keep(e))];
-  for (const local of dropped) standsIn.delete(local.id);
+  for (const local of dropped) {
+    standsIn.delete(local.id);
+    heldSince.delete(local.id); // UX wave U4a: a host entry that took its place has its time already
+  }
   locals.set(parent, kept);
 }
 
