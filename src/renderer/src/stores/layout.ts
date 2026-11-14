@@ -988,9 +988,10 @@ export function createLayoutStore() {
         else set({ destination: null });
       },
       openSettings(section) {
-        const now = get().settings;
-        if (now === null) set({ settings: { section: section ?? null } });
-        else if (section !== undefined && section !== now.section) set({ settings: { section } });
+        // Each request for a section is a new value, so the view lands on it even when it is the section already asked
+        // for: the person may have moved in the view since (the branch review). Open already, no section changes nothing.
+        if (get().settings === null) set({ settings: { section: section ?? null } });
+        else if (section !== undefined) set({ settings: { section } });
       },
       closeSettings() {
         if (get().settings !== null) set({ settings: null });

@@ -59,7 +59,7 @@ export function SettingsDialog() {
         >
           <Dialog.Title className="sr-only">{DESTINATION.settings}</Dialog.Title>
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-          {settings !== null && <View section={settings.section} />}
+          {settings !== null && <View section={settings.section} request={settings} />}
           <Dialog.Close asChild>
             <button
               type="button"

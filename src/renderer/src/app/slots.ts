@@ -19,7 +19,7 @@ export interface Slots {
   fileTab: ComponentType<{ tab: Extract<TabRef, { kind: 'file' }> }>; // C8
   diffTab: ComponentType<{ tab: Extract<TabRef, { kind: 'diff' }> }>; // C8
   newSession: ComponentType<{ appSessionId: AppSessionId }>; // C10: an unstarted session's setup, in its pane above the composer (no modal sheet)
-  settingsTab: ComponentType<{ section: SettingsSection | null }>; // C11: Settings' content, at a section (UX wave U7b: in the Settings dialog, and U11's sections)
+  settingsTab: ComponentType<{ section: SettingsSection | null; request?: object }>; // C11: Settings' content, at a section (UX wave U7b: in the Settings dialog, and U11's sections; `request` is a new value at each explicit request for a section)
   topBarEnd: ComponentType<Record<never, never>>; // the title-bar toolbar's right-side mount point, for W6's usage pill
   browserTab: ComponentType<{ tab: Extract<TabRef, { kind: 'browser' }> }>; // E4a: a session's browser tab as a main tab
   artifactsLibrary: ComponentType<Record<never, never>>; // P3-G (§D5): the Artifacts tab's content; P3-L registers the library

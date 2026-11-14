@@ -62,7 +62,7 @@ const GROUPS = SECTION_TABLE.reduce<{ group: Group; sections: SettingsSection[] 
 const UNGROUPED = SECTION_TABLE.filter(({ group }) => group === null).map(({ section }) => section);
 
 // fills its host; null opens at the table's first section
-export function SettingsView({ section }: { section: SettingsSection | null }) {
+export function SettingsView({ section, request }: { section: SettingsSection | null; request?: object }) {
   const settings = useSettingsValue();
   const body = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -70,9 +70,11 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   const [mark] = useState(() => new RowMark());
   useEffect(() => () => mark.clear(), [mark]);
   const [active, setActive] = useState<SettingsSection>(section ?? ORDER[0]!);
-  const [opened, setOpened] = useState(section);
-  if (opened !== section) {
-    setOpened(section);
+  // UX wave U7b: the dialog's `request` is new at each explicit request, which lands on its section again
+  const asked = request ?? section;
+  const [opened, setOpened] = useState(asked);
+  if (opened !== asked) {
+    setOpened(asked);
     if (section) setActive(section);
   }
 
@@ -86,7 +88,7 @@ export function SettingsView({ section }: { section: SettingsSection | null }) {
   const ready = settings !== null;
   useEffect(() => {
     if (section && ready) scrollTo(section);
-  }, [section, ready]);
+  }, [section, request, ready]);
 
   // Codex's selected-section highlighting: the last section whose top has scrolled to the body's top.
   const onScroll = () => {

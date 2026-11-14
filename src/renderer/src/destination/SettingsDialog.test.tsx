@@ -1,9 +1,12 @@
 // UX wave U7b (O-40; docs/doperpowers/plans/2026-11-12-ux-wave-U7-sidebar-title-bar-destinations.md, M5 decision 9 and
 // Interfaces §H): the Settings dialog, its frame and who takes Esc in it, first to last.
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useState } from 'react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { SettingsSection } from '../settings-tab/SettingsView';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SettingsView, type SettingsSection } from '../settings-tab/SettingsView';
+import { machineSettingsDefaults } from '@shared/settings/defaults';
+import { settingsBridge } from '../test-support/settings-bridge';
 import { registerSlot, resetSlots } from '../app/slots';
 import { Sheet } from '../sessions/Sheet';
 import { useLayout } from '../stores/layout';
@@ -137,5 +140,34 @@ describe('the Settings dialog', () => {
     fireEvent.keyDown(dialog()!, { key: 'Escape' });
     await waitFor(() => expect(dialog()).toBeNull());
     expect(document.activeElement).toBe(composer);
+  });
+});
+
+// The branch review: an explicit request for a section lands on it even when it is the section the dialog was opened
+// at and the person has moved in the index since (U11's view, drawn as the app draws it).
+describe('a request for a section', () => {
+  it('opened at Usage, Appearance picked in the index, a second request for Usage lands on Usage', () => {
+    const bridge = settingsBridge();
+    bridge.answers['machineSettings.get'] = () => ({ settings: machineSettingsDefaults(), version: 1 }); // the Gateway section's read
+    window.maws = bridge.bridge; // left installed: the sections' reads may answer after the test
+    registerSlot('settingsTab', SettingsView);
+    const scrolled: string[] = [];
+    const spy = vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function (this: HTMLElement) {
+      scrolled.push(this.getAttribute('aria-labelledby') ?? '');
+    });
+    try {
+      render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SettingsDialog /></QueryClientProvider>);
+      const entry = (name: string) => within(screen.getByRole('navigation', { name: 'Settings sections' })).getByRole('button', { name });
+      open('usage');
+      expect(entry('Usage').getAttribute('aria-current')).toBe('true');
+      fireEvent.click(entry('Appearance'));
+      expect(entry('Appearance').getAttribute('aria-current')).toBe('true');
+      expect(scrolled.at(-1)).toBe('settings-appearance');
+      open('usage');
+      expect(entry('Usage').getAttribute('aria-current')).toBe('true');
+      expect(scrolled.at(-1)).toBe('settings-usage');
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
