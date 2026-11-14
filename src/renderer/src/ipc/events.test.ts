@@ -1,7 +1,7 @@
 import { QueryObserver } from '@tanstack/react-query';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
-import type { PreloadBridge } from '@shared/ipc/schema';
+import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import { EMPTY_TAB_SET, NO_PROJECT } from '@shared/ipc/schema/layout';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
@@ -21,7 +21,7 @@ import { createMachinesStore, selectOffline } from '../stores/machines';
 import { createSessionsStore } from '../stores/sessions';
 import { connectShell, ONE_STRIP_NOTICE } from './events';
 import { queryClient } from './query';
-import { prStateKey, scmStatusKey } from '../tools/scm/queries';
+import { prStateKey, refreshPrState, scmStatusKey } from '../tools/scm/queries';
 import { useNotices } from '../stores/notices';
 import { ownersLabel } from '../sidebar/owners'; // P5 O8 M5
 import { resetRemoteLaneBStore } from '../lane-b/remote-session'; // P5 O7 M2
@@ -659,6 +659,35 @@ describe('the shell per machine', () => {
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('read again');
     fake.event('session.changed', { record: titledB('b1', 'renamed'), cause: 'update', revision: 2 }, OTHER_MACHINE);
     expect(stores.sessions.getState().records.get(onB('b1'))?.title.text).toBe('renamed');
+  });
+
+  // UX wave U8c-2 (the branch review, finding 7): a machine's snapshot that replaces a record whose working folder moved
+  // (the agent moved while the link was down) resets the session's two scm reads as a change does, so a Refresh still out
+  // for the folder it left writes nothing; a snapshot that leaves the folder keeps them.
+  it('resets a session’s scm reads when a new generation’s snapshot replaces its record with another working folder', async () => {
+    const { fake } = setup(0, { machines: [LOCAL_ENTRY, other('up', 1)] });
+    await answerSnapshots(fake);
+    await answerOther(fake, [record('b1')], 5);
+    const b1 = onB('b1');
+    const keys = [prStateKey(b1), scmStatusKey(b1)];
+    const kept = () => keys.map((key) => queryClient.getQueryData(key) !== undefined);
+    try {
+      for (const key of keys) queryClient.setQueryData(key, { kept: true });
+      fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 2)] });
+      await answerOther(fake, [titledB('b1', 'read again')], 1); // the same folder
+      expect(kept()).toEqual([true, true]);
+      let release!: () => void;
+      const held = { invoke: () => new Promise((resolve) => (release = () => resolve({ ok: true, value: { branch: 'main', pr: { number: 1 } } }))) } as unknown as MawsBridge;
+      const refreshing = refreshPrState(b1, held); // the summary's Refresh, asked of the folder the agent then left
+      fake.event('machines.changed', { machines: [LOCAL_ENTRY, other('up', 3)] });
+      await answerOther(fake, [record('b1', { agentFolder: { checkout: '/work/b1/.claude/worktrees/w1', cwd: '/work/b1/.claude/worktrees/w1', branch: 'w1', linked: true } })], 1);
+      expect(kept()).toEqual([false, false]);
+      release();
+      await refreshing;
+      expect(queryClient.getQueryData(prStateKey(b1))).toBeUndefined();
+    } finally {
+      queryClient.clear();
+    }
   });
 
   // P5 O7 M2 (the overlay rule): a lane B session main holds on B keeps the status this page last heard through B's link
