@@ -294,11 +294,12 @@ function ProjectItems({ projectId, people }: { projectId: ProjectId; people: boo
   const records = useSessions((s) => s.records);
   const projects = useSessions((s) => s.projects);
   const registry = useSessions((s) => s.registry);
+  const listed = useSessions((s) => s.listed); // ticket 644: another machine's record is the row's its listing files it under
   const project = projects.get(projectId);
   const index = useSessions((s) => selectOrgIndex(s, ipc.localMachine));
   const rowKey = project === undefined ? null : index.keyOf(project);
   // the row's sessions, from every machine
-  const unread = rowKey === null ? [] : sessionsOfRow({ records, projects, registry }, ipc.localMachine, rowKey).filter((r) => r.unread && !r.archived);
+  const unread = rowKey === null ? [] : sessionsOfRow({ records, projects, registry, listed }, ipc.localMachine, rowKey).filter((r) => r.unread && !r.archived);
   // P5 O8 M7a: the org project's sminos id, which keys its channel at the hub; the project registry: a hub project's only
   const org = rowKey === null ? undefined : index.orgs.get(rowKey);
   const smnsId = org?.registry?.hub === false ? null : (org?.smnsId ?? null);

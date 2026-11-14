@@ -5,7 +5,7 @@ import { addressOf } from '@shared/machine/address';
 import { machineKey, type OrgKey } from '@shared/machine/org-key';
 import { project, record, remoteRow } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { labelOf, localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, registryOnly, rowOfListed, rowOfSession, sessionSetKey, successorOf } from './org-projects';
+import { labelOf, localProjectOfSet, machineOrder, orgIndex, primaryCheckout, reachableCheckouts, registryOnly, rowOfListed, rowOfSession, sessionSetKey, sessionsOfRow, successorOf, type RowKey } from './org-projects';
 import { EMPTY_REGISTRY, registryRecords, type OrgProjectLocation, type OrgProjects, type RegistryProject } from './registry';
 import type { ListedSession } from './sessions';
 
@@ -193,6 +193,23 @@ describe('the project registry: rows by project id', () => {
     expect(sessionSetKey(s(null), TEST_MACHINE, b, none), 'its listing’s key is none of the table’s').toBe(machineKey(OTHER_MACHINE));
     expect(sessionSetKey(s('remote:example.org/app' as OrgKey), TEST_MACHINE, b, none), 'listing and registry agree').toBe('remote:example.org/app');
     expect(sessionSetKey(s(null), TEST_MACHINE, a, none), 'this Mac’s, by its project').toBe('remote:example.org/app');
+  });
+
+  // ticket 644: a row's sessions (its Mark all read, its archive count and ids) are the ones the sidebar files under it:
+  // another machine's record by its listing, though the registry places its project on that machine
+  it('takes into a row’s sessions another machine’s record its listing files there, not one its listing files elsewhere', () => {
+    const registry = registryOf([registered(ID, 'app', [location(OTHER_MACHINE, 'app')])], { [ID]: 'remote:example.org/app' });
+    const b = studio('b' as AppSessionId);
+    const s = (orgKey: OrgKey | null) => ({
+      projects: registryRecords(registry, TEST_MACHINE),
+      registry,
+      records: new Map([[b, record(b, { projectId: studio('app') as ProjectId, unread: true })]]),
+      listed: new Map<AppSessionId, ListedSession>([[b, { ...remoteRow(OTHER_MACHINE, 'b', { orgKey, project: orgKey === null ? null : ID }), appId: b }]]),
+    });
+    const ids = (state: ReturnType<typeof s>, key: string) => sessionsOfRow(state, TEST_MACHINE, key as RowKey).map((r) => r.appId);
+    expect(ids(s(null), 'remote:example.org/app'), 'its listing’s key is none of the table’s: not the registry project’s').toEqual([]);
+    expect(ids(s(null), machineKey(OTHER_MACHINE)), 'its machine’s row').toEqual([b]);
+    expect(ids(s('remote:example.org/app' as OrgKey), 'remote:example.org/app'), 'listing and registry agree').toEqual([b]);
   });
 
   // panel scalpel-2#1: on a Mac signed in and not enrolled, a clone here carries no id; main computes it from the
