@@ -282,15 +282,16 @@ describe('what a row reads is the same by every route (M3)', () => {
   });
 });
 
-// UX wave U2a, M5 (Interfaces §F, the proof whole; Acceptance 1): each recording's whole drawing, by every route that can
-// draw it, compared row by row. What is compared is what the window draws of the work: every run (its state, its caption,
-// its line counts and how its opened body falls into blocks of calls and thought lines), every call (where it is drawn,
-// its label as its row reads it, its reason and its status), every thought line inside a run (its label and whether it
-// opens), every thought's row outside one, and every turn's line (its state, its origin and its words, the duration read
-// as 0). A turn's line is named by the first row of its turn that every route names alike (an assistant block, a call or
-// a run: their ids are the engine's), because an engine's turn has an id of the route's own (the journal's position on
-// the live route, the record's uuid from the file). Every row that differs is listed as `route row field: the first
-// route's → this route's`; a row one route draws and another does not is listed by the field `drawn`.
+// UX wave U2a, M5 (Interfaces §F, the proof whole; Acceptance 1): each recording's whole drawing, by every route that
+// can draw it, compared row by row. What is compared is what the window draws of the work: every run (its state, its
+// caption, its line counts and how its opened body falls into blocks of calls and thought lines), every call (where it
+// is drawn, its block and its place in it, its label as its row reads it, its reason and its status), every thought
+// line inside a run (its label and whether it opens), every thought's row outside one, and every turn's line (its
+// state, its origin and its words, the duration read as 0). A turn's line is named by the first row of its turn that
+// every route names alike (an assistant block, a call or a run: their ids are the engine's), because an engine's turn
+// has an id of the route's own (the journal's position on the live route, the record's uuid from the file). Every row
+// that differs is listed as `route row field: the first route's → this route's`; a row one route draws and another does
+// not is listed by the field `drawn`.
 type Fields = Record<string, string>;
 const callFields = (cell: Cell): Fields => ({ label: cell.detail.kind === 'shell' ? shellLabel(cell) : cell.label, reason: cell.error ?? '', status: cell.status });
 const NAMED_ALIKE = new Set<Row['kind']>(['assistant_text', 'thinking', 'cell', 'group']);
@@ -306,7 +307,7 @@ function drawing(rows: Row[]): Map<string, Fields> {
       const segments = runSegments(row.cells, row.state === 'active');
       out.set(row.id, { kind: 'run', state: row.state, caption: row.summary, counts: lineCountsCopy(row.counts), body: segments.map((segment) => (segment.kind === 'calls' ? `${segment.cells.length} calls` : 'thought')).join(', ') });
       segments.forEach((segment, i) => {
-        if (segment.kind === 'calls') for (const cell of segment.cells) out.set(cell.id, { kind: 'call', in: `${row.id} block ${i}`, ...callFields(cell) });
+        if (segment.kind === 'calls') segment.cells.forEach((cell, n) => out.set(cell.id, { kind: 'call', in: `${row.id} block ${i} call ${n}`, ...callFields(cell) }));
         else out.set(segment.id, { kind: 'thought line', in: `${row.id} block ${i}`, label: thinkingLabel(false, segment.recordedMs), opens: String(segment.text !== '') });
       });
     } else if (row.kind === 'cell') {
