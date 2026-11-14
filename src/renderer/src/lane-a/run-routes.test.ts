@@ -1,11 +1,12 @@
-// The routes agree on what M1 makes a file say as the wire does (UX wave U2, first landing; the U2a execution document,
-// M1, Interfaces §F and Acceptance 1 and 6; the wave's law 5): a thought's recorded duration, and a refused call's kind
-// and reading. One recorded session is drawn from its journal as a session MAWS runs draws it (the journal through the
-// engine host's `Normalizer`), from its transcript file as the chain follower answers `session.events` for it on this
-// Mac, and from the same rows as another machine sends them (`freshSource`). It lives beside U3a's
-// `arrival-routes.test.ts` and not in the transcript's model, for the reason that test gives: the node project
-// typechecks the model's directory, and the graph of the reader of another machine's rows is the renderer's. The three
-// readers are written again here because that test exports none.
+// The routes agree (UX wave U2, first landing; the U2a execution document, Interfaces §F and Acceptance 1, 6, 10 and 11;
+// the wave's law 5): on what M1 makes a file say as the wire does (a thought's recorded duration, and a refused call's
+// kind and reading), on what a row reads (M3), and, at the end (M5), on each recording's whole drawing. One recorded
+// session is drawn from its journal as a session MAWS runs draws it (the journal through the engine host's
+// `Normalizer`), from its transcript file as the chain follower answers `session.events` for it on this Mac, and from the
+// same rows as another machine sends them (`freshSource`). It lives beside U3a's `arrival-routes.test.ts` and not in the
+// transcript's model, for the reason that test gives: the node project typechecks the model's directory, and the graph
+// of the reader of another machine's rows is the renderer's. The three readers are written again here because that test
+// exports none.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -14,14 +15,18 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR, loadJournal, loadUxwaveJournal, TRANSCRIPT_FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { FIXTURE_DIR, FIXTURE_PASSES, listEventFixtures, listJournals, listSyntheticJournals, loadEventFixture, loadJournal, loadSyntheticJournal, loadUxwaveJournal, TRANSCRIPT_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { synthesise } from '../../../../test/support/synth-transcript';
 import { journalToEvents } from '../transcript/dev/journal';
 import { rowsOf, withAllExpanded } from '../transcript/model/derive';
-import { applyEvents, createState } from '../transcript/model/reduce';
+import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
 import type { Cell, Row } from '../transcript/model/rows';
 import { freshSource, subagentLookupOf } from './plane-transcript';
-import { descriptionLabel } from '../transcript/model/copy';
+import { descriptionLabel, dividerCopy, lineCountsCopy, thinkingLabel } from '../transcript/model/copy';
+import { captionParts, stepsOfCells } from '../transcript/model/caption';
+import { presentationOf, stoppedMember } from '../transcript/model/classify';
+import { collectCells, runSegments } from '../transcript/model/groups';
 import { shellLabel } from '../transcript/view/cells/CellLine';
 
 const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de';
@@ -274,4 +279,165 @@ describe('what a row reads is the same by every route (M3)', () => {
     expect(read(routes.file), 'the file').toEqual(live);
     expect(read(routes.link), 'the file’s rows').toEqual(live);
   });
+});
+
+// UX wave U2a, M5 (Interfaces §F, the proof whole; Acceptance 1): each recording's whole drawing, by every route that can
+// draw it, compared row by row. What is compared is what the window draws of the work: every run (its state, its caption,
+// its line counts and how its opened body falls into blocks of calls and thought lines), every call (where it is drawn,
+// its label as its row reads it, its reason and its status), every thought line inside a run (its label and whether it
+// opens), every thought's row outside one, and every turn's line (its state, its origin and its words, the duration read
+// as 0). A turn's line is named by the first row of its turn that every route names alike (an assistant block, a call or
+// a run: their ids are the engine's), because an engine's turn has an id of the route's own (the journal's position on
+// the live route, the record's uuid from the file). Every row that differs is listed as `route row field: the first
+// route's → this route's`; a row one route draws and another does not is listed by the field `drawn`.
+type Fields = Record<string, string>;
+const callFields = (cell: Cell): Fields => ({ label: cell.detail.kind === 'shell' ? shellLabel(cell) : cell.label, reason: cell.error ?? '', status: cell.status });
+const NAMED_ALIKE = new Set<Row['kind']>(['assistant_text', 'thinking', 'cell', 'group']);
+
+function drawing(rows: Row[]): Map<string, Fields> {
+  const out = new Map<string, Fields>();
+  const anchors = new Map<string, string>();
+  for (const row of rows) if (row.turnId !== null && NAMED_ALIKE.has(row.kind) && !anchors.has(row.turnId)) anchors.set(row.turnId, row.id);
+  for (const row of rows) {
+    if (row.kind === 'divider') {
+      out.set(`turn line of ${anchors.get(row.turnId!) ?? row.id}`, { kind: 'turn line', state: row.state, origin: row.origin, words: dividerCopy({ ...row, durationMs: 0 }) });
+    } else if (row.kind === 'group') {
+      const segments = runSegments(row.cells, row.state === 'active');
+      out.set(row.id, { kind: 'run', state: row.state, caption: row.summary, counts: lineCountsCopy(row.counts), body: segments.map((segment) => (segment.kind === 'calls' ? `${segment.cells.length} calls` : 'thought')).join(', ') });
+      segments.forEach((segment, i) => {
+        if (segment.kind === 'calls') for (const cell of segment.cells) out.set(cell.id, { kind: 'call', in: `${row.id} block ${i}`, ...callFields(cell) });
+        else out.set(segment.id, { kind: 'thought line', in: `${row.id} block ${i}`, label: thinkingLabel(false, segment.recordedMs), opens: String(segment.text !== '') });
+      });
+    } else if (row.kind === 'cell') {
+      out.set(row.id, { kind: 'call', in: 'its own row', ...callFields(row) });
+    } else if (row.kind === 'thinking') {
+      out.set(row.id, { kind: 'thought', label: thinkingLabel(row.live, row.durationMs), opens: String(row.text !== '') });
+    }
+  }
+  return out;
+}
+
+const shown = (fields: Fields | undefined) => (fields === undefined ? 'no' : Object.values(fields).join(' · '));
+function differences(routes: Record<string, SessionEvent[]>): string[] {
+  const [[, reference], ...others] = Object.entries(routes).map(([route, events]) => [route, drawing(drawn(events))] as const);
+  return others.flatMap(([route, other]) => [...new Set([...reference.keys(), ...other.keys()])].flatMap((row) => {
+    const a = reference.get(row);
+    const b = other.get(row);
+    if (a === undefined || b === undefined) return [`${route} ${row} drawn: ${shown(a)} → ${shown(b)}`];
+    return [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((field) => a[field] !== b[field]).map((field) => `${route} ${row} ${field}: ${a[field]} → ${b[field]}`);
+  }));
+}
+
+const UXWAVE = join(FIXTURE_DIR, 'uxwave');
+const textOf = (dir: string, name: string) => readFileSync(join(dir, `${name}.jsonl`), 'utf8');
+const threeRoutes = async (journal: JournalRow[], text: string) => ({ live: fromJournal(journal), file: await fromFile(text), link: await fromRows(text) });
+const twoRoutes = async (text: string) => ({ file: await fromFile(text), link: await fromRows(text) });
+/** A probe journal's own transcript file, as its `jsonl_snapshot` row carries it. */
+const snapshotText = (rows: JournalRow[], label: string) => {
+  const frame = rows.find((row) => row.direction === 'meta' && (row.frame as { event?: unknown }).event === 'jsonl_snapshot' && (row.frame as { label?: unknown }).label === label)!.frame as { records: unknown[] };
+  return `${frame.records.map((record) => JSON.stringify(record)).join('\n')}\n`;
+};
+
+// The recordings of §F, each by every route that can draw it: the live route where a journal exists, the file's two
+// routes always. The terminal sessions have no journal (their files are what a terminal session on this Mac and on
+// another machine draw); `u3-terminal-cron-r1` is also read cut at its first fire row (line 50, its meta row not
+// written), as U3a's routes test reads it.
+const RECORDINGS: Record<string, () => Promise<Record<string, SessionEvent[]>>> = {
+  'uxwave/u3-tasks-r1': () => threeRoutes(loadUxwaveJournal('u3-tasks-r1'), textOf(UXWAVE, 'u3-tasks-r1.transcript')),
+  'uxwave/u3-tasks-r2': () => threeRoutes(loadUxwaveJournal('u3-tasks-r2'), textOf(UXWAVE, 'u3-tasks-r2.transcript')),
+  'uxwave/u3-cron-r1': () => threeRoutes(loadUxwaveJournal('u3-cron-r1'), textOf(UXWAVE, 'u3-cron-r1.transcript')),
+  'pass3/p1-maws-artifacts': () => threeRoutes(loadJournal('pass3', 'p1-maws-artifacts'), textOf(TRANSCRIPT_FIXTURE_DIR, 'p1-maws-artifacts')),
+  'pass3/steer-next-interrupted': () => threeRoutes(loadJournal('pass3', 'steer-next-interrupted'), textOf(TRANSCRIPT_FIXTURE_DIR, 'w1-steer-next-interrupted')),
+  'pass3/p1-maws-ask-interrupt': () => threeRoutes(loadJournal('pass3', 'p1-maws-ask-interrupt'), textOf(TRANSCRIPT_FIXTURE_DIR, 'p1-maws-ask-interrupt')),
+  'pass3/p1-side-thread-live, with the file its snapshot holds': () => {
+    const journal = loadJournal('pass3', 'p1-side-thread-live');
+    return threeRoutes(journal, snapshotText(journal, 'side-thread-parent'));
+  },
+  'uxwave/u3-sminos-r1-terminal': () => twoRoutes(textOf(UXWAVE, 'u3-sminos-r1-terminal.transcript')),
+  'uxwave/u3-terminal-checkin-r1': () => twoRoutes(textOf(UXWAVE, 'u3-terminal-checkin-r1.transcript')),
+  'uxwave/u3-terminal-cron-r1': () => twoRoutes(textOf(UXWAVE, 'u3-terminal-cron-r1.transcript')),
+  'uxwave/u3-terminal-cron-r1, cut at its first fire row': () => twoRoutes(`${textOf(UXWAVE, 'u3-terminal-cron-r1.transcript').split('\n').slice(0, 50).join('\n')}\n`),
+};
+
+// Two differences between routes that predate this landing (the base, b513add6f, draws both). Each is with the
+// architect, who decides between a named exception with its ticket and a fix; until then each is pinned here by name,
+// row by row.
+const WITH_THE_ARCHITECT: Record<string, string[]> = {
+  // The file's rows (`freshSource`) leave the session's last turn open, so the link draws a `Working` line that the wire
+  // and the file, whose follower closes the turn at the file's end, do not draw (M1's Surprises).
+  'pass3/steer-next-interrupted': ['link turn line of text:msg_011CfbGWiGmBzVGAQKi7GdQZ:0 drawn: no → turn line · working · human · Working'],
+  // Cut at its first fire row, the fired turn is closed from the file (the follower's exit at the file's end) and still
+  // open from the file's rows, so the link draws `Working` where the file draws no line (M2's Surprises; U3a's routes test
+  // pins the same per route).
+  'uxwave/u3-terminal-cron-r1, cut at its first fire row': ['link turn line of divider:turn:50fd110f-cb64-47f1-a481-e5867176daba drawn: no → turn line · working · engine · Working'],
+};
+
+describe('the whole drawing is the same by every route, but for the differences listed (§F, the proof whole)', () => {
+  for (const [name, routes] of Object.entries(RECORDINGS)) {
+    it(name, async () => {
+      expect(differences(await routes())).toEqual(WITH_THE_ARCHITECT[name] ?? []);
+    });
+  }
+});
+
+// The same file's second proof (§F): over every session the snapshot suite walks, which exist in one form only, each
+// drawn turn is whole. Every call the turn drew as a call before is drawn in exactly one place (a block of one run, or
+// a row of its own), in the order the engine made the calls; a run's parts count exactly its calls (a refused call that
+// stands alone is in no run); a folded run and the same run opened name the same calls; no two thought lines of a run
+// are adjacent; and no row is drawn twice. What stands against the rows the same events gave before this landing is the
+// snapshot diff's, read once at M5 (the report's account); this proof is what makes that diff evidence.
+const SESSIONS: Record<string, () => SessionEvent[]> = {
+  ...Object.fromEntries(FIXTURE_PASSES.flatMap((pass) => listJournals(pass).map((name) => [`${pass}/${name}`, () => journalToEvents(loadJournal(pass, name))] as const))),
+  ...Object.fromEntries(listSyntheticJournals().map((name) => [`transcript/${name}`, () => journalToEvents(loadSyntheticJournal(name))] as const)),
+  ...Object.fromEntries(listEventFixtures().map((name) => [`events/${name}`, () => loadEventFixture(name)] as const)),
+  'synthetic/500': () => synthesise({ turns: 500, seed: 1 }),
+};
+
+/** The state's rows with every turn open and every run folded: what a reader sees before opening a run. */
+const runsFolded = (state: TranscriptState): Row[] => rowsOf({ ...state, ui: { ...withAllExpanded(state).ui, expandedGroups: new Set(), expandedCells: new Set() } });
+
+function wholeness(events: SessionEvent[]): string[] {
+  const state = applyEvents(createState(null, null), events);
+  const opened = rowsOf(withAllExpanded(state));
+  const folded = new Map(runsFolded(state).flatMap((row) => (row.kind === 'group' ? [[row.id, row.cells.map((cell) => cell.id)] as const] : [])));
+  const found: string[] = [];
+  const seen = new Set<string>();
+  for (const row of opened) {
+    if (seen.has(row.id)) found.push(`${row.id}: drawn twice`);
+    seen.add(row.id);
+  }
+  for (const id of [...state.order, ...(state.hidden?.turns ?? [])]) {
+    const turn = state.turns.get(id);
+    if (!turn) continue;
+    const made = [...new Set(turn.events.flatMap((event) => (event.kind === 'tool.use' && presentationOf(event.toolName) === 'cell' ? [event.toolUseId as string] : [])))];
+    const drawnCalls = collectCells(opened.filter((row) => row.turnId === id)).flatMap((cell) => (cell.toolUseId === null ? [] : [cell.toolUseId as string]));
+    if (drawnCalls.join(' ') !== made.join(' ')) found.push(`${id}: calls made ${made.join(',')} but drawn ${drawnCalls.join(',')}`);
+  }
+  for (const row of opened) {
+    if (row.kind !== 'group') continue;
+    const calls = row.cells.filter((cell) => cell.toolName !== 'thinking');
+    const counted = captionParts(stepsOfCells(row.cells)).reduce((sum, part) => sum + part.calls, 0);
+    if (counted !== calls.length) found.push(`${row.id}: its parts count ${counted} calls of ${calls.length}`);
+    if (calls.some((cell) => cell.classification.denial !== null && !stoppedMember(cell.classification.denial))) found.push(`${row.id}: holds a refused call that stands alone`);
+    const named = folded.get(row.id);
+    if (named === undefined || named.join(' ') !== row.cells.map((cell) => cell.id).join(' ')) found.push(`${row.id}: folded it names ${named?.join(',') ?? 'nothing'}`);
+    const kinds = runSegments(row.cells, row.state === 'active').map((segment) => segment.kind);
+    if (kinds.some((kind, i) => kind === 'thought' && kinds[i - 1] === 'thought')) found.push(`${row.id}: two thought lines adjacent`);
+  }
+  return found;
+}
+
+// What a session drew wrong before this landing as after it, the same at the base (b513add6f) and on master 5c9cfa0c5;
+// not this landing's to move.
+const BEFORE_THIS_LANDING: Record<string, string[]> = {
+  // the subagent row of the child the relay woke is drawn twice in its turn (the tracker's row, U2a's record)
+  'pass3/relay-to-child': ['subagent:accea5ba03e220b64: drawn twice'],
+};
+
+describe('every session the snapshot suite walks draws each turn whole (§F, the second proof)', () => {
+  for (const [name, events] of Object.entries(SESSIONS)) {
+    it(name, () => {
+      expect(wholeness(events())).toEqual(BEFORE_THIS_LANDING[name] ?? []);
+    });
+  }
 });
