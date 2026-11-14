@@ -164,7 +164,7 @@ export function SurfaceQuestionRow({ row }: { row: Extract<Row, { kind: 'questio
 
 export function SurfaceGroupRow({ row }: { row: Extract<Row, { kind: 'group' }> }) {
   const { appSessionId, state, turn, storeKey } = useTranscriptSurface(row);
-  const input = state ? groupInput(row, turn, state.pending) : null;
+  const input = state ? groupInput(row, turn, state.pending, state.ui.revealed) : null; // UX wave U2: the jump's target asks nothing
   const expand = useCallback((props: TranscriptProps['ToolGroup']) => {
     if (!props.isExpanded) return;
     const current = useTranscriptStore.getState().rows(storeKey).find((r) => r.id === row.id);

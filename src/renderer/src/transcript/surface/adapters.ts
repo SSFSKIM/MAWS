@@ -66,6 +66,16 @@ function toolRecords(turn: TurnState): Map<ToolUseId, ToolRecord> {
   return records;
 }
 
+// UX wave U2 (decision 21, Interfaces §C): every tool use of a turn, a cell or not, by the records above, so the run's
+// line can tell a waiting permission that names a call of the turn from one that names none
+const callsCache = new WeakMap<Map<ToolUseId, ToolRecord>, ReadonlySet<ToolUseId>>();
+export function callsOfTurn(turn: TurnState): ReadonlySet<ToolUseId> {
+  const records = toolRecords(turn);
+  let calls = callsCache.get(records);
+  if (!calls) callsCache.set(records, (calls = new Set(records.keys())));
+  return calls;
+}
+
 // UX wave U2: `titles` names an artifact as the derivation does, from the session's loaded turns (`state`), so a
 // rewritten call keeps the title its row read
 export interface ToolInput extends RowInput<'ToolUse'> { cell: Cell; record: ToolRecord; context: TurnContext; titles: ArtifactTitles }
@@ -155,7 +165,12 @@ function bounded(value: unknown, depth = 1): Sized | null {
   return { value: Array.isArray(value) ? entries.map(([, item]) => item) : Object.fromEntries(entries), nodes, chars };
 }
 
-export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending']): RowInput<'ToolGroup'> | null {
+// UX wave U2 (the U2a document, M4 "The mods' site"; C13): the run's ask reads the tab's revealed jump target as every
+// other ask does, for the run as a whole: a run that is the target or holds it asks nothing. `revealed` is not handed to
+// `toolInputs`, since an ask that left the revealed call out would name another first call, and the instance id is
+// made from the first call. The open state sent is the run's own.
+export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+  if (revealed !== undefined && (row.id === revealed || row.cells.some((cell) => cell.id === revealed))) return null;
   const tools = row.cells.flatMap((cell) => toolInputs(cell, turn));
   if (!tools.length) return null;
   const ids = new Set(tools.map((t) => t.instanceId));
@@ -172,7 +187,7 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
       calls.unshift(sized.value as TranscriptProps['ToolUse']); nodes += sized.nodes; chars += sized.chars; break;
     }
   }
-  return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: false } };
+  return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
 export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {

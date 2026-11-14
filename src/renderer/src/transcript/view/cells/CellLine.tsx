@@ -11,7 +11,6 @@ import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
-import { LiveThinkingCellLabel } from '../rows/ThinkingLabel';
 import { CellDetailView } from './CellDetail';
 
 const EDIT_COUNTS = / \+(\d+) −(\d+)$/;
@@ -53,9 +52,10 @@ export function shellLabel(cell: Cell): string {
   return short === null ? SHELL_CELL.aCommand[status] : SHELL_CELL.command(status, short);
 }
 
-function Label({ cell, turnId }: { cell: Cell; turnId: TurnId | null }) {
+// What a call's row reads, as its line draws it; a run's line reads a call by this same component (UX wave U2,
+// decision 5), inside the run's FilePathsContext.
+export function CellLabel({ cell }: { cell: Cell }) {
   if (cell.detail.kind === 'shell') return <CodeText text={shellLabel(cell)} />;
-  if (cell.toolName === 'thinking' && cell.status === 'running') return <LiveThinkingCellLabel cell={cell} turnId={turnId} />; // W8
   const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   const label = counts ? cell.label.slice(0, counts.index) : cell.label;
   if (!asLabelled(cell)) {
@@ -81,7 +81,7 @@ export function CellLine({ cell, turnId, focusable = false, renderDetail, onTogg
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
-          <Label cell={cell} turnId={turnId} />
+          <CellLabel cell={cell} />
           {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
         </span>
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}

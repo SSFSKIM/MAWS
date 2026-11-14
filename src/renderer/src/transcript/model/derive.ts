@@ -480,11 +480,13 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (block.blockType === 'text' && !live && block.buffer.trim() === '') return null;
     if (block.blockType === 'text') return { kind: 'text', row: { id: block.rowId, turnId: turn.id, at, kind: 'assistant_text', messageUuid: block.messageUuid, blockIndex: block.blockIndex, markdown: block.buffer, live, phase: 'answer', model: block.model } };
     if (block.blockType === 'thinking') {
-      // A completed thinking block with no text (a signature-only block) has nothing to disclose: no row (W1).
-      if (!live && block.buffer.trim() === '') return null;
       // UX wave U2 (X1, decision 2): the engine's recorded duration when one came; else, for a block that streamed, the
       // time MAWS measured from its first delta to its completion
       const recordedMs = block.recordedMs ?? null;
+      // A completed thinking block with no text (a signature-only block) has nothing to disclose (W1). UX wave U2 (#479):
+      // one with a recorded duration still travels, so inside a run it is merged and tested on its time; where it leaves
+      // the group machine as a row it is dropped there (groups.ts), so outside a run it has no row, as before.
+      if (!live && block.buffer.trim() === '' && recordedMs === null) return null;
       const durationMs = recordedMs ?? (block.completedAt !== null && block.markerEventId !== null ? Date.parse(block.completedAt) - Date.parse(at) : null);
       return { kind: 'thinking', row: { id: block.rowId, turnId: turn.id, at, kind: 'thinking', messageUuid: block.messageUuid, text: block.buffer, live, durationMs, recordedMs } };
     }
@@ -937,13 +939,14 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // W1: one stream in event order. The rows that stay in view when the work area folds (isPersistentRow: a prompt the
   // engine took into this turn, at its delivery position; a hook that got in the way; the answer; a boundary; a slash
   // command's output) go through the group machine as rows, so a steer splits the work around it; everything else is
-  // the work area.
+  // the work area. UX wave U2 (decision 19): a thought is always handed to the machine, the one after the last work
+  // included, so a thought that follows a run's last call is that run's; the machine gives it back as a row where no run
+  // holds it.
   const ordered: WorkItem[] = [];
   stream.forEach((item, i) => {
     if (item.kind === 'steer' || item.kind === 'notice') ordered.push({ kind: 'row', row: item.row });
     else if (item.kind === 'text' && i > lastWork) ordered.push({ kind: 'row', row: { ...item.row, phase: 'answer' } });
     else if (item.kind === 'text') ordered.push({ kind: 'text', row: { ...item.row, phase: 'commentary' } });
-    else if (item.kind === 'thinking' && i > lastWork) ordered.push({ kind: 'row', row: item.row }); // after the last tool use: a row, not a cell of the last group
     else ordered.push(item);
   });
 

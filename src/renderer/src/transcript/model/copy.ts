@@ -2,7 +2,7 @@
 // model lives here so it can be reviewed in one place; the count semantics are what §5.3 binds.
 import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
-import type { SubagentStatus, ToolCategory } from './rows';
+import type { Cell, SubagentStatus, ToolCategory } from './rows';
 import { MCP_TOOL } from './classify';
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
@@ -198,6 +198,17 @@ export const liveThinkingLabel = (elapsedMs: number, effort: string | null) => `
 // thinking intensity, `Tn` at :521172-521179, which colours its thinking text toward the theme's warning by `pC`'s
 // eighths, :655065-655068, through `Do` at :521347 and the colour at :521357).
 export const thinkingWarmth = (elapsedMs: number) => Math.round(Math.min(Math.max((elapsedMs - 10_000) / 10_000, 0), 1) * 8) / 8;
+
+// UX wave U2 (O-29; the U2a document, Interfaces §E and Reported 2; l4-approvals-04's words, which U1b's row reads from
+// here): what a call reads while it waits for the person's permission. A shell call, its command's first line in code
+// marks; a file change, the file's name; any other call, its tool's name (an MCP tool's `{server} · {tool}`).
+export function waitingLabel(cell: Cell): string {
+  const head = 'Waiting for approval: ';
+  if (cell.detail.kind === 'shell') return `${head}\`${cell.detail.command.trim().split(/\r?\n/, 1)[0]}\``;
+  if (cell.detail.kind === 'edit') return head + baseName(cell.detail.filePath);
+  const mcp = MCP_TOOL.exec(cell.toolName);
+  return head + (mcp ? `${mcp[1]} · ${mcp[2]}` : cell.toolName);
+}
 
 export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flagged: 'Auto mode · reviewed · not flagged', flagged: 'Auto mode · flagged', not_evaluated: 'Auto mode · not reviewed' } as const;
 
