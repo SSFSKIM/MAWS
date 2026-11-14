@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { WorktreeStatus } from '@shared/sessions/worktree';
-import { project, record, status } from '../../../../test/support/builders';
+import { project, record, remoteRow, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
@@ -12,6 +12,7 @@ import { REMOTE_UNAVAILABLE } from '@shared/ipc/remote-unavailable';
 import type { OrgKey } from '@shared/machine/org-key';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
+import type { OrgProjects } from '../stores/registry';
 import { REPO, resetSetupStore } from '../test-support/setup-intents';
 import { resetShellStores } from '../test-support/shell-stores';
 import { closeDialog, openDialog, useDialogs } from './dialogs';
@@ -405,6 +406,41 @@ describe('dialogs', () => {
     } finally {
       useSessions.setState({ listedMachines: new Set() });
     }
+  });
+
+  // ticket 644: a row's archived sessions are the ones the sidebar files under it: another machine's record by its listing,
+  // though the registry places its project on that machine
+  describe('another machine’s archived session at a listed address, its project a registry location there', () => {
+    const ID = '11111111-2222-4333-8444-555555555555';
+    const KEY = 'remote:example.org/app' as OrgKey;
+    const registry: OrgProjects = {
+      projects: [{ id: ID, name: 'app', hub: true, renamable: true, locations: [{ machine: OTHER_MACHINE, pid: 'app', path: '/srv/app', key: KEY, name: 'app', source: 'remote', acts: true }] }],
+      keys: { [ID]: KEY }, moved: {}, removals: [], seen: {},
+    };
+    const b = addressOf(OTHER_MACHINE, BARE_IDLE1);
+    const stage = (orgKey: OrgKey | null) => {
+      withMain({ 'session.list': () => ({ sessions: [record(BARE_IDLE1, { projectId: 'app' as ProjectId, archived: true, title: { text: 'Archived on B', source: 'user' } })], revision: 1 }) });
+      useSessions.getState().applyRegistry(registry, TEST_MACHINE);
+      useSessions.setState({ listed: new Map([[b, { ...remoteRow(OTHER_MACHINE, BARE_IDLE1, { orgKey, project: orgKey === null ? null : ID }), appId: b }]]) });
+      render(<SessionDialogs />);
+    };
+    const shown = (dialog: HTMLElement) => within(dialog).queryAllByRole('listitem').map((li) => li.getAttribute('aria-label'));
+
+    it('lists it under its machine’s row when its listing’s key is none of the key table’s', async () => {
+      stage(null);
+      act(() => openDialog({ kind: 'archived', projectId: null, machine: OTHER_MACHINE }));
+      const dialog = await screen.findByRole('dialog', { name: `Archived sessions · ${OTHER_MACHINE}` });
+      await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull());
+      expect(shown(dialog)).toEqual(['Archived on B']);
+    });
+
+    it('lists it under the registry project’s row when its listing and the registry agree on the key', async () => {
+      stage(KEY);
+      act(() => openDialog({ kind: 'archived', projectId: addressOf(OTHER_MACHINE, 'app' as ProjectId) }));
+      const dialog = await screen.findByRole('dialog', { name: 'Archived sessions · app' });
+      await waitFor(() => expect(within(dialog).queryByText('Loading…')).toBeNull());
+      expect(shown(dialog)).toEqual(['Archived on B']);
+    });
   });
 
   // W11 (I5): the projects removed from the sidebar, each shown again by adding its directory
