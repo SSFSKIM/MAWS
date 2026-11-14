@@ -101,7 +101,8 @@ describe('group state machine', () => {
     expect(list.filter((row) => row.kind === 'group').map((row) => (row as Extract<Row, { kind: 'group' }>).cells.length)).toEqual([2, 2, 2, 2]);
   });
 
-  it('thinking blocks become cells inside the open group and never start one; a thinking-only group is a thinking row', () => {
+  // UX wave U2 (decisions 4 and 19): a thought after a run's last call is that run's, and the run's id is its first call's
+  it('thinking blocks become cells inside the open group, the one after its last call included; a thinking-only group is a thinking row', () => {
     const b = builder();
     b.turn('u1');
     b.thinking('m1', 0, 'Plan first');
@@ -114,12 +115,18 @@ describe('group state machine', () => {
     b.text('m3', 1, 'Done');
     b.end(['u1']);
     const list = rows(b.events);
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'thinking', 'assistant_text']);
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'group', 'assistant_text']);
     const g = group(list);
-    expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2']);
-    expect(g.id).toBe('group:cell:think:m1:0');
+    expect(g.cells.map((c) => c.id)).toEqual(['cell:think:m1:0', 'cell:t1', 'cell:think:m2:0', 'cell:t2', 'cell:think:m3:0']);
+    expect(g.id).toBe('group:cell:t1');
     expect(g.cells[0].detail.kind).toBe('thinking');
-    expect(find(list, 'thinking')).toMatchObject({ id: rowId.think('m3' as never, 0), text: 'Finally', live: false });
+    expect(g.cells.at(-1)?.detail).toMatchObject({ kind: 'thinking', text: 'Finally' });
+    const alone = builder();
+    alone.turn('u1');
+    alone.thinking('m1', 0, 'Only thinking');
+    alone.text('m1', 1, 'Done');
+    alone.end(['u1']);
+    expect(find(rows(alone.events), 'thinking')).toMatchObject({ id: rowId.think('m1' as never, 0), text: 'Only thinking', live: false });
   });
 
   it('a completed group with exactly one non-hidden cell unwraps to a standalone cell, with its thinking as a row before it', () => {

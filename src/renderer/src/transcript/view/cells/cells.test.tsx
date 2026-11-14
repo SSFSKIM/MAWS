@@ -286,15 +286,22 @@ describe('image, thinking and generic detail', () => {
     expect(generic.cell.textContent).toContain('type A = string');
   });
 
-  it('a thinking cell inside a group discloses its text', async () => {
-    const { cell } = await expandedCell((b) => {
-      b.thinking('m1', 0, 'Look at the drag handler first.');
-      b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
-      b.result('t1', 'a', { structured: BASH_RESULT('a') });
-      b.toolUse('t2', 'Bash', { command: 'pwd' });
-      b.result('t2', '/', { structured: BASH_RESULT('/') });
-    }, 'cell:think:m1:0');
-    expect(cell.textContent).toContain('Look at the drag handler first.');
+  // UX wave U2 (O-27): a thought inside a run is no cell row; the opened run draws it as a thought line (run-row.test.tsx)
+  it('a thought inside a run has no cell row: it discloses its text by its thought line', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.emit('assistant.block.complete', { messageUuid: 'm1-u0' as never, apiMessageId: 'm1' as never, blockIndex: 0, block: { type: 'thinking', thinking: 'Look at the drag handler first.', signature: '' }, model: 'claude-test', supersedes: [], aborted: false, userMessageUuids: [], thinkingDurationMs: 12_000 });
+    b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    b.result('t2', '/', { structured: BASH_RESULT('/') });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key);
+    const view = renderRow(rowHolding(store.rows(), 'cell:t1'), { storeKey: store.key });
+    expect(view.container.querySelector('[data-cell-id="cell:think:m1:0"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Thought for 12s' }));
+    expect(view.container.querySelector('.transcript-thinking-text')?.textContent).toBe('Look at the drag handler first.');
   });
 });
 
