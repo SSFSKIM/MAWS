@@ -1,7 +1,7 @@
 // The local service over a fake read runner, a fake status and a fake mutating runner: the argv of every mutation, the
 // trust gate's environment, the per-repository chain, the fresh-status rule and the watcher refresh. The real-repository
 // behaviour (hooks, the index on disk) is service.git.test.ts's.
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import fs, { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -665,6 +665,35 @@ describe('scm service', () => {
       await expect(service().stage({ appSessionId: ID, paths: ['a.txt'] }, refuse)).rejects.toThrow('refused by the guard');
       expect(read).not.toHaveBeenCalled();
       expect(mutate).not.toHaveBeenCalled();
+    });
+
+    // The branch review (finding 5): a mutation takes its place in its checkout's queue at the call and is admitted there,
+    // so a Stage whose folder admission answers last still runs before the Commit asked after it.
+    it("runs Stage then Commit in the order they were asked when Stage's folder admission answers last", async () => {
+      // filed in a worktree, the agent back in the launch checkout: not away, and the folder is admitted by reading git's files
+      view.putRecord(sessionRecord(ID, { directory: wt, worktree: { path: wt, branch: 'wt' }, launchFolder: repo.root, agentFolder: { checkout: repo.root, cwd: repo.root, branch: 'main', linked: false } }));
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      const realpath = fs.promises.realpath;
+      let holding = true; // the first realpath of the folder, which is Stage's admission
+      const spy = vi.spyOn(fs.promises, 'realpath').mockImplementation((async (path: string, options?: unknown) => {
+        if (holding && path === repo.root) {
+          holding = false;
+          await held;
+        }
+        return realpath(path, options as never);
+      }) as typeof realpath);
+      try {
+        const scm = service();
+        const stage = scm.stage({ appSessionId: ID, paths: ['a.txt'] });
+        const commit = scm.commit({ appSessionId: ID, message: 'x', noVerify: false });
+        await new Promise((resolve) => setTimeout(resolve, 100)); // long enough for the Commit to run if nothing held it
+        release();
+        expect(await Promise.all([stage, commit])).toMatchObject([{ ok: true }, { ok: true }]);
+        expect(mutate.mock.calls.map(([, args]) => args[0])).toEqual(['add', 'commit']);
+      } finally {
+        spy.mockRestore();
+      }
     });
 
     it('acts again once the agent is back in the launch folder', async () => {
