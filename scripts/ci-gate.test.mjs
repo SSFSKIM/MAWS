@@ -577,3 +577,61 @@ test('a budget spent past the bound while looking for the run keeps the ref, sin
   assert.match(result.stdout, keptLine);
   assert.equal(result.refs.length, 1);
 });
+
+// Mini copies: the e2e groups the call asks for whose specs reach a changed path under e2e/ go in `MiniCopy:` trailers,
+// which the plan reads; --no-mini-copy writes `none` with its reason instead.
+const copyTree = {
+  'package.json': JSON.stringify({ scripts: { e2e: 'playwright test', 'e2e:one': 'playwright test e2e/one.spec.ts', 'e2e:two': 'playwright test e2e/two.spec.ts', 'e2e:three': 'playwright test e2e/three.spec.ts' } }),
+  'playwright.config.ts': "export default { testDir: 'e2e' };",
+  'e2e/one.spec.ts': "import './support/scene';",
+  'e2e/two.spec.ts': "import '../src/endpoint';",
+  'e2e/three.spec.ts': "import './support/scene';",
+  'e2e/support/scene.ts': 'export const scene = 1;',
+  'src/endpoint.ts': 'export const endpoint = 1;',
+};
+const copiesOf = (message) => message.split('\n').filter((line) => line.startsWith('MiniCopy:'));
+
+test('a change under e2e/ puts a MiniCopy: trailer on each asked-for group whose specs reach it, and a change elsewhere none', () => {
+  const edited = gate(['--gates', 'static,e2e:one,e2e:two', '--peer', 'none'], {
+    base: copyTree,
+    change(tree) { writeFileSync(join(tree, 'e2e/support/scene.ts'), 'export const scene = 2;'); writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); },
+  });
+  assert.equal(edited.refs.length, 1, edited.stdout + edited.stderr);
+  // three reaches the edit too, but the call did not ask for it; two reaches only src/.
+  assert.deepEqual(copiesOf(edited.message), ['MiniCopy: one e2e/support/scene.ts']);
+  assert.match(edited.stdout, /^ci-gate: mini copy: e2e:one e2e\/support\/scene\.ts$/m);
+  const elsewhere = gate(['--gates', 'e2e:two', '--peer', 'none'], { base: copyTree, change(tree) { writeFileSync(join(tree, 'src/endpoint.ts'), 'export const endpoint = 2;'); } });
+  assert.deepEqual(copiesOf(elsewhere.message), []);
+  // Without a merge base nothing is copied, and the run's summary is told why.
+  const unreadable = gate(['--gates', 'e2e:one', '--peer', 'none']);
+  assert.deepEqual(copiesOf(unreadable.message), []);
+  assert.match(unreadable.message, /^E2E-Coverage: note: mini copies not computed: /m);
+});
+
+test('--no-mini-copy writes MiniCopy: none with its reason, computes nothing, and refuses a reason a relaunch line could not carry', () => {
+  const result = gate(['--gates', 'e2e:one', '--peer', 'none', '--no-mini-copy', 'copies stand on 0123abcd'], {
+    base: copyTree,
+    change(tree) { writeFileSync(join(tree, 'e2e/support/scene.ts'), 'export const scene = 2;'); },
+  });
+  assert.deepEqual(copiesOf(result.message), ['MiniCopy: none (copies stand on 0123abcd)']);
+  assert.match(result.stdout, /^ci-gate: no mini copies: copies stand on 0123abcd$/m);
+  assert.doesNotMatch(result.stdout, /^ci-gate: mini copy:/m);
+  assert.match(planOf({ HEAD_MESSAGE: `${result.message}\nRunner: macos` }, { e2e: 'x', 'e2e:one': 'x' }).summary, /\nMini copies: none \(copies stand on 0123abcd\)\.\n/);
+  for (const reason of ["it's done", 'a; b', 'a\nb']) {
+    const refused = gate(['--gates', 'e2e:one', '--no-mini-copy', reason]);
+    assert.equal(refused.status, 2, reason);
+    assert.match(refused.stderr, /^ci-gate: --no-mini-copy takes a reason of /m, reason);
+    assert.deepEqual(refused.refs, [], reason);
+  }
+});
+
+test("the alert refusal's push-anyway line quotes each argument, so a reason's spaces and its # survive a paste", () => {
+  const result = gate(['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd'], { alerts: true });
+  assert.equal(result.status, 2, result.stdout + result.stderr);
+  const line = /^ci-gate: to push anyway, for an alert left open by mistake: MAWS_GATE_IGNORE_ALERTS=1 scripts\/ci-gate\.sh (.*)$/m.exec(result.stderr)?.[1];
+  assert.ok(line, result.stderr);
+  // The line's words, as a shell reads them back: the call's own arguments, then the peer as resolved.
+  const words = execFileSync('bash', ['-c', `set -- ${line}; printf '%s\\n' "$@"`], { encoding: 'utf8' }).trimEnd().split('\n');
+  assert.deepEqual(words.slice(1, 9), ['--gates', 'e2e:document-app', '--runner', 'macos', '--peer', 'none', '--no-mini-copy', '#copies stand on 0123abcd']);
+  assert.deepEqual(words.slice(-2), ['--peer', 'none']);
+});
