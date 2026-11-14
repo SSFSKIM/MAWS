@@ -35,10 +35,15 @@ Out: Windows, Essential and Signal as wholes. Kept, in the owner's words where t
   beside its row for hover or focus.
 - **A suggestion to try:** "use tool use parts, tool use blocks and more, to liquid glass too."
 
+Answers the owner gave after this brief was first written (2026-11-14): the settings reading above is confirmed;
+a waiting approval is answered Quiet's way in all three syntheses (a capsule of glyphs at the top right, a card from
+the waiting sidebar row); the owner uses both colour schemes equally; and of the right column: "don't worry too
+much because what's on main after ux-wave is what we'll use anyway. Only note is to make it have sort of separate
+Liquid Glass component floating feeling", so its content is plain and only its container is judged.
+
 Not judged by the owner, so yours to decide and to make easy to compare: where a waiting approval is answered, the
 user's message, diff and running-command blocks, the usage mark, what the composer carries, the dark scheme's
-ground. The owner has been asked about the approval, the settings folding, the right column and which scheme they
-use; if answers arrive while you build, the dispatcher sends them to you.
+ground.
 
 ## What round 1 found, so you do not find it again
 
