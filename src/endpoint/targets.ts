@@ -490,7 +490,9 @@ export class CheckoutBounds {
  * folder and the working folder `record` names through one of its facts (the selector's `launch` and `path` where they
  * are not its directory or its worktree's path), each with whether it is admitted for this request: the work tree git
  * finds for its realpath (`git.worktree.list`'s `toplevel` there) is the path of one of the work trees the machine lists
- * at the record's directory, in the same common git directory, as the service names paths (realpaths, in NFC). The files
+ * at the record's directory, in the same common git directory: the directory a listed path names, found by its NFC
+ * spelling (the service names paths as realpaths in NFC where that spelling is git's directory) and admitted by its
+ * device and inode, so a sibling spelled in the other Unicode form is not the registered worktree. The files
  * service reads the same predicate from git's own files (src/services/files/allowlist.ts' `admittedFolder`); one table of
  * cases holds both. Nothing is kept: two calls of the machine per request while a record carries a fact, none otherwise.
  * `real` null: not admitted (gone, unanswered, not listed); its `toplevel` and `main` are then empty.
@@ -509,14 +511,19 @@ async function admittedFacts(record: unknown, dispatch: EndpointServices['dispat
       const real = await realpathOf(folder[which]);
       if (real === null || listed === null) return refused;
       const at = await worktreesAt(real, dispatch);
-      if (at === null || at.commonDir !== listed.commonDir || !listed.paths.includes(at.toplevel.normalize('NFC'))) return refused;
+      if (at === null || at.commonDir !== listed.commonDir) return refused;
       const toplevel = ancestorsOf(real).find((path) => path.normalize('NFC') === at.toplevel.normalize('NFC'));
-      return toplevel === undefined ? refused : { which, real, toplevel, main: at.main };
+      if (toplevel === undefined) return refused;
+      // the folded spelling finds a listed work tree; only the directory it names admits (a sibling spelled in the other
+      // Unicode form, holding a copy of a registered worktree's pointer, is another directory: the branch review's P1)
+      const candidates = listed.paths.filter((path) => path.normalize('NFC') === at.toplevel.normalize('NFC'));
+      const member = (await Promise.all(candidates.map((path) => sameDirectory(path, toplevel)))).includes(true);
+      return member ? { which, real, toplevel, main: at.main } : refused;
     }),
   );
 }
 
-/** What the machine's `git.worktree.list` answers at `real` (a realpath): its top level, main checkout, common dir and work trees (NFC), or null. */
+/** What the machine's `git.worktree.list` answers at `real` (a realpath): its top level, main checkout, common dir and work trees (as the service names them), or null. */
 async function worktreesAt(real: string, dispatch: EndpointServices['dispatch']): Promise<{ toplevel: string; main: string; commonDir: string; paths: string[] } | null> {
   const folded = real.normalize('NFC'); // the service answers for the NFC spelling (repositoryOf, round 4)
   if (folded !== real && !(await sameDirectory(real, folded))) return null;
@@ -529,7 +536,7 @@ async function worktreesAt(real: string, dispatch: EndpointServices['dispatch'])
   if (typeof toplevel !== 'string' || !isAbsolute(toplevel) || typeof main !== 'string' || typeof commonDir !== 'string' || !Array.isArray(worktrees)) return null;
   const paths = worktrees.flatMap((entry) => {
     const path = field(entry, 'path');
-    return typeof path === 'string' ? [path.normalize('NFC')] : [];
+    return typeof path === 'string' ? [path] : [];
   });
   return { toplevel, main, commonDir, paths };
 }

@@ -8,7 +8,7 @@
 //
 // Every command takes a repository root and normalises it to the main worktree's root (a linked worktree's path works
 // too); every path is matched against `git worktree list` as an NFC realpath on both sides.
-import { lstat } from 'node:fs/promises';
+import { lstat, realpath, stat } from 'node:fs/promises';
 // C12 start
 import { appendFile, mkdir, readFile } from 'node:fs/promises';
 // C12 end
@@ -22,6 +22,7 @@ import type {
   GitWorktreeRemoveInput,
 } from '@shared/ipc/schema/git';
 import { validateWorktreeName, worktreeDirName, type BranchStatus, type WorktreeInfo, type WorktreeStatus } from '@shared/sessions/worktree';
+import { normalizePath } from '@shared/sessions/trust';
 import { canonicalPath, occupancyOf, type HolderDeps } from '../sessions/holders';
 import { parseStatus } from './porcelain';
 import { GitCommandError, type GitRun } from './runner';
@@ -292,7 +293,8 @@ export class WorktreeService {
   // `worktree list --porcelain -z`: NUL-terminated attribute lines, an empty one between stanzas; the first is the main
   // worktree. The branch is what git says, never derived from the directory's name. When the git dir is separate from
   // the checkout (`git init --separate-git-dir`), git lists the main worktree at the git dir itself, having no pointer
-  // back to the checkout; that entry is the root when the root is known to be the main checkout.
+  // back to the checkout; that entry is the root when the root is known to be the main checkout. Each path is named as
+  // `listedPath` names it.
   private async entries(repo: Repo): Promise<WorktreeInfo[]> {
     const { root } = repo;
     const out = await this.git(root, ['worktree', 'list', '--porcelain', '-z']);
@@ -310,7 +312,7 @@ export class WorktreeService {
     const managedPrefix = join(root, '.claude', 'worktrees') + '/';
     return Promise.all(
       stanzas.map(async (stanza, i) => {
-        const listed = await canonicalPath(stanza.get('worktree') ?? '');
+        const listed = await listedPath(stanza.get('worktree') ?? '');
         const path = i === 0 && repo.isMain && !stanza.has('bare') && listed === repo.commonDir ? root : listed;
         const ref = stanza.get('branch');
         return {
@@ -384,6 +386,28 @@ export class WorktreeService {
   private git(directory: string, args: string[]): Promise<string> {
     return this.deps.git(directory, args);
   }
+}
+
+// A path `git worktree list` names, as the service names paths (`canonicalPath`: its realpath, in NFC) where that NFC
+// spelling is git's own directory; where it is another directory or none (a filesystem that keeps `café` composed and
+// decomposed apart, ext4), git's own spelling, realpathed, so the list never names a sibling spelled in the other form as
+// a registered worktree (the endpoint admits a folder by the directory a listed path names: src/endpoint/targets.ts, the
+// U8c-2 branch review's P1). A path gone is spelled as git spells it below its nearest folder that resolves.
+async function listedPath(path: string): Promise<string> {
+  const absolute = resolve(path);
+  const own = await realpath(absolute).catch(() => null);
+  if (own === null) {
+    const parent = dirname(absolute);
+    return parent === absolute ? normalizePath(absolute) : join(await listedPath(parent), basename(absolute));
+  }
+  const folded = normalizePath(own);
+  return folded === own || (await sameDirectory(own, folded)) ? folded : own;
+}
+
+// Whether `a` and `b` name one directory (its device and inode); false when either does not stat.
+async function sameDirectory(a: string, b: string): Promise<boolean> {
+  const [x, y] = await Promise.all([stat(a, { bigint: true }).catch(() => null), stat(b, { bigint: true }).catch(() => null)]);
+  return x !== null && y !== null && x.isDirectory() && x.dev === y.dev && x.ino === y.ino;
 }
 
 function processes(o: WorktreeStatus['occupancy']): number {
