@@ -270,6 +270,7 @@ export interface Cell {
   status: 'running' | 'done' | 'error' | 'denied' | 'stopped';
   label: string; // diagnostic/copy label (copy.ts)
   summary?: string; // optional engine summary; never replaces a denial diagnostic
+  moved?: true; // UX wave U4a (decision 33): the engine moved the call to the background (rec.moved)
   paths: string[]; // file chips; a merged read cell lists every path
   startedAt: string;
   endedAt: string | null;
