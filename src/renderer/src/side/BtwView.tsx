@@ -8,7 +8,10 @@
 // Retry on a session with no ready process start it first (`acquireSession(id, 'side')`, the field reading Starting…)
 // and then ask; a refused start says why and keeps the question; a terminal or job holding it, or an archive, disables
 // them with the reason. Continuing as a thread needs no process (a fork resumes from disk). Opening starts nothing.
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+// UX wave U4a (O-20): since a session's own `/btw` answers in its card (BtwCard.tsx), this view is a side thread's
+// questions under its thread view; the card asks, lists and draws its exchanges through the same hook and row
+// (`useSideAsk`, `Exchange`), with its own waiting line in place of the spinner.
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
 import { STARTS } from '../composer/submit/submit-state';
@@ -26,7 +29,9 @@ import { askSide, clearSide, promotable, refreshSide, retrySide, sidePaneOf, use
 const COPY = SIDE_COPY.btw;
 const SHOWN = 50; // the most recent exchanges kept on screen
 
-export function BtwView({ parent }: { parent: AppSessionId }) {
+// Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is the scroller
+// kept at its newest exchange.
+export function useSideAsk(parent: AppSessionId, log: RefObject<HTMLElement | null>) {
   const process = useSessions((s) => s.engine.get(parent)?.process ?? null);
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const driven = useDrivenAsk(parent); // P5 O9 M5
@@ -44,14 +49,13 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
   // P5 O7 M8: why Continue as a side thread and Clear are greyed for a session on another machine (lane-b/remote-unavailable.ts)
   const promoteUnavailable = useRemoteUnavailable(parent, 'side.thread.open');
   const clearUnavailable = useRemoteUnavailable(parent, 'side.question.clear');
-  const log = useRef<HTMLDivElement>(null);
 
   useEffect(() => void refreshSide(parent), [parent, process]);
   const shown = (exchanges ?? []).slice(-SHOWN);
   const last = shown.at(-1);
   useEffect(() => {
     if (log.current) log.current.scrollTop = log.current.scrollHeight; // the newest exchange in view
-  }, [shown.length, last?.state]);
+  }, [log, shown.length, last?.state]);
 
   // P2-A: the session started first when it has no ready process; null when it can be asked, else the words shown
   const started = async (): Promise<boolean> => {
@@ -90,6 +94,15 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
     if (result.ok) setQuestion('');
     else setRefusal(result.error);
   };
+  const canClear = !shown.every((e) => e.state === 'pending') && clearUnavailable === null;
+  const clear = () => void clearSide(parent);
+  return { shown, question, setQuestion, canAsk, ask, retry, onKeyDown, note, refusal, promoting, canPromote, promote, promoteUnavailable, canClear, clear, clearUnavailable };
+}
+
+export function BtwView({ parent }: { parent: AppSessionId }) {
+  const log = useRef<HTMLDivElement>(null);
+  const side = useSideAsk(parent, log);
+  const { shown, question, setQuestion, canAsk, note, refusal } = side;
 
   return (
     <div data-side-btw-view={parent} className="flex h-full min-h-0 flex-col">
@@ -99,7 +112,7 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
         ) : (
           <ol className="m-0 flex list-none flex-col gap-4 p-0">
             {shown.map((exchange) => (
-              <Exchange key={exchange.id} exchange={exchange} canRetry={canAsk} onRetry={() => void retry(exchange)} />
+              <Exchange key={exchange.id} exchange={exchange} canRetry={canAsk} onRetry={() => void side.retry(exchange)} />
             ))}
           </ol>
         )}
@@ -118,36 +131,46 @@ export function BtwView({ parent }: { parent: AppSessionId }) {
             rows={2}
             value={question}
             onChange={(event) => setQuestion(event.target.value)}
-            onKeyDown={onKeyDown}
+            onKeyDown={side.onKeyDown}
             className={`${FIELD} min-h-[52px] resize-none leading-snug placeholder:text-fg-faint`}
           />
-          <button type="button" className={PRIMARY} disabled={!canAsk || question.trim() === ''} onClick={() => void ask()}>
+          <button type="button" className={PRIMARY} disabled={!canAsk || question.trim() === ''} onClick={() => void side.ask()}>
             {COPY.ask}
           </button>
         </div>
-        <div className="flex items-center justify-between gap-2">
-          <button type="button" className={`${QUIET} text-ui-sm`} disabled={shown.every((e) => e.state === 'pending') || clearUnavailable !== null} title={clearUnavailable ?? undefined} onClick={() => void clearSide(parent)}>
-            {COPY.clear}
-          </button>
-          <button type="button" className={`${SECONDARY} text-ui-sm`} disabled={!canPromote} title={promoteUnavailable ?? undefined} onClick={() => void promote()}>
-            {promoting ? COPY.promoting : COPY.promote}
-          </button>
-        </div>
+        <SideActions side={side} />
       </div>
     </div>
   );
 }
 
-function Exchange({ exchange, canRetry, onRetry }: { exchange: SideExchange; canRetry: boolean; onRetry(): void }) {
+// Clear and "Continue as a side thread", the view's and the card's.
+export function SideActions({ side }: { side: ReturnType<typeof useSideAsk> }) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <button type="button" className={`${QUIET} text-ui-sm`} disabled={!side.canClear} title={side.clearUnavailable ?? undefined} onClick={side.clear}>
+        {COPY.clear}
+      </button>
+      <button type="button" className={`${SECONDARY} text-ui-sm`} disabled={!side.canPromote} title={side.promoteUnavailable ?? undefined} onClick={() => void side.promote()}>
+        {side.promoting ? COPY.promoting : COPY.promote}
+      </button>
+    </div>
+  );
+}
+
+// One exchange: the question, then its pending line (`waiting`, the card's; the view's spinner and "Answering…" otherwise),
+// its answer, or its failure with Retry.
+export function Exchange({ exchange, canRetry, onRetry, waiting }: { exchange: SideExchange; canRetry: boolean; onRetry(): void; waiting?: ReactNode }) {
   return (
     <li data-side-exchange={exchange.state} className="flex min-w-0 flex-col gap-2">
       <p className="m-0 max-w-[90%] self-end rounded-lg bg-(--bg-user-message) px-3 py-1.5 text-ui break-words whitespace-pre-wrap text-fg">{exchange.question}</p>
-      {exchange.state === 'pending' && (
-        <p role="status" className="m-0 flex items-center gap-2 text-ui-sm text-fg-muted">
-          <span aria-hidden className="size-3 shrink-0 animate-spin rounded-full border border-border-strong border-t-accent motion-reduce:animate-none" />
-          {COPY.answering}
-        </p>
-      )}
+      {exchange.state === 'pending' &&
+        (waiting ?? (
+          <p role="status" className="m-0 flex items-center gap-2 text-ui-sm text-fg-muted">
+            <span aria-hidden className="size-3 shrink-0 animate-spin rounded-full border border-border-strong border-t-accent motion-reduce:animate-none" />
+            {COPY.answering}
+          </p>
+        ))}
       {/* P5 O9: a terminal session's question the bridge may not have taken: pending still, its doubt said, Retry offered */}
       {exchange.state === 'pending' && exchange.error !== null && (
         <div data-side-uncertain="" className="flex flex-wrap items-center gap-2 text-ui-sm text-warning">

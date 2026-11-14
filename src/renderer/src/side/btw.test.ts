@@ -246,7 +246,7 @@ describe('the side-question store', () => {
   it('"Continue as a side thread" opens a thread from the answered exchanges and the text typed beside them, and the pane turns to it', async () => {
     const CHILD = 'b2222222-2222-4222-8222-222222222222' as AppSessionId;
     useSidePane.setState({
-      panes: new Map([[A, { view: { kind: 'btw' }, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
+      panes: new Map([[A, { view: null /* UX wave U4a: asked in the session's card */, shownChild: null, inlineQuestions: false, exchanges: [entry({ state: 'answered', response: 'ZEBRA', question: 'Word?' }), entry({ id: 'op-2', state: 'failed', error: 'x' }), entry({ id: 'op-3', state: 'pending' }), entry({ id: 'op-4', state: 'answered', response: null })] }]]),
     });
     fake = fakeClient({ 'side.thread.open': { status: 'starting', appSessionId: CHILD }, 'session.intent.get': null });
     window.maws = fake.client as unknown as PreloadBridge;
