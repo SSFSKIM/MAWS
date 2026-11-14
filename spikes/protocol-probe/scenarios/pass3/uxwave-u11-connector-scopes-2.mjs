@@ -7,8 +7,8 @@
 //   cs-proj (the repository's .mcp.json), cs-user and cs-oauth (`claude mcp add --scope user`, stdio and HTTP),
 //   cs-local (`--scope local`), plugin:cs-plug:cs-pserver and plugin:cs-plug:cs-poauth (plugin cs-plug, user scope).
 // The HTTP stub accepts only the token seeded in the scratch credential store (as a completed sign-in leaves one) and
-// counts every request with its time; the stdio stub appends one line per start, per JSON-RPC method and per close to
-// a log, so a case can say whether and when a server was started. Folders: the scratch repository (root), a linked
+// counts every request with its time; the stdio stub appends one line per start, per JSON-RPC method, per signal and
+// per stdin close to a log, so a case can say whether, when and how long a server ran. Folders: the scratch repository (root), a linked
 // worktree of it beside it (`git worktree add`), and a subfolder `sub`. Every session is MAWS's launch
 // (uxwave-common-arrivals.mjs mawsLaunch). Only the toggle cases with a turn call a model (haiku, one word).
 // Cases, by check:
@@ -19,7 +19,8 @@
 //   4  two-live       two live sessions in the root; each sent its own toggles
 //   5  place-live     live sessions in the worktree and the subfolder while the root's session switches; then new ones
 //   9  add-json       `claude mcp add-json` for http, sse and stdio at user, local and project scope; refused names
-//   11 term-mcp       a terminal session (the interactive engine under tmux) typing /mcp disable and /mcp enable
+//   11 term-*         a terminal session (the interactive engine under tmux) typing /mcp disable and /mcp enable, in the
+//                     root, in the worktree, and from a list that already holds two names
 // Written: the journals fixtures/uxwave/<tag>-<case>[-<step>].jsonl (trimmed: stream events dropped, long arrays
 // reduced to their count and the probe's own names) and the record fixtures/uxwave/<tag>.ndjson (one case a line).
 import {mawsLaunch,turn,delay,BIN,ENGINE_VERSION,FIXTURES,sys,rowsOf} from './uxwave-common-arrivals.mjs';
@@ -39,7 +40,8 @@ const MCPJSON=join(REPO,'.mcp.json'), AUTH_CACHE=join(HOME,'.claude/mcp-needs-au
 const MARKET=join(ROOT,'cs-market'), SERVER=join(ROOT,'cs-mcp.mjs'), STDIO_LOG=join(ROOT,'stdio-log.ndjson');
 const PLUGIN='cs-plug@cs-market', P_STDIO='plugin:cs-plug:cs-pserver', P_HTTP='plugin:cs-plug:cs-poauth';
 const NAMES=['cs-proj','cs-user','cs-oauth','cs-local',P_STDIO,P_HTTP];
-let INSTALL='';   // the plugin's installed folder, read from installed_plugins.json after install
+let INSTALL='';
+let REPORTED={};  // each server's config as allow-none's mcp_status reports it (the engine's expansion of the plugin's)   // the plugin's installed folder, read from installed_plugins.json after install
 const anonStr=s=>{if(typeof s!=='string')return s;if(INSTALL)s=s.split(INSTALL).join('<plugin-install>');return s.split(WT).join('<worktree>').split(SUB).join('<root>/sub').split(HOME).join('<home>').split(REPO).join('<root>').split(ROOT).join('<scratch>');};
 let BASE='';
 const anon=s=>{s=anonStr(s);return BASE&&typeof s==='string'?s.split(BASE).join('<base>'):s;};
@@ -53,7 +55,8 @@ const git=(...a)=>execFileSync('git',['-c','user.name=Probe','-c','user.email=pr
 const SERVER_JS=`import {createInterface} from 'node:readline';import {appendFileSync} from 'node:fs';
 const name=process.argv[2], log=ev=>appendFileSync(${JSON.stringify(STDIO_LOG)},JSON.stringify({t:Date.now(),name,pid:process.pid,ev})+'\\n');
 const out=m=>process.stdout.write(JSON.stringify(m)+'\\n');log('start');
-const rl=createInterface({input:process.stdin});rl.on('close',()=>{log('close');process.exit(0);});
+const rl=createInterface({input:process.stdin});rl.on('close',()=>{log('stdin-closed');process.exit(0);});
+for(const sig of ['SIGTERM','SIGINT','SIGHUP'])process.on(sig,()=>{log(sig);process.exit(0);});
 rl.on('line',l=>{let m;try{m=JSON.parse(l);}catch{return;}if(m.method)log(m.method);
  if(m.method==='initialize')out({jsonrpc:'2.0',id:m.id,result:{protocolVersion:m.params?.protocolVersion??'2025-06-18',capabilities:{tools:{}},serverInfo:{name,version:'0.0.1'}}});
  else if(m.method==='tools/list')out({jsonrpc:'2.0',id:m.id,result:{tools:[{name:'ping',description:'Answers pong.',inputSchema:{type:'object',properties:{}}}]}});
@@ -87,7 +90,7 @@ function httpStub(){
   m=path.match(/^\/open\/([a-z0-9-]+)$/);
   if(m){if(req.method!=='POST'){res.writeHead(405);return res.end();}if(!rpc||rpc.id===undefined){res.writeHead(202);return res.end();}return json(200,rpcAnswer(rpc,m[1]));}
   m=path.match(/^\/sse\/([a-z0-9-]+)$/);
-  if(m&&req.method==='GET'){const sid=randomUUID();res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache',connection:'keep-alive'});res.write(`event: endpoint\ndata: /sse/${m[1]}/messages?sid=${sid}\n\n`);sseStreams.set(sid,res);req.on('close',()=>sseStreams.delete(sid));return;}
+  if(m&&req.method==='GET'){const sid=randomUUID();res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-cache',connection:'keep-alive'});res.write(`event: endpoint\ndata: /sse/${m[1]}/messages?sid=${sid}\n\n`);sseStreams.set(sid,res);res.on('close',()=>sseStreams.delete(sid));return;}
   m=path.match(/^\/sse\/([a-z0-9-]+)\/messages$/);
   if(m&&req.method==='POST'){const s=sseStreams.get(u.searchParams.get('sid'));res.writeHead(s?202:404);res.end();if(s&&rpc&&rpc.id!==undefined)s.write(`event: message\ndata: ${JSON.stringify(rpcAnswer(rpc,m[1]))}\n\n`);return;}
   const pr=path.match(/^\/.well-known\/oauth-protected-resource\/mcp\/([a-z-]+)$/);
@@ -140,8 +143,11 @@ function restore(keys=Object.keys(FILES)){for(const k of keys){const f=FILES[k];
 
 // What the engine holds in .claude.json for each place: the disabled list and the servers defined there.
 const places=()=>{const d=readJson(GLOBAL)??{};return deep(Object.fromEntries(Object.entries(d.projects??{}).filter(([,v])=>v.disabledMcpServers||v.enabledMcpServers||Object.keys(v.mcpServers??{}).length).map(([k,v])=>[k,{disabledMcpServers:v.disabledMcpServers,enabledMcpServers:v.enabledMcpServers,mcpServers:v.mcpServers?Object.keys(v.mcpServers):undefined}])));};
+const listNow=(key='<root>')=>places()[key]?.disabledMcpServers??null;
 const mine=n=>typeof n==='string'&&/cs-|aj-/.test(n);
 const statusOf=r=>r?.error?{error:r.error}:Object.fromEntries((r?.response?.mcpServers??[]).filter(s=>mine(s.name)).map(s=>[s.name,`${s.status}${s.scope?' '+s.scope:''}${(s.tools??[]).length?' tools:'+s.tools.map(t=>t.name).join(','):''}${s.error?' error:'+anon(String(s.error)).slice(0,160):''}`]));
+const configsOf=r=>Object.fromEntries((r?.response?.mcpServers??[]).filter(s=>mine(s.name)).map(s=>[s.name,s.config??null]));
+const cmdOf=n=>{const c=REPORTED[n];if(!c?.command)throw new Error('no reported command for '+n+' (run allow-none first)');return [c.command,...(c.args??[])];};
 async function status(p){const r=await p.request('mcp_status',{},15000).catch(e=>({error:e.message}));return {seq:p.seq,servers:statusOf(r)};}
 async function settled(p,bound=45000){
  const t0=Date.now();
@@ -170,10 +176,19 @@ function shrink(v){
  if(typeof v==='string'&&v.length>4000)return v.slice(0,600)+`…[${v.length} chars]`;
  return v;
 }
+const PROBE_RE=/cs-|aj-|mcp_toggle|mcp_status|mcpServers|disabledMcp/;
+function slim(frame){
+ const s=JSON.stringify(frame);
+ if(s.length>4000&&!PROBE_RE.test(s)){
+  if(frame.type==='control_response'&&frame.response&&typeof frame.response==='object'){const inner=frame.response.response;return {...frame,response:{...frame.response,response:inner&&typeof inner==='object'?{trimmedBytes:JSON.stringify(inner).length,keys:Object.keys(inner)}:inner}};}
+  if(frame.type==='control_request'&&frame.request&&typeof frame.request==='object')return {...frame,request:{subtype:frame.request.subtype,trimmedBytes:JSON.stringify(frame.request).length}};
+ }
+ return shrink(frame);
+}
 function trimJournal(file){
  if(!existsSync(file))return;
  const rows=readFileSync(file,'utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l)).filter(r=>r.frame?.type!=='stream_event');
- writeFileSync(file,rows.map(r=>redact(anon(JSON.stringify({...r,frame:shrink(r.frame)})))).join('\n')+'\n');
+ writeFileSync(file,rows.map(r=>redact(anon(JSON.stringify({...r,frame:slim(r.frame)})))).join('\n')+'\n');
 }
 const journals=[];
 async function launch(step,opts,body){
@@ -184,9 +199,9 @@ async function launch(step,opts,body){
 function debugLines(file){
  if(!existsSync(file))return {missing:true};
  const lines=readFileSync(file,'utf8').split('\n');
- const hit=lines.filter(l=>/Invalid entry|allowedMcpServers|deniedMcpServers|policy|blocked|allowlist|allow list/i.test(l)).map(l=>anon(l.replace(/^\S+\s+/,'')).slice(0,400));
+ const pick=re=>[...new Set(lines.filter(l=>re.test(l)&&!/CA certs/.test(l)).map(l=>anon(l.replace(/^\S+\s+/,'')).slice(0,400)))];
  rmSync(file);
- return {lines:lines.length,matched:[...new Set(hit)].slice(0,30)};
+ return {lines:lines.length,settings:pick(/Invalid entry|Invalid setting|allowedMcpServers|deniedMcpServers|policy|allowlist|allow list/i).slice(0,20),mcp:pick(/MCP|mcp/).filter(l=>/cs-|plugin:|allow|block|polic|skip/i.test(l)).slice(0,40)};
 }
 
 const record=[];
@@ -196,15 +211,18 @@ const settingsView=()=>deep(Object.fromEntries(Object.entries({user:USER_SETTING
 // Check 1: the allow list.
 const sN=n=>({serverName:n});
 const ALLOW=[
+ {name:'allow-none',what:'control: no allow list; mcp_status with each server\'s config as the engine reports it (what ${CLAUDE_PLUGIN_ROOT} expands to)',configs:true},
  {name:'allow-pname-only',what:'user allowedMcpServers naming only the plugin servers by engine name (plugin:cs-plug:...)',user:()=>[sN(P_STDIO),sN(P_HTTP)]},
  {name:'allow-pname',what:'user allowedMcpServers: the plugin servers by engine name, and cs-user (a valid name, the control)',user:()=>[sN(P_STDIO),sN(P_HTTP),sN('cs-user')]},
  {name:'allow-bare',what:'user allowedMcpServers: the plugin servers by bare name (cs-pserver, cs-poauth), and cs-user',user:()=>[sN('cs-pserver'),sN('cs-poauth'),sN('cs-user')]},
- {name:'allow-cmd',what:'user allowedMcpServers: serverCommand for cs-pserver with the folder the engine expands ${CLAUDE_PLUGIN_ROOT} to; serverName cs-user (stdio) and cs-oauth (http)',user:()=>[{serverCommand:['node',INSTALL+'/srv.mjs','cs-pserver']},sN('cs-user'),sN('cs-oauth')]},
+ {name:'allow-cmd',what:'user allowedMcpServers: serverCommand for cs-pserver as allow-none\'s mcp_status reports its command (the engine\'s expansion of ${CLAUDE_PLUGIN_ROOT}); serverName cs-user (stdio) and cs-oauth (http)',user:()=>[{serverCommand:cmdOf(P_STDIO)},sN('cs-user'),sN('cs-oauth')]},
+ {name:'allow-cmd-install',what:'user allowedMcpServers: serverCommand for cs-pserver with the plugin\'s installed folder (installed_plugins.json installPath) in place of ${CLAUDE_PLUGIN_ROOT}; serverName cs-user',user:()=>[{serverCommand:['node',INSTALL+'/srv.mjs','cs-pserver']},sN('cs-user')]},
  {name:'allow-cmd-var',what:'user allowedMcpServers: serverCommand for cs-pserver as its .mcp.json spells it (${CLAUDE_PLUGIN_ROOT}); serverName cs-user',user:()=>[{serverCommand:['node','${CLAUDE_PLUGIN_ROOT}/srv.mjs','cs-pserver']},sN('cs-user')]},
  {name:'allow-url',what:'user allowedMcpServers: serverUrl for cs-poauth; serverName cs-oauth (http) and cs-user (stdio)',user:()=>[{serverUrl:url('cs-poauth')},sN('cs-oauth'),sN('cs-user')]},
- {name:'allow-address-all',what:'user allowedMcpServers by address only: serverCommand for each of the four stdio servers (the plugin one expanded), serverUrl for both HTTP servers',user:()=>[...['cs-proj','cs-user','cs-local'].map(n=>({serverCommand:['node',SERVER,n]})),{serverCommand:['node',INSTALL+'/srv.mjs','cs-pserver']},{serverUrl:url('cs-oauth')},{serverUrl:url('cs-poauth')}]},
+ {name:'allow-address-all',what:'user allowedMcpServers by address only: serverCommand for each of the four stdio servers (as mcp_status reports them), serverUrl for both HTTP servers',user:()=>[...['cs-proj','cs-user','cs-local',P_STDIO].map(n=>({serverCommand:cmdOf(n)})),{serverUrl:url('cs-oauth')},{serverUrl:url('cs-poauth')}]},
  {name:'allow-flag',what:'allowedMcpServers [cs-user] in --settings alone',flag:()=>[sN('cs-user')]},
- {name:'allow-worktree',what:'a session in the linked worktree: user allowedMcpServers [cs-user]; the worktree\'s .claude/settings.local.json [cs-oauth]; the root\'s .claude/settings.local.json [cs-proj]',cwd:WT,user:()=>[sN('cs-user')],wtLocal:()=>[sN('cs-oauth')],local:()=>[sN('cs-proj')]},
+ {name:'allow-worktree',what:'a session in the linked worktree: user allowedMcpServers [cs-user]; the worktree\'s own .claude/settings.local.json [cs-oauth]',cwd:WT,user:()=>[sN('cs-user')],wtLocal:()=>[sN('cs-oauth')]},
+ {name:'allow-worktree-rootlocal',what:'a session in the linked worktree: user allowedMcpServers [cs-user]; the main root\'s .claude/settings.local.json [cs-proj] (the worktree has none)',cwd:WT,user:()=>[sN('cs-user')],local:()=>[sN('cs-proj')]},
 ];
 async function allowCase(c){
  restore();
@@ -215,7 +233,7 @@ async function allowCase(c){
  const flags=['--debug-file',dbg,...(c.flag?['--settings',JSON.stringify({dialogExpiry:'never',allowedMcpServers:c.flag()})]:[])];
  const row={case:c.name,check:1,what:c.what,cwd:c.cwd??REPO,settings:settingsView(),flagSettings:c.flag?c.flag():undefined,fixture:'fixtures/uxwave/'+TAG+'-'+c.name+'.jsonl'};
  const t0=Date.now();
- await launch(c.name,{cwd:c.cwd??REPO,flags},async p=>{row.status=await settled(p);});
+ await launch(c.name,{cwd:c.cwd??REPO,flags},async p=>{row.status=await settled(p);if(c.configs){row.configs=configsOf(await p.request('mcp_status',{},15000));REPORTED=row.configs;}});
  row.hits=hitsView(t0);row.stdio=stdioView(t0);
  row.debug=debugLines(dbg);
  const J=FIXTURES+TAG+'-'+c.name+'.jsonl';
@@ -233,11 +251,12 @@ async function toggleCases(){
   row.atStart=await settled(p);
   for(const n of NAMES){
    const ta=Date.now();
-   const off=await toggle(p,n,false);const sOff=await status(p);const lOff=places();
-   await delay(1500);const tb=Date.now();
-   const on=await toggle(p,n,true);const sOn=await status(p);const lOn=places();
-   await delay(1500);
-   row.steps.push({server:n,off:{...off,status:sOff.servers[n]??'absent',statusSeq:sOff.seq,list:lOff['<root>']?.disabledMcpServers??null,stdio:stdioView(ta,tb)[n.replace(/^plugin:cs-plug:/,'')]},on:{...on,status:sOn.servers[n]??'absent',statusSeq:sOn.seq,list:lOn['<root>']?.disabledMcpServers??null,stdio:stdioView(tb)[n.replace(/^plugin:cs-plug:/,'')]}});
+   const off=await toggle(p,n,false);const lOff=listNow();const sOff=await status(p);
+   await delay(1500);const lOff2=listNow();const tb=Date.now();
+   const on=await toggle(p,n,true);const lOn=listNow();await delay(1500);const sOn=await status(p);const lOn2=listNow();
+   await delay(500);const tc=Date.now();
+   const bare=n.replace(/^plugin:cs-plug:/,'');
+   row.steps.push({server:n,off:{...off,status:sOff.servers[n]??'absent',statusSeq:sOff.seq,listAtAnswer:lOff,listAfter1500ms:lOff2,stdio:stdioView(ta,tb)[bare],hits:hitsView(ta,tb)},on:{...on,status:sOn.servers[n]??'absent',statusSeq:sOn.seq,listAtAnswer:lOn,listAfter1500ms:lOn2,stdio:stdioView(tb,tc)[bare],hits:hitsView(tb,tc)}});
   }
   for(const n of NAMES)await toggle(p,n,false);
   row.allOff=await status(p);
@@ -250,7 +269,7 @@ async function toggleCases(){
  const t1=Date.now();
  const L=await launch('toggle-on-from-disabled',{},async p=>{
   r2.atStart=await settled(p);r2.hitsAtStart=hitsView(t1);r2.stdioAtStart=stdioView(t1);
-  for(const n of NAMES){const ta=Date.now();const on=await toggle(p,n,true);await delay(1500);const s=await status(p);r2.steps.push({...on,status:s.servers[n]??'absent',statusSeq:s.seq,list:places()['<root>']?.disabledMcpServers??null,hits:hitsView(ta),stdio:stdioView(ta)});}
+  for(const n of NAMES){const ta=Date.now();const on=await toggle(p,n,true);const l0=listNow();await delay(1500);const s=await status(p);r2.steps.push({...on,status:s.servers[n]??'absent',statusSeq:s.seq,listAtAnswer:l0,listAfter1500ms:listNow(),hits:hitsView(ta),stdio:stdioView(ta)});}
   const t=await turn(p,'Reply with only the word ok');r2.result={seq:p.seq,subtype:t.result?.subtype??null,text:t.result?.result??null};
   r2.init=initOf(p);
  });
@@ -277,6 +296,10 @@ async function earlyCase(name,afterStatus){
   row.init=initOf(p);
  });
  row.deferred=deferredOf(L.transcript);row.hitsAll=hitsView(t0);row.stdioAll=stdioView(t0);
+ {const J=readFileSync(FIXTURES+TAG+'-'+name+'.jsonl','utf8').split('\n').filter(Boolean).map(l=>JSON.parse(l));
+  const out=J.find(r=>r.direction==='out'&&r.frame?.request?.subtype==='initialize'), id=out?.frame?.request_id, ans=J.find(r=>r.frame?.type==='control_response'&&r.frame.response?.request_id===id);
+  const spawn=J.find(r=>r.direction==='meta'||r.seq===1);
+  row.initialize={sentAtMs:out?Date.parse(out.at)-t0:null,seq:out?.seq,answeredAtMs:ans?Date.parse(ans.at)-t0:null,answerSeq:ans?.seq,firstRowAtMs:spawn?Date.parse(spawn.at)-t0:null};}
  row.stdioTimeline=stdioLog().filter(e=>e.t>=t0).map(e=>({ms:e.t-t0,name:e.name,ev:e.ev}));
  row.httpTimeline=hits.filter(h=>h.t>=t0).map(h=>({ms:h.t-t0,path:h.path,rpc:h.rpc,token:h.token,code:undefined}));
  row.listAfterEnd=places();
@@ -287,7 +310,7 @@ async function earlyCase(name,afterStatus){
 async function twoLive(){
  restore();
  const row={case:'two-live',check:4,what:'sessions A and B live in the root at once; A switches cs-user off; B is sent its own off for cs-user; A switches cs-oauth off, then B switches cs-local off (does B\'s write keep A\'s); B switches cs-user on',fixture:['fixtures/uxwave/'+TAG+'-two-live-a.jsonl','fixtures/uxwave/'+TAG+'-two-live-b.jsonl'],steps:[]};
- const step=async(label,f)=>{const v=await f();row.steps.push({step:label,...v,list:places()['<root>']?.disabledMcpServers??null});};
+ const step=async(label,f)=>{const v=await f();const l0=listNow();await delay(1500);row.steps.push({step:label,...v,listAtAnswer:l0,listAfter1500ms:listNow()});};
  await launch('two-live-a',{},async a=>{
   row.aStart=await settled(a);
   await launch('two-live-b',{},async b=>{
@@ -354,8 +377,9 @@ async function addJson(){
 }
 
 // Check 11: the terminal's /mcp disable and /mcp enable.
-async function termCase(name,cwd,commands){
+async function termCase(name,cwd,commands,preset){
  restore();
+ if(preset)edit(GLOBAL,d=>({...d,projects:{...d.projects,[REPO]:{...d.projects?.[REPO],disabledMcpServers:preset}}}));
  const row={case:name,check:11,what:`an interactive engine under tmux (TERM xterm-256color, --model haiku), cwd ${anon(cwd)}; typed: ${commands.join(' | ')}; the place lists read after each`,route:'terminal',steps:[]};
  const sock='cs2-'+process.pid+'-'+name;
  const tmux=(...a)=>execFileSync('tmux',['-L',sock,...a],{encoding:'utf8'});
@@ -394,6 +418,7 @@ export default async()=>{
   if(want('add-json'))await addJson();
   if(want('term-root'))await termCase('term-root',REPO,['/mcp disable cs-user','/mcp disable plugin:cs-plug:cs-pserver','/mcp enable cs-user']);
   if(want('term-worktree'))await termCase('term-worktree',WT,['/mcp disable cs-oauth']);
+  if(want('term-from-disabled'))await termCase('term-from-disabled',REPO,['/mcp enable cs-user','/mcp enable plugin:cs-plug:cs-poauth'],['cs-user',P_HTTP]);
  }finally{
   stub.close();
   for(const j of journals)trimJournal(j);
