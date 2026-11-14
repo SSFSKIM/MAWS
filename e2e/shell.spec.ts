@@ -35,6 +35,9 @@ const SHELL_ENV = {
 // the session in front.
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
+// A session with a transcript and no request at launch (its read-only request comes at 3000 on the manual clock), so its
+// composer is drawn: FIX's permission is pending from launch and docked in its composer's place, which hides the draft.
+const CHARTER_TITLE = 'Charter + research';
 const SIP = 'Sidebar interaction pass';
 const QUOTA = 'Quota reset recovery';
 const NORTH = 'Workstation north star';
@@ -686,8 +689,9 @@ test('Settings is a dialog', async () => {
   try {
     const { app, page } = maws;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-    await (await sidebarRow(page, FIX)).click();
-    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([FIX]);
+    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
+    await (await sidebarRow(page, CHARTER_TITLE)).click();
+    await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([CHARTER_TITLE]);
     const main = page.locator('[data-region="main"]');
     // read under the dialog too, where everything outside it is hidden from accessibility
     const composer = main.getByRole('textbox', { name: 'Message', includeHidden: true });
@@ -765,8 +769,10 @@ test('a page beside the sidebar', async () => {
     const files = panel.locator('[data-surface="files"]');
     const bar = page.getByRole('banner');
     const region = pageRegion(page);
-    await (await sidebarRow(page, FIX)).click();
-    await expect.poll(labels).toEqual([FIX]);
+    // the premise: a session whose composer is drawn and whose transcript scrolls (FIX's docked permission hides FIX's
+    // draft; first Mac run)
+    await (await sidebarRow(page, CHARTER_TITLE)).click();
+    await expect.poll(labels).toEqual([CHARTER_TITLE]);
 
     // the tab as the person leaves it: a side surface open, a draft typed, the transcript scrolled up from its end
     await openSurface(page, 'Files');
@@ -828,7 +834,7 @@ test('a page beside the sidebar', async () => {
     await backToTabs(page);
     await expect(behind).toHaveJSProperty('inert', false);
     await expect(files).toBeVisible();
-    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(FIX);
+    await expect.poll(() => selectedTab(page, 'Open tabs')).toBe(CHARTER_TITLE);
     expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
     await expect(composer).toHaveText(DRAFT);
     // Back's own write: the page's key deleted. The store schedules every key a change touches in one pass, `regions` and
@@ -910,7 +916,9 @@ test('⌘⇧\\ under a page', async () => {
     await expect(pageRegion(page), 'the page closes').toHaveCount(0);
     await expect.poll(front, { message: 'the other pane’s tab in front' }).toBe(other);
     await expect(main.locator('[data-pane="1"]'), 'the split stays').toBeVisible();
-    expect(await tabLabels(page, 'Open tabs'), 'no tab added or lost').toEqual(expect.arrayContaining([NORTH, FIX]));
+    // the premise: in a split the two strips are named for their panes, and no strip is "Open tabs" (TabStrip, since C5)
+    const splitTabs = [...(await tabLabels(page, 'Left pane tabs')), ...(await tabLabels(page, 'Right pane tabs'))];
+    expect(splitTabs, 'no tab added or lost').toEqual(expect.arrayContaining([NORTH, FIX]));
     expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws.cleanup();
