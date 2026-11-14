@@ -20,7 +20,7 @@ import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { invoke, launchReady, promoteNowJournal, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
@@ -314,12 +314,11 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await page.keyboard.type('/');
   }
 
-  // once widgets are registered for them, the list opens on MAWS's panels in their declared order, `/model` first, from
-  // MAWS (U4a, decision 17 h: the owner's "MAWS's panels first"), and the same names open the widget (W3, C6: as the
-  // floating dialog, never in the box)
+  // once widgets are registered for them, `/model` (a panel, and the newest name chosen) opens the list, from MAWS, and
+  // the same names open the widget (W3, C6: as the floating dialog, never in the box). The panels' declared order before
+  // any pick is the next scene's: the names chosen above rank first with nothing typed (decision 17 c)
   await page.evaluate(() => ['model', 'permissions'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
   await expect(commands.getByRole('option').nth(0)).toHaveAccessibleName('/model');
-  await expect(commands.getByRole('option').nth(1)).toHaveAccessibleName('/permissions');
   await expect(commands.getByRole('option').nth(0)).toHaveAttribute('data-origin', 'widget');
   await expect(chosen).toHaveAccessibleName('/model');
   await expect(detail).toContainText('Choose the model for this session');
@@ -337,6 +336,36 @@ test('@ and / menus with the widget union', async ({ editor }) => {
     await clearEditor(page);
     await page.keyboard.type('/');
   }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U4a (decision 17 h, the owner's "MAWS's panels first"): with nothing typed and nothing chosen yet in this
+// window, the list opens on the panels the session has, in the order MAWS declares them whatever the order they were
+// registered in, then the engine's entries in the engine's order.
+test('/ opens on MAWS’s panels in their declared order before any pick, then the engine’s entries', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'c7-editor-panels-first';
+  await openEditor(page);
+  value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await launchEditor(page, id, turnsJournal(scratch, id, 1));
+  await page.keyboard.type('hi');
+  await page.keyboard.press('Enter'); // the turn's system/init completes the catalogue
+  await expect.poll(() => sent(page, id)).toEqual(['hi']);
+  await expect.poll(async () => (await serialized(page))?.display).toBe('');
+  await page.evaluate(() => ['permissions', 'model'].forEach((name) => (window as unknown as EditorWindow).__maws_editor.registerWidget(name)));
+
+  await page.keyboard.type('/');
+  const commands = page.getByRole('listbox', { name: 'Commands' });
+  const options = commands.getByRole('option');
+  await expect(options.nth(0)).toHaveAccessibleName('/model');
+  await expect(options.nth(1)).toHaveAccessibleName('/permissions');
+  await expect(options.nth(0)).toHaveAttribute('data-origin', 'widget');
+  await expect(options.nth(1)).toHaveAttribute('data-origin', 'widget');
+  await expect(options.nth(2)).toHaveAttribute('data-origin', 'engine');
+  await expect(commands.locator('[role="option"][aria-selected="true"]')).toHaveAccessibleName('/model');
+  await expect(page.locator('#composer-slash-detail')).toContainText('Choose the model for this session');
+  await page.keyboard.press('Escape');
+  await expect(commands).toBeHidden();
   expect(editor.consoleErrors()).toEqual([]);
 });
 
@@ -739,6 +768,55 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   await expect(transcript).toContainText(/Moved\s*`?node wait\.cjs a1 30`?\s*to the background after/);
   await expect(transcript).toContainText(message); // drawn once the engine started it
   await expect(list).toHaveCount(0);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// Send now on a row that waits after the turn (⌘Enter during a turn) is the queue's promote at `now` (decision 15), over
+// the engine's own answers to it (`promoteNowJournal`, `uxwave/u4p3-promote-late-1`): the replay holds at the recorded
+// `now` frame until the host writes it.
+test('U4a, Send now: on an after-the-turn row it promotes the message at priority now and pauses nothing; the turn ends for the message', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4a-send-now-after';
+  await openComposerPage(page);
+  await launchReady(page, id, promoteNowJournal(scratch, id));
+  await showPanes(page, [{ composer: id, shell: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('Run the long command in the foreground.');
+  await page.keyboard.press('Enter'); // seq 12; its Bash call then runs, a task from 37
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+  const steered = 'Reply with one word at the next step.';
+  await page.keyboard.type(steered);
+  await page.keyboard.press('Enter'); // at the next step (39)
+  const later = 'Reply with another word now.';
+  await page.keyboard.type(later);
+  await page.keyboard.press('Meta+Enter'); // after the turn: MAWS's queue holds it, nothing is written
+  const list = stackOf(page, 0);
+  const after = list.locator('li[data-queue-state="after"]');
+  await expect(after).toContainText(later);
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered)?.priority).toBe('next');
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written').toBe(false);
+  const queued = (await queueOf(page, id)).entries.filter((e) => e.state === 'queued');
+  expect(queued).toHaveLength(1);
+  const sendNow = after.getByRole('button', { name: 'Send now' });
+  await expect(sendNow).toBeEnabled();
+  await expect(sendNow).toHaveAttribute('title', 'Sends this now; what the agent is running keeps running');
+  await clickRevealed(after, sendNow);
+
+  // the queue's promote at `now` (42): the message written at priority now, no send-now request, nothing held or paused
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === later)?.priority).toBe('now');
+  const frames = await outFrames(page, id);
+  expect(frames.some((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt'), 'a promote, not the send-now request').toBe(false);
+  expect(frames.some((f) => f.request?.subtype === 'cancel_async_message'), 'Send now holds nothing').toBe(false);
+  expect((await queueOf(page, id)).paused).toBe(false);
+  expect((await queueOf(page, id)).entries.some((e) => e.queueId === queued[0]!.queueId && e.state === 'queued'), 'the entry left the queue').toBe(false);
+
+  // the command moved (46) and the turn cut (`aborted_tools`, 49): its line reads "Ended for your message"; the promoted
+  // message runs as its own turn
+  const transcript = transcriptOf(page, 0);
+  await expect(transcript).toContainText('Ended for your message after');
+  await expect(transcript).not.toContainText('You stopped after');
+  await expect(transcript).toContainText(later);
   expect((await queueOf(page, id)).paused).toBe(false);
   expect(editor.consoleErrors()).toEqual([]);
 });

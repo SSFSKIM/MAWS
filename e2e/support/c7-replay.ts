@@ -193,3 +193,14 @@ export function sendNowJournal(dir: string, name: string): string {
   const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p2-a-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
   return writeJournal(dir, `${name}-send-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
+
+// UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
+// promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
+// Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
+// which has the command moved (46) and the turn cut (`success`, `aborted_tools`, 49); the `now` message's own turn, and
+// the waiting message read at its first tool boundary (120 to 122). C3's prelude stands in for the probe's handshake,
+// and the answer at 14 and the meta rows go, as in `sendNowJournal`.
+export function promoteNowJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p3-promote-late-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-promote-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}

@@ -2664,14 +2664,15 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
       .poll(() => s.journal(id).some((r) => r.direction === 'out' && r.frame.type === 'user' && JSON.stringify(r.frame).includes(STAGE_TAKEN)), { timeout: 60_000, message: 'the turn ended and the queue released the message to the engine' })
       .toBe(true);
     expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
-    // the message's own turn plays the fixture's second round trip: its request answered too, so the session idles at
+    // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
+    // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
     // the next prompt and no request's card holds either build's box
     type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
     let next: Requested | undefined;
     await expect
       .poll(async () => (next = (await eventsOf(run.page, id)).find((e): e is Requested => e.kind === 'permission.requested' && e.requestId !== requested.requestId)), { timeout: 60_000, message: 'the message’s own turn reaches its request' })
       .toBeDefined();
-    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: next!.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+    value(await invoke(run.page, 'session.answer', { appSessionId: id, requestId: next!.requestId, answer: { kind: 'permission', decision: 'deny' } }));
     await expect.poll(async () => (await statusOf(run.page, id)).turn === null, { timeout: 60_000, message: 'the message’s own turn ended' }).toBe(true);
     expect(stageOf(await storedDraft(run.page, id)), 'the stage still kept: nothing settled it').toEqual(mark);
     expect(run.maws.consoleErrors()).toEqual([]);
