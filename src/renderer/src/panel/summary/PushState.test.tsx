@@ -138,6 +138,32 @@ describe('push state row shows PR state, install and sign-in states and opens th
     expect(prLine()?.textContent).toBe('No PR for feature');
   });
 
+  // The branch review (finding 7): the PR state is the checkout's as well as the session's. Two checkouts on branches of
+  // one name (a worktree made with --force) have each its own answer: the row shown for the other one says nothing of the
+  // first one's PR while its own answer is out, and then says its own.
+  it('shows no PR of another checkout on a branch of the same name', async () => {
+    const OTHER_DIR = `${DIR}/.claude/worktrees/again`;
+    let held!: (answer: ScmPrState) => void;
+    const invoke = fake.client.invoke;
+    let asks = 0;
+    fake.client.invoke = ((command: CommandName, input: never, opts: never) =>
+      command === 'scm.pr.state' && asks++ > 0
+        ? (void invoke(command, input, opts), new Promise((resolve) => (held = (value) => resolve({ ok: true, value })))) // recorded, then held
+        : invoke(command, input, opts)) as never;
+    function At({ directory }: { directory: string }) {
+      useEffect(() => useGit.getState().watch(TEST_MACHINE, directory), [directory]);
+      return <QueryClientProvider client={queryClient}><PushState directory={directory} appSessionId={A} /></QueryClientProvider>;
+    }
+    const view = render(<At directory={DIR} />);
+    await lineReads('PR #12 Open · 2 passed, 1 pending');
+    view.rerender(<At directory={OTHER_DIR} />);
+    for (let i = 0; i < 4; i++) await settle();
+    expect(prLine()?.textContent ?? '').not.toContain('#12');
+    await waitFor(() => expect(asks).toBe(2));
+    act(() => held({ ...PR, pr: null }));
+    await lineReads('No PR for feature');
+  });
+
   it('says No PR for the branch, and why the PR state is unavailable', async () => {
     bridge({ 'scm.pr.state': { ...PR, pr: null } });
     let view = await mount();
