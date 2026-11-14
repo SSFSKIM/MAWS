@@ -523,7 +523,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type('/bt');
     const commands = page.getByRole('listbox', { name: 'Commands' });
     await expect(commands.getByRole('option').filter({ hasText: '/btw' })).toBeVisible();
-    await page.keyboard.press('Escape');
+    // UX wave U4a (M7's fix; `openSideQuestions`): a bare `/btw` picked from the palette opens the session's side chat
+    // card with its field focused, before any question (the widgets harness mounts no card: `e2e/widgets.spec.ts`
+    // proves the hand-off there)
+    await page.keyboard.type('w');
+    await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
+    await page.keyboard.press('Enter');
+    const picked = main.locator('[data-btw-card="corner"]');
+    await expect(picked).toBeVisible();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toBeFocused();
+    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toHaveAttribute('placeholder', 'Ask a quick question…');
+    await expect(page.locator('[data-widget-dialog="btw"]'), 'no dialog: the card took the pick').toHaveCount(0);
+    expect(writtenControls(maws, parent, 'side_question'), 'nothing asked yet').toEqual([]);
     await composer.click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.press('Backspace');

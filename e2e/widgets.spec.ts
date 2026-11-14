@@ -359,6 +359,17 @@ test.describe('interactive', () => {
         await expect(widget(page, name)).toBeHidden();
         continue;
       }
+      if (name === 'btw') {
+        // UX wave U4a (M7's decisions; `openSideQuestions` in side/btw.ts): on a session that can take a question now
+        // (`canAskSide`), a pick of `/btw` hands itself to the session's side chat card and closes before its dialog is
+        // drawn. This harness mounts the composer alone and no card, so what this scene proves here is the hand-off: the
+        // pick is taken and no dialog stays. The card itself is proven where the app mounts it, `e2e/side.spec.ts` scene 5
+        // (a bare `/btw` picked from the palette opens the card with its field focused).
+        await expect(page.locator('[data-widget-dialog="btw"]')).toHaveCount(0);
+        await expect(widget(page, name)).toHaveCount(0);
+        await expect.poll(async () => (await message.textContent()) ?? '').toBe('');
+        continue;
+      }
       if (name === 'rename') {
         // no title: C10's rename dialog (the session action C10 registers), not a widget of C11's
         const dialog = page.getByRole('dialog', { name: 'Rename' });
