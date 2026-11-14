@@ -494,16 +494,27 @@ test('bash, memory, paste, history recall, the palette, the status line and Add 
       observe('misc.memory', { initial, menu, chosen, file, content: readFileSync(file, 'utf8') });
     });
 
-    const body = Array.from({ length: 40 }, (_, i) => `live paste line ${i + 1}`).join('\n');
-    await test.step('a 40-line paste renders as a chip with its body and recalls with it after a reload', async () => {
-      await messageIn(pane).click();
-      await page.evaluate((text) => {
+    // UX wave U4a (l3-input-09): pasted text stays text; only a paste over 20,000 characters becomes a chip
+    const pasteIn = (text: string) =>
+      page.evaluate((t) => {
         const target = document.querySelector('[data-region="main"] [data-pane="0"] [contenteditable="true"]') as HTMLElement;
         const data = new DataTransfer();
-        data.setData('text/plain', text);
+        data.setData('text/plain', t);
         target.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
-      }, body);
-      await expect(pane.locator('[contenteditable="true"]').getByText('Pasted text #1 +40 lines')).toBeVisible();
+      }, text);
+    const short = Array.from({ length: 40 }, (_, i) => `live paste line ${i + 1}`).join('\n');
+    const body = Array.from({ length: 1200 }, (_, i) => `live paste line ${i + 1}`).join('\n');
+    await test.step('a 40-line paste lands as text; a paste over 20,000 characters renders as a chip with its body and recalls with it after a reload', async () => {
+      await messageIn(pane).click();
+      await pasteIn(short);
+      await expect(pane.locator('[contenteditable="true"]')).toContainText('live paste line 40');
+      await expect(pane.locator('[contenteditable="true"] [data-pasted]')).toHaveCount(0);
+      await page.keyboard.press('Meta+a');
+      await page.keyboard.press('Backspace');
+      await expect.poll(async () => (await editorText(pane)).trim()).toBe('');
+      expect(body.length).toBeGreaterThan(20_000);
+      await pasteIn(body);
+      await expect(pane.locator('[contenteditable="true"]').getByText('Pasted text #1 +1200 lines')).toBeVisible();
       await page.keyboard.insertText(' How many lines did I paste? Reply with only the number.');
       await page.keyboard.press('Enter');
       await idle(page, m.id);

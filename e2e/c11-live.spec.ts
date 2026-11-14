@@ -379,7 +379,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await typedLine(page, main, 'effort low');
       await expect.poll(async () => (await status(page, id)).effort).toBe('low');
       await openSessionInfo(page, id);
-      await expect.poll(() => infoRow(page, id, 'Main')).toMatch(/· low$/);
+      await expect.poll(() => infoRow(page, id, 'Main')).toMatch(/ Low$/); // UX wave U4a (decision 19): the chip's name, the effort in words
       observe('effort', { main: await infoRow(page, id, 'Main') });
     });
 
@@ -419,7 +419,8 @@ test('every widget opens with live engine data; controls take effect and are rea
       await idle(page, id);
       const statusText = await settled(await openWidget(live, 'status'));
       w = await openWidget(live, 'fast');
-      const caption = (await w.innerText()).match(/Fast mode · [^\n]+/)?.[0] ?? null; // W3: the selector's fast caption
+      // UX wave U4a (decision 20): fast mode's row, "Fast mode" over its muted line (the pending word, a reason, On or Off)
+      const caption = (await w.locator('[data-fast-row]').innerText()).match(/Fast mode\n([^\n]+)/)?.[1] ?? null;
       const s = await status(page, id);
       observe('fast', { warning, inits: inits(maws, id).slice(-2), fastMode: s.fastMode, autoModeServer: statusText.match(/Auto mode server\n[^\n]+/)?.[0], caption });
       expect(caption).not.toContain('the next init frame confirms it');
