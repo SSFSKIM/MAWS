@@ -394,8 +394,11 @@ function pointedRepository(workTree: string, dotGit: string): Repository | null 
   return { commonDir, workTree, linked };
 }
 
-// A pointer file's one line, less `prefix`; throws when it is not one.
+// A pointer file's one line, less `prefix`; throws when it is not one. Only a regular file is opened (its type read
+// first, links followed, without an open): these reads run inside the index's transaction, where opening a FIFO would
+// block for ever, so anything else is unreadable metadata (the branch review's P2).
 function pointer(path: string, prefix = ''): string {
+  if (!statSync(path).isFile()) throw new Error(`not a regular file: ${path}`);
   const line = readFileSync(path, 'utf8').split('\n')[0].trimEnd();
   if (!line.startsWith(prefix) || line.length === prefix.length) throw new Error(`not a pointer: ${path}`);
   return line.slice(prefix.length);
