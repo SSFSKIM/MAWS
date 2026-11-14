@@ -794,7 +794,6 @@ test('a page beside the sidebar', async () => {
       read = now;
       return settled;
     }, { message: 'layout.json holds the side surface, settled', intervals: [400] }).toBe(true);
-    const stored = JSON.parse(read) as { regions: unknown; surfaces: unknown };
 
     // the page: everything right of the sidebar
     await openAppDestination(page, 'Customize');
