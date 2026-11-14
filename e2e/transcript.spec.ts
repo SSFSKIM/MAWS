@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
@@ -787,9 +788,9 @@ test('a streaming thought reads its label under the shimmer, warm from 20 s, and
   await page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.setEffort('xhigh'));
   const cases = [
     // 50 s in at load, a thinking row of its own
-    { fixture: 'events/thinking-live', shot: 'deep', thought: '[data-kind="thinking"] .transcript-thinking', tier: 'Deep in thought', text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true },
+    { fixture: 'events/thinking-live', shot: 'deep', thought: '[data-kind="thinking"] .transcript-thinking', tier: thinkingTier(50_000), text: 'Weighing where the anchor should sit: the reader’s row keeps their place, the end keeps the stream in view.', warm: true },
     // 12 s in, the last member of a folded run: its line under the run's
-    { fixture: 'events/thinking-live-group', shot: 'still', thought: '[data-kind="group"] .transcript-group > .transcript-thinking', tier: 'Still thinking', text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false },
+    { fixture: 'events/thinking-live-group', shot: 'still', thought: '[data-kind="group"] .transcript-group > .transcript-thinking', tier: thinkingTier(12_000), text: 'It passes. Now, why the reader stays put: the virtualiser anchors to the end only while following.', warm: false },
   ];
   for (const { fixture, shot, thought, tier, text, warm } of cases) {
     await loadAll(page, fixture);
