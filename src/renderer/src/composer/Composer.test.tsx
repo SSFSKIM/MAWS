@@ -1260,7 +1260,8 @@ describe('the composer as the float’s bar (UX wave U10b)', () => {
     let answered = 0;
     await waitFor(() => expect(fake.pending('session.ui.render')).toBeGreaterThan(0));
     while (fake.pending('session.ui.render') > 0) {
-      const input = fake.invoked('session.ui.render')[answered++] as { component: string };
+      const input = fake.invoked('session.ui.render')[answered] as { component: string };
+      answered += 1;
       await act(() => fake.reply('session.ui.render', answers[input.component] ?? ENGINE));
     }
   }
