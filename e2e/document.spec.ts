@@ -6,7 +6,7 @@
 // host restart, after which the typing still lands; History lists A's versions, Save version adds a named one, and
 // Restore brings it back with the banner. The document exports through A's export service (M9's fix wave): `.md`,
 // `.html`, `.docx` and a `.pdf` beginning `%PDF-` with one page per tab on Letter and on A4, from the header's Export
-// menu and from `artifacts.export`; an image uploaded as an asset renders in the editor through the `maws-artifact:`
+// menu and from `artifacts.export` (UX wave U10b: the menu's A4 is the document's page, which its PDF row follows); an image uploaded as an asset renders in the editor through the `maws-artifact:`
 // scheme under the app's CSP. P3-F (8.2, F7): the header's Export saves where the owner chooses (main's save seam under
 // the e2e, MAWS_E2E_SAVE_PATH), the toast saying where, and exports what is shown: the version a preview shows, nothing
 // while two versions are compared, the live document again once history is left.
@@ -23,11 +23,12 @@ import { traceForeground } from './support/foreground-trace';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { sidebarRow } from './support/sidebar';
 import { join } from 'node:path';
-import { PerfSeam, type ReadResult } from './support/document-scale';
+import { blocksOf, PerfSeam, type ReadResult } from './support/document-scale';
 import { carriedBy, decodeMap, insertedBy } from '../src/artifacts/yjs';
 import { commentsMessage, readAnchoredMessage } from '../src/shared/anchor/message'; // UX wave U5a
 import { FIRST_REPLY, invoke, PARENT, startSessionCase, value } from './support/library-session'; // UX wave U5a
 import { SideJournal } from './support/side-replay'; // UX wave U5a
+import { journalOf, mcpCalls, mcpResultOf, resultText } from './support/maws-tools'; // UX wave U10b
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -323,7 +324,16 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     const savedFile = (name: string) => join(saved, name);
     const appears = (name: string, check: (bytes: Buffer) => boolean) =>
       expect.poll(() => (existsSync(savedFile(name)) ? check(readFileSync(savedFile(name))) : false), { timeout: 60_000, message: `${name} saved` }).toBe(true);
-    await pick('PDF, A4 (.pdf)');
+    // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the page is the document's own,
+    // chosen among the menu's checked items; its formats send no size, so PDF then prints on A4
+    await mainHeader.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Letter', exact: true }), 'the system’s page, with nothing set').toHaveAttribute('aria-checked', 'true');
+    await page.getByRole('menuitemcheckbox', { name: 'A4', exact: true }).click();
+    await mainHeader.getByRole('button', { name: 'Export', exact: true }).click();
+    await expect(page.getByRole('menuitemcheckbox', { name: 'A4', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('menuitemcheckbox', { name: 'Letter', exact: true })).toHaveAttribute('aria-checked', 'false');
+    await page.keyboard.press('Escape');
+    await pick('PDF (.pdf)');
     await appears('Quarterly plan.pdf', (bytes) => bytes.subarray(0, 5).toString('latin1') === '%PDF-');
     expect(pdfPages(readFileSync(savedFile('Quarterly plan.pdf')))).toEqual({ pages: 3, width: 595, height: 842 });
     await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${savedFile('Quarterly plan.pdf')}`).first()).toBeVisible();
@@ -373,11 +383,11 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
     const docx = await exported('docx');
     expect(docx.subarray(0, 2).toString('latin1')).toBe('PK');
 
-    const letter = await exported('pdf');
+    const letter = await exported('pdf', 'letter');
     expect(letter.subarray(0, 5).toString('latin1')).toBe('%PDF-');
-    expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter
-    const a4 = await exported('pdf', 'a4');
-    expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4
+    expect(pdfPages(letter)).toEqual({ pages: 3, width: 612, height: 792 }); // a tab a page, US Letter: the call's size wins
+    const a4 = await exported('pdf');
+    expect(pdfPages(a4)).toEqual({ pages: 3, width: 595, height: 842 }); // A4, the document's own page (UX wave U10b)
 
     await test.step('P3-F (8.2, F7): during a version preview the menu exports that version, while two are compared nothing, and the live document once history is left', async () => {
       await ok(page, 'artifacts.saveVersion', { artifactId: id, label: 'Three tabs' });
@@ -400,8 +410,11 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
       await expect(bar.getByText('Three tabs → With the addition')).toBeVisible({ timeout: 10_000 });
       await mainHeader.getByRole('button', { name: 'Export', exact: true }).click();
       const items = page.getByRole('menuitem');
-      await expect(items).toHaveCount(6);
+      await expect(items).toHaveCount(4); // UX wave U10b: the four formats, then the page's three checked items
       for (const item of await items.all()) await expect(item, 'two versions compared: nothing to export').toBeDisabled();
+      const pageItems = page.getByRole('menuitemcheckbox');
+      await expect(pageItems).toHaveCount(3);
+      for (const item of await pageItems.all()) await expect(item, 'a version shown: the page takes no choice').toBeDisabled();
       await page.keyboard.press('Escape');
 
       await rail.getByRole('button', { name: 'Close version history', exact: true }).click();
@@ -414,6 +427,224 @@ test('the document exports through A’s export service: Markdown, HTML, DOCX an
   } finally {
     rmSync(saved, { recursive: true, force: true });
   }
+});
+
+// ---- UX wave U10b: a document's page (A3; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M3) -------------
+
+// A memo of a heading and fifteen two-line paragraphs: past one Letter page at standard density (about 1,040 px of text
+// on the page's 912), within one A4 page at compact (about 910 of 978). Invented text.
+const MEMO_TITLE = 'Offsite planning memo';
+const MEMO_PARAGRAPH = (k: number) => `Item ${k}: the planning group meets in the north room after lunch, reviews the open questions from the last session, and agrees who drafts the summary.`;
+const MEMO = `# Offsite planning\n\n${Array.from({ length: 15 }, (_, k) => MEMO_PARAGRAPH(k + 1)).join('\n\n')}\n`;
+
+// The session's turn: it makes the memo, exports a PDF, sets the page to A4 at compact density, and exports again.
+function memoJournal(cwd: string): SideJournal {
+  const journal = new SideJournal(PARENT, cwd);
+  const prompt = journal.prompt();
+  journal.mawsToolCall('artifact_create', { kind: 'document', title: MEMO_TITLE, handle: 'memo', content: MEMO }, { status: 'created', title: MEMO_TITLE }, { asked: false });
+  journal.mawsToolCall('artifact_export', { artifact: 'memo', format: 'pdf' }, { status: 'exported', format: 'pdf' }, { asked: false });
+  journal.mawsToolCall('artifact_edit', { artifact: 'memo', baseRevision: 0, ops: [{ op: 'set_page', size: 'a4', density: 'compact' }] }, { status: 'edited' }, { asked: false });
+  journal.mawsToolCall('artifact_export', { artifact: 'memo', format: 'pdf' }, { status: 'exported', format: 'pdf' }, { asked: false });
+  journal.reply(prompt, FIRST_REPLY); // the words the session case waits for at the turn's end
+  journal.completed(prompt);
+  return journal;
+}
+
+// The `maws` server's answers the host wrote for the session, in its calls' order, each with the call's name: what the
+// agent was told, read from the journal (the replay's own tool results are the recording's).
+function mawsAnswers(userData: string, appSessionId: string): Array<{ name: string; isError: boolean; answer: Record<string, unknown> }> {
+  const rows = journalOf(userData, appSessionId);
+  return mcpCalls(rows).map(({ requestId, name }) => {
+    const result = mcpResultOf(rows, requestId);
+    const isError = result?.isError === true;
+    const text = result ? resultText(result) : '';
+    return { name, isError, answer: isError ? { refusal: text } : (JSON.parse(text || '{}') as Record<string, unknown>) };
+  });
+}
+
+// A3: asked for a one-page memo, the agent sets the page and its PDF export names the page count; the Export menu shows
+// the same page, A4 and Compact checked; the owner's own PDF from the menu has the same count by the scene's own count.
+test('UX wave U10b (A3): the agent’s set_page makes a two-page memo one A4 page at compact density, its export says pages: 1, and the Export menu shows A4 and Compact checked and prints one page', async () => {
+  test.setTimeout(180_000);
+  const saved = mkdtempSync('/tmp/maws-e2e-document-page-');
+  const c = await startSessionCase((cwd) => [memoJournal(cwd)], { MAWS_E2E_SAVE_PATH: saved });
+  try {
+    const { page, maws, parent } = c;
+    const answers = mawsAnswers(maws.userData, parent);
+    expect(answers.map(({ name, isError }) => [name, isError])).toEqual([
+      ['artifact_create', false],
+      ['artifact_export', false],
+      ['artifact_edit', false],
+      ['artifact_export', false],
+    ]);
+    const [created, standard, edited, compact] = answers.map(({ answer }) => answer) as [{ artifactId: string }, { path: string; pages?: number }, { results: unknown[] }, { path: string; pages?: number }];
+    expect(standard.pages, 'the memo at standard density on its system’s Letter page').toBe(2);
+    expect(pdfPages(readFileSync(standard.path))).toEqual({ pages: 2, width: 612, height: 792 });
+    expect(edited.results).toEqual([{ op: 'set_page', size: 'a4', density: 'compact' }]);
+    expect(compact.pages, 'the agent’s answer after set_page').toBe(1);
+    expect(pdfPages(readFileSync(compact.path)), 'the scene’s own count of the same file').toEqual({ pages: 1, width: 595, height: 842 });
+    // Proof 2 (the owner's look at a memo at two densities): the standard PDF and the compact one, on Letter too
+    const compactLetter = value(await invoke(page, 'artifacts.export', { artifactId: created.artifactId, format: 'pdf', pageSize: 'letter' }));
+    await test.info().attach('memo-standard-letter.pdf', { body: readFileSync(standard.path), contentType: 'application/pdf' });
+    await test.info().attach('memo-compact-letter.pdf', { body: readFileSync(compactLetter.path), contentType: 'application/pdf' });
+    await test.info().attach('memo-compact-a4.pdf', { body: readFileSync(compact.path), contentType: 'application/pdf' });
+
+    // the window: the document's Export menu shows the page the agent set, and the menu's PDF prints on it
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    await page.locator('[data-library]').getByRole('article', { name: MEMO_TITLE, exact: true }).click({ timeout: 15_000 });
+    const main = page.locator(`[data-region="main"] [data-artifact-tab="${created.artifactId}"]`);
+    await expect(main.locator('.ds-doc .ProseMirror')).toContainText(MEMO_PARAGRAPH(15), { timeout: 15_000 });
+    const header = page.locator('[data-region="main"] [data-editor-header]');
+    await header.getByRole('button', { name: 'Export', exact: true }).click();
+    const checked = async (name: string) => page.getByRole('menuitemcheckbox', { name, exact: true }).getAttribute('aria-checked');
+    await expect(page.getByRole('menuitemcheckbox', { name: 'A4', exact: true })).toHaveAttribute('aria-checked', 'true');
+    expect([await checked('Letter'), await checked('A4'), await checked('Compact')]).toEqual(['false', 'true', 'true']);
+    expect(await page.getByRole('menu').getByRole('menuitem').allTextContents()).toEqual(['Markdown (.md)', 'Web page (.html)', 'Word (.docx)', 'PDF (.pdf)']);
+    await page.getByRole('menuitem', { name: 'PDF (.pdf)', exact: true }).click();
+    const file = join(saved, `${MEMO_TITLE}.pdf`);
+    await expect.poll(() => (existsSync(file) ? readFileSync(file).subarray(0, 5).toString('latin1') : ''), { timeout: 60_000, message: 'the menu’s PDF saved' }).toBe('%PDF-');
+    expect(pdfPages(readFileSync(file)), 'the owner’s PDF: the same page count').toEqual({ pages: 1, width: 595, height: 842 });
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await c.cleanup();
+    rmSync(saved, { recursive: true, force: true });
+  }
+});
+
+// What a page draws of its blocks, read the same way in the editor and in the exported page: each top-level block of
+// `content` (its tag, its height, its left edge from the content box's and its width) and the gap above it, from the
+// block before; and the content box's width. Blocks the editor draws for itself (ProseMirror's own widgets) are left out.
+type DrawnBlocks = { width: number; blocks: Array<{ tag: string; height: number; left: number; width: number; gap: number | null }> };
+function drawnBlocks({ content, skip }: { content: string; skip?: string }): DrawnBlocks {
+  const root = document.querySelector(content) as HTMLElement;
+  const style = getComputedStyle(root);
+  const box = root.getBoundingClientRect();
+  const left = box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
+  const width = root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  const children = [...root.children].filter((child) => !(skip && child.matches(skip)) && ![...child.classList].some((name) => name.startsWith('ProseMirror-')) && child.getBoundingClientRect().height > 0);
+  let bottom: number | null = null;
+  const blocks = children.map((shown) => {
+    // the editor may wrap a table in a box of its own (the table's node view): the table is the block either way
+    const child = shown.tagName === 'DIV' && shown.firstElementChild?.tagName === 'TABLE' ? shown.firstElementChild : shown;
+    const rect = child.getBoundingClientRect();
+    const gap = bottom === null ? null : rect.top - bottom;
+    bottom = rect.bottom;
+    const tag = child.tagName.toLowerCase() + (child.getAttribute('data-type') ? `[${child.getAttribute('data-type')}]` : '');
+    return { tag, height: rect.height, left: rect.left - left, width: rect.width, gap };
+  });
+  return { width, blocks };
+}
+
+// The exported page loaded in a window of this app at `width` CSS px (a hidden one, as the export's own capture is), and
+// its blocks read by `drawnBlocks` under `content`.
+async function exportedBlocks(app: MawsLaunch['app'], path: string, width: number, content: string, skip?: string): Promise<DrawnBlocks> {
+  const script = `(${drawnBlocks.toString()})(${JSON.stringify({ content, skip })})`;
+  return app.evaluate(
+    async ({ BrowserWindow }, { path, width, script }) => {
+      const window = new BrowserWindow({ show: false, useContentSize: true, width, height: 3_000, webPreferences: { javascript: true } });
+      try {
+        await window.loadFile(path);
+        await window.webContents.executeJavaScript('document.fonts.ready.then(() => true)');
+        return (await window.webContents.executeJavaScript(script)) as DrawnBlocks;
+      } finally {
+        window.destroy();
+      }
+    },
+    { path, width, script },
+  );
+}
+
+// Each block's height, left edge and width and each gap, the editor's against the export's, where they differ by half a
+// pixel or more.
+function spacingDifferences(editor: DrawnBlocks, exported: DrawnBlocks): string[] {
+  const out: string[] = [];
+  if (Math.abs(editor.width - exported.width) >= 0.5) out.push(`content width: editor ${editor.width}, export ${exported.width}`);
+  if (editor.blocks.length !== exported.blocks.length) out.push(`blocks: editor ${editor.blocks.map((b) => b.tag).join(' ')}; export ${exported.blocks.map((b) => b.tag).join(' ')}`);
+  editor.blocks.forEach((drawn, i) => {
+    const there = exported.blocks[i];
+    if (!there) return;
+    for (const field of ['height', 'left', 'width', 'gap'] as const) {
+      const [a, b] = [drawn[field], there[field]];
+      if (a === null || b === null) continue;
+      if (Math.abs(a - b) >= 0.5) out.push(`block ${i} (${drawn.tag} / ${there.tag}) ${field}: editor ${a.toFixed(1)}, export ${b.toFixed(1)}`);
+    }
+  });
+  return out;
+}
+
+const SPACING_MD = [
+  '# Spacing review',
+  'The planning group meets on Thursday to settle the order of the agenda and the room.',
+  '- Book the north room\n- Send the agenda\n- Print the handouts',
+  '| Item | Owner |\n| --- | --- |\n| Budget | Ana |\n| Venue | Leo |',
+  '> Bring the numbers from the last quarter.',
+  '- [ ] Draft the slides\n- [x] Confirm the date',
+  '## Next steps',
+  'Each owner sends a short note by Friday.',
+].join('\n\n');
+const SECTION_MD = (n: number) => [`## Section ${n} notes`, `The second section keeps its own list, number ${n}.`, '- First point\n- Second point', '> A quoted line inside the section.'].join('\n\n');
+
+// The export's page takes the editor's spacing (L1; the owner's answer of 2026-11-15 to the card "PDF spacing"; the
+// architect's ruling of 2026-11-15: per block kind, the block's height and its inline box): the web-page export of a
+// document holding a heading, a paragraph, a list, a table, a blockquote and a checklist, loaded in a page, draws each
+// block as the editor draws it and the same gap between each pair; and a two-tab document's blocks inside each tab's
+// section, as the editor draws that tab.
+test('UX wave U10b (A3): the web-page export draws each block, its height, left edge and width, and each gap as the editor does, in a one-tab and a two-tab document', async () => {
+  test.setTimeout(180_000);
+  const page = await start(true);
+  const seam = new PerfSeam(join(userData!, 'document-perf'));
+  await expect.poll(() => existsSync(join(seam.dir, 'in'))).toBe(true);
+  const agent = 'document-spacing-agent';
+  const firstBlock = async (artifact: string, tab?: string) => {
+    const read = await seam.call<ReadResult & { tabs?: Array<{ id: string }> }>(agent, 'artifact_read', { artifact, ...(tab && { tab }) });
+    expect(read.isError, read.text).toBe(false);
+    return { block: [...blocksOf(read.result!.markdown).keys()][0]!, tabs: read.result!.tabs ?? [] };
+  };
+  const write = async (artifact: string, block: string, markdown: string) => {
+    const edit = await seam.call(agent, 'artifact_edit', { artifact, baseRevision: 'last', ops: [{ op: 'replace_block', id: block, markdown }] });
+    expect(edit.isError, edit.text).toBe(false);
+  };
+  const editorOf = (main: Locator) => main.locator('.ds-doc .ProseMirror').first();
+  const measureEditor = async (id: string) => page.evaluate(drawnBlocks, { content: `[data-region="main"] [data-artifact-tab="${id}"] .ds-doc .ProseMirror` });
+  const containerWidth = (main: Locator) => main.locator('.ds-doc').first().evaluate((el) => (el as HTMLElement).clientWidth);
+  const exportOf = async (id: string) => value(await invoke(page, 'artifacts.export', { artifactId: id, format: 'html' })).path;
+  const report: Record<string, { editor: DrawnBlocks; exported: DrawnBlocks }> = {};
+
+  // one tab: every block kind
+  const one = await openInMain(page, 'Spacing review');
+  await one.main.locator('[data-editor="live"]').fill('Draft.'); // a block the agent's read names
+  await durable(one.main);
+  const first = await firstBlock(one.id);
+  await write(one.id, first.block, SPACING_MD);
+  await expect(editorOf(one.main)).toContainText('Each owner sends a short note by Friday.', { timeout: 15_000 });
+  await durable(one.main);
+  const width = await containerWidth(one.main);
+  report['one tab'] = { editor: await measureEditor(one.id), exported: await exportedBlocks(launch!.app, await exportOf(one.id), width, 'article.doc-content') };
+  expect(report['one tab'].editor.blocks.map((b) => b.tag), 'the blocks the scene compares').toEqual(['h1', 'p', 'ul', 'table', 'blockquote', 'ul[taskList]', 'h2', 'p']);
+
+  // two tabs: each tab's blocks inside its section of the export, as the editor draws that tab
+  const two = await openInMain(page, 'Two sections');
+  await addDocumentSection(two.main);
+  await expect.poll(async () => (await firstBlock(two.id)).tabs.length, { message: 'the second tab' }).toBe(2);
+  const { tabs } = await firstBlock(two.id);
+  for (const [k, tab] of tabs.entries()) {
+    await two.main.locator(`[role="tab"][data-tab-id="${tab.id}"]`).click();
+    await two.main.locator('[data-editor="live"]').fill(`Draft ${k + 1}.`);
+    await durable(two.main);
+    await write(two.id, (await firstBlock(two.id, tab.id)).block, SECTION_MD(k + 1));
+  }
+  await durable(two.main);
+  const twoPath = await exportOf(two.id);
+  const twoWidth = await containerWidth(two.main);
+  for (const [k, tab] of tabs.entries()) {
+    await two.main.locator(`[role="tab"][data-tab-id="${tab.id}"]`).click();
+    await expect(editorOf(two.main)).toContainText(`number ${k + 1}.`, { timeout: 10_000 });
+    report[`tab ${k + 1} of two`] = { editor: await measureEditor(two.id), exported: await exportedBlocks(launch!.app, twoPath, twoWidth, `section.doc-tab:nth-of-type(${k + 1})`, '.doc-tab-title') };
+  }
+  await test.info().attach('spacing.json', { body: JSON.stringify(report, null, 2), contentType: 'application/json' });
+  const differences = Object.fromEntries(Object.entries(report).map(([name, { editor, exported }]) => [name, spacingDifferences(editor, exported)]));
+  expect(differences, 'the export draws every block and gap as the editor does (spacing.json has the measures)').toEqual({ 'one tab': [], 'tab 1 of two': [], 'tab 2 of two': [] });
+  expect(launch!.consoleErrors()).toEqual([]);
 });
 
 // ---- M9: comments through the real pasteboard and a real drag, and restore with conversations ------------------------
