@@ -26,6 +26,8 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { currentSet } from '../stores/layout-model';
+import { registerPanelTool } from '../panel/host'; // UX wave U6b-1
+import { filesTool } from '../tools/code/files/FilesTool'; // UX wave U6b-1
 import { ipcSource, useTranscriptStore } from '../transcript';
 import { builder, uuid } from '../transcript/model/test-events';
 import { HEADINGS as PREVIEW_HEADINGS } from '../sidebar/RequestPreview';
@@ -345,8 +347,17 @@ describe('request card placements and delivery states', () => {
     mount({ ...plan, plan: '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' } as RequestEvent, 'docked');
     fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
-    fireEvent.click(screen.getByTitle('/r/app.ts'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: APP, machine: TEST_MACHINE }));
+    // UX wave U6b-1: the file opens beside the requesting session's chat, as a tab of Files
+    useLayout.setState({ hydrated: true });
+    const unregister = registerPanelTool(filesTool);
+    try {
+      fireEvent.click(screen.getByTitle('/r/app.ts'));
+      const files = (useLayout.getState().panelBySession.get(APP)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+      expect(files.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/r/app.ts', line: 7, preview: true }]);
+      expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file')).toEqual([]);
+    } finally {
+      unregister();
+    }
   });
 
   it.each(['constructor', 'toString', '__proto__'])('renders and submits a question named %s', async (text) => {

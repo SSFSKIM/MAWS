@@ -205,7 +205,9 @@ const FileTextSchema = z.string().max(ARTIFACT_MAX_BYTES); // characters; the st
 // `file` artifact from `path` (in place), a `document` from nothing or markdown `content` (P3-B's create, ledger X25),
 // another Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
 // `handle` and `path`, so the call skills already make keeps working. P3-F wave S (F5, the owner's DL13 change): `space`
-// names the Space the artifact is made in, by its id or its name, resolved by the host.
+// names the Space the artifact is made in, by its id or its name, resolved by the host. UX wave U10b (l6-artifacts-08):
+// `designSystem` binds the new artifact to a design system, by its id or its title, for the kinds a system governs.
+export const DESIGN_SYSTEM_KINDS = ['document', 'presentation', 'design', 'dashboard'] as const;
 export const ArtifactCreateInputSchema = z
   .strictObject({
     kind: ArtifactKindSchema.optional(),
@@ -215,6 +217,7 @@ export const ArtifactCreateInputSchema = z
     files: z.record(FilePathSchema, FileTextSchema).optional(),
     content: FileTextSchema.optional(),
     space: z.string().min(1).max(200).optional(), // F5: a Space's id or its name
+    designSystem: z.string().min(1).max(200).optional(), // UX wave U10b (l6-artifacts-08): a design system's id or its name, for a kind of DESIGN_SYSTEM_KINDS
     id: ArtifactIdSchema.optional(), // E2's name for `handle`
     html_path: PathSchema.optional(), // E2's name for `path`
   })
@@ -249,7 +252,8 @@ export const ArtifactScreenshotInputSchema = z.strictObject({
 });
 export type ArtifactScreenshotInput = z.infer<typeof ArtifactScreenshotInputSchema>;
 // P3-A (M6) start
-export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema, artifact: z.string().min(1).optional() });
+// UX wave U10b (M10, §E.4): `space` names a Space by its id or its name, to describe a new artifact there.
+export const ArtifactDescribeTypeInputSchema = z.strictObject({ kind: ArtifactKindSchema, artifact: z.string().min(1).optional(), space: z.string().min(1).max(200).optional() });
 // P3-B's document read fields (ledger X25, the architect 2026-10-13): a tab, a block id to start from, how many blocks,
 // and the changes since a revision. B's reader serves them for a document; A's generic reader ignores them. A owns them
 // here, and B's `document-tools.ts` imports this export (it keeps no copy of its own; Decision Log 44d).
@@ -272,16 +276,23 @@ export type ArtifactReadInput = z.infer<typeof ArtifactReadInputSchema>;
 // `files` maps a path to its whole new text, `null` removing it (Decision Log 10); an `html` page is its one file
 // (`index.html`, or the name it was created under). `mode: 'suggest'` writes the files as a suggestion the user accepts
 // or rejects (M8; parent Decision Log 27), as does any publish to an artifact whose owner set `agentEditsAsSuggestions`;
-// the default is a direct write, which never overrides the owner's setting.
+// the default is a direct write, which never overrides the owner's setting. UX wave U10b (l6-artifacts-18; the execution
+// document's §A.2): an html page may come from `path` instead, the .html file whose bytes become the new version, read
+// as `artifact_create`'s is; exactly one of the two, the refusal `publishPathOrFiles`.
 export const PUBLISH_MODES = ['direct', 'suggest'] as const;
-export const ArtifactPublishInputSchema = z.strictObject({
-  artifact: ArtifactIdSchema,
-  baseRevision: z.number().int().min(0),
-  files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }),
-  force: z.boolean().optional(), // default false
-  message: z.string().max(2000).optional(),
-  mode: z.enum(PUBLISH_MODES).optional(), // default 'direct'
-});
+export const ArtifactPublishInputSchema = z
+  .strictObject({
+    artifact: ArtifactIdSchema,
+    baseRevision: z.number().int().min(0),
+    files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }).optional(),
+    path: z.string().min(1).optional(), // U10b
+    force: z.boolean().optional(), // default false
+    message: z.string().max(2000).optional(),
+    mode: z.enum(PUBLISH_MODES).optional(), // default 'direct'
+  })
+  .superRefine((input, ctx) => {
+    if ((input.path === undefined) === (input.files === undefined)) ctx.addIssue({ code: 'custom', path: [], message: TOOL_ERRORS.publishPathOrFiles });
+  });
 export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
 export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
@@ -395,6 +406,11 @@ export type ArtifactDelivery = z.infer<typeof ArtifactDeliverySchema>;
 // can, the slide, the element and the property), and the files it held with their reasons
 const FileWarningSchema = z.strictObject({ path: z.string(), slide: z.string().optional(), element: z.string().optional(), property: z.string().optional(), message: z.string() });
 const HeldFileSchema = z.strictObject({ path: z.string(), reasons: z.array(z.string()) });
+// UX wave U10b (M10, §E.4; l8-settings-13): a Space's instructions from the user, as an answer about an artifact in that
+// Space (or a new one there) carries them: the first time the session meets the Space, and again once the text has
+// changed or the session's context was compacted.
+export const SpaceInstructionsAnswerSchema = z.strictObject({ spaceId: z.uuid(), name: z.string(), text: z.string() });
+export type SpaceInstructionsAnswer = z.infer<typeof SpaceInstructionsAnswerSchema>;
 // P3-A (M6): the kind's guide, attached once per session to the first create of that kind (§4.3).
 const KindGuideSchema = z.strictObject({ guide: z.string(), format: z.string() });
 // An `html` create also answers E2's fields (`id`, `deliverableId`, `version` 1,
@@ -408,6 +424,7 @@ export const ArtifactCreateResultSchema = z.strictObject({
   // P3-C (M3 fix wave 1): a file kind created from files answers what its loader said of them, as a publish does
   warnings: z.array(FileWarningSchema).optional(), notes: z.number().int().min(1).optional(), held: z.array(HeldFileSchema).optional(),
   spaceId: z.uuid().optional(), spaceName: z.string().optional(), // F5: the Space it was made in
+  spaceInstructions: SpaceInstructionsAnswerSchema.optional(), // UX wave U10b (M10)
 });
 export type ArtifactCreateResult = z.infer<typeof ArtifactCreateResultSchema>;
 // The listed artifact and who wrote it last (`ArtifactEditorSchema`, `ListedArtifactSchema`) are `./listed-artifact`'s
@@ -433,6 +450,7 @@ export const ArtifactDescribeTypeResultSchema = z.strictObject({
   artifactId: z.uuid().optional(), home: z.string().optional(),
   designCheck: DesignCheckSchema.optional(),
   designSystem: z.string().optional(), // a document, presentation or design: the governing design system's DESIGN.md (Decision Log 42)
+  spaceInstructions: SpaceInstructionsAnswerSchema.optional(), // UX wave U10b (M10): the artifact's Space's, or the Space named
 });
 export type ArtifactDescribeTypeResult = z.infer<typeof ArtifactDescribeTypeResultSchema>;
 const VersionSummarySchema = z.strictObject({ id: z.number().int().min(1), kind: z.string(), revision: z.number().int().min(0), at: IsoTimeSchema, by: ArtifactEditorSchema.shape.by, label: z.string().optional() });
@@ -451,6 +469,7 @@ export const ArtifactReadResultSchema = z.strictObject({
   held: z.array(HeldFileSchema).optional(), // P3-C
   file: z.strictObject({ name: z.string(), path: z.string(), size: z.number().int().min(0), sha256: z.string(), text: z.string().optional(), exists: z.boolean() }).optional(),
   versions: z.array(VersionSummarySchema),
+  spaceInstructions: SpaceInstructionsAnswerSchema.optional(), // UX wave U10b (M10)
 });
 export type ArtifactReadResult = z.infer<typeof ArtifactReadResultSchema>;
 // `changed` and `removed` are the paths the publish wrote; `kept`, the artifact's other files, as they are live. An
@@ -476,6 +495,7 @@ export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSc
 export const ArtifactExportResultSchema = z.strictObject({
   status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional(),
   blockedRequests: z.number().int().positive().optional(), // remote resources the page named, which the export did not load (P3-A Decision Log 44b)
+  pages: z.number().int().positive().optional(), // UX wave U10b (§B.4): a pdf's page count, counted in the exported file by the tool server
 });
 export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
 
@@ -515,7 +535,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -538,7 +558,7 @@ export const MAWS_TOOLS = {
   artifact_describe_type: {
     title: 'Describe artifact kind',
     description:
-      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment.",
+      "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
     input: ArtifactDescribeTypeInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it
@@ -546,7 +566,7 @@ export const MAWS_TOOLS = {
   artifact_read: {
     title: 'Read artifact',
     description:
-      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
+      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
     input: ArtifactReadInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it
@@ -554,7 +574,7 @@ export const MAWS_TOOLS = {
   artifact_publish: {
     title: 'Publish artifact',
     description:
-      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
+      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files; baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
     input: ArtifactPublishInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it
@@ -575,7 +595,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; a pdf\'s answer also names pages, its page count; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -633,6 +653,7 @@ export const TOOL_ERRORS = {
   targetRequired: (pane: string) => `show_pane: a target is required for the ${pane} pane`,
   fileNotFound: (path: string) => `show_pane: file not found: ${path}`,
   paneTimeout: `show_pane: no MAWS window answered within ${PANE_ANSWER_MS / 1000} s`,
+  paneNotReady: 'show_pane: the MAWS window was still loading its layout; try again', // UX wave U6b-1: the window's wait for its layout ran out
   // E2 start: each artifact refusal names the tool whose call it answers (E1's `notAFile` stays `send_file`'s)
   artifactNotAFile: (tool: ArtifactToolName, path: string) => `${tool}: not a file: ${path}`,
   notHtml: (tool: ArtifactToolName, path: string) => `${tool}: not an HTML file: ${path}`,
@@ -640,7 +661,15 @@ export const TOOL_ERRORS = {
   artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_publish`,
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
   artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
+  // UX wave U10b (l6-artifacts-08): a create's `designSystem` names no live design system, more than one, or a kind no system governs
+  noDesignSystem: (ref: string, names: readonly string[]) =>
+    names.length ? `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}` : `artifact_create: no design system "${ref}"; there are no design systems`,
+  designSystemAmbiguous: (ref: string, ids: readonly string[]) => `artifact_create: more than one design system is named "${ref}"; give one of these ids: ${ids.join(', ')}`,
+  designSystemNotForKind: (kind: string) => `artifact_create: kind "${kind}" takes no design system; designSystem is for ${DESIGN_SYSTEM_KINDS.join(', ')}`,
   noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
+  // UX wave U10b (l6-artifacts-18, §A.2): a publish names path or files, exactly one; path is an html page's alone
+  publishPathOrFiles: 'artifact_publish: give path or files, not both and not neither',
+  publishPathHtmlOnly: (kind: string) => `artifact_publish: path publishes an html page; send files for a ${kind}`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
@@ -683,11 +712,13 @@ type ToolInput<N extends MawsToolName> = z.infer<(typeof MAWS_TOOLS)[N]['input']
 // A call's arguments through the tool's input schema: the data, or the refusal text the host answers (an unknown pane
 // named with the known ones, every other refusal by its issues). U6d (decision 17): a `show_pane` that names the retired
 // `artifact` pane is answered `artifactPaneRetired` before the schema is consulted, so the agent always reads the sentence
-// that teaches the link, never a list of issues.
+// that teaches the link, never a list of issues. UX wave U10b (§A.2): a publish the schema refused for naming both or
+// neither of path and files is answered `publishPathOrFiles` alone, the sentence that says what to send.
 export function parseToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: ToolInput<N> } | { ok: false; error: string } {
   if (name === 'show_pane' && (args as { pane?: unknown } | null | undefined)?.pane === 'artifact') return { ok: false, error: TOOL_ERRORS.artifactPaneRetired };
   const parsed = MAWS_TOOLS[name].input.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as ToolInput<N> };
+  if (name === 'artifact_publish' && parsed.error.issues.some((issue) => issue.message === TOOL_ERRORS.publishPathOrFiles)) return { ok: false, error: TOOL_ERRORS.publishPathOrFiles };
   const pane = (args as { pane?: unknown } | null | undefined)?.pane;
   if (name === 'show_pane' && pane !== undefined && parsed.error.issues.some((issue) => issue.path.length === 1 && issue.path[0] === 'pane')) return { ok: false, error: TOOL_ERRORS.unknownPane(String(pane)) };
   return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };

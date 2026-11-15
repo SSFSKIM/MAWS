@@ -16,10 +16,12 @@ import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJ
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
+import { TOOL_ERRORS } from '@shared/maws/tools'; // UX wave U10b
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import committedFingerprint from '@artifacts/document/fingerprint.json';
 import { onSessionReplica, isWarming, warmInSlices } from '../documents/kinds/document-host';
 import { registerDocumentKind } from '../documents/kinds/document';
+import { registerDashboards } from '../dashboards'; // UX wave U10b
 import { HUMAN, openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
@@ -129,6 +131,31 @@ describe('artifact_create of a document', () => {
     expect(refusalOf(unknown)).toEqual({ reason: 'notFound', space: 'Elsewhere' });
     expect(textOfResult(unknown)).toContain('no Space "Elsewhere"');
     expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+  });
+
+  // UX wave U10b (l6-artifacts-08, H10): a document and a dashboard take a design system, which governs them and guides the answer
+  it('binds a document or a dashboard to the design system it names, the answer’s guide that system’s, and refuses one that is not there', async () => {
+    const dashboards = registerDashboards({ documents: world });
+    try {
+      const create = documentCreateTool(deps());
+      const house = await world.store.create({ kind: 'design_system', title: 'House' }, HUMAN);
+      const harbor = await world.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+      await world.store.setDefaults({ owner: house.id, spaces: {} });
+      world.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+      const memo = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Memo', content: 'One line.', designSystem: 'Harbor' }));
+      expect(memo).toMatchObject({ designSystem: '# DESIGN of Harbor' });
+      expect(world.store.get(memo.artifactId)!.designSystemId).toBe(harbor.id);
+      const board = json<{ artifactId: string }>(await call(create, { kind: 'dashboard', title: 'Board', designSystem: harbor.id }));
+      expect(board).toMatchObject({ kind: 'dashboard', designSystem: '# DESIGN of Harbor' });
+      expect(world.store.get(board.artifactId)!.designSystemId).toBe(harbor.id);
+      const plain = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Plain' }));
+      expect(world.store.get(plain.artifactId)!.designSystemId).toBeUndefined();
+      const missing = await call(create, { kind: 'document', title: 'Lost', designSystem: 'Harbour' });
+      expect(textOfResult(missing)).toBe(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'House']));
+      expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+    } finally {
+      dashboards.close();
+    }
   });
 
   it('hands every other kind to the tool it wraps', async () => {
@@ -846,5 +873,35 @@ describe('the whole-branch review: a read-only store, a create’s replay', () =
     expect(json(first)).toMatchObject({ guide: KIND_GUIDES.document, designSystem: 'The house voice.' });
     expect(await call(create, input, { toolUseId })).toEqual(first);
     expect(lookup).toHaveBeenCalledTimes(1);
+  });
+});
+
+// UX wave U10b (M10 fix wave 1, the task review): two creates with one tool-use id overlap. Both used to pass the replay
+// lookup and settle their own decorations; the second then got the first's recorded answer from the op ledger yet marked
+// the newer instructions it had read and never returned, so the next read left them out. Now the second joins the
+// first's whole response, as A's generic create does, and marks nothing of its own.
+describe('fix wave 1 (M10): overlapping creates with one tool-use id and a Space’s instructions', () => {
+  it('answer one response, and the instructions changed between them reach the next read', async () => {
+    const brand = await world.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    const notes = await world.store.createSpace({ name: 'Field notes' });
+    await world.store.setDefaults({ owner: brand.id, spaces: {} });
+    await world.store.setSpaceInstructions(notes.id, 'Use metres.');
+    const held: (() => void)[] = []; // the design system's context, held open per ask, released in order
+    world.store.registerDesignSystemContext((system) => new Promise((resolve) => held.push(() => resolve(`# DESIGN of ${system.title}`))));
+    const create = documentCreateTool(deps());
+    const input = { kind: 'document', title: 'Memo', content: '# Memo', space: 'Field notes' };
+    const toolUseId = 'toolu_overlap' as ToolUseId;
+    const first = call(create, input, { toolUseId });
+    await vi.waitFor(() => expect(held).toHaveLength(1)); // the first has read the instructions and waits on the context
+    await world.store.setSpaceInstructions(notes.id, 'Use metres and Celsius.');
+    const second = call(create, input, { toolUseId });
+    for (let turn = 0; turn < 20; turn++) await settle(); // a second that ran on would read the new text and wait on the context too
+    held.shift()!();
+    const answered = json(await first);
+    held.shift()?.();
+    expect(json(await second)).toEqual(answered); // one response
+    expect(answered.spaceInstructions).toEqual({ spaceId: notes.id, name: 'Field notes', text: 'Use metres.' });
+    expect(json(await read({ artifact: answered.artifactId as string })).spaceInstructions).toEqual({ spaceId: notes.id, name: 'Field notes', text: 'Use metres and Celsius.' });
+    expect(world.store.list({ kind: 'document' })).toHaveLength(1);
   });
 });

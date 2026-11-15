@@ -69,6 +69,8 @@ export const listKey = (filter?: LibraryFilter, machine?: MachineRef): string =>
 };
 export const rowKey = (artifactId: string): string => `row:${artifactId}`;
 export const spacesKey = (machine: MachineRef = ipc.localMachine): string => `spaces:${machine}`;
+// UX wave U10b (M9): this Mac's Spaces' instructions (its engine host's `spaces.instructions`; never another machine's)
+export const instructionsKey = (machine: MachineRef = ipc.localMachine): string => `instructions:${machine}`;
 
 // ---- reads -------------------------------------------------------------------------------------------------------------
 
@@ -156,6 +158,15 @@ export const watchLibrarySpaces = (client: MawsBridge = ipc, machine: MachineRef
     return result.ok ? { ok: true, value: result.value.spaces } : result;
   }, () => machine, client);
 
+// UX wave U10b (M9, §E.2): this Mac's Spaces' instructions. Not a read of main's index, whose `library.changed` they do not
+// follow: read again at this Mac's `spaces.changed` (connectLibrary) and after this window's own write.
+export const watchSpaceInstructions = (client: MawsBridge = ipc): (() => void) =>
+  watch(instructionsKey(client.localMachine), async (c) => {
+    const result = await c.invoke('spaces.instructions', {});
+    return result.ok ? { ok: true, value: result.value.instructions } : result;
+  }, () => client.localMachine, client);
+export const refreshSpaceInstructions = (client: MawsBridge = ipc): void => read(instructionsKey(client.localMachine), client);
+
 // Every watched read, or (`machine`) every one of that machine, read again (a change in its index, or a Retry).
 export function refreshLibrary(client: MawsBridge = ipc, machine?: MachineRef): void {
   for (const key of watchers.keys()) if (machine === undefined || machineOfKey.get(key)?.() === machine) read(key, client);
@@ -166,9 +177,12 @@ export function refreshLibrary(client: MawsBridge = ipc, machine?: MachineRef): 
 export function connectLibrary(client: MawsBridge = ipc): () => void {
   const offChanged = client.on('library.changed', (_change, from) => refreshLibrary(client, from.machine));
   const offResync = client.on('artifacts.resync', (_resync, from) => refreshLibrary(client, from.machine));
+  // UX wave U10b (M9): a Space's instructions changed on this Mac (another machine's are never read here)
+  const offSpaces = client.on('spaces.changed', (_change, from) => from.machine === client.localMachine && refreshSpaceInstructions(client));
   return () => {
     offChanged();
     offResync();
+    offSpaces();
   };
 }
 
@@ -177,6 +191,39 @@ export function connectLibrary(client: MawsBridge = ipc): () => void {
 export const libraryList = (s: LibraryState, filter?: LibraryFilter, machine?: MachineRef) => (s.reads.get(listKey(filter, machine)) ?? IDLE) as LibraryRead<LibraryList>;
 export const libraryRow = (s: LibraryState, artifactId: string) => (s.reads.get(rowKey(artifactId)) ?? IDLE) as LibraryRead<LibraryRow | null>; // null: not in the library
 export const librarySpaces = (s: LibraryState, machine?: MachineRef) => (s.reads.get(spacesKey(machine)) ?? IDLE) as LibraryRead<LibrarySpace[]>;
+// This Mac's Spaces' instructions by Space; empty until read, and when the engine host has never answered (an older one
+// knows no such command). One map per answer, so a selector over it is stable.
+const NO_INSTRUCTIONS: ReadonlyMap<string, string> = new Map();
+const instructionMaps = new WeakMap<object, ReadonlyMap<string, string>>();
+function instructionsMapOf(answer: { spaceId: string; text: string }[]): ReadonlyMap<string, string> {
+  let map = instructionMaps.get(answer);
+  if (!map) instructionMaps.set(answer, (map = new Map(answer.map(({ spaceId, text }) => [spaceId, text]))));
+  return map;
+}
+export function spaceInstructionsOf(s: LibraryState): ReadonlyMap<string, string> {
+  const answer = s.reads.get(instructionsKey())?.value as { spaceId: string; text: string }[] | undefined;
+  return answer === undefined ? NO_INSTRUCTIONS : instructionsMapOf(answer);
+}
+
+// The same read as a writer needs it (the branch review of U10b-4): not read yet, failed (the last read was refused,
+// before or after a good answer, until a read succeeds; its message kept while it is read again), or read. A field that
+// would overwrite the stored text is held until it is read: a refused refresh may hide text written since, so it is
+// failed here, while `spaceInstructionsOf` keeps the last good map for the marks and the cards' chip. One value per
+// read, so a selector over it is stable.
+export type SpaceInstructionsRead = { status: 'unread' } | { status: 'failed'; error: string } | { status: 'read'; instructions: ReadonlyMap<string, string> };
+const UNREAD: SpaceInstructionsRead = { status: 'unread' };
+const readsOfInstructions = new WeakMap<LibraryRead<unknown>, SpaceInstructionsRead>();
+export function spaceInstructionsReadOf(s: LibraryState): SpaceInstructionsRead {
+  const read = s.reads.get(instructionsKey());
+  if (read === undefined || (read.value === undefined && read.error === null)) return UNREAD;
+  let known = readsOfInstructions.get(read);
+  if (!known) {
+    const answer = read.value as { spaceId: string; text: string }[] | undefined;
+    known = read.error !== null || answer === undefined ? { status: 'failed', error: read.error! } : { status: 'read', instructions: instructionsMapOf(answer) };
+    readsOfInstructions.set(read, known);
+  }
+  return known;
+}
 
 export function useLibraryList(filter?: LibraryFilter, machine?: MachineRef): LibraryRead<LibraryList> {
   const key = listKey(filter, machine);
@@ -193,6 +240,16 @@ export function useLibraryRow(artifactId: string | null): LibraryRead<LibraryRow
 export function useLibrarySpaces(machine?: MachineRef): LibraryRead<LibrarySpace[]> {
   useEffect(() => watchLibrarySpaces(ipc, machine), [machine]);
   return useLibrary((s) => librarySpaces(s, machine));
+}
+
+export function useSpaceInstructions(): ReadonlyMap<string, string> {
+  useEffect(() => watchSpaceInstructions(), []);
+  return useLibrary(spaceInstructionsOf);
+}
+
+export function useSpaceInstructionsRead(): SpaceInstructionsRead {
+  useEffect(() => watchSpaceInstructions(), []);
+  return useLibrary(spaceInstructionsReadOf);
 }
 
 // An `artifact` tab's title for the strip and the toolbar: its row's, null until known (or when it is not in the library).

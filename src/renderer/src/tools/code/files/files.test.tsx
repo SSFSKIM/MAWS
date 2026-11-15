@@ -1,24 +1,33 @@
 // The Files tool (C8c execution document, M2): the tree's pure model, the listing store over a fake X2 client, and the
-// tool over C8a's host.
+// tool over C8a's host. UX wave U6b-1 (M2): a file beside the chat as an editor; (M3) the tree at the file's left.
+import { isolateHistory, undo } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesEntry } from '@shared/ipc/schema/files';
+import { FilesTreeSchema } from '@shared/ipc/schema/layout';
 import type { SessionRecord } from '@shared/graph/session';
 import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
 import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
-import { instanceOf, panelHost, registerPanelTool } from '../../../panel/host';
+import { panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
-import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
-import { useViewer } from '../viewer/viewer-store';
-import { filesTool, type FilesState } from './FilesTool';
+import { installDisk } from '../../../test-support/code-disk';
+import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
+import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
+import { openFile, resetKeptOpens } from '../open-file';
+import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from '../viewer/viewer-store';
+import { filesTool } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
+import { FILE_WIDTH_MIN, resetTreeState, treeOf, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
+import { installResizeObserver } from '../../../test-support/resize';
+import { connectSideFiles } from './tabs';
 import { dirname, expandTo, hidden, joinPath, roleOf, rootsFor, rowsOf, sameFile, type Listing } from './tree';
-import { currentSet } from '../../../stores/layout-model';
+import { activeTab, allTabs, currentSet } from '../../../stores/layout-model';
 import { useSetup } from '../../../sessions/store'; // E11
 import { FILES_COPY } from '../copy'; // E11
 
@@ -151,6 +160,7 @@ describe('files tree', () => {
 // The panel's summary, drawn before a tool is selected, reads too: answered quietly.
 const QUIET: Partial<Record<string, ReturnType<typeof answer>>> = {
   'layout.get': answer({ value: null }),
+  'layout.set': answer(), // UX wave U6b-1 (M3): the tree's state, written after a person's act
   'git.watch': fail('not a git repository'),
   'git.unwatch': answer(),
   'fs.workflows': answer({ runs: [] }),
@@ -384,6 +394,7 @@ describe('files tool', () => {
   let main: ReturnType<typeof mainWith>;
   beforeEach(() => {
     resetPanelStores();
+    resetTreeState();
     useFiles.getState().reset();
     useViewer.getState().reset();
     main = mainWith(REPO);
@@ -395,7 +406,7 @@ describe('files tool', () => {
     offs.splice(0).forEach((off) => off());
   });
 
-  const openTool = (params?: { path?: string; line?: number }) => act(() => void panelHost.addTool('files', { appSessionId: A, params }));
+  const openTool = () => act(() => void panelHost.addTool('files', { appSessionId: A }));
 
   it('gives the semantic tree its virtual content extent as directories expand and collapse, with Refresh outside it', async () => {
     render(<TestHost />);
@@ -435,17 +446,21 @@ describe('files tool', () => {
     expect(screen.queryByText('src')).toBeNull();
   });
 
-  it('opens a clicked file in the main area for the session and leaves the panel; a symlink opens nothing', async () => {
+  // UX wave U6b-1: a file opens beside the chat; the first one takes the session's tree-only tab (the tree at its left
+  // is M3's), and nothing opens in the main area
+  it('opens a clicked file beside the chat in the tree-only tab, the main area unchanged; a symlink opens nothing', async () => {
     render(<TestHost />);
     openTool();
-    await screen.findByText('src');
+    const [tab] = panelOf(A)!.tabs;
     fireEvent.click(await screen.findByText('src'));
+    fireEvent.click(await screen.findByText('link-out'));
+    expect(useLayout.getState().panelParams[tab.id]).toBeUndefined();
     fireEvent.click(await screen.findByText('app.ts'));
-    expect(fileTabs()).toEqual([{ id: `file:${TEST_MACHINE}:/r/src/app.ts`, kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false }]);
-    expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual(['files']);
-    expect(item('app.ts').getAttribute('aria-selected')).toBe('true');
-    fireEvent.click(item('link-out'));
-    expect(fileTabs()).toHaveLength(1);
+    expect(fileTabs()).toEqual([]);
+    expect(panelOf(A)!.tabs.map((t) => t.id)).toEqual([tab.id]);
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/r/src/app.ts', line: null, preview: true });
+    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('/r/src/app.ts');
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/src/app.ts');
   });
 
   it('shows a refused root as the refusal with its path, and retries it when expanded again', async () => {
@@ -459,24 +474,14 @@ describe('files tool', () => {
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
   });
 
-  it('open reveals a path: expands its ancestors, selects it and opens the file at the line', async () => {
+  // UX wave U6b-1 (Decision 8): the reveal of `params.path`, which nothing in the window asked for, is gone
+  it('a tab with params of the older reveal draws the tree and opens nothing', async () => {
     render(<TestHost />);
-    openTool({ path: '/r/src/../src/staged.ts', line: 5 });
-    await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/r/src/staged.ts', line: 5, appSessionId: A })]));
-    expect(item('staged.ts').getAttribute('aria-selected')).toBe('true');
-    expect(item('src').getAttribute('aria-expanded')).toBe('true');
-    openTool({ path: '/r/src/app.ts', line: 9 }); // re-targeting the open tab
-    await waitFor(() => expect(fileTabs().map((t) => t.kind === 'file' && [t.path, t.line])).toContainEqual(['/r/src/app.ts', 9]));
-    expect(panelOf(A)?.tabs).toHaveLength(1);
-  });
-
-  it('open with a path that only ends like a root opens it as given, in no root', async () => {
-    main = mainWith({ '': [dir('/Users/new/work/app')], '/Users/new/work/app': [file('/Users/new/work/app/config.ts')] });
-    render(<TestHost />);
-    openTool({ path: '/app/config.ts', line: 2 });
-    await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
-    expect(item('app').getAttribute('aria-expanded')).toBe('true');
-    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: bareOf(A), path: '/Users/new/work/app' }]);
+    act(() => void panelHost.addTool('files', { appSessionId: A, params: { path: '/r/src/app.ts', line: 5 } as never }));
+    await waitFor(() => expect(items()).toHaveLength(5));
+    expect(fileTabs()).toEqual([]);
+    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('');
+    expect(main.callsOf('files.read')).toEqual([]);
   });
 
   // UX wave U8c-2 (M4 decision 4, §I): while the session is moved, the root that is the working folder is listed first,
@@ -676,6 +681,11 @@ describe('files tool', () => {
     await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     fireEvent.click(await screen.findByText('app.ts'));
+    // UX wave U6b-1: the click opened app.ts in this tab, beside the chat; given back to the tree alone, the tab marks the
+    // session's selection, the row the click made (a tab that holds a file marks its file: M3's suite)
+    const id = panelOf(A)!.tabs[0].id;
+    act(() => useLayout.getState().setPanelParams(id, null));
+    await screen.findByText('app.ts');
     REPO['/r/src'] = [file('/r/src/app.ts'), file('/r/src/new.ts'), file('/r/src/staged.ts')];
     try {
       act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src/new.ts', kind: 'created' }));
@@ -683,7 +693,7 @@ describe('files tool', () => {
       expect(item('app.ts').getAttribute('aria-selected')).toBe('true');
       main.calls.splice(0);
       act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src', kind: 'invalidated' }));
-      await waitFor(() => expect(main.calls.map((c) => [c.name, c.input.path])).toEqual([
+      await waitFor(() => expect(main.calls.filter((c) => c.name.startsWith('files.')).map((c) => [c.name, c.input.path])).toEqual([
         ['files.watch', '/r/src'],
         ['files.list', '/r/src'],
       ]));
@@ -700,13 +710,556 @@ describe('files tool', () => {
     act(() => useLayout.getState().setPanelTabPinned(A, id, true));
     await screen.findByText('src');
     await screen.findByText('src');
-    const state = instanceOf(id)!.state as FilesState;
     act(() => useLayout.getState().openSession(B));
     act(() => panelHost.selectTab(id));
     await waitFor(() => expect(main.callsOf('files.list')).toContainEqual({ appSessionId: bareOf(B) }));
-    await waitFor(() => expect(state.ui.getState().views[B]?.defaultRoot).toBe('/r'));
+    await waitFor(() => expect(treeOf(useTreeState.getState(), B).defaultRoot).toBe('/r')); // UX wave U6b-1 (M3): the session's tree, not the tab's
     act(() => useLayout.getState().openSession(A));
     expect(await screen.findByText('src')).toBeTruthy(); // A's expansion kept
     expect(within(screen.getByRole('tree')).getAllByRole('treeitem')[0].getAttribute('aria-expanded')).toBe('true');
+  });
+});
+
+// ---- the tree at the file's left (UX wave U6b-1, M3) -------------------------------------------------------------------
+// Every Files tab draws the tree in a column at the left of its file, and a tab with no file the tree alone. The tree is
+// the session's (`tree-state.ts`): the same folders open, the same width and fold in every tab of the session, and after a
+// relaunch. A row's click opens the file in the preview tab, a double-click keeps it, ⌘-click opens a main tab. The row of
+// the file in view is marked. In a tab too narrow for both, the tree folds, and its button shows it in the file's place
+// (the owner's answer on card R8). happy-dom has no layout: a tab's width is reported by a fake ResizeObserver.
+describe('the tree at the file’s left', () => {
+  const APP = '/r/src/app.ts';
+  const STAGED = '/r/src/staged.ts';
+  const WIDE = 700;
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof treeMain>;
+  let observer: ReturnType<typeof installResizeObserver>;
+
+  // Main as the tree reads it (REPO's listings), a file's text, and the tree's stored state
+  function treeMain(stored: unknown = null) {
+    return installFakeMain((name, input) => {
+      if (name === 'layout.get') return answer({ value: input.key === 'files.tree' ? stored : null });
+      if (QUIET[name]) return QUIET[name];
+      if (name === 'files.watch' || name === 'files.unwatch') return answer();
+      if (name === 'files.list') {
+        const found = REPO[(input.path as string | undefined) ?? ''];
+        if (found === undefined) return fail(`not found: ${String(input.path)}`);
+        return typeof found === 'string' ? fail(found) : answer({ root: input.path === undefined ? null : '/r', path: input.path ?? '', entries: found, truncated: false });
+      }
+      if (name === 'files.read') {
+        const content = `// ${String(input.path)}\n`;
+        return answer({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null });
+      }
+      return fail(`unexpected ${name}`);
+    });
+  }
+
+  beforeEach(() => {
+    resetPanelStores();
+    resetKeptOpens();
+    resetTreeState();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    observer = installResizeObserver();
+    main = treeMain();
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r', additionalDirectories: ['/docs'] })) }));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    vi.unstubAllGlobals();
+    resetKeptOpens();
+  });
+
+  const sideTabs = () => (panelOf(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+  const filesTab = () => document.querySelector<HTMLElement>('[data-files-tab]')!;
+  const widen = (width: number) => observer.resize(filesTab(), { width, height: 600 });
+  const treeColumn = () => document.querySelector<HTMLElement>('[data-files-tree]');
+  const toggle = () => document.querySelector<HTMLElement>('[data-files-tree-toggle]');
+  const divider = () => screen.getByRole('separator', { name: FILES_COPY.resizeTree });
+  const row = (path: string) => document.querySelector<HTMLElement>(`[role="treeitem"][data-path="${path}"]`);
+  const shown = async (path: string) => waitFor(() => expect(row(path)).not.toBeNull());
+  const marked = () => [...document.querySelectorAll('[role="treeitem"][aria-selected="true"]')].map((element) => element.getAttribute('data-path'));
+  // The file's viewer drawn and not hidden (while the tree stands in its place it stays mounted, hidden)
+  const fileShown = () => {
+    const viewer = document.querySelector('[data-file-viewer]');
+    return viewer !== null && viewer.closest('[hidden]') === null;
+  };
+  const NARROW = TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN - 1;
+  const openBeside = async (path: string, options: { keep?: boolean } = {}) => {
+    act(() => void openFile(A, path, null, options));
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(path));
+  };
+
+  it('every Files tab draws the tree at the left of its file, and a tab with no file the tree alone', async () => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await shown('/r/src');
+    expect(treeColumn()?.getAttribute('data-place')).toBe('alone');
+    expect(toggle()).toBeNull();
+    fireEvent.click(row('/r/src')!);
+    await shown(APP);
+    fireEvent.click(row(APP)!);
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+    widen(WIDE);
+    const tree = treeColumn()!;
+    expect(tree.getAttribute('data-place')).toBe('beside');
+    expect(tree.style.width).toBe(`${TREE_WIDTH_DEFAULT}px`);
+    const viewer = document.querySelector<HTMLElement>('[data-file-viewer]')!;
+    expect(viewer.getAttribute('data-path')).toBe(APP);
+    expect(tree.compareDocumentPosition(viewer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // the tree at the file's left
+    expect(row(STAGED)).not.toBeNull(); // the same tree: src still open
+    const button = within(viewer).getByRole('button', { name: FILES_COPY.hideTree });
+    expect(button.hasAttribute('data-files-tree-toggle')).toBe(true);
+    expect(fileTabs()).toEqual([]);
+  });
+
+  it('is the session’s tree: every Files tab of the session shows the same folders open, width and fold', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    await openBeside(STAGED, { keep: true });
+    const [first, second] = sideTabs();
+    expect(paramsOf(second.id)).toMatchObject({ file: STAGED });
+    widen(WIDE);
+    await shown('/r/src');
+    fireEvent.click(row('/r/src')!);
+    await shown(APP);
+    fireEvent.keyDown(divider(), { key: 'ArrowRight' });
+    expect(treeColumn()!.style.width).toBe(`${TREE_WIDTH_DEFAULT + 8}px`);
+    act(() => panelHost.selectTab(first.id));
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+    widen(WIDE);
+    expect(treeColumn()!.style.width).toBe(`${TREE_WIDTH_DEFAULT + 8}px`);
+    expect(divider().getAttribute('aria-valuenow')).toBe(String(TREE_WIDTH_DEFAULT + 8));
+    await shown(APP); // src open in this tab too
+    fireEvent.click(toggle()!);
+    expect(treeColumn()).toBeNull();
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree);
+    act(() => panelHost.selectTab(second.id));
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(STAGED));
+    widen(WIDE);
+    expect(treeColumn()).toBeNull(); // folded for the session
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree);
+  });
+
+  it('a row’s click opens the file in the preview tab, a double-click keeps it, and ⌘-click opens a main tab with no side tab left', async () => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
+    await shown('/r/src');
+    fireEvent.click(row('/r/src')!);
+    await shown(APP);
+    fireEvent.click(row(APP)!);
+    const [tab] = sideTabs();
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+    widen(WIDE);
+    await shown(STAGED);
+    fireEvent.click(row(STAGED)!);
+    expect(sideTabs().map((ref) => ref.id)).toEqual([tab.id]);
+    expect(paramsOf(tab.id)).toEqual({ file: STAGED, line: null, preview: true }); // the preview tab reused
+    fireEvent.click(row(STAGED)!);
+    fireEvent.dblClick(row(STAGED)!);
+    expect(paramsOf(tab.id)).toEqual({ file: STAGED, line: null }); // kept
+    fireEvent.click(row(APP)!);
+    const second = sideTabs().find((ref) => ref.id !== tab.id)!;
+    expect(sideTabs()).toHaveLength(2);
+    expect(paramsOf(second.id)).toEqual({ file: APP, line: null, preview: true }); // a second tab, the new preview
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+    widen(WIDE);
+    await shown(STAGED);
+    fireEvent.click(row(STAGED)!, { metaKey: true });
+    expect(fileTabs().map((ref) => ref.path)).toEqual([STAGED]);
+    expect(sideTabs().map((ref) => paramsOf(ref.id))).toEqual([{ file: APP, line: null, preview: true }]); // rule 3: none of it beside the chat
+  });
+
+  it('marks the row of the file in view, and opens no folder to reach it', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(WIDE);
+    await shown('/r/src');
+    expect(row(APP)).toBeNull(); // its folder stays closed
+    expect(marked()).toEqual([]);
+    fireEvent.click(row('/r/src')!);
+    await shown(APP);
+    expect(marked()).toEqual([APP]);
+    await openBeside(STAGED); // the preview tab reused
+    expect(marked()).toEqual([STAGED]);
+  });
+
+  it('in a tab too narrow for both the tree folds, and its button shows the tree in the file’s place until a file is chosen or it is pressed again', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    const threshold = TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN;
+    widen(threshold - 1);
+    expect(treeColumn()).toBeNull();
+    expect(document.querySelector('[data-file-viewer]')).not.toBeNull();
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree);
+    widen(threshold);
+    expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.hideTree);
+    widen(threshold - 1);
+    expect(treeColumn()).toBeNull();
+    fireEvent.click(toggle()!);
+    expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+    expect(fileShown()).toBe(false); // in the file's place, nothing beside it
+    expect(document.querySelector('[data-file-viewer]')!.closest('[inert]')).not.toBeNull(); // mounted, hidden and inert
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.hideTree);
+    expect(within(filesTab()).getByText(FILES_COPY.title)).toBeTruthy();
+    fireEvent.click(toggle()!); // pressed again: the file
+    expect(treeColumn()).toBeNull();
+    expect(fileShown()).toBe(true);
+    expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe(APP);
+    fireEvent.click(toggle()!);
+    await shown('/r/src');
+    fireEvent.click(row('/r/src')!); // a folder is not a file: the tree stays
+    await shown(STAGED);
+    expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+    fireEvent.click(row(STAGED)!); // a file chosen: it shows, in the preview tab
+    await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe(STAGED));
+    expect(treeColumn()).toBeNull();
+    expect(treeOf(useTreeState.getState(), A).folded).toBe(false); // the narrow button stores nothing
+  });
+
+  // M3's review: the first click of a double-click ends the tree in the file's place, so the second lands on the file
+  it('a double-click on a row of the tree in the file’s place keeps the tab, its first click showing the file at once', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    const [tab] = sideTabs();
+    widen(NARROW);
+    fireEvent.click(toggle()!);
+    await shown('/r/src');
+    fireEvent.click(row('/r/src')!, { detail: 1 });
+    await shown(STAGED);
+    fireEvent.click(row(STAGED)!, { detail: 1 }); // the pair's first click: the file at once, in the preview tab
+    await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe(STAGED));
+    expect(fileShown()).toBe(true);
+    expect(paramsOf(tab.id)).toEqual({ file: STAGED, line: null, preview: true });
+    const there = document.querySelector<HTMLElement>('[data-file-viewer]')!; // what now stands where the row was
+    fireEvent.click(there, { detail: 2 });
+    fireEvent.dblClick(there, { detail: 2 });
+    expect(paramsOf(tab.id)).toEqual({ file: STAGED, line: null }); // kept
+    // a later double-click in the file keeps nothing: its own first click ends the chosen row's pair
+    act(() => void openFile(A, APP, null));
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+    const preview = sideTabs().find((ref) => ref.id !== tab.id)!;
+    widen(NARROW);
+    fireEvent.click(toggle()!);
+    await shown(APP);
+    fireEvent.click(row(APP)!, { detail: 1 }); // the file the tab holds, chosen: the file shows again
+    await waitFor(() => expect(fileShown()).toBe(true));
+    const file = document.querySelector<HTMLElement>('[data-file-viewer]')!;
+    fireEvent.click(file, { detail: 1 }); // later, a double-click of its own
+    fireEvent.click(file, { detail: 2 });
+    fireEvent.dblClick(file, { detail: 2 });
+    expect(paramsOf(preview.id)).toEqual({ file: APP, line: null, preview: true });
+  });
+
+  // M3's review, the record's bounds: the file a row's click chose is kept by the pair's second click only. Each case
+  // interrupts the row's first click before a click with `detail` 2 and a double-click arrive; none keeps a file.
+  describe('a double-click keeps only the file its own first click chose', () => {
+    const ENV = '/r/.env';
+    // `path` in the preview tab, the tree in its place, and a click on ENV's row: the preview reused, ENV shown
+    async function chooseFromNarrowTree(path: string) {
+      await openBeside(path);
+      widen(NARROW);
+      fireEvent.click(toggle()!, { detail: 1 });
+      await shown(ENV);
+      fireEvent.click(row(ENV)!, { detail: 1 });
+      await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe(ENV));
+      return sideTabs().find((ref) => paramsOf(ref.id) && (paramsOf(ref.id) as { file: string }).file === ENV)!;
+    }
+    const secondClickOn = (element: Element) => {
+      fireEvent.click(element, { detail: 2 });
+      fireEvent.dblClick(element, { detail: 2 });
+    };
+
+    it('an unrelated change of the tab in view between the two clicks', async () => {
+      render(<TestHost />);
+      await openBeside(APP, { keep: true });
+      const other = sideTabs()[0];
+      act(() => void openFile(A, STAGED, null)); // a second tab, the preview
+      await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(STAGED));
+      const chosen = await chooseFromNarrowTree(STAGED);
+      act(() => panelHost.selectTab(other.id)); // not the row's doing
+      await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+      expect(filesTab().getAttribute('data-file')).toBe(APP); // still in view
+    });
+
+    it('a key pressed between the two clicks', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      fireEvent.keyDown(document.querySelector('[data-file-viewer]')!, { key: 'Enter' });
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+    });
+
+    it('a click outside every Files tab between the two clicks', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      fireEvent.click(document.body, { detail: 1 }); // a pair's first click elsewhere
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+    });
+
+    it('a second click on the tree’s button or on the divider does that control’s own thing and keeps no file', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      secondClickOn(toggle()!); // the button where the tree's own stood: it shows the tree again
+      expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+      widen(WIDE); // room for both: the tree beside the file
+      fireEvent.keyDown(divider(), { key: 'End' });
+      await shown('/r/src');
+      fireEvent.click(row('/r/src')!, { detail: 1 }); // a folder's click: nothing chosen …
+      await shown(STAGED);
+      fireEvent.click(row(STAGED)!, { detail: 1 }); // … then a file's, which reuses the preview
+      await waitFor(() => expect(paramsOf(chosen.id)).toEqual({ file: STAGED, line: null, preview: true }));
+      secondClickOn(divider()); // the divider's own double-click: the default width
+      expect(treeOf(useTreeState.getState(), A).width).toBeNull();
+      expect(paramsOf(chosen.id)).toEqual({ file: STAGED, line: null, preview: true });
+    });
+  });
+
+  it('a reuse of the tab ends the tree in the file’s place: a file opened again from a link shows, not the tree', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(NARROW);
+    fireEvent.click(toggle()!);
+    expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+    await openBeside(STAGED); // from a link: the preview tab reused, no row chosen
+    expect(treeColumn()).toBeNull();
+    await openBeside(APP); // and the first file again
+    expect(treeColumn()).toBeNull();
+    expect(fileShown()).toBe(true);
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree);
+  });
+
+  it('a tab of a fractional width stores the divider’s maximum as a whole number, and a reload keeps every session’s tree', async () => {
+    main = treeMain({ version: 1, sessions: { [B]: { width: 300, folded: true, expanded: ['/r'] } } });
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(WIDE + 0.5);
+    expect(Number(divider().getAttribute('aria-valuemax'))).toBe(WIDE - FILE_WIDTH_MIN);
+    fireEvent.keyDown(divider(), { key: 'End' });
+    await waitFor(() => expect(main.callsOf('layout.set')).toHaveLength(1));
+    const written = main.callsOf('layout.set')[0].value;
+    expect(FilesTreeSchema.safeParse(written).success).toBe(true);
+    act(() => resetTreeState());
+    main = treeMain(written);
+    await act(() => useTreeState.getState().load());
+    expect(treeOf(useTreeState.getState(), A).width).toBe(WIDE - FILE_WIDTH_MIN);
+    expect(treeOf(useTreeState.getState(), B)).toMatchObject({ width: 300, folded: true, expanded: new Set(['/r']) });
+  });
+
+  it('in a tab wide enough its button folds the tree for the session, and the fold is stored', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(WIDE);
+    await shown('/r/src');
+    fireEvent.click(toggle()!);
+    expect(treeColumn()).toBeNull();
+    expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree);
+    await waitFor(() => expect(main.callsOf('layout.set')).toContainEqual({ key: 'files.tree', value: { version: 1, sessions: { [A]: { width: null, folded: true, expanded: ['/r'] } } } }));
+    fireEvent.click(toggle()!);
+    expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
+    expect(treeOf(useTreeState.getState(), A).folded).toBe(false);
+  });
+
+  it('drags the divider between the tree’s least width and what leaves the file its own, and a double-click returns it to the default', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(WIDE);
+    const bounds = () => ['aria-valuemin', 'aria-valuemax', 'aria-valuenow'].map((name) => Number(divider().getAttribute(name)));
+    expect(bounds()).toEqual([TREE_WIDTH_MIN, WIDE - FILE_WIDTH_MIN, TREE_WIDTH_DEFAULT]);
+    fireEvent.keyDown(divider(), { key: 'End' });
+    expect(treeColumn()!.style.width).toBe(`${WIDE - FILE_WIDTH_MIN}px`);
+    fireEvent.keyDown(divider(), { key: 'Home' });
+    expect(treeColumn()!.style.width).toBe(`${TREE_WIDTH_MIN}px`);
+    expect(treeOf(useTreeState.getState(), A).width).toBe(TREE_WIDTH_MIN);
+    fireEvent.dblClick(divider());
+    expect(treeColumn()!.style.width).toBe(`${TREE_WIDTH_DEFAULT}px`);
+    expect(treeOf(useTreeState.getState(), A).width).toBeNull();
+  });
+
+  it('after a relaunch the session’s tree has its stored width, fold and open folders', async () => {
+    main = treeMain({ version: 1, sessions: { [A]: { width: 300, folded: true, expanded: ['/r', '/r/src'] } } });
+    render(<TestHost />);
+    await openBeside(APP);
+    widen(WIDE);
+    await waitFor(() => expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.showTree));
+    expect(treeColumn()).toBeNull(); // folded, as stored
+    fireEvent.click(toggle()!);
+    expect(treeColumn()!.style.width).toBe('300px');
+    await shown(APP); // src open, as stored
+    expect(marked()).toEqual([APP]);
+    expect(main.callsOf('layout.get').filter((input) => input.key === 'files.tree')).toHaveLength(1);
+  });
+});
+
+// ---- a file beside the chat as an editor (UX wave U6b-1, M2) -----------------------------------------------------------
+// The first edit keeps the preview tab (L1), so nothing replaces an unsaved file beside the chat; and a session that goes
+// leaves no unsaved file behind unasked (R5, sequence 6): the side tabs' one subscriber opens a main tab, not in front,
+// for each file that left them with unsaved edits or a save under way, before the viewer's prune runs.
+describe('a file beside the chat as an editor', () => {
+  const APP = '/r/app.ts';
+  const LIB = '/r/lib.ts';
+  const OTHER = '/r/c.ts';
+  const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
+  const offs: (() => void)[] = [];
+  let disk: ReturnType<typeof installDisk>;
+  beforeAll(() => import('../viewer/CodeView'));
+  beforeEach(() => {
+    resetPanelStores();
+    useLayout.setState({ main: mainShowing(B, A) }); // A in front, B's tab beside it: what comes to the front when A goes
+    resetKeptOpens();
+    resetTreeState();
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    disk = installDisk({ [APP]: 'const a = 1;\n', [LIB]: 'export const b = 2;\n', [OTHER]: 'c\n' });
+    offs.push(registerPanelTool(filesTool), registerEditor(), connectSideFiles(sideFilesViewer), connectCodeEvents());
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    resetKeptOpens();
+  });
+
+  const sideTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+  const editor = () => {
+    const element = document.querySelector<HTMLElement>('[data-files-tab] .cm-editor');
+    return element ? EditorView.findFromDOM(element) : null;
+  };
+  const type = (text: string) => act(() => editor()!.dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const entryOf = (path: string) => useViewer.getState().entries.get(KEY(path));
+  const documentOf = (path: string) => existingViewState(KEY(path))?.docOf?.();
+  const mainTab = (path: string) => allTabs(useLayout.getState().main).find((tab) => tab.id === KEY(path));
+
+  // `path` beside A's chat in the preview tab (or kept), shown and editable.
+  async function openBeside(path: string, options: { keep?: boolean } = {}) {
+    act(() => void openFile(A, path, null, options));
+    await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
+    await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(path));
+  }
+
+  it('the first edit keeps the preview tab, so the next single click opens a second tab and the edited file stands', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    const [preview] = sideTabs(A);
+    expect(paramsOf(preview.id)).toEqual({ file: APP, line: null, preview: true });
+    act(() => {
+      editor()!.dispatch({ changes: { from: 0, insert: '// mine\n' }, userEvent: 'input.type' });
+      expect(paramsOf(preview.id)).toEqual({ file: APP, line: null }); // in the same step as the edit, before any render
+    });
+    await openBeside(LIB);
+    expect(sideTabs(A)).toHaveLength(2);
+    expect(paramsOf(preview.id)).toEqual({ file: APP, line: null });
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(documentOf(APP)).toBe('// mine\nconst a = 1;\n');
+  });
+
+  it.each([
+    ['not in view', true],
+    ['in view', false],
+  ])('a session that goes with its unsaved file %s leaves the file as a main tab, not in front, with its edit', async (_, other) => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    if (other) {
+      await openBeside(LIB); // another file in view: app.ts's view unmounts, its entry and document stay
+      expect(document.querySelectorAll('[data-files-tab]')).toHaveLength(1);
+    }
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${A}`);
+    act(() => useLayout.getState().dropSession(A));
+    expect(panelOf(A)).toBeUndefined();
+    expect(mainTab(APP)).toMatchObject({ kind: 'file', path: APP, appSessionId: A });
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(documentOf(APP)).toBe('// mine\nconst a = 1;\n');
+    expect(mainTab(LIB)).toBeUndefined(); // a clean file goes with its session, as any side tab does
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the unmounts' prunes
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(entryOf(LIB)).toBeUndefined();
+  });
+
+  // The review's finding: each main tab the rule opens notifies the viewer's own layout subscriber, whose prune would take
+  // the next unsaved file's entry before its tab exists; every file to keep is held as the side's across the opens.
+  it('a session that goes with two unsaved files not in view leaves both as main tabs, not in front, each with its edit', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// app\n');
+    await openBeside(LIB, { keep: true });
+    type('// lib\n');
+    await waitFor(() => expect([entryOf(APP)?.dirty, entryOf(LIB)?.dirty]).toEqual([true, true]));
+    await openBeside(OTHER); // a third file in view: both edited views unmount, their entries and documents stay
+    act(() => useLayout.getState().dropSession(A));
+    expect([mainTab(APP)?.id, mainTab(LIB)?.id]).toEqual([KEY(APP), KEY(LIB)]);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the unmounts' prunes
+    expect([entryOf(APP)?.dirty, entryOf(LIB)?.dirty]).toEqual([true, true]);
+    expect([documentOf(APP), documentOf(LIB)]).toEqual(['// app\nconst a = 1;\n', '// lib\nexport const b = 2;\n']);
+    expect(mainTab(OTHER)).toBeUndefined();
+  });
+
+  it('a session that goes while its file saves leaves the file as a main tab; the save lands there', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    const write = disk.hold('files.write');
+    const saving = useViewer.getState().save(KEY(APP));
+    await waitFor(() => expect(entryOf(APP)?.saving).toBe(true));
+    act(() => useLayout.getState().dropSession(A));
+    expect(mainTab(APP)).toBeDefined();
+    await act(async () => write.release());
+    expect(await saving).toBe('ok');
+    expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n');
+    expect(entryOf(APP)).toMatchObject({ dirty: false, saving: false });
+  });
+
+  // M3's review: while the tree stands in the file's place the viewer stays mounted, so at the viewer's cap a clean file
+  // keeps its entry and its undo history; and the hidden file is not where the keyboard is
+  it('at the viewer’s cap a clean file whose tree stood in its place keeps its undo history', async () => {
+    const observer = installResizeObserver();
+    const others: (() => void)[] = [];
+    try {
+      render(<TestHost />);
+      await openBeside(APP, { keep: true });
+      type('// mine\n');
+      await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+      expect(await act(() => useViewer.getState().save(KEY(APP)))).toBe('ok');
+      expect(entryOf(APP)?.dirty).toBe(false);
+      for (let i = 0; i < VIEWER_ENTRIES_MAX; i++) others.push(useViewer.getState().mount(KEY(`/r/x${i}.ts`), { appSessionId: A, path: `/r/x${i}.ts`, line: null }));
+      act(() => editor()!.contentDOM.focus());
+      expect(focusedFile()).toBe(KEY(APP));
+      observer.resize(document.querySelector('[data-files-tab]')!, { width: TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN - 1, height: 600 });
+      fireEvent.click(document.querySelector('[data-files-tree-toggle]')!);
+      expect(document.querySelector('[data-files-tree]')?.getAttribute('data-place')).toBe('instead');
+      expect(focusedFile()).toBeNull(); // hidden: not where the keyboard is
+      act(() => sideFilesViewer.prune()); // past the cap, with the tree in the file's place
+      expect(entryOf(APP)).toBeDefined();
+      fireEvent.click(document.querySelector('[data-files-tree-toggle]')!);
+      expect(document.querySelector('[data-files-tree]')).toBeNull();
+      act(() => void undo(editor()!));
+      expect(editor()!.state.doc.toString()).toBe('const a = 1;\n');
+    } finally {
+      act(() => others.forEach((off) => off()));
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('a file another session’s list still holds stays beside that chat, and no main tab is made', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    act(() => void openFile(B, APP, null, { keep: true }));
+    act(() => useLayout.getState().dropSession(A));
+    expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
+    expect(mainTab(APP)).toBeUndefined();
+    expect(entryOf(APP)?.dirty).toBe(true);
   });
 });

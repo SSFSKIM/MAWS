@@ -3,6 +3,7 @@
 // Refusals carry an `ArtifactRefusal` in `IpcError.issues`, as `artifacts.*` does (schema/artifacts.ts).
 import * as z from 'zod';
 import { SpaceSchema } from '../../artifacts/entity';
+import { SPACE_INSTRUCTIONS_MAX } from '../../artifacts/space-instructions';
 import type { CommandSpec } from './common';
 
 const host = <I extends z.ZodType, O extends z.ZodType>(input: I, output: O) => ({ input, output, owner: 'engine-host' as const });
@@ -18,6 +19,11 @@ export const commands = {
   'spaces.create': host(z.strictObject({ name: Name, linkedDir: z.string().min(1).optional() }), SpaceAnswer),
   'spaces.update': host(z.strictObject({ spaceId: z.uuid(), name: Name.optional(), linkedDir: z.string().min(1).nullable().optional() }), SpaceAnswer),
   'spaces.delete': host(z.strictObject({ spaceId: z.uuid() }), z.void()),
+  // UX wave U10b (M9, §E.1): a Space's instructions, held beside the Space (the store's `meta`), never in it; every Space
+  // that has some, and one Space's set ('' removes them), announced as `spaces.changed` `updated`. Not offered over the
+  // link (src/endpoint/offers.ts holds no row for either).
+  'spaces.instructions': host(z.strictObject({}), z.strictObject({ instructions: z.array(z.strictObject({ spaceId: z.uuid(), text: z.string(), at: z.number().int().nonnegative() })) })),
+  'spaces.setInstructions': host(z.strictObject({ spaceId: z.uuid(), text: z.string().max(SPACE_INSTRUCTIONS_MAX) }), z.void()),
 } as const satisfies Record<`spaces.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

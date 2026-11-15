@@ -27,6 +27,10 @@ export const FILES_COPY = {
   truncated: `Showing ${FILES_LIST_MAX_ENTRIES.toLocaleString('en-US')} of many entries`,
   couldNotList: (message: string) => `Could not list: ${message}`,
   refused: (message: string) => `Refused: ${message}`,
+  // UX wave U6b-1 (M3): the tree at the file's left, its button in the file's bar and its divider
+  hideTree: 'Hide files',
+  showTree: 'Show files',
+  resizeTree: 'Resize files',
 } as const;
 
 export const VIEWER_COPY = {

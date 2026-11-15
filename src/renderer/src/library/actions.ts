@@ -16,6 +16,7 @@ import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
 import { isOpen } from '../stores/layout-model';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
+import { refreshSpaceInstructions } from './store'; // UX wave U10b (M9)
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's words, shared with the editor's notice
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
@@ -66,6 +67,13 @@ export const renameSpace = (spaceId: string, name: string, client: MawsBridge = 
 export const linkSpaceDirectory = (spaceId: string, linkedDir: string | null, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, linkedDir }, spaceOf, local(client));
 // Its artifacts are left in no Space (A's rule).
 export const deleteSpace = (spaceId: string, client: MawsBridge = ipc) => run(client, 'spaces.delete', { spaceId }, nothing);
+// UX wave U10b (M9, §E.2): a Space's instructions on this Mac ('' removes them), read again once written, so this window
+// shows them whether or not the host's announcement reaches it first.
+export async function setSpaceInstructions(spaceId: string, text: string, client: MawsBridge = ipc): Promise<LibraryActionResult<void>> {
+  const result = await run(client, 'spaces.setInstructions', { spaceId, text }, nothing);
+  if (result.ok) refreshSpaceInstructions(client);
+  return result;
+}
 
 // ---- opening -----------------------------------------------------------------------------------------------------------
 

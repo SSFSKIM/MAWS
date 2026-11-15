@@ -4,7 +4,9 @@
 // `buildCodeScratch` makes (Files, the viewer, `files.*` and Review against real files and real git). The product has
 // no harness API, so its cases read what they assert from the DOM and drive it with the clicks a reader makes; a line
 // is reached through Review's `Open file ↗` on a hunk at that line (the product's own path to a line), and a diff tab
-// is opened by writing it into layout.json and reloading (C5's restore path).
+// is opened by writing it into layout.json and reloading (C5's restore path). UX wave U6b-1
+// (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file a session opens is a tab of
+// its side column, beside the chat, with Files' tree at its left; the main strip gains a file tab only on ⌘-click.
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
@@ -17,18 +19,35 @@ import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
   addTool, documentEnd, expectLandedOn, invoke, menu, notice, numstat, openInViewer, openReview, otherThemeColours, recordNotices, restoreWithTab, reveal,
-  selectReviewFile, shortWindow, treeRow, withProduct,
+  selectReviewFile, shortWindow, sideFileTab, treeRow, withProduct,
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
 import { addressed, localRef } from './support/address';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
-import { hideSurfaces, mainTabs, openSurface, pinSurfaceForSessions, sessionCard, sideColumn, surface, unfoldSessionCard } from './support/shell';
+import { activeMainTab, hideSurfaces, mainTabById, mainTabs, mountedTabs, openSurface, pinSurfaceForSessions, sessionCard, sideColumn, sideTab, surface, unfoldSessionCard } from './support/shell';
 import { sidebarRow } from './support/sidebar';
 
 const REFUSAL = "path outside the session's directories";
 const DIR_A = '/tmp/maws-harness/a'; // session A's directory in the harness scenario
 const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixtures/panel/harness-sessions.json' };
+
+// UX wave U6b-1: what layout.json holds of the files open beside a chat (each Files tab's `file` in `panelTools.params`,
+// sorted) and of the main strip's file tabs (their ids, in every tab set).
+// The main strip's tab ids, in strip order (an inventory: hidden tabs included).
+const stripIds = (page: Page) => mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+
+async function storedFiles(page: Page): Promise<{ beside: string[]; main: string[] }> {
+  return page.evaluate(async () => {
+    const params = await window.maws.invoke('layout.get', { key: 'panelTools.params' });
+    const tabs = await window.maws.invoke('layout.get', { key: 'main.tabs' });
+    type Params = { params?: Record<string, { file?: unknown } | null> };
+    type Sets = { sets: Record<string, { panes: { tabs: { id: string; kind: string }[] }[] }> };
+    const beside = params.ok ? Object.values((params.value.value as Params | null)?.params ?? {}).flatMap((held) => (typeof held?.file === 'string' ? [held.file] : [])) : [];
+    const main = tabs.ok ? Object.values((tabs.value.value as Sets | null)?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((tab) => tab.kind === 'file').map((tab) => tab.id))) : [];
+    return { beside: beside.sort(), main };
+  });
+}
 
 // The themes' scan (`otherThemeColours`) and the stub-mode product helpers live in `support/code-product.ts` (E5 M4),
 // shared with the editor spec.
@@ -175,7 +194,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     const file = cell.getByRole('button', { name: '/tmp/maws-synth-edit-and-receipt/src/app.ts', exact: true });
     await expect(file).toHaveAttribute('title', '/tmp/maws-synth-edit-and-receipt/src/app.ts');
     await file.click();
-    await expect(h.page.locator('[data-file-viewer][data-path="/tmp/maws-synth-edit-and-receipt/src/app.ts"]')).toBeVisible();
+    // UX wave U6b-1 (A1): beside the chat, a tab of the side column; the transcript keeps its place in the main area
+    await expect(h.region.locator('[data-file-viewer][data-path="/tmp/maws-synth-edit-and-receipt/src/app.ts"]'), 'the file beside the chat').toBeVisible();
+    await expect(h.region.locator('[data-files-tab][data-file="/tmp/maws-synth-edit-and-receipt/src/app.ts"]')).toBeVisible();
+    await expect(cell, 'the transcript keeps its place').toBeVisible();
     h.expectQuietConsole();
   });
 
@@ -370,18 +392,19 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const children = p.panel.locator(`[data-tool="files"] [role="treeitem"][aria-level="3"]`);
       await expect(children).toHaveCount(3);
       expect(await children.evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path')))).toEqual(['app.ts', 'generated.ts', 'staged.ts'].map((name) => p.scratch.path(`src/${name}`)));
+      const sessionTab = await activeMainTab(p.page).getAttribute('data-tab-id');
+      const strip = await stripIds(p.page);
       await treeRow(p, p.scratch.path('src/app.ts')).click();
-      await expect(p.page.locator(`[data-file-viewer][data-path="${p.scratch.path('src/app.ts')}"]`)).toBeVisible();
-      await expect
-        .poll(async () =>
-          p.page.evaluate(async () => {
-            const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-            // W12: every tab set's panes
-            type Sets = { sets: Record<string, { panes: { activeTabId: string }[] }> };
-            return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.map((pane) => pane.activeTabId)) : [];
-          }),
-        )
-        .toContain(`file:${await localRef(p.page)}:${p.scratch.path('src/app.ts')}`);
+      // UX wave U6b-1 (A1): the file opens beside the chat, in the tab the tree was drawn in (its preview, the title in
+      // italics), the tree at its left; the main strip holds the session's tab alone, still in front
+      const app = p.scratch.path('src/app.ts');
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${app}"] [data-file-viewer][data-path="${app}"]`)).toBeVisible();
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${app}"] [data-files-tree][data-place="beside"]`), 'the tree at the file’s left').toBeVisible();
+      await expect(sideFileTab(p.page, 'app.ts')).toHaveAttribute('data-preview', 'true');
+      await expect(sideFileTab(p.page, 'app.ts').getByRole('tab').getByText('app.ts', { exact: true }), 'the preview’s title in italics').toHaveCSS('font-style', 'italic');
+      expect(await stripIds(p.page), 'the main strip gains nothing').toEqual(strip);
+      await expect(activeMainTab(p.page)).toHaveAttribute('data-tab-id', sessionTab!);
+      await expect.poll(() => storedFiles(p.page), { message: 'layout.json holds the file beside the chat, and no main file tab' }).toEqual({ beside: [app], main: [] });
     });
   });
 
@@ -640,21 +663,25 @@ test.describe('the product in stub mode over a scratch repository', () => {
   test('Open file lands at the first changed line and a second Open moves the line', async () => {
     await withProduct(async (p) => {
       const review = await openReview(p);
+      const strip = await stripIds(p.page);
       await selectReviewFile(review, 'src/app.ts');
       await review.locator('[data-open-file]').click();
       await expectLandedOn(p.page, '// added at line 5');
-      // The main area's focused pane changed tab; the panel follows the file tab's session, still A's Review.
+      // UX wave U6b-1: the file opens beside the chat, in Review's place in its group (one tab in view per group); Review's
+      // tab stays in the strip, and brings Review back on its hunk
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${p.scratch.path('src/app.ts')}"]`)).toBeVisible();
+      const reviewTab = sideTab(sideColumn(p.page), /^Review/);
+      await expect(reviewTab, 'Review’s tab still in its strip').toHaveCount(1);
+      await reviewTab.click();
       await review.getByRole('button', { name: 'Next hunk' }).click();
       await expect(review.locator('[data-review-hunk]')).toHaveText('Showing hunk 2 of 3');
       await review.locator('[data-open-file]').click();
       await expectLandedOn(p.page, '// added at line 14');
       await expect(p.page.locator('[data-file-viewer]')).toHaveCount(1);
-      const fileTabs = await p.page.evaluate(async () => {
-        const result = await window.maws.invoke('layout.get', { key: 'main.tabs' });
-        type Sets = { sets: Record<string, { panes: { tabs: { id: string; kind: string; line?: number }[] }[] }> }; // W12: every tab set
-        return result.ok ? Object.values((result.value.value as Sets).sets).flatMap((set) => set.panes.flatMap((pane) => pane.tabs.filter((t) => t.kind === 'file'))) : [];
-      });
-      expect(fileTabs.map((t) => t.id), 'one file tab').toEqual([`file:${await localRef(p.page)}:${p.scratch.path('src/app.ts')}`]);
+      await expect(sideFileTab(p.page, 'app.ts'), 'one side tab of the file').toHaveCount(1);
+      await expect(reviewTab).toHaveCount(1);
+      expect(await stripIds(p.page), 'no main file tab').toEqual(strip);
+      await expect.poll(() => storedFiles(p.page), { message: 'one side tab of the file is stored, and no main file tab' }).toEqual({ beside: [p.scratch.path('src/app.ts')], main: [] });
     });
   });
 
@@ -748,7 +775,10 @@ test.describe('the product in stub mode over a scratch repository', () => {
           ] as const) {
             const viewer = await openInViewer(p, file);
             await expect(viewer.locator(ready).first()).toBeVisible();
-            expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row and ${file}`).toEqual([]);
+            // UX wave U6b-1: the scan covers the tree's column at the file's left and the preview tab's italic title
+            await expect(p.panel.locator('[data-files-tree][data-place="beside"]')).toBeVisible();
+            await expect(sideFileTab(p.page, basename(file))).toHaveAttribute('data-preview', 'true');
+            expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row beside ${file}, its tab the preview`).toEqual([]);
           }
         }
       },
@@ -986,6 +1016,117 @@ test.describe('the product over a session discovered from its transcript', () =>
       repo.dispose();
       await store.dispose();
       rmSync(answers, { recursive: true, force: true });
+    }
+  });
+});
+
+// ---- UX wave U6b-1 (A1, L1, L3): a file opens beside the chat ---------------------------------------------------------
+// docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G. A session discovered from a
+// transcript of invented rows in a scratch engine store, its reply linking two files of its folder, over a scratch
+// repository with one change for Review. No engine runs. Every open is read on what the screen shows: the file's tab of
+// the side column with Files' tree at its left, the main strip as it was, the session's tab in front and the reply in view.
+
+test.describe('UX wave U6b-1: a file opens beside the chat', () => {
+  test('a file opens beside the chat: from a path link, from Review and from the tree; the preview tab is reused, a double-click keeps it, ⌘-click opens a main tab', async () => {
+    const repo = await ScratchRepo.create({ sentinels: false });
+    const store = await StoreFixture.create();
+    let maws: MawsLaunch | null = null;
+    try {
+      const sid = '5e551011-0000-4000-8000-0000000000b6';
+      for (const name of ['alpha.txt', 'beta.txt', 'gamma.txt', 'delta.txt']) writeFileSync(repo.path(name), `An invented file, ${name}.\n`);
+      writeFileSync(repo.path('README.md'), 'hello\nchanged in the repository\n'); // the change Review opens
+      const at = '2026-11-14T10:00:00.000Z';
+      const row = { cwd: repo.root, sessionId: sid, timestamp: at, isSidechain: false, userType: 'external', version: '2.1.300' };
+      const reply = `Read [alpha](${repo.path('alpha.txt')}) first, then [delta](${repo.path('delta.txt')}).`;
+      await store.addTranscript(repo.root, sid, [
+        { ...row, type: 'user', uuid: 'u-u6b1-1', parentUuid: null, message: { role: 'user', content: 'Which files should I read?' } },
+        {
+          ...row, type: 'assistant', uuid: 'a-u6b1-1', parentUuid: 'u-u6b1-1',
+          message: { id: 'msg_u6b10001', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: reply }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+        },
+      ]);
+      writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+      maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: '', CLAUDE_CONFIG_DIR: store.configHome, MAWS_HARNESS: '0' } });
+      const { page } = maws;
+      const appId = await indexedSession(page, sid);
+      await (await sidebarRow(page, { appSessionId: appId })).click();
+      const main = page.locator('[data-region="main"]');
+      const link = (name: string) => main.locator(`[data-chip="path"][title="${repo.path(name)}"]`);
+      await expect(link('alpha.txt')).toBeVisible({ timeout: 20_000 });
+      const sessionTab = `session:${await addressed(page, appId)}`;
+      await expect(activeMainTab(page)).toHaveAttribute('data-tab-id', sessionTab);
+      const strip = await stripIds(page);
+      const machine = await localRef(page);
+
+      // The Files tab that holds `name`, in the side column; the one preview tab of the strip; a row of the tree drawn in
+      // the Files tab in view (one group here, so one tree is drawn).
+      const holding = (name: string) => sideColumn(page).locator(`[data-files-tab][data-file="${repo.path(name)}"]`);
+      const preview = sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]');
+      const treeRowOf = (name: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-path="${repo.path(name)}"]`);
+      const titleOf = (name: string) => sideFileTab(page, name).getByRole('tab').getByText(name, { exact: true });
+      const besideTheChat = async (name: string, by: string) => {
+        await expect(holding(name).locator(`[data-file-viewer][data-path="${repo.path(name)}"]`), `${name} beside the chat, from ${by}`).toBeVisible({ timeout: 20_000 });
+        await expect(holding(name).locator('[data-files-tree][data-place="beside"]'), 'Files’ tree at its left').toBeVisible();
+        expect(await stripIds(page), 'the main strip gains nothing').toEqual(strip);
+        await expect(activeMainTab(page), 'the session’s tab still in front').toHaveAttribute('data-tab-id', sessionTab);
+        await expect(link('alpha.txt'), 'the transcript keeps its place').toBeVisible();
+      };
+
+      // a path link in the transcript: the session's preview tab, its title in italics
+      await link('alpha.txt').click();
+      await besideTheChat('alpha.txt', 'a path link');
+      await expect(preview).toHaveCount(1);
+      const previewId = await preview.getAttribute('data-tab-id');
+      await expect(sideFileTab(page, 'alpha.txt')).toHaveAttribute('data-preview', 'true');
+      await expect(titleOf('alpha.txt'), 'the preview’s title in italics').toHaveCSS('font-style', 'italic');
+
+      // Review's Open: the same tab, now its file; Review's tab stays in its strip
+      await openSurface(page, 'Review');
+      const review = surface(page, 'review').locator('[data-review]');
+      const uncommitted = review.locator('[data-chip="uncommitted"]');
+      await expect(uncommitted).toBeVisible({ timeout: 20_000 });
+      if ((await uncommitted.getAttribute('aria-pressed')) !== 'true') await uncommitted.click();
+      await selectReviewFile(review, 'README.md');
+      await review.locator('[data-open-file]').click();
+      await besideTheChat('README.md', 'Review’s Open');
+      await expect(preview, 'the preview tab reused').toHaveAttribute('data-tab-id', previewId!);
+      await expect(sideFileTab(page, 'alpha.txt'), 'the file it showed is no longer beside the chat').toHaveCount(0);
+      await expect(sideTab(sideColumn(page), /^Review/), 'Review’s tab still in its strip').toHaveCount(1);
+
+      // a row of Files' tree: the same tab again
+      await treeRowOf('beta.txt').click();
+      await besideTheChat('beta.txt', 'a row of the tree');
+      await expect(preview, 'the preview tab reused').toHaveAttribute('data-tab-id', previewId!);
+      await expect(treeRowOf('beta.txt'), 'its row marked').toHaveAttribute('aria-selected', 'true');
+
+      // a double-click on the tab keeps it: its title no longer italic, and the next single click opens a second tab
+      await sideFileTab(page, 'beta.txt').getByRole('tab').dblclick();
+      await expect(preview, 'no preview tab once kept').toHaveCount(0);
+      await expect(titleOf('beta.txt')).toHaveCSS('font-style', 'normal');
+      await treeRowOf('gamma.txt').click();
+      await besideTheChat('gamma.txt', 'a row of the tree, after the keep');
+      await expect(sideFileTab(page, 'beta.txt'), 'the kept tab stays').toHaveCount(1);
+      await expect(sideFileTab(page, 'gamma.txt')).toHaveAttribute('data-preview', 'true');
+      expect(await preview.getAttribute('data-tab-id'), 'a second tab, not the kept one').not.toBe(previewId);
+
+      // ⌘-click on a path link: a main tab, in front, and nothing of it beside the chat
+      const mainFile = (name: string) => mainTabById(page, `file:${machine}:${repo.path(name)}`);
+      await link('delta.txt').click({ modifiers: ['Meta'] });
+      await expect(mainFile('delta.txt'), 'a main tab of the file, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+      await expect(main.locator(`[data-file-viewer][data-path="${repo.path('delta.txt')}"]`)).toBeVisible();
+      await expect(sideFileTab(page, 'delta.txt')).toHaveCount(0);
+
+      // ⌘-click on a row of the tree, whose file is beside the chat: a main tab, and its side tab gone (one view of a file)
+      await treeRowOf('gamma.txt').click({ modifiers: ['Meta'] });
+      await expect(mainFile('gamma.txt'), 'a main tab of the file, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+      await expect(sideFileTab(page, 'gamma.txt'), 'no side tab of it is left').toHaveCount(0);
+      await expect(sideFileTab(page, 'beta.txt')).toHaveCount(1);
+      expect((await stripIds(page)).sort(), 'the main strip gained the two files, and only them').toEqual([...strip, `file:${machine}:${repo.path('delta.txt')}`, `file:${machine}:${repo.path('gamma.txt')}`].sort());
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    } finally {
+      await maws?.cleanup();
+      repo.dispose();
+      await store.dispose();
     }
   });
 });

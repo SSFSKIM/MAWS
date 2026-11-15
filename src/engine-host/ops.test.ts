@@ -301,6 +301,26 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('connectors.addJson');
   });
 
+  // UX wave U10b (M9; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, Routes): a Space's instructions name
+  // no session and are no artifact write, so a remote action naming either command is refused where it would run, though
+  // this host serves both to its own windows; nothing is run and nothing is claimed
+  it('refuses a Space’s instructions `unavailable`, through host.op and host.artifactOp alike, running nothing and claiming nothing', async () => {
+    const served: string[] = [];
+    const serve = (name: string) => (name === 'spaces.instructions' || name === 'spaces.setInstructions' ? async () => void served.push(name) : undefined);
+    const h = ops({ handler: serve, artifactWrite: serve });
+    const set = { spaceId: '22222222-2222-4222-8222-222222222222', text: 'Use metres.' };
+    expect(validateCommandInput('spaces.setInstructions', set).ok).toBe(true);
+    expect(validateCommandInput('spaces.instructions', {}).ok).toBe(true);
+    for (const [name, input] of [['spaces.setInstructions', set], ['spaces.instructions', {}]] as const) {
+      expect(await h.op(op({ name, input }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
+      expect(await h.op(op({ name, input: { ...input, appSessionId: 'app-1' } }), CTX), name).toEqual({ state: 'refused', reason: 'malformed' }); // no session can be named into it
+      expect(await h.artifactOp(save({ name, input }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
+    }
+    expect(served).toEqual([]);
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+    expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('spaces.');
+  });
+
   // UX wave U10b (M4): and the fourteenth, the undelete of an agent's delete
   it('names the fourteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
     expect([...ARTIFACT_OP_COMMANDS].sort()).toEqual([

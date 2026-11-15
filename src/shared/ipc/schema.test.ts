@@ -1916,7 +1916,19 @@ describe('ipc schema validates both directions', () => {
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
       expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
-      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete', 'spaces.instructions', 'spaces.setInstructions']);
+    });
+
+    // UX wave U10b (M9, §E.1): a Space's instructions, two engine-host commands beside the Space and not in it, the text
+    // at most 8,000 characters; '' removes it
+    it('reads and writes a Space’s instructions by two engine-host commands, the text at most 8,000 characters', () => {
+      expect([spaces.commands['spaces.instructions'].owner, spaces.commands['spaces.setInstructions'].owner]).toEqual(['engine-host', 'engine-host']);
+      expect(validateCommandInput('spaces.instructions', {}).ok).toBe(true);
+      expect(validateCommandInput('spaces.instructions', { spaceId: id }).ok).toBe(false);
+      expect(validateCommandOutput('spaces.instructions', { instructions: [{ spaceId: id, text: 'Use metres.', at: 1 }] }).ok).toBe(true);
+      for (const text of ['', 'Use metres.', 'x'.repeat(8000)]) expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text }).ok).toBe(true);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'x'.repeat(8001) }).ok).toBe(false);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'Use metres.', name: 'Work' }).ok).toBe(false);
     });
 
     // P3-A M7: the export service (main's `artifacts.export`, the host's bridge `maws.artifact.export`/`exported`) and an
