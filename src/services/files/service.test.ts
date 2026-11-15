@@ -95,8 +95,9 @@ function identityAt(path: string): string {
 function pastChangeTime(path: string) {
   const before = statSync(path, { bigint: true }).ctimeNs;
   const probe = `${path}.tick`;
-  do appendFileSync(probe, 'x');
-  while (statSync(probe, { bigint: true }).ctimeNs <= before);
+  do {
+    appendFileSync(probe, 'x');
+  } while (statSync(probe, { bigint: true }).ctimeNs <= before);
   unlinkSync(probe);
 }
 // The bytes a base64 answer carries

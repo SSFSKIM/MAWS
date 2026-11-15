@@ -68,7 +68,7 @@ import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { fileMime, isTextMime } from './mime';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -115,7 +115,7 @@ interface Asked {
 // roots leave out the machine's home and anything above it.
 export interface FilesService {
   list(input: { appSessionId: AppSessionId; path?: string }, remote?: boolean): Promise<FilesListOutput>;
-  read(input: FilesReadInput, remote?: boolean, signal?: AbortSignal): Promise<FilesReadOutput>; // U6c: `input.named`, answered with `named`
+  read(input: FilesReadInput, remote?: boolean, signal?: AbortSignal): Promise<FilesReadOutput>; // U6c: `input.named`, answered with `named`; U6b-2: `input.raw`, answered with `identity`, for this machine's caller alone
   // P3-L (M6b fix wave 2): a file at a path main itself resolved (a File artifact's stored file, `library.read`), read as
   // `read` reads one: the path's realpath opened with no symlink anywhere on it, a regular file, the same answer. No
   // session and no roots: the caller's resolution is the admission, and a window never names the path.
@@ -308,10 +308,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed, raw = false }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
     // E2: a delivered file is read; U6c: a named one too, and its every answer says so
     const { handle, stat, real, named: byName } = await openConfirmed(appSessionId, path, 'file', DELIVERED_OR_NAMED, remote, { named: asksNamed, signal });
-    const answer = await readOpened(handle, stat, real, offset, length, hash);
+    // U6b-2: a raw read is this machine's caller's alone; another machine's `raw` is passed over, as its `named` is
+    const answer = await readOpened(handle, stat, real, offset, length, hash, raw && !remote ? { path } : null);
     return byName ? { ...answer, named: true } : answer;
   }
 
@@ -344,8 +345,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return readOpened(handle, stat, real, offset, length, hash);
   }
 
-  // The read itself, over a confirmed descriptor it closes.
-  async function readOpened(handle: FileHandle, stat: BigIntStats, real: string, offset: number, length: number, hash: boolean): Promise<FilesReadOutput> {
+  // The read itself, over a confirmed descriptor it closes. UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-
+  // file-frames.md, M2): a raw read (`raw`, with the path as the request gave it) answers the bytes of exactly the range
+  // asked as base64, unsettled, with the descriptor's `identity`; the descriptor's state is read again after the bytes,
+  // and a read whose file changed between the two is refused, so one answer never holds bytes of two versions. What
+  // passes is a write that leaves all five values as they were (a file system whose times did not move between them).
+  async function readOpened(handle: FileHandle, stat: BigIntStats, real: string, offset: number, length: number, hash: boolean, raw: { path: string } | null = null): Promise<FilesReadOutput> {
     try {
       // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
       // (the chunk, the sniffed head, the settle step's extra bytes, `bytes` itself) taken from that buffer, so the chunk
@@ -357,8 +362,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       let chunk = await bytesAt(Math.max(0, Math.min(length, size - offset)), offset);
       const head = offset === 0 && chunk.length >= Math.min(BINARY_SNIFF_BYTES, size) ? chunk.subarray(0, BINARY_SNIFF_BYTES) : await bytesAt(Math.min(BINARY_SNIFF_BYTES, size), 0);
       const mime = fileMime(basename(real), head);
-      const encoding = isTextMime(mime) ? 'utf8' : 'base64';
+      const encoding = !raw && isTextMime(mime) ? 'utf8' : 'base64';
       if (encoding === 'utf8') chunk = await settleText(bytesAt, chunk, offset, size);
+      const identity = raw ? await sameVersion(handle, stat, raw.path) : null;
       return {
         encoding,
         content: chunk.toString(encoding),
@@ -369,10 +375,20 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
         mime,
         hash: whole ? sha256(whole) : null,
         utf8: whole ? isUtf8(whole) : null,
+        ...(identity !== null && { identity }),
       };
     } finally {
       await handle.close();
     }
+  }
+
+  // U6b-2: the identity of the version a raw read's bytes are of, once its bytes are read: the descriptor's state then is
+  // still the one confirmed before them, else the read is refused.
+  async function sameVersion(handle: FileHandle, before: BigIntStats, path: string): Promise<string> {
+    await at('after-read', path);
+    const identity = identityOf(before);
+    if (identityOf(await handle.stat({ bigint: true })) !== identity) throw new Error(`changed while reading: ${path}`);
+    return identity;
   }
 
   // E5's hash-checked save (E5 execution document, Interfaces "The write"): `read`'s boundary opened read-write, then,
@@ -517,6 +533,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     dispose: () => watches.dispose(),
   };
 }
+
+// UX wave U6b-2 (Interfaces §B): the version of a file as an opened descriptor knows it. The change time joins the four
+// other values because a writer can set a modification time back and cannot set a change time.
+export const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 
 // Step 5 (and the late confirmations): a fresh realpath of the path as given, under a root, whose `stat` names the
 // descriptor's object. Answers the confirmed realpath.
