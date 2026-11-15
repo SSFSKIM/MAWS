@@ -127,8 +127,10 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     const [id] = s.ids;
     await show(s, id);
     await replay(s, id, ASK_BLOCKING);
-    // P2-C Design §7 defaults lane-on panes to Report; this case checks transcript follow mode.
-    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+    // P2-C Design §7 defaults lane-on panes to Report, and this case checks transcript follow mode. UX wave U2b: the
+    // recording holds no message, so no to-human view is in force: the pane is the plain transcript, the switch that
+    // would offer the full transcript is absent, and there is nothing to press.
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
     await allowNext(s, id); // mcp__maws__ask (seq 129)
 
     const capsule = capsuleOf(s);

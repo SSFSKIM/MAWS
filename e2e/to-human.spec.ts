@@ -94,7 +94,11 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
         await needs.click();
         await page.mouse.move(700, 450);
         await expect(pane.locator(`[data-composer="${await addressed(page, asking)}"]`)).toBeVisible();
-        await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+        // UX wave U2b: the report is the to-human view, its switch above the composer offering the full transcript; the
+        // mark is a message, in sight, so no record had to open for it (a jump into a record: e2e/transcript.spec.ts)
+        await expect(pane.locator('[data-view-switch]').getByRole('button', { name: 'full transcript ›', exact: true })).toBeVisible();
+        await expect(pane.getByRole('group', { name: 'Session view' })).toHaveCount(0);
+        await expect(pane.getByRole('button', { name: '‹ fold to report', exact: true })).toHaveCount(0);
         await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.includes('The migration drops the legacy_users table.') === true)).toBe(true);
       },
       () =>
