@@ -12,6 +12,7 @@ import {
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
   artifactExportName,
+  ArtifactExportResultSchema,
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
@@ -589,5 +590,37 @@ describe('artifact_edit’s reply', () => {
     expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
     expect(description.split(sentence)).toHaveLength(2);
     expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
+  });
+});
+
+// UX wave U10b (l6-artifacts-07 (b), M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2 to §B.4): a
+// document's page, set with `set_page` and read back with `page`, and a PDF export's `pages`, each placed word for word
+describe('a document’s page in the tools', () => {
+  const edit = { artifact: 'memo', baseRevision: 3 };
+
+  it('takes set_page with a size, a density or both, and refuses one with neither or with another field', () => {
+    const schema = MAWS_TOOLS.artifact_edit.input;
+    for (const op of [{ size: 'a4' }, { density: 'compact' }, { size: 'system', density: 'standard' }, { size: 'letter' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(true);
+    }
+    for (const op of [{}, { size: 'legal' }, { density: 'airy' }, { size: 'a4', margin: '1in' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(false);
+    }
+    expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({
+      properties: { ops: { items: { oneOf: expect.arrayContaining([expect.objectContaining({ additionalProperties: false, properties: { op: { type: 'string', const: 'set_page' }, size: { type: 'string', enum: ['letter', 'a4', 'system'] }, density: { type: 'string', enum: ['standard', 'compact'] } } })]) } } },
+    });
+  });
+
+  it('tells the agent of set_page after the list of ops, of page in a document’s read, and of a pdf’s pages', () => {
+    expect(MAWS_TOOLS.artifact_edit.description).toContain('set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document\'s exports print on (give at least one; a document only). A replace_block, delete or set_cell');
+    expect(MAWS_TOOLS.artifact_read.description).toContain("an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata");
+    expect(MAWS_TOOLS.artifact_export.description).toContain("Returns the exported file's path; a pdf's answer also names pages, its page count; to (a path under the working directory)");
+  });
+
+  it('answers pages for a pdf as a positive whole number, or not at all', () => {
+    const exported = { status: 'exported', artifactId: '11111111-1111-4111-8111-111111111111', format: 'pdf', revision: 4, path: '/x/4-pdf.pdf' };
+    expect(ArtifactExportResultSchema.safeParse({ ...exported, pages: 2 }).success).toBe(true);
+    expect(ArtifactExportResultSchema.safeParse(exported).success).toBe(true);
+    for (const pages of [0, 1.5, -1]) expect(ArtifactExportResultSchema.safeParse({ ...exported, pages }).success, String(pages)).toBe(false);
   });
 });

@@ -1,5 +1,6 @@
 import { runInNewContext } from 'node:vm';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setDocPage } from '@artifacts/document/meta';
 import { createDocument } from '@artifacts/document/tabs';
 import { schemaFor } from '@artifacts/document/schema';
 import { newDoc, stateV2 } from '@artifacts/yjs';
@@ -76,5 +77,20 @@ describe('document visual inspection', () => {
     expect(render).toHaveBeenCalledWith(expect.stringContaining('Ship after review.'), request, context.signal);
     expect(render.mock.calls).toHaveLength(1);
     expect(written).toHaveBeenCalledWith('/output.png', image);
+  });
+
+  // UX wave U10b (M2; §B.4): `artifact_screenshot` of a document draws the export's page, so a compact document's too
+  it('draws a compact document at compact density, as its export prints it', async () => {
+    const doc = newDoc();
+    createDocument(doc, { title: 'Memo', body: schemaFor().nodeFromJSON({ type: 'doc', content: [{ type: 'heading', attrs: { level: 1 }, content: [{ type: 'text', text: 'Memo' }] }] }) });
+    setDocPage(doc, { density: 'compact' });
+    const state = stateV2(doc);
+    doc.destroy();
+    const request: ExportRequest = { artifactId: 'doc', kind: 'document', format: 'png', revision: 2, path: '/memo.png', width: 640, height: 480 };
+    const render = vi.fn(async () => Buffer.from('memo'));
+    const context: ExportContext = { title: 'Memo', state: async () => state, assets: { list: async () => [] }, readAsset: async () => null, printToPdf: async () => new Uint8Array(), writeFile: async () => {}, signal: new AbortController().signal };
+    await documentPngExporter(DOCUMENT_EXPORTERS.find((exporter) => exporter.format === 'html')!, render).run(request, context);
+    const [html] = render.mock.calls[0] as unknown as [string];
+    expect(html).toMatch(/\.ds-doc h1 \{[^}]*font-size: 23\.4px;/);
   });
 });

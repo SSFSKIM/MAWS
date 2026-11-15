@@ -44,6 +44,11 @@ describe('the kinds’ guides and format references', () => {
     expect(editing).toContain('and `files: {"index.html": "<the whole new page>"}`. When you rebuilt the page as a file, pass `path` (that .html file) in place of `files`: its bytes become the new version.');
   });
 
+  // UX wave U10b (l6-artifacts-07 (b), §B.4): how to fit a page, right after the system's page size
+  it('tells the agent how to fit a document to a page', () => {
+    expect(KIND_GUIDES.document.guide).toContain('its fonts, colours, spacing and page size come from the system, in the editor and in every export. To fit a page, set the document\'s page with `set_page` and check the PDF\'s `pages`. Do not style through the content');
+  });
+
   // P3-B (M7): the document kind's guide and format reference (their examples are checked against the dialect in
   // document/format.test.ts)
   it('writes the document kind in full: the guide names its tools, the format reference its dialect', () => {

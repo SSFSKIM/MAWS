@@ -19,6 +19,8 @@ import { applyV1, applyV2, newDoc, stateV2, type Doc } from '@artifacts/yjs';
 import { YNode } from '@artifacts/yjs/document';
 import { pmnodeToDelta, ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import { schemaFor } from '@artifacts/document/schema';
+import { docPage } from '@artifacts/document/meta';
+import { applyEdit } from '@artifacts/document/patch-writer';
 import { createDocument, tabBody } from '@artifacts/document/tabs';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
 import type { DocumentHandle } from '@artifacts/document/editor/host-types';
@@ -247,5 +249,18 @@ describe('the editor’s repairs through the store', () => {
     applyV1(replay, after[2]!.bytes);
     const expected = ['paragraph:From the agent.', 'paragraph:Quarterly sales.', 'chart:', 'paragraph:x'];
     expect([shape(replay), shape(world!.service.live(id)), shape(second.doc)]).toEqual([expected, expected, expected]);
+  });
+
+  // UX wave U10b (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2, U10a's A2 for this write): a
+  // session's set_page reaches an open editor and a second replica, and neither sends anything back
+  it('take a session’s set_page in an open editor and a second replica with no row of theirs', async () => {
+    const id = await made(para('p1', 'Quarterly sales.'), chart('c1'));
+    const { mine, second } = await mounted(id);
+    expect(await actors(id), 'the open').toEqual(['session:app-agent']);
+    await world!.service.writeAs(id, AGENT, (d) => void applyEdit(d, [{ op: 'set_page', size: 'a4', density: 'compact' }]));
+    await until(() => docPage(mine.doc).size === 'a4' && docPage(second.doc).size === 'a4', 'the page at both replicas');
+    await ticks(30);
+    expect([await actors(id), mine.state().unsaved, second.state().unsaved], 'after the page').toEqual([['session:app-agent', 'session:app-agent'], 0, 0]);
+    expect(shape(world!.service.live(id))).toEqual(['paragraph:Quarterly sales.', 'chart:']);
   });
 });

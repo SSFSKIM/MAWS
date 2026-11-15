@@ -4,9 +4,10 @@
 // adapter would credit the agent). B's thread tools serve a dashboard's threads; A's publish refuses a dashboard.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { charSlots } from '@artifacts/document/structs';
-import { nodeOf, seedDoc } from '@artifacts/document/writer.fixture';
+import { nodeOf, seedDoc, textOf } from '@artifacts/document/writer.fixture';
 import { applyV1, carriedBy, diffV1, insertedBy } from '@artifacts/yjs';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
+import { SET_PAGE_REFUSALS } from '@shared/maws/document-tools';
 import { artifactRefusalOf } from '@shared/maws/tools';
 import { HUMAN, openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { registerDashboards, type Dashboards } from '../dashboards';
@@ -85,5 +86,24 @@ describe('a dashboard among the kinds', () => {
     const refusal = await call('artifact_publish', { artifact: created.artifactId, baseRevision: 0, files: { 'a.md': 'x' } });
     expect(refusal.isError).toBe(true);
     expect(artifactRefusalOf(text(refusal))).toMatchObject({ reason: 'invalid', kind: 'dashboard' });
+  });
+});
+
+// UX wave U10b (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2, §B.3, H8): a page is a document's
+// setting; a dashboard takes no `set_page` and its read names no page
+describe('a dashboard and the page setting', () => {
+  it('refuses set_page with the whole batch, writes nothing, and reads with no page; a document beside it reads one', async () => {
+    const id = await seeded('dashboard');
+    const read = json<{ revision: number; page?: unknown }>(await call('artifact_read', { artifact: id }));
+    expect(read).not.toHaveProperty('page');
+    const before = world.store.revision(id);
+    const refused = await call('artifact_edit', { artifact: id, baseRevision: read.revision, ops: [{ op: 'replace_text', block: 'p1', old: 'lazy', new: 'sleepy' }, { op: 'set_page', size: 'a4' }] });
+    expect(refused.isError).toBe(true);
+    expect(text(refused).startsWith(`artifact_edit: ${SET_PAGE_REFUSALS.dashboard} {`)).toBe(true);
+    expect(SET_PAGE_REFUSALS.dashboard).toBe('set_page: a dashboard has no page setting');
+    expect(artifactRefusalOf(text(refused))).toMatchObject({ reason: 'invalid', opIndex: 1 });
+    expect(world.store.revision(id)).toBe(before);
+    expect(textOf(world.service.live(id), 'p1')).toContain('lazy');
+    expect(json<{ page?: unknown }>(await call('artifact_read', { artifact: await seeded('document') })).page).toEqual({ size: 'system', density: 'standard' });
   });
 });

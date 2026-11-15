@@ -22,7 +22,7 @@ import { SqliteDocumentStorage } from '../documents/storage';
 import { ArtifactStore } from '../documents/store';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
 import { readHtmlSource } from './artifact-context';
-import { artifactExportTool, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
+import { artifactExportTool, countPdfPages, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
@@ -512,6 +512,9 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
   });
 });
 
+// Two page objects under one page tree, the second written without a space (both forms Chromium may write).
+const TWO_PAGES = '%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >>\n2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\n3 0 obj << /Type /Page /Parent 2 0 R >>\n4 0 obj << /Type/Page /Parent 2 0 R >>\n%%EOF';
+
 describe('artifact_export', () => {
   it('asks main’s export service for a path under the artifact’s exports and copies the file to `to` (a stubbed answer)', async () => {
     const page = jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
@@ -535,6 +538,27 @@ describe('artifact_export', () => {
     expect(jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'a4' }, w.ctx()))).toMatchObject({ status: 'exported' });
     expect(sent).toEqual([expect.objectContaining({ format: 'pdf', pageSize: 'a4' })]);
     expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'legal' }, w.ctx())).isError).toBe(true);
+  });
+
+  // UX wave U10b (l6-artifacts-07 (b), M2 decision 5; §B.4): a pdf's answer names its page count, read by the tool server
+  // from the file main wrote; no count found, or a file it cannot read, leaves the field out
+  it('answers a pdf’s pages from the exported file, and names none for another format or a file with no page', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    let bytes = TWO_PAGES;
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (writeFileSync(request.path, bytes), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+    const tool = artifactExportTool({ ...w.deps(), exporter });
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).toMatchObject({ status: 'exported', format: 'pdf', pages: 2 });
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'png' }, w.ctx()))).not.toHaveProperty('pages');
+    bytes = '%PDF-1.7\n%%EOF';
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).not.toHaveProperty('pages');
+  });
+
+  it('counts the page objects of a pdf as Chromium writes them, never its page tree or labels', () => {
+    const latin1 = (text: string) => Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+    expect(countPdfPages(latin1(TWO_PAGES))).toBe(2);
+    expect(countPdfPages(latin1('%PDF-1.7\n1 0 obj << /Type /Pages /Kids [] /Count 0 >>\n2 0 obj << /Type /PageLabel >>\n%%EOF'))).toBeNull();
+    expect(countPdfPages(new Uint8Array())).toBeNull();
+    expect(countPdfPages(Uint8Array.from([0xff, 0xfe, ...latin1('<< /Type /Page >>'), 0x00, 0xc3]))).toBe(1);
   });
 
   // P3-C M9 (H2-4): a presentation's PPTX faces travel to main as the agent named them
