@@ -1201,7 +1201,7 @@ describe('a Space’s instructions', () => {
     await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
     await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
     const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
-    await within(sheet).findByText(/the engine host is unavailable/);
+    await within(sheet).findByText('Couldn’t read this Space’s instructions: the engine host is unavailable');
     expect(field(sheet).readOnly).toBe(true);
     await user.type(field(sheet), 'Use feet.{Enter}');
     expect(field(sheet).value).toBe('');

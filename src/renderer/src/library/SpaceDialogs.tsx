@@ -268,7 +268,7 @@ export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>)
           className={`${FIELD} max-h-[40vh] min-h-[calc(8lh+0.5rem)] resize-none overflow-y-auto leading-snug field-sizing-content`}
         />
         {text.length >= INSTRUCTIONS_COUNTED_FROM && <p className="m-0 text-ui-sm text-fg-muted">{SPACE_COPY.limit(text.length)}</p>}
-        {known.status === 'failed' && <p className="m-0 text-ui-sm text-danger">{known.error}</p>}
+        {known.status === 'failed' && <p className="m-0 text-ui-sm text-danger">{SPACE_COPY.readFailed(known.error)}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
         <div className="flex items-center justify-end gap-2">
           <button type="button" disabled={busy} onClick={close} className={SECONDARY}>

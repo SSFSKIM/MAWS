@@ -184,6 +184,7 @@ export const SPACE_COPY = {
   mark: 'Instructions', // on the heading line of a Space that has them
   receivers: 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.',
   limit: (n: number) => `${n.toLocaleString('en-US')} of 8,000 characters`,
+  readFailed: (message: string) => `Couldn’t read this Space’s instructions: ${message}`, // the sheet holds its field and offers no Save (ruled 2026-11-15)
   cancel: 'Cancel',
   save: 'Save',
   // the chip's body, sent with the first message of a chat a card starts from the Space
