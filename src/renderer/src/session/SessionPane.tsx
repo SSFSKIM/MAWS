@@ -159,12 +159,13 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
 }
 
 // UX wave U1b (M5): how many requests of the session wait, as one line above the compact composer; the card opens on a
-// click, and the oldest of them is shown in its transcript once that mounts.
+// click, and the oldest of them is shown in its transcript once that mounts, its row taking the keyboard (the card's
+// composer is not handed it).
 function WaitingLine({ appSessionId }: { appSessionId: AppSessionId }) {
   const waiting = useAttention((s) => selectWaitingRequests(s, appSessionId).length);
   if (waiting === 0) return null;
   const go = () => {
-    openCard();
+    openCard(false);
     showWaiting(appSessionId, null);
   };
   return (
