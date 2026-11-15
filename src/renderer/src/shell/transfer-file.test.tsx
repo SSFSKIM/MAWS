@@ -3,6 +3,7 @@
 // the text typed immediately before the act is there once in the new place, and the undo history came with it
 // (Constraint 9). The main area and the side column are drawn as the shell draws them, with the real file viewer.
 import { isolateHistory, undo } from '@codemirror/commands';
+import { getChunks } from '@codemirror/merge';
 import { EditorView } from '@codemirror/view';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -12,6 +13,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { registerShellActions } from '../app/shell-actions';
 import { registerSlot, resetSlots } from '../app/slots';
+import { connectCodeEvents } from '../ipc/events';
 import { queryClient } from '../ipc/query';
 import { runAction } from '../keymap/actions-runtime';
 import { MainArea } from '../main/MainArea';
@@ -408,6 +410,38 @@ describe('a file with unsaved edits opened beside a second session’s chat', ()
     expect(useLayout.getState().panelParams[tabId]).toEqual({ file: APP, line: null });
     act(() => void openFile(B, LIB));
     expect(sideTabOf(APP, B)).toBe(tabId);
+  });
+});
+
+// ---- the merge view across a move (the Mac run's second failure) ----------------------------------------------------------
+
+describe('a file in the merge view moved to the main area', () => {
+  const numbered = (edit: Record<number, string> = {}) => Array.from({ length: 10 }, (_, i) => `${edit[i + 1] ?? `line ${i + 1}`}\n`).join('');
+  const chunksIn = (name: 'main' | 'panel') => region(name).querySelectorAll<HTMLElement>('.cm-deletedChunk');
+
+  it('takes theirs there: the chunk’s lines are the disk’s, and the bar counts one change', async () => {
+    offs.push(connectCodeEvents());
+    disk.files[APP] = numbered();
+    renderBoth();
+    const side = await openBeside(APP, { keep: true });
+    act(() => {
+      const line = side.state.doc.line(2);
+      side.dispatch({ changes: { from: line.from, to: line.to, insert: 'mine 2' }, userEvent: 'input.type', annotations: isolateHistory.of('full') });
+    });
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    disk.files[APP] = numbered({ 8: 'theirs 8' });
+    act(() => disk.emit('files.changed', { appSessionId: 'app-a', path: APP, kind: 'changed' }));
+    fireEvent.click(await within(region('panel')).findByRole('button', { name: 'Compare' }));
+    await waitFor(() => expect(chunksIn('panel')).toHaveLength(2));
+    act(() => void moveFileToMain(sideTabOf(APP)!));
+    await waitFor(() => expect(chunksIn('main')).toHaveLength(2));
+    const counted = () => region('main').querySelector('[data-merge-changes]')?.textContent;
+    expect(counted()).toBe('2 changes from disk');
+    fireEvent.click(within(chunksIn('main')[1]).getByRole('button', { name: 'Take theirs' }));
+    await waitFor(() => expect(counted()).toBe('1 change from disk'));
+    const main = editorIn('main')!;
+    expect(main.state.doc.toString()).toBe(numbered({ 2: 'mine 2', 8: 'theirs 8' }));
+    expect(getChunks(main.state)?.chunks).toHaveLength(1);
   });
 });
 
