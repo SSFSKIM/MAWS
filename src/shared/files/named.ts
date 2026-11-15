@@ -1006,7 +1006,7 @@ export interface PendingCall {
   toolUseId: string;
   when: 'mcp' | 'edit';
 }
-export type RowClaim = { names: true } | { names: false; pending: PendingCall[] };
+export type RowClaim = { names: true } | { names: false; pending: PendingCall[]; other?: true };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };

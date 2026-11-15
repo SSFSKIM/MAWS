@@ -718,7 +718,7 @@ describe('the queue (S14, S15)', () => {
     const located = deferred();
     const named = paths({ transcript: () => located.promise.then(() => file), bounds: { waitMs: 20 } });
     const late = Symbol('still pending');
-    const within = (answer: Promise<boolean>, ms: number) => Promise.race([answer, new Promise<typeof late>((done) => setTimeout(() => done(late), ms))]);
+    const within = (answer: Promise<Naming>, ms: number) => Promise.race([answer, new Promise<typeof late>((done) => setTimeout(() => done(late), ms))]);
     expect(await within(named.names(S, P), 500)).toBe(false);
     const controller = new AbortController();
     const aborted = named.names(S, P, controller.signal);

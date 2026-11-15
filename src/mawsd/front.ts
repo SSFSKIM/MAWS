@@ -196,6 +196,7 @@ export interface FrontOptions {
 }
 
 export interface ServicesFront {
+  appBundles(): readonly string[]; // stub
   runtimeFor(client: ClientFacts): ServedRuntime; // one per welcomed machine.sock client (socket-server's `many`)
   bus: ServicesBus; // what startSpine registers through
   port: ClientPort; // §E: the spine's client port
@@ -616,6 +617,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
   }
 
   return {
+    appBundles: () => [],
     runtimeFor: (facts) => new FrontClient(facts),
     bus,
     port: clientPort,

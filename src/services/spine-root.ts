@@ -132,6 +132,7 @@ export async function openSpineData(profile: string, { build, lock: given, syste
 export type SpineHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onState' | 'onStreaming' | 'streaming' | 'snapshot' | 'setResync'> & { replay?: HeldReplay; need?(): void; handoverState?: HostSupervisor['handoverState'] /* O16 panel 1 */; peer?: HostSupervisor['peer'] /* P5 O7 M9: the engine host's welcome, for its capabilities */ };
 
 export interface SpineDeps {
+  appBundles?: () => readonly string[]; // stub
   profile: string; // <userData>, the daemon's profile (O3 §1)
   machine: MachineRef; // this machine
   data: SpineData;
