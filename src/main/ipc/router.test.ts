@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
-import type { HostDispatch, MainContext, RemoteDispatch } from './router';
+import type { CommandGuard, HostDispatch, MainContext, RemoteDispatch } from './router';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const OTHER = 'OtherMachineRef0000000' as MachineRef;
@@ -811,7 +811,7 @@ describe('main ipc router', () => {
       const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
       const list = vi.fn(() => ({ sessions: [], revision: 3 }));
       router.registerMachineHandler('session.list', list);
-      const guard = vi.fn((_name: unknown, _input: unknown, _context: MainContext) => REFUSED);
+      const guard = vi.fn<CommandGuard>(() => REFUSED);
       router.guardCommand(['session.list'], guard);
       await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
       await expect(router.invokeOwn('session.list', {}, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
