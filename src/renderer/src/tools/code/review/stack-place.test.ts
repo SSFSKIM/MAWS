@@ -279,7 +279,7 @@ describe('a card’s exposure and the person’s navigation', () => {
     const body = page.el.querySelector('[data-review-file="src/part-000.ts"] [data-review-body]')!;
     page.heights.set(body, page.heights.get(body)! + 160);
     let scrolls = 0;
-    page.el.addEventListener('scroll', () => scrolls++);
+    page.el.addEventListener('scroll', () => void (scrolls += 1));
     saved.length = 0;
     placer.relayout();
     expect({ scrolls, scrollTop: page.el.scrollTop, saved }).toEqual({ scrolls: 0, scrollTop: 4 * (1 + LINES) * ROW, saved: [] });
