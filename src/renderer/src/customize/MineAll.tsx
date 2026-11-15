@@ -80,7 +80,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
           ? { state: 'failed', words: installed.error, retry: retryList }
           : { state: 'out' };
   const pluginRows = installed.data ? pluginsOfAll(identities, search) : [];
-  const modRows = plugins.state !== 'out' && mods.read.state === 'ready' ? modsMatching(mods.read.rows, search).sort((a, b) => byName(a.name, b.name)) : [];
+  const pluginsInError = plugins.state === 'failed' || (installed.data !== undefined && installed.error !== null);
   const listed = installed.data ? new Set(installed.data.plugins.map(installedKey)) : null;
   const uninstalled = listed === null ? [] : [...ops.entries.keys()].filter((key) => key.startsWith(INSTALLED_PREFIX) && !listed.has(key));
 
@@ -89,9 +89,15 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
   const connectors = useMemo(() => (inventory.data ? connectorRows(inventory.data) : []), [inventory.data]);
   const connectorShown = [...connectorRowsMatching(connectors, search)].sort((a, b) => byName(a.name, b.name));
 
+  // What the place holds, whatever the search: the empty state and the mods turn on it, never on what a search keeps.
+  const holdsItems = identities.some((identity) => identity.group !== null) || skillGroups.length > 0 || connectors.length > 0;
+  // Empty only once every read has answered with nothing: a read in error (a failed refresh over an empty answer among
+  // them) has not, and its part's state stands instead.
+  const nothing = plugins.state === 'answered' && !pluginsInError && inventory.data !== undefined && inventory.error === null && !holdsItems;
+  // The mods stand beside at least one plugin, skill or connector (ruled point 7), and under the plugins' failure (§E).
+  const modRows = plugins.state !== 'out' && (holdsItems || pluginsInError) && mods.read.state === 'ready' ? modsMatching(mods.read.rows, search).sort((a, b) => byName(a.name, b.name)) : [];
   const searched = search.trim() !== '';
   const answered = plugins.state !== 'out' && inventory.data !== undefined;
-  const nothing = answered && plugins.state === 'answered' && !searched && pluginRows.length === 0 && skillGroups.length === 0 && connectors.length === 0;
   const nothingMatches = answered && searched && pluginRows.length + modRows.length + skillRows.length + connectorShown.length === 0;
 
   // a plugin's or a skill's detail in the list's place
@@ -122,7 +128,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
     (pane.current.querySelector<HTMLElement>(`${from.row} [data-row-open]`) ?? pane.current.closest<HTMLElement>('[data-customize-page]'))?.focus();
   }, [showing]);
   const openPlugin = (id: string) => open({ kind: 'plugin', id }, `[data-plugin-row="${CSS.escape(id)}"]`);
-  const openSkill = (row: SkillRow) => open({ kind: 'skill', key: skillRowKey(row) }, `[data-skill-row="${CSS.escape(row.name)}"]`);
+  const openSkill = (row: SkillRow) => open({ kind: 'skill', key: skillRowKey(row) }, `[data-skill-key="${CSS.escape(skillRowKey(row))}"]`); // a name two scopes can share
 
   const pluginResults = uninstalled.map((key) => {
     const { id, scope } = installationOf(key);
@@ -205,7 +211,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
                     ))}
                   </ul>
                 )}
-                {plugins.state !== 'out' && mods.read.state === 'unavailable' && <ModsUnavailable read={mods.read} />}
+                {plugins.state !== 'out' && (holdsItems || pluginsInError) && mods.read.state === 'unavailable' && <ModsUnavailable read={mods.read} />}
               </div>
               <div data-all-part="skills">
                 <InventoryState error={inventory.error} pending={inventory.isPending} refresh={() => void inventory.refetch()} />

@@ -51,6 +51,9 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
   );
 }
 
+// A row's identity across answers: its file, else its name (the list's own key).
+export const skillRowKey = (row: SkillRow): string => row.path ?? row.name;
+
 // A click inside the row opens its detail unless it landed on a control of its own.
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open])') !== null;
 
@@ -63,6 +66,7 @@ export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: Skill
   return (
     <li
       data-skill-row={row.name}
+      data-skill-key={skillRowKey(row)}
       className="relative flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0 hover:bg-bg-hover"
       onClick={(event) => {
         if (!ownControl(event.target)) onOpen(row);
@@ -132,9 +136,6 @@ export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: Skil
   );
 }
 
-// A row's identity across answers: its file, else its name (the list's own key).
-export const skillRowKey = (row: SkillRow): string => row.path ?? row.name;
-
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
 // selected row as `groups` has it now, so what it offers follows a new answer or a changed launch profile (the task
@@ -151,10 +152,10 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList 
   }
   const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => skillRowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
-  const left = useRef<{ name: string; scrollTop: number } | null>(null);
+  const left = useRef<{ key: string; scrollTop: number } | null>(null);
   if (selectedKey !== null && selected === null) setSelectedKey(null); // its skill is gone: the list again
   const open = (row: SkillRow) => {
-    left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
+    left.current = { key: skillRowKey(row), scrollTop: pane.current?.scrollTop ?? 0 };
     setSelectedKey(skillRowKey(row));
   };
   const back = () => setSelectedKey(null);
@@ -165,7 +166,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList 
     if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
-    pane.current.querySelector<HTMLElement>(`[data-skill-row="${CSS.escape(from.name)}"] [data-row-open]`)?.focus();
+    pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`)?.focus(); // a name two scopes can share
   }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
