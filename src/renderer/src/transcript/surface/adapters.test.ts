@@ -6,7 +6,7 @@ import { rowsOf, turnRows, withAllExpanded } from '../model/derive';
 import { applyEvents, createState, withReaderState } from '../model/reduce';
 import type { Row } from '../model/rows';
 import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
-import type { ArrivalEntry } from '@shared/engine/arrival-schema';
+import { commandEntry, type ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, noticeIndexBuilds, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
@@ -305,6 +305,33 @@ describe('transcript surface adapters', () => {
     b.emit('user.message', { messageUuid: uuid('out'), content: 'Set model', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
     const { rows, state } = setup(b); const row = find(rows, 'local_command');
     expect(commandInput(row, state)).toEqual({ instanceId: 'out', props: { command: 'model', args: 'haiku', text: 'Set model', isErrored: false } });
+  });
+
+  // UX wave U3b (M1, decision 5; Acceptance 3): the command is the run the output's event carries (`/cost` runs as
+  // `usage`), else its own turn's command line; `isErrored` is the row's error. No event outside the row's turn is read.
+  it('asks with the run the output carries, the error the row says, and nothing outside its own turn', () => {
+    const b = builder(); b.turn('u1', '/cost');
+    b.emit('user.message', { messageUuid: uuid('o1'), content: '<local-command-stdout>Total cost: $0.01</local-command-stdout>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null, arrival: commandEntry({ run: { command: 'usage', args: '' }, plain: false }) });
+    b.end(['u1']);
+    b.turn('u2', '/compact');
+    b.emit('user.message', { messageUuid: uuid('o2'), content: '<local-command-stderr>Error: Nothing to compact</local-command-stderr>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null });
+    b.end(['u2']);
+    const { rows, state } = setup(b);
+    const [cost, compact] = rows.filter((r): r is Extract<Row, { kind: 'local_command' }> => r.kind === 'local_command');
+    expect(commandInput(cost!, state)?.props).toEqual({ command: 'usage', args: '', text: 'Total cost: $0.01', isErrored: false });
+    expect(commandInput(cost!, undefined)?.props).toMatchObject({ command: 'usage', args: '' }); // from the row alone
+    expect(commandInput(compact!, state)?.props).toEqual({ command: 'compact', args: '', text: 'Error: Nothing to compact', isErrored: true });
+    // the turns before it are not read: with only the row's own turn in the state, the answer is the same
+    const own = { ...state, turns: new Map([...state.turns].filter(([id]) => id === compact!.turnId)), loose: [] };
+    expect(commandInput(compact!, own)?.props).toEqual(commandInput(compact!, state)?.props);
+  });
+
+  it('asks with no command for an output that stands alone with no run', () => {
+    const b = builder();
+    b.emit('user.message', { messageUuid: uuid('o1'), content: '<local-command-stdout>Loose output</local-command-stdout>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null });
+    b.turn('u1', '/model haiku'); b.end(['u1']);
+    const { rows, state } = setup(b);
+    expect(commandInput(find(rows, 'local_command'), state)?.props).toEqual({ command: '', args: '', text: 'Loose output', isErrored: false });
   });
 });
 

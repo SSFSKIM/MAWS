@@ -8,7 +8,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { describe, expect, it } from 'vitest';
-import { carriedOf, consentMessage } from '@shared/engine/arrival';
+import { carriedOf, commandOf, consentMessage } from '@shared/engine/arrival';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
@@ -380,6 +380,23 @@ describe('where each class is read (M4)', () => {
     expect(notices(drawn(stateOf(live(loadUxwaveJournal('u3-tasks-bare')))))).toEqual(['task failed: Background command "uxw fail" failed with exit code 1']);
     const outputs = drawn(stateOf(live(loadUxwaveJournal('u3-commands-bare')))).flatMap((row) => (row.kind === 'local_command' ? [row.text.split('\n', 1)[0]] : []));
     expect(outputs).toEqual(['Error: No messages to compact', 'Total cost:            $0.0013', 'Session renamed to: uxw renamed', 'Compaction canceled.', 'Compacted']);
+  });
+});
+
+// UX wave U3b (M1; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, decision 2 and Interfaces A):
+// the live wire's output frame names the command the engine ran (`local_command_run`), and its event carries it in a
+// `command` entry; an output whose frame named none carries no entry. No output on the live wire is a terminal's text.
+describe('a command’s output carries the command the engine ran', () => {
+  it('u3-commands-r1: each output event names its run where the frame did, none is plain, and no synthetic message carries the entry', () => {
+    const events = live(loadUxwaveJournal('u3-commands-r1'));
+    const outputs = events.filter((event): event is Message => event.kind === 'user.message' && event.origin === 'local-command');
+    expect(outputs.map((event) => [event.seq, event.arrival === undefined ? null : commandOf(event.arrival).run?.command ?? '?'])).toEqual([
+      [28, 'compact'], [155, null], [167, 'usage'], [179, 'context'], [191, 'reload-plugins'], [204, 'rename'], [216, 'effort'], [228, 'model'], [406, null], [423, null],
+    ]);
+    expect(outputs.find((event) => event.seq === 204)!.arrival).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' } }]);
+    expect(outputs.filter((event) => commandOf(event.arrival).plain)).toEqual([]);
+    expect(events.filter((event) => event.kind === 'user.message' && event.isSynthetic && (event.arrival ?? []).some((entry) => entry.class === 'command'))).toEqual([]);
+    expect(outputs.every((event) => carriedOf(event.arrival).length === 0)).toBe(true);
   });
 });
 
