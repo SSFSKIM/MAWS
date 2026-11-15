@@ -439,7 +439,7 @@ export function settled(entry: DerivedAgent, entries: ReadonlyMap<string, Derive
     if (!ENDED.includes(e.status)) return false;
     if (e.evidence === 'rows' || e.evidence === 'session') return true;
     if (e.evidence !== 'parent') return false;
-    const parentId = str(e.meta.parentAgentId) ?? str(e.spawn?.parentAgentId);
+    const parentId: string | null = str(e.meta.parentAgentId) ?? str(e.spawn?.parentAgentId);
     e = parentId === null ? undefined : entries.get(parentId);
   }
   return false;
