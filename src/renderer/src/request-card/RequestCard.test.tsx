@@ -112,6 +112,9 @@ const keyAt = (target: Element, init: KeyboardEventInit) => {
 const KEY_GRACE_MS = 400;
 const graceOver = () => act(() => void vi.advanceTimersByTime(KEY_GRACE_MS));
 const flush = () => act(async () => {});
+// UX wave U1b M2: a delivery is held by the request until its item leaves the list, so a case that answers one request
+// again in a fresh card first lets the answered one leave, as its holder does
+const answeredLeaves = () => act(() => useAttention.getState().applySnapshot([], TEST_MACHINE));
 // A button's name as a reader hears it: its text without what is hidden from the accessibility tree (a key hint)
 const nameOf = (b: HTMLElement) =>
   b.getAttribute('aria-label') ?? [...b.childNodes].filter((n) => !(n instanceof Element && n.getAttribute('aria-hidden') === 'true')).map((n) => n.textContent).join('').trim();
@@ -149,6 +152,7 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
       fireEvent.click(screen.getByRole('button', { name }));
       await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'dialog', behavior: 'completed', result }));
       view.unmount();
+      answeredLeaves();
     }
   });
 
@@ -158,6 +162,7 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
     await press('{Enter}');
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'retry_fallback' }]));
     first.view.unmount();
+    answeredLeaves();
     mount(refusal, 'docked');
     focusOn(frame());
     await press('{Escape}');
@@ -173,6 +178,7 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
     await press('{Enter}');
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'continue' }]));
     first.view.unmount();
+    answeredLeaves();
     mount(autoFallback, 'docked');
     focusOn(frame());
     await press('{Escape}');
@@ -962,6 +968,7 @@ describe('the permission card', () => {
         await flush();
         expect(answers().at(-1)).toEqual(answer);
         view.unmount();
+        answeredLeaves();
       }
       expect(answers()).toHaveLength(3);
     });

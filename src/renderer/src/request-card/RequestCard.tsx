@@ -3,8 +3,9 @@
 // `attention.request` through the attention store's cache), answers through `session.answer` with payloads `toAnswer`
 // validated, reports the delivery (`answering`; `delivered` standing as it was, its controls disabled, until its item
 // leaves the session's list, UX wave U1's UC-1 and U1a's §C; `not_pending` for two seconds; `write_failed` back to
-// pending with Retry), and owns the keyboard: Enter and Esc (and a permission prompt's ⌘↩ and ⇧⌘↩, UX wave U1a §D)
-// through C5's dispatcher, bound `within` the element that owns focus for the placement, each on a fresh press only.
+// pending with Retry; UX wave U1b M2: all of it held by the request in the attention store, `deliver`), and owns the
+// keyboard: Enter and Esc (and a permission prompt's ⌘↩ and ⇧⌘↩, UX wave U1a §D) through C5's dispatcher, bound
+// `within` the element that owns focus for the placement, each on a fresh press only.
 // Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
 // article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
 // option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
@@ -40,7 +41,7 @@ import { RACE, settledWords, terminalOnlyNow, useRace } from '../lane-a/race'; /
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
-import { useAttention } from '../stores/attention';
+import { connectAnswers, useAttention, type Outcome } from '../stores/attention';
 import { markDocked } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
@@ -51,7 +52,6 @@ import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { proposedChange, proposedFilePath } from './preview/proposed';
-import { receiptOfAnswer } from './receipts'; // UX wave U1b
 import { useProposedFile } from './preview/use-proposed-file';
 import { requesterName } from './requester';
 import { askedLine, mcpParts, toolVerb } from './tools';
@@ -89,7 +89,6 @@ export interface RequestCardProps {
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
 export const HEADINGS = ATTENTION_HEADINGS;
 const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
-const NOT_PENDING_MS = 2_000;
 const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
 const NO_KEYS: Record<(typeof KEY_NAMES)[number], boolean> = { accept: false, decline: false, allowOnce: false, allowLasting: false };
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
@@ -100,53 +99,41 @@ const DENY = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
 // `sent`: the answer was delivered, and the card stands as it was, its controls disabled, until the session's list no
 // longer holds its item, which every route's holder says at once (UC-1, U1a's §C); the card never hides on its own word.
 type Phase = 'pending' | 'answering' | 'sent' | 'not_pending' | 'closed';
-type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 
-// The one delivery path: the session's controls port (lane B: `session.answer`), its outcome, and a Retry that sends
-// the same answer again. UX wave U1b (Interfaces §G): a delivered answer to a question is its call's receipt, which the
-// question's row reads until the transcript's own row carries the answer.
-function useDelivery(item: AttentionItem, request: SessionEvent | null, onAnswered: RequestCardProps['onAnswered']) {
-  const [phase, setPhase] = useState<Phase>('pending');
-  const [failed, setFailed] = useState<{ retry: () => void; detail: string | null } | null>(null);
-  const inFlight = useRef(false);
+// UX wave U1b (Interfaces §G "The delivery"): the store's answer path is the session's controls port (lane B:
+// `session.answer`) and lane A's race, given here because the store imports no IPC client.
+connectAnswers({ send: (item, answer) => answerSession(item, answer), terminalOnly: terminalOnlyNow });
+
+// A delivered answer's follow-up (`submit`'s third argument: a dialog's Edit prompt opens the prompt's edit), by item,
+// while its write is out or failed, so a Retry from a card mounted again still runs it.
+const followUps = new Map<AttentionItem['id'], () => void>();
+
+// The one delivery path, held by the request (UX wave U1b M2, decision 17): the attention store's `deliver` sends the
+// answer, keeps its phase under the item's id (a failure with the answer a Retry sends again; answered elsewhere for two
+// seconds) and writes a question's receipt; every mounted card of the item reads that one entry.
+function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswered']) {
+  const entry = useAttention((s) => s.deliveries.get(item.id));
 
   const submit = useCallback(
     (answer: RequestAnswer, _what: string, delivered?: () => void) => { // the card draws no "Answered · <what>" (§C)
-      const { requestId } = item.request;
-      if (requestId === null) return;
-      const send = async () => {
-        if (inFlight.current) return;
-        inFlight.current = true;
-        setPhase('answering');
-        setFailed(null);
-        const result = await answerSession(item, answer);
-        inFlight.current = false;
-        const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
+      if (item.request.requestId === null) return;
+      const held = useAttention.getState().deliveries.get(item.id);
+      if (held !== undefined && held.phase !== 'failed') return; // one answer per request: in flight, sent, or answered elsewhere
+      if (delivered) followUps.set(item.id, delivered);
+      else followUps.delete(item.id);
+      void useAttention.getState().deliver(item, answer).then((outcome: Outcome) => {
         onAnswered?.(outcome);
-        if (outcome === 'delivered') {
-          const call = item.request.toolUseId;
-          const receipt = receiptOfAnswer(request, answer);
-          if (call !== null && receipt !== null) useAttention.getState().recordReceipt(item.appSessionId, call, receipt);
-          setPhase('sent');
-          delivered?.();
-        } else if (outcome === 'not_pending') {
-          setPhase(terminalOnlyNow(item) ? 'pending' : 'not_pending'); // P5 O9 M6: the terminal's to answer, still pending
-        } else {
-          setPhase('pending');
-          setFailed({ retry: () => void send(), detail: result.ok ? null : result.error.message });
-        }
-      };
-      void send();
+        if (outcome === 'write_failed') return;
+        const then = followUps.get(item.id);
+        followUps.delete(item.id);
+        if (outcome === 'delivered') then?.();
+      });
     },
-    [item, request, onAnswered],
+    [item, onAnswered],
   );
 
-  useEffect(() => {
-    if (phase !== 'not_pending') return;
-    const timer = setTimeout(() => setPhase('closed'), NOT_PENDING_MS);
-    return () => clearTimeout(timer);
-  }, [phase]);
-
+  const phase: Phase = entry === undefined || entry.phase === 'failed' ? 'pending' : entry.phase;
+  const failed = entry?.phase === 'failed' ? { retry: () => submit(entry.answer, '', followUps.get(item.id)), detail: entry.detail } : null;
   return { phase, failed, submit };
 }
 
@@ -250,7 +237,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
   const now = useNow();
-  const { phase, failed, submit } = useDelivery(item, request, onAnswered);
+  const { phase, failed, submit } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
   // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
   const controls = useSessionControls(item.appSessionId);
