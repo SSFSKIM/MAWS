@@ -237,8 +237,6 @@ describe('a prompt’s keys reach it', () => {
   });
 
   it('Esc with the composer’s popup open closes the popup and answers nothing', async () => {
-    const original = console.error;
-    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { original(String(args[0]), new Error('trace').stack); });
     const off = registerSlashWidget('usage', { title: 'Usage', component: () => null }); // a row for the `/` list
     onTestFinished(off);
     const { prompt } = scene();
@@ -246,15 +244,18 @@ describe('a prompt’s keys reach it', () => {
     arm();
     focusOn(editor()!);
     const list = () => document.querySelector('[data-key-sink="composer"] [role="listbox"]');
-    // the popup is the editor's own React root (Tiptap's renderer): waited for inside act, a bounded number of times
-    const until = async (shown: boolean) => {
-      for (let i = 0; i < 50 && (list() !== null) !== shown; i++) await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
-    };
-    await type('/');
-    await until(true);
+    // the popup is drawn by the editor's own renderer, a few ticks after the key: each step and its wait in one act, the
+    // wait bounded, so the renderer's updates land inside it
+    const step = (run: () => void, shown: boolean) =>
+      act(async () => {
+        run();
+        for (let i = 0; i < 50 && (list() !== null) !== shown; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      });
+    await step(() => void editor()!.editor.commands.insertContent('/'), true);
     expect(list()).not.toBeNull();
-    await press(editor()!, ESCAPE);
-    await until(false);
+    const escape = new KeyboardEvent('keydown', { ...ESCAPE, bubbles: true, cancelable: true });
+    await step(() => void editor()!.dispatchEvent(escape), false);
     expect(list()).toBeNull();
     expect(answered()).toEqual([]);
   });
