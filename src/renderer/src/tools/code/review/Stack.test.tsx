@@ -736,13 +736,10 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect(page.rowAtTop()).toEqual({ ...row!, line: row!.line + 5 });
     });
 
-    // The branch's task review (finding 5): a card opened from the chip on a line drawn wholly in view near the
-    // viewport's bottom; its field takes the keyboard as it is drawn, and the browser scrolls the field into view, a
-    // scroll with no input before it. The stack stands the card wholly in view, and that scroll is not undone.
-    // The architect's review (its first finding): a card opened from the chip while its file's own read is out waits on
-    // that read; the person's scroll in the scroller meanwhile is theirs, and the card, placed when the read answers,
-    // opens under its line where that is, moving neither the scroller nor the place the person reads.
-    it('opens a card that waited on its file’s read under its line where the person scrolled away meanwhile: no reveal and no exposure', async () => {
+    // A card opened from the chip while its file's own read is out (past the scope's cap, the read held), the person's
+    // scroll by hand into the next file meanwhile, then the read answering inside their wheel's window: the card mounts
+    // under its line and its field takes the keyboard, the browser scrolling the field into view (the seam below).
+    async function waitedCard() {
       const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
       offs.push(registerCommentComposer(openComment));
       const main = await mount(files, { pastCap: true });
@@ -790,11 +787,35 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       await page.settle();
       expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[0].path)); // opened under its line
       expect(focusScrolls).toBe(1); // the field took the keyboard, and the browser scrolled it into view
+      return { reading, atEachScroll };
+    }
+
+    // The architect's review (its first finding): a card opened from the chip while its file's own read is out waits on
+    // that read; the person's scroll in the scroller meanwhile is theirs, and the card, placed when the read answers,
+    // opens under its line where that is, moving neither the scroller nor the place the person reads.
+    it('opens a card that waited on its file’s read under its line where the person scrolled away meanwhile: no reveal and no exposure', async () => {
+      const { reading, atEachScroll } = await waitedCard();
       expect(page.rowAtTop()).toEqual(reading);
       // the first file's growth above the place (its rows, then the card's row) and the field's focus scroll, each held
       // or undone: none went back to the comment
       expect(atEachScroll.length).toBeLessThanOrEqual(5);
       expect(atEachScroll.filter((row) => JSON.stringify(row) !== JSON.stringify(reading))).toEqual([]);
+    });
+
+    // The architect's re-review (Review fix 3): only the field's own focus as the cancelled card mounts is not the
+    // person's; a later focus they move into the same card (Tab to its next control, after their input) is revealed.
+    it('reveals a later keyboard focus into the card whose opening was cancelled: the browser’s scroll to it stands', async () => {
+      const { reading } = await waitedCard();
+      expect(page.rowAtTop()).toEqual(reading);
+      page.scrollTo(scroller().scrollTop + ROW); // the person's input, a row on
+      await page.settle();
+      clock += 100; // inside its window
+      const before = scroller().scrollTop;
+      const control = within(card()!).getAllByRole('button')[0];
+      act(() => control.focus()); // Tab to the card's next control: the browser scrolls it into view
+      await page.settle();
+      const row = card()!.closest('tr')!;
+      expect({ moved: scroller().scrollTop !== before, at: scroller().scrollTop }).toEqual({ moved: true, at: page.topOf(row) });
     });
 
     // The architect's re-review (X-072): a card left open is the surface's, not the stack mount's. Review hidden and shown
@@ -818,6 +839,9 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect(page.rowAtTop()).toEqual(reading);
     });
 
+    // The branch's task review (finding 5): a card opened from the chip on a line drawn wholly in view near the
+    // viewport's bottom; its field takes the keyboard as it is drawn, and the browser scrolls the field into view, a
+    // scroll with no input before it. The stack stands the card wholly in view, and that scroll is not undone.
     it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
       const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
       offs.push(registerCommentComposer(openComment));
