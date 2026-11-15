@@ -194,6 +194,19 @@ export function sendNowJournal(dir: string, name: string): string {
   return writeJournal(dir, `${name}-send-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
 
+// UX wave U1b (decision 22, probe 8): Stop while the main loop's permission prompt waits, as
+// `uxwave/u1b-intpend-main-r1` recorded it on engine 2.1.322 under MAWS's launch: the probe's prompt (seq 18), its Bash
+// call and the call's `can_use_tool` (39); the replay then holds at Stop's interrupt (43), recorded as the plain stop
+// writes it; after it the engine's `control_cancel_request` for the request (44), the interrupt's answer (45), the
+// rejected call's result (48), the turn's end (`error_during_execution`, 50) and idle (52). C3's prelude stands in for
+// the probe's handshake (3 to 16); the maws server's tool listing (19, its answer 20 and its echo 24) and the answer to
+// the thinking-display write (21) go, as do the meta rows; the probe's late allow (54) and its next prompt are cut, so
+// the replay waits for the test's end.
+export function stopPendingJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1b-intpend-main-r1.jsonl').filter((r) => r.seq >= 18 && r.seq <= 52 && ![19, 20, 21, 24].includes(r.seq) && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-stop-pending`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
 // UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
 // promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
 // Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),

@@ -18,6 +18,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { loadUxwaveJournal } from '../../../../test/support/fixtures';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { Composer } from '../composer/Composer';
 import { resetDictationStore, useDictationStore } from '../composer/dictation/store';
@@ -26,7 +27,7 @@ import { resetTakeBack } from '../composer/queue/take-back';
 import { resetSurfaceRegistry } from '../engine-surface/registry';
 import { connectKeys } from '../keymap/dispatcher';
 import { resetLaneAStore } from '../stores/lane-a';
-import { useAttention } from '../stores/attention';
+import { selectPendingOf, useAttention } from '../stores/attention';
 import { resetComposerStore } from '../stores/composer';
 import { useHosts } from '../stores/hosts';
 import { useLayout } from '../stores/layout';
@@ -38,6 +39,7 @@ import { preloadOf } from '../test-support/preload-of';
 import { layOutPrompts } from '../test-support/prompt-layout';
 import { resetShellStores } from '../test-support/shell-stores';
 import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
+import { journalToEvents } from '../transcript/dev/journal';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
 import { itemFor, permission, type RequestEvent } from './test-requests';
@@ -408,6 +410,46 @@ describe('the session’s end and a child transcript’s end in one pane', () =>
     arm();
     await press(childRow(), CMD_ENTER);
     await waitFor(() => expect(answered()).toEqual([{ requestId: 'rc', answer: ALLOW_ONCE }]));
+  });
+});
+
+// UX wave U1b, decision 22 (probe 8, spikes/protocol-probe/findings-uxwave-u1b-interrupt-pending.txt): Stop while a
+// subagent's permission request waits. The engine sends no `control_cancel_request` for it and keeps it answerable, so
+// the window withdraws nothing: after Stop its card still stands at the child transcript's end (and the session's), and
+// its allow is sent for its own request id. Over the recorded child run whose main turn was still open at Stop
+// (u1b-intpend-child-r2), its events up to the interrupt.
+describe('Stop while a subagent’s prompt waits (probe 8)', () => {
+  it('sends the interrupt and withdraws nothing: the child’s card stays at its end and its Allow once answers its request', async () => {
+    const rows = loadUxwaveJournal('u1b-intpend-child-r2');
+    const interrupt = rows.find((row) => row.direction === 'out' && (row.frame as { request?: { subtype?: unknown } }).request?.subtype === 'interrupt')!;
+    events = journalToEvents(rows.filter((row) => row.seq < interrupt.seq));
+    const asked = events.find((event): event is Extract<SessionEvent, { kind: 'permission.requested' }> => event.kind === 'permission.requested')!;
+    expect(asked.agentId, 'the recorded request is a subagent’s').not.toBeNull();
+    requests.set(asked.requestId, asked);
+    const child = itemFor(asked, APP, { summary: 'Bash: touch uxw-ran-child.txt' });
+    await mount(
+      [child],
+      <div data-testid="child">
+        <TranscriptSlot appSessionId={APP} agentId={asked.agentId!} />
+      </div>,
+    );
+    const childEnd = () => screen.getByTestId('child').querySelector<HTMLElement>('[data-request-end]');
+    const childPrompt = () => within(childEnd()!).getByRole('group', { name: 'Approval needed' });
+    await waitFor(() => expect(childEnd() && within(childEnd()!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
+
+    const stop = pane(0).querySelector<HTMLButtonElement>('[data-submit-state]')!;
+    await waitFor(() => expect(stop.textContent).toBe('Stop'));
+    await act(async () => void stop.click());
+    await waitFor(() => expect(fake.invoked('session.interrupt')).toHaveLength(1));
+    await flush();
+
+    // no cancel frame comes for it, so its item stays listed and nothing in the window takes its card away
+    expect(selectPendingOf(useAttention.getState(), APP).map((item) => item.id), 'the item still listed').toEqual([child.id]);
+    expect(childPrompt().textContent).toContain('touch uxw-ran-child.txt');
+    expect(within(end()!).getByRole('group', { name: 'Approval needed' }), 'and at the session’s end').toBeTruthy();
+    arm();
+    await act(async () => void within(childPrompt()).getByRole('button', { name: 'Allow once' }).click());
+    await waitFor(() => expect(answered()).toEqual([{ requestId: asked.requestId, answer: ALLOW_ONCE }]));
   });
 });
 
