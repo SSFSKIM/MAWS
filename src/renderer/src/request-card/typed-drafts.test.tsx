@@ -35,6 +35,13 @@ afterEach(() => {
 const end = (event: RequestEvent | null) => (event === null ? <div /> : <RequestCard key={event.requestId} item={itemFor(event, APP)} request={event} placement="inline" region="end" paneIndex={null} />);
 const reason = () => screen.queryByRole('textbox', { name: 'Reason for denying' }) as HTMLTextAreaElement | null;
 const feedback = () => screen.queryByRole('textbox', { name: 'What should change in the plan' }) as HTMLTextAreaElement | null;
+// A control outside the card holding the keyboard: a box drawn open again by a remount must not take it from there.
+function focusOutside(): HTMLButtonElement {
+  const outside = document.body.appendChild(document.createElement('button'));
+  outside.textContent = 'Elsewhere';
+  outside.focus();
+  return outside;
+}
 
 describe('a request’s typed draft', () => {
   it('a reason typed for Deny… with a reason stands through a switch to another waiting prompt and back', async () => {
@@ -44,8 +51,11 @@ describe('a request’s typed draft', () => {
     await user.type(reason()!, 'not the build folder');
     rerender(end(second));
     expect(reason(), 'the other prompt has no reason of its own').toBeNull();
+    const outside = focusOutside();
     rerender(end(first));
     expect(reason()?.value).toBe('not the build folder');
+    expect(document.activeElement, 'the keyboard stays where it was').toBe(outside);
+    outside.remove();
   });
 
   it('a plan’s feedback stands through its form leaving the page and coming back', async () => {
@@ -54,8 +64,11 @@ describe('a request’s typed draft', () => {
     await user.click(screen.getByRole('button', { name: 'Keep planning' }));
     await user.type(feedback()!, 'Write the page first');
     rerender(end(null));
+    const outside = focusOutside();
     rerender(end(plan));
     expect(feedback()?.value).toBe('Write the page first');
+    expect(document.activeElement, 'the keyboard stays where it was').toBe(outside);
+    outside.remove();
   });
 
   it('goes when its request leaves the session’s list, and only that request’s', async () => {

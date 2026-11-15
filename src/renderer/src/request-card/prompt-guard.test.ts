@@ -27,7 +27,10 @@ function clip(r: DOMRect, by: DOMRect): DOMRect {
 const touches = (a: DOMRect, b: DOMRect) => a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 class FakeObserver {
   observed: Element[] = [];
-  constructor(private readonly callback: (entries: IntersectionObserverEntry[], observer: unknown) => void) {
+  constructor(
+    private readonly callback: (entries: IntersectionObserverEntry[], observer: unknown) => void,
+    readonly options?: IntersectionObserverInit, // what the guard asks of the browser: the fake fires whatever these are
+  ) {
     observers.add(this);
   }
   observe(target: Element) {
@@ -198,6 +201,9 @@ describe('the guard of a prompt at a transcript’s end', () => {
   it('a card that only touches the view’s edge is not shown: a sliver that arrives later waits the full 400 ms from its own arrival', () => {
     AWAY();
     const { guard } = watch();
+    // the browser sends the sliver's own entry only at a threshold between none and some area: pinned here, since the
+    // fake would fire without it
+    expect([...observers].at(-1)?.options?.threshold).toEqual([0, 1e-6, 1]);
     vi.advanceTimersByTime(1000);
     EDGE();
     intersect(); // intersecting, by the browser's word, with an empty rectangle
