@@ -2,7 +2,7 @@
 // near the scroll position are drawn, a folded section weighs its header alone, the place the person reads is kept
 // through a resize, a zoom and late drawing and is returned to after Review was hidden, and the hunk counter counts and
 // moves across the whole stack. The page is laid out by `fakeStackLayout`: happy-dom lays nothing out.
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
@@ -18,9 +18,11 @@ import { closeCard, resetPlaceNotes, useCommentCard } from '../../../side/card/s
 import { registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { resetDiffTabs } from './DiffTab';
-import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
+import { REVIEW_SCOPE_BYTES_CAP, type ReviewFile } from './review-model';
 import { useReview } from './review-store';
 import { reviewTool } from './ReviewTool';
+import { useStack, type HeldFile } from './Stack';
+import { createReviewUi } from './view-state';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -320,6 +322,32 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(sectionOf(untracked.path).querySelector('[data-review-body] table')).not.toBeNull();
     expect(prepared.sections).toBeLessThanOrEqual(2); // its section (not 201)
     expect(prepared.diffs).toBeLessThanOrEqual(2); // its body's data
+  });
+
+  // The branch's task review: each mounted stack makes its own sections, from its own folds, marks and hold, so another
+  // surface over the same files remakes none of them.
+  it('makes again, of two hundred files that two stacks show, only the section whose hold changed in one of them', () => {
+    const files: ReviewFile[] = Array.from({ length: 200 }, (_, i) => {
+      const file = made(i, 1, 6);
+      return { path: file.path, displayPath: file.path, oldPath: null, openPath: `/repo/${file.path}`, kind: 'modified', added: 1, removed: 0, hunks: [file.patch.slice(file.patch.indexOf('@@'))], blocks: [1], header: null };
+    });
+    const open = createReviewUi({ session: A });
+    const shut = createReviewUi({ session: A });
+    shut.setState({ folds: new Map([['key', new Map(files.map((file) => [file.path, 'closed' as const]))]]) });
+    const heldOf = (file: ReviewFile): HeldFile => ({ placeKey: 'key', path: file.path, hunks: file.hunks!, blocks: [file.hunks!] });
+    const first = renderHook(({ held }: { held: HeldFile | null }) => useStack({ files, target: null, placeKey: 'key', pastCap: false, ui: open, held }), { initialProps: { held: null as HeldFile | null } });
+    const second = renderHook(({ held }: { held: HeldFile | null }) => useStack({ files, target: null, placeKey: 'key', pastCap: false, ui: shut, held }), { initialProps: { held: null as HeldFile | null } });
+    expect(first.result.current.sections.every((section) => !section.folded)).toBe(true);
+    expect(second.result.current.sections.every((section) => section.folded)).toBe(true);
+    prepared.sections = 0;
+    first.rerender({ held: heldOf(files[7]) });
+    expect(first.result.current.sections[7].hunks).toBe(heldOf(files[7]).hunks);
+    expect(prepared.sections).toBeLessThanOrEqual(2); // the held file's section (not 200)
+    prepared.sections = 0;
+    second.rerender({ held: heldOf(files[9]) });
+    expect(prepared.sections).toBeLessThanOrEqual(2); // and in the other stack, its own held file's (not 200)
+    first.unmount();
+    second.unmount();
   });
 
   it('keeps the file and row the person reads at the top through a change of width and a zoom', async () => {
@@ -706,6 +734,41 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       page.scrollTo(scroller().scrollTop + 5 * ROW); // the person's scroll, five rows on, under the grown page
       await page.settle();
       expect(page.rowAtTop()).toEqual({ ...row!, line: row!.line + 5 });
+    });
+
+    // The branch's task review (finding 5): a card opened from the chip on a line drawn wholly in view near the
+    // viewport's bottom; its field takes the keyboard as it is drawn, and the browser scrolls the field into view, a
+    // scroll with no input before it. The stack stands the card wholly in view, and that scroll is not undone.
+    it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      offs.push(registerCommentComposer(openComment));
+      await mount(files);
+      addOn(files[0].path, files[0].added[0]);
+      await page.settle();
+      const field = within(card()!).getByRole('textbox', { name: 'Comment' });
+      fireEvent.change(field, { target: { value: 'Say what this counts.' } });
+      fireEvent.keyDown(field, { key: 'Escape' }); // a draft: the card goes, the chip stands for it
+      await page.settle();
+      expect(card()).toBeNull();
+      const line = () => lineRow(files[0].path, files[0].added[0]);
+      page.scrollTo(page.topOf(line()) + ROW + 10 - VIEWPORT); // by hand: the line wholly in view, ten pixels above the bottom
+      await page.settle();
+      expect(page.topOf(line()) + ROW).toBeLessThanOrEqual(scroller().scrollTop + VIEWPORT);
+      clock += 1_000; // the wheel's window long over
+      // The browser's focus scroll: a field focused below the viewport is scrolled to its bottom.
+      const focus = HTMLElement.prototype.focus;
+      vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+        focus.call(this, options);
+        const row = this.closest('[data-comment-card]')?.closest('tr');
+        if (!row || options?.preventScroll) return;
+        const bottom = page.topOf(row) + page.height(row);
+        if (bottom > scroller().scrollTop + VIEWPORT) scroller().scrollTop = bottom - VIEWPORT;
+      });
+      fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
+      await page.settle();
+      const row = card()!.closest('tr')!;
+      const top = scroller().scrollTop;
+      expect({ cardTop: page.topOf(row) >= top + HEADER, cardBottom: page.topOf(row) + page.height(row) <= top + VIEWPORT, line: page.topOf(line()) >= top + HEADER }).toEqual({ cardTop: true, cardBottom: true, line: true });
     });
 
     it('ends an earlier wheel’s window when a reveal starts: a scroll 100 ms into the reveal is a layout change, and the requested file stays at the top', async () => {

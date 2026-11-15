@@ -74,16 +74,19 @@ interface Page {
   sections: PlacedSection[];
   order: StackHunk[];
   drawn: number; // bodies drawn
+  tops: number[]; // each section's top in the scroller
 }
 
 // A stack of `files` files, each `HUNKS` hunks, scrolled to `at`: the bodies within the band drawn, the rest spacers.
-function pageOf(files: number, at: number): Page {
+// Each file's header is `headerOf(file)` high (a held file's has a second line).
+function pageOf(files: number, at: number, headerOf: (file: number) => number = () => HEADER): Page {
   const heights = new Map<Element, number>();
   const offsets = new Map<Element, number>();
   const el = document.createElement('div');
   el.setAttribute('data-review-stack', '');
   const sections: PlacedSection[] = [];
   const order: StackHunk[] = [];
+  const tops: number[] = [];
   let top = 0;
   let drawn = 0;
   for (let f = 0; f < files; f++) {
@@ -91,11 +94,12 @@ function pageOf(files: number, at: number): Page {
     const body = ROWS * ROW;
     const section = document.createElement('section');
     section.dataset.reviewFile = path;
+    tops.push(top);
     const header = document.createElement('div');
     header.setAttribute('data-review-file-header', '');
-    heights.set(header, HEADER);
+    heights.set(header, headerOf(f));
     section.append(header);
-    const bodyTop = top + HEADER;
+    const bodyTop = top + headerOf(f);
     if (bodyTop <= at + VIEWPORT + BAND * VIEWPORT && bodyTop + body >= at - BAND * VIEWPORT) {
       drawn += 1;
       const box = document.createElement('div');
@@ -137,7 +141,7 @@ function pageOf(files: number, at: number): Page {
     el.append(section);
     sections.push({ path, folded: false, lines: ROWS });
     for (let h = 0; h < HUNKS; h++) order.push({ path, index: h, block: 0, anchor: { side: 'new', line: 1 + h * 10 } });
-    top += HEADER + body;
+    top += headerOf(f) + body;
   }
   const total = top;
   let scrollTop = at;
@@ -162,7 +166,7 @@ function pageOf(files: number, at: number): Page {
     tally.counts.measures += 1;
     return offsets.get(element) ?? 0;
   });
-  return { el, sections, order, drawn };
+  return { el, sections, order, drawn, tops };
 }
 
 // Every query the page answers (its own and its elements'), counted.
@@ -193,6 +197,47 @@ function scrollOnce(page: Page, by: number) {
   page.el.scrollTop += by;
   return { ...tally.counts };
 }
+
+// The placer over the page standing at `at`: its first layout reads the place there; a second, with nothing changed,
+// stands that place again. Where the scroller stands after it.
+function readThenStand(page: Page): number {
+  const placer = new StackPlacer({ band: () => {}, saved: () => {}, counted: () => {} });
+  page.el.addEventListener('scroll', () => placer.scrolled());
+  placer.update({ sections: page.sections, order: page.order, current: 0 });
+  placer.attach(page.el, null);
+  placer.relayout();
+  placer.relayout();
+  return page.el.scrollTop;
+}
+
+// The branch's task review (finding 2's handoff): a sticky header is pushed off by the next section's, so the edge
+// under the header standing at the top passes from one file to the next; the place read anywhere in that handoff, and
+// stood again with nothing changed, is where the scroller was.
+describe('the place read where one file’s header hands over to the next', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  for (const [from, to] of [
+    [58, 30],
+    [30, 58],
+  ] as const) {
+    it(`stands again where it was read, from a ${from} px header to a ${to} px one`, () => {
+      const headers = (file: number) => (file === 0 ? from : to);
+      const boundary = from + ROWS * ROW; // the second file's top
+      const stood: { at: number; stood: number }[] = [];
+      for (let at = boundary - 80; at <= boundary + 40; at++) {
+        document.body.replaceChildren();
+        const page = pageOf(3, at, headers);
+        expect(page.tops[1]).toBe(boundary);
+        expect(page.el.scrollTop).toBe(at);
+        stood.push({ at, stood: readThenStand(page) });
+      }
+      expect(stood.filter(({ at, stood }) => stood !== at)).toEqual([]);
+    });
+  }
+});
 
 describe('one scroll of the person’s on the stack', () => {
   afterEach(() => {
