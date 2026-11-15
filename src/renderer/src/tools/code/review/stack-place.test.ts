@@ -253,7 +253,8 @@ describe('a card’s exposure and the person’s navigation', () => {
   it('leaves the hunk the person jumped to at the top when the card opened before the jump draws: no scroll, the place the jump’s', () => {
     const page = pageOf(3, 0);
     const saved: StackPlace[] = [];
-    const placer = new StackPlacer({ band: () => {}, saved: (place) => saved.push(place), counted: () => {} });
+    // every band handed is drawn at once, as the stack's commit draws it
+    const placer: StackPlacer = new StackPlacer({ band: (band) => placer.drawn(band), saved: (place) => saved.push(place), counted: () => {} });
     page.el.addEventListener('scroll', () => placer.scrolled());
     placer.update({ sections: page.sections, order: page.order, current: 0 });
     placer.attach(page.el, null);
@@ -266,6 +267,7 @@ describe('a card’s exposure and the person’s navigation', () => {
     placer.showCard(line);
     placer.relayout();
     placer.revealHunk(page.order[4]); // ↑, to the fifth hunk
+    placer.relayout(); // the commit after it: the jump reached
     expect(page.el.scrollTop).toBe(4 * (1 + LINES) * ROW); // its header row and first line under the file’s header
     // the card draws under its line, 160 px high: a layout change
     const widget = document.createElement('tr');
