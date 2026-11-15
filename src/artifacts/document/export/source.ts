@@ -1,9 +1,9 @@
 // What a document export reads (D12 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): a document's state (the
 // live doc or a version's) as plain values: its tabs in order with their bodies as ProseMirror docs of the one schema,
 // its threads (DOCX writes them as Word comments), its token overrides (`meta.dsOverrides`) and, since UX wave U10b, its
-// page (`meta.page`: the size it prints on and its density, §B.4 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md). The exporters are pure
-// functions of this, so M8's registrations in A's export service, the editor's Export menu and `artifact_export` all
-// call them the same way, from main or the renderer.
+// page (`meta.page`: the size it prints on and its density; §B.4 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md).
+// The exporters are pure functions of this, so M8's registrations in A's export service, the editor's Export menu and
+// `artifact_export` all call them the same way, from main or the renderer.
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { Actor } from '@shared/artifacts/actor';
 import { actorDisplay } from '@shared/artifacts/actor';
