@@ -285,7 +285,7 @@ const CHANGE_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'ad
 // on the edit's own `filePath`, one block per edit in their order, since each edit's hunks
 // are numbered against the file as that edit found it (amended 2026-09-29, M3 review). A file is shown relative to the
 // repository when it is inside it, absolute outside it or while no repository is known; its identity stays absolute.
-export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActivity | null, repoRoot: string | null): ReviewFile[] {
+export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActivity | null, repoRoot: string | null = null): ReviewFile[] {
   const inside = repoRoot === null ? null : `${repoRoot.replace(/\/+$/, '')}/`;
   const edits = new Map<string, string[][]>();
   for (const entry of activity?.files ?? []) {

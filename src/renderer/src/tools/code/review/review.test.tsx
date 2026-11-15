@@ -273,7 +273,7 @@ describe('review model', () => {
         { path: '/p/new.ts', use: 'edited', at: '', edit: edit('/p/new.ts', ['+n']) },
       ],
     } as unknown as TurnActivity;
-    const rows = turnScopeFiles(changedFiles, activity, null);
+    const rows = turnScopeFiles(changedFiles, activity);
     expect(rows.map((r) => [r.path, r.kind, r.added, r.removed, r.openPath])).toEqual([
       ['/p/a.ts', 'modified', 3, 1, '/p/a.ts'],
       ['/p/new.ts', 'added', 1, 0, '/p/new.ts'],
