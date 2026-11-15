@@ -515,7 +515,8 @@ describe('the chat over the artifact beside the split (UX wave U10b)', () => {
       useSessions.setState({ records: new Map([[A, { ...record(A), unread }], [B, record(B)]]) });
       if (waiting) useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) });
     });
-    expect(showChatButton()!.textContent, 'no new visible words').toBe('Show chat');
+    const words = [...showChatButton()!.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join('');
+    expect(words, 'no new visible words').toBe('Show chat');
     expect(showChatButton()!.getAttribute('aria-description')).toBe(description);
   });
 
