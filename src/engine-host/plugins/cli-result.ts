@@ -7,7 +7,7 @@ import { sep } from 'node:path';
 import * as z from 'zod';
 import type { AvailablePlugin, InstalledPlugin, PluginSourceRef, PluginsOutcome } from '@shared/ipc/schema/plugins';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
-import type { McpAction, McpActionInputs } from '@shared/plugins/cli';
+import { holdsValueSlot, isMcpEntryAdd, MCP_MASK, mcpShownCommand, mcpValueSlotsOf, type McpAction, type McpActionInputs, type McpEntryAdd } from '@shared/plugins/cli';
 
 export interface CliRun {
   stdout: string;
@@ -50,12 +50,72 @@ export function mutationOutcome(run: CliRun): PluginsOutcome {
 // ("Added HTTP MCP server linear with URL: … to user config", then "File modified: …"), on a refusal the reason on stderr
 // with exit 1 ("MCP server linear already exists in user config", "No MCP server named "x" in user scope", "Invalid
 // name …"). The result carries the CLI's line as its `message`, as a plugin verb's does.
+// UX wave U11g: a custom add's input is read by its own branch (`customAddOutcome`, below).
 export function mcpOutcome<A extends McpAction>(action: A, input: McpActionInputs[A], run: CliRun): PluginsOutcome {
+  if (action === 'mcp-add' && isMcpEntryAdd(input as McpActionInputs['mcp-add'])) return customAddOutcome(input as McpEntryAdd, run);
   const command = action === 'mcp-add' ? 'mcp add' : 'mcp remove';
   if (run.code === 0) return { ok: true, result: { command, outcome: 'ok', message: lines(run.stdout)[0] ?? `${command} ${input.name}`, name: input.name, scope: input.scope } };
   const said = lines(run.stderr).at(-1) ?? lines(run.stdout).at(-1);
-  if (said === undefined) return { ok: false, error: { code: 'no_result', message: run.code === null ? 'the CLI ended without a result' : `the CLI exited ${run.code} without a result`, failureCode: null, shownCommand: null } };
-  return { ok: false, error: { code: 'cli_failed', message: said, failureCode: null, shownCommand: null } };
+  if (said === undefined) return noResult(run);
+  return failed('cli_failed', said);
+}
+
+type Failed = Extract<PluginsOutcome, { ok: false }>;
+const failed = (code: Failed['error']['code'], message: string, failureCode: string | null = null): Failed => ({ ok: false, error: { code, message, failureCode, shownCommand: null } });
+const noResult = (run: CliRun): Failed => failed('no_result', run.code === null ? 'the CLI ended without a result' : `the CLI exited ${run.code} without a result`);
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §B and §C): a custom add's words, in
+// one table. The enum of an outcome's code cannot grow (a wire major), so its new cases are told apart by `failureCode`.
+export const CUSTOM_ADD_WORDS = {
+  added: (type: string, name: string, scope: string) => `Added ${type} MCP server ${name} to ${scope} config`, // the engine's own line (Engine facts, 1)
+  configured: (name: string, scope: string) => `${name} is already configured here (${scope} scope). Nothing was added.`,
+  heldByApp: (name: string) => `${name} is held by MAWS’s own list (Settings › Sessions › MCP servers). Nothing was added.`,
+  unread: 'Not every configuration here could be read, so the name can’t be checked. Nothing was added.',
+  withheld: (code: number | null, command: string) => `Claude Code exited ${code === null ? 'on a signal' : code}. Its message repeats a header or variable value, so it is not shown. To read it, run this in a terminal with your values in place of ${MCP_MASK}: ${command}`,
+  spawnWithheld: 'The command could not be started. The system’s message repeats a header or variable value, so it is not shown.',
+  readback: (code: number | null) => `Claude Code exited ${code === null ? 'on a signal' : code}. It could not read its configuration file back after writing it, and its message may quote that file, so it is not shown. The connector may have been added: check the list before adding it again.`, // R10
+} as const;
+
+// R10: the fixed phrase of the engine's read-back error, read from engine 2.1.322 (`cli.pretty.js:475658`, thrown at
+// `:476792`): "MCP server "<name>" may not have been saved…: <file> could not be read to confirm the change (<reason>)…".
+// Its `<reason>` is free text from the failed read and can quote any fragment of the file, so a line holding the phrase
+// is withheld whole whatever else it holds.
+export const ENGINE_READBACK_PHRASE = 'could not be read to confirm the change';
+
+/** Why a custom add's CLI line is withheld whole, or null when it may be forwarded: tested on the line as the CLI wrote
+ * it, before any trimming (what is forwarded is the trimmed line). The read-back error first, since its sentence says
+ * the connector may have been added; then a value slot's content, as written or as JSON escapes it. The one drop of the
+ * `output` path and the outcome's path alike. */
+export function withheldLine(raw: string, slots: readonly string[]): 'readback' | 'value' | null {
+  if (raw.includes(ENGINE_READBACK_PHRASE)) return 'readback';
+  return holdsValueSlot(raw, slots) ? 'value' : null;
+}
+
+/** The check before the run could not be made, or its read of the configuration was not whole: nothing was added. */
+export const CONFIGURATION_UNREAD: Failed = failed('spawn_failed', CUSTOM_ADD_WORDS.unread, 'configuration_unread');
+/** A spawn's failure whose system message repeats a value slot's content. */
+export const SPAWN_WITHHELD: Failed = failed('spawn_failed', CUSTOM_ADD_WORDS.spawnWithheld, 'message_withheld');
+
+/** The engine host's name check before a custom add's run (R3), from the inventory of the page's folder: the name's first
+ * entry, as the sheet's `existingOf` finds it (MAWS's own list included, scope `app`), refuses with its scope; a read that
+ * was not whole refuses too; a free name answers null. Built from public fields alone. */
+export function nameCheckOutcome(configured: { servers: readonly { name: string; scope: string }[]; serversRead: boolean }, name: string): Failed | null {
+  const found = configured.servers.find((server) => server.name === name);
+  if (found) return failed('spawn_failed', found.scope === 'app' ? CUSTOM_ADD_WORDS.heldByApp(name) : CUSTOM_ADD_WORDS.configured(name, found.scope), 'name_configured');
+  return configured.serversRead ? null : CONFIGURATION_UNREAD;
+}
+
+// The rule about values (§C): stdout is never read; the success is worded from the input; the CLI's last error line, as
+// the CLI wrote it, is forwarded whole (trimmed) when `withheldLine` passes it, and is otherwise replaced whole by the
+// fixed sentence of its trigger (R10's read-back error, or a value slot's content). Nothing is replaced inside a line.
+function customAddOutcome(input: McpEntryAdd, run: CliRun): PluginsOutcome {
+  if (run.code === 0) return { ok: true, result: { command: 'mcp add-json', outcome: 'ok', message: CUSTOM_ADD_WORDS.added(input.entry.type, input.name, input.scope), name: input.name, scope: input.scope } };
+  const raw = run.stderr.split('\n').filter((line) => line.trim().length > 0).at(-1); // as the CLI wrote it
+  if (raw === undefined) return noResult(run);
+  const withheld = withheldLine(raw, mcpValueSlotsOf(input));
+  if (withheld === 'readback') return failed('cli_failed', CUSTOM_ADD_WORDS.readback(run.code), 'readback_unconfirmed');
+  if (withheld === 'value') return failed('cli_failed', CUSTOM_ADD_WORDS.withheld(run.code, mcpShownCommand(input)), 'message_withheld');
+  return failed('cli_failed', raw.trim());
 }
 
 // -- the reads -----------------------------------------------------------------------------------------------------------

@@ -48,7 +48,7 @@ describe('McpDriven', () => {
     expect(screen.getByRole('list', { name: 'Connectors' })).toBeTruthy();
     expect(document.querySelector('[data-mcp-server="probe"]')!.textContent).toContain('Connected · 1 tool');
     expect(document.querySelector('[data-mcp-server="tracker"]')!.textContent).toContain('Sign in needed');
-    expect(frame.textContent).not.toContain('Off here is off');
+    expect(frame.textContent).not.toContain('A switch here');
   });
 
   it('shows Disable disabled in place with its reason when the bridge cannot disable, and runs it when it can', async () => {

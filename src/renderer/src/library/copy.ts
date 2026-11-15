@@ -1,6 +1,7 @@
 // The library's words (docs/doperpowers/plans/2026-10-12-p3-l-library.md): what the `artifact` main tab says when it
 // cannot show an editor, and the names of the kinds. User-visible copy says Artifact (Decision Log 10).
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import { DESIGN_SYSTEM_KINDS } from '@shared/maws/tools';
 
 export const KIND_LABELS: Record<ArtifactKind, string> = {
   document: 'Document',
@@ -69,9 +70,13 @@ const KIND_NOUNS: Record<ArtifactKind, string> = {
   html: 'HTML page',
   file: 'file',
 };
-// P3-F wave S (F5): from a Space, the words name it, so the agent makes the artifact there (`artifact_create`'s `space`)
-export const askClaudePrefill = (kind: ArtifactKind, spaceName?: string): string =>
-  `Make ${kind === 'html' ? 'an' : 'a'} ${KIND_NOUNS[kind]}${spaceName === undefined ? '' : ` in the Space “${spaceName}”`}: `;
+// P3-F wave S (F5): from a Space, the words name it, so the agent makes the artifact there (`artifact_create`'s `space`).
+// UX wave U10b (l6-artifacts-08): a chosen design system that is not the default is named too, for a kind a system
+// governs, so the agent binds it (`artifact_create`'s `designSystem`).
+export function askClaudePrefill(kind: ArtifactKind, spaceName?: string, systemName?: string): string {
+  const system = systemName !== undefined && (DESIGN_SYSTEM_KINDS as readonly ArtifactKind[]).includes(kind) ? `, in the design system “${systemName}”` : '';
+  return `Make ${kind === 'html' ? 'an' : 'a'} ${KIND_NOUNS[kind]}${spaceName === undefined ? '' : ` in the Space “${spaceName}”`}${system}: `;
+}
 export const untitledTitle = (kind: ArtifactKind): string => `Untitled ${KIND_NOUNS[kind]}`;
 
 export const GROUP_COPY = {
@@ -94,9 +99,16 @@ export const LIBRARY_PAGE = {
   // P5 O7 M5a: the machine menu
   machine: { local: 'This Mac', label: (name: string) => `Library on ${name}`, title: 'Whose library this lists', menu: 'Machines' },
   makeNew: 'Make something new',
-  create: 'New',
+  // UX wave U10b (l6-artifacts-08): the four cards, each with Blank; More; the design-system choice
+  blank: 'Blank',
+  blankOf: (kind: ArtifactKind) => `Blank ${KIND_NOUNS[kind]}`, // a Blank's name, told apart from the other cards'
+  more: 'More',
   addFile: 'Add a file…',
   askClaude: 'Ask Claude',
+  system: 'Design system',
+  systemOf: (shown: string) => `Design system: ${shown}`, // the choice's name
+  systemDefault: (name: string) => `${name} · default`,
+  floorSystem: 'MAWS', // the bundled floor's name, as the document's breadcrumb says it
   reading: 'Reading the library…',
   readFailed: (message: string) => `Couldn’t read the library: ${message}`,
   retry: 'Try again',
@@ -166,4 +178,15 @@ export const SPACE_COPY = {
   changeFolder: 'Change folder…',
   unlink: 'Unlink folder',
   delete: 'Delete Space…',
+  // UX wave U10b (l8-settings-13; M9, §E.2, §E.3): a Space's instructions for agents. The sheet's title is the chip's name.
+  instructions: 'Instructions…', // the menu item, directly after Rename…
+  instructionsFor: (name: string) => `Instructions for “${name}”`,
+  mark: 'Instructions', // on the heading line of a Space that has them
+  receivers: 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.',
+  limit: (n: number) => `${n.toLocaleString('en-US')} of 8,000 characters`,
+  readFailed: (message: string) => `Couldn’t read this Space’s instructions: ${message}`, // the sheet holds its field and offers no Save (ruled 2026-11-15)
+  cancel: 'Cancel',
+  save: 'Save',
+  // the chip's body, sent with the first message of a chat a card starts from the Space
+  chipBody: (name: string, text: string) => `Instructions of the Space “${name}”, set by the user in MAWS:\n${text}`,
 };

@@ -2,7 +2,7 @@
 // binary and the exact argument list from M1's `commandLine`, the files from its `writesOf`, what follows), a row's
 // operation line in the engine's own words with the reload report beside it, the marketplace-declared command a
 // refusal carries. Pure: the components and the tests read these.
-import { runnerCommandLine, writesOf, type PluginsAction, type PluginsInstallation, type PluginsScope, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
+import { isMcpAction, isMcpEntryAdd, mcpShown, mcpShownLine, runnerCommandLine, writesOf, type McpActionInputs, type PluginsAction, type PluginsInstallation, type PluginsScope, type RunnerAction, type RunnerActionInputs } from '@shared/plugins/cli';
 import type { InstalledPlugin, PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { OPERATION, PLUGIN_MANAGEMENT as W } from '../copy';
 
@@ -36,6 +36,9 @@ export interface RequestContext {
   connector?: ConnectorAdd; // P4-AGG M4
   catalog?: CatalogInstall;
   afterAdd?: { marketplace: string; scope: PluginsScope };
+  // UX wave U11g (§B, §D): a custom connector's add, the page's folder its name is checked against (null: the user
+  // configuration's page), sent beside the folder the CLI runs in
+  folder?: string | null;
 }
 
 // One mutation as the owner asked for it: the action, the CLI's input, and the marketplace's source kind when known
@@ -60,7 +63,16 @@ export const targetOf = (request: PluginsRequest): string => {
   return input.plugin ?? input.name ?? input.source ?? '';
 };
 
-export const argvOf = (request: PluginsRequest): string[] => runnerCommandLine(request.action, request.input as never);
+// UX wave U11g (§A, §D): an MCP action's line is the shown line, with `•••` in every value slot of a custom add and
+// today's line for every other request, so no code in the window builds a custom add's real argument list.
+export const argvOf = (request: PluginsRequest): string[] => (isMcpAction(request.action) ? mcpShownLine(request.action, request.input as McpActionInputs['mcp-add']) : runnerCommandLine(request.action, request.input as never));
+
+/** UX wave U11g (§D): the request as a window keeps it after the send, `•••` in every value slot of a custom add; every
+ * other request is kept as it is. */
+export function shownRequestOf(request: PluginsRequest): PluginsRequest {
+  if (request.action !== 'mcp-add' || !isMcpEntryAdd(request.input)) return request;
+  return { ...request, input: mcpShown(request.input) };
+}
 
 // A shell-safe word as-is; anything else single-quoted, so a path with a space reads as one argument.
 const word = (arg: string): string => (/^[\w@%+=:,./~-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", `'\\''`)}'`);

@@ -2,7 +2,11 @@
 // local `resolveDsVars` keeps D's semantics, overrides win over the system, the page follows Decision Log 43, and the
 // local Office theme maps the roles as D's does.
 import { describe, expect, it } from 'vitest';
-import { HOUSE_TOKENS, dsValue, exportDesign, hexOf, houseSystem, officeFace, officeThemeXmlLocal, pageOf, resolveDsVarsLocal, twipsOf } from './design-system';
+import { officeThemeXml } from '../../design-system/office';
+import { resolveDsVars } from '../../design-system/resolve-vars';
+import type { TokenSet } from '../../design-system/tokens';
+import { builtinView } from '../../design-system/view';
+import { COMPACT, HOUSE_TOKENS, dsValue, exportDesign, hexOf, houseSystem, officeFace, officeThemeXmlLocal, pageOf, resolveDsVarsLocal, twipsOf, type DesignSystemExport, type DsName, type LocalTokens } from './design-system';
 import { isDarkGround } from './highlight';
 
 const tokens = { properties: { '--ds-color-text': '#111111', '--ds-space-2': '8px' } } as const;
@@ -116,5 +120,62 @@ describe('values for Office', () => {
       ['css', 'document', { '--ds-color-accent': '#0b5fff' }],
       ['theme', 'MAWS', { '--ds-color-accent': '#0b5fff' }],
     ]);
+  });
+});
+
+// UX wave U10b (l6-artifacts-07 (b), M2 decision 4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.4): Compact
+// is computed from the governing system's own values, beneath the document's overrides, each number in its own unit
+describe('the export design at compact density', () => {
+  const sizes = (design: ReturnType<typeof exportDesign>, names: DsName[]) => names.map((name) => dsValue(design, name));
+  const systemOf = (properties: Record<DsName, string>): DesignSystemExport<LocalTokens> => ({ ...houseSystem, tokens: { properties: { ...HOUSE_TOKENS.properties, ...properties } } });
+  const TYPE = ['title', 'subtitle', 'h1', 'h2', 'h3', 'body', 'caption', 'quote'].map((role) => `--ds-type-${role}-size` as DsName);
+  const SPACE = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `--ds-space-${n}` as DsName);
+
+  it('holds the three numbers the owner chose in one place', () => {
+    expect(COMPACT).toEqual({ type: 0.9, space: 0.75, margin: '0.75in' });
+  });
+
+  it('scales the eight type sizes by 0.9 and the eight spaces by 0.75, rounded to two decimals; the rest stays the system’s', () => {
+    const compact = exportDesign(houseSystem, {}, 'compact');
+    expect(sizes(compact, TYPE)).toEqual(['30.6px', '17.1px', '23.4px', '18.9px', '15.3px', '14.4px', '11.7px', '15.3px']);
+    expect(sizes(compact, SPACE)).toEqual(['3px', '6px', '9px', '12px', '18px', '24px', '36px', '48px']);
+    expect(sizes(compact, ['--ds-type-body-line', '--ds-type-h1-weight', '--ds-color-text', '--ds-radius-md', '--ds-page-margin'])).toEqual(['1.7', '700', '#1f1e1b', '10px', '72px']);
+    expect(sizes(exportDesign(houseSystem, {}), ['--ds-type-body-size', '--ds-space-3'])).toEqual(['16px', '12px']);
+  });
+
+  it('keeps each value’s unit: a rem token is scaled in rem, a value it cannot read is left as the system wrote it', () => {
+    const compact = exportDesign(systemOf({ '--ds-type-body-size': '1.125rem', '--ds-space-2': '0.5rem', '--ds-space-4': '1.5em', '--ds-type-title-size': 'clamp(28px, 4vw, 40px)' }), {}, 'compact');
+    expect(sizes(compact, ['--ds-type-body-size', '--ds-space-2', '--ds-space-4', '--ds-type-title-size'])).toEqual(['1.01rem', '0.38rem', '1.13em', 'clamp(28px, 4vw, 40px)']);
+  });
+
+  it('lets the document’s own override of a size win over compact’s value for that token alone', () => {
+    const compact = exportDesign(houseSystem, { '--ds-type-body-size': '15px', '--ds-space-3': '10px' }, 'compact');
+    expect(sizes(compact, ['--ds-type-body-size', '--ds-space-3', '--ds-type-h1-size', '--ds-space-4'])).toEqual(['15px', '10px', '23.4px', '12px']);
+  });
+
+  it('sets the page margin to 0.75 in only where the system’s is larger (a system that names none prints at 1in)', () => {
+    const margin = (properties: Record<DsName, string>) => pageOf(exportDesign(systemOf(properties), {}, 'compact')).margin;
+    expect(margin({ '--ds-page-margin': '1in' })).toBe('0.75in');
+    expect(margin({ '--ds-page-margin': '30mm' })).toBe('0.75in');
+    expect(margin({ '--ds-page-margin': '72px' })).toBe('72px');
+    expect(margin({ '--ds-page-margin': '0.5in' })).toBe('0.5in');
+    expect(pageOf(exportDesign({ ...houseSystem, tokens: { properties: {} } }, {}, 'compact')).margin).toBe('0.75in');
+    expect(pageOf(exportDesign(systemOf({ '--ds-page-margin': '1in' }), { '--ds-page-margin': '2in' }, 'compact')).margin).toBe('2in');
+  });
+
+  it('reaches a bundled system through D’s resolver as it reaches the house tokens', () => {
+    const view = builtinView();
+    const bundled: DesignSystemExport<TokenSet> = { name: view.name, tokens: view.tokens, resolveDsVars, officeThemeXml };
+    const standard = exportDesign(bundled, {});
+    const compact = exportDesign(bundled, {}, 'compact');
+    const scaled = (value: string | null, by: number) => `${Math.round(parseFloat(value!) * by * 100) / 100}px`;
+    expect(dsValue(compact, '--ds-type-body-size')).toBe(scaled(dsValue(standard, '--ds-type-body-size'), 0.9));
+    expect(dsValue(compact, '--ds-space-3')).toBe(scaled(dsValue(standard, '--ds-space-3'), 0.75));
+    expect(pageOf(compact).margin).toBe(pageOf(standard).margin);
+  });
+
+  it('is the house system when no system is given', () => {
+    expect(dsValue(exportDesign(undefined, {}, 'compact'), '--ds-type-body-size')).toBe('14.4px');
+    expect(exportDesign(undefined, {}).name).toBe('MAWS');
   });
 });

@@ -30,6 +30,7 @@ import { timed } from './host-work'; // P4-R6
 import { restoreArtifact } from './restore';
 import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
 import { mainOf, type Committed, type DocumentService, type WriteOptions } from './service';
+import { readInstructions, SPACE_INSTRUCTIONS_KEY, withInstructions, type SpaceInstructions } from './space-instructions'; // UX wave U10b (M9)
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
 
@@ -664,9 +665,37 @@ export class ArtifactStore {
     await this.service.inBatch(() => {
       this.storage.db.prepare('UPDATE artifacts SET spaceId = NULL, updatedAt = ? WHERE spaceId = ?').run(at, spaceId);
       this.storage.db.prepare('DELETE FROM spaces WHERE id = ?').run(spaceId);
+      if (this.storage.getMeta(SPACE_INSTRUCTIONS_KEY) !== null) this.writeInstructionsInFrame(spaceId, ''); // UX wave U10b (M9): its text goes with it
     });
     this.emitSpace(spaceId, 'deleted');
     for (const id of moved) this.emit(id, 'updated');
+  }
+
+  // UX wave U10b (M9, §E.1; space-instructions.ts): a Space's instructions, held in `meta` beside the Space. A text is
+  // answered only while its Space exists (one deleted under an older build leaves its entry until the next write).
+  spaceInstructions(spaceId: string): SpaceInstructions | null {
+    const entry = readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY))[spaceId];
+    return entry && this.getSpace(spaceId) ? entry : null;
+  }
+
+  allSpaceInstructions(): ({ spaceId: string } & SpaceInstructions)[] {
+    const live = new Set(this.listSpaces().map((space) => space.id));
+    return Object.entries(readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY)))
+      .filter(([spaceId]) => live.has(spaceId))
+      .map(([spaceId, entry]) => ({ spaceId, text: entry.text, at: entry.at }))
+      .sort((a, b) => a.spaceId.localeCompare(b.spaceId));
+  }
+
+  // Sets a Space's text ('' removes it), announced as the Space updated.
+  async setSpaceInstructions(spaceId: string, text: string): Promise<void> {
+    this.requireSpace(spaceId);
+    await this.service.inBatch(() => this.writeInstructionsInFrame(spaceId, text));
+    this.emitSpace(spaceId, 'updated');
+  }
+
+  private writeInstructionsInFrame(spaceId: string, text: string): void {
+    const table = withInstructions(readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY)), spaceId, text, this.now(), (id) => this.getSpace(id) !== null);
+    this.storage.setMeta(SPACE_INSTRUCTIONS_KEY, JSON.stringify(table));
   }
 
   // ── byte kinds and assets ──

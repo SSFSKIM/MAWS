@@ -12,8 +12,10 @@
 // installation left the list stays beneath it.
 import type { ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { useNow } from '../../app/use-now';
+import { usePluginIcons } from '../../customize/discover/read';
 import { LIBRARY as L } from '../copy';
 import { BuiltInMods } from './BuiltInMods';
 import { byNameTogether, isNarrowed, loadedOnly, loadedOnlyShown, myItems, problemsShown, type PluginIdentity } from './library';
@@ -29,12 +31,16 @@ export interface MyItemsProps {
   appSessionId: AppSessionId | null;
   installed: PluginsReadResult<{ plugins: InstalledPlugin[] }>;
   identities: readonly PluginIdentity[];
+  marketplaces: readonly Marketplace[] | undefined; // the list's read of the marketplaces: what the icons are asked with (UX wave U11c)
   loaded: LoadedPlugins | null;
   loadedIds: ReadonlySet<string> | null;
   onRetry(): void;
   manifestError: string | null; // `plugins.manifest`'s refusal: the rows stay, without what their files say
   onRetryManifests(): void;
   onOpen(id: string): void; // a row's click: its detail
+  // UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D "Search"): Customize's one text, in the
+  // library store's place (Filter and Sort stay the store's); its Reset filters clears it
+  search?: { text: string; clear(): void };
 }
 
 function Centered({ children, role }: { children: ReactNode; role?: 'status' | 'alert' }) {
@@ -47,11 +53,15 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
-export function MyItems({ appSessionId, installed, identities, loaded, loadedIds, onRetry, manifestError, onRetryManifests, onOpen }: MyItemsProps) {
+export function MyItems({ appSessionId, installed, identities, marketplaces, loaded, loadedIds, onRetry, manifestError, onRetryManifests, onOpen, search }: MyItemsProps) {
   const { ops } = useManage();
-  const view = useLibraryStore((s) => s.plugins);
+  const stored = useLibraryStore((s) => s.plugins);
+  const view = search ? { ...stored, search: search.text } : stored;
   const now = useNow();
   const plugins = installed.data?.plugins;
+  // UX wave U11c M1: one read of the directory's icons for every plugin the list may draw, whatever its search and Show
+  const icons = usePluginIcons(identities, marketplaces);
+  const iconOf = (identity: PluginIdentity) => icons.get(identity.id) ?? null;
 
   if (!plugins) {
     return (
@@ -78,7 +88,10 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
   const groups = myItems(identities, { ...view, loadedIds });
   const extras = loadedView && loaded !== null ? loadedOnlyShown(loadedOnly(loaded.plugins, identities), view.search) : [];
   const problems = loadedView && loaded !== null ? problemsShown(present(loaded).problems, view.search, groups.flatMap((g) => g.rows), extras) : [];
-  const resetFilters = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, search: '', filter: 'all' } }));
+  const resetFilters = () => {
+    search?.clear();
+    useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, ...(search ? {} : { search: '' }), filter: 'all' } }));
+  };
   const showAll = () => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'all' } }));
 
   let body: ReactNode;
@@ -119,7 +132,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
               extras,
             ).map((row) =>
               row.kind === 'identity' ? (
-                <PluginRow key={row.identity.id} identity={row.identity} now={now} onOpen={onOpen} />
+                <PluginRow key={row.identity.id} identity={row.identity} now={now} iconUrl={iconOf(row.identity)} onOpen={onOpen} />
               ) : (
                 <LoadedRow key={loadedKey(row.plugin)} plugin={row.plugin} />
               ),
@@ -140,7 +153,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
             ) : (
               <ul className="m-0 list-none p-0">
                 {rows.map((identity) => (
-                  <PluginRow key={identity.id} identity={identity} now={now} onOpen={onOpen} />
+                  <PluginRow key={identity.id} identity={identity} now={now} iconUrl={iconOf(identity)} onOpen={onOpen} />
                 ))}
               </ul>
             )}

@@ -39,7 +39,7 @@ export const PATH_COMMANDS = [
   'marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove',
   'artifacts.create', 'artifacts.testWrite', 'artifacts.content',
   'spaces.create', 'spaces.update',
-  'connectors.add', 'connectors.remove', 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directSend',
+  'connectors.add', 'connectors.remove', 'connectors.addJson' /* UX wave U11g */, 'connectors.directResolve', 'connectors.directStart', 'connectors.directDiscover', 'connectors.directSend',
   'customization.inventory', 'customization.serverEndpoints',
   'catalog.home', 'catalog.query', 'catalog.item', 'catalog.postures', 'catalog.engine' /* P5 O4 M3: the machine's half */,
   'host.op', // P5 O10 M7: main-only (mawsd's ledger), never bridged; its `context.engineSessionId` makes it path

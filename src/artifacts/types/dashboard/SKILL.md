@@ -4,7 +4,7 @@ A document whose chart and table blocks draw datasets: data files you bound, eac
 
 ## When to use this kind
 
-Use a dashboard when the user should see real data drawn: charts and tables over files you wrote or were given, with prose around them that the user may comment on and edit. Its views are drawn by MAWS from a declarative spec, never by your code, and every view says which file and which upload it shows. For prose alone use a `document`; for a page you design with your own scripts and styles, `html`.
+Use a dashboard when the user should see real data drawn: charts and tables over files you wrote or were given, with prose around them that the user may comment on and edit. Its views are drawn by MAWS from a declarative spec, never by your code, and every view says which file and which upload it shows. For prose alone use a `document`; for a page you design with your own scripts and styles, `html`. A dashboard's views have no controls for the reader: a filter is fixed in each view's spec. When the user should filter or explore the data themselves, make an `html` page.
 
 ## Creating one
 

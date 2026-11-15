@@ -656,3 +656,26 @@ describe('the front’s requests as work', () => {
     await vi.waitFor(() => expect(open).toBe(0));
   });
 });
+
+describe('the front’s refusal of a custom connector’s entry', () => {
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, R2): a custom connector's entry
+  // refused for a value too long, and for a control character in a value, is answered with an error that, like every
+  // line logged meanwhile, holds no part of the value
+  it('refuses connectors.addJson for a value too long or holding a control character without echoing the value', async () => {
+    const logged = (['log', 'info', 'warn', 'error'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+    const { client, forwarded, logs } = front();
+    const c = client();
+    const values = [`value-one-${'x'.repeat(8_200)}`, 'value-one\u0007more'];
+    for (const value of values) {
+      for (const entry of [{ type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }, { type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }]) {
+        const input = { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', entry, folder: '/tmp/files-probe' };
+        const answer = await c.request('connectors.addJson', input);
+        expect(answer).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+        const said = [JSON.stringify(answer), ...logs, ...logged.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call, (_key, v: unknown) => (v instanceof Error ? v.message : v))))].join('\n');
+        for (const form of [value, JSON.stringify(value).slice(1, -1)]) expect(said.includes(form)).toBe(false);
+      }
+    }
+    expect(forwarded).toEqual([]);
+    for (const spy of logged) spy.mockRestore();
+  });
+});

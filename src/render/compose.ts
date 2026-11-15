@@ -46,7 +46,7 @@ export function composeRender({ call, content, root, env, authors = {}, hostGene
   const exporters = new ExporterRegistry();
   // in this order: inspection wraps the document's html and the presentation's png exporters
   const withdraw = [
-    registerHtmlExporters(exporters, { content, env }), // P3-A M7: an html artifact's PDF and PNG
+    registerHtmlExporters(exporters, { content, env }), // P3-A M7: an html artifact's PDF and PNG; U10b: its HTML
     registerDocumentExporters((exporter) => exporters.register(governDocumentExporter(exporter, call)), authors), // P3-B, P3-D; WR 73
     registerDesignSystemExporters(exporters), // P3-D M7: `design_system` as `claude`
     registerPresentationExporters(exporters, { call, env }), // P3-C M9

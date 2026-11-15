@@ -156,7 +156,7 @@ export const MCP = {
   none: 'No connectors',
   list: 'Connectors',
   subtitle: 'MCP servers',
-  reach: (place: string) => `Off here is off for every session in ${place}.`,
+  reach: (place: string) => `A switch here is for this chat, and every session started in ${place} afterwards.`,
   reachTip: 'The engine records it in ~/.claude.json.',
   failed: 'Failed',
   off: 'Off',
@@ -491,7 +491,7 @@ export const RENAME = {
 // it has them, §10 Q9). The person's words; no provenance.
 export const LIBRARY = {
   searchPlugins: 'Search plugins',
-  show: 'Show',
+  show: 'Filter', // UX wave U11c (O-14): "Show" names Customize's row of kinds
   filter: { all: 'All plugins', enabled: 'Enabled', disabled: 'Disabled', loaded: 'Loaded in this session', otherProjects: 'Other projects' } as const,
   sortBy: 'Sort by',
   sort: { updated: 'Last updated', name: 'Name' } as const,
@@ -629,7 +629,7 @@ export const SKILLS_LIBRARY = {
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
   pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',
   firstTitle: 'Add your first skills',
-  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Discover, with Show set to Skills, lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",
   invoke: 'Type',
   plugin: 'Plugin',

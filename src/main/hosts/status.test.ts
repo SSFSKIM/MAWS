@@ -419,7 +419,7 @@ describe('host.status’s handover', () => {
   it('is mawsd’s report, emitted at each change', () => {
     let reason: ReturnType<EngineHandoverWatch['reason']> = null;
     const changes = new Set<() => void>();
-    const engineHandover: EngineHandoverWatch = { drainingAt: () => null, reason: () => reason, onChange: (l) => (changes.add(l), () => void changes.delete(l)), bind: () => () => {} };
+    const engineHandover: EngineHandoverWatch = { drainingAt: () => null, reason: () => reason, onChange: (l) => (changes.add(l), () => void changes.delete(l)), verdict: () => null, bind: () => () => {} };
     const h = harness({ daemon: () => null, engineHandover });
     reason = { inFlight: 3, tool: 'show_pane' };
     changes.forEach((l) => l());

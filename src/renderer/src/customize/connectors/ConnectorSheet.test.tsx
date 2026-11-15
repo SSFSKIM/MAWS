@@ -4,7 +4,8 @@ import { cleanup, fireEvent, render, screen, within } from '@testing-library/rea
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { item } from '../discover/test-items';
-import { ConnectorSheet, type ConnectorSheetEnv } from './ConnectorSheet';
+import { ConnectorSheet } from './ConnectorSheet';
+import type { ConnectorSheetEnv } from './sheet-parts';
 import { requestFor } from '../../widgets/plugins/present';
 import { connectorAddOf } from './present';
 

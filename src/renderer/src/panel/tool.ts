@@ -6,6 +6,7 @@ import type { ComponentType } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
+import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import type { EditorHostScope } from './editor-host';
 import type { panelHost } from './host';
 
@@ -44,6 +45,10 @@ export interface PanelTool<S, P = void> {
   menu?: boolean; // offered from "+"; default true; false for Log
   createState(init: PanelToolInit<P>): S;
   open?(state: S, params: P): void; // addTool on an existing single-instance tab re-targets it (a restored tab never shown gets its createState first)
+  // UX wave U6b-1 (Decision 21): for a multiInstance tool, the existing tab an add re-targets as `open` does a
+  // single-instance tool's, or null for a new tab. `refs`: the tool's tabs in the add's scope, the pins first, then the
+  // session's own. Asked now and at the barrier, after hydration, never of a reservation.
+  reuse?(refs: readonly PanelTabRef[], params: P): string | null;
   beforeClose(state: S): Promise<boolean>; // false vetoes; the tool shows its own inline confirmation and calls ctx.close() later, and its next beforeClose passes
   dispose(state: S): void; // releases everything the instance owns, a running process included: the host disposes without beforeClose when reconciliation finds the ref gone (a removed session; ruling O4, 2026-09-29)
   render: ComponentType<{ state: S; ctx: PanelToolContext }>;

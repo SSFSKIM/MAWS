@@ -5,9 +5,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import {
-  connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, UNWATCHED_KEPT, watchLibraryList,
-  watchLibraryRow, watchLibrarySpaces,
+  connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, spaceInstructionsOf, spaceInstructionsReadOf, UNWATCHED_KEPT, watchLibraryList,
+  watchLibraryRow, watchLibrarySpaces, watchSpaceInstructions,
 } from './store';
+import { OTHER_MACHINE } from '../../../../test/support/machine';
 import { preloadOf } from '../test-support/preload-of';
 
 const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -158,5 +159,58 @@ describe('a read nobody watches', () => {
     off();
     await fake.reply('library.list', answer(row(1)));
     expect(libraryList(state()).value?.rows).toHaveLength(1);
+  });
+});
+
+// UX wave U10b (M9, §E.2): this Mac's Spaces' instructions, read from its engine host, read again at its `spaces.changed`
+// (which `library.changed` does not follow: the library's index holds no instructions) and at a resync; another
+// machine's announcement reads nothing.
+describe('the Spaces’ instructions', () => {
+  it('are read on their first watch, by Space, and read again at this Mac’s spaces.changed alone', async () => {
+    watch(watchSpaceInstructions());
+    expect(fake.invoked('spaces.instructions')).toEqual([{}]);
+    expect(spaceInstructionsOf(state()).size).toBe(0); // nothing known yet: no Space has any
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres.', at: 3 }] });
+    expect([...spaceInstructionsOf(state())]).toEqual([[id(101), 'Use metres.']]);
+    expect(spaceInstructionsOf(state())).toBe(spaceInstructionsOf(state())); // one map per answer, for a hook's selector
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' }, OTHER_MACHINE);
+    expect(fake.invoked('spaces.instructions')).toHaveLength(1);
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    expect(fake.invoked('spaces.instructions')).toHaveLength(2);
+    await fake.reply('spaces.instructions', { instructions: [] });
+    expect(spaceInstructionsOf(state()).size).toBe(0);
+  });
+
+  it('keep the last good answer when a read is refused (an older engine host knows no such command)', async () => {
+    watch(watchSpaceInstructions());
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres.', at: 3 }] });
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    await fake.fail('spaces.instructions', 'unknown command');
+    expect([...spaceInstructionsOf(state())]).toEqual([[id(101), 'Use metres.']]);
+  });
+
+  // the branch review of U10b-4: the sheet holds its field until the text is known, and offers no Save when it cannot be
+  it('tell “not read yet”, “failed” and “read” apart: any refusal is failed until a read succeeds, the stale map kept for the marks', async () => {
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
+    watch(watchSpaceInstructions());
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
+    await fake.fail('spaces.instructions', 'unknown command');
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'unknown command' });
+    expect(spaceInstructionsReadOf(state())).toBe(spaceInstructionsReadOf(state())); // stable, for a hook's selector
+    expect(spaceInstructionsOf(state()).size).toBe(0);
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'unknown command' }); // read again, still unknown
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres.', at: 3 }] });
+    const read = spaceInstructionsReadOf(state());
+    expect(read.status === 'read' && [...read.instructions]).toEqual([[id(101), 'Use metres.']]);
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    await fake.fail('spaces.instructions', 'the engine host is unavailable');
+    // the task review of the branch fix: a writer must not take the last good answer for what is stored now
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'the engine host is unavailable' });
+    expect([...spaceInstructionsOf(state())]).toEqual([[id(101), 'Use metres.']]); // the cards' chip and the marks keep it
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres and Celsius.', at: 4 }] });
+    const again = spaceInstructionsReadOf(state());
+    expect(again.status === 'read' && [...again.instructions]).toEqual([[id(101), 'Use metres and Celsius.']]);
   });
 });

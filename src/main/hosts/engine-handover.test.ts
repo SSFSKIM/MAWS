@@ -3,7 +3,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { HostState } from '@shared/ipc/schema';
 import type { EngineHandover } from '@shared/ipc/schema/daemon';
-import { ENGINE_HANDOVER_FRESH_MS, watchEngineHandover } from './engine-handover';
+import { ENGINE_HANDOVER_FRESH_MS, HANDOVER_VERDICT_WAIT_MS, watchEngineHandover } from './engine-handover';
 
 function harness() {
   const events = new Set<(payload: EngineHandover) => void>();
@@ -116,5 +116,52 @@ describe('watchEngineHandover', () => {
     expect(Object.keys(h.hosts)).toEqual(['onEvent', 'onState']); // no dispatch reaches it: no daemon.status, no wake
     vi.advanceTimersByTime(ENGINE_HANDOVER_FRESH_MS * 4);
     expect(watch.drainingAt()).toBeNull(); // a parked host with a held hello: no report, today's bound, no spawn held off
+  });
+
+  // #473: mawsd's verdict on the drained host's exit, for main's verdict on its relayed host, which its own look at the
+  // gone process (its link dropped at the drain's start) can reach before mawsd has read the host's word
+  describe('verdict', () => {
+    const OLD = '4242@2026-11-01T09:00:00.000Z';
+    const ended = (handedOver: boolean, pid = 4242) => ({ pid, startedAt: '2026-11-01T09:00:00.000Z', handedOver });
+
+    it('waits while a drain is reported, for the end report that names the process', async () => {
+      const h = harness();
+      const watch = watchEngineHandover();
+      watch.bind(h.hosts as never);
+      h.heard({ state: 'draining', inFlight: 0 });
+      const waited = watch.verdict(OLD);
+      expect(waited).not.toBeNull();
+      vi.advanceTimersByTime(HANDOVER_VERDICT_WAIT_MS - 1);
+      h.heard({ state: 'none', inFlight: 0, ended: ended(true) });
+      await expect(waited).resolves.toBe(true);
+      await expect(watch.verdict(OLD), 'once told, at once').resolves.toBe(true);
+    });
+
+    it('a crash mid-drain is told as such; another process’s verdict, or none in time, is nothing to go on', async () => {
+      const h = harness();
+      const watch = watchEngineHandover();
+      watch.bind(h.hosts as never);
+      h.heard({ state: 'draining', inFlight: 0 });
+      const crashed = watch.verdict(OLD);
+      h.heard({ state: 'none', inFlight: 0, ended: ended(false) });
+      await expect(crashed).resolves.toBe(false);
+      expect(watch.verdict('77@2026-11-01T09:30:00.000Z'), 'the drain’s verdict is in and names another process').toBeNull();
+      h.heard({ state: 'draining', inFlight: 0 }); // the next drain, from a `mawsd` that sends no end report
+      const silent = watch.verdict('77@2026-11-01T09:30:00.000Z');
+      h.heard({ state: 'none', inFlight: 0 });
+      vi.advanceTimersByTime(HANDOVER_VERDICT_WAIT_MS);
+      await expect(silent).resolves.toBeNull();
+    });
+
+    it('no drain reported, or only one past its freshness: nothing to wait for', () => {
+      const h = harness();
+      const watch = watchEngineHandover();
+      watch.bind(h.hosts as never);
+      expect(watch.verdict(OLD)).toBeNull();
+      h.heard({ state: 'draining', inFlight: 0 });
+      h.heard({ state: 'none', inFlight: 0 });
+      vi.advanceTimersByTime(ENGINE_HANDOVER_FRESH_MS);
+      expect(watch.verdict(OLD)).toBeNull();
+    });
   });
 });

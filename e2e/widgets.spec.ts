@@ -25,6 +25,7 @@ import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { newChatIn, openProject, sidebarRow } from './support/sidebar';
 import { pageRegion, unfoldSessionCard } from './support/shell';
+import { customizePage } from './support/customize';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -289,19 +290,23 @@ const lineOf = (row: Locator) => row.getByRole('status');
 // MAWS_E2E the network sources are offline), whose cards install through E8's sheet. Customize is the product window's,
 // so the cases through Discover run there (`appBackend`, `openSessionPlugins`); the harness page has no main area. The
 // Add menu's two marketplace dialogs are sheets beside the frame under which E8's confirm sheet stacks. UX wave U7b (O-40):
-// Customize is a page beside the sidebar, not a main tab, so its library is found in the page's region.
-const customizeLibrary = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
+// Customize is a page beside the sidebar, not a main tab. UX wave U11c: its view (My items | Discover) and its kind (Show)
+// are the page's head; Open Discover lands on Discover with Show: Plugins, and the head's tools, the plugins' body and
+// Discover's pane are all found in the page (support/customize.ts).
 const allOf = (w: Locator) => w.locator('[data-discover="plugins"] [data-catalog-results]').last(); // All, on the home
 async function openDiscover(w: Locator): Promise<Locator> {
   await w.getByRole('button', { name: 'Open Discover', exact: true }).click();
   await expect(w).toBeHidden();
   await expect(pageRegion(w.page())).toHaveAttribute('data-destination', 'customize');
-  const library = customizeLibrary(w.page());
-  await expect(allOf(library).locator('[data-catalog-grid] [data-catalog-card]').first()).toBeVisible({ timeout: 30_000 });
-  return library;
+  const customize = customizePage(w.page());
+  await expect(customize).toHaveAttribute('data-customize-view', 'discover');
+  await expect(customize).toHaveAttribute('data-customize-show', 'plugins');
+  await expect(allOf(customize).locator('[data-catalog-grid] [data-catalog-card]').first()).toBeVisible({ timeout: 30_000 });
+  return customize;
 }
 async function toMyItems(w: Locator): Promise<void> {
-  const view = w.getByRole('radio', { name: 'My items' }); // Customize's switch; `/plugins` is My items alone (Decision Log 10)
+  // Customize's view switch, in its head (Show kept: Plugins); `/plugins` is My items alone (Decision Log 10)
+  const view = w.locator('[data-customize-header]').getByRole('radiogroup', { name: 'Library', exact: true }).getByRole('radio', { name: 'My items', exact: true });
   if ((await view.count()) > 0) await view.click();
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
 }
@@ -440,7 +445,7 @@ test.describe('interactive', () => {
     await expect(mcp.locator('header h3')).toHaveText('Connectors');
     await expect(mcp.locator('[data-widget-subtitle]')).toHaveText('MCP servers');
     const reach = mcp.locator('[data-widget-note]');
-    await expect(reach).toHaveText(/^Off here is off for every session in .+\.$/);
+    await expect(reach).toHaveText(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
     await expect(reach).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
     const list = mcp.getByRole('list', { name: 'Connectors' });
     const servers = list.getByRole('listitem');
@@ -457,10 +462,10 @@ test.describe('interactive', () => {
 
     await inProject(backend); // E8: the frame follows `plugins.list`, the CLI stub's, run in the session's directory
     await pick(page, 'plugins'); // pass2/real-settings.jsonl seq 15, from the status
-    // P2-B M3: the loaded line counts them; its count shows them (Show › Loaded in this session)
+    // P2-B M3: the loaded line counts them; its count shows them (Filter › Loaded in this session; "Show" until UX wave U11c)
     await widget(page, 'plugins').getByRole('button', { name: '11 plugins loaded in this session' }).click();
     await expect(widget(page, 'plugins').getByRole('list', { name: 'Loaded plugins' }).getByRole('listitem')).toHaveCount(11);
-    await widget(page, 'plugins').getByRole('button', { name: 'Show' }).click();
+    await widget(page, 'plugins').getByRole('button', { name: 'Filter' }).click();
     await page.getByRole('menuitemradio', { name: 'All plugins' }).click();
 
     await pick(page, 'permissions'); // pass2/grant-askrule-start.jsonl seq 65
@@ -738,7 +743,7 @@ test.describe('interactive', () => {
     const mcpReads = async () => (await calls(backend)).filter((c) => c.subtype === 'mcp_status').length;
 
     // Toggle off: what the switch reaches said once, in the head (U11a), one read after the outcome, the switch from that read
-    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in /);
+    await expect(widget(page, 'mcp').locator('[data-widget-note]')).toHaveText(/^A switch here is for this chat, and every session started in /);
     await expect(docs).not.toContainText('~/.claude.json');
     await holdOperations(backend, true);
     await docs.getByRole('switch').click();
@@ -1529,13 +1534,13 @@ test.describe('plugin management (E8)', () => {
     await expect(installedRow(w, o('pyright-lsp'))).toContainText('by Anthropic · python language server'); // no plugin.json: its marketplace entry
     await expect(installedRow(w, o('feature-dev'), 'project').getByText('New', { exact: true })).toBeVisible();
 
-    // Show › Other projects: what is installed only for other projects, read-only
-    await w.getByRole('button', { name: 'Show' }).click();
+    // Filter › Other projects: what is installed only for other projects, read-only
+    await w.getByRole('button', { name: 'Filter' }).click();
     await page.getByRole('menuitemradio', { name: 'Other projects' }).click();
     await expect.poll(async () => (await idsIn('otherProjects')).sort()).toEqual(['agent-sdk-dev', 'cloud-sql-postgresql', 'code-simplifier', 'commit-commands', 'explanatory-output-style', 'linear', 'playground', 'skill-creator', 'supabase'].map(o));
     await expect(items.getByRole('button', { name: /^More actions for / })).toHaveCount(0);
     await expect(items.locator(`[data-plugin-row="${o('supabase')}"]`)).toContainText('other projects · manage it from a session there');
-    await w.getByRole('button', { name: 'Show' }).click();
+    await w.getByRole('button', { name: 'Filter' }).click();
     await page.getByRole('menuitemradio', { name: 'All plugins' }).click();
 
     // P2-B M4: a row low in the scrolled list opens its detail; Back returns to the list where it was, the row focused

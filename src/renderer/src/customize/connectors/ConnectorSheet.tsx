@@ -10,45 +10,23 @@
 // configuration's page, a removal), the one scope is a plain line, so it stays in view with the command closed. The
 // binary is `plugins.env`'s, read at every opening: until it answers the sheet names no command and confirms nothing.
 import { useState } from 'react';
-import type { McpActionInputs, PluginsScope } from '@shared/plugins/cli';
+import { isMcpEntryAdd, type McpActionInputs, type McpRemoteAdd, type PluginsScope } from '@shared/plugins/cli';
 import { Sheet, SheetForm } from '../../sessions/Sheet';
-import { CHOICE, DANGER, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
+import { CHOICE, DANGER, FIELD, PRIMARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import { FixedScope, type EngineResolution } from '../../widgets/plugins/ConfirmSheet';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
 import { CONNECTORS as C } from './copy';
-import { existingOf, nameProblem, scopesFor, urlProblem, writesFor, type ConfiguredServers } from './present';
+import { CustomConnectorSheet } from './CustomConnectorSheet';
+import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './sheet-parts';
+import { existingOf, nameProblem, scopesFor, urlProblem, writesFor } from './present';
 
-type Add = McpActionInputs['mcp-add'];
-
-export interface ConnectorSheetEnv {
-  cwd: string | null; // the page's directory; null for the user configuration
-  runCwd: string; // where the CLI runs: the page's directory, else the engine's configuration directory
-  engine: EngineResolution;
-  configured: ConfiguredServers; // configured in every scope that applies here (the inventory for `cwd`)
-  retryServers(): void; // read them again
-}
+type Add = McpRemoteAdd; // Discover's add: a remote server by name and URL (UX wave U11g narrows the action's two inputs)
 
 export function ConnectorSheet({ request, env, onConfirm, onClose }: { request: PluginsRequest; env: ConnectorSheetEnv; onConfirm(request: PluginsRequest, binary: string): void; onClose(): void }) {
+  if (request.action === 'mcp-add' && isMcpEntryAdd(request.input)) return <CustomConnectorSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} />; // UX wave U11g
   return request.action === 'mcp-add' ? <AddSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} /> : <RemoveSheet request={request} env={env} onConfirm={onConfirm} onClose={onClose} />;
-}
-
-// Until `plugins.env` answers there is no command to detail: the sheet says it is resolving the engine, or why it cannot.
-function Unresolved({ engine }: { engine: EngineResolution }) {
-  if (engine.state === 'error')
-    return (
-      <p role="alert" className="m-0 text-ui-sm text-danger">
-        {engine.error}
-      </p>
-    );
-  if (engine.state === 'loading')
-    return (
-      <p role="status" className="m-0 text-ui-sm text-fg-muted">
-        {W.resolving}
-      </p>
-    );
-  return null;
 }
 
 // The exact command (none while the form is invalid) and the file it changes, behind Details (the owner's ruling of
@@ -70,33 +48,6 @@ function Details({ engine, request, scope, cwd }: { engine: EngineResolution; re
         </p>
       </div>
     </SheetDetails>
-  );
-}
-
-function Problem({ text, id }: { text: string | null; id: string }) {
-  return text === null ? null : (
-    <p id={id} role="alert" data-connector-problem className="m-0 text-ui-sm text-danger [overflow-wrap:anywhere]">
-      {text}
-    </p>
-  );
-}
-
-// Why Add waits on what is configured here, with Retry where reading again may help; nothing once it is read whole.
-function Configured({ configured, retry }: { configured: ConfiguredServers; retry(): void }) {
-  if (configured.state === 'read') return null;
-  if (configured.state === 'reading')
-    return (
-      <p role="status" className="m-0 text-ui-sm text-fg-muted">
-        {C.serversReading}
-      </p>
-    );
-  return (
-    <div role="alert" data-connector-configured={configured.state} className="flex flex-wrap items-baseline gap-2 text-ui-sm text-danger [overflow-wrap:anywhere]">
-      {configured.state === 'failed' ? C.serversFailed(configured.message) : C.serversPartial}
-      <button type="button" className={SECONDARY} onClick={retry}>
-        {C.retry}
-      </button>
-    </div>
   );
 }
 

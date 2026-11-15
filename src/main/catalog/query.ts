@@ -9,9 +9,14 @@
 // - Order: installs (rank for connectors) descending, then updated descending, then name, ties by id; or updated, or
 //   name. `reverse` turns the whole order round, ties included, so both directions are total.
 // - Search covers both names and the description; a match on a name ranks above a match on the description only.
+// - All (UX wave U11c M4, docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §F): both kinds. Its home is the
+//   Plugins home's Featured and a shelf per kind, Plugins, Skills, Connectors, each of that kind's first items in its own
+//   shelf order with no community item (the ruling above, carried forward), Skills leaving out Plugins' cards, each total
+//   the kind's whole count, and no categories. Its query has one order whatever sort is sent (installs and rank do not
+//   mix): a name match first, then by name, ties by id; the category is ignored.
 // - A cursor carries the catalog revision, the order and the last item's sort key: under another revision the query
 //   restarts from the first page and says so.
-import type { CatalogChip, CatalogHome, CatalogItem, CatalogPage, CatalogQueryInput, CatalogShelf, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { CatalogChip, CatalogHome, CatalogItem, CatalogKindTab, CatalogPage, CatalogQueryInput, CatalogShelf, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
 import { CATALOG_PAGE_SIZE } from '@shared/ipc/schema/catalog';
 import { ownershipOfRoute } from './join';
 import { COMMUNITY, ownershipOf, SEEDS } from './sources';
@@ -20,6 +25,7 @@ const SHELF_ITEMS = 12; // a shelf's row: as many cards as fit, the renderer dec
 const CATEGORY_SHELVES = 4;
 
 export function inTab(item: CatalogItem, tab: CatalogTab): boolean {
+  if (tab === 'all') return true;
   if (tab === 'connectors') return item.kind === 'connector';
   return item.kind === 'plugin' && (tab === 'plugins' || (item.components?.skills.length ?? 0) > 0);
 }
@@ -94,7 +100,26 @@ function featuredOf(items: readonly CatalogItem[], tab: CatalogTab): CatalogItem
   return shelfOrder(candidates.filter((item) => item.installs !== null && item.install.kind === 'plugin' && marketplacesOf(item).some((name) => ownershipIn(item, name) === 'anthropic')))[0] ?? null;
 }
 
+const KIND_SHELVES: readonly [CatalogKindTab, string][] = [
+  ['plugins', 'Plugins'],
+  ['skills', 'Skills'],
+  ['connectors', 'Connectors'],
+];
+
+// All's home: a shelf per kind; the Skills shelf leaves out the Plugins shelf's cards (a plugin with skills is in both kinds)
+function allHomeOf(catalog: readonly CatalogItem[]): CatalogHome {
+  const shown = new Set<string>();
+  const shelves = KIND_SHELVES.map(([tab, title]): CatalogShelf => {
+    const items = catalog.filter((item) => inTab(item, tab));
+    const first = shelfOrder(items.filter((item) => !isCommunity(item) && !shown.has(item.id))).slice(0, SHELF_ITEMS);
+    for (const item of first) shown.add(item.id);
+    return { key: `kind:${tab}`, kind: 'kind', title, items: first, total: items.length };
+  });
+  return { featured: featuredOf(catalog.filter((item) => inTab(item, 'plugins')), 'plugins'), shelves, categories: [], total: catalog.length };
+}
+
 export function homeOf(catalog: readonly CatalogItem[], tab: CatalogTab): CatalogHome {
+  if (tab === 'all') return allHomeOf(catalog);
   const items = catalog.filter((item) => inTab(item, tab));
   const shelved = items.filter((item) => !isCommunity(item));
   const shelves: CatalogShelf[] = [];
@@ -138,13 +163,13 @@ function decode(text: string): Cursor | null {
 export function queryOf(catalog: readonly CatalogItem[], input: CatalogQueryInput, revision: string): CatalogPage {
   const needle = (input.text ?? '').trim().toLowerCase();
   const chips = new Set(input.chips ?? []);
-  const sort = input.sort ?? 'installs';
+  const sort = input.tab === 'all' ? 'name' : (input.sort ?? 'installs'); // All: one order, whatever is sent
   const reverse = input.reverse ?? false;
   const keyed: { item: CatalogItem; key: Key }[] = [];
   for (const item of catalog) {
     if (!inTab(item, input.tab)) continue;
     if (chips.size > 0 && !chips.has(chipOf(item))) continue;
-    if (input.category && !item.categories.includes(input.category)) continue;
+    if (input.category && input.tab !== 'all' && !item.categories.includes(input.category)) continue;
     if (input.source && !inSource(item, input.source)) continue;
     if (input.notInstalled && item.installed === 'here') continue;
     const group = matchGroup(item, needle);

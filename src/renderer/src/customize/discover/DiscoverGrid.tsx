@@ -3,9 +3,13 @@
 // whose pages main answers in a deterministic order (`catalog.query`: ties by id, a cursor per page) and which asks for
 // the next page when its end scrolls into view or Show more is pressed. Keyboard: a shelf is a row of cards reachable by
 // Tab; the arrow keys move between its cards; Enter opens a card's detail; + is its own focus stop.
+// Discover › All's grid (UX wave U11c M4, docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §F) mixes the kinds:
+// each card is drawn as its own kind's, with its kind word, and its line offers what its kind's line offered (Reload
+// again on a plugin's alone, `KindLines`).
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
-import type { CatalogItem, CatalogQueryInput, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { CatalogItem, CatalogKindTab, CatalogQueryInput, CatalogTab } from '@shared/ipc/schema/catalog';
 import { SECONDARY } from '../../sessions/ui';
+import { WithoutReload } from '../place';
 import { CARD_HEIGHT, CatalogCard } from './CatalogCard';
 import { DISCOVER as D } from './copy';
 import { useCatalogQuery } from './read';
@@ -42,6 +46,14 @@ function arrows(event: KeyboardEvent<HTMLUListElement>) {
   next.focus();
 }
 
+/** The kind a card is drawn as on a tab: its tab's, and under All its own (a plugin's or a connector's). */
+export const cardTabOf = (tab: CatalogTab, item: CatalogItem): CatalogKindTab => (tab !== 'all' ? tab : item.kind === 'connector' ? 'connectors' : 'plugins');
+
+/** Under All, the lines of a kind other than Plugins offer no session's reload, as their own Discover's never did. */
+export function KindLines({ tab, children }: { tab: CatalogKindTab; children: ReactNode }) {
+  return tab === 'plugins' ? children : <WithoutReload>{children}</WithoutReload>;
+}
+
 export function ShelfHeading({ title, count, action }: { title: string; count?: number; action?: ReactNode }) {
   return (
     <div className="mb-2 flex min-w-0 items-baseline gap-2">
@@ -53,7 +65,7 @@ export function ShelfHeading({ title, count, action }: { title: string; count?: 
 }
 
 /** One shelf: its first row of cards and See all. */
-export function Shelf({ shelfKey, title, items, total, tab, onOpen, onSeeAll }: { shelfKey: string; title: string; items: readonly CatalogItem[]; total: number; tab: CatalogTab; onOpen(item: CatalogItem): void; onSeeAll(): void }) {
+export function Shelf({ shelfKey, title, items, total, tab, onOpen, onSeeAll }: { shelfKey: string; title: string; items: readonly CatalogItem[]; total: number; tab: CatalogKindTab; onOpen(item: CatalogItem): void; onSeeAll(): void }) {
   const row = useRef<HTMLUListElement>(null);
   const columns = useColumns(row) || UNMEASURED; // before the first measure (and where nothing lays out), a row of four
   return (
@@ -117,9 +129,15 @@ export function QueryGrid({ input, tab, onOpen, header, empty }: { input: Omit<C
     body = (
       <>
         <ul data-catalog-grid onKeyDown={arrows} className={GRID}>
-          {items.map((item) => (
-            <CatalogCard key={item.id} item={item} tab={tab} onOpen={onOpen} />
-          ))}
+          {items.map((item) =>
+            tab === 'all' ? (
+              <KindLines key={item.id} tab={cardTabOf(tab, item)}>
+                <CatalogCard item={item} tab={cardTabOf(tab, item)} kindWord onOpen={onOpen} />
+              </KindLines>
+            ) : (
+              <CatalogCard key={item.id} item={item} tab={tab} onOpen={onOpen} />
+            ),
+          )}
         </ul>
         {hasNextPage && (
           <button ref={end} type="button" data-show-more disabled={isFetchingNextPage} onClick={() => void more()} className={`${SECONDARY} self-center`}>

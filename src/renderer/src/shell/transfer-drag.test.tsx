@@ -6,7 +6,7 @@
 // moves the artifact on drop; Escape, a release elsewhere or a source unmounting clears every drag state. Every drag
 // holds the browser cover while it is on (P4-B3 Decision Log 39), so no page's native view lies over a target.
 import { QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAYOUT_DEFAULTS, tabId, type Strip, type TabRef, type TabSet } from '@shared/ipc/schema/layout';
 import type { LibraryRow } from '@shared/ipc/schema/library';
@@ -25,6 +25,7 @@ import { useLayout } from '../stores/layout';
 import { allTabs, currentSet } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { fail, installFakeMain, ok } from '../test-support/code';
+import { drag, transfer } from '../test-support/drag';
 import { A, panelOf, resetPanelStores, sessionTab } from '../test-support/panel';
 import { ARTIFACTS_TOOL_ID, artifactsTool, type ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
@@ -46,34 +47,6 @@ const panes = (...pieces: TabRef[][]): Strip => ({
   ...LAYOUT_DEFAULTS.main,
   panes: pieces.map((tabs) => ({ tabs, activeTabId: tabs.at(-1)!.id })) as TabSet['panes'], focusedPane: 0,
 });
-
-// A DataTransfer as a drag carries it; happy-dom's own cannot be filled from a test.
-function transfer() {
-  const data = new Map<string, string>();
-  const types: string[] = [];
-  return {
-    types,
-    effectAllowed: 'all',
-    dropEffect: 'none',
-    setData: (type: string, value: string) => {
-      data.set(type, value);
-      if (!types.includes(type)) types.push(type);
-    },
-    getData: (type: string) => data.get(type) ?? '',
-    setDragImage: () => {},
-  };
-}
-type Transfer = ReturnType<typeof transfer>;
-
-// Fires a drag event carrying this very transfer (testing-library would copy it into a read-only one, losing what a
-// handler sets on it) and its x (which happy-dom's DragEvent lacks); answers whether a handler accepted it.
-function drag(kind: 'dragStart' | 'dragEnter' | 'dragOver' | 'dragLeave' | 'drop' | 'dragEnd', target: Element, dataTransfer: Transfer = transfer(), clientX = 0): boolean {
-  const event = createEvent[kind](target);
-  Object.defineProperty(event, 'dataTransfer', { value: dataTransfer });
-  Object.defineProperty(event, 'clientX', { value: clientX });
-  act(() => void fireEvent(target, event));
-  return event.defaultPrevented;
-}
 
 const offs: (() => void)[] = [];
 let rows: LibraryRow[];

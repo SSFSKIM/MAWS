@@ -223,7 +223,7 @@
     {
       "name": "artifact_create",
       "title": "Create artifact",
-      "description": "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
+      "description": "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -271,6 +271,11 @@
             "maxLength": 16777216
           },
           "space": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "designSystem": {
             "type": "string",
             "minLength": 1,
             "maxLength": 200
@@ -394,7 +399,7 @@
     {
       "name": "artifact_describe_type",
       "title": "Describe artifact kind",
-      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment.",
+      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -414,6 +419,11 @@
           "artifact": {
             "type": "string",
             "minLength": 1
+          },
+          "space": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           }
         },
         "required": [
@@ -433,7 +443,7 @@
     {
       "name": "artifact_read",
       "title": "Read artifact",
-      "description": "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
+      "description": "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -500,7 +510,7 @@
     {
       "name": "artifact_publish",
       "title": "Publish artifact",
-      "description": "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
+      "description": "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files; baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -533,6 +543,10 @@
               ]
             }
           },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
           "force": {
             "type": "boolean"
           },
@@ -550,8 +564,7 @@
         },
         "required": [
           "artifact",
-          "baseRevision",
-          "files"
+          "baseRevision"
         ],
         "additionalProperties": false
       },
@@ -626,7 +639,7 @@
     {
       "name": "artifact_export",
       "title": "Export artifact",
-      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.",
+      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; a pdf's answer also names pages, its page count; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -820,7 +833,7 @@
     {
       "name": "artifact_edit",
       "title": "Edit document",
-      "description": "Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.",
+      "description": "Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document's exports print on (give at least one; a document only). A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -1008,6 +1021,34 @@
                     "row",
                     "col",
                     "markdown"
+                  ],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "op": {
+                      "type": "string",
+                      "const": "set_page"
+                    },
+                    "size": {
+                      "type": "string",
+                      "enum": [
+                        "letter",
+                        "a4",
+                        "system"
+                      ]
+                    },
+                    "density": {
+                      "type": "string",
+                      "enum": [
+                        "standard",
+                        "compact"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "op"
                   ],
                   "additionalProperties": false
                 }

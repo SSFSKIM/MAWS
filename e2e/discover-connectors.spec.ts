@@ -16,12 +16,20 @@
 //            custom one is refused), each summed up on its own `spike <question>` line, and asks them
 //            of engine 2.1.322, which MAWS_SIGNIN_SPIKE_ENGINE_BIN names for this case alone; without it the case runs
 //            the group's engine.
-//   add:     Connectors › Discover lists Linear (Partner, its rank, its URL); + opens the connector sheet with the name,
+//   add:     Discover › Connectors lists Linear (Partner, its rank, its URL); + opens the connector sheet with the name,
 //            user scope and the exact command; the real CLI adds it (the scratch configuration has it, type http); My
 //            items lists it with "Sign in needed"; the url_regex server asks an instance URL and refuses one off its
 //            pattern; the authless server reads "No sign-in needed"; a name configured already is refused with the
 //            existing entry; Remove removes it (acceptance 8). Without the directory, its words and Retry are acceptance
 //            11's Connectors side, in discover.spec.ts's offline case.
+//   custom:  the UX wave's U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, M2's scene, G1 to
+//            G3): from My items' "Add custom connector…" (in the page's head since U11c) and the real CLI, on the
+//            user configuration's page a local command with two arguments and one variable for all projects, and a
+//            second with neither, each in the scratch configuration as given, both named by the engine's `mcp list`,
+//            no value on the page; on the scratch project's page a remote connector with a header shared in its
+//            .mcp.json, the warning, the secrets sentence and the masked command seen before Add, then the file as
+//            given and the row; last, a name added in a terminal while the sheet is open, which the engine host refuses
+//            on the add's line, naming its scope.
 //   sign-in: acceptance 9, on the Mac lane alone (Decision Log 13), under the runner's HOME (its login keychain) and a
 //            scratch CLAUDE_CONFIG_DIR, against the engine-mode fixture: (a) S1 running, a server added, signed in from
 //            S1 (its line as S1's own status reads it), then S2 reads it connected; (b) in S2, started after the add: a consent
@@ -42,6 +50,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
+import { chooseCustomize, customizePage } from './support/customize';
 import { firstRead } from './support/discover-read';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { mainTabById, openAppDestination, pageRegion } from './support/shell';
@@ -186,17 +195,17 @@ async function engineCli(launch: MawsLaunch, args: string[]): Promise<string> {
 }
 
 const userServers = (launch: MawsLaunch) => (JSON.parse(readFileSync(join(launch.realEngine!.scratch.configDir, '.claude.json'), 'utf8')) as { mcpServers?: Record<string, { type?: string; url?: string }> }).mcpServers ?? {};
-const panel = (page: Page) => page.getByRole('tabpanel', { name: 'Connectors' });
+// UX wave U11c: Customize's connectors are Show: Connectors in either view of the page's head; a row, the head's tools and
+// an add's line are found in the page (support/customize.ts).
 const pane = (page: Page) => page.locator('[data-discover="connectors"]');
-const row = (page: Page, name: string) => panel(page).locator(`[data-connector="${name}"]`);
+const row = (page: Page, name: string) => customizePage(page).locator(`[data-connector="${name}"]`);
 const addSheet = (page: Page) => page.locator('[data-plugins-sheet="mcp-add"]');
 
 // Discover once its catalog is shown: a cwd's first read runs the engine's CLI (support/discover-read.ts).
 async function openConnectors(page: Page, view: 'My items' | 'Discover'): Promise<void> {
   const read = view === 'Discover' ? await firstRead(page) : null;
-  await openAppDestination(page, 'Customize');
-  await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
-  await panel(page).getByRole('radio', { name: view }).click();
+  await openAppDestination(page, 'Customize'); // My items, All
+  await chooseCustomize(page, { view, show: 'Connectors' });
   await read?.(pane(page), 'connectors');
 }
 
@@ -295,7 +304,7 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
   });
 
   await test.step('My items lists it under Configured on disk with Sign in needed; Remove removes it', async () => {
-    await panel(page).getByRole('radio', { name: 'My items' }).click();
+    await chooseCustomize(page, { view: 'My items' }); // Show kept: Connectors
     await expect(row(page, 'linear').locator('[data-sign-in-state]')).toHaveText('Sign in needed');
     await row(page, 'linear').getByRole('button', { name: 'Remove linear' }).click();
     const sheet = page.locator('[data-plugins-sheet="mcp-remove"]');
@@ -307,6 +316,117 @@ test('add: Linear from Discover through the connector sheet and the real CLI; th
     await expect(row(page, 'linear')).toHaveCount(0, { timeout: CLI_MS });
     expect(userServers(maws!).linear).toBeUndefined();
     expect(await engineCli(maws!, ['mcp', 'list'])).not.toContain('linear');
+  });
+});
+
+// UX wave U11g: Customize › My items › Connectors › "Add custom connector…" (M2's scene; in the page's head since U11c).
+// Invented names and values; no sign-in, no Keychain item.
+test('custom: a local command for all projects and a remote one shared in the project, added from My items through the real CLI; a name taken meanwhile refused on the line', async () => {
+  test.setTimeout(480_000);
+  maws = await launchMaws({ realEngine: { projects: 1 } });
+  const { page } = maws;
+  const engine = maws.realEngine!;
+  const [directory] = engine.scratch.projects;
+  const configFile = join(engine.scratch.configDir, '.claude.json');
+  type Config = { mcpServers?: Record<string, unknown>; projects?: Record<string, { mcpServers?: Record<string, unknown> }> };
+  const config = () => JSON.parse(readFileSync(configFile, 'utf8')) as Config;
+  const customSheet = page.locator('[data-plugins-sheet="mcp-add"][data-connector-custom]');
+  const projectPicker = page.getByRole('combobox', { name: 'Project', exact: true });
+  const openCustom = async (): Promise<Locator> => {
+    await customizePage(page).getByRole('button', { name: 'Add custom connector…', exact: true }).click(); // the head's
+    await expect(customSheet).toBeVisible();
+    await expect(details(customSheet)).toBeVisible({ timeout: 30_000 }); // once plugins.env answered
+    await expect(details(customSheet)).toHaveAttribute('aria-expanded', 'false');
+    return customSheet;
+  };
+  const addRow = async (sheet: Locator, button: 'Add header' | 'Add variable', name: string, value: string) => {
+    await sheet.getByRole('button', { name: button, exact: true }).click();
+    const added = sheet.locator('[data-connector-row]').last();
+    await added.locator('[data-connector-row-name]').fill(name);
+    await added.locator('[data-connector-value]').fill(value);
+  };
+  // Add once the sheet's own read of what is configured here answered
+  const addAndClose = async (sheet: Locator) => {
+    const add = sheet.getByRole('button', { name: 'Add', exact: true });
+    await expect(add).toBeEnabled({ timeout: 30_000 });
+    await add.click();
+    await expect(sheet).toBeHidden();
+  };
+  const pageText = () => page.locator('body').innerText();
+
+  await openConnectors(page, 'My items');
+  await projectPicker.selectOption({ label: 'User configuration' });
+
+  await test.step('G1: a local command with two arguments and one variable, for all projects, and a second with neither: each written as given, both named by mcp list, no value on the page', async () => {
+    const sheet = await openCustom();
+    await expect(sheet.locator('[data-connector-add-to]')).toHaveText('All projects');
+    await sheet.locator('[data-connector-name]').fill('files-probe');
+    await sheet.getByRole('radio', { name: 'Local command', exact: true }).check();
+    await sheet.locator('[data-connector-command-field]').fill('/bin/sh');
+    await sheet.locator('[data-connector-args-field]').fill("-c 'exit 0'");
+    await expect(sheet.locator('[data-connector-arg]')).toHaveText(['-c', 'exit 0']);
+    await addRow(sheet, 'Add variable', 'FILES_PROBE_MODE', 'value-one');
+    await expect(sheet).toContainText('Saved in Claude Code’s configuration file as written.');
+    await openDetails(sheet);
+    await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add-json', 'files-probe', '{"type":"stdio","command":"/bin/sh","args":["-c","exit 0"],"env":{"FILES_PROBE_MODE":"•••"}}', '--scope', 'user']));
+    await expect(sheet.locator('[data-connector-writes]')).toHaveText(configFile);
+    await test.info().attach('custom-connector-local-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' });
+    await addAndClose(sheet);
+    await expect(row(page, 'files-probe')).toContainText('user scope · stdio', { timeout: CLI_MS });
+    await expect(row(page, 'files-probe').getByRole('button', { name: 'Remove files-probe' })).toBeVisible();
+    expect(config().mcpServers?.['files-probe']).toEqual({ type: 'stdio', command: '/bin/sh', args: ['-c', 'exit 0'], env: { FILES_PROBE_MODE: 'value-one' } });
+
+    const second = await openCustom();
+    await second.locator('[data-connector-name]').fill('files-probe-2');
+    await second.getByRole('radio', { name: 'Local command', exact: true }).check();
+    await second.locator('[data-connector-command-field]').fill('/usr/bin/true');
+    await expect(second.locator('[data-connector-args]')).toHaveText('No arguments');
+    await addAndClose(second);
+    await expect(row(page, 'files-probe-2')).toContainText('user scope · stdio', { timeout: CLI_MS });
+    expect(config().mcpServers?.['files-probe-2']).toEqual({ type: 'stdio', command: '/usr/bin/true', args: [] });
+
+    const listed = await engineCli(maws!, ['mcp', 'list']);
+    expect(listed).toMatch(/\bfiles-probe\b(?!-)/);
+    expect(listed).toContain('files-probe-2');
+    expect(await pageText()).not.toContain('value-one');
+  });
+
+  await test.step('G2: on the project’s page, a remote connector with a header shared in its .mcp.json: the warning once the header has a name, the masked command, then the file as given and the row', async () => {
+    value(await invoke(page, 'session.projects.add', { directory }));
+    const wanted = (await projectPicker.locator('option', { hasText: 'project-a' }).getAttribute('value'))!;
+    await projectPicker.selectOption(wanted);
+    const sheet = await openCustom();
+    await sheet.locator('[data-connector-name]').fill('remote-probe');
+    await sheet.locator('[data-connector-url-field]').fill('https://files.example.test/mcp');
+    await sheet.getByRole('radio', { name: 'project-a, shared in its .mcp.json', exact: true }).check();
+    await expect(sheet.locator('[data-connector-shared-warning]')).toHaveCount(0);
+    await addRow(sheet, 'Add header', 'X-Probe-Key', 'value-two');
+    await expect(sheet.locator('[data-connector-shared-warning]')).toHaveText('This file is usually committed with the repository. Write a secret as ${NAME}, with a name of your own, and set NAME under env in ~/.claude/settings.json or in the environment Claude Code starts with.');
+    await expect(sheet).toContainText('Saved in Claude Code’s configuration file as written.');
+    await openDetails(sheet);
+    await expect(sheet.locator('[data-plugins-argv]')).toHaveAttribute('data-plugins-argv', JSON.stringify(['mcp', 'add-json', 'remote-probe', '{"type":"http","url":"https://files.example.test/mcp","headers":{"X-Probe-Key":"•••"}}', '--scope', 'project']));
+    await expect(sheet.locator('[data-plugins-argv] [data-command-mask]')).toHaveText(['•••']);
+    await expect(sheet.locator('[data-connector-writes]')).toHaveText(join(directory, '.mcp.json'));
+    await test.info().attach('custom-connector-shared-1280x820.png', { body: await page.screenshot(), contentType: 'image/png' });
+    await addAndClose(sheet);
+    await expect(row(page, 'remote-probe')).toContainText('project scope · http', { timeout: CLI_MS });
+    await expect(row(page, 'remote-probe').locator('[data-sign-in-needs-session]')).toHaveText(/^Open a session in .*project-a.*, then sign in$/); // Sign in by the existing rule: no session runs
+    expect(JSON.parse(readFileSync(join(directory, '.mcp.json'), 'utf8'))).toEqual({ mcpServers: { 'remote-probe': { type: 'http', url: 'https://files.example.test/mcp', headers: { 'X-Probe-Key': 'value-two' } } } });
+    expect(await pageText()).not.toContain('value-two');
+  });
+
+  await test.step('G3: a name added in a terminal while the sheet is open is refused by the engine host on the add’s line, naming its scope; the list is read again', async () => {
+    const sheet = await openCustom();
+    await sheet.locator('[data-connector-name]').fill('late-probe');
+    await sheet.locator('[data-connector-url-field]').fill('https://late.example.test/mcp');
+    await sheet.getByRole('radio', { name: 'project-a only', exact: true }).check();
+    await expect(sheet.getByRole('button', { name: 'Add', exact: true })).toBeEnabled({ timeout: 30_000 }); // its read answered without the name
+    await engineCli(maws!, ['mcp', 'add-json', 'late-probe', JSON.stringify({ type: 'http', url: 'https://late.example.test/mcp' }), '--scope', 'user']);
+    await addAndClose(sheet);
+    const line = customizePage(page).locator('[data-connector-adding="connector:add:local:late-probe"]');
+    await expect(line).toContainText('late-probe is already configured here (user scope). Nothing was added. · name_configured', { timeout: CLI_MS });
+    await expect(row(page, 'late-probe')).toContainText('user scope · http', { timeout: CLI_MS });
+    expect(config().projects?.[directory]?.mcpServers?.['late-probe']).toBeUndefined();
   });
 });
 
@@ -370,7 +490,7 @@ test('sign-in: S1 then S2, connected here after a delayed consent, Cancel and a 
       return opened().at(-1)!;
     };
     const refresh = async (names: string[]) => {
-      await panel(page).getByRole('button', { name: 'Refresh', exact: true }).click();
+      await customizePage(page).getByRole('button', { name: 'Refresh', exact: true }).click(); // the head's
       for (const name of names) await expect(row(page, name)).toBeVisible();
     };
 
@@ -501,7 +621,7 @@ test('dynamic: a plugin’s connector and one of MAWS’s own list signed in fro
       return opened().at(-1)!;
     };
 
-    // Customize › Connectors › My items for the scratch project, chosen each time: the page is left for the session's tab
+    // Customize › My items › Connectors for the scratch project, chosen each time: the page is left for the session's tab
     const customizeProject = async () => {
       await openAppDestination(page, 'Customize');
       const select = page.getByRole('combobox', { name: 'Project', exact: true });

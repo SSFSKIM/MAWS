@@ -8,13 +8,16 @@ import {
   ARTIFACT_SCREENSHOT_MAX_BYTES,
   ArtifactCreateInputSchema,
   ArtifactCreateResultSchema,
+  ArtifactDescribeTypeResultSchema, // UX wave U10b (M10)
   ArtifactListInputSchema,
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
   artifactExportName,
+  ArtifactExportResultSchema,
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
+  ArtifactReadResultSchema, // UX wave U10b (M10)
   artifactRefusalOf,
   DOCUMENT_READ_FIELDS,
   ArtifactScreenshotInputSchema,
@@ -22,6 +25,7 @@ import {
   ASK_MODALITIES, // P3-D
   ASK_NOTE_MAX,
   ASK_PREVIEW_MAX,
+  DESIGN_SYSTEM_KINDS, // UX wave U10b
   AskAnswerSchema,
   AskInputSchema,
   AskResultSchema,
@@ -126,9 +130,10 @@ describe('X9: the maws server and its twelve tools', () => {
   });
 
   // U6d (O-44): the agent opens no artifact by itself, and nothing it is served invites the call that did
-  it('invites no call of show_pane for an artifact: artifact_create ends on the link, and no other tool names show_pane', () => {
-    expect(MAWS_TOOLS.artifact_create.description.endsWith('To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.')).toBe(true);
-    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1275);
+  it('invites no call of show_pane for an artifact: artifact_create ends on the link’s sentence followed only by the sentence on a Space’s instructions, and no other tool names show_pane', () => {
+    // UX wave U10b (M10, §E.4): only the sentence on a Space's instructions follows the link's, and it names no pane
+    expect(MAWS_TOOLS.artifact_create.description.endsWith("To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.")).toBe(true);
+    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458 + 184); // UX wave U10b: designSystem's sentence; M10: the instructions' sentence
     for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
   });
 });
@@ -296,6 +301,11 @@ describe('X9 records: parseRecordedToolArguments', () => {
     ];
     for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
   });
+
+  // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
+  it('carries the exact text of a window still loading its layout', () => {
+    expect(TOOL_ERRORS.paneNotReady).toBe('show_pane: the MAWS window was still loading its layout; try again');
+  });
 });
 
 describe('X9 results', () => {
@@ -334,6 +344,13 @@ describe('X9 artifact tools (E2)', () => {
     expect(MAWS_TOOLS.artifact_publish.description).toContain('baseRevision is the revision your last artifact_read');
   });
 
+  // UX wave U10b (l6-artifacts-18, §A.2 and §A.3): the publish's path and the html page's own export, word for word
+  it('tells the agent of a publish from a file and an html page exported as itself', () => {
+    expect(MAWS_TOOLS.artifact_publish.description).toContain('(an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file\'s bytes in place of files; baseRevision is');
+    expect(MAWS_TOOLS.artifact_export.description).toContain('Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them.');
+    expect(MAWS_TOOLS.artifact_export.description).not.toContain('Formats: pdf or png for an html page;');
+  });
+
   it("publishes each input's JSON schema: strict, with the bounds of the contract", () => {
     const schemaOf = (name: 'artifact_create' | 'artifact_list' | 'artifact_screenshot' | 'artifact_publish') => mawsToolList().find((t) => t.name === name)!.inputSchema;
     const id = { type: 'string', pattern: ARTIFACT_ID.source };
@@ -346,7 +363,22 @@ describe('X9 artifact tools (E2)', () => {
       type: 'object', additionalProperties: false, required: ['id'],
       properties: { id, version: { type: 'integer', minimum: 1 }, width: { type: 'integer', minimum: 320, maximum: 2560 }, height: { type: 'integer', minimum: 240, maximum: 2560 } },
     });
-    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision', 'files'] });
+    // UX wave U10b (§A.2): an html page publishes from path or files, one of them, so neither is required
+    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision'], properties: { path: { type: 'string', minLength: 1 } } });
+  });
+
+  // UX wave U10b (l6-artifacts-18, §A.2): path or files, exactly one, refused by the schema with the one sentence
+  it('takes path or files on a publish, not both and not neither', () => {
+    const base = { artifact: 'dash', baseRevision: 3 };
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, path: 'page.html' }).success).toBe(true);
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, files: { 'index.html': '<p/>' } }).success).toBe(true);
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base, { ...base, path: '' }]) {
+      expect(ArtifactPublishInputSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base]) {
+      const refused = parseToolArguments('artifact_publish', bad);
+      expect(refused.ok === false && refused.error, JSON.stringify(bad)).toBe(TOOL_ERRORS.publishPathOrFiles);
+    }
   });
 
   it('parses the inputs strictly and never defaults', () => {
@@ -432,6 +464,45 @@ describe('X9 artifact tools (E2)', () => {
     expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [listed] }).success).toBe(true);
   });
 
+  // UX wave U10b (l6-artifacts-08): a create bound to a design system, by its id or its name, for the kinds a system governs
+  it('admits a design system on artifact_create by its id or its name, for the four kinds a system governs, and says so after the Space', () => {
+    expect(DESIGN_SYSTEM_KINDS).toEqual(['document', 'presentation', 'design', 'dashboard']);
+    expect(parseToolArguments('artifact_create', { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' })).toEqual({ ok: true, data: { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' } });
+    expect(parseToolArguments('artifact_create', { kind: 'dashboard', title: 'Board', designSystem: UUID, space: 'P3 sitting' }).ok).toBe(true);
+    for (const designSystem of ['', 'x'.repeat(201), 7]) expect(ArtifactCreateInputSchema.safeParse({ kind: 'design', title: 'Site', designSystem }).success, JSON.stringify(designSystem)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_create')!.inputSchema).toMatchObject({ properties: { designSystem: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_create.description).toContain(
+      "a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id",
+    );
+    expect(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'Classroom'])).toBe('artifact_create: no design system "Harbour"; the design systems are: Harbor, Classroom');
+    expect(TOOL_ERRORS.designSystemAmbiguous('Harbor', [UUID, '22222222-2222-4222-8222-222222222222'])).toBe(`artifact_create: more than one design system is named "Harbor"; give one of these ids: ${UUID}, 22222222-2222-4222-8222-222222222222`);
+    expect(TOOL_ERRORS.designSystemNotForKind('file')).toBe('artifact_create: kind "file" takes no design system; designSystem is for document, presentation, design, dashboard');
+    expect(TOOL_ERRORS.noDesignSystem('Harbor', [])).toBe('artifact_create: no design system "Harbor"; there are no design systems');
+  });
+
+  // UX wave U10b (M10, §E.4; l8-settings-13): `space` on artifact_describe_type, and a Space's instructions in three answers
+  it('admits a Space on artifact_describe_type, answers spaceInstructions from create, read and describe, and says so in their descriptions', () => {
+    expect(parseToolArguments('artifact_describe_type', { kind: 'document', space: 'Field notes' })).toEqual({ ok: true, data: { kind: 'document', space: 'Field notes' } });
+    expect(parseToolArguments('artifact_describe_type', { kind: 'presentation', space: UUID }).ok).toBe(true);
+    for (const space of ['', 'x'.repeat(201), 7]) expect(parseToolArguments('artifact_describe_type', { kind: 'document', space }).ok, JSON.stringify(space)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_describe_type')!.inputSchema).toMatchObject({ properties: { space: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_describe_type.description).toContain(
+      "without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system",
+    );
+    const closing = " When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.";
+    for (const name of ['artifact_create', 'artifact_read', 'artifact_describe_type'] as const) expect(MAWS_TOOLS[name].description.endsWith(`.${closing}`), name).toBe(true);
+    for (const name of MAWS_TOOL_NAMES.filter((n) => !['artifact_create', 'artifact_read', 'artifact_describe_type'].includes(n))) expect(MAWS_TOOLS[name].description, name).not.toContain('spaceInstructions');
+    const given = { spaceId: UUID, name: 'Field notes', text: 'Write dates as 14 March.\nUse metres.' };
+    const created = { status: 'created', artifactId: UUID, kind: 'document', title: 'Note', revision: 1, spaceId: UUID, spaceName: 'Field notes', spaceInstructions: given };
+    const read = { status: 'read', artifactId: UUID, kind: 'html', title: 'Page', revision: 1, files: { 'index.html': '<p>x</p>' }, versions: [], spaceInstructions: given };
+    const described = { status: 'described', kind: 'document', guide: 'g', format: 'f', home: 'Field notes', spaceInstructions: given };
+    for (const [schema, answer] of [[ArtifactCreateResultSchema, created], [ArtifactReadResultSchema, read], [ArtifactDescribeTypeResultSchema, described]] as const) {
+      expect(schema.safeParse(answer).success).toBe(true);
+      expect(schema.safeParse({ ...answer, spaceInstructions: { ...given, at: 1 } }).success).toBe(false); // the stamp stays the host's
+      expect(schema.safeParse({ ...answer, spaceInstructions: { ...given, spaceId: 'not-a-uuid' } }).success).toBe(false);
+    }
+  });
+
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {
     const created = { status: 'created', artifactId: UUID, kind: 'html', title: 'Dashboard', revision: 1, handle: 'dash', id: 'dash', deliverableId: UUID, version: 1, externalReferences: 0 };
     expect(ArtifactCreateResultSchema.safeParse(created).success).toBe(true);
@@ -458,6 +529,8 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.notHtml('artifact_create', '/r/x.txt')).toBe('artifact_create: not an HTML file: /r/x.txt');
     expect(TOOL_ERRORS.tooLarge('artifact_create', '/r/x.html', 16777217)).toBe('artifact_create: too large: /r/x.html (16777217 bytes; the limit is 16 MiB)');
     expect(TOOL_ERRORS.artifactExists('dash')).toBe('artifact_create: an artifact "dash" already exists in this session; use artifact_publish');
+    expect(TOOL_ERRORS.publishPathOrFiles).toBe('artifact_publish: give path or files, not both and not neither'); // U10b (§A.2)
+    expect(TOOL_ERRORS.publishPathHtmlOnly('document')).toBe('artifact_publish: path publishes an html page; send files for a document');
     expect(TOOL_ERRORS.noArtifact('artifact_publish', 'nope')).toBe('artifact_publish: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noArtifact('artifact_screenshot', 'nope')).toBe('artifact_screenshot: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noVersion('dash', 3, 2)).toBe('artifact_screenshot: version 3 does not exist; "dash" has 2 version(s)');
@@ -565,5 +638,37 @@ describe('artifact_edit’s reply', () => {
     expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
     expect(description.split(sentence)).toHaveLength(2);
     expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
+  });
+});
+
+// UX wave U10b (l6-artifacts-07 (b), M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2 to §B.4): a
+// document's page, set with `set_page` and read back with `page`, and a PDF export's `pages`, each placed word for word
+describe('a document’s page in the tools', () => {
+  const edit = { artifact: 'memo', baseRevision: 3 };
+
+  it('takes set_page with a size, a density or both, and refuses one with neither or with another field', () => {
+    const schema = MAWS_TOOLS.artifact_edit.input;
+    for (const op of [{ size: 'a4' }, { density: 'compact' }, { size: 'system', density: 'standard' }, { size: 'letter' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(true);
+    }
+    for (const op of [{}, { size: 'legal' }, { density: 'airy' }, { size: 'a4', margin: '1in' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(false);
+    }
+    expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({
+      properties: { ops: { items: { oneOf: expect.arrayContaining([expect.objectContaining({ additionalProperties: false, properties: { op: { type: 'string', const: 'set_page' }, size: { type: 'string', enum: ['letter', 'a4', 'system'] }, density: { type: 'string', enum: ['standard', 'compact'] } } })]) } } },
+    });
+  });
+
+  it('tells the agent of set_page after the list of ops, of page in a document’s read, and of a pdf’s pages', () => {
+    expect(MAWS_TOOLS.artifact_edit.description).toContain('set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document\'s exports print on (give at least one; a document only). A replace_block, delete or set_cell');
+    expect(MAWS_TOOLS.artifact_read.description).toContain("an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata");
+    expect(MAWS_TOOLS.artifact_export.description).toContain("Returns the exported file's path; a pdf's answer also names pages, its page count; to (a path under the working directory)");
+  });
+
+  it('answers pages for a pdf as a positive whole number, or not at all', () => {
+    const exported = { status: 'exported', artifactId: '11111111-1111-4111-8111-111111111111', format: 'pdf', revision: 4, path: '/x/4-pdf.pdf' };
+    expect(ArtifactExportResultSchema.safeParse({ ...exported, pages: 2 }).success).toBe(true);
+    expect(ArtifactExportResultSchema.safeParse(exported).success).toBe(true);
+    for (const pages of [0, 1.5, -1]) expect(ArtifactExportResultSchema.safeParse({ ...exported, pages }).success, String(pages)).toBe(false);
   });
 });

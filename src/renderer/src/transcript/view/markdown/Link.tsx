@@ -1,6 +1,7 @@
 // The `a` of every markdown surface (residue *Streamdown configuration*): the gates in sanitize.ts leave only
 // `https:`, `http:`, `mailto:` and the chip schemes. A web link opens through C5's open-external command and never
-// navigates the renderer; `maws-path:` is a path link opening the file (whether it exists is not known here);
+// navigates the renderer; `maws-path:` is a path link opening the file (whether it exists is not known here; beside the
+// chat, and ⌘-click in the main area: UX wave U6b-1);
 // `maws-image:` is an image chip naming its source, loading nothing (§4.1); `maws-artifact:` (P3-F wave S, F14) is an
 // artifact mention; a link whose href the gates removed is its text. P5 O7 M3: a web link carries its row's session, whose
 // machine decides whether a loopback link is a forward (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md).
@@ -126,7 +127,7 @@ export function TranscriptLink({ href, children }: ComponentProps<'a'> & ExtraPr
   if (href.startsWith('maws-path:')) {
     const { path, line } = pathOf(href.slice('maws-path:'.length));
     return (
-      <InlineLink data-chip="path" title={path} open={() => actions.openFile(path, line, session)}>
+      <InlineLink data-chip="path" title={path} open={(metaKey) => actions.openFile(path, line, session, { main: metaKey })}>
         {children}
       </InlineLink>
     );

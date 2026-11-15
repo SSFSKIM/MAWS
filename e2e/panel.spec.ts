@@ -672,12 +672,18 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         await panel.call('showSummary');
         await panel.unfold('Context');
 
+        // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file row
+        // opens the file beside A's chat, as every open does: a tab of Files in A's side column, in view, holding the path;
+        // the main strip gains no file tab
         await panel.section('Sources').getByRole('button', { name: /src\/util\/rows\.ts/ }).click();
+        await expect.poll(async () => (await panel.tabs()).find((tab) => tab.toolId === 'files') ?? null, { message: 'a file row opens a Files tab in A' }).toMatchObject({ active: true, pinned: false });
+        const filesTab = (await panel.tabs()).find((tab) => tab.toolId === 'files')!;
         await expect
-          .poll(async () => Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: Record<string, unknown>[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs)), {
-            message: 'a file row opens a file tab for A through C5’s openTab',
-          })
-          .toContainEqual(expect.objectContaining({ kind: 'file', path: EDIT_SOURCES[0], appSessionId: await addressed(panel.page, 'A') }));
+          .poll(async () => (await panel.layout<{ params?: Record<string, { file?: unknown }> }>('panelTools.params'))?.params?.[filesTab.id]?.file, { message: 'the tab holds the row’s file' })
+          .toBe(EDIT_SOURCES[0]);
+        await expect(panel.page.locator(`[data-region="panel"] [data-file-viewer][data-path="${EDIT_SOURCES[0]}"]`), 'the file beside the chat').toBeVisible();
+        const stored = Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: { kind: string }[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs));
+        expect(stored.filter((tab) => tab.kind === 'file'), 'no main file tab').toEqual([]);
       });
       panel.expectQuietConsole();
     });
@@ -1064,7 +1070,7 @@ async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<
 const tabNamed = (title: string) => new RegExp(`^${title.replace(/[+]/g, '\\+')}`);
 
 test.describe('the product host over a scenario derived from C5’s records', () => {
-  test('floating cards follow the focused session and leave non-session main tabs unreserved', async () => {
+  test('cards follow the session in view, and a non-session tab alone earns neither cards nor a reserved column', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       await (await sidebarRow(page, CHARTER)).click();
@@ -1076,6 +1082,15 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(openScm).toHaveText('1 ahead of origin/main');
       await expect(openScm).toHaveAccessibleDescription('Open Source control');
       await expect(environment).toContainText('Trust this folder to see PR state');
+
+      // UX2: a non-session tab alone earns neither cards nor an empty right column, but keeps remembered tool context.
+      await menu(app, 'diagnostics.open');
+      await expect(sessionCards(page)).toHaveCount(0);
+      await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
+      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
+      await expect(surfaceRow(page).getByRole('button', { name: 'Review', exact: true })).toBeEnabled();
+      await menu(app, 'tab.close');
+      await expect(sessionCards(page)).toBeVisible();
 
       await (await sidebarRow(page, SIDEBAR_DRAG)).click({ modifiers: ['Meta'] });
       await menu(app, 'pane.split');
@@ -1089,10 +1104,11 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText('⎇ main');
       await menu(app, 'diagnostics.open');
-      // UX2: a non-session tab earns neither cards nor an empty right column, but keeps remembered tool context.
-      await expect(sessionCards(page)).toHaveCount(0);
+      // #692: the other pane still shows a session, so the column stays beside it and speaks of that session, not of the focused tab.
+      await expect(sessionCards(page)).toBeVisible();
+      await expect(environment).toContainText(/Not a git repository|Git unavailable/);
+      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeEnabled();
       await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
-      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
       await expect(surfaceRow(page).getByRole('button', { name: 'Review', exact: true })).toBeEnabled();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

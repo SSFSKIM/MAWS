@@ -77,6 +77,7 @@ export function everyKindSource(): ExportSource {
       thread('t9', 'a passage that is gone', 'open', [[HUMAN, 'An orphaned thread.']]),
     ],
     overrides: {},
+    page: {},
   };
 }
 
@@ -88,7 +89,7 @@ export function sourceOf(blocks: JSONContent[], threads: Thread[] = []): ExportS
     ...(json.type !== 'text' && !['hardBreak', 'image', 'math', 'date', 'mention', 'dropdown'].includes(json.type ?? '') ? { attrs: { id: `b${++n}`, ...json.attrs } } : {}),
     ...(json.content ? { content: json.content.map(withIds) } : {}),
   });
-  return { title: 'Probe', tabs: [{ id: 'tab-1', title: 'Probe', body: schemaFor().nodeFromJSON({ type: 'doc', content: blocks.map(withIds) }) }], threads, overrides: {} };
+  return { title: 'Probe', tabs: [{ id: 'tab-1', title: 'Probe', body: schemaFor().nodeFromJSON({ type: 'doc', content: blocks.map(withIds) }) }], threads, overrides: {}, page: {} };
 }
 
 /** A thread with the given messages on tab-1. */

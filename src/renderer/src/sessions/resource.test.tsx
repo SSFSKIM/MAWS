@@ -59,6 +59,7 @@ beforeEach(() => {
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
   backend.script('session.observedFacts', () => null);
+  backend.script('layout.get', () => ({ value: null })); // UX wave U6b-1 (M3): Files' tree state, nothing stored
   window.maws = backend.bridge();
   const page = pageScenario(scenario);
   const filler = Array.from({ length: 200 - scenario.sessions.length }, (_, i) => record(at(`app-idx-${i}`)));

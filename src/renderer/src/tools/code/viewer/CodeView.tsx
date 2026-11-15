@@ -27,7 +27,7 @@ import { EDITOR_COPY } from '../copy';
 import { commentGutter, comments } from '../editor/comment-gutter';
 import { conflictBlocks, conflicts, conflictsOf, stepConflict } from '../editor/conflicts';
 import { documentText, editing, editingExtensions, fromStore } from '../editor/editing';
-import { changeCount, mergedWith, mergeView, merging, stepChange } from '../editor/merge';
+import { changeCount, mergedWith, mergeView, merging, redrawMergeView, stepChange } from '../editor/merge';
 import { attachNavigation, reportCounts } from '../editor/navigation';
 import { codeHighlightStyle, codeThemeDark, codeThemeLight } from './code-theme';
 import { jumpTarget } from './kinds';
@@ -151,6 +151,7 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
     saved.ratioPending = false;
     // A state left behind under the other theme, and every later switch, take the page's theme.
     view.dispatch({ effects: theming.reconfigure(pageTheme()) });
+    if (reuse) redrawMergeView(view); // a merge view left behind acts on this view (the Mac run's second failure)
     const themes = new MutationObserver(() => view.dispatch({ effects: theming.reconfigure(pageTheme()) }));
     themes.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
     // E5 M3: the bar's counts and its arrows, which leave the editor focused at the chunk or block they reach.
