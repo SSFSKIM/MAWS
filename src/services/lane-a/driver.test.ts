@@ -1095,8 +1095,7 @@ describe('subagents', () => {
     await expect.poll(() => s.located()).toBeGreaterThan(located); // a tick's read is out
     end(s);
     s.release(new Error('the transcript went away'));
-    await s.settledStream();
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await new Promise((resolve) => setTimeout(resolve, 150)); // the rejection lands
     expect(s.h.logs.filter((line) => line.includes('could not be read for its jobs'))).toEqual([]);
   });
 
