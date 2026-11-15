@@ -68,6 +68,12 @@ function rendererSources(dir: string): string[] {
   });
 }
 
+// The parser reads only the sources that could make a portal (the tree's other files would cost seconds): one that
+// names one, or one with an escaped identifier, which could spell the name otherwise.
+function scanned(sources: readonly { file: string; text: string }[]): string[] {
+  return sources.filter(({ text }) => text.includes('Portal')).flatMap(({ file, text }) => overlayPortalViolations(text, file));
+}
+
 describe('an overlay that takes keys is portalled to the body', () => {
   it('names a Portal given a container or spread props, and an overlay role portalled elsewhere', () => {
     const source = [
@@ -88,10 +94,13 @@ describe('an overlay that takes keys is portalled to the body', () => {
     ]);
   });
 
+  it('reads a source whose portal is named through an escaped identifier', () => {
+    const escaped = 'const c = create\\u0050ortal(<div role="dialog" />, host);';
+    expect(scanned([{ file: 'escaped.tsx', text: escaped }])).toEqual(['escaped.tsx:1 createPortal of role dialog into host']);
+  });
+
   it('holds for every renderer source', () => {
-    // only a source that names a portal can make one: the parser reads those alone (the tree's other files would cost seconds)
-    const sources = rendererSources(RENDERER).map((path) => ({ path, text: readFileSync(path, 'utf8') })).filter(({ text }) => text.includes('Portal'));
-    const violations = sources.flatMap(({ path, text }) => overlayPortalViolations(text, relative(RENDERER, path).split(sep).join('/')));
+    const violations = scanned(rendererSources(RENDERER).map((path) => ({ file: relative(RENDERER, path).split(sep).join('/'), text: readFileSync(path, 'utf8') })));
     expect(violations).toEqual([]);
   });
 });

@@ -7,7 +7,7 @@
 // answer sent). Over the real transcript slot, the card's registered renderer, the attention store and the key
 // dispatcher. Every question, command and id is invented.
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { useLayoutEffect, type ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -27,11 +27,13 @@ import { useFloatingCard } from '../shell/floating';
 import { useAttention } from '../stores/attention';
 import { resetComposerStore } from '../stores/composer';
 import { resetLaneAStore } from '../stores/lane-a';
+import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';
 import { resetShellStores } from '../test-support/shell-stores';
-import { TranscriptSlot, useTranscriptStore } from '../transcript';
+import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
+import { useWaitingView } from '../transcript/view/waiting-view';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard } from './index';
 import { itemFor, type RequestEvent } from './test-requests';
@@ -247,6 +249,56 @@ describe('a way to a request from outside its transcript', () => {
     expect(keyboardRow()).toBeNull();
   });
 
+  // The review of M5 (its Important finding): a request remembered for a transcript not yet mounted belongs to the
+  // navigation that asked for it. The person moving to another session, or any later call, lets it go.
+  const OTHER = at('app-elsewhere' as AppSessionId);
+  const front = (id: AppSessionId) => act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: id }, { pane: 'focused' }));
+  const settleFrames = () => act(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+  async function mountLater() {
+    render(<section data-pane={0}>{slot()}</section>);
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    await settleFrames();
+  }
+
+  it('a remembered request is let go once the person moves to another session: its transcript ready later focuses nothing', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    front(OTHER);
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('a remembered request does not fire on a later visit after the person left and came back', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    front(OTHER);
+    front(APP);
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+  });
+
+  it('a later call, even one that finds nothing to show, lets the remembered request go', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    act(() => showWaiting(OTHER, null)); // nothing of that session waits
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+    expect(toasts()).toEqual([]);
+  });
+
   it('a closed floating card’s compact composer reads Waiting for you · N while N wait; its click opens the card and goes to the oldest', async () => {
     const { question, prompt, second } = scene();
     act(() => useSessions.setState({ records: new Map([[APP, record(APP)]]) }));
@@ -332,6 +384,43 @@ describe('the jump button', () => {
     await waitFor(() => expect(jump()?.dataset.state).toBe('input'));
     list([]); // answered: the button is the round one again
     await waitFor(() => expect(jump()?.getAttribute('aria-label')).toBe('Jump to latest'));
+  });
+
+  it('an element tracked again for the same request within one commit is the only one observed', async () => {
+    const { prompt } = scene();
+    act(() => useAttention.getState().applySnapshot([prompt], TEST_MACHINE));
+    const made: HTMLElement[] = [];
+    function Retrack() {
+      const { track } = useWaitingView();
+      useLayoutEffect(() => {
+        const [old, next] = [document.createElement('div'), document.createElement('div')];
+        made.push(old, next);
+        track(prompt.id, old);
+        track(prompt.id, null);
+        track(prompt.id, next);
+      }, [track]);
+      return null;
+    }
+    const source = { key: APP, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
+    render(<section data-pane={0}><Transcript source={source} variant="session" renderRequest={() => <Retrack />} /></section>);
+    await waitFor(() => expect(made).toHaveLength(2));
+    await act(() => Promise.resolve());
+    const [watch] = rooted();
+    expect(watch.targets.has(made[1])).toBe(true);
+    expect(watch.targets.has(made[0])).toBe(false);
+  });
+
+  it('a desk transcript’s key names no MAWS session: no observer, nothing placed', async () => {
+    const { prompt } = scene();
+    // the session a desk key's prefix would be misread as, given a waiting request
+    act(() => useAttention.getState().applySnapshot([{ ...prompt, appSessionId: 'desk' as AppSessionId }], TEST_MACHINE));
+    const source = { key: 'desk:proj:sess-1', subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
+    render(<Transcript source={source} variant="session" renderRequest={() => <div data-desk-slot="" />} />);
+    await waitFor(() => expect(document.querySelector('[data-kind="question"]')).not.toBeNull());
+    expect([...observers].filter((watch) => watch.root !== null)).toEqual([]);
+    expect(document.querySelector('[data-row-id="request-end"]')).toBeNull();
+    expect(document.querySelector('[data-desk-slot]')).toBeNull();
+    expect(jump()).toBeNull();
   });
 
   it('a question in its row above a reader at the end raises the pill though the reader follows; the pill goes to the oldest out of view, by row and by the end', async () => {
