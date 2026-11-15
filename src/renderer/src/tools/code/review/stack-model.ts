@@ -110,12 +110,30 @@ export function sectionAt(layout: StackLayout, y: number): number {
 // of a place in it (a held file's header has a second row, decision 10).
 export const headerOf = (layout: StackLayout, index: number): number => layout.bodyTops[index] - layout.tops[index];
 
-// The reading edge at a scroll position: just under the header standing at the scroller's top, the header of the section
-// the edge falls in, so a place read here and stood again (`topOfPlace`, less its own section's header) is the same.
+// The reading edge at a scroll position: just under the header standing at the scroller's top. A header is sticky
+// within its section, so the next section's pushes it off: from where its bottom meets the next section's top, the edge
+// crosses the next header, in proportion, until that header stands at the top. The edge rises with the scroll position
+// everywhere, so each edge has one scroll position (`scrollTopAt`), and a place read at one stands again exactly there.
 export function edgeAt(layout: StackLayout, scrollTop: number): number {
   if (layout.paths.length === 0) return scrollTop;
-  const under = scrollTop + headerOf(layout, sectionAt(layout, scrollTop));
-  return scrollTop + headerOf(layout, sectionAt(layout, under));
+  const index = sectionAt(layout, scrollTop);
+  const header = headerOf(layout, index);
+  if (index + 1 >= layout.paths.length) return scrollTop + header;
+  const next = layout.tops[index + 1];
+  const pushed = next - header; // where the next section's top meets this header's bottom
+  if (scrollTop < pushed) return scrollTop + header;
+  return next + (headerOf(layout, index + 1) * (scrollTop - pushed)) / header;
+}
+
+// The scroll position whose reading edge is `edge` (`edgeAt`'s inverse): an edge in a body stands under its section's
+// header; one in a header is in the handoff to it from the section above. Not below 0.
+export function scrollTopAt(layout: StackLayout, edge: number): number {
+  if (layout.paths.length === 0) return Math.max(0, edge);
+  const index = sectionAt(layout, edge);
+  const header = headerOf(layout, index);
+  if (index === 0 || edge >= layout.bodyTops[index]) return Math.max(0, edge - header);
+  const above = headerOf(layout, index - 1);
+  return Math.max(0, layout.tops[index] - above + (above * (edge - layout.tops[index])) / header);
 }
 
 // A drawn body's row by its block, side and line, through an index made once per rows read (the page is read once per

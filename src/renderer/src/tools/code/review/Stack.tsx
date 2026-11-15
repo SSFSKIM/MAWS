@@ -54,6 +54,8 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
   const marks = useStore(ui, (s) => s.viewed);
   const folds = useStore(ui, (s) => s.folds);
   const fetched = useReview((s) => s.files);
+  // This stack's own sections: another surface over the same files makes its own, from its own folds, marks and hold.
+  const [made] = useState(() => new WeakMap<ReviewFile, MadeSection>());
   return useMemo(() => {
     const sections: StackSection[] = [];
     const order: StackHunk[] = [];
@@ -71,12 +73,12 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
         choice: folds.get(key)?.get(file.path),
         held: held !== null && held.placeKey === key && held.path === file.path ? held : null,
       };
-      const entry = sectionFor(from, ownRead);
+      const entry = sectionFor(made, from, ownRead);
       sections.push(entry.section);
       for (const hunk of entry.hunks) order.push(hunk);
     }
     return { sections, order };
-  }, [files, target, key, pastCap, marks, folds, fetched, held]);
+  }, [made, files, target, key, pastCap, marks, folds, fetched, held]);
 }
 
 // What one file's section is made from, and what was made.
@@ -98,10 +100,9 @@ interface MadeSection {
 const sameInputs = (a: SectionInputs, b: SectionInputs): boolean =>
   a.file === b.file && a.target === b.target && a.key === b.key && a.pastCap === b.pastCap && a.load === b.load && a.mark === b.mark && a.choice === b.choice && a.held === b.held;
 
-// The section last made for each of the list's files, by the file's own object (a re-read of the list makes new ones):
-// made again only when one of its inputs differs.
-const made = new WeakMap<ReviewFile, MadeSection>();
-function sectionFor(from: SectionInputs, ownRead: boolean): MadeSection {
+// The section a stack last made for each of the list's files, by the file's own object (a re-read of the list makes new
+// ones): made again only when one of its inputs differs.
+function sectionFor(made: WeakMap<ReviewFile, MadeSection>, from: SectionInputs, ownRead: boolean): MadeSection {
   const was = made.get(from.file);
   if (was && sameInputs(was.from, from)) return was;
   const next = sectionOf(from, ownRead);
@@ -255,7 +256,10 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
         if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
         placed.revealPlace(place);
       }
+      // the branch's task review: once drawn under its line, the card itself stands wholly in view
+      placed.showCard(place);
     }
+    if (card === null) placed.showCard(null);
     const watching = observer.current;
     if (watching) {
       for (const element of watching.watched) {

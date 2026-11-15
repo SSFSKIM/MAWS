@@ -17,14 +17,15 @@
 //
 // The reading edge is the scroller's top under the sticky header: what the person reads is the row just below the
 // header that stays at the top, so a place names that row, and a hunk jumped to stands there. The header is the one of
-// the section the place is in (a held file's has a second row).
+// the section the place is in (a held file's has a second row); where the next section's header pushes it off, the edge
+// crosses the incoming header (`edgeAt`), so every edge has one scroll position and a place stands where it was read.
 //
 // The cost of a scroll is the band's, not the scope's: the sections are found and their headers measured at a layout
 // change and kept until the next (a scroll changes neither); a scroll measures the drawn bodies and reads the rows of the
 // file at the reading edge, and the counter resolves that file's hunks alone, each row found by its index.
 import { reviewLayout } from './measure';
 import { drawnSections, rowsOf, settled, type DrawnSection } from './stack-dom';
-import { bandOf, edgeAt, headerOf, hunkPlace, placeAt, rowOf, sectionAt, stackLayout, topOfPlace, type RowsOf, type StackHunk, type StackLayout, type StackRow } from './stack-model';
+import { bandOf, edgeAt, hunkPlace, placeAt, rowOf, scrollTopAt, sectionAt, stackLayout, topOfPlace, type RowsOf, type StackHunk, type StackLayout, type StackRow } from './stack-model';
 import type { StackPlace } from './view-state';
 
 // A header not measured yet (`h-8`).
@@ -102,6 +103,7 @@ export class StackPlacer {
   private gesture = -Infinity; // when the person's last input in the scroller came
   private pressed = false; // a pointer held down in the scroller (a drag of its scroll bar)
   private recount = false; // the counter was last read where a file's rows were not drawn yet
+  private card: StackPlace | null = null; // the line of a card opened and not drawn under it yet
 
   constructor(private readonly host: PlacerHost) {}
 
@@ -147,10 +149,18 @@ export class StackPlacer {
     this.relayout();
   }
 
+  // A card opened on a line (M5), or none: once the card is drawn in its row under the line, the stack stands it wholly
+  // in view itself (the field's own scroll as it takes the keyboard would come outside the person's gesture, and be
+  // undone as a layout change). The person's input before then leaves it where it is drawn.
+  showCard(place: StackPlace | null): void {
+    this.card = place;
+  }
+
   // The person's wheel, touch, key or pointer press inside the scroller: their gesture begins, and an outstanding reveal
   // ends where it left the scroller, which becomes the live place (so its file's late answer moves nothing).
   interact(): void {
     this.gesture = performance.now();
+    this.card = null;
     if (!this.reveal) return;
     this.reveal = null;
     const m = this.measure();
@@ -191,7 +201,7 @@ export class StackPlacer {
     const m = this.measure(moved);
     if (!m) return;
     const held = moved && this.live !== null ? topOfPlace(m.layout, this.live, m.rows) : null;
-    if (held !== null) this.write(el, this.scrollFor(m.layout, this.live!, held) + by);
+    if (held !== null) this.write(el, this.scrollFor(m.layout, held) + by);
     this.read(m);
     this.at = el.scrollTop;
     this.setBand(this.bandFor(m, el.scrollTop));
@@ -233,13 +243,14 @@ export class StackPlacer {
       // A section folded is not reached yet: the jump that unfolds it draws it next. A section's top (a request, or a
       // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top.
       const exact = at.exact && !this.input.sections[layout.index.get(reveal.place.path)!]?.folded;
-      const want = reveal.top ? Math.max(0, at.top) : this.scrollFor(layout, reveal.place, at);
+      const want = reveal.top ? Math.max(0, at.top) : this.scrollFor(layout, at);
       this.write(el, want);
       const band = this.bandFor(m, el.scrollTop);
       const lags = this.pending || !sameBand(band, this.band);
       if (exact && !lags && (Math.abs(el.scrollTop - want) < 1 || (want > el.scrollTop && atEnd(el)))) {
         this.reveal = null; // reached: the place reached is the live place
         this.read(m);
+        this.standCard(m);
       }
       this.setBand(band);
       this.at = el.scrollTop;
@@ -248,7 +259,7 @@ export class StackPlacer {
     if (this.live === null) this.read(m);
     else {
       const target = topOfPlace(layout, this.live, rows);
-      if (target !== null) this.write(el, this.scrollFor(layout, this.live, target));
+      if (target !== null) this.write(el, this.scrollFor(layout, target));
       // A place read where its file was not drawn yet names no row; once the file draws, the row at the same spot is
       // read, so the place survives what moves inside the file from then on.
       if (target !== null && this.live.row === null && !this.pending && this.drawsRows(layout, this.live.path, rows)) this.read(m);
@@ -256,6 +267,7 @@ export class StackPlacer {
       // shows, which can put the edge past hunks it has not reached.
       else if (this.recount && !this.pending && this.drawsRows(layout, this.live.path, rows)) this.count(m);
     }
+    this.standCard(m);
     this.setBand(this.bandFor(m, el.scrollTop));
     this.at = el.scrollTop;
   }
@@ -275,10 +287,31 @@ export class StackPlacer {
     this.count(m);
   }
 
-  // Where the scroller stands for a place found at `target`: its row under its own section's header at the reading
-  // edge, or, for a section-top fallback, the section's top at the scroller's top.
-  private scrollFor(layout: StackLayout, place: StackPlace, target: { top: number; edge: boolean }): number {
-    return Math.max(0, target.edge ? target.top - headerOf(layout, layout.index.get(place.path)!) : target.top);
+  // The card waiting to be drawn, once it is: its line's row reaches down over the card's (`rowsOf`), and stands wholly
+  // between the reading edge and the scroller's bottom; else the scroller moves by the least that shows it, never past
+  // its line at the reading edge (a card taller than the view shows its top). Read as the live place where it moved.
+  private standCard(m: Measured): void {
+    const place = this.card;
+    if (!place?.row || !m.laidOut) return;
+    if (!this.found?.sections.get(place.path)?.body?.querySelector('[data-review-card-row] [data-comment-card]')) return;
+    this.card = null;
+    const at = topOfPlace(m.layout, place, m.rows);
+    const index = m.layout.index.get(place.path);
+    const rows = index === undefined ? null : m.rows(index);
+    const row = rows ? rowOf(rows, place.row) : undefined;
+    if (!at?.exact || !at.edge || !row) return;
+    const top = m.el.scrollTop;
+    const line = scrollTopAt(m.layout, at.top); // the line at the reading edge
+    const want = at.top < edgeAt(m.layout, top) ? line : Math.min(line, Math.max(top, at.top + row.height - m.viewport));
+    if (Math.abs(want - top) < 1) return;
+    this.write(m.el, want);
+    this.read(m);
+  }
+
+  // Where the scroller stands for a place found at `target`: at the reading edge (its row under its own section's
+  // header, or in a header's handoff), or, for a section-top fallback, the section's top at the scroller's top.
+  private scrollFor(layout: StackLayout, target: { top: number; edge: boolean }): number {
+    return target.edge ? scrollTopAt(layout, target.top) : Math.max(0, target.top);
   }
 
   // ---- the page --------------------------------------------------------------------------------------------------------

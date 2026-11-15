@@ -6,6 +6,7 @@ import { REVIEW_FILE_LINES_CAP } from './review-model';
 import {
   bandOf,
   bodyLines,
+  edgeAt,
   ESTIMATED_ROW_PX,
   estimatedBody,
   everyFolded,
@@ -13,6 +14,7 @@ import {
   hunkPlace,
   isFolded,
   placeAt,
+  scrollTopAt,
   stackLayout,
   topOfPlace,
   type SectionMeasure,
@@ -148,6 +150,24 @@ describe('the place', () => {
     expect(deep).toEqual({ path: 'src/f2.ts', row: { block: 0, side: 'new', line: 45 }, offset: 50 });
     const back = topOfPlace(layout, deep, wrapped(20))!;
     expect(placeAt(layout, back.top, wrapped(20))?.row).toEqual({ block: 0, side: 'new', line: 45 });
+  });
+
+  // The branch's task review: a sticky header is pushed off by the next section's, and the edge crosses the incoming
+  // header meanwhile, so it rises with the scroll position everywhere and each edge has one scroll position.
+  it('has one scroll position for each reading edge, through every header’s handoff, taller to shorter and shorter to taller', () => {
+    const layout = stackLayout([section('a.ts', { header: 58, body: 942 }), section('b.ts', { header: 30, body: 400 }), section('c.ts', { header: 58, body: 400 }), section('d.ts', { header: 30, folded: true }), section('e.ts')]);
+    expect(layout.tops[1]).toBe(1_000);
+    expect(edgeAt(layout, 900)).toBe(958); // under a.ts's header
+    expect(edgeAt(layout, 942)).toBe(1_000); // a.ts's header meets b.ts's top: pushed off from here
+    expect(edgeAt(layout, 971)).toBe(1_015); // halfway: halfway across b.ts's header
+    expect(edgeAt(layout, 1_000)).toBe(1_030); // b.ts's header at the top
+    let before = -Infinity;
+    for (let at = 0; at <= layout.total - 100; at += 0.5) {
+      const edge = edgeAt(layout, at);
+      expect(edge).toBeGreaterThan(before);
+      expect(scrollTopAt(layout, edge)).toBeCloseTo(at, 6);
+      before = edge;
+    }
   });
 
   it('has no top in a stack that no longer lists its file, and no place in an empty stack', () => {
