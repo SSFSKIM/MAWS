@@ -196,12 +196,6 @@ const suites = {
       await sleep(4000);
     };
     const cParts = [];
-    const describe = (seq) => {
-      const ds = decisionsFor(seq);
-      const by = {};
-      for (const r of ds) by[`${r.decision}/${r.branch}/${r.webContentsId ?? 'none'}`] = (by[`${r.decision}/${r.branch}/${r.webContentsId ?? 'none'}`] ?? 0) + 1;
-      return { decisions: ds.length, by };
-    };
     let seq = lastSeq();
     const w2 = await openWindow({ width: 1000, height: 700 });
     await mountAll(w2);
@@ -224,8 +218,9 @@ const suites = {
       const to = cParts[i + 1]?.[1] ?? lastSeq();
       const slice = (rs) => rs.filter((r) => r.seq <= to);
       const entries = slice(entriesFor(from));
-      const d2 = describe(from);
       const ds = slice(decisionsFor(from));
+      const d2 = { by: {} };
+      for (const r of ds) d2.by[`${r.decision}/${r.branch}/${r.webContentsId ?? 'none'}`] = (d2.by[`${r.decision}/${r.branch}/${r.webContentsId ?? 'none'}`] ?? 0) + 1;
       const passed = ds.filter((r) => r.decision === 'pass').length;
       const ok = entries.length === 0;
       result('c', part, ok ? 'pass' : 'fail', `asker ${asker}: handler entries for the four URLs ${entries.length}; decisions ${ds.length} (passed ${passed}; ${Object.entries(d2.by).map(([k2, n]) => `${k2} ${n}`).join(', ')})${part === 'no-web-contents' ? `; fetch: ${fetched.join(' | ')}` : ''}`, { entries, decisions: ds.length });
@@ -271,7 +266,8 @@ const suites = {
     const fails = rs.filter((r) => r.type === 'did-fail-load').map((r) => `${r.errorCode} ${r.errorDescription}`);
     const src = await page(win, 'JSON.stringify([...document.querySelectorAll("iframe")].map((f) => f.src))');
     const loads = a.entries > 0 && a.text?.t === 'script ran';
-    result('d', 'all-digit token', 'record', `${loads ? 'loads' : 'does not load'}: decisions ${a.decisions}, handler entries ${a.entries}, frame ${JSON.stringify(a.text)}; the iframe's src as the page reads it ${src}; failed loads ${fails.join('; ') || 'none'}; control (lettered token): decisions ${b.decisions}, entries ${b.entries}, frame ${JSON.stringify(b.text)}`);
+    const frames = frameTree().flatMap((w) => w.frames.map((f) => f.url)).filter((u) => !u.startsWith('file:'));
+    result('d', 'all-digit token', 'record', `${loads ? 'loads' : 'does not load'}: decisions ${a.decisions}, handler entries ${a.entries}, frame ${JSON.stringify(a.text)}; the iframe's src as the page reads it ${src}; failed loads ${fails.join('; ') || 'none'}; the window's frames other than its page ${JSON.stringify(frames)}; control (lettered token): decisions ${b.decisions}, entries ${b.entries}, frame ${JSON.stringify(b.text)}`);
     await picture(win, join(out, 'd-window.png'));
   },
 
@@ -296,7 +292,9 @@ const suites = {
       const screen = screenShot(join(out, `e-${name}-screen.png`));
       const xAfter = xWindows();
       const newX = xAfter.filter((w) => w.mapped && !before.x.has(w.id));
-      const procs = descendants().filter((p) => !before.procs.has(p.pid) && p.exe !== electronExe).map((p) => `${p.comm} (${p.exe})`);
+      // Chromium's own processes: Electron's metrics name them, and a sandboxed one cannot be read (its exe is null).
+      const chromium = new Set(app.getAppMetrics().map((m) => m.pid));
+      const procs = descendants().filter((p) => !before.procs.has(p.pid) && !chromium.has(p.pid) && p.exe !== null && p.exe !== electronExe).map((p) => `${p.comm} (${p.exe})`);
       const opened = openerLines(openedFile).slice(before.opened);
       const rs = since(before.seq);
       const expected = (url) => noFragment(url) === noFragment(t.url) || url.startsWith(PDF_VIEWER) || url === 'about:blank' || url.startsWith('chrome://');
@@ -404,7 +402,7 @@ async function toolbarAndSidebar(list) {
     const t = tokens.issue({ owner: win.webContents.id, name: 'several-pages.pdf', mime: 'application/pdf', bytes, kind: 'pdf' });
     const id = `${row}-${part}`;
     await mount(win, { id, kind: 'pdf', url: t.url + fragment, width, height: 640 });
-    const d = await waitDrawn(t.url, 20000, 6);
+    const d = await waitDrawn(t.url, 20000);
     await sleep(1500);
     const first = drawnProbe(await probeViewer(t.url));
     await sleep(2500);
@@ -419,6 +417,7 @@ async function toolbarAndSidebar(list) {
 }
 const drawnProbe = (probes) => probes.find((p) => p.probe && !p.probe.error)?.probe ?? null;
 
+app.on('window-all-closed', () => {}); // a case closes its window; the suite, not Electron's default, ends the app
 app.whenReady().then(async () => {
   setupSession(session.defaultSession, 'default');
   setupSession(session.fromPartition('file-frame-second'), 'second');
