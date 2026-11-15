@@ -146,7 +146,7 @@ function extendOf(rows: readonly PlacedComment[], block: number) {
   return { oldFile, newFile };
 }
 
-const renderUnsent = ({ data }: { data: readonly PassComment[] }) => <UnsentRows comments={data} />;
+const renderUnsent = ({ data, side }: { data: readonly PassComment[]; side: SplitSide }) => <UnsentRows comments={data} side={sideOf(side)} />;
 
 // The diff view throws while rendering a diff its parser rejects; uncaught, that would unmount the whole window (C8c
 // M4: found over a fixture's unprefixed context lines). One block says so instead, and tries again when its diff changes.

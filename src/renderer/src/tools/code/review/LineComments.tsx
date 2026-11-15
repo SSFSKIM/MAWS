@@ -118,7 +118,6 @@ export function CommentRow({ path, place, onClose }: { path: string; place: Line
   const mine = card !== null && card.path === path && card.block === place.block && card.side === place.side && card.line === place.line;
   const setRow = comments?.setRow;
   const [element, setElement] = useState<HTMLDivElement | null>(null);
-  const [offset, setOffset] = useState(0);
 
   useEffect(() => {
     if (!mine) onClose();
@@ -128,14 +127,21 @@ export function CommentRow({ path, place, onClose }: { path: string; place: Line
     setRow(element);
     return () => setRow(null);
   }, [mine, element, setRow]);
+  const offset = useCodeEdge(element, place.side);
+
+  if (!mine) return null;
+  return <div ref={setElement} data-review-card-row={`${place.side}:${place.line}`} style={{ paddingLeft: offset }} className="py-1.5 pr-3 whitespace-normal" />;
+}
+
+// Where a row under a line starts (D3, the card's rule, which the unsent rows follow): past the line numbers' gutter of
+// its side where the gutter and the card's width fit in the row, else at the row's left edge.
+function useCodeEdge(element: HTMLElement | null, side: LineSide): number {
+  const [offset, setOffset] = useState(0);
   useLayoutEffect(() => {
     if (!element) return;
-    const gutterCell = () => {
-      const table = element.closest('table');
-      return table?.querySelector(place.side === 'old' ? 'td.diff-line-old-num' : 'td.diff-line-new-num') ?? table?.querySelector('td.diff-line-num') ?? null;
-    };
     const measure = () => {
-      const gutter = gutterCell();
+      const table = element.closest('table');
+      const gutter = table?.querySelector(side === 'old' ? 'td.diff-line-old-num' : 'td.diff-line-new-num') ?? table?.querySelector('td.diff-line-num') ?? null;
       setOffset(cardOffset(reviewLayout.width(element), gutter ? reviewLayout.width(gutter) : 0, CARD_WIDTH));
     };
     measure();
@@ -143,10 +149,8 @@ export function CommentRow({ path, place, onClose }: { path: string; place: Line
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [element, place.side]);
-
-  if (!mine) return null;
-  return <div ref={setElement} data-review-card-row={`${place.side}:${place.line}`} style={{ paddingLeft: offset }} className="py-1.5 pr-3 whitespace-normal" />;
+  }, [element, side]);
+  return offset;
 }
 
 /**
@@ -154,14 +158,16 @@ export function CommentRow({ path, place, onClose }: { path: string; place: Line
  * recommended option, is built here: one line each, its first words shortened). A click on the words edits that comment
  * in the card; Remove drops it; each target is at least 24 px tall (D6).
  */
-export function UnsentRows({ comments }: { comments: readonly PassComment[] }) {
+export function UnsentRows({ comments, side }: { comments: readonly PassComment[]; side: LineSide }) {
   const context = useLineCommentsContext();
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const offset = useCodeEdge(element, side);
   if (!context) return null;
   const { key, hostId } = context;
   return (
-    <div data-review-unsent="" className="flex flex-col gap-0.5 py-1 pr-3 pl-3 whitespace-normal">
+    <div ref={setElement} data-review-unsent="" style={{ paddingLeft: offset }} className="flex flex-col gap-0.5 py-1 pr-3 whitespace-normal">
       {comments.map((comment) => (
-        <div key={comment.id} data-review-unsent-comment={comment.id} className="flex w-full max-w-[min(100%,480px)] min-w-0 items-center gap-1 rounded-sm border border-border bg-bg-raised text-ui-sm">
+        <div key={comment.id} data-review-unsent-comment={comment.id} style={{ maxWidth: CARD_WIDTH }} className="flex w-full min-w-0 items-center gap-1 rounded-sm border border-border bg-bg-raised text-ui-sm">
           <button type="button" data-review-unsent-edit="" title={comment.text.trim()} onClick={() => editComment(key, comment.id, hostId)} className="flex min-h-6 min-w-0 flex-1 items-center truncate rounded-sm px-2 text-left text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
             <span className="min-w-0 truncate">{comment.text.trim()}</span>
           </button>
