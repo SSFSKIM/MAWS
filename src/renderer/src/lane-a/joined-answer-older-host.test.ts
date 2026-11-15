@@ -3,7 +3,9 @@
 // what a host of an older build sends for a joined answer draws as this build's own events will. A host of build G
 // sends the joined message whole on both routes; its events are frozen beside the probes' recordings, written before
 // this landing changed any source: `<name>.base-events.json` (the journal through the normaliser) and
-// `<name>.base-backfill.json` (the engine's file through the chain follower).
+// `<name>.base-backfill.json` (the engine's file through the chain follower). It lives beside the reader of another
+// machine's rows, as arrival-routes.test.ts does: it reads the composer's recall and Edit's prefill, whose graph is the
+// renderer's, and the node project typechecks the model's directory.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -11,19 +13,19 @@ import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskQuestion } from '@shared/maws/tools';
-import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
-import { MemoryFileReader } from '../../../../../test/support/memory-reader';
-import { PROBE_CONTROLS, PROBE_JOINS, recordedJoin } from '../../../../../test/support/recorded-joins';
-import { recallEntries, recallText } from '../../composer/editor/history';
-import { rowPrefill } from '../../composer/edit-prefill';
-import { journalToEvents } from '../dev/journal';
-import { turnActivity } from './activity';
-import { rowsOf, withAllExpanded } from './derive';
-import { applyEvents, createState, type TranscriptState } from './reduce';
-import type { Row } from './rows';
-import { builder, uuid } from './test-events';
-import { copiedUserText } from './user-text';
+import { ChainFollower } from '../../../engine-host/fs/chain-follower';
+import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { PROBE_CONTROLS, PROBE_JOINS, recordedJoin } from '../../../../test/support/recorded-joins';
+import { recallEntries, recallText } from '../composer/editor/history';
+import { rowPrefill } from '../composer/edit-prefill';
+import { journalToEvents } from '../transcript/dev/journal';
+import { turnActivity } from '../transcript/model/activity';
+import { rowsOf, withAllExpanded } from '../transcript/model/derive';
+import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
+import type { Row } from '../transcript/model/rows';
+import { builder, uuid } from '../transcript/model/test-events';
+import { copiedUserText } from '../transcript/model/user-text';
 
 type UserRow = Extract<Row, { kind: 'user' }>;
 type AskRow = Extract<Row, { kind: 'ask' }>;
