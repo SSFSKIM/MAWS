@@ -1587,7 +1587,7 @@ describe('plugins widget: the images', () => {
 
   it('asks for each plugin with its own marketplace’s source: one named like a seed from another repository with that repository, one the list does not name with none', async () => {
     const reused = 'harbour-chart@claude-plugins-official';
-    installed = [plugin(BERTH), plugin(reused), plugin('e8-quay@harbour-annex')];
+    installed = [plugin('e8-probe@e8-scratch'), plugin(BERTH), plugin(reused), plugin('e8-quay@harbour-annex')];
     backend.script('marketplaces.list', () => ({
       marketplaces: [
         { name: 'e8-scratch', source: 'directory', locator: SCRATCH, installLocation: SCRATCH },
@@ -1602,6 +1602,7 @@ describe('plugins widget: the images', () => {
       {
         plugins: [
           { id: BERTH, marketplaceLocator: SCRATCH },
+          { id: 'e8-probe@e8-scratch', marketplaceLocator: SCRATCH },
           { id: 'e8-quay@harbour-annex', marketplaceLocator: null },
           { id: reused, marketplaceLocator: 'harbour-works/claude-plugins-official' },
         ],
