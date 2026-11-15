@@ -1,10 +1,12 @@
 // What Show › "Loaded in this session" adds to My items' rows (P2-B execution document §5.6): the plugin problems the
 // engine reported at the last init, and the loaded plugins that are no plugin of the list (the engine's own `@builtin`
 // ones, a folder's), each read-only with its credit. `present` reads A's loaded facts (`useLoadedPlugins`).
+import { ItemImage } from '../../customize/image/ItemImage';
+import { pluginSeedOf } from '../../customize/image/tile';
 import { LIBRARY as L, PLUGINS } from '../copy';
 import type { LoadedOnly } from './library';
 import type { LoadedPlugins } from '../../sessions/observed';
-import { GroupHeading, PluginTile } from './PluginRow';
+import { GroupHeading } from './PluginRow';
 
 export interface PluginsView {
   plugins: { name: string; version: string | null; source: string | null; path: string }[];
@@ -54,11 +56,11 @@ export function LoadedBody({ problems, extras }: { problems: PluginsView['proble
 export const loadedKey = (p: LoadedOnly) => `${p.source}:${p.name}`;
 
 // A loaded plugin that is no plugin of the list, read-only with its credit (in LoadedBody's list, or among My items'
-// rows under Name sort).
+// rows under Name sort). Its image is its letter tile: the directory names no icon of a plugin no marketplace route installs.
 export function LoadedRow({ plugin: p }: { plugin: LoadedOnly }) {
   return (
     <li data-loaded-row={p.source || p.name} className="flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0">
-      <PluginTile />
+      <ItemImage kind="plugin" seed={p.source ? pluginSeedOf(p.source) : p.name} iconUrl={null} size="row" />
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="truncate font-medium">{p.name}</span>
         <span className="truncate text-ui-sm text-fg-muted">{CREDIT[p.kind] ?? p.source}</span>

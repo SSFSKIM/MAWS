@@ -1,5 +1,5 @@
 // One Discover card (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "A card"; the owner's
-// reference, Claude Desktop's Customize › Discover): the icon (main's data, else a monogram), the name, "by <publisher>",
+// reference, Claude Desktop's Customize › Discover): the image (the directory's icon as main's data, else the letter tile; UX wave U11c), the name, "by <publisher>",
 // the trust label with its tooltip, two lines of description, the components ("3 skills · MCP server · runs code" or
 // "Contents shown after install") and the count where a source has one, and + at the trailing edge. Fixed height, so a
 // shelf's cards align. The whole card is one target, "View <name>" (its detail; an item installed here opens it in My
@@ -8,8 +8,9 @@
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
 import { IconButton, PlusIcon } from '../../app/IconButton';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
+import { ItemImage } from '../image/ItemImage';
+import { catalogSeedOf } from '../image/tile';
 import { catalogKey, installRequestOf } from './add';
-import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
 import { addable, cardContentsWords, metricWords, trustOf } from './present';
 
@@ -77,7 +78,7 @@ export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: Cat
     >
       <button type="button" data-card-open aria-label={D.view(item.name)} className="absolute inset-0 rounded-lg outline-accent -outline-offset-1 focus-visible:outline-2" />
       <div className="relative flex min-w-0 items-start gap-3">
-        <CatalogIcon item={item} size="md" />
+        <ItemImage kind={item.kind} seed={catalogSeedOf(item)} iconUrl={item.iconUrl} size="card" />
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate font-medium text-fg" title={item.installName ?? item.name}>
             {item.name}

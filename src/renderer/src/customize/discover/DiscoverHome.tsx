@@ -9,9 +9,10 @@ import { IconButton, SortIcon } from '../../app/IconButton';
 import { SECONDARY } from '../../sessions/ui';
 import { Choice } from '../../widgets/plugins/LibraryHeader';
 import { OperationLine } from '../../widgets/plugins/manage';
+import { ItemImage } from '../image/ItemImage';
+import { catalogSeedOf } from '../image/tile';
 import { catalogKey } from './add';
 import { AddButton, InstalledMark, TrustLabel } from './CatalogCard';
-import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
 import { CardPlaceholders, QueryGrid, Shelf, ShelfHeading } from './DiscoverGrid';
 import { addable, componentsWords, metricWords } from './present';
@@ -49,7 +50,7 @@ function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(i
         </div>
       </div>
       <span className="relative hidden @md/customize:block">
-        <CatalogIcon item={item} size="lg" />
+        <ItemImage kind={item.kind} seed={catalogSeedOf(item)} iconUrl={item.iconUrl} size="detail" />
       </span>
     </section>
   );

@@ -138,6 +138,10 @@ describe('skills widget: the library', () => {
     expect(design.querySelector('[data-skill-badge]')!.textContent).toBe('Frontend design');
     expect(document.querySelector('[data-skill-row="lookup"] [data-skill-badge]')!.textContent).toBe('mcp'); // the engine's word
     expect(document.querySelector('[data-skill-row="p2b-user"] [data-skill-badge]')).toBeNull();
+    // UX wave U11c M1: every row's image is its letter tile, by the name the row shows (no "/" tile: "Use in chat" says it)
+    const images = [...document.querySelectorAll('[data-skill-row]')].map((r) => r.querySelector('[data-item-image]'));
+    expect(images.every((image) => image?.getAttribute('data-item-image') === 'tile' && image.getAttribute('data-item-kind') === 'skill')).toBe(true);
+    expect(design.querySelector('[data-item-image]')!.textContent).toBe('F');
   });
 
   it('Use in chat closes the dialog and puts /<skill> at the composer’s caret, sending nothing', async () => {
@@ -160,6 +164,8 @@ describe('skills widget: the library', () => {
     fireEvent.click(screen.getByRole('button', { name: 'View frontend-design' }));
     const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
     expect(detail.getAttribute('data-skill-detail')).toBe('frontend-design:frontend-design');
+    const onRow = document.querySelector('[data-skill-row="frontend-design:frontend-design"] [data-item-image]')!;
+    expect([detail.querySelector('[data-item-image]')!.textContent, detail.querySelector('[data-item-image]')!.getAttribute('data-tile-colour')]).toEqual([onRow.textContent, onRow.getAttribute('data-tile-colour')]); // one tile, row and detail
     expect(detail.textContent).toContain('Long enough to be cut on the row and whole in the detail.');
     expect(detail.textContent).toContain('/frontend-design:frontend-design');
     expect(detail.textContent).toContain('Frontend design');

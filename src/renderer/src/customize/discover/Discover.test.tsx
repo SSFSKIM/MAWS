@@ -107,6 +107,8 @@ function answer(name: CommandName, input: unknown): unknown {
       ];
     case 'catalog.icon':
       return { dataUrl: iconAnswer((input as { url: string }).url) };
+    case 'catalog.pluginIcons':
+      return { icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: null })) };
     case 'catalog.refresh':
       return answer('catalog.sources', {});
     case 'plugins.env':
@@ -234,8 +236,8 @@ describe('Customize › Plugins › Discover', () => {
     expect(h.querySelector('[data-trust]')!.getAttribute('data-trust')).toBe('Added by you');
     expect(h.querySelector('[data-trust]')!.getAttribute('title')).toBe('You added this marketplace. Anthropic hasn’t reviewed it.');
     expect(h.querySelector('[data-catalog-components]')!.textContent).toBe('hooks · runs code');
-    await waitFor(() => expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('image'));
-    expect(h.querySelector('[data-catalog-icon]')!.textContent).toBe('H');
+    await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
+    expect(h.querySelector('[data-item-image]')!.textContent).toBe('H');
   });
 
   it('See all filters to its shelf with a removable chip; a search lists results', async () => {
@@ -391,19 +393,30 @@ describe('Customize › Plugins › Discover', () => {
     expect(screen.getByRole('region', { name: 'Featured' }).querySelector('[data-marketplace-stays]')!.textContent).toContain('The marketplace claude-plugins-official stays added.');
   });
 
+  // UX wave U11c M1 (§C, the seed): an item is the same tile wherever it is drawn
+  it('an installed plugin draws one tile in My items and on its Discover card: the letter and colour of its install name', async () => {
+    mountPlugins();
+    const row = await found('[data-plugin-row="code-review@claude-plugins-official"] [data-item-image]');
+    expect([row.getAttribute('data-item-image'), row.getAttribute('data-item-kind'), row.textContent]).toEqual(['tile', 'plugin', 'C']);
+    const colour = row.getAttribute('data-tile-colour');
+    await discover();
+    const onCard = card(installedHere.id).querySelector('[data-item-image]')!;
+    expect([onCard.getAttribute('data-item-image'), onCard.getAttribute('data-item-kind'), onCard.textContent, onCard.getAttribute('data-tile-colour')]).toEqual(['tile', 'plugin', 'C', colour]);
+  });
+
   it('an icon main could not answer is asked again on Refresh, so main’s retry reaches an open window', async () => {
     let up = false;
     iconAnswer = (url) => (up && url.includes('plugin-icons') ? 'data:image/png;base64,iVBORw0KGgo=' : null);
     mountPlugins();
     await discover();
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(0));
-    expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('monogram');
+    expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     up = true;
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('image'));
+    await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
   });
 
-  it('an icon renders only as an image of its data: an SVG’s script and external reference neither run nor load; anything but image data is a monogram', async () => {
+  it('an icon renders only as an image of its data: an SVG’s script and external reference neither run nor load; anything but image data is the tile', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="window.__iconRan=1"><script>window.__iconRan=1</script><image xlink:href="https://evil.example/x.png" href="https://evil.example/x.png" width="10" height="10"/></svg>';
     const hostile = `data:image/svg+xml;base64,${btoa(svg)}`;
     iconAnswer = (url) => (url.includes('plugin-icons') ? hostile : null);
@@ -411,7 +424,7 @@ describe('Customize › Plugins › Discover', () => {
     mountPlugins();
     await discover();
     const tile = await waitFor(() => {
-      const el = card(frontend.id).querySelector('[data-catalog-icon="image"]');
+      const el = card(frontend.id).querySelector('[data-item-image="icon"]');
       if (!el) throw new Error('no icon yet');
       return el;
     });
@@ -422,11 +435,11 @@ describe('Customize › Plugins › Discover', () => {
     expect(fetched).not.toHaveBeenCalled();
     fetched.mockRestore();
     cleanup();
-    iconAnswer = (url) => (url.includes('plugin-icons') ? 'https://evil.example/x.png' : null); // not data: a monogram, never a request
+    iconAnswer = (url) => (url.includes('plugin-icons') ? 'https://evil.example/x.png' : null); // not data: the tile, never a request
     mountPlugins();
     await discover();
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(1));
-    expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('monogram');
+    expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     expect(card(frontend.id).querySelector('img')).toBeNull();
   });
 

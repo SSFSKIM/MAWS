@@ -10,10 +10,11 @@
 // nothing observed says it is unknown (unknown is never empty). A failed read of what the plugins say
 // about themselves keeps the rows (their names come from the listing) and says so with Retry. A change's result whose
 // installation left the list stays beneath it.
-import type { ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { useNow } from '../../app/use-now';
+import { usePluginIcons } from '../../customize/discover/read';
 import { LIBRARY as L } from '../copy';
 import { BuiltInMods } from './BuiltInMods';
 import { byNameTogether, isNarrowed, loadedOnly, loadedOnlyShown, myItems, problemsShown, type PluginIdentity } from './library';
@@ -52,6 +53,9 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
   const view = useLibraryStore((s) => s.plugins);
   const now = useNow();
   const plugins = installed.data?.plugins;
+  // UX wave U11c M1: one read of the directory's icons for every plugin the list may draw, whatever its search and Show
+  const icons = usePluginIcons(useMemo(() => identities.map((identity) => identity.id), [identities]));
+  const iconOf = (identity: PluginIdentity) => icons.get(identity.id) ?? null;
 
   if (!plugins) {
     return (
@@ -119,7 +123,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
               extras,
             ).map((row) =>
               row.kind === 'identity' ? (
-                <PluginRow key={row.identity.id} identity={row.identity} now={now} onOpen={onOpen} />
+                <PluginRow key={row.identity.id} identity={row.identity} now={now} iconUrl={iconOf(row.identity)} onOpen={onOpen} />
               ) : (
                 <LoadedRow key={loadedKey(row.plugin)} plugin={row.plugin} />
               ),
@@ -140,7 +144,7 @@ export function MyItems({ appSessionId, installed, identities, loaded, loadedIds
             ) : (
               <ul className="m-0 list-none p-0">
                 {rows.map((identity) => (
-                  <PluginRow key={identity.id} identity={identity} now={now} onOpen={onOpen} />
+                  <PluginRow key={identity.id} identity={identity} now={now} iconUrl={iconOf(identity)} onOpen={onOpen} />
                 ))}
               </ul>
             )}

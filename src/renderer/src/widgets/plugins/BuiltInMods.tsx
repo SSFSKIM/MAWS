@@ -8,10 +8,11 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { Segment } from '../../settings-tab/parts';
 import { REPORT } from '../../owner/report/copy';
+import { ItemImage } from '../../customize/image/ItemImage';
 import { LIBRARY as L } from '../copy';
 import { useBuiltInMods } from './builtin-mods';
 import { Switch } from './manage';
-import { GroupHeading, PluginTile } from './PluginRow';
+import { GroupHeading } from './PluginRow';
 
 export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSessionId | null; search: string }) {
   const { read, failure, setEnabled, setOverride } = useBuiltInMods(appSessionId);
@@ -34,7 +35,7 @@ export function BuiltInMods({ appSessionId, search }: { appSessionId: AppSession
       <ul className="m-0 list-none p-0">
         {rows.map((row) => (
           <li key={row.id} data-mod-row={row.id} className="flex items-start gap-3 border-b border-border px-2 py-2 last:border-b-0">
-            <PluginTile />
+            <ItemImage kind="mod" seed={row.name} iconUrl={null} size="row" />
             <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-ui-sm text-fg-muted">
               <span className="flex min-w-0 items-center gap-2 text-ui">
                 <span className="truncate font-medium text-fg">{row.name}</span>

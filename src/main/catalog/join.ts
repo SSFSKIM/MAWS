@@ -120,8 +120,8 @@ function pluginItem(identity: string, listed: readonly EntryListing[], records: 
   return item;
 }
 
-/** The catalog for one cwd: every plugin and connector, joined. */
-export function buildCatalog(input: CatalogInput): CatalogItem[] {
+// The plugins by identity: every listing that points at one thing, with the directory's records of it.
+function pluginGroups(input: CatalogInput): Map<string, { listed: EntryListing[]; records: DirectoryPlugin[] }> {
   const groups = new Map<string, { listed: EntryListing[]; records: DirectoryPlugin[] }>();
   const group = (identity: string) => groups.get(identity) ?? groups.set(identity, { listed: [], records: [] }).get(identity)!;
   const { listings, ambiguous } = pluginListings(input.network, input.engine, input.tests);
@@ -130,8 +130,25 @@ export function buildCatalog(input: CatalogInput): CatalogItem[] {
     const place = repositoryLocation(record.repository, record.path);
     group(place === null ? `directory:${record.id}` : identityOf(place, directoryEntryName(record.name), DIRECTORY_MARKETPLACE, ambiguous)).records.push(record);
   }
+  return groups;
+}
 
-  const items = [...groups].map(([identity, { listed, records }]) => pluginItem(identity, listed, records, input));
+/** UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): the directory's icon of the item
+ * each route installs, by the route's `<plugin>@<marketplace>`, as Discover's card of that item draws it (its first
+ * record's). From the network data alone, with no engine view: the routes are the seeds' (a marketplace no seed is has
+ * none here). A route two items name with different icons has none. */
+export function pluginIconsOf(network: NetworkData): ReadonlyMap<string, string | null> {
+  const icons = new Map<string, string | null>();
+  for (const { listed, records } of pluginGroups({ network, engine: null, tests: [] }).values()) {
+    const icon = records[0]?.iconUrl ?? null;
+    for (const id of new Set(listed.map(routeId))) icons.set(id, icons.has(id) && icons.get(id) !== icon ? null : icon);
+  }
+  return icons;
+}
+
+/** The catalog for one cwd: every plugin and connector, joined. */
+export function buildCatalog(input: CatalogInput): CatalogItem[] {
+  const items = [...pluginGroups(input)].map(([identity, { listed, records }]) => pluginItem(identity, listed, records, input));
   const configured = new Set(input.engine?.servers ?? []);
   for (const server of input.network.servers ?? []) {
     const route = connectorRoute(server);

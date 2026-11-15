@@ -5,7 +5,7 @@
 // again, and a query starts again from its first page, since its cursors belong to the catalog revision they came from.
 // A page that answers `restarted` (its cursor's revision has gone) starts its query again the same way.
 import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
 import { ipc } from '../../ipc/client';
@@ -33,6 +33,7 @@ export function catalogChanged(client: QueryClient = queryClient): void {
   void client.invalidateQueries({ queryKey: [...ROOT, 'item'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'sources'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'postures'] });
+  void client.invalidateQueries({ queryKey: [...ROOT, 'pluginIcons'] });
   void client.invalidateQueries({ queryKey: [...ROOT, 'icon'], predicate: (query) => query.state.data === null }); // the misses
 }
 
@@ -93,7 +94,7 @@ export function useCatalogRefresh(): { refresh(): void; running: boolean } {
   return { refresh, running };
 }
 
-/** A card's icon as data from main (null: a monogram). A miss stays fresh for five minutes, an icon for a day; Refresh and
+/** An item's icon as data from main (null: its letter tile). A miss stays fresh for five minutes, an icon for a day; Refresh and
  * `catalog.changed` ask the misses again. */
 export const useCatalogIcon = (url: string | null) =>
   useQuery<string | null, IpcCommandError>({
@@ -104,6 +105,26 @@ export const useCatalogIcon = (url: string | null) =>
     gcTime: Infinity,
     refetchOnWindowFocus: false,
   });
+
+const NO_ICONS: ReadonlyMap<string, string | null> = new Map();
+const ICON_IDS_MAX = 512; // the command's bound: a row past it keeps its tile
+
+/** UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): the directory's icon URL of each
+ * installed plugin a list draws, by its id, in one read for the list (main's `catalog.pluginIcons`, from the directory
+ * copy it holds: it asks the network nothing and reads no catalog of the engine). Empty while it is out or failed, so
+ * every row keeps its tile; read again on `catalog.changed`. */
+export function usePluginIcons(ids: readonly string[]): ReadonlyMap<string, string | null> {
+  const asked = useMemo(() => [...new Set(ids)].sort().slice(0, ICON_IDS_MAX), [ids]);
+  const read = useQuery<CommandOutput<'catalog.pluginIcons'>, IpcCommandError>({
+    queryKey: [...ROOT, 'pluginIcons', asked],
+    queryFn: () => invoke('catalog.pluginIcons', { ids: asked }, LOCAL()),
+    enabled: asked.length > 0,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+  const icons = read.data?.icons;
+  return useMemo(() => (icons ? new Map(icons.map(({ id, iconUrl }) => [id, iconUrl])) : NO_ICONS), [icons]);
+}
 
 /** P4-AGG M4: each configured server's sign-in posture, by the directory record its endpoint matches, and its
  * configuration's fingerprint (main's `catalog.postures`, from the directory copy it holds: My items never reaches the

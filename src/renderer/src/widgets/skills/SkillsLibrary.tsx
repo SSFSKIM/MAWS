@@ -1,12 +1,14 @@
 // The skills library's list and detail (P2-B execution document §5.10; Claude Desktop's Skills section,
 // readable/app-2.16120.0/web/app/v1/c5e558aae-DNGm5L2q.js:1076-1112, :1351-1398, and its plugin badge,
-// ccea1f474-BHx9TdZi.js:381-420): My items' group headings, a row per skill (the tile, the skill's name, its plugin's
+// ccea1f474-BHx9TdZi.js:381-420): My items' group headings, a row per skill (the image, its letter tile, UX wave U11c:
+// "Use in chat" says what the old "/" tile said; the skill's name, its plugin's
 // name or the engine's source word as a neutral badge, the description on a second line, "Use in chat" at the trailing
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Icon, SortIcon } from '../../app/IconButton';
+import { SortIcon } from '../../app/IconButton';
+import { ItemImage } from '../../customize/image/ItemImage';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -40,15 +42,6 @@ export function SkillsToolbar({ plugins, canReload = false, reloading = false, o
   );
 }
 
-// Only a verified invocation earns the slash; disk metadata uses a neutral document glyph.
-function SkillTile({ invocable, size = 'size-9' }: { invocable: boolean; size?: string }) {
-  return (
-    <span aria-hidden className={`flex ${size} shrink-0 items-center justify-center rounded-md border border-border bg-bg-active font-mono text-ui text-fg-muted`}>
-      {invocable ? '/' : <Icon><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.5h4" /></Icon>}
-    </span>
-  );
-}
-
 function Centered({ children, role }: { children: ReactNode; role?: 'status' | 'alert' }) {
   return (
     <div role={role} className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
@@ -73,7 +66,7 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       }}
     >
       <button type="button" data-row-open aria-label={L.view(label)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
-      <SkillTile invocable={invocation !== null} />
+      <ItemImage kind="skill" seed={label} iconUrl={null} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
@@ -108,7 +101,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
       <BackButton to={S.list} onBack={onBack} />
       <div className="flex items-center gap-3">
-        <SkillTile invocable={invocation !== null} size="size-11" />
+        <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="detail" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>

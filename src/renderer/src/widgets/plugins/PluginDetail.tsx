@@ -10,17 +10,20 @@
 // plugin, and What's inside; a tab per non-empty kind lists it. A chip that is not here or the user's offers no change
 // and says where the plugin is managed.
 import { DropdownMenu } from 'radix-ui';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Availability } from '@shared/ipc/schema/session';
 import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ChevronLeftIcon } from '../../app/IconButton';
 import { useNow } from '../../app/use-now';
 import { FRESHNESS } from '../../sessions/observed';
+import { ItemImage } from '../../customize/image/ItemImage';
+import { pluginSeedOf } from '../../customize/image/tile';
+import { usePluginIcons } from '../../customize/discover/read';
 import { LIBRARY as L, PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
 import { chipLabel, chipManagedWords, chipsOf, loadedFactOf, OTHER_PROJECTS, projectCount, unreadNotice, updateOffer } from './detail';
-import { MoreIcon, PluginGlyph } from './icons';
+import { MoreIcon } from './icons';
 import { basename, dateWords, displayNameOf, installationRef, manifestKeyOf, updatedOf, versionWords, type PluginIdentity } from './library';
 import { RefreshGesture, useRefresh, type SessionPlugins } from './LoadedLine';
 import { present } from './LoadedView';
@@ -79,6 +82,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const unread = unreadNotice(view, read);
 
   const name = displayNameOf(identity.name, view ?? identity.manifest);
+  const icons = usePluginIcons(useMemo(() => [identity.id], [identity.id])); // UX wave U11c: the directory's icon, else the tile
   const installation = chip?.installation ?? identity.representative;
   const version = versionWords(installation.version);
   const updated = chip ? (installation.lastUpdated ?? installation.installedAt) : updatedOf(identity);
@@ -113,9 +117,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
           </p>
         )}
         <div className="flex min-w-0 items-start gap-3">
-          <span aria-hidden className="flex size-11 shrink-0 items-center justify-center rounded-lg border border-border bg-bg-active text-fg-muted">
-            <PluginGlyph className="size-5" />
-          </span>
+          <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={icons.get(identity.id) ?? null} size="detail" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <h3 className="m-0 truncate text-prose font-semibold text-fg" title={identity.id}>
               {name}

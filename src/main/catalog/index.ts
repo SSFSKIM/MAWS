@@ -18,9 +18,9 @@ import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventPayload } from '@shared/ipc/schema';
 import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
-import { catalogPages, iconGet, NETWORK_KEYS, type IconGet } from './fetch';
+import { catalogPages, iconGet, isIconUrl, NETWORK_KEYS, type IconGet } from './fetch';
 import { CatalogIcons } from './icons';
-import { buildCatalog } from './join';
+import { buildCatalog, pluginIconsOf } from './join';
 import { connectorRoute, engineViewFromWire, type EngineView, type TestSourceData } from './normalize';
 import { configurationFingerprint, posturesOf } from './postures';
 import { homeOf, queryOf } from './query';
@@ -40,6 +40,7 @@ export interface CatalogDeps {
   userAgent: string; // MAWS and its version
   log?: (line: string) => void;
   iconGet?: IconGet; // how icons are read (tests); by default the environment's (fetch.ts)
+  now?: () => number; // the icons' clock (tests)
 }
 
 const READ_ATTEMPTS = 3; // a read overtaken by an invalidation this many times in a row answers what it has, uncached
@@ -54,7 +55,7 @@ export interface Catalog {
 export function startCatalog(deps: CatalogDeps): Catalog {
   const log = deps.log ?? ((line: string) => console.log(`[catalog] ${line}`));
   const store = new CatalogStore({ dir: join(deps.userData, 'catalog'), keys: NETWORK_KEYS, pages: catalogPages(deps.env, deps.userAgent), log });
-  const icons = new CatalogIcons({ dir: join(deps.userData, 'catalog', 'icons'), get: deps.iconGet ?? iconGet(deps.env, deps.userAgent), log });
+  const icons = new CatalogIcons({ dir: join(deps.userData, 'catalog', 'icons'), get: deps.iconGet ?? iconGet(deps.env, deps.userAgent), now: deps.now, log });
   const built = new Map<string, { revision: string; items: CatalogItem[] }>();
   let tests: Promise<TestSourceData[]> | null = null;
   const testData = () =>
@@ -142,13 +143,29 @@ export function startCatalog(deps: CatalogDeps): Catalog {
     }
   });
   deps.register('catalog.icon', async ({ url }) => ({ dataUrl: await icons.dataUrl(url) }));
+  // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): an icon is handed to My items only
+  // where `catalog.icon` could answer it, so a row asks nothing for one on a vendor's site
+  const onIconRoute = (url: string | null) => (url !== null && isIconUrl(url) ? url : null);
+  // UX wave U11c M1 (§C): the directory's icon of each installed plugin, from the copy held and nothing else (never
+  // `ready()`, never the machine's engine view: the session's `/plugins` reads no catalog of the engine), joined once per
+  // revision of the store
+  let pluginIcons: { revision: number; icons: ReadonlyMap<string, string | null> } | null = null;
+  deps.register('catalog.pluginIcons', async ({ ids }) => {
+    await store.loaded();
+    if (pluginIcons?.revision !== store.revision) pluginIcons = { revision: store.revision, icons: pluginIconsOf(store.data()) };
+    const held = pluginIcons.icons;
+    return { icons: ids.map((id) => ({ id, iconUrl: onIconRoute(held.get(id) ?? null) })) };
+  });
   // M4: from the copy held (no fetch: a posture is not worth a network read), against the configured servers' endpoints
   deps.register('catalog.postures', async ({ cwd }) => {
     await store.loaded();
     const endpoints = await deps.call('customization.serverEndpoints', { cwd });
     if (!endpoints.ok) throw new CommandFailure(endpoints.error);
-    const routes = (store.data().servers ?? []).flatMap((server) => connectorRoute(server) ?? []);
-    return { servers: posturesOf(endpoints.value.servers, routes, fingerprint) };
+    const listed = (store.data().servers ?? []).flatMap((server) => {
+      const route = connectorRoute(server);
+      return route === null ? [] : [{ route, iconUrl: onIconRoute(server.iconUrl) }];
+    });
+    return { servers: posturesOf(endpoints.value.servers, listed, fingerprint) };
   });
   deps.register('catalog.sources', async () => {
     await store.loaded();

@@ -1534,3 +1534,67 @@ describe('plugins widget: the detail', () => {
     expect(detail()).toBeNull();
   });
 });
+
+// UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C; C6, C7): every row's image. The list
+// asks main once for the directory's icon of the plugins it draws (`catalog.pluginIcons`, from the copy main holds); a
+// row with an icon draws it in its tile's box, every other row its letter tile, and only a named icon is asked for.
+describe('plugins widget: the images', () => {
+  const ICON = `https://api.anthropic.com/api/directory/plugin-icons/${'0a'.repeat(32)}/256.png`;
+  const DATA = 'data:image/png;base64,iVBORw0KGgo=';
+  const BERTH = 'e8-berth@e8-scratch';
+  const iconsOf = (input: unknown) => ({ icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: id === BERTH ? ICON : null })) });
+  const imageOf = (id: string) => row(id).querySelector<HTMLElement>('[data-item-image]')!;
+  const rowOrder = () => [...section('my-items').querySelectorAll('[data-plugin-row]')].map((r) => r.getAttribute('data-plugin-row'));
+
+  it('draws a listed plugin’s directory icon in the session’s /plugins and in its detail; one with none its tile, asking catalog.icon nothing', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin(BERTH)];
+    backend.script('catalog.pluginIcons', iconsOf);
+    backend.script('catalog.icon', () => ({ dataUrl: DATA }));
+    await ready();
+    await waitFor(() => expect(imageOf(BERTH).getAttribute('data-item-image')).toBe('icon'));
+    expect(imageOf(BERTH).querySelector('img')!.getAttribute('src')).toBe(DATA);
+    expect([imageOf('e8-probe@e8-scratch').getAttribute('data-item-image'), imageOf('e8-probe@e8-scratch').getAttribute('data-item-kind'), imageOf('e8-probe@e8-scratch').textContent]).toEqual(['tile', 'plugin', 'E']);
+    expect(invoked('catalog.pluginIcons')).toEqual([{ ids: [BERTH, 'e8-probe@e8-scratch'] }]); // one read for the list
+    expect(invoked('catalog.icon')).toEqual([{ url: ICON }]);
+    expect(invoked('catalog.home')).toEqual([]); // no catalog of the engine is built for it
+    fireEvent.click(within(row(BERTH)).getByRole('button', { name: /^View / }));
+    const detail = document.querySelector<HTMLElement>(`[data-plugin-detail="${BERTH}"] [data-item-image]`)!;
+    await waitFor(() => expect(detail.getAttribute('data-item-image')).toBe('icon'));
+    expect(detail.className).toContain('size-14');
+  });
+
+  it('held open: while the icons’ read is out every row has its tile; its answer fills one box and no row is added, removed or moved', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin(BERTH), plugin('e8-quay@e8-scratch')];
+    let release!: () => void;
+    const answered = new Promise<void>((resolve) => (release = resolve));
+    backend.script('catalog.pluginIcons', async (input) => {
+      await answered;
+      return iconsOf(input);
+    });
+    backend.script('catalog.icon', () => ({ dataUrl: DATA }));
+    await ready();
+    await waitFor(() => expect(invoked('catalog.pluginIcons')).toHaveLength(1));
+    const order = rowOrder();
+    expect(order).toHaveLength(3);
+    expect(order.map((id) => imageOf(id!).getAttribute('data-item-image'))).toEqual(['tile', 'tile', 'tile']);
+    expect(invoked('catalog.icon')).toEqual([]);
+    await act(async () => release());
+    await waitFor(() => expect(imageOf(BERTH).getAttribute('data-item-image')).toBe('icon'));
+    expect(rowOrder()).toEqual(order);
+    expect(row(BERTH).firstElementChild!.nextElementSibling).toBe(imageOf(BERTH)); // in the tile's place, after the row's own target
+    expect(imageOf(BERTH).className).toContain('size-9');
+    expect(order.filter((id) => id !== BERTH).map((id) => imageOf(id!).getAttribute('data-item-image'))).toEqual(['tile', 'tile']);
+  });
+
+  it('a failed read of the icons leaves every row its tile', async () => {
+    installed = [plugin('e8-probe@e8-scratch'), plugin(BERTH)];
+    backend.script('catalog.pluginIcons', () => {
+      throw new WidgetBackendError({ code: 'internal', message: 'no copy' });
+    });
+    await ready();
+    await waitFor(() => expect(invoked('catalog.pluginIcons')).toHaveLength(1));
+    await act(async () => {});
+    expect(imageOf(BERTH).getAttribute('data-item-image')).toBe('tile');
+    expect(invoked('catalog.icon')).toEqual([]);
+  });
+});

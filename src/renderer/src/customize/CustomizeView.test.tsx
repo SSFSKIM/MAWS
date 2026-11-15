@@ -198,15 +198,14 @@ it('keeps disk skill names as display metadata without inventing user or plugin 
     const label = open.closest('li')!.querySelector('[data-skill-name]')!;
     expect(label.textContent).toBe(name);
     expect(label.getAttribute('title')).toBeNull();
-    const tile = open.closest('li')!.querySelector('span[aria-hidden]')!;
-    expect(tile.textContent?.trim()).not.toBe('/');
-    expect(tile.querySelector('svg')).not.toBeNull();
+    // UX wave U11c M1: a skill's image is its letter tile, whether or not it is invocable (the "/" tile went)
+    const tile = open.closest('li')!.querySelector('[data-item-image]')!;
+    expect([tile.getAttribute('data-item-image'), tile.getAttribute('data-item-kind'), tile.textContent]).toEqual(['tile', 'skill', name.startsWith('Plugin') ? 'P' : 'Q']);
     fireEvent.click(open);
     const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
     expect(within(detail).getByRole('heading', { name })).toBeTruthy();
-    const detailTile = detail.querySelector('span[aria-hidden]')!;
-    expect(detailTile.textContent?.trim()).not.toBe('/');
-    expect(detailTile.querySelector('svg')).not.toBeNull();
+    const detailTile = detail.querySelector('[data-item-image]')!;
+    expect([detailTile.textContent, detailTile.getAttribute('data-tile-colour')]).toEqual([tile.textContent, tile.getAttribute('data-tile-colour')]); // the same tile in its detail
     expect(within(detail).queryByText('Type')).toBeNull();
     expect(within(detail).queryByText(`/${name}`)).toBeNull();
     expect(within(detail).queryByRole('button', { name: 'Use in chat' })).toBeNull();
@@ -226,10 +225,10 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={page.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
   expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
-  expect(open.closest('li')!.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(open.closest('li')!.querySelector('[data-item-image]')!.textContent).toBe('R'); // UX wave U11c: the tile, "Use in chat" saying it is invocable
   fireEvent.click(open);
   const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
-  expect(detail.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(detail.querySelector('[data-item-image]')!.textContent).toBe('R');
   expect(within(detail).getByText('Type')).toBeTruthy();
   expect(within(detail).getByText('/reports:review')).toBeTruthy();
   expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();
@@ -334,12 +333,29 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }] }));
   const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
     resetSignIns();
     print = 'print-1';
+  });
+
+  // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): a configured row's image is the
+  // icon of the one directory record its address matches (main's posture names it), else the connector's letter tile
+  it('draws a configured connector’s directory icon where its posture names one and its tile where none, the rows in place', async () => {
+    const ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/tides.svg';
+    const at = (name: string, iconUrl: string | null) => ({ name, scope: 'user', path: '/config/.claude.json', authPosture: null, fingerprint: null, revision: null, iconUrl });
+    backend.script('customization.inventory', () => ({ skills: [], servers: ['tides', 'buoy'].map((name) => ({ name, scope: 'user', path: '/config/.claude.json', transport: 'http' })), warnings: [], serversRead: true }));
+    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)] }));
+    backend.script('catalog.icon', () => ({ dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }));
+    mountWith(fresh());
+    const imageOf = (name: string) => document.querySelector<HTMLElement>(`[data-connector="${name}"] [data-item-image]`)!;
+    await screen.findByText('buoy');
+    await waitFor(() => expect(imageOf('tides').getAttribute('data-item-image')).toBe('icon'));
+    expect([imageOf('buoy').getAttribute('data-item-image'), imageOf('buoy').getAttribute('data-item-kind'), imageOf('buoy').textContent]).toEqual(['tile', 'connector', 'B']);
+    expect(backend.calls.filter((call) => call.command === 'catalog.icon').map((call) => call.input)).toEqual([{ url: ICON }]);
+    expect([...document.querySelectorAll('[data-connector]')].map((row) => row.getAttribute('data-connector'))).toEqual(['tides', 'buoy']);
   });
 
   it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
@@ -409,7 +425,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -439,8 +455,8 @@ describe('Connectors', () => {
     const innerFile = '/one/.mcp.json';
     let innerPrint = 'print-inner';
     backend.script('catalog.postures', () => ({ servers: [
-      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null },
-      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null },
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null, iconUrl: null },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null, iconUrl: null },
     ] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
@@ -469,7 +485,7 @@ describe('Connectors', () => {
   // host of an earlier build) it offers nothing, and with no such session it says to open one.
   describe('a row of MAWS’s own list', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
-    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
     // the disk row, not the live list's line of the same name below it
     const ownRow = () => waitFor(() => {

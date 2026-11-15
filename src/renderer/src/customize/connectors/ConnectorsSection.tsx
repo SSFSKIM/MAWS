@@ -37,6 +37,7 @@ import { useEngineRead } from '../../widgets/read';
 import { DISCOVER } from '../discover/copy';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import { DiscoverToolbar } from '../discover/DiscoverToolbar';
+import { ItemImage } from '../image/ItemImage';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { useCustomizationInventory } from '../inventory';
 import { ConnectorSheet } from './ConnectorSheet';
@@ -228,7 +229,7 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
       ))}
       <ul aria-label={C.configured} className="m-0 list-none p-0">
         {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={server.scope === 'app' ? ownSignInSessionOf(server.name, ready, attached, cwd) : signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} revision={postureOf(server)?.revision ?? null} />
+          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={server.scope === 'app' ? ownSignInSessionOf(server.name, ready, attached, cwd) : signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} revision={postureOf(server)?.revision ?? null} iconUrl={postureOf(server)?.iconUrl ?? null} />
         ))}
       </ul>
     </>
@@ -239,7 +240,8 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
 // `shadowedBy`) says which entry
 // shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
 // U11a M8: a row of MAWS's own list is a dynamic connector to the sign-in, offered only with its configuration's revision.
-function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null; revision: string | null }) {
+// UX wave U11c M1 (§C): its image, the icon of the one directory record its address matches (the posture's), else its tile.
+function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision, iconUrl }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null; revision: string | null; iconUrl: string | null }) {
   const { ops } = useManage();
   const own = server.scope === 'app';
   const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
@@ -253,54 +255,57 @@ function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead,
   const remove = removeRequestOf(server);
   const busy = ops.entries.get(key)?.state.phase === 'working';
   return (
-    <li data-connector={server.name} data-connector-scope={server.scope} className="flex min-w-0 flex-col gap-1 border-b border-border px-2 py-2 last:border-b-0">
-      <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="font-medium [overflow-wrap:anywhere]">{server.name}</span>
-        <span className="text-ui-sm text-fg-muted">{[C.scopeOf(server.scope), server.transport].filter(Boolean).join(' · ')}</span>
-        {state?.text && (
-          <span data-sign-in-state className={`text-ui-sm ${TONE[state.tone]}`}>
-            {state.text}
-          </span>
-        )}
-        <span className="ml-auto flex shrink-0 items-baseline gap-1">
-          {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
-          {state?.signIn &&
-            (own ? (
-              // U11a M8: only with the revision the press must carry, so it signs in this configuration or nothing
-              kept !== null &&
-              revision !== null &&
-              (session === null ? (
+    <li data-connector={server.name} data-connector-scope={server.scope} className="flex min-w-0 items-start gap-3 border-b border-border px-2 py-2 last:border-b-0">
+      <ItemImage kind="connector" seed={server.name} iconUrl={iconUrl} size="row" />
+      <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-medium [overflow-wrap:anywhere]">{server.name}</span>
+          <span className="text-ui-sm text-fg-muted">{[C.scopeOf(server.scope), server.transport].filter(Boolean).join(' · ')}</span>
+          {state?.text && (
+            <span data-sign-in-state className={`text-ui-sm ${TONE[state.tone]}`}>
+              {state.text}
+            </span>
+          )}
+          <span className="ml-auto flex shrink-0 items-baseline gap-1">
+            {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
+            {state?.signIn &&
+              (own ? (
+                // U11a M8: only with the revision the press must carry, so it signs in this configuration or nothing
+                kept !== null &&
+                revision !== null &&
+                (session === null ? (
+                  <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
+                    {C.openSession(null)}
+                  </span>
+                ) : (
+                  <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignInDynamic({ name: server.name, revision }, fingerprint, session as AppSessionId)}>
+                    {C.signIn}
+                  </button>
+                ))
+              ) : session === null ? (
                 <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
-                  {C.openSession(null)}
+                  {C.openSession(server.scope === 'user' ? null : place)}
                 </span>
               ) : (
-                <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignInDynamic({ name: server.name, revision }, fingerprint, session as AppSessionId)}>
-                  {C.signIn}
-                </button>
-              ))
-            ) : session === null ? (
-              <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
-                {C.openSession(server.scope === 'user' ? null : place)}
-              </span>
-            ) : (
-              // offered once main has said which configuration this is, so the result can be tied to it
-              target !== null &&
-              fingerprint !== null && (
-                <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, fingerprint, session)}>
-                  {C.signIn}
-                </button>
-              )
-            ))}
-          {remove && (
-            <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => askIn(key, remove, removalDirectoryOf(server))}>
-              {C.remove}
-            </button>
-          )}
-        </span>
-      </div>
-      <span className="font-mono text-ui-sm break-all text-fg-faint">{server.path}</span>
-      <div className="text-ui-sm empty:hidden">
-        <OperationLine opKey={key} />
+                // offered once main has said which configuration this is, so the result can be tied to it
+                target !== null &&
+                fingerprint !== null && (
+                  <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, fingerprint, session)}>
+                    {C.signIn}
+                  </button>
+                )
+              ))}
+            {remove && (
+              <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => askIn(key, remove, removalDirectoryOf(server))}>
+                {C.remove}
+              </button>
+            )}
+          </span>
+        </div>
+        <span className="font-mono text-ui-sm break-all text-fg-faint">{server.path}</span>
+        <div className="text-ui-sm empty:hidden">
+          <OperationLine opKey={key} />
+        </div>
       </div>
     </li>
   );
