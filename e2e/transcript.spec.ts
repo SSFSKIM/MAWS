@@ -1309,24 +1309,29 @@ test('a wide table and a code block are the text column’s width in an answer, 
   for (const host of Object.values(hosts)) await expect(host).toHaveCount(1);
   const measure = (host: Locator) =>
     host.evaluate((element) => {
-      const row = element.closest('.transcript-row')!;
-      const rowStyle = getComputedStyle(row);
-      const rowBox = row.getBoundingClientRect();
-      const text = { left: rowBox.left + parseFloat(rowStyle.paddingLeft), width: rowBox.width - parseFloat(rowStyle.paddingLeft) - parseFloat(rowStyle.paddingRight) };
+      // the text column: the host's content box, and for the answer the row's (the shared column, less its pads)
+      const contentOf = (el: Element) => {
+        const style = getComputedStyle(el);
+        const { left, width } = el.getBoundingClientRect();
+        return { left: left + parseFloat(style.paddingLeft), width: width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight) };
+      };
+      const text = contentOf(element);
+      const column = contentOf(element.closest('.transcript-row')!);
       const blocks = Array.from(element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"], [data-streamdown="code-block"]')).map((block) => {
         const { left, width } = block.getBoundingClientRect();
         const table = block.querySelector('table');
         const scroller = table === null ? null : (block.lastElementChild as HTMLElement);
         return { kind: block.dataset.streamdown!, left, width, frameScrolls: block.scrollWidth > block.clientWidth, wide: table !== null && table.getBoundingClientRect().width > width, scrollerScrolls: scroller !== null && scroller.scrollWidth > scroller.clientWidth };
       });
-      return { text, blocks };
+      return { text, column, blocks };
     });
 
   for (const width of BLOCK_WIDTHS) {
     await paneWidth(page, width);
     for (const [name, host] of Object.entries(hosts)) {
       await mounted(page, host);
-      const { text, blocks } = await measure(host);
+      const { text, column, blocks } = await measure(host);
+      if (name === 'answer') expect([text.left, text.width], `${width} px: the answer’s text is the column`).toEqual([column.left, column.width]);
       expect(blocks.filter((block) => block.kind === 'code-block').length, `${name}: a code block`).toBeGreaterThan(0);
       expect(blocks.filter((block) => block.wide).length, `${name}: a table wider than the column`).toBeGreaterThan(0);
       for (const block of blocks) {
@@ -1369,8 +1374,8 @@ test('a wide table and a code block are the text column’s width in an answer, 
   expect(look.controlsPlaced, 'the control’s row is out of the flow').toBe('absolute');
   expect(Math.abs(look.addedHeight), `the copy control adds no height (${look.addedHeight} px)`).toBeLessThanOrEqual(1);
   // the control: hidden at rest, shown on hover and on focus within, 9 px from the outer top and right, a 24 px target
-  const controls = wide.locator('> div').first();
-  const copy = controls.locator('> div > button').first();
+  const controls = wide.locator(':scope > div').first();
+  const copy = controls.locator(':scope > div > button').first();
   await page.mouse.move(0, 0);
   await expect(controls).toHaveCSS('opacity', '0');
   await wide.hover();
@@ -1586,7 +1591,7 @@ test('the last answer before the owner’s next prompt offers Copy, Fork from he
   await mounted(page, secondBlock);
   await expect(firstBlock.locator('.transcript-answer-actions'), 'the answer’s first block carries none').toHaveCount(0);
   const actions = secondBlock.locator('.transcript-answer-actions');
-  await expect(actions.locator('> *')).toHaveText(['Copy', 'Fork from here', /\d/]);
+  await expect(actions.locator(':scope > *')).toHaveText(['Copy', 'Fork from here', /\d/]);
   await expect(actions.getByRole('button', { name: 'Fork from here' })).toHaveAttribute('title', 'Starts a new session from this point. This one stays as it is.');
   await expect(actions.getByRole('button', { name: 'Fork from here' })).toBeEnabled();
 
