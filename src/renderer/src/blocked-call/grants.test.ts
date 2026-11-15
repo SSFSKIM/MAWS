@@ -722,7 +722,7 @@ describe('another machine’s terminal session, state by state (Acceptance 7a to
     await flush();
     expect(sentence).toBe(grant(call));
     expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: bareOf(APP), text: sentence }]);
-    await fake.reply('laneA.send', { state: 'entered', uuid: after[0]!.uuid });
+    await fake.reply('laneA.send', { key: { writer: 'maws/test', seq: 1 }, state: 'entered', uuid: after[0]!.uuid });
     await flush();
     expect(useGrantsOut.getState().out.size, 'delivered: out until the record says').toBe(1);
     await settleTask();

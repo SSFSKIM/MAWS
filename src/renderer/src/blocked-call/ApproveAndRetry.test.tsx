@@ -555,7 +555,9 @@ describe('where there is no button, where it is disabled, and a terminal session
     expect(run.sentence).toBe(consentMessage('command', MARKER));
     expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: bareOf(store.key), text: run.sentence }]);
     expect(row.button()!.disabled, 'out').toBe(true);
-    await answer('laneA.send', { state: 'entered', uuid: run.uuid });
+    await answer('laneA.send', { key: { writer: 'maws/test', seq: 1 }, state: 'entered', uuid: run.uuid });
+    expect(useGrantsOut.getState().out.size, 'delivered: out until the record says').toBe(1);
+    expect(row.button()!.disabled, 'delivered').toBe(true);
     await store.push(run.after);
     expect(row.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
     expect(row.button()).toBeNull();
