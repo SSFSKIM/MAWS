@@ -69,7 +69,7 @@ async function answer(request: Request, held: FrameToken, tokens: Pick<FrameToke
   };
 
   const header = request.headers.get('Range');
-  const asked = firstRead(header);
+  const asked = request.method === 'HEAD' ? { offset: 0, length: 1 } : firstRead(header); // HEAD needs the size alone
   let first: Page;
   try {
     first = await held.source.read(asked.offset, asked.length);

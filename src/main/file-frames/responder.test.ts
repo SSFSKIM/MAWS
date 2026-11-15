@@ -272,6 +272,7 @@ describe('the bytes', () => {
     expect(answer.headers.get('content-length')).toBe('3000');
     expect(answer.headers.get('content-type')).toBe('application/pdf');
     expect(answer.body).toBeNull();
+    expect(file.reads).toEqual([{ offset: 0, length: 1 }]); // the size alone is needed
     const ranged = await ask(url, { method: 'HEAD', headers: { Range: 'bytes=100-199' } });
     expect(ranged.status).toBe(206);
     expect(ranged.headers.get('content-range')).toBe('bytes 100-199/3000');
