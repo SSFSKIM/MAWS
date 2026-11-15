@@ -425,9 +425,10 @@ describe('Stop while a subagent’s prompt waits (probe 8)', () => {
     // the main turn's end the interrupt brings (`result` error_during_execution), before the late Allow the record makes
     const ended = rows.find((row) => row.seq > interrupt.seq && row.direction === 'in' && (row.frame as { type?: unknown }).type === 'result')!;
     expect((ended.frame as { subtype?: unknown }).subtype, 'the record’s main result after the Stop').toBe('error_during_execution');
-    const recorded = journalToEvents(rows.filter((row) => row.seq <= ended.seq)); // one normaliser through the result, as main runs it
-    events = recorded.filter((event) => event.seq < interrupt.seq);
-    const afterStop = recorded.filter((event) => event.seq > interrupt.seq);
+    // one normaliser through the result, as main runs it; each event carries its row's seq (a journal's are never null)
+    const recorded = journalToEvents(rows.filter((row) => row.seq <= ended.seq));
+    events = recorded.filter((event) => event.seq! < interrupt.seq);
+    const afterStop = recorded.filter((event) => event.seq! > interrupt.seq);
     const asked = events.find((event): event is Extract<SessionEvent, { kind: 'permission.requested' }> => event.kind === 'permission.requested')!;
     expect(asked.agentId, 'the recorded request is a subagent’s').not.toBeNull();
     requests.set(asked.requestId, asked);
