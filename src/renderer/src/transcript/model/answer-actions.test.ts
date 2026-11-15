@@ -100,7 +100,8 @@ describe('rows beside a message (the pre-flight’s point (a))', () => {
 });
 
 // Engine facts, 20 (ruled R17): the engine refuses a rewind to anything before a compaction, and accepts the first row
-// after it (a typed /compact's own command row, or the next prompt).
+// after it (a typed /compact's own command row, or the next prompt). The prompt that set off an automatic compaction is
+// written before it (ruled, M3-4).
 describe('above the list’s last compaction boundary', () => {
   it('two answers above a boundary and one below: no Fork for the upper one, the one directly above forks against the first prompt after the boundary, the one below is unchanged', () => {
     const rows = [prompt('1'), answer('u', '1'), prompt('2'), answer('d', '2'), compaction(null), prompt('3'), answer('l', '3')];
@@ -115,9 +116,9 @@ describe('above the list’s last compaction boundary', () => {
     expect(entries(file)).toEqual([['u', 'm:1', false], ['a1', 'm:2', true], ['a3', null, true]]);
   });
 
-  it('an automatic compaction inside the next prompt’s turn: the answer directly above forks against the first prompt after the boundary', () => {
+  it('an automatic compaction inside the next prompt’s turn: the answer before the prompt that set it off draws no Fork (ruled, M3-4)', () => {
     const rows = [prompt('1'), answer('a1', '1'), prompt('2'), divider('2'), compaction('2'), answer('a2', '2'), prompt('3'), answer('a3', '3')];
-    expect(entries(rows)).toEqual([['a1', 'm:3', true], ['a2', 'm:3', true], ['a3', null, true]]);
+    expect(entries(rows)).toEqual([['a1', 'm:2', false], ['a2', 'm:3', true], ['a3', null, true]]);
   });
 
   it('only the list’s last boundary counts', () => {
