@@ -223,7 +223,7 @@ export function DeleteSpaceSheet({ dialog }: SheetOf<'deleteSpace'>) {
 // A Space's instructions: one field, eight lines tall at first, growing with its text to 40 % of the window, then
 // scrolling, so Save stays in view; Enter makes a new line. Save is offered whenever the text differs from what is stored,
 // the empty text included (saving it removes them). The field takes at most SPACE_INSTRUCTIONS_MAX characters (a paste is
-// cut there), and from 7,500 a line under it counts them. A save holds both buttons disabled; a failure is said here and
+// cut there), and from 7,500 a line under it counts them. A save holds both buttons disabled and the field read-only; a failure is said here and
 // keeps the text; closing the sheet meanwhile does not cancel the save, and a failure then is toasted.
 export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>) {
   const { space } = dialog;
@@ -256,6 +256,7 @@ export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>)
         <textarea
           aria-label={title}
           autoFocus
+          readOnly={busy} // what is saved is what the field shows: nothing typed during the save is lost
           value={text}
           maxLength={SPACE_INSTRUCTIONS_MAX}
           onChange={(event) => setEdited(event.target.value.slice(0, SPACE_INSTRUCTIONS_MAX))}
