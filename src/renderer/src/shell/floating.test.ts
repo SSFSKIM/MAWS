@@ -801,6 +801,20 @@ describe('the float’s three presentations', () => {
         expect([presentation(), keyboard()]).toEqual(['no float', 'the composer of A']);
         expect(useFloatingCard.getState()).toMatchObject({ closed: false, hidden: false, showChatTakesFocus: false, pillTakesFocus: false });
       });
+
+      // §I: Hide chat wins in either order within one tick. The raise ran first and opened the card, marking the
+      // composer (the keyboard was in the bar); Hide chat in the same tick leaves the chat hidden, no mark pending.
+      it('a request arriving in the same tick before Hide chat is judged against the state the tick leaves: hidden, no card, no mark left', async () => {
+        enterIn(host, 'bar');
+        focusIn('the bar');
+        pending(attention(A, 'permission', T0));
+        hideChat();
+        expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+        await microtasks();
+        expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
+        showChat();
+        expect(presentation(), 'the request was seen: Show chat brings the bar, not the card').toBe('bar');
+      });
     });
   }
 
@@ -902,6 +916,22 @@ describe('the float’s three presentations', () => {
     expect([presentation(), keyboard()]).toEqual(['hidden', 'Show chat']);
   });
 
+  it('a request raised in an earlier tick stays the card: a Hide chat after it does nothing', async () => {
+    splitIn('bar');
+    pending(attention(A, 'permission', T0));
+    await microtasks();
+    hideChat();
+    expect(presentation()).toBe('card');
+  });
+
+  it('a card the person opened after a raise in the same tick is not taken back by Hide chat', () => {
+    splitIn('bar');
+    pending(attention(A, 'permission', T0));
+    openCard();
+    hideChat();
+    expect([presentation(), keyboard()]).toEqual(['card', 'the composer of A']);
+  });
+
   it('a request seen while hidden does not open the bar Show chat brings back; the next new one does', () => {
     splitIn('hidden');
     pending(attention(A, 'permission', T0));
@@ -924,11 +954,40 @@ describe('the float’s three presentations', () => {
     expect(currentSetOf().focusedPane).toBe(1);
   });
 
-  it('Show chat on the split’s float puts the focused pane on S, as Expand leaves it, and opens no card', () => {
+  // M7 decisions 6 and 7: after Show chat the keyboard is in the box's editor. The mark and the focused pane agree: the
+  // bar's editor (S's session's composer) takes the keyboard when it mounts, and the focused pane is S's.
+  it('Show chat on the split’s float puts the focused pane on S, as Expand leaves it, marks the bar’s editor, and opens no card', () => {
     splitIn('hidden');
     showChat();
-    expect([presentation(), currentSetOf().focusedPane]).toEqual(['bar', 0]);
+    expect([presentation(), keyboard(), currentSetOf().focusedPane]).toEqual(['bar', 'the composer of A', 0]);
   });
+
+  // Today's behaviour, kept (the architect's ruling of 2026-11-15; the fix is ticket six hundred ninety): with the
+  // keyboard in the bar the focused pane is already S's, so choosing S's session in the sidebar, or its tab, moves nothing
+  // and opens nothing. No synthetic move of the focus to the artifact here.
+  for (const [state, enter] of [
+    ['right after Expand', () => runAction('main.expandArtifactPane')],
+    ['right after Show chat', () => splitIn('hidden') /* the focused pane is the artifact's */],
+  ] as const) {
+    it.each([
+      ['the session chosen in the sidebar', () => layout().openSession(A)],
+      ['its tab', () => layout().activateTab(S.id)],
+    ])(`the split’s float ${state}: %s leaves the bar, and throws nothing`, (_, run) => {
+      enter();
+      if (state === 'right after Show chat') showChat();
+      expect(currentSetOf().focusedPane, 'the bar stands for S').toBe(0);
+      expect(run).not.toThrow();
+      expect(presentation()).toBe('bar');
+    });
+
+    // ⇧⌘\ from there focuses the other pane, the artifact's, as it does today: it opens no card either
+    it(`the split’s float ${state}: ⇧⌘\\ moves the focused pane to the artifact and leaves the bar`, () => {
+      enter();
+      if (state === 'right after Show chat') showChat();
+      runAction('pane.focusOther');
+      expect([presentation(), currentSetOf().focusedPane]).toEqual(['bar', 1]);
+    });
+  }
 
   it('Hide chat acts only on the bar; Show chat and the header’s going only on a hidden chat', () => {
     splitIn('card');
