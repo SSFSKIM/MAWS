@@ -12,6 +12,14 @@
 // lifetime rule). When the tab cannot show an editor (the artifact is gone, or its kind has no editor yet) the state is
 // given back and the notice registers a header of its own, which replaces the editor's quietly (its body has unmounted),
 // so no stale closeGuard holds the tab.
+//
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): where the host says an agent
+// deleted the artifact and that can be undone (`artifacts.get`'s `deleted.undoable`), the view keeps the editor it holds
+// mounted under a notice with the transcript row's Undo, its disabled sentences and its line for an act that ended
+// without its effect. The editor takes no edit meanwhile: its replica, refused by the host's fence, waits for the
+// artifact to be restored and reads as read-only (../artifacts/host.ts), the state each kind has for a reader who may only
+// view. After Undo the library lists the artifact again, the view shows it as live, and the replica reconnects and sends
+// what the fence refused. A delete that cannot be undone (the person's own, in the Library) shows today's notice.
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
@@ -28,9 +36,13 @@ import { registerReplaceVerdict } from '../keymap/actions-runtime';
 import { editorHostOf, useEditorHost, type EditorHostScope } from '../panel/editor-host';
 import { useHosts } from '../stores/hosts';
 import { pageOpen, useLayout, type ReplaceVerdict } from '../stores/layout';
-import { markArtifactViewed } from './actions';
+import { markArtifactViewed, undeleteArtifact } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
+import { useMachineUndoUnavailable, useUndoAct } from './undo-delete'; // UX wave U10b
+import { artifactMachineOf } from '../artifacts/machines'; // UX wave U10b
+import { useUnsentWhileDeleted } from '../artifacts/deleted-replicas'; // UX wave U10b
+import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's Undo
 
 type ArtifactTabRef = Extract<TabRef, { kind: 'artifact' }>;
 
@@ -60,6 +72,18 @@ export function ArtifactView({ artifactId, scope, visible }: { artifactId: strin
   if (artifact && editor) return <MountedEditor artifactId={artifact.id} kind={artifact.kind} editor={editor} scope={scope} visible={visible} />;
   if (artifact) return <NoEditor artifact={artifact} scope={scope} />;
   if (indexless && host.answer?.status === 'absent') return <Gone scope={scope} />;
+  // UX wave U10b (§C.5): an agent's delete, which Undo can take back: the editor held stays, under the notice
+  if (indexless && host.answer?.status === 'deleted') {
+    const deleted = <DeletedNotice artifactId={artifactId} />;
+    if (held && editor && held.editor === editor) {
+      return (
+        <MountedEditor artifactId={held.artifactId} kind={held.kind} editor={editor} scope={scope} visible={visible}>
+          {deleted}
+        </MountedEditor>
+      );
+    }
+    return <DeletedWithoutEditor scope={scope} title={host.answer.title}>{deleted}</DeletedWithoutEditor>;
+  }
   // Unconfirmed: the index has no row (or its read failed) and the host has not said the artifact is gone.
   const problem = indexless && host.answer?.status === 'refused' ? LIBRARY_COPY.hostUnreachable(host.answer.error) : read.status === 'error' ? LIBRARY_COPY.readFailed(read.error ?? '') : null;
   const retry = () => {
@@ -84,7 +108,8 @@ export function ArtifactView({ artifactId, scope, visible }: { artifactId: strin
   return <Quiet>{notice || <p className="m-0">{LIBRARY_COPY.reading}</p>}</Quiet>;
 }
 
-type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' } | { status: 'refused'; error: string };
+// UX wave U10b: `deleted`, an agent's delete Undo can take back (any other deleted artifact is `absent`, as today).
+type HostAnswer = { status: 'present'; row: ArtifactRow } | { status: 'absent' } | { status: 'deleted'; title: string } | { status: 'refused'; error: string };
 
 // While main's index answers no row, the host's word on the artifact: present (the index has not caught up: just
 // created, or the index unavailable), absent (confirmed gone), or refused (a timeout, a restarting host: no word at
@@ -100,7 +125,14 @@ function useHostAnswer(artifactId: string, read: LibraryRead<LibraryRow | null>)
     let live = true;
     void ipc.invoke('artifacts.get', { artifactId }).then((result) => {
       if (!live) return;
-      const next: HostAnswer = !result.ok ? { status: 'refused', error: result.error.message } : result.value.artifact ? { status: 'present', row: result.value.artifact } : { status: 'absent' };
+      const { deleted } = result.ok ? result.value : { deleted: undefined };
+      const next: HostAnswer = !result.ok
+        ? { status: 'refused', error: result.error.message }
+        : result.value.artifact
+          ? { status: 'present', row: result.value.artifact }
+          : deleted?.undoable === true
+            ? { status: 'deleted', title: deleted.title }
+            : { status: 'absent' };
       setAnswer({ artifactId, answer: next });
     });
     return () => {
@@ -160,6 +192,39 @@ function NoEditor({ artifact, scope }: { artifact: LibraryRow | ArtifactRow; sco
       </dl>
     </Quiet>
   );
+}
+
+// UX wave U10b (M5, §C.5): the notice over an editor open on an artifact an agent deleted, in the place a held editor's
+// notices stand, with the row's Undo on the artifact's machine. While the editor's replica holds an edit the host never
+// acknowledged, it says that restoring saves it.
+function DeletedNotice({ artifactId }: { artifactId: string }) {
+  const machine = artifactMachineOf(artifactId) ?? ipc.localMachine;
+  const unavailable = useMachineUndoUnavailable(machine);
+  const unsent = useUnsentWhileDeleted(artifactId);
+  const act = useUndoAct(() => undeleteArtifact(artifactId, machine));
+  const line = unavailable ?? act.failure;
+  return (
+    <div role="status" data-artifact-deleted={artifactId} className="flex shrink-0 flex-col gap-1 border-b border-border bg-bg-raised px-3 py-1.5 text-ui-sm text-fg-muted">
+      <div className="flex items-center gap-3">
+        <p className="m-0 min-w-0 flex-1 text-fg">{unsent ? LIBRARY_COPY.deletedUnsent : LIBRARY_COPY.deletedByAgent}</p>
+        <button type="button" disabled={unavailable !== null || act.busy} onClick={act.press} className={`${TEXT_BUTTON} min-h-6 shrink-0 disabled:text-fg-faint disabled:hover:bg-transparent`}>
+          {ARTIFACT.undo}
+        </button>
+      </div>
+      {line !== null && (
+        <p data-artifact-line="" className={`m-0 ${unavailable === null ? 'text-danger' : ''}`}>
+          {line}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// The same notice when the view holds no editor for the artifact (a tab restored at a relaunch, say): the header is the
+// notice's, and Undo brings the artifact back, whose editor then mounts as live.
+function DeletedWithoutEditor({ scope, title, children }: { scope: EditorHostScope; title: string; children: ReactNode }) {
+  useNoEditor(scope, title);
+  return <div className="flex h-full flex-col">{children}</div>;
 }
 
 function Gone({ scope }: { scope: EditorHostScope }) {
