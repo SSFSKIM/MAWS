@@ -915,6 +915,26 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   Rationale: the xhigh panel's finding on `b730f60f5..a45498b34`, confirmed by the architect, who set the rule; shown red before green on the VM.
   Date/Author: 2026-11-15 (UTC), the branch review's fix wave (`3f04d9abd`..`73ce3122a`); folded by the controller.
 
+- Decision: the chain merge, named by the architect: `70102ea83` (the final head of `ux-wave/U5b`: master `ef1d659ad` and the eight landings before U1b) merged as `4a6af2fe9` from `e3154211c`. There were five conflicts, each resolved by keeping both sides' behaviour:
+  - `transcript/model/derive.ts` `isPersistentRow`: U1b's comment and its waiting plan's line are kept. The `owner_record` line is dropped, because the chain head removed that row kind.
+  - `stores/transcript.ts`, the store's interface: the chain head's `toggleStretch` replaces `toggleReportRecord`, which it removed. U1b's `setWaitingForms` is kept.
+  - `harness/Harness.tsx`: U1b's `renderRequest` and the chain head's `ownerLane`, both kept.
+  - `e2e/lane-a.spec.ts`: both header comments are kept, and the imports are the union of both sides'.
+  - `docs/tech-debt-tracker.md`: both sides' rows, the chain head's first.
+
+  Read in the merged tree: `WIRE_MINOR` 51 and `RL2_PROTOCOL` 1.15, the chain head's own; U1b takes no minor. Two commits after the merge, each demanded by a check:
+  - `da16b9ec2`: the web typecheck failed on `stores/transcript.test.ts`'s import of the removed report projection. The waiting plan's to-human case now reads U2b's `mirrorRows`, where a plan is never inside a record, waiting or answered (U2b's UC-3).
+  - `1d92a7eee`: reading the scenes found the probe 9a scene in e2e:tools still pressing the removed "Session view" toggle. It now asserts no switch.
+
+  Both documents' statement that a waiting request stays in view in the to-human view holds on the merged tree, by reading. The mirror classes `question`, `ask`, `plan` and `request_slot` as `stays`, and the end row is appended after the mirror's rows.
+
+  Between the merge and those fixes, `0ee3a3ea1` holds the architect's three small items from the medium review of the fix wave:
+  - the guard's thresholds pinned by its test;
+  - a remounted draft's focus pinned by its test;
+  - the digit keys' tracker row.
+  Rationale: the chain-merge brief; the architect's message of 2026-11-15.
+  Date/Author: 2026-11-15, the controller.
+
 ## Outcomes & Retrospective
 
 Written 2026-11-15 by the controller at the end of M7, on the head that holds M1 to M7, the two probes merges and the early chain merge of U6b. The branch review, class 1a, the Electron groups and the pull request are the architect's.
