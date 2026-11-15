@@ -11,8 +11,9 @@ import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { serializeRows } from './serialize';
 import { builder, uuid } from './test-events';
-import { confirmsSettingChange, slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
+import { confirmsSettingChange, copiedUserText, slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
 import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
+import { askSteerText } from '@shared/maws/ask'; // UX wave U4b
 
 // The golden fixture: one 40-line block wrapped exactly as the grammar frames it, typed text before and after.
 const fixture = JSON.parse(readFileSync(join(__dirname, '../../../../../test/fixtures/composer/pasted-40-lines.json'), 'utf8')) as { typed: string; pasted: { id: string; body: string }[]; sent: string };
@@ -187,5 +188,24 @@ describe('a linked read sent with the message', () => {
   it('leaves the same words typed in a message alone', () => {
     const typed = `<system-reminder>\nThe user's message links the MAWS artifact [x](maws-artifact:${ID}). not json\n</system-reminder>`;
     expect(userTextOf([{ type: 'text', text: typed }]).text).toBe(typed);
+  });
+});
+
+// UX wave U4b (the joined answer, step 2): the engine joins an answer envelope with a prompt waiting beside it; the row's
+// text, and so what is drawn and copied, is the person's words. A text that is all envelope reads as before.
+describe('a user text holding an answer envelope joined with a prompt', () => {
+  const question = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const envelope = askSteerText('ask-1', [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
+
+  it('is the prompt alone, envelope first or last, and Copy gives the same', () => {
+    for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
+      const read = userTextOf(text);
+      expect(read.text).toBe('Also fix the footer.');
+      expect(copiedUserText(read)).toBe('Also fix the footer.');
+    }
+  });
+
+  it('a text that is all envelope stays as it is', () => {
+    expect(userTextOf(envelope).text).toBe(envelope);
   });
 });
