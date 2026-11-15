@@ -1032,6 +1032,7 @@ describe('a Space’s instructions', () => {
   };
   const headingOf = async (name: string) => (await screen.findByRole('heading', { name, level: 2 })).parentElement as HTMLElement; // the Space's heading line
   const markOf = (heading: HTMLElement) => within(heading).queryByRole('button', { name: 'Instructions' });
+  const markFound = async (space: string) => within(await headingOf(space)).findByRole('button', { name: 'Instructions' });
   const field = (sheet: HTMLElement) => within(sheet).getByRole('textbox') as HTMLTextAreaElement;
   const button = (sheet: HTMLElement, name: string) => within(sheet).getByRole('button', { name }) as HTMLButtonElement;
 
@@ -1061,7 +1062,7 @@ describe('a Space’s instructions', () => {
     expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.\nCite the field log.' }]);
 
     await store([{ spaceId: HOME, text: 'Use metres.\nCite the field log.', at: 5 }], HOME);
-    const mark = await waitFor(async () => markOf(await headingOf('Home'))!);
+    const mark = await markFound('Home');
     expect(markOf(await headingOf('Work'))).toBeNull();
     await user.click(mark);
     const again = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
@@ -1086,7 +1087,7 @@ describe('a Space’s instructions', () => {
     answers['spaces.setInstructions'] = () => ok();
     const user = userEvent.setup();
     await bySpace(user);
-    await user.click(await waitFor(async () => markOf(await headingOf('Work'))!));
+    await user.click(await markFound('Work'));
     const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
     await user.clear(field(sheet));
     expect(button(sheet, 'Save').disabled).toBe(false); // the empty text differs from what is stored
@@ -1141,6 +1142,26 @@ describe('a Space’s instructions', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await act(async () => second.resolve(ok()));
     expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }, { spaceId: HOME, text: 'Use metres.' }]);
+  });
+
+  // the task review of M9: what is saved is what the field shows, so nothing typed while the save runs is lost
+  it('a save in flight leaves the field read-only, so what is stored is what was shown', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => answer.promise;
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(sheet).readOnly).toBe(false);
+    await user.type(field(sheet), 'Use metres.');
+    await user.click(button(sheet, 'Save'));
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), ' And Celsius.');
+    expect(field(sheet).value).toBe('Use metres.');
+    await act(async () => answer.resolve(ok()));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }]);
   });
 
   it('ride in a chat a card starts from the Space as one chip after the opening words, its body sent with the first message; a Space without them adds no chip', async () => {
