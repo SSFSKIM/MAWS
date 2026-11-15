@@ -986,6 +986,54 @@ describe('a parked replica leaves only on a current read that answers live (fix 
     expect(reads.count()).toBe(2);
     handle.close();
   });
+
+  it('a quick delete, Undo and delete, then a refused reopen, parks with the inherited reads out: none starts another, decides anything or arms a timer, and the last carries the wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const reads = heldReads(h);
+    const change = (to: 'created' | 'deleted') => h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: to });
+    change('deleted'); // the first direct read
+    await settle();
+    change('created'); // Undo: unparked, it reads nothing
+    await settle();
+    change('deleted'); // the second direct read
+    await settle();
+    expect(reads.count()).toBe(2);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the third direct read
+    expect(reads.count()).toBe(3);
+    reads.answer(2, DELETED); // parks it, two reads inherited
+    await settle();
+    stillParked(handle);
+    expect(reads.out()).toBe(2);
+    expect(vi.getTimerCount()).toBe(0); // no timer at the park
+    change('created'); // triggers while the inherited reads are out only mark
+    h.hostState('ready', 9);
+    await settle(CAP * 2);
+    expect(reads.count()).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
+    stillParked(handle);
+    reads.answer(0, LIVE); // stale: unparks nothing
+    await settle();
+    expect(reads.count()).toBe(3);
+    expect(reads.out()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    stillParked(handle);
+    reads.answer(1, GONE); // stale: ends nothing; the last out carries the wait (marked: one read)
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(4);
+    reads.answer(3, DELETED);
+    await settle();
+    coalesced(reads, 'timer');
+    stillParked(handle);
+    handle.close();
+  });
 });
 
 describe('an artifact an agent deleted (UX wave U10b)', () => {
