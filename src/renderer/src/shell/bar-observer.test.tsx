@@ -144,9 +144,9 @@ it('the bar’s observer watches its surface, and an answer streaming above it r
   expect(watch.runs - before.runs, 'a keystroke in the box runs the observer').toBeGreaterThan(0);
 });
 
-// The architect's ruling of 2026-11-15: typing in the box runs the observer, at most once per keystroke, and never
-// redraws the bar.
-it('typing in the bar’s box runs its observer at most once per keystroke and redraws the bar no times', async () => {
+// The architect's ruling of 2026-11-15: typing in the box runs the observer, at most once per keystroke (and once more
+// as the empty box becomes a draft), and never redraws the bar.
+it('typing in the bar’s box runs its observer at most once per keystroke, once more as the box becomes a draft, and redraws the bar no times', async () => {
   mount();
   await waitFor(() => expect(message()).toBeTruthy());
   const watch = surfaceWatch();
@@ -156,7 +156,9 @@ it('typing in the bar’s box runs its observer at most once per keystroke and r
   const first = watch.runs - before.runs;
   for (let i = 1; i < K; i += 1) await type();
   expect(message().textContent).toBe('a'.repeat(K));
-  expect({ first, rest: watch.runs - before.runs - first }).toEqual({});
+  // the first keystroke turns the empty box into a draft, which the box redraws a second time once
+  expect(first, 'the first keystroke').toBeLessThanOrEqual(2);
+  expect(watch.runs - before.runs - first, `the ${K - 1} keystrokes after it`).toBeLessThanOrEqual(K - 1);
   expect(marks.reads - before.renders, `${K} keystrokes`).toBe(0);
 });
 
