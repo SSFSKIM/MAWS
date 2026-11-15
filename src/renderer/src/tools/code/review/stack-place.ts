@@ -67,7 +67,9 @@ export class StackPlacer {
   private band: Band = EMPTY_BAND;
   private pending = false; // a band handed to the host and not drawn yet: the page lags the model
   private live: StackPlace | null = null;
-  private reveal: StackPlace | null = null;
+  // The outstanding reveal: a place, or a requested file's section at the scroller's top (`top`), whatever its header
+  // measures when it is applied.
+  private reveal: { place: StackPlace; top?: true } | null = null;
   private own: number | null = null; // the offset the stack last put its scroller at: a scroll event there is its own
 
   constructor(private readonly host: PlacerHost) {}
@@ -75,7 +77,7 @@ export class StackPlacer {
   // Mounted: a saved place for this key is the first reveal.
   attach(scroller: HTMLElement, saved: StackPlace | null): void {
     this.scroller = scroller;
-    this.reveal = saved;
+    this.reveal = saved ? { place: saved } : null;
   }
 
   // Unmounted: the place then in force (a reveal reached became the live place).
@@ -95,13 +97,13 @@ export class StackPlacer {
 
   // A request that named a file: that section's top at the scroller's top.
   revealSection(path: string): void {
-    this.reveal = { path, row: null, offset: this.headers.get(path) ?? HEADER_PX };
+    this.reveal = { place: { path, row: null, offset: 0 }, top: true };
     this.relayout();
   }
 
   // ↑ or ↓: the hunk's first row at the reading edge.
   revealHunk(hunk: StackHunk): void {
-    this.reveal = hunkPlace(hunk);
+    this.reveal = { place: hunkPlace(hunk) };
     this.relayout();
   }
 
@@ -136,12 +138,12 @@ export class StackPlacer {
     }
     const { el, layout, rows, sticky } = m;
     const reveal = this.reveal;
-    const at = reveal ? topOfPlace(layout, reveal, rows) : null;
+    const at = reveal ? topOfPlace(layout, reveal.place, rows) : null;
     if (reveal && at === null) this.reveal = null; // its file left the stack: the live place stands
     if (reveal && at !== null) {
       // A section folded is not reached yet: the jump that unfolds it draws it next.
-      const exact = at.exact && !this.input.sections.find((section) => section.path === reveal.path)?.folded;
-      const want = Math.max(0, exact ? at.top - sticky : at.top);
+      const exact = at.exact && !this.input.sections.find((section) => section.path === reveal.place.path)?.folded;
+      const want = Math.max(0, reveal.top || !exact ? at.top : at.top - sticky);
       this.write(el, want);
       this.live = placeAt(layout, el.scrollTop + sticky, rows);
       const band = this.bandFor(m, el.scrollTop);
