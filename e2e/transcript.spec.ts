@@ -1694,9 +1694,9 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 // whether it is mounted now. The recording's invented content only.
 async function attachPaneRows(pane: Locator, name: string): Promise<void> {
   const rows = await pane.locator('[data-transcript-scroller]').first().evaluate(async (scroller) => {
-    const read = () => [...scroller.querySelectorAll<HTMLElement>('[data-index]')].map((item) => {
-      const frame = item.querySelector<HTMLElement>('[data-kind]');
-      return { index: Number(item.dataset.index), id: item.dataset.rowId ?? null, kind: frame?.dataset.kind ?? null, turn: frame?.dataset.turnId ?? null };
+    const read = () => Array.from(scroller.querySelectorAll('[data-index]')).map((item) => {
+      const frame = item.querySelector('[data-kind]');
+      return { index: Number(item.getAttribute('data-index')), id: item.getAttribute('data-row-id'), kind: frame?.getAttribute('data-kind') ?? null, turn: frame?.getAttribute('data-turn-id') ?? null };
     });
     const mounted = read();
     const back = scroller.scrollTop;
