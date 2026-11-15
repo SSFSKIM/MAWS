@@ -1731,6 +1731,41 @@ describe('files saves outside the folders', () => {
       expect(await saveShown(restarted, A, out('chosen.txt'), 'still chosen\n')).toEqual({ status: 'ok', hash: sha('still chosen\n') });
     });
 
+    // Review finding 1: MAWS's own folders are compared by the real path the boundary confirms (the native realpath), so
+    // a folder handed in through a link to it, or in another case than the disk's, protects what is in it
+    const refusesBoth = async (files: Files, appSessionId: AppSessionId, path: string) => {
+      const before = original(path);
+      const read = await files.read({ appSessionId, path, hash: true });
+      expect(read, path).toMatchObject({ own: true });
+      const forged = JSON.stringify({ version: 1, sessions: { [A]: [{ real: out('unnamed.txt'), at: 1 }] } });
+      await expect(files.write({ appSessionId, path, content: forged, expectedHash: read.hash! }), path).rejects.toThrow(new Error(`not writable: ${path}`));
+      await expect(files.writeOutside({ appSessionId, path, content: forged, expectedHash: read.hash!, real: path }), path).rejects.toThrow(new Error(`not writable: ${path}`));
+      expect(original(path), path).toBe(before);
+    };
+    const holdsOnlyTheGrantMade = () => {
+      grants = openGrants(); // the daemon restarts: the store is opened again over the same file
+      expect(grants.has(A, out('chosen.txt'))).toBe(true);
+      expect(grants.has(A, out('unnamed.txt'))).toBe(false);
+    };
+
+    it('refuses both writes under a profile handed in through a link to it, the grants file among them, and a store opened again holds the grants it held', async () => {
+      symlinkSync(profile, at('profile-alias'));
+      records.set(H, record(base));
+      const files = outsideService({ own: ownFolders(at('profile-alias'), at('bin', 'node'), () => []) });
+      expect(await files.grant(A, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+      for (const path of [grantsFile, join(profile, 'settings.json')]) await refusesBoth(files, H, path);
+      holdsOnlyTheGrantMade();
+    });
+
+    // APFS ignores case: the profile and a told bundle given in another case than the disk's are the same folders
+    it.skipIf(process.platform !== 'darwin')('refuses both writes under a profile and a told bundle given in another case than the disk’s, and a store opened again holds the grants it held', async () => {
+      records.set(H, record(base));
+      const files = outsideService({ own: ownFolders(at('PROFILE'), at('bin', 'node'), () => [at('Dev', 'maws dev.app')]) });
+      expect(await files.grant(A, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+      for (const path of [grantsFile, join(profile, 'settings.json'), at('Dev', 'MAWS Dev.app', 'Contents', 'Resources', 'dev.txt')]) await refusesBoth(files, H, path);
+      holdsOnlyTheGrantMade();
+    });
+
     it('protects an attached app’s bundle once the app tells it, and not before (S13)', async () => {
       records.set(H, record(base));
       const files = outsideService();
@@ -1980,6 +2015,37 @@ describe('files saves outside the folders', () => {
       await vi.waitFor(() => expect(named).toHaveBeenCalledOnce());
       ended.abort();
       await expect(answer).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(far(), 'utf8')).toBe('same bytes\n');
+    });
+
+    // Review finding 2: the client's end refuses the save at every step after the search, the grant asked again included
+    it('refuses a save whose client ends while the transcript is asked, though a grant is made meanwhile (S4, the second grant lookup)', async () => {
+      await transcriptOf(A, [said('nothing linked')]);
+      const files = outsideService();
+      const ended = new AbortController();
+      let reached!: () => void;
+      let release!: () => void;
+      const searching = new Promise<void>((resolve) => (reached = resolve));
+      const held = new Promise<void>((resolve) => (release = resolve));
+      points['before-named'] = async () => {
+        reached();
+        await held;
+      };
+      const answer = files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal);
+      await searching;
+      expect(await files.grant(A, far())).toEqual({ status: 'granted', path: far() });
+      ended.abort();
+      release();
+      await expect(answer).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(far(), 'utf8')).toBe('same bytes\n');
+    });
+
+    it('refuses a save whose client ends after the file is opened, before its section writes (S4)', async () => {
+      const files = outsideService();
+      await files.grant(A, far());
+      const ended = new AbortController();
+      points['after-open'] = () => ended.abort();
+      await expect(files.writeOutside({ appSessionId: A, path: far(), content: 'pwned\n', expectedHash: sha('same bytes\n'), real: far() }, false, ended.signal)).rejects.toThrow(new Error(OUT));
       expect(readFileSync(far(), 'utf8')).toBe('same bytes\n');
     });
 
