@@ -192,16 +192,19 @@ describe('a linked read sent with the message', () => {
 });
 
 // UX wave U4b (the joined answer, step 2): the engine joins an answer envelope with a prompt waiting beside it; the row's
-// text, and so what is drawn and copied, is the person's words. A text that is all envelope reads as before.
+// text, and so what is drawn and copied, is the person's words. A text that is all envelope reads as before. Ticket 704:
+// the window reads the joined message apart where it enters (the reducer), so the row is built through the model.
 describe('a user text holding an answer envelope joined with a prompt', () => {
   const question = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
   const envelope = askSteerText('ask-1', [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
 
   it('is the prompt alone, envelope first or last, and Copy gives the same', () => {
     for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
-      const read = userTextOf(text);
-      expect(read.text).toBe('Also fix the footer.');
-      expect(copiedUserText({ text: read.text, attachments: read.attachments, placeholders: read.placeholders })).toBe('Also fix the footer.');
+      const b = builder();
+      b.turn('u1', text);
+      const row = rowsOf(applyEvents(createState(null, null), b.events)).find((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user')!;
+      expect(row.text).toBe('Also fix the footer.');
+      expect(copiedUserText(row)).toBe('Also fix the footer.');
     }
   });
 

@@ -88,7 +88,8 @@ describe('an answer envelope the engine joined with a waiting prompt', () => {
 });
 
 // the task review (Decision Log): a join of envelopes alone, each for an ask answered here, is no bubble, as one envelope
-// is; one whose ask is not answered here keeps the bubble, as an orphan envelope does
+// is. Ticket 704 (its document, "Reported to the architect", C 1): the window reads each envelope as an event of its own
+// under the joined message's uuid, so an orphan (its ask not held here) is drawn only where it is the first of them
 describe('a join of answer envelopes with no prompt', () => {
   const question = (id: string) => ({ id: 'q1', question: `Which option for ${id}?`, header: id, modality: 'choice' as const, options: [{ label: 'One' }, { label: 'Two' }] });
   const envelopeOf = (askId: string) => askSteerText(askId, [question(askId)], [{ id: 'q1', question: question(askId).question, status: 'answered', value: ['Two'] }]);
@@ -109,11 +110,17 @@ describe('a join of answer envelopes with no prompt', () => {
     expect(users(rows).map((r) => r.text)).toEqual(['prompt u0']);
   });
 
-  it('one of them for an ask not answered here: the join keeps its bubble, as an orphan envelope does', () => {
+  it('the second of them for an ask not answered here: no bubble, the orphan not being the first (ticket 704; U4b drew the join raw)', () => {
     const text = `${envelopeOf('toolu_ask_a')}\n${envelopeOf('toolu_ask_c')}`;
     const rows = stateWith(['toolu_ask_a'], text);
     expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: 'toolu_ask_a', state: 'answered' });
-    expect(users(rows).map((r) => r.text)).toEqual(['prompt u0', text]);
+    expect(users(rows).map((r) => r.text)).toEqual(['prompt u0']);
+  });
+
+  it('the first of them for an ask not answered here: its bubble is the orphan alone, as a lone orphan’s is', () => {
+    const rows = stateWith(['toolu_ask_a'], `${envelopeOf('toolu_ask_c')}\n${envelopeOf('toolu_ask_a')}`);
+    expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: 'toolu_ask_a', state: 'answered' });
+    expect(users(rows).map((r) => r.text)).toEqual(['prompt u0', envelopeOf('toolu_ask_c')]);
   });
 });
 
@@ -174,16 +181,18 @@ describe('the joined answer, the architect\'s review', () => {
       expect(promptOf(rows)).toMatchObject({ text: '', attachments: [{ kind: 'file', name: 'brief.pdf' }] });
     });
 
-    it('a block that draws nothing (a type no attachment reads) keeps no row: there is nothing to lose', () => {
+    // ticket 704: the block stays with the person's part (its document, decision 7), so the row draws what it draws for a
+    // message of that block alone; U4b drew no row
+    it('a block that draws nothing (a type no attachment reads) is the person’s message: its row draws nothing of the envelope', () => {
       const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [{ type: 'text', text: envelopeOf('toolu_ask_i') }, { type: 'container_upload' }]);
       expect(asksOf(rows)).toEqual([['toolu_ask_i', 'answered']]);
-      expect(promptOf(rows)).toBeUndefined();
+      expect(promptOf(rows)).toMatchObject({ text: '', attachments: [] });
     });
 
-    it('an ask not answered here: the row draws the image and the raw text', () => {
+    it('an ask not answered here: the row draws the image alone, the orphan not being the first (ticket 704; U4b drew the raw text beside it)', () => {
       const text = `${envelopeOf('toolu_ask_i')}\n${envelopeOf('toolu_ask_k')}`;
       const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [IMAGE, { type: 'text', text }]);
-      expect(promptOf(rows)).toMatchObject({ text, attachments: [{ kind: 'image' }] });
+      expect(promptOf(rows)).toMatchObject({ text: '', attachments: [{ kind: 'image' }] });
     });
   });
 
