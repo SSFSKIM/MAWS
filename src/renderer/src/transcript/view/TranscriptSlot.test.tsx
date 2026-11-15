@@ -969,7 +969,8 @@ describe('the lane of the to-human view', () => {
     settings(true);
     render(<TranscriptSlot appSessionId={LOCAL} />);
     await settle();
-    expect(useTranscriptStore.getState().entries[LOCAL]?.state.ui.ownerLane).toBe(false); // the app's switch is not this session's lane
+    expect(useTranscriptStore.getState().entries[LOCAL]?.phase).toBe('live');
+    expect(useTranscriptStore.getState().entries[LOCAL]!.state.ui.ownerLane ?? false).toBe(false); // the app's switch is not this session's lane
     act(() => useOwnerChannelStore.setState({ bySession: new Map([[LOCAL, { ...channel(true), appSessionId: LOCAL }]]) }));
     await settle();
     expect(useTranscriptStore.getState().entries[LOCAL]?.state.ui.ownerLane).toBe(true);

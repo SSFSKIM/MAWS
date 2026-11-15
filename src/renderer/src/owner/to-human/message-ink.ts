@@ -162,8 +162,12 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
   tree.children = grouped;
 };
 
+// Streamdown caches its processor by its plugins' function names (`generateCacheKey`, read in streamdown's dist), so
+// each decoration carries a name of its own: four anonymous plugins would share the first one's processor.
+const named = (name: string, plugin: Plugin<[], Root>): Plugin<[], Root> => Object.defineProperty(plugin, 'name', { value: name });
+
 /** The decoration of a text's one Markdown tree: completed or streaming, whole or its messages alone (a closed head). */
-export const messageInk = { source: sourceTags, decorate: decorateWith({ live: false, only: false }) };
-export const liveMessageInk = { source: sourceTags, decorate: decorateWith({ live: true, only: false }) };
-export const reportMessageInk = { source: sourceTags, decorate: decorateWith({ live: false, only: true }) };
-export const liveReportMessageInk = { source: sourceTags, decorate: decorateWith({ live: true, only: true }) };
+export const messageInk = { source: sourceTags, decorate: named('messageInk', decorateWith({ live: false, only: false })) };
+export const liveMessageInk = { source: sourceTags, decorate: named('liveMessageInk', decorateWith({ live: true, only: false })) };
+export const reportMessageInk = { source: sourceTags, decorate: named('reportMessageInk', decorateWith({ live: false, only: true })) };
+export const liveReportMessageInk = { source: sourceTags, decorate: named('liveReportMessageInk', decorateWith({ live: true, only: true })) };
