@@ -31,7 +31,7 @@ After the four pull requests of this landing:
 - [x] (2026-11-15) Revision 2: the review's rulings and the drawn pages' rulings folded in (Decision Log).
 - [x] (2026-11-15) The owner's answers to four of the eight cards, each the recommended option: "PDF spacing", "Compact", "Export menu", "Above the bar" (Decision Log).
 - [x] (2026-11-15) The owner's answers to the other four cards, each the recommended option: "Bar glyphs", "Other session", "New cards", "Space mark" (Decision Log). No card is open; what remains for the owner is the look on a Mac at each landing.
-- [ ] M1 — An HTML page is published from a file and exported as itself.
+- [x] (2026-11-15) M1 — An HTML page is published from a file and exported as itself. Commits `015c2a727..a3b4f0307`, fix `d1ece68c0..e6ecbd939`; reviewed clean.
 - [ ] M2 — A document's page is a setting of the document, and an export says how many pages it has.
 - [ ] M3 — The person's Export menu shows the page, and the scenes of U10b-1.
 - [ ] M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content.
