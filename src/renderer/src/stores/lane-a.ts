@@ -10,11 +10,15 @@
 // P5 O9 M6: the settlements this page's answers were told (`laneA.answer`'s `not_pending`), beside those the state carries,
 // so a card whose answer lost the race says who won.
 //
+// UX wave U8d (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, Interfaces §C): a session's subagents
+// as main derives their statuses, beside its jobs, with when the latest body was noted.
+//
 // M5 lists the local machine: main's driver serves its own sessions. M9: another machine's lane A states come from main's
 // remote adapter, for the sessions some page watches there; each machine O8's rows list (`listedMachines`) is listed by
 // that machine as the roster gains it, into its own partition, and a machine the roster loses is emptied. A
 // `laneA.changed` from any machine is applied, after the list of its machine when one is on its way.
 import type { Job } from 'desk-hub/protocol';
+import type { LaneAAgent } from '@shared/lane-a/agents';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
@@ -49,7 +53,15 @@ export interface LaneAStore {
   uploads: ReadonlyMap<AppSessionId, readonly LaneAUpload[]>; // M7: the composer's uploads, until they went on or are dismissed
   usage: ReadonlyMap<AppSessionId, LaneAUsage>; // the latest `usage` a watch of this page heard (its snapshot's, then each turn's)
   jobs: ReadonlyMap<AppSessionId, readonly Job[]>; // the latest jobs a watch of this page heard (its snapshot's, then each `subagents`)
+  agents: ReadonlyMap<AppSessionId, NotedAgents>; // UX wave U8d: the latest subagents a watch of this page heard, beside the jobs
   told: ReadonlyMap<AppSessionId, ReadonlyMap<string, RequestSettlement>>; // M6: settlements an answer of this page was told, by request
+}
+
+// UX wave U8d: one session's subagents as the latest body said them, and when that body was noted (ISO, this Mac's clock):
+// the task-graph store lays them over the session's graph unless this app launched the session after that.
+export interface NotedAgents {
+  agents: readonly LaneAAgent[];
+  notedAt: string;
 }
 
 // How a request of a bridged session was settled (DX4 `settled`'s words, `winner` 'web' | 'terminal' | 'other'), or that
@@ -67,7 +79,7 @@ export interface LaneAUsage {
   cost: { usd: number } | null;
 }
 
-const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), uploads: new Map(), usage: new Map(), jobs: new Map(), told: new Map() });
+const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), uploads: new Map(), usage: new Map(), jobs: new Map(), agents: new Map(), told: new Map() });
 
 export const useLaneA = create<LaneAStore>()(empty);
 
@@ -188,6 +200,30 @@ export function laneAJobsWatchEnded(appSessionId: AppSessionId): void {
   });
 }
 export const useLaneAJobs = (appSessionId: AppSessionId): readonly Job[] | null => useLaneA((s) => s.jobs.get(appSessionId) ?? null);
+
+// UX wave U8d: the session's subagents as main derives their statuses (its jobs' rule: kept past the watch that heard
+// them only when none still runs). A body that says what the held one says keeps the held list, so nothing that reads
+// it recomputes; its time is still the later one.
+export function noteLaneAAgents(appSessionId: AppSessionId, agents: readonly LaneAAgent[], notedAt: string = new Date().toISOString()): void {
+  useLaneA.setState((s) => {
+    const held = s.agents.get(appSessionId)?.agents;
+    const same = held !== undefined && JSON.stringify(held) === JSON.stringify(agents);
+    return { agents: new Map(s.agents).set(appSessionId, { agents: same ? held : agents, notedAt }) };
+  });
+}
+export function laneAAgentsWatchEnded(appSessionId: AppSessionId): void {
+  if (useLaneA.getState().agents.get(appSessionId)?.agents.some((a) => a.status === 'running')) forgetLaneAAgents(appSessionId);
+}
+// A launch by this app after they were noted: they are gone, not hidden (the task-graph store's `applyStatus`).
+export function forgetLaneAAgents(appSessionId: AppSessionId): void {
+  if (!useLaneA.getState().agents.has(appSessionId)) return;
+  useLaneA.setState((s) => {
+    const agents = new Map(s.agents);
+    agents.delete(appSessionId);
+    return { agents };
+  });
+}
+export const useLaneAAgents = (appSessionId: AppSessionId): readonly LaneAAgent[] | null => useLaneA((s) => s.agents.get(appSessionId)?.agents ?? null);
 
 // P5 O9 M6: what an answer was told of its request's settlement (`not_pending`), kept while the session is in lane A.
 export function noteLaneASettlement(appSessionId: AppSessionId, request: string, settlement: RequestSettlement): void {

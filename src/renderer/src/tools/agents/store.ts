@@ -6,11 +6,23 @@
 // after the wire. Stop marks the node, calls `session.stopTask` and removes a node only under the resolution rule: the
 // call resolved, the id absent from the status's list, no terminal frame within STOP_SETTLE_MS. The store never reads
 // C6's transcript store: the two reducers see the same events and agree by construction.
+//
+// UX wave U8d (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, M3 and Interfaces §C): a terminal
+// session this Mac drives has its subagents' statuses derived in main and carried by its lane A watch (the lane A store
+// keeps them, `noteLaneAAgents`). For a session bound to this machine's reads the store publishes the graph those reads
+// built with them laid over it (`withStatuses`), and keeps the reads' graph apart: every reduction of its own starts from
+// it, so a later body is never laid over an earlier one. What ends them is a launch by this app after they were noted
+// (the status's `launchedAt`): it discards them, whatever its process says. While the graph is watched and the session's
+// bridge is live or starting, the store holds the session's lane A watch, so the panel alone keeps the body coming.
 import { create } from 'zustand';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
+import type { LaneAAgent } from '@shared/lane-a/agents';
+import { withStatuses, type StatusedMeta } from '../../lane-a/agents/task-feed';
+import { watchLaneA } from '../../lane-a/watches';
+import { forgetLaneAAgents, useLaneA } from '../../stores/lane-a';
 import { useSessions } from '../../stores/sessions';
 import { agentWorkClient } from './client';
 import { applySnapshot, applyTaskEvents, emptyGraph, markExited, mergeRuns, mergeSidecars, removeTask, setStopping, TASK_EVENT_KINDS, type TaskGraph } from './model/task-graph';
@@ -68,6 +80,8 @@ export function placeInRow(eventId: string): number {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
+// U8d: the status's launch came after the time given (both this Mac's clock)
+const launchedAfter = (status: EngineSessionStatus, at: string) => Date.parse(status.launchedAt) > Date.parse(at);
 const nowIso = () => new Date().toISOString();
 
 // What the store keeps per session outside its state: the subscriptions and timers a watch owns.
@@ -84,6 +98,7 @@ interface Watch {
   workflowTimer: ReturnType<typeof setTimeout> | null;
   initializing: boolean;
   remote: boolean; // P5 O9 M9: bound to another machine's plane (the remote feed), not this machine's reads
+  laid: { reads: TaskGraph; agents: readonly LaneAAgent[]; published: TaskGraph } | null; // U8d: the last overlay published
   binding: number; // bumped at each rebind, so a disk read the old binding started is dropped
 }
 
@@ -91,7 +106,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
   const watches = new Map<AppSessionId, Watch>();
   const watchOf = (id: AppSessionId): Watch => {
     let w = watches.get(id);
-    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, frozen: null, status: null, settle: new Map(), workflowTimer: null, initializing: false, remote: false, binding: 0 }));
+    if (!w) watches.set(id, (w = { watchers: 0, offs: [], wire: false, held: null, generation: 0, cursorN: Infinity, frozen: null, status: null, settle: new Map(), workflowTimer: null, initializing: false, remote: false, binding: 0, laid: null }));
     return w;
   };
 
@@ -100,8 +115,39 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       graph: emptyGraph(), phase: 'idle', launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map(),
     });
     const read = (id: AppSessionId) => get().entries.get(id) ?? blank();
-    // Writes only what changed, so an event that changes nothing leaves the entry (and its graph) the same object.
-    const write = (id: AppSessionId, patch: Partial<TaskGraphEntry>) => {
+
+    // U8d: the session's noted lane A agents, unless the session is bound to another machine's feed (whose graph carries
+    // them already) or the status this store applied was launched after they were noted.
+    const layable = (id: AppSessionId): readonly LaneAAgent[] | null => {
+      const w = watchOf(id);
+      const noted = w.remote ? undefined : useLaneA.getState().agents.get(id);
+      if (noted === undefined || noted.agents.length === 0) return null;
+      return w.status !== null && launchedAfter(w.status, noted.notedAt) ? null : noted.agents;
+    };
+    // The graph to publish for the reads' graph: the same object again when neither it nor the agents changed.
+    const publish = (id: AppSessionId, reads: TaskGraph): TaskGraph => {
+      const w = watchOf(id);
+      const agents = layable(id);
+      if (agents === null) {
+        w.laid = null;
+        return reads;
+      }
+      if (w.laid !== null && w.laid.reads === reads && w.laid.agents === agents) return w.laid.published;
+      // the body crossed IPC as JSON, so each meta is the JSON object DX4's type names
+      w.laid = { reads, agents, published: withStatuses(reads, agents as readonly StatusedMeta[]) };
+      return w.laid.published;
+    };
+    // The graph the store's own reads built: the published one, unless that is the overlay last laid over them.
+    const readsOf = (id: AppSessionId): TaskGraph => {
+      const published = read(id).graph;
+      const laid = watchOf(id).laid;
+      return laid !== null && laid.published === published ? laid.reads : published;
+    };
+
+    // Writes only what changed, so an event that changes nothing leaves the entry (and its graph) the same object. A
+    // graph written is the reads' graph; what is published is `publish`'s.
+    const write = (id: AppSessionId, given: Partial<TaskGraphEntry>) => {
+      const patch = given.graph === undefined ? given : { ...given, graph: publish(id, given.graph) };
       const held = get().entries.get(id);
       const current = held ?? blank();
       if (held && (Object.keys(patch) as (keyof TaskGraphEntry)[]).every((key) => current[key] === patch[key])) return;
@@ -111,7 +157,8 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     // A pending stop ends with its task: the terminal frame (or the exit) arrived, or the node is gone.
     const settleEnded = (id: AppSessionId) => {
       const e = read(id);
-      const ended = [...e.pendingStops.keys()].filter((taskId) => e.graph.tasks.get(taskId)?.status !== 'running');
+      const graph = readsOf(id);
+      const ended = [...e.pendingStops.keys()].filter((taskId) => graph.tasks.get(taskId)?.status !== 'running');
       if (ended.length === 0) return;
       const pendingStops = new Map(e.pendingStops);
       const w = watchOf(id);
@@ -134,7 +181,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           if (!e.pendingStops.has(taskId)) return;
           const pendingStops = new Map(e.pendingStops);
           pendingStops.delete(taskId);
-          write(id, { graph: removeTask(e.graph, taskId), pendingStops }); // the engine answered success for an id it no longer knows
+          write(id, { graph: removeTask(readsOf(id), taskId), pendingStops }); // the engine answered success for an id it no longer knows
         }, STOP_SETTLE_MS),
       );
     };
@@ -178,7 +225,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       }
       if (w.frozen) ({ lastSeq, cursorN } = w.frozen); // the events apply; the cursor does not pass what no snapshot covered
       w.cursorN = cursorN;
-      write(id, { graph: applyTaskEvents(e.graph, accepted), lastSeq });
+      write(id, { graph: applyTaskEvents(readsOf(id), accepted), lastSeq });
       settleEnded(id);
     };
 
@@ -191,7 +238,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
 
     const remergeDisk = (id: AppSessionId) => {
       const e = read(id);
-      write(id, { graph: mergeRuns(mergeSidecars(e.graph, e.disk.agents ?? []), e.disk.runs ?? []) });
+      write(id, { graph: mergeRuns(mergeSidecars(readsOf(id), e.disk.agents ?? []), e.disk.runs ?? []) });
     };
 
     // One snapshot of this launch from the cursor, then the held batches and every later one.
@@ -231,7 +278,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
 
     const applyDisk = (id: AppSessionId, patch: Partial<TaskGraphEntry['disk']>) => {
       const e = read(id);
-      let graph = e.graph;
+      let graph = readsOf(id);
       if (patch.agents) graph = mergeSidecars(graph, patch.agents);
       if (patch.runs) graph = mergeRuns(graph, patch.runs);
       write(id, { disk: { ...e.disk, ...patch }, graph });
@@ -269,6 +316,10 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const applyStatus = (id: AppSessionId, status: EngineSessionStatus | null) => {
       const w = watchOf(id);
       w.status = status;
+      // U8d: a launch by this app after the terminal's statuses were noted ends them, whatever its process says; an
+      // earlier launch's status never does, whenever it arrives
+      const noted = useLaneA.getState().agents.get(id);
+      if (status !== null && noted !== undefined && launchedAfter(status, noted.notedAt)) forgetLaneAAgents(id);
       const e = read(id);
       if (status === null) {
         w.wire = false;
@@ -277,7 +328,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         write(id, { phase: 'disk' });
         return;
       }
-      let graph = e.graph;
+      let graph = readsOf(id);
       const patch: Partial<TaskGraphEntry> = {};
       let relaunched = false;
       if (e.launchId !== status.launchId) {
@@ -356,6 +407,29 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           }, WORKFLOW_REREAD_MS);
         }),
       );
+      // U8d: the statuses its watch carries, laid again as they change, and the watch held while the bridge is up
+      let laneA: (() => void) | null = null;
+      const holdLaneA = () => {
+        const bridge = useLaneA.getState().states.get(id)?.bridge;
+        const up = bridge === 'live' || bridge === 'starting';
+        if (up && laneA === null) laneA = watchLaneA(id, () => {});
+        else if (!up && laneA !== null) {
+          laneA();
+          laneA = null;
+        }
+      };
+      w.offs.push(
+        useLaneA.subscribe((state, before) => {
+          if (state.agents.get(id) !== before.agents.get(id)) write(id, { graph: readsOf(id) });
+          if (state.states.get(id) !== before.states.get(id)) holdLaneA();
+        }),
+        () => {
+          laneA?.();
+          laneA = null;
+        },
+      );
+      write(id, { graph: readsOf(id) });
+      holdLaneA();
       if (w.status) startWire(id);
       readDisk(id);
     };
@@ -402,8 +476,9 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
 
       async stop(id, taskId) {
         const e = read(id);
-        if (e.graph.tasks.get(taskId)?.stopping) return { ok: true };
-        write(id, { graph: setStopping(e.graph, taskId, true), pendingStops: new Map(e.pendingStops).set(taskId, { requestedAt: nowIso(), resolvedAt: null, absentAtResolution: false }) });
+        const graph = readsOf(id);
+        if (graph.tasks.get(taskId)?.stopping) return { ok: true };
+        write(id, { graph: setStopping(graph, taskId, true), pendingStops: new Map(e.pendingStops).set(taskId, { requestedAt: nowIso(), resolvedAt: null, absentAtResolution: false }) });
         try {
           await agentWorkClient().stopTask(id, taskId);
         } catch (error) {
@@ -411,7 +486,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           if (!current.pendingStops.has(taskId)) return { ok: true }; // the terminal frames came first: the task stopped
           const pendingStops = new Map(current.pendingStops);
           pendingStops.delete(taskId);
-          write(id, { graph: setStopping(current.graph, taskId, false), pendingStops });
+          write(id, { graph: setStopping(readsOf(id), taskId, false), pendingStops });
           return { ok: false, message: messageOf(error) };
         }
         const current = read(id);
