@@ -3,7 +3,10 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { commandLine, isMcpAction, isMcpName, isMcpUrl, isPluginsArgument, mcpCommandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, RUNNER_ACTIONS, runnerCommandLine, writesOf, type PluginsAction, type PluginsActionInputs } from './cli';
+import {
+  commandLine, holdsValueSlot, isMcpAction, isMcpName, isMcpUrl, isPluginsArgument, MCP_ENTRY_BOUNDS, MCP_MASK, mcpCommandLine, mcpEntryJson, mcpEntryProblem, mcpShown, mcpShownCommand, mcpShownLine, mcpValueSlotsOf,
+  PLUGINS_ACTIONS, PLUGINS_SCOPES, READ_LINES, RUNNER_ACTIONS, runnerCommandLine, writesOf, type McpEntry, type McpEntryProblem, type McpPair, type PluginsAction, type PluginsActionInputs,
+} from './cli';
 
 const ROOT = resolve(__dirname, '../../..');
 
@@ -239,5 +242,175 @@ describe('mcpCommandLine', () => {
 
   it('tells the runner\'s two families apart', () => {
     expect(RUNNER_ACTIONS.filter(isMcpAction)).toEqual(['mcp-add', 'mcp-remove']);
+  });
+});
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §A): a custom connector's entry,
+// its one rule, the `claude mcp add-json` line (Engine facts, 1: written exactly as given), its value slots, and the
+// line MAWS shows, built from the structure with the slots replaced and never by searching text.
+const remote: McpEntry = { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value: 'value-one' }] };
+const local: McpEntry = { type: 'stdio', command: '/opt/files probe/bin/files-probe', args: ['--root', '/tmp/my files'], env: [{ name: 'FILES_PROBE_KEY', value: 'value-two' }] };
+const add = (entry: McpEntry, name = 'files-probe', scope: 'user' | 'project' | 'local' = 'user') => ({ name, scope, entry });
+
+describe('the custom add’s command line', () => {
+  it('builds `mcp add-json <name> <json> --scope <scope>` whose JSON parses back to the entry, for each type, with and without headers, variables and arguments', () => {
+    const cases: [McpEntry, Record<string, unknown>][] = [
+      [remote, { type: 'http', url: 'https://files.example.test/mcp', headers: { 'X-Files-Key': 'value-one' } }],
+      [{ ...remote, type: 'sse' }, { type: 'sse', url: 'https://files.example.test/mcp', headers: { 'X-Files-Key': 'value-one' } }],
+      [{ type: 'http', url: 'https://files.example.test/mcp', headers: [] }, { type: 'http', url: 'https://files.example.test/mcp' }],
+      [local, { type: 'stdio', command: '/opt/files probe/bin/files-probe', args: ['--root', '/tmp/my files'], env: { FILES_PROBE_KEY: 'value-two' } }],
+      [{ type: 'stdio', command: 'files-probe', args: [], env: [] }, { type: 'stdio', command: 'files-probe', args: [] }],
+      [{ type: 'stdio', command: 'files-probe', args: [''], env: [{ name: 'EMPTY_ONE', value: '' }] }, { type: 'stdio', command: 'files-probe', args: [''], env: { EMPTY_ONE: '' } }],
+    ];
+    for (const scope of PLUGINS_SCOPES) {
+      for (const [entry, written] of cases) {
+        const argv = mcpCommandLine('mcp-add', add(entry, 'files-probe', scope));
+        expect(argv.length).toBe(6);
+        expect([argv[0], argv[1], argv[2], argv[4], argv[5]]).toEqual(['mcp', 'add-json', 'files-probe', '--scope', scope]);
+        expect(JSON.parse(argv[3])).toEqual(written);
+        expect(argv[3]).toBe(mcpEntryJson(entry));
+        expect(runnerCommandLine('mcp-add', add(entry, 'files-probe', scope))).toEqual(argv);
+      }
+    }
+  });
+
+  it('leaves today’s `mcp add` and `mcp remove` lines as they were', () => {
+    expect(mcpCommandLine('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' })).toEqual(['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'user']);
+    expect(mcpCommandLine('mcp-remove', { name: 'linear', scope: 'local' })).toEqual(['mcp', 'remove', 'linear', '--scope', 'local']);
+  });
+
+  it('refuses a name the engine refuses before anything of the entry is read', () => {
+    for (const name of ['two words', '-y', '', 'dot.name']) expect(() => mcpCommandLine('mcp-add', add(local, name)), name).toThrow(/server name/);
+  });
+});
+
+describe('mcpEntryProblem', () => {
+  const B = MCP_ENTRY_BOUNDS;
+  const pairs = (n: number, prefix = 'K') => Array.from({ length: n }, (_, i) => ({ name: `${prefix}${i}`, value: 'v' }));
+  const problemOf = (entry: McpEntry): McpEntryProblem | null => mcpEntryProblem(entry);
+  // one case per rule of §A's table, each answering the field, the row and the code
+  const refused: [string, McpEntry, McpEntryProblem][] = [
+    ['a URL that is not http or https', { ...remote, url: 'ftp://files.example.test/mcp' }, { field: 'url', index: null, code: 'url' }],
+    ['a URL with a space at its end', { ...remote, url: 'https://files.example.test/mcp ' }, { field: 'url', index: null, code: 'url' }],
+    ['a URL over 4,096', { ...remote, url: `https://files.example.test/${'x'.repeat(B.url)}` }, { field: 'url', index: null, code: 'too-long' }],
+    ['an empty command', { ...local, command: '' }, { field: 'command', index: null, code: 'empty' }],
+    ['a command with a space at an end', { ...local, command: ' files-probe' }, { field: 'command', index: null, code: 'space' }],
+    ['a command over 4,096', { ...local, command: 'x'.repeat(B.command + 1) }, { field: 'command', index: null, code: 'too-long' }],
+    ['257 arguments', { ...local, args: Array.from({ length: B.args + 1 }, () => 'a') }, { field: 'args', index: null, code: 'too-many' }],
+    ['an argument over 8,192', { ...local, args: ['ok', 'x'.repeat(B.arg + 1)] }, { field: 'args', index: 1, code: 'too-long' }],
+    ['65 headers', { ...remote, headers: pairs(B.headers + 1, 'X-H') }, { field: 'headers', index: null, code: 'too-many' }],
+    ['129 variables', { ...local, env: pairs(B.env + 1) }, { field: 'env', index: null, code: 'too-many' }],
+    ['a header name that is no HTTP token', { ...remote, headers: [{ name: 'X Files', value: 'v' }] }, { field: 'headers', index: 0, code: 'name' }],
+    ['an empty header name', { ...remote, headers: [{ name: '', value: 'value-one' }] }, { field: 'headers', index: 0, code: 'name' }],
+    ['a header name over 256', { ...remote, headers: [{ name: 'x'.repeat(B.pairName + 1), value: 'v' }] }, { field: 'headers', index: 0, code: 'name' }],
+    ['a header named __proto__', { ...remote, headers: [{ name: '__proto__', value: 'v' }] }, { field: 'headers', index: 0, code: 'name' }],
+    ['a variable name starting with a digit', { ...local, env: [{ name: '1KEY', value: 'v' }] }, { field: 'env', index: 0, code: 'name' }],
+    ['a variable name with a hyphen', { ...local, env: [{ name: 'FILES-KEY', value: 'v' }] }, { field: 'env', index: 0, code: 'name' }],
+    ['a variable named __proto__', { ...local, env: [{ name: '__proto__', value: 'v' }] }, { field: 'env', index: 0, code: 'name' }],
+    ['two headers of one name, case ignored', { ...remote, headers: [{ name: 'X-Files-Key', value: 'a' }, { name: 'x-files-key', value: 'b' }] }, { field: 'headers', index: 1, code: 'duplicate' }],
+    ['two variables of one name', { ...local, env: [{ name: 'KEY', value: 'a' }, { name: 'OTHER', value: 'b' }, { name: 'KEY', value: 'c' }] }, { field: 'env', index: 2, code: 'duplicate' }],
+    ['a header value over 8,192', { ...remote, headers: [{ name: 'X-A', value: 'x'.repeat(B.value + 1) }] }, { field: 'headers', index: 0, code: 'too-long' }],
+    ['a variable value over 8,192', { ...local, env: [{ name: 'A', value: 'x'.repeat(B.value + 1) }] }, { field: 'env', index: 0, code: 'too-long' }],
+    ['a control character in the URL', { ...remote, url: 'https://files.example.test/m\ncp' }, { field: 'url', index: null, code: 'control' }],
+    ['a control character in the command', { ...local, command: 'files\u0007probe' }, { field: 'command', index: null, code: 'control' }],
+    ['a control character in an argument', { ...local, args: ['a', 'b\tc'] }, { field: 'args', index: 1, code: 'control' }],
+    ['a control character in a header value', { ...remote, headers: [{ name: 'X-A', value: 'value\none' }] }, { field: 'headers', index: 0, code: 'control' }],
+    ['a delete character in a variable value', { ...local, env: [{ name: 'A', value: 'value\u007f' }] }, { field: 'env', index: 0, code: 'control' }],
+    ['a JSON text over 32,768 bytes', { ...local, args: Array.from({ length: 5 }, () => 'x'.repeat(B.arg)) }, { field: 'entry', index: null, code: 'too-large' }],
+  ];
+  it.each(refused)('refuses %s', (_what, entry, problem) => {
+    expect(problemOf(entry)).toEqual(problem);
+  });
+
+  it('accepts the entries of both kinds at their bounds: an empty value, an empty argument, the maximum counts, a value of 8,192', () => {
+    expect(problemOf(remote)).toBeNull();
+    expect(problemOf(local)).toBeNull();
+    expect(problemOf({ ...remote, headers: [{ name: "!#$%&'*+-.^_`|~Az09", value: '' }] })).toBeNull();
+    expect(problemOf({ ...local, args: [''], env: [{ name: '_A1', value: '' }] })).toBeNull();
+    expect(problemOf({ ...remote, headers: pairs(B.headers, 'X-H') })).toBeNull();
+    expect(problemOf({ ...local, env: pairs(B.env) })).toBeNull();
+    expect(problemOf({ ...local, env: [{ name: 'A', value: 'x'.repeat(B.value) }] })).toBeNull();
+    expect(problemOf({ ...local, env: [{ name: 'KEY', value: 'a' }, { name: 'key', value: 'b' }] })).toBeNull(); // variables are case-sensitive
+  });
+
+  it('makes the builder throw on each problem in words that name the field and the row, never a slot’s content', () => {
+    // a value of a letter or two is in any words; each short value is made one that no fixed word holds
+    const distinct = (entry: McpEntry): McpEntry => {
+      const values = (pairs: McpPair[]) => pairs.map(({ name, value }, i) => ({ name, value: value.length < 8 && ![...value].some((c) => c.charCodeAt(0) < 0x20 || c.charCodeAt(0) === 0x7f) ? `slot-value-${i}` : value }));
+      return entry.type === 'stdio' ? { ...entry, env: values(entry.env) } : { ...entry, headers: values(entry.headers) };
+    };
+    for (const [what, given] of refused) {
+      const entry = distinct(given);
+      expect(mcpEntryProblem(entry), what).toEqual(mcpEntryProblem(given));
+      let message = '';
+      try {
+        mcpCommandLine('mcp-add', add(entry));
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message, what).not.toBe('');
+      for (const slot of mcpValueSlotsOf(add(entry))) expect(message.includes(slot), what).toBe(false);
+    }
+    expect(() => mcpCommandLine('mcp-add', add({ ...remote, headers: [{ name: 'X-A', value: 'value\none' }] }))).toThrow(/headers/);
+  });
+});
+
+describe('the value slots and the shown line', () => {
+  it('names the content of every header’s and variable’s value that is not empty, and nothing for any other input', () => {
+    expect(mcpValueSlotsOf(add(remote))).toEqual(['value-one']);
+    expect(mcpValueSlotsOf(add({ ...local, env: [{ name: 'A', value: 'value-two' }, { name: 'B', value: '' }, { name: 'C', value: 'value-three' }] }))).toEqual(['value-two', 'value-three']);
+    expect(mcpValueSlotsOf({ name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' })).toEqual([]);
+    expect(mcpValueSlotsOf({ name: 'linear', scope: 'user' })).toEqual([]);
+  });
+
+  it('finds a slot’s content in a text as written and as JSON escapes it inside a string, and an empty slot nowhere', () => {
+    expect(holdsValueSlot('the key was value-one, refused', ['value-one'])).toBe(true);
+    expect(holdsValueSlot('nothing here', ['value-one'])).toBe(false);
+    const quoted = 'value "one" \\ two';
+    expect(holdsValueSlot(`could not parse ${JSON.stringify({ k: quoted })}`, [quoted])).toBe(true); // as JSON escapes it
+    expect(holdsValueSlot(`raw ${quoted}`, [quoted])).toBe(true); // as written
+    expect(holdsValueSlot('a line', [''])).toBe(false);
+    expect(holdsValueSlot('a line', [])).toBe(false);
+  });
+
+  it('masks every value slot, empty ones too, and keeps every public field as typed, also where it equals a value', () => {
+    const same = add({ type: 'http', url: 'https://value-one.example.test/mcp', headers: [{ name: 'value-one', value: 'value-one' }, { name: 'X-Empty', value: '' }] }, 'value-one');
+    expect(mcpShown(same)).toEqual({ name: 'value-one', scope: 'user', entry: { type: 'http', url: 'https://value-one.example.test/mcp', headers: [{ name: 'value-one', value: MCP_MASK }, { name: 'X-Empty', value: MCP_MASK }] } });
+    expect(mcpShown(add(local))).toEqual(add({ ...local, env: [{ name: 'FILES_PROBE_KEY', value: MCP_MASK }] }));
+    const plain = { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http' as const, scope: 'user' as const };
+    expect(mcpShown(plain)).toBe(plain);
+    expect(MCP_MASK).toBe('•••');
+  });
+
+  it('shows the line with ••• in every slot, the public fields as typed, and holds no slot’s content', () => {
+    const input = add(local, 'files-probe', 'project');
+    const shown = mcpShownLine('mcp-add', input);
+    expect([shown[0], shown[1], shown[2], shown[4], shown[5]]).toEqual(['mcp', 'add-json', 'files-probe', '--scope', 'project']);
+    expect(JSON.parse(shown[3])).toEqual({ type: 'stdio', command: '/opt/files probe/bin/files-probe', args: ['--root', '/tmp/my files'], env: { FILES_PROBE_KEY: MCP_MASK } });
+    expect(shown.join(' ').includes('value-two')).toBe(false);
+    expect(mcpShownLine('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' })).toEqual(['mcp', 'add', '--transport', 'http', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'user']);
+    expect(mcpShownLine('mcp-remove', { name: 'linear', scope: 'user' })).toEqual(['mcp', 'remove', 'linear', '--scope', 'user']);
+    expect(() => mcpShownLine('mcp-add', add({ ...local, env: [{ name: '1KEY', value: 'value-two' }] }))).toThrow(); // validated once, as the real line is
+  });
+
+  it('builds both lines for an entry a few bytes under the JSON bound whose values are empty or one character, the mask past it (R5)', () => {
+    const values = Array.from({ length: 100 }, (_, i) => ({ name: `K${i}`, value: i % 2 === 0 ? '' : 'v' }));
+    const base: McpEntry = { type: 'stdio', command: 'files-probe', args: [], env: values };
+    const bytes = (e: McpEntry) => new TextEncoder().encode(mcpEntryJson(e)).length;
+    // five arguments fill the room to six bytes under the bound: each adds its length, its two quotes and a comma between
+    const fill = MCP_ENTRY_BOUNDS.json - 6 - bytes(base) - 5 * 2 - 4;
+    const each = Math.floor(fill / 5);
+    const entry: McpEntry = { ...base, args: [...Array.from({ length: 4 }, () => 'x'.repeat(each)), 'x'.repeat(fill - 4 * each)] };
+    expect(bytes(entry)).toBe(MCP_ENTRY_BOUNDS.json - 6);
+    expect(mcpEntryProblem(entry)).toBeNull();
+    expect(mcpCommandLine('mcp-add', add(entry))).toHaveLength(6);
+    const shown = mcpShownLine('mcp-add', add(entry));
+    expect(new TextEncoder().encode(shown[3]).length).toBeGreaterThan(MCP_ENTRY_BOUNDS.json); // nine bytes for each mask
+    expect(Object.values(JSON.parse(shown[3]).env as Record<string, string>).every((value) => value === MCP_MASK)).toBe(true);
+  });
+
+  it('words the shown command for a terminal, the JSON single-quoted for a shell', () => {
+    expect(mcpShownCommand(add(remote))).toBe(`claude mcp add-json files-probe '{"type":"http","url":"https://files.example.test/mcp","headers":{"X-Files-Key":"•••"}}' --scope user`);
+    expect(mcpShownCommand(add({ ...local, args: ["it's"], env: [] }))).toBe(`claude mcp add-json files-probe '{"type":"stdio","command":"/opt/files probe/bin/files-probe","args":["it'\\''s"]}' --scope user`);
   });
 });

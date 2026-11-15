@@ -5,7 +5,9 @@ export const commands = [
   'connectors.open', 'connectors.declare', 'connectors.call', 'connectors.watch', 'connectors.unwatch', 'connectors.refresh',
   'connectors.visibility', 'connectors.close',
   'connectors.servers', 'connectors.connect', 'connectors.reconnect', 'connectors.disconnect', // P3-HD M3c2: the owner's, from the sheet
-  'connectors.add', 'connectors.remove', 'connectors.signIn', 'connectors.signInCancel', // P4-AGG M4: Customize › Connectors
+  'connectors.add', 'connectors.remove', // P4-AGG M4: Customize › Connectors
+  'connectors.addJson', // UX wave U11g: Customize's custom connector
+  'connectors.signIn', 'connectors.signInCancel', // P4-AGG M4
   'connectors.signInServer', // P5 O7 M8: the session's MCP widget
   'connectors.signInDynamicServer', // UX wave U11a M8: a plugin's connector and one of MAWS's own list
 ] as const;

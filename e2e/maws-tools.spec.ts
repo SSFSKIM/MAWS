@@ -51,9 +51,9 @@ test.describe.configure({ timeout: 120_000 });
 const scene = (opts: { titles: string[]; repo?: string }, body: (s: Scene) => Promise<void>) => sharedScene({ ...opts, folders: ['assets'], label: 'e1-tools' }, body);
 
 // `e1-replay-<surface>-<theme>.png` under docs/doperpowers/evidence/p1-e1/ when MAWS_E1_SHOTS=1.
-async function shoot(s: Scene, surface: string): Promise<void> {
+async function shoot(s: Scene, surface: string, before?: () => Promise<void>): Promise<void> {
   if (SHOTS === null) return;
-  await shootThemes(s.page, (theme) => join(SHOTS, `e1-replay-${surface}-${theme}.png`));
+  await shootThemes(s.page, (theme) => join(SHOTS, `e1-replay-${surface}-${theme}.png`), before);
 }
 
 // ---- the Question sheet ---------------------------------------------------------------------------------------------
@@ -619,7 +619,7 @@ test('notes: an async ask answered with a note beside one answer and a skip with
 
 // ---- G5: show_pane --------------------------------------------------------------------------------------------------
 
-test('show_pane: the Terminal opens in the panel, an artifact no record answers to and an unknown pane are error cells', async () => {
+test('show_pane: the Terminal opens in the panel, the retired artifact pane and an unknown pane are error cells', async () => {
   await scene({ titles: ['E1 tools: show_pane'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -631,18 +631,18 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await allowNext(s, id); // nope (seq 100)
     await idle(s, id);
 
-    // what the host answered: the renderer's Terminal, the renderer's "no artifact" (E2: the recording's target `none`
-    // names no record; the recording itself carried "not available", and the replay compares no bodies), the host's
+    // what the host answered: the renderer's Terminal, the host's refusal of the retired artifact pane (UX wave U6d: no
+    // window is asked; the recording itself carried "not available", and the replay compares no bodies), the host's
     // unknown pane
     const calls = mcpCalls(s.journal(id));
     expect(calls.map((c) => c.args)).toEqual([{ pane: 'terminal' }, { pane: 'artifact', target: 'none' }, { pane: 'nope' }]);
     const results = calls.map((c) => mcpResultOf(s.journal(id), c.requestId)!);
     expect(JSON.parse(resultText(results[0]!))).toMatchObject({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', title: 'Terminal' } });
-    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
+    expect(results[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactPaneRetired }], isError: true });
     expect(results[2]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownPane('nope') }], isError: true });
     expect(ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
       ['terminal', 'panel-tool', null],
-      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
+      ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
     ]);
 
     // the cells: what opened, and why nothing did twice. Read on the cells' own labels: the turn's line says what the
@@ -650,7 +650,8 @@ test('show_pane: the Terminal opens in the panel, an artifact no record answers 
     await unfoldWork(s.pane);
     const cell = (text: RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
     await expect(cell(/^Opened Terminal$/)).toBeVisible();
-    // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not available")
+    // the cell reads the engine's tool_result, which the replay plays as the fixture has it (E1's build answered "not
+    // available"), so the refusal's own words are the model's unit test's and the paid live group's (U6d, decision 22)
     await expect(cell(/^Could not open pane: the artifact pane is not available in this build of MAWS$/)).toBeVisible();
     await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible(); // the host's words go on to list the known panes
     await shoot(s, 'pane');
@@ -682,13 +683,16 @@ function replyFixture(dir: string, fixture: string, text: string): string {
   return path;
 }
 
-test('an artifact link in the agent’s reply: a click opens it in the panel’s Artifacts tool, ⌘-click in its main tab, and an id no record answers to opens the not-found notice', async () => {
+test('an artifact link in the agent’s reply: link text that wraps, a click opens it in the panel’s Artifacts tool, ⌘-click in its main tab, a click then shows that tab, Enter opens, a drag selects, and an id no record answers to opens the not-found notice', async () => {
   await scene({ titles: ['P3-F: artifact links'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
     const { artifact } = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: 'Linked plan' }));
+    // UX wave U6d (A14.2): a mention whose title is longer than a line, after a few words, so that it crosses a line end
+    const LONG_TITLE = 'A plan for the spring garden: which beds take the tomatoes and the beans, where the new path runs past the shed, what to sow under glass in March, and which tools to mend before the season starts';
+    const { artifact: long } = value(await invoke(s.page, 'artifacts.create', { kind: 'document', title: LONG_TITLE }));
     const GONE = '00000000-0000-4000-8000-00000000f14a';
-    await replay(s, id, replyFixture(s.scratch.root, SHOW_PANE, `The plan is [Linked plan](maws-artifact:${artifact.id}); the old one was [Old notes](maws-artifact:${GONE}).`));
+    await replay(s, id, replyFixture(s.scratch.root, SHOW_PANE, `The plan is [Linked plan](maws-artifact:${artifact.id}); the old one was [Old notes](maws-artifact:${GONE}). Before the season, read [${LONG_TITLE}](maws-artifact:${long.id}) first.`));
     for (let k = 0; k < 3; k++) await allowNext(s, id); // the recording's three show_pane calls
     await idle(s, id);
 
@@ -712,7 +716,85 @@ test('an artifact link in the agent’s reply: a click opens it in the panel’s
     // ⌘-click: the artifact in a main tab of its own
     await chip('Linked plan').click({ modifiers: ['Meta'] });
     await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
-    await expect(mainTabById(s.page, `artifact:${await localRef(s.page)}:${artifact.id}`)).toHaveAttribute('aria-selected', 'true');
+    const linkedTab = mainTabById(s.page, `artifact:${await localRef(s.page)}:${artifact.id}`);
+    await expect(linkedTab).toHaveAttribute('aria-selected', 'true');
+
+    // ---- UX wave U6d (O-44; docs/doperpowers/plans/2026-11-14-ux-wave-U6d-artifact-link.md, A14.1 to A14.6) ----
+    await show(s, id); // the session's tab selected again; the main tab stays in the strip
+    const record = (artifactId: string) => s.panel.locator(`[data-artifact-record="${artifactId}"]`);
+    await expect(gone, 'the side column still shows the last record it opened').toBeVisible();
+
+    // A14.1: link text, not a box: inline, no border, the prose's font, the accent colour; an underline only under the
+    // pointer. The border is read by its width: the base reset gives every element the style `solid` at width 0
+    const accent = await s.page.evaluate(() => {
+      const probe = document.body.appendChild(document.createElement('span'));
+      probe.style.color = 'var(--accent)';
+      const colour = getComputedStyle(probe).color;
+      probe.remove();
+      return colour;
+    });
+    const look = () =>
+      chip('Linked plan').evaluate((el) => {
+        const style = getComputedStyle(el);
+        return { tag: el.tagName, display: style.display, border: style.borderTopWidth, underline: style.textDecorationLine, colour: style.color, proseFont: style.fontFamily === getComputedStyle(el.parentElement!).fontFamily };
+      });
+    expect(await look()).toEqual({ tag: 'SPAN', display: 'inline', border: '0px', underline: 'none', colour: accent, proseFont: true });
+    await chip('Linked plan').hover();
+    await expect.poll(async () => (await look()).underline, { message: 'an underline under the pointer' }).toBe('underline');
+    await s.page.mouse.move(700, 20);
+    await expect.poll(async () => (await look()).underline).toBe('none');
+
+    // A14.2: the long title wraps across lines as prose does and stays inside the text column
+    const wrap = await chip(LONG_TITLE).evaluate((el) => {
+      const boxes = Array.from(el.getClientRects());
+      const column = (el.closest('.transcript-prose') ?? el.parentElement!).getBoundingClientRect();
+      return { lineBoxes: boxes.length, rightmost: Math.max(...boxes.map((box) => box.right)), columnRight: column.right };
+    });
+    expect(wrap.lineBoxes, 'the long mention crosses a line end').toBeGreaterThanOrEqual(2);
+    expect(wrap.rightmost, 'inside the text column').toBeLessThanOrEqual(wrap.columnRight + 0.5);
+
+    // A14.6: a drag inside the mention's words selects them and opens nothing (the side column's record is read again at
+    // the end of A14.4); a drag across the passage selects the mention's text with the words around it
+    const firstLine = await chip(LONG_TITLE).evaluate((el) => {
+      const box = el.getClientRects()[0]!;
+      return { x: box.left, y: box.top + box.height / 2, width: box.width };
+    });
+    await s.page.mouse.move(firstLine.x + 6, firstLine.y);
+    await s.page.mouse.down();
+    await s.page.mouse.move(firstLine.x + Math.min(160, firstLine.width - 6), firstLine.y, { steps: 6 });
+    await s.page.mouse.up();
+    const selected = () => s.page.evaluate(() => (document.getSelection()?.toString() ?? '').replace(/\s+/g, ' '));
+    expect(await selected(), 'a drag inside the mention selects part of it').not.toBe('');
+    // the paragraph's box, from inside its first line to the end of its last
+    const passage = await chip(LONG_TITLE).evaluate((el) => {
+      const box = el.parentElement!.getBoundingClientRect();
+      return { from: { x: box.left + 2, y: box.top + 6 }, to: { x: box.right - 2, y: box.bottom - 6 } };
+    });
+    await s.page.mouse.move(passage.from.x, passage.from.y);
+    await s.page.mouse.down();
+    await s.page.mouse.move(passage.to.x, passage.to.y, { steps: 8 });
+    await s.page.mouse.up();
+    expect(await selected(), 'a swept selection holds the mentions’ text').toContain(`Linked plan; the old one was Old notes. Before the season, read ${LONG_TITLE} first.`);
+    await s.page.evaluate(() => document.getSelection()?.removeAllRanges());
+
+    // A14.4: with the artifact open as a main tab, a click on its mention brings that tab forward, and nothing opens or
+    // changes beside the chat
+    await chip('Linked plan').click();
+    await expect(linkedTab).toHaveAttribute('aria-selected', 'true');
+    await expect(s.page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`)).toBeVisible();
+    await show(s, id);
+    await expect(gone, 'the side column shows what it showed').toBeVisible();
+    await expect(record(artifact.id)).toHaveCount(0);
+    await expect(record(long.id)).toHaveCount(0);
+
+    // A14.5: the link takes focus (tabindex 0, so Tab reaches it), and Enter opens a mention whose artifact no main tab
+    // holds beside the chat; the picture is of the focused, wrapped mention, for the ring's look on each line
+    await chip(LONG_TITLE).focus();
+    await expect(chip(LONG_TITLE)).toBeFocused();
+    await s.page.keyboard.press('Enter');
+    await expect(record(long.id)).toBeVisible();
+    await expect(chip(LONG_TITLE), 'the transcript stays in place').toBeVisible();
+    await shoot(s, 'artifact-link-focus', () => chip(LONG_TITLE).focus());
   });
 });
 

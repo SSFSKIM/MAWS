@@ -326,6 +326,7 @@
   "catalog.postures",
   "catalog.query",
   "connectors.add",
+  "connectors.addJson",
   "connectors.directDiscover",
   "connectors.directResolve",
   "connectors.directSend",

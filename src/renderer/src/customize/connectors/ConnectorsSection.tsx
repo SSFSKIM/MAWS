@@ -11,10 +11,15 @@
 //   directory (no copy at all) the pane says so, with Retry.
 // The management state (the operations and the sheet) lives here, above both views, so an add or a removal runs on, and
 // its line stays, whichever view shows; Customize keeps the section mounted once visited.
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, "Where", "After Add", §D): My
+// items' head has "Add custom connector…", which opens the custom sheet with Remote (HTTP) and all projects; every
+// opening reads what is configured here again, and the sheet checks the name only against that read. Its add runs under
+// `connector:add:<scope>:<name>`, and its line stands at the head of the list while it works or after it failed; a
+// succeeded add draws nothing there, its row being the result.
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
-import type { PluginsScope } from '@shared/plugins/cli';
+import { isMcpEntryAdd, type PluginsScope } from '@shared/plugins/cli';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { ipc } from '../../ipc/client';
@@ -23,7 +28,7 @@ import { SECONDARY } from '../../sessions/ui';
 import { LibrarySwitch, type LibraryTab } from '../../widgets/plugins/LibraryHeader';
 import { Gone, ManageProvider, OperationLine, useManage, type Manage } from '../../widgets/plugins/manage';
 import { usePluginOperations } from '../../widgets/plugins/operation';
-import type { PluginsRequest } from '../../widgets/plugins/present';
+import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
 import { usePluginsEnv } from '../../widgets/plugins/read';
 import { resolutionOf } from '../../widgets/PluginsWidget';
 import { TextButton } from '../../widgets/parts';
@@ -33,46 +38,67 @@ import { DISCOVER } from '../discover/copy';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import { DiscoverToolbar } from '../discover/DiscoverToolbar';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
+import { useCustomizationInventory } from '../inventory';
 import { ConnectorSheet } from './ConnectorSheet';
 import { CONNECTORS as C } from './copy';
-import { ownSignInSessionOf, removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type HoldingSession, type SignInFacts, type SignInView } from './present';
+import { addLineShown, configuredOf, customAddKey, ownSignInSessionOf, removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type HoldingSession, type SignInFacts, type SignInView } from './present';
+import { configuredSinceOpening } from './custom-form';
 import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, useSignIns, type SignInServer } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
 const DIRECTORY_SERVERS = 'directory:servers';
 
-type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number; runIn: string | null }; // runIn: a removal's own directory (sweep#2)
+// runIn: a removal's own directory (sweep#2); read: for a custom add, whether this opening's read of what is configured
+// here has answered (null for every other sheet, which reads the page's answer)
+type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number; runIn: string | null; read: 'out' | 'answered' | null };
+
+// What "Add custom connector…" opens (§D): Remote (HTTP), all projects, nothing typed.
+const CUSTOM_ADD_KEY = 'connector:add'; // the sheet's own key; its add runs under `customAddKey` once named
+const CUSTOM_ADD = requestFor('mcp-add', { name: '', scope: 'user', entry: { type: 'http', url: '', headers: [] } }, null);
 
 // The operations and the connector sheet: every opening reads `plugins.env` again, as the install sheet does.
-function useConnectorManage(cwd: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode; askIn: AskIn } {
+function useConnectorManage(cwd: string | null, place: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode; askIn: AskIn } {
   const env = usePluginsEnv();
   const { reread } = env;
   const runCwd = cwd ?? env.data?.configHome ?? '';
   const ops = usePluginOperations();
   const [asking, setAsking] = useState<Asking | null>(null);
   const openings = useRef(0);
+  // U11g: the page's inventory, read again at a custom sheet's opening (the same query as the page's, so they share it)
+  const inventory = useCustomizationInventory(cwd);
+  const { refetch } = inventory;
+  // A read begun after the opening: with an answer in hand a refetch cancels any read in flight and starts its own; with
+  // none yet, TanStack Query joins the read in flight, which began before the opening, so that one is let end and a read
+  // is begun after it (M2's review).
+  const unanswered = inventory.data === undefined;
   const askIn = useCallback<AskIn>(
     (key, request, runIn) => {
       const opening = ++openings.current;
-      setAsking({ key, request, engine: { state: 'loading' }, opening, runIn });
+      const custom = request.action === 'mcp-add' && isMcpEntryAdd(request.input);
+      setAsking({ key, request, engine: { state: 'loading' }, opening, runIn, read: custom ? 'out' : null });
       void reread().then((read) => setAsking((current) => (current?.opening === opening ? { ...current, engine: resolutionOf(read) } : current)));
+      if (!custom) return;
+      const readAfterOpening = unanswered ? refetch().then(() => refetch()) : refetch();
+      void readAfterOpening.then(() => setAsking((current) => (current?.opening === opening ? { ...current, read: 'answered' } : current)));
     },
-    [reread],
+    [reread, refetch, unanswered],
   );
   const ask = useCallback((key: string, request: PluginsRequest) => askIn(key, request, null), [askIn]);
   const manage = useMemo<Manage>(() => ({ cwd: runCwd, ops, ask, reloadMods: null }), [runCwd, ops, ask]);
   const runIn = asking?.runIn ?? runCwd;
+  const sheetConfigured = asking?.read == null ? configured : configuredSinceOpening(asking.read === 'answered', { isFetching: inventory.isFetching, configured: configuredOf(inventory) });
   const sheet = asking && (
     <ConnectorSheet
       key={`${asking.key}:${asking.opening}`}
       request={asking.request}
-      env={{ cwd, runCwd: runIn, engine: asking.engine, configured, retryServers }}
+      env={{ cwd, runCwd: runIn, engine: asking.engine, configured: sheetConfigured, retryServers, place }}
       onConfirm={(request, binary) => {
         setAsking(null);
         // a configuration MAWS removed or replaced: a sign-in's result for that name and scope says nothing about it now
         const { name, scope } = request.input as { name: string; scope: PluginsScope };
-        void ops.run(asking.key, request, runIn, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
+        const key = asking.read === null ? asking.key : customAddKey(scope, name);
+        void ops.run(key, request, runIn, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
       }}
       onClose={() => setAsking(null)}
     />
@@ -95,7 +121,7 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
   live: ReactNode; // what the attached session has live
 }) {
   const [view, setView] = useState<LibraryTab>('myItems');
-  const { manage, sheet, askIn } = useConnectorManage(cwd, configured, refresh);
+  const { manage, sheet, askIn } = useConnectorManage(cwd, place, configured, refresh);
   const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   return (
     <ManageProvider value={manage}>
@@ -112,11 +138,15 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
           <div data-customize-toolbar="mcp" className="mb-2 flex flex-wrap items-center gap-2">
             {switcher}
             <h2 className="m-0 text-ui font-medium">{C.configured}</h2>
-            <button type="button" className={`${BUTTON} ml-auto`} onClick={refresh}>
+            <button type="button" data-connector-add-custom className={`${BUTTON} ml-auto`} onClick={() => askIn(CUSTOM_ADD_KEY, CUSTOM_ADD, null)}>
+              {C.addCustom}
+            </button>
+            <button type="button" className={BUTTON} onClick={refresh}>
               {C.refresh}
             </button>
           </div>
           {inventoryState}
+          <Adding />
           {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} />}
           {live}
         </div>
@@ -124,6 +154,13 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
       {sheet}
     </ManageProvider>
   );
+}
+
+// U11g: a custom add's line at the head of the list, under its name, while it works or after it failed (§D).
+function Adding() {
+  const { ops } = useManage();
+  const lines = [...ops.entries.entries()].filter(([key, entry]) => key.startsWith(`${CUSTOM_ADD_KEY}:`) && addLineShown(entry.state));
+  return lines.map(([key, entry]) => <Gone key={key} opKey={key} name={(entry.request.input as { name: string }).name} data={{ 'data-connector-adding': key }} />);
 }
 
 // Discover's connectors; with no copy of Anthropic's directory at all, its words and Retry in the list's place.

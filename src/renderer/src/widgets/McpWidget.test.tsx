@@ -257,9 +257,9 @@ describe('the Connectors dialog: one line per connector (U11a §C)', () => {
       expect(found).not.toBeNull();
       return found!;
     });
-    expect(note.textContent).toMatch(/^Off here is off for every session in .+\.$/);
+    expect(note.textContent).toMatch(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
     expect(note.title).toBe('The engine records it in ~/.claude.json.');
-    expect(screen.getAllByText(/Off here is off/)).toHaveLength(1);
+    expect(screen.getAllByText(/A switch here/)).toHaveLength(1);
     expect(list.textContent).not.toContain('~/.claude.json');
   });
 
@@ -347,7 +347,7 @@ describe('the place the head names (U11a §C, "<place>")', () => {
     inFolder(WORKTREE);
     useSessions.setState({ records: new Map([[ID, record(ID, { projectId: 'p-atlas' as ProjectId, directory: MAIN })]]), projects: new Map([['p-atlas' as ProjectId, project('p-atlas', 0, { name: 'Atlas', directory: MAIN })]]) });
     mount();
-    expect(await head()).toBe('Off here is off for every session in Atlas.');
+    expect(await head()).toBe('A switch here is for this chat, and every session started in Atlas afterwards.');
     expect(gitReads()).toEqual([]);
   });
 
@@ -355,7 +355,7 @@ describe('the place the head names (U11a §C, "<place>")', () => {
     backend.script('git.worktree.list', () => listed(WORKTREE));
     inFolder(WORKTREE);
     mount();
-    expect(await head()).toBe('Off here is off for every session in ~/code/atlas.');
+    expect(await head()).toBe('A switch here is for this chat, and every session started in ~/code/atlas afterwards.');
     expect(gitReads()).toEqual([{ repoRoot: WORKTREE }]);
   });
 
@@ -365,19 +365,20 @@ describe('the place the head names (U11a §C, "<place>")', () => {
     });
     inFolder('/Users/example/scratch/plain');
     mount();
-    expect(await head()).toBe('Off here is off for every session in ~/scratch/plain.');
+    expect(await head()).toBe('A switch here is for this chat, and every session started in ~/scratch/plain afterwards.');
     cleanup();
     backend.script('git.worktree.list', () => {
       throw new WidgetBackendError({ code: 'timeout', message: 'git answered nothing' });
     });
     inFolder(`${MAIN}/sub`);
     mount();
-    expect(await head()).toBe('Off here is off for every session in ~/code/atlas/sub.');
+    expect(await head()).toBe('A switch here is for this chat, and every session started in ~/code/atlas/sub afterwards.');
   });
 });
 
-// U11a M6 review: the switch reaches every session in the place the head names, so it waits for that sentence; a read of
-// the main root that is out holds both back, while Reconnect, which reaches this session only, stays available.
+// U11a M6 review: the switch reaches this chat and every session started afterwards in the place the head names, so it
+// waits for that sentence; a read of the main root that is out holds both back, while Reconnect, which reaches this
+// session only, stays available.
 describe('the switch waits for the sentence of what it reaches (U11a §C)', () => {
   const MAIN = '/Users/example/code/atlas';
   const WORKTREE = `${MAIN}/.claude/worktrees/feature`;
@@ -401,14 +402,14 @@ describe('the switch waits for the sentence of what it reaches (U11a §C)', () =
   it('holds the switch disabled while the main root is read, and enables it with the sentence once read', async () => {
     const docs = await heldOpen();
     await act(async () => settle.resolve({ repoRoot: MAIN, commonDir: `${MAIN}/.git`, worktrees: [], toplevel: WORKTREE }));
-    await waitFor(() => expect(note()?.textContent).toBe('Off here is off for every session in ~/code/atlas.'));
+    await waitFor(() => expect(note()?.textContent).toBe('A switch here is for this chat, and every session started in ~/code/atlas afterwards.'));
     expect(within(docs).getByRole('switch')).toHaveProperty('disabled', false);
   });
 
   it('enables the switch with the folder’s sentence when the read fails', async () => {
     const docs = await heldOpen();
     await act(async () => settle.reject(new WidgetBackendError({ code: 'internal', message: 'not a git repository' })));
-    await waitFor(() => expect(note()?.textContent).toBe('Off here is off for every session in ~/code/atlas/.claude/worktrees/feature.'));
+    await waitFor(() => expect(note()?.textContent).toBe('A switch here is for this chat, and every session started in ~/code/atlas/.claude/worktrees/feature afterwards.'));
     expect(within(docs).getByRole('switch')).toHaveProperty('disabled', false);
   });
 });

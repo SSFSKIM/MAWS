@@ -2180,7 +2180,7 @@ describe('ipc schema validates both directions', () => {
       const owners = Object.fromEntries(Object.entries(connectors.commands).map(([name, spec]) => [name, spec.owner]));
       // P4-AGG M4: Customize's add and remove are the engine host's plugin runner, which a window reaches as it reaches
       // `plugins.install`; every other bridged connectors command is the machine's
-      const runner = ['connectors.add', 'connectors.remove'];
+      const runner = ['connectors.add', 'connectors.remove', 'connectors.addJson']; // UX wave U11g: a custom connector's add-json
       for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe(runner.includes(name) ? 'engine-host' : 'machine');
       // the app's window report and adoption hand-off: the machine's, asked by main alone
       for (const name of ['connectors.windowShown', 'connectors.adoptGrant'] as const) {

@@ -779,6 +779,26 @@ describe('main ipc router', () => {
       expect(broken).toHaveBeenCalledOnce();
     });
   });
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, R2): a custom connector's entry
+  // refused for a value too long, and for a control character in a value, is answered with an error that, like every
+  // line logged meanwhile, holds no part of the value
+  it('refuses connectors.addJson for a value too long or holding a control character without echoing the value', async () => {
+    const logged = (['log', 'info', 'warn', 'error'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+    const dispatch = vi.fn<HostDispatch>(async () => ({ ok: true, value: { opId: 'op-1' } }));
+    await load(DEV_URL, dispatch);
+    const values = [`value-one-${'x'.repeat(8_200)}`, 'value-one\u0007more'];
+    for (const value of values) {
+      for (const entry of [{ type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }, { type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }]) {
+        const input = { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', entry, folder: '/tmp/files-probe' };
+        const answer = await invoke(appWindow(), 'connectors.addJson', input);
+        expect(answer).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+        const said = [JSON.stringify(answer), ...logged.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call, (_key, v: unknown) => (v instanceof Error ? v.message : v))))].join('\n');
+        for (const form of [value, JSON.stringify(value).slice(1, -1)]) expect(said.includes(form)).toBe(false);
+      }
+    }
+    expect(dispatch).not.toHaveBeenCalled();
+    for (const spy of logged) spy.mockRestore();
+  });
 
   // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 9 and §C; R2): a guard
   // runs after the input is validated and before anything else, for every way a command enters, and its refusal is the
