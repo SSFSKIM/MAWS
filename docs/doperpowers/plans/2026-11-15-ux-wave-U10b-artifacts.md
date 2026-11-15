@@ -1189,6 +1189,17 @@ The architect's ruling of 2026-11-15 (UTC) on the branch panel's findings for U1
   - A refused read's cached row stays invalid until a successful read clears the store's error.
   - The close guards of a document, a deck and a design ask at once for a read-only replica that holds an unacknowledged edit, and a tab holding such an edit is not replaced. A dashboard uses the document's guard. The html and file viewers hold no replica edits. The design system's guard was already sound.
 
+The architect's ruling of 2026-11-15 (UTC) on fix waves 6 and 6b (the delta review's P2, and the reviews of the coalescer).
+
+- A parked replica's reads coalesce. **Once parked, no read is started while one is out, and never a read with the timer armed.** A trigger during a read (`created`, `hostReady`, `artifacts.resync`, the poll, a ticket bump from `hostGone()` or the first sync) marks "ask again" once. On settle, the first that applies decides:
+  1. a current live answer unparks;
+  2. a marked "ask again" issues one read, and a gone answer is not acted on then;
+  3. a current gone answer fails the replica;
+  4. otherwise the capped backoff is armed.
+  This replaces the wording of fix wave 6's tests, "at most one standing read in flight while parked".
+- Reads issued before the park can number more than one, during a quick delete, Undo and delete. Each decides nothing, and the last one out hands the wait on: one more ask if a trigger came meanwhile, else the backoff. The tracker has a row for it.
+- A reopen refused while the replica is parked asks through the coalescer, and `hostReady()` handles a parked replica before the guard of an open in progress. `artifacts.get` needs no bound of its own: it has a 10 s deadline here and over the link, and pending calls settle when the host disconnects or the link closes.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
