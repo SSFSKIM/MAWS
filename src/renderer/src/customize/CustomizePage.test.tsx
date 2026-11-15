@@ -38,7 +38,7 @@ const buoyLog = { ...installedLedger, id: 'buoy-log@harbour-market', name: 'buoy
 
 let calls: { name: string; input: unknown }[];
 let listeners: Map<string, Set<(payload: unknown) => void>>;
-let held: Map<string, (outcome?: unknown) => void>; // a held command's receipt or its done, released by the test
+let held: Map<string, (outcome?: unknown, reload?: unknown) => void>; // a held command's receipt or its done (with its reload), released by the test
 let holdReceipt: Set<CommandName>;
 let holdDone: Set<CommandName>;
 let installed: (typeof installedLedger)[];
@@ -98,9 +98,9 @@ function answer(name: CommandName, input: unknown): unknown {
         if (holdReceipt.has(name)) return new Promise((resolve) => held.set(name, () => resolve({ opId })));
         return { opId };
       }
-      const event = (outcome: unknown = { ok: true, result: { message: `${ACTION_OF[name]} done` } }) => ({ opId, action: ACTION_OF[name], target: 'x', phase: 'done', outcome });
+      const event = (outcome: unknown = { ok: true, result: { message: `${ACTION_OF[name]} done` } }, reload?: unknown) => ({ opId, action: ACTION_OF[name], target: 'x', phase: 'done', outcome, ...(reload !== undefined && { reload }) });
       // a held done is released by the test (inside its act); an automatic one arrives while the test waits
-      if (holdDone.has(name)) held.set(name, (outcome) => emit('plugins.operation', event(outcome)));
+      if (holdDone.has(name)) held.set(name, (outcome, reload) => emit('plugins.operation', event(outcome ?? undefined, reload)));
       else queueMicrotask(() => deliver('plugins.operation', event()));
       return { opId };
     }
@@ -178,6 +178,14 @@ const install = async (entry: CatalogItem) => {
   await resolved();
   fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
 };
+
+// A ready session MAWS runs in the page's folder: the page's attachment, whose reloads a plugin's line offers.
+const attachLive = () => {
+  const live = { ...status('quay-live'), appSessionId: at('quay-live' as AppSessionId), cwd: QUAY };
+  useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
+};
+const NOT_REFLECTED = { sessions: [{ appSessionId: 'quay-live', outcome: 'not_reflected', error: null }] };
+const cardIn = (tab: 'plugins' | 'skills', entry: CatalogItem) => found(`[data-discover="${tab}"] [data-shelf] [data-catalog-card="${CSS.escape(entry.id)}"]`);
 
 describe('the head', () => {
   it('has two rows: the view switch with Showing, then Show: and its four choices with the tools; no section tab is left', async () => {
@@ -270,6 +278,27 @@ describe('the head', () => {
       expect(action !== null, `${view}, ${show}`).toBe(drawn);
       if (action) expect(action.nextElementSibling!.textContent).toBe('Refresh');
     }
+  });
+
+  it('draws no tools while a Discover card’s detail is open; pressing the view shown or a Show value returns to the list, the card focused again', async () => {
+    mountCustomize({ view: 'discover', show: 'plugins' });
+    const card = () => document.activeElement?.closest(`[data-catalog-card="${CSS.escape(berth.id)}"]`) ?? null;
+    for (const press of [() => chooseView('Discover'), () => chooseShow('Plugins')]) {
+      fireEvent.click(within(await shelfCard(berth)).getByRole('button', { name: 'View berth-notes' }));
+      await found('[data-catalog-detail]');
+      await waitFor(() => expect(tools()).toBeNull());
+      press();
+      await waitFor(() => expect(document.querySelector('[data-catalog-detail]')).toBeNull());
+      expect(within(tools()!).getByRole('searchbox', { name: 'Search all sources' })).toBeTruthy();
+      expect(card()).not.toBeNull(); // back on the card it left from
+    }
+  });
+
+  it('a plugin’s row gives up its version and date under the page’s narrow width only', async () => {
+    mountCustomize({ view: 'mine', show: 'plugins' });
+    const facts = (await pluginRow('buoy-log@harbour-market')).querySelector<HTMLElement>('[data-plugin-version]')!;
+    expect(facts.textContent).toContain('1.0.0');
+    expect(facts.classList.contains('@max-sm/customize:hidden')).toBe(true); // the page's container, not /plugins' dialog
   });
 });
 
@@ -372,6 +401,51 @@ describe('what a person started outlives the view', () => {
     fireEvent.keyDown(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
     await waitFor(() => expect(sheet()).toBeTruthy());
+  });
+
+  it('held open: a declared command’s second sheet, asked by an install of the first visit to a project, is not opened on a later visit to it', async () => {
+    holdDone.add('plugins.install');
+    mountCustomize({ view: 'discover', show: 'plugins' });
+    await install(ledger);
+    await waitFor(() => expect(held.has('plugins.install')).toBe(true));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
+    await shelfCard(ledger);
+    const declared = { ok: false, error: { code: 'cli_failed', message: 'This plugin runs a command its marketplace declares', failureCode: 'command_source_refused', shownCommand: { sha256: 'e'.repeat(64), command: 'npx quay-helper', kind: 'command-source' } } };
+    act(() => held.get('plugins.install')!(declared));
+    await waitFor(async () => expect(within(await shelfCard(ledger)).getByRole('status').textContent).toContain('command_source_refused'));
+    expect(document.querySelector('[data-plugins-sheet]')).toBeNull();
+  });
+
+  // Keep means keep: one book for every kind, and each kind's line offers what it offered (a plugin's, Reload again)
+  for (const [tab, offered] of [['plugins', true], ['skills', false]] as const)
+    it(`a ${tab} Discover install whose reload a session did not reflect ${offered ? 'offers' : 'offers no'} Reload again`, async () => {
+      attachLive();
+      holdDone.add('plugins.install');
+      mountCustomize({ view: 'discover', show: tab });
+      fireEvent.click(within(await cardIn(tab, ledger)).getByRole('button', { name: 'Add quay-ledger' }));
+      await resolved();
+      fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
+      await waitFor(() => expect(held.has('plugins.install')).toBe(true));
+      act(() => held.get('plugins.install')!(undefined, NOT_REFLECTED));
+      await waitFor(async () => expect(within(await cardIn(tab, ledger)).getByRole('status').textContent).toContain('not reflected'));
+      expect(within(await cardIn(tab, ledger)).queryByRole('button', { name: 'Reload again' }) !== null).toBe(offered);
+    });
+
+  it('a connector’s removal whose reload a session did not reflect offers no Reload again', async () => {
+    attachLive();
+    holdDone.add('connectors.remove');
+    mountCustomize({ view: 'mine', show: 'connectors' });
+    fireEvent.click(await screen.findByRole('button', { name: 'Remove tides' }));
+    const removal = await screen.findByRole('dialog', { name: 'Remove tides?' });
+    await within(removal).findByRole('button', { name: 'Details' });
+    fireEvent.click(within(removal).getByRole('checkbox'));
+    fireEvent.click(within(removal).getByRole('button', { name: 'Remove' }));
+    await waitFor(() => expect(held.has('connectors.remove')).toBe(true));
+    act(() => held.get('connectors.remove')!(undefined, NOT_REFLECTED));
+    const row = () => document.querySelector<HTMLElement>('[data-connector="tides"]')!;
+    await waitFor(() => expect(row().textContent).toContain('not reflected'));
+    expect(screen.queryByRole('button', { name: 'Reload again' })).toBeNull();
   });
 });
 
