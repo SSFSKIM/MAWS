@@ -1137,3 +1137,68 @@ describe('a joined row keeps every grant, from the file (U1c)', () => {
     expect(marks('u1c-b-two-1', [44, 47])).toEqual([[[GRANT('1a')]], [[GRANT('1b')]]]);
   });
 });
+
+// UX wave U1c, M4 (the U1c document, Design 7 and Interfaces §C, 6 and 8; probe T,
+// findings-uxwave-u1c-terminal-grant.txt): the grant a sminos bridge carried to a terminal session, from its file. Idle,
+// the bridge's row submitted as the user is the grant's message and opens its turn. During a turn and after an Esc the
+// bridge appends it: the appended row stays the synthetic message it was, and the words the mirror line names become
+// the person's steer, which carries the mark, so the mark is on one event of the uuid; after an Esc that steer waits
+// for the turn the bridge's wake opens, and opens it. Over the nine recorded runs, whole.
+describe('a grant a sminos bridge carried to a terminal session, from the file (U1c, M4; probe T)', () => {
+  const GRANT = (n: number) => ({ class: 'consent', kind: 'command', subject: `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"` });
+  // each run: its name, the line of the grant's row, the marker its command names
+  const runs: Record<'idle' | 'busy' | 'esc', [string, number, number][]> = {
+    idle: [['u1c-t-idle-1', 53, 1], ['u1c-t-idle-2', 51, 2], ['u1c-t-idle-3', 47, 3]],
+    busy: [['u1c-t-busy-1', 52, 1], ['u1c-t-busy-2', 53, 2], ['u1c-t-busy-4', 49, 4]],
+    esc: [['u1c-t-esc-1', 56, 1], ['u1c-t-esc-2', 51, 2], ['u1c-t-esc-3', 52, 3]],
+  };
+  /** The run's file mapped whole, the uuid of its grant's row, and the messages that carry a mark. */
+  const mapped = (name: string, line: number) => {
+    const records = loadUxwaveTranscript(name);
+    const events = mapAll(records);
+    const uuid = records[line - 1]!.uuid as MessageUuid;
+    return { events, uuid, marked: only(events, 'user.message').filter((event) => event.arrival !== undefined) };
+  };
+  const delivered = (events: SessionEvent[]) => only(events, 'notice.posted').filter((event) => event.text.startsWith('sminos: delivered: '));
+
+  it.each(runs.idle)('idle, %s: the row the bridge submitted as the user is the grant’s message, with its mark, and opens its turn', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: null, isSynthetic: false, arrival: [GRANT(n)] })]);
+    expect(only(events, 'turn.started').map((event) => event.userMessageUuid)).toContain(uuid);
+  });
+
+  it.each(runs.busy)('during a turn, %s: the words the mirror line names are the person’s steer into the running turn, with the mark; the appended row is a synthetic message with none; the line is no notice', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: 'human', isSynthetic: false, arrival: [GRANT(n)] })]);
+    const at = events.indexOf(marked[0]!);
+    expect(events[at + 1]).toMatchObject({ kind: 'command.lifecycle', commandUuid: uuid, state: 'started' });
+    expect(only(events, 'user.message').filter((event) => event.messageUuid === uuid).map((event) => [event.isSynthetic, event.arrival ?? null])).toEqual([[true, null], [false, [GRANT(n)]]]);
+    expect(delivered(events)).toEqual([]);
+  });
+
+  it.each(runs.esc)('after an Esc, %s: the words the mirror line names wait for the turn the bridge’s wake opens, and open it with the mark; the line is no notice', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: 'human', isSynthetic: false, arrival: [GRANT(n)] })]);
+    const opened = only(events, 'turn.started').find((event) => event.userMessageUuid === uuid);
+    expect(opened, 'the wake’s turn, opened by the grant').toBeDefined();
+    expect(events.indexOf(opened!)).toBeLessThan(events.indexOf(marked[0]!));
+    expect(delivered(events)).toEqual([]);
+  });
+
+  const sminos = { kind: 'plugin', name: 'sminos' };
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: at(0), origin: { ...sminos, asUser: true }, message: { role: 'user', content: 'run the build' } });
+  const row = (uuid: string, text: string) => rec({ type: 'user', uuid, parentUuid: 'p1', isMeta: true, timestamp: at(1), origin: sminos, promptId: 'x', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const line = (uuid: string, parentUuid: string, text: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, isMeta: false, timestamp: at(2), content: `sminos: delivered: ${text.replaceAll('\n', ' ')}`, level: 'notice' });
+  const SENTENCE = 'Permission granted for this exact command only, as one whole string: "make build". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.';
+
+  it('appended words that hold the sentence among other words, or behind the person’s sminos frame line, are the person’s words with no mark', () => {
+    const among = `Also run the linter.\n${SENTENCE}`;
+    const framed = `[sminos message from human id=0f0e0d0c]\n${SENTENCE}`;
+    const events = mapAll([prompt, row('d1', among), line('n1', 'd1', among), row('d2', framed), line('n2', 'd2', framed)]);
+    expect(only(events, 'user.message').filter((event) => !event.isSynthetic).map((event) => [event.messageUuid, event.content, event.arrival ?? null])).toEqual([
+      ['p1', 'run the build', null],
+      ['d1', among, null],
+      ['d2', SENTENCE, null],
+    ]);
+  });
+});

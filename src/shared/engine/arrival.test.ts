@@ -493,7 +493,7 @@ describe('the grant: its encoding and its forms (U1c)', () => {
     expect(personsGrants('Also say the word EXTRA when done.')).toEqual([]);
   });
 
-  it('a grant line among the person’s words is read on the person’s row and queued prompt; on a peer’s message, a task’s notification and a plugin’s row it is none', () => {
+  it('a grant line among the person’s words is read on the person’s row and queued prompt; on a peer’s message, a task’s notification and a plugin’s row it is none (a bridge’s submitted row is read whole, M4)', () => {
     const text = `Also say the word EXTRA when done.\n${consentMessage('command', 'make build')}`;
     expect(readArrivals({ type: 'user', uuid: 'u-1', origin: { kind: 'human' }, message: { role: 'user', content: text } })).toEqual([grant('make build')]);
     expect(readArrivals({ type: 'attachment', uuid: 'u-2', attachment: { type: 'queued_command', prompt: text, source_uuid: 'u-1', commandMode: 'prompt', origin: { kind: 'human' } } })).toEqual([grant('make build')]);
@@ -501,13 +501,79 @@ describe('the grant: its encoding and its forms (U1c)', () => {
     expect(readArrivals({ type: 'user', uuid: 'u-3', origin: { kind: 'peer', from: 'uds:/tmp/socks/9.sock' }, message: { role: 'user', content: peer } }).filter((arrival) => arrival.class === 'consent')).toEqual([]);
     const notification = `<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>${text}</summary>\n</task-notification>`;
     expect(readArrivals({ type: 'user', uuid: 'u-4', origin: { kind: 'task-notification' }, message: { role: 'user', content: notification } }).filter((arrival) => arrival.class === 'consent')).toEqual([]);
-    expect(readArrivals({ type: 'user', uuid: 'u-5', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: consentMessage('command', 'make build') } })).toEqual([]);
+    // M4 (§C, 6): the bridge's row submitted as the user is read whole, as a grant the bridge carried for the person
+    expect(readArrivals({ type: 'user', uuid: 'u-5', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: consentMessage('command', 'make build') } })).toEqual([grant('make build')]);
     expect(readArrivals({ type: 'user', uuid: 'u-6', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: text } })).toEqual([]);
   });
 
   it('the recorded joined row (u1c-b-twoend-1, line 47) gives both grants, and u1c-b-joinend-other-first-1 line 39 the one, from the file', () => {
     expect(readArrivals(rowOf('u1c-b-twoend-1', 47))).toEqual([grant('curl -s -o marker-1a.txt "https://example.com/?maws-probe-marker-1a"'), grant('curl -s -o marker-1b.txt "https://example.com/?maws-probe-marker-1b"')]);
     expect(readArrivals(rowOf('u1c-b-joinend-other-first-1', 39))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+  });
+});
+
+// UX wave U1c, M4 (the U1c document, Design 7 and Interfaces §C, 6 and 7; probe T,
+// findings-uxwave-u1c-terminal-grant.txt): the grant a sminos bridge carried to a terminal session, in the rows probe T
+// recorded for each state. Idle, the bridge submits it as the user: that row is the grant, read whole (§C, 6). During a
+// turn and after an Esc it appends it: the appended row itself is no arrival (its words become the person's steer where
+// the bridge's mirror line names them, `backfill.ts`), and as the reader of another machine's rows draws it, a prompt of
+// the person's queued into the turn whose content is the row's text block, it is the grant (§C, 7). Every other text is
+// invented.
+describe('the grant a sminos bridge carried to a terminal session (U1c, M4; probe T)', () => {
+  const grant = (subject: string) => ({ class: 'consent', kind: 'command', subject });
+  const marker = (n: number) => `consent to the command curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"`;
+  const GRANT = consentMessage('command', 'make build');
+
+  it('idle: in each of u1c-t-idle-1..3 the row the bridge submitted as the user is the grant, and no other row is an arrival', () => {
+    expect(transcriptArrivals('u1c-t-idle-1')).toEqual({ 53: [marker(1)] });
+    expect(transcriptArrivals('u1c-t-idle-2')).toEqual({ 51: [marker(2)] });
+    expect(transcriptArrivals('u1c-t-idle-3')).toEqual({ 47: [marker(3)] });
+  });
+
+  it('during a turn and after an Esc: in each of u1c-t-busy-1, -2, -4 and u1c-t-esc-1..3 the appended row and its mirror line are no arrival; after an Esc the bridge’s wake is', () => {
+    for (const name of ['u1c-t-busy-1', 'u1c-t-busy-2', 'u1c-t-busy-4']) expect(transcriptArrivals(name), name).toEqual({});
+    expect(transcriptArrivals('u1c-t-esc-1')).toEqual({ 61: ['wake'] });
+    expect(transcriptArrivals('u1c-t-esc-2')).toEqual({ 56: ['wake'] });
+    expect(transcriptArrivals('u1c-t-esc-3')).toEqual({ 57: ['wake'] });
+  });
+
+  // The form `steerAsDrawn` (renderer/src/lane-a/source/bridge-rows.ts) gives an appended row on the route of another
+  // machine's rows: `asQueuedPrompt`, the row as a queued prompt of the person's whose prompt is the row's content.
+  const asDrawn = (row: Record<string, unknown>) => {
+    const { message, origin: _origin, isMeta: _isMeta, ...rest } = row as { message: { content: unknown }; origin?: unknown; isMeta?: unknown };
+    void _origin;
+    void _isMeta;
+    return { ...rest, type: 'attachment', attachment: { type: 'queued_command', prompt: message.content, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: row.uuid } };
+  };
+
+  it('during a turn and after an Esc, as another machine’s rows draw the appended row (u1c-t-busy-1 line 52, u1c-t-esc-1 line 56): a prompt of the person’s queued into the turn, its text block the grant', () => {
+    expect(readArrivals(asDrawn(rowOf('u1c-t-busy-1', 52) as Record<string, unknown>))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+    expect(readArrivals(asDrawn(rowOf('u1c-t-esc-1', 56) as Record<string, unknown>))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+  });
+
+  it('a queued prompt of blocks is read only when they are text alone, of the person’s, as a prompt and not meta', () => {
+    const queued = (prompt: unknown, over: Record<string, unknown> = {}) => ({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'u-q', ...over } });
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }]))).toEqual([grant('make build')]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }]))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { isMeta: true }))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { commandMode: 'task-notification' }))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { origin: { kind: 'plugin', name: 'sminos' } }))).toEqual([]);
+  });
+
+  it('a grant behind a sminos frame line is the delivery it was: the person’s own words, or a peer’s, never an approval', () => {
+    const own = '[sminos message from human id=0f0e0d0c]';
+    expect(readArrivals(submitted(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(submitted(`${PEER_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
+    expect(readArrivals(appended(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(appended(`${CHAT_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
+  });
+
+  it('the grant on a row of another plugin, submitted as the user or appended, and in a peer’s inbox message, is no approval', () => {
+    expect(readArrivals({ type: 'user', uuid: 'u-o', origin: { kind: 'plugin', name: 'lint-helper', asUser: true }, message: { role: 'user', content: GRANT } })).toEqual([]);
+    expect(readArrivals({ type: 'user', uuid: 'u-o', isMeta: true, origin: { kind: 'plugin', name: 'lint-helper' }, message: { role: 'user', content: [{ type: 'text', text: GRANT }] } })).toEqual([]);
+    expect(readArrivals({ type: 'user', uuid: 'u-d', origin: { kind: 'plugin', name: 'doperpowers', asUser: true }, message: { role: 'user', content: GRANT } }), 'the bridge’s older plugin').toEqual([grant('make build')]);
+    expect(readArrivals(inbox(GRANT, { kind: 'peer', from: 'unknown', name: 'docs' })).map((arrival) => arrival.class)).toEqual(['peer']);
+    expect(readArrivals(inbox(GRANT)).map((arrival) => arrival.class), 'named human in the origin, no frame').toEqual(['peer']);
   });
 });
 

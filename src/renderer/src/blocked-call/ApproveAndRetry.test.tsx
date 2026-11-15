@@ -17,9 +17,10 @@ import { addressOf } from '@shared/machine/address';
 import type { JournalRow } from '@shared/wire/journal';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../test/support/fixtures';
+import { FIXTURE_DIR, loadUxwaveJournal, loadUxwaveTranscript } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { createBackfillContext, recordToEvents } from '../../../engine-host/fs/backfill';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { freshSource, subagentLookupOf } from '../lane-a/plane-transcript';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
@@ -27,7 +28,6 @@ import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-sess
 import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
 import { QueueList } from '../composer/queue/QueueList';
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session';
-import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useMachines } from '../stores/machines';
 import { resetQueueStore, useQueueStore, type SessionQueue } from '../stores/queue';
@@ -42,7 +42,7 @@ import { NO_ACTIONS } from '../transcript/view/context';
 import { registeredActions } from '../transcript/view/registry';
 import { renderRow } from '../transcript/view/rows/test-support';
 import { Transcript } from '../transcript/view/Transcript';
-import { resetGrantsOut, SETTLE_MS, useGrantsOut } from './grants';
+import { resetGrantsOut, SETTLE_MS, terminalStateOf, useGrantsOut, type TerminalState } from './grants';
 import { registerBlockedCalls } from './index';
 
 const MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"';
@@ -89,7 +89,7 @@ const flush = () => act(async () => {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 });
 /** The bridge answers the oldest unanswered `name`, under fake timers. */
-async function answer(name: 'session.send' | 'session.steer' | 'session.steer.cancel' | 'session.queue.remove', value: unknown) {
+async function answer(name: 'session.send' | 'session.steer' | 'session.steer.cancel' | 'session.queue.remove' | 'laneA.send', value: unknown) {
   await act(async () => {
     const answered = fake.reply(name, value);
     await vi.advanceTimersByTimeAsync(0);
@@ -172,6 +172,16 @@ const grantMessage = (b: Builder, u: string, subject: string) => {
 };
 
 // ---- the recording ----------------------------------------------------------------------------------------------------
+
+/** A probe T run's transcript file mapped as the chain follower maps it, before the bridge's grant row and from it on; the row's uuid and its text. */
+function bridged(name: string, line: number) {
+  const records = loadUxwaveTranscript(name);
+  const ctx = createBackfillContext({ sessionId: '0f0e0d0c-0000-4000-8000-00000000c0de' as SessionId, agent: null });
+  const mapped = records.map((row) => recordToEvents(row, ctx));
+  const row = records[line - 1]! as unknown as { uuid: string; message: { content: string | { type: string; text: string }[] } };
+  const content = row.message.content;
+  return { before: mapped.slice(0, line - 1).flat(), after: mapped.slice(line - 1).flat(), uuid: row.uuid, sentence: typeof content === 'string' ? content : content[0]!.text };
+}
 
 const frameOf = (row: JournalRow) => row.frame as { type?: string; message?: { content?: unknown } };
 const isGrantFrame = (row: JournalRow) => row.direction === 'out' && frameOf(row).type === 'user' && typeof frameOf(row).message?.content === 'string' && (frameOf(row).message!.content as string).startsWith('Permission granted');
@@ -492,7 +502,7 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
   });
 });
 
-describe('where there is no button, and where it is disabled (Acceptance 7 as shipped, 8, 12, 16)', () => {
+describe('where there is no button, where it is disabled, and a terminal session state by state (Acceptance 7, 8, 12, 16)', () => {
   it('a mount that supplies no control (the desk’s web app, the harness) draws the short label, no button and no block', async () => {
     const store = await storeAt(at('no-control'), blockedTurn(['make build &&\nmake test']).events);
     ready(store.key);
@@ -520,20 +530,37 @@ describe('where there is no button, and where it is disabled (Acceptance 7 as sh
     for (const cell of cellsOf(store.rows()).filter((cell) => cell.classification.denial !== null)) expect(drawn(store, cell.id).button(), cell.id).toBeNull();
   });
 
+  // M4 (Decision Log 11; probe T, findings-uxwave-u1c-terminal-grant.txt, 3 of 3 in each state): every state offered,
+  // each by its recording. The rows are the file's, as the chain follower maps them on this Mac (the backfill under one
+  // context), up to the bridge's grant row and from it on.
   it.each([
-    ['idle', { running: false, unknown: false }],
-    ['running', { running: true, unknown: false }],
-    ['stopped', { running: false, unknown: false }],
-  ] as const)('a terminal session, %s, with no state offered: the button disabled, its title “Not available for a terminal session”, and a press sends nothing to the bridge', async (state, turn) => {
-    const b = blockedTurn(['make build'], { running: state === 'running', stopped: state === 'stopped' });
-    const store = await storeAt(at(`terminal-${state}`), b.events);
+    ['idle', 'u1c-t-idle-1', 53, { running: false, unknown: false }],
+    ['running', 'u1c-t-busy-1', 52, { running: true, unknown: false }],
+    ['stopped', 'u1c-t-esc-1', 56, { running: false, unknown: false }],
+  ] as [TerminalState, string, number, { running: boolean; unknown: boolean }][])('a terminal session, %s (%s, Acceptance 7a to 7c): the button offered; the press reaches the bridge once with the sentence whole; the rows the bridge left draw the approval’s line and the row reads approved', async (state, name, line, turn) => {
+    const run = bridged(name, line);
+    const store = await storeAt(at(`terminal-${state}`), run.before);
     onTerminal(store.key, turn);
-    const row = drawn(store, blockedIds(store)[0]!);
-    expect(row.button()!.disabled).toBe(true);
-    expect(row.button()!.title).toBe(LANE_A_WORDS.widget);
+    expect(terminalStateOf(store.key)).toBe(state);
+    const [id] = blockedIds(store);
+    const row = drawn(store, id!);
+    expect(row.line()).toBe(`Auto mode blocked: ${MARKER}`);
+    expect(row.button()!.disabled).toBe(false);
+    expect(row.button()!.title).toBe('');
+    vi.useFakeTimers();
     fireEvent.click(row.button()!);
     await flush();
-    expect(fake.invoked('laneA.send')).toEqual([]);
+    fireEvent.click(row.button()!);
+    await flush();
+    expect(run.sentence).toBe(consentMessage('command', MARKER));
+    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: store.key, text: run.sentence }]);
+    expect(row.button()!.disabled, 'out').toBe(true);
+    await answer('laneA.send', { state: 'entered', uuid: run.uuid });
+    await store.push(run.after);
+    expect(row.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
+    expect(row.button()).toBeNull();
+    expect(store.rows().flatMap((r) => (r.kind === 'user' && r.consent !== undefined ? [r.consent.subject] : []))).toEqual([MARKER]);
+    expect(useGrantsOut.getState().out.size, 'ended on the record').toBe(0);
   });
 
   it('a terminal session before its bridge is live: the button disabled, its title the holder’s words', async () => {

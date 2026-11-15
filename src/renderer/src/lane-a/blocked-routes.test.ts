@@ -125,3 +125,44 @@ describe('a subagent’s blocked call, by each route (probe D, ruling J; pinned,
     }
   });
 });
+
+// UX wave U1c, M4 (the U1c document, Design 7; Acceptance 7a to 7c): a terminal session's blocked call and the grant
+// its sminos bridge carried, in each state probe T recorded (findings-uxwave-u1c-terminal-grant.txt: idle, the row the
+// bridge submitted as the user; during a turn, the row it appended and its mirror line; after an Esc, the same two after
+// the interrupted call's rows, then the bridge's wake), from the file on this Mac and through the same rows as another
+// machine sends them. On both routes the blocked row reads approved, the grant is the approval's line, the retry ran,
+// and the two routes draw the same person's rows.
+describe('a grant the bridge carried to a terminal session, by both routes (probe T; Acceptance 7a to 7c)', () => {
+  const runs: [string, number][] = [
+    ['u1c-t-idle-1', 1], ['u1c-t-idle-2', 2], ['u1c-t-idle-3', 3],
+    ['u1c-t-busy-1', 1], ['u1c-t-busy-2', 2], ['u1c-t-busy-4', 4],
+    ['u1c-t-esc-1', 1], ['u1c-t-esc-2', 2], ['u1c-t-esc-3', 3],
+  ];
+  /** The marker command's calls as their lines read them, the approvals, and the person's rows, one line each. */
+  function terminalReading(events: SessionEvent[], command: string) {
+    const state = withAllExpanded(applyEvents(createState(null, null), events));
+    const rows = rowsOf(state);
+    const states = blockedStates(rows, state.hidden?.turns ?? []);
+    const calls = callsOf(rows).filter((cell) => cell.detail.kind === 'shell' && cell.detail.command === command);
+    return {
+      calls: calls.map((cell) => {
+        const blocked = states.get(cell.id);
+        return blocked === undefined ? cell.status : `${blockedLabel(cell, blocked)} (${blocked.grant})`;
+      }),
+      approvals: rows.flatMap((row) => (row.kind === 'user' && row.consent !== undefined ? [row.consent.subject] : [])),
+      persons: rows.flatMap((row) => (row.kind === 'user' ? [`${row.consent !== undefined ? 'consent' : row.steer ? 'steer' : 'prompt'}: ${row.text.split('\n', 1)[0]}`] : [])),
+    };
+  }
+
+  it.each(runs)('%s: from the file and through its rows, the blocked row reads approved, the grant is its line, the retry ran', async (name, n) => {
+    const command = `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"`;
+    const text = textOf(`${name}.transcript.jsonl`);
+    const file = terminalReading(await fromFile(text), command);
+    const link = terminalReading(await fromRows(text), command);
+    for (const [route, reading] of Object.entries({ file, link })) {
+      expect(reading.calls, route).toEqual([`Auto mode blocked: \`${command}\` · approved (read)`, 'done']);
+      expect(reading.approvals, route).toEqual([command]);
+    }
+    expect(link.persons, 'the same person’s rows by both routes').toEqual(file.persons);
+  });
+});

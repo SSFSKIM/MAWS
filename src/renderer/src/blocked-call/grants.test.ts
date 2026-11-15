@@ -1,8 +1,11 @@
 // UX wave U1c, M3 (the U1c document, Design 4, 5 and 7, Interfaces §F): what keeps "Approve and retry" closed, what a
 // press sends on each route, and the store that holds a grant out between the press and the record. The bridge answers
 // on command; the clock is faked.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { JsonObject, SessionMessage } from 'desk-hub/protocol';
 import { consentMessage } from '@shared/engine/arrival';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
@@ -11,9 +14,13 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
+import { holdRemoteTranscript, remoteTranscriptOf, resetRemoteTranscripts } from '../lane-a/remote-source';
+import { mount } from '../lane-a/test-support/fake-plane';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
+import { resetLaneAWatches } from '../lane-a/watches';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session';
 import { sendToSession } from '../session/controls/controls-for';
@@ -23,12 +30,12 @@ import { useMachines } from '../stores/machines';
 import { attachQueue, resetQueueStore, useQueueStore, type SessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
-import { blockedKey, type BlockedCall } from '../transcript/model/blocked';
+import { blockedKey, blockedStates, hiddenTurnsOf, type BlockedCall } from '../transcript/model/blocked';
 import { expandedTurnRows } from '../transcript/model/derive';
 import type { CellId } from '../transcript/model/rows';
 import { builder } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
-import { approve, gateOf, GRANT_DURING_TURN, grantOptions, pressedTurnExpansions, resetGrantsOut, SETTLE_MS, TERMINAL_OFFERED, terminalRefusal, terminalStateOf, useGrantsOut, waitingGrants } from './grants';
+import { approve, gateOf, GRANT_DURING_TURN, grantOptions, pressedTurnExpansions, resetGrantsOut, SETTLE_MS, TERMINAL_OFFERED, terminalRefusal, terminalStateOf, useGrantsOut, waitingGrants, type TerminalState } from './grants';
 
 const BUILD: BlockedCall = { kind: 'command', subject: 'make build' };
 const CHECK: BlockedCall = { kind: 'command', subject: 'make check' };
@@ -127,8 +134,8 @@ describe('a terminal session’s state (Design 7; Decision Log 5)', () => {
     for (const state of ['idle', 'running', 'stopped'] as const) expect(terminalRefusal(state, all), state).toBeNull();
   });
 
-  it('ships with no state offered (M3; M4 turns each by its recording)', () => {
-    expect(TERMINAL_OFFERED).toEqual({ idle: false, running: false, stopped: false });
+  it('offers every state, each by its recording (M4, Decision Log 11: u1c-t-idle-1..3, u1c-t-busy-1, -2, -4, u1c-t-esc-1..3, 3 of 3 each)', () => {
+    expect(TERMINAL_OFFERED).toEqual({ idle: true, running: true, stopped: true });
   });
 });
 
@@ -192,13 +199,15 @@ describe('the gate (Design 6): closed over unavailable over open', () => {
     expect(gateOf(id, BUILD, 'waiting')).toEqual({ state: 'closed' });
   });
 
-  it('unavailable over open, each in the words that exist: no port, the holder’s; a terminal session’s state not offered, the table’s; the port’s own answer to send', () => {
+  it('unavailable over open, each in the words that exist: no port, the holder’s; the port’s own answer to send; a terminal session open in each state, all offered (a state not offered is the table’s words, above)', () => {
     const held = at('gate-held') as AppSessionId;
     useSessions.setState({ records: new Map([[held, record(held, { holder: { kind: 'terminal', pid: 42 } })]]) });
     expect(gateOf(held, BUILD, 'none')).toEqual({ state: 'unavailable', reason: expect.stringMatching(/^Held by /) });
     const terminal = at('gate-terminal') as AppSessionId;
     onTerminal(terminal);
-    expect(gateOf(terminal, BUILD, 'none')).toEqual({ state: 'unavailable', reason: LANE_A_WORDS.widget });
+    expect(gateOf(terminal, BUILD, 'none'), 'idle').toEqual({ state: 'open' });
+    onTerminal(terminal, { running: true, unknown: false });
+    expect(gateOf(terminal, BUILD, 'none'), 'running').toEqual({ state: 'open' });
     const remote = addressOf(OTHER_MACHINE, 'app-closed' as AppSessionId);
     useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
     useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-closed', { lane: 'B' }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]), records: new Map([[remote, record(remote)]]) });
@@ -287,11 +296,15 @@ describe('what a press sends (Design 5 and 7)', () => {
     expect(useGrantsOut.getState().out.size).toBe(0);
   });
 
-  it('a terminal session with no state offered: nothing reaches the bridge', async () => {
-    const id = at('press-terminal') as AppSessionId;
-    onTerminal(id);
-    await approve(id, BUILD, PRESSED);
-    expect(fake.invoked('laneA.send')).toEqual([]);
+  it('a terminal session, idle and while a turn runs: the press is one laneA.send with the sentence whole, and no `when`', async () => {
+    for (const [name, turn] of [['press-terminal-idle', { running: false, unknown: false }], ['press-terminal-busy', { running: true, unknown: false }]] as const) {
+      const id = at(name) as AppSessionId;
+      onTerminal(id, turn);
+      void approve(id, BUILD, PRESSED);
+      await flush();
+      expect(fake.invoked('laneA.send').at(-1), name).toEqual({ appSessionId: id, text: grant(BUILD) });
+    }
+    expect(fake.invoked('laneA.send')).toHaveLength(2);
   });
 });
 
@@ -635,5 +648,92 @@ describe('the grant that is out, against what outlives a press (M3’s review, f
     const settled = pressedTurnExpansions.count;
     act(() => useQueueStore.setState({ bySession: new Map() }));
     expect(pressedTurnExpansions.count - settled, 'one store change, one turn').toBe(1);
+  });
+});
+
+// UX wave U1c, M4 (Acceptance 7a to 7c, from another machine's rows; M4's prerequisite through a press, Decision Log
+// 35): another machine's terminal session, state by state, over the rows probe T recorded (findings-uxwave-u1c-
+// terminal-grant.txt). Its pane holds the page's plane transcript and attaches its source, as `RemoteTranscriptSlot`
+// does; the machine's watch carries the recorded rows up to the bridge's grant row, then the press, then the pane closed
+// and a fresh snapshot (the plane rebuilt) while the grant is out, then the rows the bridge left from the grant's on.
+describe('another machine’s terminal session, state by state (Acceptance 7a to 7c; the hold through a press)', () => {
+  const APP = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
+  const UP = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null } as const;
+  const recordedRows = (name: string): JsonObject[] =>
+    readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as JsonObject);
+  let n = 0;
+  const envelope = (kind: string, body: unknown): SessionMessage => ({ project: 'p', machine: OTHER_MACHINE, session: 'eng-t', kind, sub: 'up-1', n: kind === 'snapshot' ? 0 : ++n, body }) as SessionMessage;
+  const snapshot = (rows: JsonObject[]) => envelope('snapshot', { rows: [...rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true, launch: 'L1' }, streaming: [] });
+  const settleTask = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
+  const until = async (ok: () => boolean) => {
+    for (let i = 0; i < 100 && !ok(); i++) await settleTask();
+  };
+
+  beforeEach(() => {
+    n = 0;
+    resetLaneAWatches();
+    resetRemoteTranscripts();
+    fake = fakeClient({ 'laneA.watch': { watch: 'w1' }, 'laneA.read': { ok: true, result: { requested: true } }, 'session.queue.list': { entries: [], paused: false } });
+    window.maws = fake.client as unknown as PreloadBridge;
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
+    useSessions.setState({ listed: new Map([[APP, { ...remoteRow(OTHER_MACHINE, 'eng-t', { lane: 'A', availability: 'foreign_held' }), appId: APP }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => {
+    resetRemoteTranscripts();
+    resetLaneAWatches();
+  });
+
+  it.each([
+    ['idle', 'u1c-t-idle-1', 53, { running: false, unknown: false }],
+    ['running', 'u1c-t-busy-1', 52, { running: true, unknown: false }],
+    ['stopped', 'u1c-t-esc-1', 56, { running: false, unknown: false }],
+  ] as [TerminalState, string, number, { running: boolean; unknown: boolean }][])('%s (%s): the press reaches the bridge once with the sentence whole; with the pane closed and the plane rebuilt, the rows the bridge left end the grant and the row reads approved', async (state, name, line, turn) => {
+    const all = recordedRows(name);
+    const rows = all.filter((row) => typeof row.uuid === 'string');
+    const cut = rows.findIndex((row) => row.uuid === all[line - 1]!.uuid);
+    const [before, after] = [rows.slice(0, cut), rows.slice(cut)];
+    const content = (after[0]!.message as unknown as { content: string | { text: string }[] }).content;
+    const sentence = typeof content === 'string' ? content : content[0]!.text;
+    const command = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"';
+    const call: BlockedCall = { kind: 'command', subject: command };
+    applyLaneAState(APP, laneAState(APP, { link: UP, acts: [], turn }));
+    const transcript = remoteTranscriptOf(APP, fake.client);
+    const releasePane = holdRemoteTranscript(APP, transcript);
+    const unmount = mount(transcript, useTranscriptStore);
+    const plane = (messages: SessionMessage[]) => fake.event('laneA.plane', { appSessionId: APP, watch: 'w1', messages }, OTHER_MACHINE);
+    await settleTask();
+    plane([snapshot(before)]);
+    const blocked = () => {
+      const entry = useTranscriptStore.getState().entries[APP];
+      return entry === undefined ? undefined : [...blockedStates(entry.rows, hiddenTurnsOf(entry.state))].find(([, s]) => s.call.subject === command);
+    };
+    await until(() => blocked() !== undefined);
+    expect(terminalStateOf(APP)).toBe(state);
+    const [pressed, unapproved] = blocked()!;
+    expect(unapproved.grant).toBe('none');
+    expect(gateOf(APP, call, 'none')).toEqual({ state: 'open' });
+
+    void approve(APP, call, pressed);
+    void approve(APP, call, pressed);
+    await flush();
+    expect(sentence).toBe(grant(call));
+    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: APP, text: sentence }]);
+    await fake.reply('laneA.send', { state: 'entered', uuid: after[0]!.uuid });
+    await flush();
+    expect(useGrantsOut.getState().out.size, 'delivered: out until the record says').toBe(1);
+    await settleTask();
+
+    unmount();
+    releasePane();
+    fake.event('laneA.plane', { appSessionId: APP, watch: 'w1', reset: true }, OTHER_MACHINE);
+    plane([snapshot(before)]); // a fresh snapshot over the held rows: the plane rebuilds under a new source
+    await until(() => useTranscriptStore.getState().entries[APP]?.phase === 'live');
+    expect(useTranscriptStore.getState().attached(APP), 'the grant keeps the transcript attached').toBe(true);
+    expect(fake.invoked('laneA.unwatch'), 'and the machine’s watch open').toEqual([]);
+    plane(after.map((row) => envelope('row', { row, agentId: null })));
+    await until(() => useGrantsOut.getState().out.size === 0);
+    expect(useGrantsOut.getState().out.size, 'ended on the record').toBe(0);
+    expect(blocked()?.[1].grant, 'the row reads approved').toBe('read');
+    expect(useTranscriptStore.getState().attached(APP), 'the last grant ended: let go').toBe(false);
   });
 });
