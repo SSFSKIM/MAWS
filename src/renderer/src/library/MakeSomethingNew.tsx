@@ -25,6 +25,7 @@ import { artifactEditorFor, useArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { createSession, focusedProject, useSessionCreatorRegistered } from '../keymap/actions-runtime';
 import { prefillComposer } from '../stores/composer';
+import { placeOf, useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { createArtifact, openArtifactTab } from './actions';
 import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, untitledTitle } from './copy';
@@ -72,15 +73,17 @@ async function addFile(spaceId: string | null): Promise<void> {
   await make({ kind: 'file', title: file.name, content: { path: file.path }, ...(spaceId !== null && { spaceId }) });
 }
 
-// A new chat, in the Space's linked folder when it has one, whose composer holds `words`.
+// A new chat, in the Space's linked folder when it has one, whose composer holds `words`. The place in front is read at
+// the press, so a tab the person moves to while the folder is added stays in front and the chat opens behind it.
 async function askClaude(words: string, space: LibrarySpace | undefined): Promise<void> {
+  const front = placeOf(useLayout.getState());
   let appSessionId: AppSessionId | null;
   if (space?.linkedDir !== undefined) {
     const added = await ipc.invoke('session.projects.addFolder', { directory: space.linkedDir }, { machine: ipc.localMachine }); // P5 O6 M4: a Space's folder is this machine's (O7)
     if (!added.ok) return toastFailure(added.error.message);
-    appSessionId = await createSession(added.value.project.id, { location: added.value.location });
+    appSessionId = await createSession(added.value.project.id, { location: added.value.location, front });
   } else {
-    appSessionId = await createSession(focusedProject());
+    appSessionId = await createSession(focusedProject(), { front });
   }
   if (appSessionId !== null) prefillComposer(appSessionId, { text: words });
 }
