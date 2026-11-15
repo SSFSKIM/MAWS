@@ -151,6 +151,37 @@ const suites = {
     serve.pauseMs = 20;
   },
 
+  // Row a's addendum: a linearized PDF of several MiB (linearized on the host by qpdf, run.mjs `--qpdf`), whose viewer
+  // may ask ranges by itself. Ranges offered; once with 20 ms between pages and once with 400 ms. Both ends recorded as
+  // row b records them. Launched once with default features and once with --enable-features=PdfPartialLoading.
+  async 'a-linear'() {
+    if (!argv.linearized) return result('a', `linearized (${argv.features ?? 'default features'})`, 'fail', 'no linearized PDF: run.mjs was given no --qpdf');
+    const bytes = readFileSync(argv.linearized);
+    const win = await openWindow({ width: 1000, height: 900 });
+    const owner = win.webContents.id;
+    for (const pauseMs of [20, 400]) {
+      serve.pauseMs = pauseMs;
+      const t = tokens.issue({ owner, name: 'linearized.pdf', mime: 'application/pdf', bytes, kind: 'pdf' });
+      const seq = lastSeq();
+      await mount(win, { id: `linear-${pauseMs}`, kind: 'pdf', url: t.url, width: 800, height: 700 });
+      const d = await waitDrawn(t.url, 60000, Number(argv.pages));
+      // Scroll the viewer to the last page, so a viewer that loads by range has to ask for it.
+      const f = viewerFramesOf(t.url)[0];
+      if (f) await within(f.executeJavaScript(`(() => { const find = (root) => { const hit = root.querySelector('#scroller, #main'); if (hit) return hit; for (const el of root.querySelectorAll('*')) { const r = el.shadowRoot && find(el.shadowRoot); if (r) return r; } return null; }; const s = find(document); if (s) s.scrollTop = s.scrollHeight; return !!s; })()`, true), 3000);
+      await sleep(4000);
+      const rs = since(seq);
+      const w = walk(rs, t.url, owner);
+      const all = rs.filter((r) => (r.end === 'decision' || r.end === 'entry') && (r.url ?? '').includes(t.token));
+      const other = all.filter((r) => noFragment(r.url) !== t.url).length;
+      const ok = d.ok && w.cancels === 0 && w.entryWithoutPass === 0 && w.passWithOtherId === 0 && other === 0;
+      result('a', `linearized, ${argv.features ?? 'default features'}, ${pauseMs} ms between pages`, ok ? 'pass' : 'fail', `${d.ok ? `drawn, ${d.probe.docLength} pages` : 'NOT drawn'}; ${bytes.length} B; entries ${w.entries}, passed ${w.passes}, cancelled ${w.cancels}, entries without a passed decision before them ${w.entryWithoutPass}, passes with another id ${w.passWithOtherId}; ids ${w.ids.join(',')} (window ${owner}); Range at the handler: ${w.ranges.join(', ')}; requests for another path of the token ${other}`, { walk: w, decisions: all.filter((r) => r.end === 'decision').map((r) => ({ seq: r.seq, method: r.method, resourceType: r.resourceType, webContentsId: r.webContentsId, branch: r.branch, decision: r.decision, initiatorOrigin: r.initiatorOrigin })), entries: all.filter((r) => r.end === 'entry').map((r) => ({ seq: r.seq, method: r.method, range: r.range })) });
+      await page(win, `spike.unmount(${JSON.stringify(`linear-${pauseMs}`)})`);
+      tokens.release(t.token);
+      await sleep(500);
+    }
+    serve.pauseMs = 20;
+  },
+
   // Rows b and c, in one launch: c asks again, from elsewhere, the URLs b loaded.
   async bc() {
     const w1 = await openWindow({ width: 1400, height: 900 });

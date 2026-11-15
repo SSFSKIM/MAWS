@@ -3,12 +3,17 @@
 // ordered record of both ends of each suite, and main's own record. On Linux without a display it re-runs itself under
 // xvfb-run, as spikes/viewer-frame/run.mjs does.
 //
-//   node run.mjs [--only=<suite,suite>] [--setuid-sandbox]
+//   node run.mjs [--only=<suite,suite>] [--setuid-sandbox] [--qpdf=<path to a qpdf binary>]
+//
+// --qpdf: row a's linearized PDF is made by `qpdf --linearize` from the harness's large PDF (8 pages). qpdf is not a
+// dependency of the repository: give the path of any build of it (the run of record used qpdf 12.4.2's static Linux
+// build, unpacked outside the repository). Without it the two `a-linear` suites report that they did not run.
 //
 // --setuid-sandbox: on a host whose kernel restricts unprivileged user namespaces (Ubuntu 24.04), Chromium's sandbox
 // needs its setuid helper; this sets it on the repository's Electron with `sudo -n` (spikes/viewer-frame/FINDINGS.md,
 // "Linux"). The sandbox is never turned off.
 import { spawnSync } from 'node:child_process';
+import { largePdf } from './pdf.mjs';
 import { chmodSync, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,7 +60,22 @@ for (const name of ['xdg-open', 'gio', 'gvfs-open', 'kde-open', 'kde-open5', 'kf
   chmodSync(join(fakebin, name), 0o755);
 }
 
-const ALL = [['gen'], ['a'], ['a-partial', ['--enable-features=PdfPartialLoading']], ['bc'], ['d'], ['e'], ['f'], ['f', ['--lang=ko'], { LANGUAGE: 'ko', LANG: 'ko_KR.UTF-8' }, 'f-ko'], ['g'], ['hi'], ['hi-reversed']];
+// Row a's addendum: the linearized PDF, made once per run.
+let linearized = null;
+const LINEAR_PAGES = 8;
+if (argv.qpdf) {
+  const plain = join(runs, 'large-8.pdf');
+  linearized = join(runs, 'large-8-linearized.pdf');
+  writeFileSync(plain, largePdf(LINEAR_PAGES));
+  const made = spawnSync(String(argv.qpdf), ['--linearize', plain, linearized], { encoding: 'utf8' });
+  const check = spawnSync(String(argv.qpdf), ['--check-linearization', linearized], { encoding: 'utf8' });
+  console.error(`qpdf --linearize: exit ${made.status}; --check-linearization: exit ${check.status} ${(check.stdout ?? '').trim().split('\n').slice(-1)[0] ?? ''}`);
+  if (made.status !== 0 || check.status !== 0) linearized = null;
+}
+const linearArgs = linearized ? [`--linearized=${linearized}`, `--pages=${LINEAR_PAGES}`] : [];
+
+const ALL = [['gen'], ['a'], ['a-partial', ['--enable-features=PdfPartialLoading']],
+  ['a-linear', linearArgs, {}, 'a-linear'], ['a-linear', ['--enable-features=PdfPartialLoading', '--features=PdfPartialLoading', ...linearArgs], {}, 'a-linear-partial'], ['bc'], ['d'], ['e'], ['f'], ['f', ['--lang=ko'], { LANGUAGE: 'ko', LANG: 'ko_KR.UTF-8' }, 'f-ko'], ['g'], ['hi'], ['hi-reversed']];
 const only = argv.only ? new Set(String(argv.only).split(',')) : null;
 const parts = [];
 const record = {};

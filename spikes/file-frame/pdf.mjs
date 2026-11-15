@@ -86,7 +86,7 @@ export function buildPdf({ pages, catalog = () => '' }) {
 const textPages = (n, title) => Array.from({ length: n }, (_, i) => ({ lines: [`${title}`, `Page ${i + 1} of ${n}`, 'Invented text for the file-frame spike.'] }));
 
 // Row a and row b: several pages, about 5 MiB (a picture of noise on each page).
-export const largePdf = () => buildPdf({ pages: Array.from({ length: 5 }, (_, i) => ({ lines: ['Large document', `Page ${i + 1} of 5`], image: { width: 640, height: 540, seed: 1000 + i } })) });
+export const largePdf = (n = 5) => buildPdf({ pages: Array.from({ length: n }, (_, i) => ({ lines: ['Large document', `Page ${i + 1} of ${n}`], image: { width: 640, height: 540, seed: 1000 + i } })) });
 
 // Rows h and i: several pages of text.
 export const pagesPdf = () => buildPdf({ pages: textPages(6, 'Several pages') });
