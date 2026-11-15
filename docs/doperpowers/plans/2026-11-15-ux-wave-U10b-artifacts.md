@@ -1058,6 +1058,13 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation: the three menu chords of the composer ask a predicate the composer registers, not the context that hides the toolbar's popovers.
   Evidence: `draftShown: () => !promptState.current.docked` in `composer/Composer.tsx`, read by `toggleFocusedMenu` in `ComposerAppKeys.tsx`. Found by the adversarial review; hence §F.3's predicate.
 
+- Observation (M6): right after Expand, with the keyboard in the bar, a sidebar click on the floating session (or on its own tab) opens no card, as with today's pill. Expand leaves the focused pane on S, and the rule that opens the split's card reacts to the focused pane moving to S. §F.1's row "bar, the session chosen in the sidebar or its tab → card" holds from every state where the artifact's pane is focused (after the card's Close, after Hide chat, after a click into the artifact).
+  Evidence: `expandPane` → `floatSplit` → `showPane(split.pane)`, and the second `useLayout.subscribe` in `shell/floating.ts` (`focusedPane === split.pane && before !== split.pane`); `focusCompactCard` keeps S focused while the bar is typed in. Put to the architect on 2026-11-15.
+- Observation (M6, for M7): a tab that has just opened registers its header in a layout effect at its first mount, so `useShowChatHeader` can read false for one render when a new artifact tab comes in front of a hidden chat. A layer that called `showChatHeaderGone` from that rendered value would turn the hidden chat into the bar on a switch to a newly opened artifact. A tab mounted before keeps its registration (a registration outlives its body).
+  Evidence: the registration effect in `panel/editor-host.ts`; M6's report.
+- Observation (M6): `floating.test.ts` runs in two renderer projects (plain and React-Compiler), so each case counts twice in a run.
+  Evidence: the red run at `5c4421d12`, 140 failed (70 new cases × 2).
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
@@ -1110,6 +1117,15 @@ The architect's rulings of 2026-11-15 (UTC) on the six points revision 2 could n
 - What an older build's accept of a suggestion does with the page setting is accepted as written: the scenes of U10b-1 on both exact peers are the proof. §G; M3 decision 6.
 - Whether the history rail shows a page-only revision as an empty change is accepted as written: M2's executor reads it and reports.
 - The architect read the three statements the mark of §C.1 rests on in the code, and they hold: the update log has two inserts and no third; the prune keeps each artifact's newest row; both older builds read `meta` by key only.
+
+The execution of U10b-3 (M6, M7), on branch `ux-wave/U10b-3` from `015c2a727`. The Concrete Steps' merge of master at each milestone's start is replaced, for this build, by merges of heads the architect names.
+
+- M6, 2026-11-15: Hide chat on the split's float also puts the focused pane on the artifact's pane, as the card's Close does. Without it the sidebar, S's tab and ⇧⌘\ could not reach the card from hidden (each opens it through the focused pane moving to S). Show chat puts the focused pane back on S through `focusCompactCard`, which opens no card: the state Expand leaves.
+- M6, 2026-11-15: `hideChat` acts only from the bar and only where a header holds Show chat, by the same rule `useShowChatHeader` reads (`holdsShowChat`, from `editorHostOf`), so "hidden exists only while a header holds Show chat" holds for any caller. `showChat` and `showChatHeaderGone` act only on a hidden chat.
+- M6, 2026-11-15: "the same tick" (§I) is read as whatever is handled after the press: Hide chat changes the state at once and the raise stays synchronous, so a later request finds the chat hidden; one handled before the press has already opened the card, and Hide chat then does nothing.
+- M6, 2026-11-15: while hidden, the raise still records the request ids it sees, so Show chat brings the bar (A6's "Waiting for you · N" above the box), not the card; the next new request raises the bar as usual.
+- M6, 2026-11-15: `presentationForNewSession` is applied by a layout subscription when the panel's card moves to another session, with the keyboard left where it was; today it answers `left`, so a different answer of the owner would change only that function.
+- M6, 2026-11-15: every reset, and `showChatHeaderGone`, also clear `showChatTakesFocus`, so a Show chat that never mounts cannot take the keyboard later; `setClosed` clears `hidden` for both values. `useShowChatHeader` lives in `shell/floating.ts` (it imports `panel/editor-host`, which imports only the layout stores). Calling `showChatHeaderGone` is the float's layer's, in M7.
 
 ## Outcomes & Retrospective
 
