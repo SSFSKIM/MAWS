@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import type { MessageUuid } from '@shared/graph/ids';
+import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
 import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
@@ -109,6 +110,19 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     ];
     const recalled = recallEntries(rows, activity, listed).map((r) => plain(recallDoc(r)));
     expect(recalled).toEqual(['from the terminal', 'first', 'second', 'see <pasted_content>[Pasted text #1 +2 lines]\nok']);
+  });
+
+  // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
+  // text MAWS's answer envelope; ↑ skips it as the stack's take-back does, and never puts the envelope in the box
+  it('never recalls an answer envelope: with one waiting at the newest end, ↑ goes to the prompt before it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const rows = [userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', envelope), steer: true } as Row];
+    const recalls = recallEntries(rows, [turn('t1', 'human')], []);
+    expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.']);
+    const first = historyNavigation({ index: null, draft: null }, 'up', recalls.length, doc(''));
+    expect(first.show).toEqual({ kind: 'entry', index: 0 });
+    expect(plain(recallDoc(recalls[0]!))).toBe('Count to ten.');
   });
 
   it('keeps two entries with the same display and different bodies apart', () => {
