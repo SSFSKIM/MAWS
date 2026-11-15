@@ -133,8 +133,18 @@ function deriveStates(rows: readonly Row[], hidden: ReadonlySet<TurnId>): Readon
   return states;
 }
 
-/** The approval rows for a key outside a hidden branch, read, waiting or dropped: what a press remembers and compares. */
-export function approvalsFor(rows: readonly Row[], hidden: readonly TurnId[], key: string): number {
+/** Whether the row draws the cell: as a row of its own, or as a member of a run of calls drawn as one line. */
+export const drawsCell = (row: Row, cell: CellId): boolean => row.id === cell || (row.kind === 'group' && row.cells.some((member) => member.id === cell));
+
+/**
+ * The approval rows for a key outside a hidden branch, read, waiting or dropped, that stand after the row drawing the
+ * pressed cell `after`: what a press remembers and compares (Design 4; M3's review, finding 1, as the coordinator ruled).
+ * Rows that do not draw the cell are counted whole. The caller hands rows that draw the cell's own turn whenever the
+ * transcript holds it (`blocked-call/grants.ts`), so rows without the cell lie wholly after it, and the count is then as
+ * many as stand after it or fewer, never more.
+ */
+export function approvalsFor(rows: readonly Row[], hidden: readonly TurnId[], key: string, after: CellId): number {
   const hiddenTurns = new Set(hidden);
-  return rows.filter((row) => (row.turnId === null || !hiddenTurns.has(row.turnId)) && approvalOf(row)?.key === key).length;
+  const at = rows.findIndex((row) => drawsCell(row, after));
+  return rows.slice(at + 1).filter((row) => (row.turnId === null || !hiddenTurns.has(row.turnId)) && approvalOf(row)?.key === key).length;
 }

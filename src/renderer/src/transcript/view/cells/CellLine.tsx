@@ -108,7 +108,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
         <Chevron />
       </button>
-      {offered !== null && actions.renderBlockedCall!({ call: offered.call, again: offered.again, grant: offered.grant as 'none' | 'waiting', onLine })}
+      {offered !== null && actions.renderBlockedCall!({ cell: model.id, call: offered.call, again: offered.again, grant: offered.grant as 'none' | 'waiting', onLine })}
       <DisclosureBody open={cell.expanded}>
         {renderDetail ? renderDetail(opened) : <CellDetailView cell={opened} turnId={turnId} />}
       </DisclosureBody>

@@ -7,7 +7,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
-import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { AskRowData, Cell, CellId, Row, Spill, SubagentRef, TurnId } from '../model/rows';
 import type { TaskId } from '@shared/graph/ids'; // UX wave U3
 import type { BlockedCall } from '../model/blocked'; // UX wave U1c
 import { WorkMotion } from './motion';
@@ -73,10 +73,11 @@ export interface TranscriptActions {
   renderBlockedCall?(props: BlockedCallProps): ReactNode;
 }
 
-// UX wave U1c (the U1c document, Interfaces §D): what the control under a blocked call's line is given: the name the rule
-// read from the store's row, whether the row is blocked again, whether its grant waits, and whether the row's line names
-// the subject whole (`lineNamesWhole`), so the control draws the subject itself only when the line does not.
-export interface BlockedCallProps { call: BlockedCall; again: boolean; grant: 'none' | 'waiting'; onLine: boolean }
+// UX wave U1c (the U1c document, Interfaces §D): what the control under a blocked call's line is given: the row's cell (a
+// press remembers it: M3's review, finding 1), the name the rule read from the store's row, whether the row is blocked
+// again, whether its grant waits, and whether the row's line names the subject whole (`lineNamesWhole`), so the control
+// draws the subject itself only when the line does not.
+export interface BlockedCallProps { cell: CellId; call: BlockedCall; again: boolean; grant: 'none' | 'waiting'; onLine: boolean }
 
 // UX wave U3: a task notice's output, as "Open output" hands it to the mount: the file the engine named, the task's id
 // and the line's words as the view's title.

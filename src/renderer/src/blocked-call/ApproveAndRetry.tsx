@@ -13,12 +13,12 @@ export function ApproveAndRetry(props: BlockedCallProps) {
   return appSessionId === null ? null : <Control appSessionId={appSessionId} {...props} />;
 }
 
-function Control({ appSessionId, call, again, grant, onLine }: BlockedCallProps & { appSessionId: AppSessionId }) {
+function Control({ appSessionId, cell, call, again, grant, onLine }: BlockedCallProps & { appSessionId: AppSessionId }) {
   const { gate, notice } = useGrant(appSessionId, call, grant);
   return (
     <div className="transcript-blocked">
       {!onLine && <pre className="transcript-blocked-subject">{call.subject}</pre>}
-      <button type="button" className="transcript-button" disabled={gate.state !== 'open'} title={gate.state === 'unavailable' ? gate.reason : undefined} onClick={() => void approve(appSessionId, call)}>
+      <button type="button" className="transcript-button" disabled={gate.state !== 'open'} title={gate.state === 'unavailable' ? gate.reason : undefined} onClick={() => void approve(appSessionId, call, cell)}>
         {BLOCKED.approve}
       </button>
       {again && <p role="status" className="transcript-blocked-line">{BLOCKED.always[call.kind]}</p>}

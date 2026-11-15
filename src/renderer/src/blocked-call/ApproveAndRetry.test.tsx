@@ -295,6 +295,14 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     return store;
   }
 
+  it('the press remembers the row that was pressed, by its cell id, among two rows of one key (finding 1)', async () => {
+    const store = await oneBlock('remembers', ['make build', 'make build']);
+    const [, second] = blockedIds(store);
+    fireEvent.click(drawn(store, second!).button()!);
+    await flush();
+    expect([...useGrantsOut.getState().out.values()].map((out) => out.pressed)).toEqual([second]);
+  });
+
   it('a second press does not send twice: on the same row, while the send is unanswered', async () => {
     const store = await oneBlock('same-row');
     const row = drawn(store, blockedIds(store)[0]!);

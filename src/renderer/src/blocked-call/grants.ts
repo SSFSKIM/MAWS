@@ -10,14 +10,21 @@ import { consentMessage, personsGrants } from '@shared/engine/arrival';
 import { messageText } from '@shared/engine/peer-envelope';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
+import { isAddress, machineOf } from '@shared/machine/address';
 import type { HumanPromptOptions, HumanPromptResult } from '../composer/submit/send-human-prompt';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
+import { ipc } from '../ipc/client';
 import { drivenByBridge, heldWords, sendToSession, sessionControls, useSessionControls } from '../session/controls/controls-for';
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { laneAStateOf, useLaneA } from '../stores/lane-a';
-import { useQueueStore } from '../stores/queue';
-import { useTranscriptStore } from '../stores/transcript';
-import { approvalsFor, blockedKey, hiddenTurnsOf, type BlockedCall } from '../transcript/model/blocked';
+import { useMachines } from '../stores/machines';
+import { attachQueue, useQueueStore } from '../stores/queue';
+import { useSessions } from '../stores/sessions';
+import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
+import { approvalsFor, blockedKey, drawsCell, hiddenTurnsOf, type BlockedCall } from '../transcript/model/blocked';
+import { expandedTurnRows } from '../transcript/model/derive';
+import { cellId } from '../transcript/model/keys';
+import type { CellId, Row } from '../transcript/model/rows';
 import { isAbortedReason } from '../transcript/model/classify';
 
 export const SETTLE_MS = 5_000;
@@ -89,30 +96,36 @@ export function grantOptions(appSessionId: AppSessionId, during: 'after' | 'next
   return { origin: 'answer', ...(during === 'after' && !drivenByBridge(appSessionId) && { when: 'after' as const }) };
 }
 
-/** The press (Design 4). The only caller of the port's send for a grant; it sends nothing while the gate is not open. */
-export async function approve(appSessionId: AppSessionId, call: BlockedCall): Promise<void> {
+/** The press (Design 4). The only caller of the port's send for a grant; it sends nothing while the gate is not open. `pressed` is the blocked row's cell. */
+export async function approve(appSessionId: AppSessionId, call: BlockedCall, pressed: CellId): Promise<void> {
   if (gateOf(appSessionId, call, 'none').state !== 'open') return;
   const key = blockedKey(call);
   const at = outKey(appSessionId, key);
-  begin(at, { appSessionId, key, phase: 'sending', rows: approvalsNow(appSessionId, key), quietSince: null }); // the linearisation point: "sending" is in the store before the send is called
+  attempts += 1;
+  const attempt = attempts;
+  // the linearisation point: "sending" is in the store before the send is called
+  begin(at, { attempt, appSessionId, key, pressed, phase: 'sending', rows: approvalsNow(appSessionId, key, pressed), quietSince: null, stood: sessionStands(appSessionId) });
   let result: HumanPromptResult;
   try {
     result = await sendToSession(appSessionId, consentMessage(call.kind, call.subject), grantOptions(appSessionId));
   } catch (error) {
-    return fail(at, error instanceof Error ? error.message : String(error));
+    return fail(at, attempt, error instanceof Error ? error.message : String(error));
   }
-  if (result.disposition === 'refused' || result.disposition === 'held') return fail(at, result.disposition === 'refused' ? (result.reason ?? null) : null);
-  delivered(at);
+  if (result.disposition === 'refused' || result.disposition === 'held') return fail(at, attempt, result.disposition === 'refused' ? (result.reason ?? null) : null);
+  delivered(at, attempt);
 }
 
 // ---- the grants out ----------------------------------------------------------------------------------------------------
 
 interface Out {
+  attempt: number; // the press's own number: an answer moves only the grant of the press it answers
   appSessionId: AppSessionId;
   key: string;
+  pressed: CellId; // the blocked row that was pressed, by its cell: `cell:<tool use id>`, the engine's id on every route
   phase: 'sending' | 'delivered';
-  rows: number; // the approval rows the transcript held for the key at the press
+  rows: number; // the approval rows the transcript held for the key after the pressed row, at the press
   quietSince: number | null; // delivered: when the record first listed no waiting grant for the key
+  stood: boolean; // the window knew the session at the press, so its going is heard
 }
 interface GrantsOut {
   out: ReadonlyMap<string, Out>;
@@ -122,15 +135,53 @@ interface GrantsOut {
 /** The grants out, by session and key, and the last press's notice beside them. The window's memory; never stored. */
 export const useGrantsOut = create<GrantsOut>()(() => ({ out: new Map(), notices: new Map() }));
 
+let attempts = 0;
 const outKey = (appSessionId: AppSessionId, key: string): string => `${appSessionId}\u0001${key}`;
-const approvalsNow = (appSessionId: AppSessionId, key: string): number => {
+const approvalsNow = (appSessionId: AppSessionId, key: string, pressed: CellId): number => {
   const entry = useTranscriptStore.getState().entries[appSessionId];
-  return entry === undefined ? 0 : approvalsFor(entry.rows, hiddenTurnsOf(entry.state), key);
+  return entry === undefined ? 0 : approvalsFor(rowsDrawing(entry, pressed), hiddenTurnsOf(entry.state), key, pressed);
 };
 
-// Every change of the grants out goes through here: the store follows the record while any grant is out, and stops.
+/** Instrumentation: how many times a count drew the pressed call's turn expanded (tests pin when it runs). */
+export const pressedTurnExpansions = { count: 0 };
+
+// The rows a press's count reads (M3's review, finding 1, as the coordinator ruled). A closed turn folds its work away,
+// so the store's rows can lack the pressed cell while the history before it is held; then the turn that holds the cell's
+// call (the reducer's index of tool uses) is drawn expanded in place of its folded rows (`expandedTurnRows`), so the
+// count still starts at the pressed cell. Only when no held turn holds the call are the store's rows counted as they
+// are: they lie wholly after it. The expansion derives that one turn, and runs only while a grant is out (at the press,
+// and in `settle`, which the stores call only while one is out).
+function rowsDrawing(entry: TranscriptEntry, pressed: CellId): readonly Row[] {
+  const { rows, state } = entry;
+  if (rows.some((row) => drawsCell(row, pressed))) return rows;
+  const turn = [...state.index.toolUses].find(([use]) => cellId.tool(use) === pressed)?.[1];
+  if (turn === undefined) return rows;
+  pressedTurnExpansions.count += 1;
+  const expanded = expandedTurnRows(state, turn);
+  const first = rows.findIndex((row) => row.turnId === turn);
+  if (first !== -1) return [...rows.slice(0, first), ...expanded, ...rows.slice(rows.findLastIndex((row) => row.turnId === turn) + 1)];
+  // the turn draws no row of its own here: its rows go before the first row of a later turn
+  const place = state.order.indexOf(turn);
+  const next = rows.findIndex((row) => row.turnId !== null && state.order.indexOf(row.turnId) > place);
+  return next === -1 ? [...rows, ...expanded] : [...rows.slice(0, next), ...expanded, ...rows.slice(next)];
+}
+
+// The session stands while the window knows it, on a machine the roster lists: a record not archived (closed), or a row
+// the org's listing gives. A session that stood at the press and no longer does has gone (closed, removed, its machine
+// gone), and its grants end with it.
+function sessionStands(appSessionId: AppSessionId): boolean {
+  const { records, listed } = useSessions.getState();
+  const record = records.get(appSessionId);
+  if (!listed.has(appSessionId) && (record === undefined || record.archived)) return false;
+  const machine = isAddress(appSessionId) ? machineOf(appSessionId) : ipc.localMachine;
+  return machine === ipc.localMachine || useMachines.getState().machines.has(machine);
+}
+
+// Every change of the grants out goes through here: the store follows the record while any grant is out, and stops; and
+// it holds what feeds that record for each session with a grant out, whatever is mounted (ruling F3).
 function put(out: ReadonlyMap<string, Out>, notices: ReadonlyMap<string, string> = useGrantsOut.getState().notices): void {
   useGrantsOut.setState({ out, notices });
+  keep(new Set([...out.values()].map((grant) => grant.appSessionId)));
   if (out.size === 0) unfollow();
   else follow();
 }
@@ -145,23 +196,25 @@ function begin(at: string, grant: Out): void {
   put(new Map(out).set(at, grant), without(notices, at));
 }
 
-function fail(at: string, notice: string | null): void {
+// An answer to a press whose grant is no longer the one out (the record ended it, and another press followed) moves nothing.
+function fail(at: string, attempt: number, notice: string | null): void {
   const { out, notices } = useGrantsOut.getState();
-  if (!out.has(at)) return; // the record answered first
+  if (out.get(at)?.attempt !== attempt) return;
   put(without(out, at), notice === null || notice === '' ? notices : new Map(notices).set(at, notice));
 }
 
-function delivered(at: string): void {
+function delivered(at: string, attempt: number): void {
   const { out } = useGrantsOut.getState();
   const grant = out.get(at);
-  if (grant === undefined || grant.phase !== 'sending') return; // the record answered first
+  if (grant === undefined || grant.attempt !== attempt || grant.phase !== 'sending') return;
   put(new Map(out).set(at, { ...grant, phase: 'delivered' }));
   settle();
 }
 
-// The transitions on evidence (Design 4's table): the transcript holds more approval rows for the key than at the press,
-// and the grant ends whatever its phase; a delivered grant the record no longer lists as waiting starts its clock, and
-// ends when the clock reaches SETTLE_MS; one the record lists again stops it.
+// The transitions on evidence (Design 4's table): the transcript holds more approval rows for the key after the pressed
+// row than at the press, and the grant ends whatever its phase; a delivered grant the record no longer lists as waiting
+// starts its clock, and ends when the clock reaches SETTLE_MS; one the record lists again stops it. A session that has
+// gone ends its grants.
 function settle(): void {
   const { out } = useGrantsOut.getState();
   if (out.size === 0) return;
@@ -177,7 +230,7 @@ function settle(): void {
   const next = new Map<string, Out>();
   let changed = false;
   for (const [at, grant] of out) {
-    if (approvalsNow(grant.appSessionId, grant.key) > grant.rows) {
+    if ((grant.stood && !sessionStands(grant.appSessionId)) || approvalsNow(grant.appSessionId, grant.key, grant.pressed) > grant.rows) {
       changed = true;
       continue;
     }
@@ -206,12 +259,12 @@ function clock(): void {
   }, Math.max(0, Math.min(...since) + SETTLE_MS - Date.now()));
 }
 
-// The store follows the transcript's store, the queue store and the lane A store while any grant is out, and none of them
-// while none is: nothing in it depends on a mounted component.
+// The store follows the transcript's store, the queue store, the lane A store, the sessions and the roster while any
+// grant is out, and none of them while none is: nothing in it depends on a mounted component.
 let following: (() => void) | null = null;
 function follow(): void {
   if (following !== null) return;
-  const offs = [useTranscriptStore.subscribe(settle), useQueueStore.subscribe(settle), useLaneA.subscribe(settle)];
+  const offs = [useTranscriptStore.subscribe(settle), useQueueStore.subscribe(settle), useLaneA.subscribe(settle), useSessions.subscribe(settle), useMachines.subscribe(settle)];
   following = () => offs.forEach((off) => off());
 }
 function unfollow(): void {
@@ -221,9 +274,29 @@ function unfollow(): void {
   timer = null;
 }
 
+// What the store holds for each session with a grant out: the session's queue attachment (its snapshot and its events)
+// and its transcript's attachment (the source a view attached), so that closing the pane does not stop the record the
+// grant ends on. The lane A store lists every session its machine serves, whatever is mounted: nothing to hold. Let go
+// when the session's last grant ends, or the session goes.
+const holds = new Map<AppSessionId, () => void>();
+function keep(sessions: ReadonlySet<AppSessionId>): void {
+  for (const [appSessionId, release] of holds) {
+    if (sessions.has(appSessionId)) continue;
+    holds.delete(appSessionId);
+    release();
+  }
+  for (const appSessionId of sessions) {
+    if (holds.has(appSessionId)) continue;
+    const queue = attachQueue(appSessionId);
+    const transcript = useTranscriptStore.getState().hold(appSessionId);
+    holds.set(appSessionId, () => (queue(), transcript()));
+  }
+}
+
 /** Tests: the window starts with no grant out and no notice. */
 export function resetGrantsOut(): void {
   unfollow();
+  keep(new Set());
   useGrantsOut.setState({ out: new Map(), notices: new Map() });
 }
 

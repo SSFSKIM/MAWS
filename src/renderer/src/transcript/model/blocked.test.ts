@@ -20,7 +20,7 @@ import { approvalsFor, blockedCallOf, blockedKey, blockedStates, classifierReaso
 import { blockedLabel } from './cells';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState, type TranscriptState } from './reduce';
-import type { Cell, Row, TurnId } from './rows';
+import type { Cell, CellId, Row, TurnId } from './rows';
 import { builder, type Builder } from './test-events';
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -172,12 +172,40 @@ describe('the rule: whether a blocked row is approved, waits, or is blocked agai
     expect(read(rows)).toEqual([]);
   });
 
-  it('the approval rows for a key count every one, read, waiting and dropped, outside a hidden branch', () => {
+  it('the approval rows for a key after the pressed row count every one, read, waiting and dropped, outside a hidden branch', () => {
     const rows = [block(T1, 'make build'), approval(T1, 'make build', { dropped: true }), approval(T2, 'make build', { pending: 'next' }), approval(T2, 'make build'), approval(T2, 'make check'), approval(T3, 'make build')];
     const key = blockedKey({ kind: 'command', subject: 'make build' });
-    expect(approvalsFor(rows, [], key)).toBe(4);
-    expect(approvalsFor(rows, [T3], key)).toBe(3);
-    expect(approvalsFor(rows, [], blockedKey({ kind: 'call', subject: 'make build' }))).toBe(0);
+    const pressed = rows[0].id as CellId;
+    expect(approvalsFor(rows, [], key, pressed)).toBe(4);
+    expect(approvalsFor(rows, [T3], key, pressed)).toBe(3);
+    expect(approvalsFor(rows, [], blockedKey({ kind: 'call', subject: 'make build' }), pressed)).toBe(0);
+  });
+
+  it('the command blocked twice: the approval between the two rows counts for the earlier row’s press and not for the later’s (finding 1)', () => {
+    const rows = [block(T1, 'make build'), approval(T1, 'make build'), block(T2, 'make build'), approval(T2, 'make build', { pending: 'next' })];
+    const key = blockedKey({ kind: 'command', subject: 'make build' });
+    expect(approvalsFor(rows, [], key, rows[0].id as CellId)).toBe(2);
+    expect(approvalsFor(rows, [], key, rows[2].id as CellId)).toBe(1);
+  });
+
+  it('the pressed cell drawn as a member of a run of calls on one line, the run opened or folded: the count starts at the run (finding 1)', () => {
+    const pressed = block(T2, 'make build') as Cell;
+    const before = approval(T1, 'make build');
+    for (const expanded of [true, false]) {
+      const run = { kind: 'group', id: `group:${pressed.id}`, turnId: T2, at: AT, state: 'completed', cells: [block(T2, 'make check') as Cell, pressed], summary: '', counts: { added: 0, removed: 0 }, icon: 'commands', expanded } as unknown as Row;
+      const rows = [before, run, approval(T3, 'make build')];
+      expect(approvalsFor(rows, [], blockedKey({ kind: 'command', subject: 'make build' }), pressed.id), `the run ${expanded ? 'opened' : 'folded'}`).toBe(1);
+    }
+  });
+
+  it('rows that do not hold the pressed row lie wholly after it: every approval of the key there counts, as many as stand after the row or fewer, never more', () => {
+    const history = [block(T1, 'make build'), approval(T1, 'make build'), block(T2, 'make build'), approval(T2, 'make build')];
+    const key = blockedKey({ kind: 'command', subject: 'make build' });
+    const pressed = history[2].id as CellId;
+    const newer = history.slice(3); // the store let the history up to the pressed row go
+    expect(approvalsFor(newer, [], key, pressed)).toBe(1);
+    expect(approvalsFor(newer, [], key, pressed)).toBeLessThanOrEqual(approvalsFor(history, [], key, pressed));
+    expect(approvalsFor([], [], key, pressed), 'no rows loaded').toBe(0);
   });
 
   it('is memoised on the rows and the hidden turns', () => {
@@ -378,6 +406,21 @@ describe('probe E: one block, its grant and its retry, as journal and as transcr
       expect(advisoryRows(rows), `${route}: no advisory row`).toEqual([]);
       expect(rows.filter((row) => row.kind === 'cell' && row.toolName === 'Bash').map((row) => (row as RowOf<'cell'>).status), route).toEqual(['denied', 'done']);
     }
+  });
+
+  it('u1c-e-1: the blocked row has one cell id live and from the file, so a press remembers the same row on either route; the grant is the one approval after it', async () => {
+    const routes = { live: journalToEvents(loadUxwaveJournal('u1c-e-1')), file: await fromFile('u1c-e-1') };
+    const key = blockedKey({ kind: 'command', subject: MARKER('1') });
+    const ids = Object.entries(routes).map(([route, events]) => {
+      const at = events.findIndex(isGrant);
+      const [id] = [...blockedStates(drawn(stateOf(events.slice(0, at))), []).keys()];
+      expect(id, route).toBeDefined();
+      expect(approvalsFor(drawn(stateOf(events.slice(0, at))), [], key, id!), `${route}, before the grant`).toBe(0);
+      expect(approvalsFor(drawn(stateOf(events)), [], key, id!), `${route}, whole`).toBe(1);
+      expect([...blockedStates(drawn(stateOf(events)), []).keys()], `${route}, whole`).toEqual([id]);
+      return id;
+    });
+    expect(ids[0]).toBe(ids[1]);
   });
 });
 

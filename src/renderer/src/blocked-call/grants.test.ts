@@ -8,7 +8,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
@@ -20,17 +20,21 @@ import { sendToSession } from '../session/controls/controls-for';
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { applyLaneAState, holdPendingSend, resetLaneAStore, useLaneA } from '../stores/lane-a';
 import { useMachines } from '../stores/machines';
-import { resetQueueStore, useQueueStore, type SessionQueue } from '../stores/queue';
+import { attachQueue, resetQueueStore, useQueueStore, type SessionQueue } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
 import { blockedKey, type BlockedCall } from '../transcript/model/blocked';
+import { expandedTurnRows } from '../transcript/model/derive';
+import type { CellId } from '../transcript/model/rows';
 import { builder } from '../transcript/model/test-events';
 import type { TranscriptSource } from '../transcript/source/types';
-import { approve, gateOf, GRANT_DURING_TURN, grantOptions, resetGrantsOut, SETTLE_MS, TERMINAL_OFFERED, terminalRefusal, terminalStateOf, useGrantsOut, waitingGrants } from './grants';
+import { approve, gateOf, GRANT_DURING_TURN, grantOptions, pressedTurnExpansions, resetGrantsOut, SETTLE_MS, TERMINAL_OFFERED, terminalRefusal, terminalStateOf, useGrantsOut, waitingGrants } from './grants';
 
 const BUILD: BlockedCall = { kind: 'command', subject: 'make build' };
 const CHECK: BlockedCall = { kind: 'command', subject: 'make check' };
 const UUID = '11111111-1111-4111-8111-111111111111' as MessageUuid;
+/** The pressed blocked row: `make build`'s call `t1` in the transcripts below. */
+const PRESSED = 'cell:t1' as CellId;
 const OPENING = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: ';
 
 let fake: FakeClient;
@@ -177,7 +181,7 @@ describe('the gate (Design 6): closed over unavailable over open', () => {
     expect(gateOf(id, CHECK, 'none'), 'another key').toEqual({ state: 'open' });
     queueOf(id, { entries: [] });
     vi.useFakeTimers();
-    void approve(id, CHECK);
+    void approve(id, CHECK, PRESSED);
     expect(gateOf(id, CHECK, 'none'), 'out').toEqual({ state: 'closed' });
   });
 
@@ -236,7 +240,7 @@ describe('what a press sends (Design 5 and 7)', () => {
     const id = at('press-b') as AppSessionId;
     ready(id, { turn: humanTurn });
     vi.useFakeTimers();
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
     await flush();
     expect(fake.invoked('session.steer')).toEqual([{ appSessionId: 'press-b', content: grant(BUILD), priority: 'next' }]);
     expect(fake.invoked('session.send')).toEqual([]);
@@ -255,7 +259,7 @@ describe('what a press sends (Design 5 and 7)', () => {
     const remote = onStudio();
     useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote, { turn: humanTurn }) }, OTHER_MACHINE);
     vi.useFakeTimers();
-    void approve(remote, BUILD);
+    void approve(remote, BUILD, PRESSED);
     await flush();
     expect(fake.invoked('session.steer')).toEqual([{ appSessionId: 'app-r', content: grant(BUILD), priority: 'next' }]);
     expect(fake.invoked('session.send')).toEqual([]);
@@ -264,12 +268,12 @@ describe('what a press sends (Design 5 and 7)', () => {
   it('another machine’s session with no status held, and with one held and no turn running (Acceptance 8): the press is one session.send with the sentence, and no steer', async () => {
     const remote = onStudio();
     vi.useFakeTimers();
-    void approve(remote, BUILD);
+    void approve(remote, BUILD, PRESSED);
     await flush();
     await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-1' });
     resetGrantsOut();
     useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote) }, OTHER_MACHINE);
-    void approve(remote, BUILD);
+    void approve(remote, BUILD, PRESSED);
     await flush();
     expect(fake.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: grant(BUILD) }, { appSessionId: 'app-r', content: grant(BUILD) }]);
     expect(fake.invoked('session.steer')).toEqual([]);
@@ -278,7 +282,7 @@ describe('what a press sends (Design 5 and 7)', () => {
   it('a session no port drives: nothing is sent, and the gate says who holds it', async () => {
     const id = at('press-held') as AppSessionId;
     useSessions.setState({ records: new Map([[id, record(id, { holder: { kind: 'terminal', pid: 42 } })]]) });
-    await approve(id, BUILD);
+    await approve(id, BUILD, PRESSED);
     expect(fake.calls.filter((call) => call.startsWith('invoke'))).toEqual([]);
     expect(useGrantsOut.getState().out.size).toBe(0);
   });
@@ -286,7 +290,7 @@ describe('what a press sends (Design 5 and 7)', () => {
   it('a terminal session with no state offered: nothing reaches the bridge', async () => {
     const id = at('press-terminal') as AppSessionId;
     onTerminal(id);
-    await approve(id, BUILD);
+    await approve(id, BUILD, PRESSED);
     expect(fake.invoked('laneA.send')).toEqual([]);
   });
 });
@@ -296,10 +300,10 @@ describe('the grant that is out (Design 4)', () => {
     const id = at('twice') as AppSessionId;
     ready(id);
     vi.useFakeTimers();
-    void approve(id, BUILD);
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
+    void approve(id, BUILD, PRESSED);
     await flush();
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
     await flush();
     expect(fake.invoked('session.send')).toHaveLength(1);
   });
@@ -308,7 +312,7 @@ describe('the grant that is out (Design 4)', () => {
     const id = at('notice') as AppSessionId;
     ready(id);
     vi.useFakeTimers();
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
     await flush();
     const failed = fake.fail('session.send', 'The engine host could not take the message');
     await vi.advanceTimersByTimeAsync(0);
@@ -316,7 +320,7 @@ describe('the grant that is out (Design 4)', () => {
     await flush();
     expect([...useGrantsOut.getState().out.keys()]).toEqual([]);
     expect([...useGrantsOut.getState().notices.values()]).toEqual(['The engine host could not take the message']);
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
     expect([...useGrantsOut.getState().notices.values()]).toEqual([]);
   });
 
@@ -325,7 +329,7 @@ describe('the grant that is out (Design 4)', () => {
     ready(id);
     const transcript = await blockedSession(id);
     vi.useFakeTimers();
-    void approve(id, BUILD);
+    void approve(id, BUILD, PRESSED);
     await flush();
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
     const b = builder('2026-09-28T11:00:00.000Z');
@@ -338,11 +342,11 @@ describe('the grant that is out (Design 4)', () => {
     expect(gateOf(id, BUILD, 'none')).toEqual({ state: 'open' });
   });
 
-  it('follows the transcript, the queue and the lane A store only while a grant is out', async () => {
+  it('follows the transcript, the queue, the lane A store, the sessions and the roster only while a grant is out', async () => {
     const id = at('follows') as AppSessionId;
     ready(id);
     const offs: ReturnType<typeof vi.fn>[] = [];
-    for (const store of [useTranscriptStore, useQueueStore, useLaneA] as { subscribe: (listener: () => void) => () => void }[]) {
+    for (const store of [useTranscriptStore, useQueueStore, useLaneA, useSessions, useMachines] as { subscribe: (listener: () => void) => () => void }[]) {
       const subscribe = store.subscribe.bind(store);
       vi.spyOn(store, 'subscribe').mockImplementation((listener: () => void) => {
         const off = vi.fn(subscribe(listener));
@@ -351,13 +355,285 @@ describe('the grant that is out (Design 4)', () => {
       });
     }
     vi.useFakeTimers();
-    void approve(id, BUILD);
-    expect(offs).toHaveLength(3);
+    void approve(id, BUILD, PRESSED);
+    expect(offs).toHaveLength(5);
     await flush();
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
     expect(offs.every((off) => off.mock.calls.length === 0), 'while it is out').toBe(true);
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(useGrantsOut.getState().out.size).toBe(0);
-    expect(offs.map((off) => off.mock.calls.length)).toEqual([1, 1, 1]);
+    expect(offs.map((off) => off.mock.calls.length)).toEqual([1, 1, 1, 1, 1]);
+  });
+});
+
+// M3's review, fix 1. An answer belongs to its own press (finding 2); the store keeps alive what it reads while a grant is
+// out, whatever is mounted, and lets go when the session's last grant ends or the session goes (finding 3); and the count
+// a press compares runs only over the approval rows after the pressed cell (finding 1, as the coordinator ruled).
+describe('the grant that is out, against what outlives a press (M3’s review, fix 1)', () => {
+  const G = '22222222-2222-4222-8222-222222222222' as MessageUuid;
+  const G0 = '33333333-3333-4333-8333-333333333333' as MessageUuid;
+
+  /** The host's echo of a grant it was handed, waiting at the next step (the steer's row), with the person's mark. */
+  const echo = (uuid: MessageUuid, name: string) => {
+    const b = builder('2026-09-28T11:00:00.000Z');
+    b.emit('user.message', { messageUuid: uuid, content: grant(BUILD), isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'make build' }] });
+    return later(b.events, name);
+  };
+  const withdrawn = (uuid: MessageUuid, name: string) => {
+    const b = builder('2026-09-28T11:01:00.000Z');
+    b.emit('command.lifecycle', { commandUuid: uuid, state: 'cancelled' });
+    return later(b.events, name);
+  };
+  /** A's echo comes before A's send answers, and ends A; the echo is withdrawn; B is pressed on the same key, unanswered. */
+  async function aEndedThenB(name: string) {
+    const id = at(name) as AppSessionId;
+    ready(id);
+    const transcript = await blockedSession(id);
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    act(() => transcript.push(echo(UUID, 'echo-a')));
+    expect(useGrantsOut.getState().out.size, 'A ends on its own approval row').toBe(0);
+    act(() => transcript.push(withdrawn(UUID, 'withdrawn-a')));
+    expect(gateOf(id, BUILD, 'none'), 'withdrawn: the button returns').toEqual({ state: 'open' });
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    expect(fake.invoked('session.send'), 'A and B, each one send').toHaveLength(2);
+    return id;
+  }
+
+  it('a late refusal of an earlier press leaves the newer press’s grant out: no notice, and no third send', async () => {
+    const id = await aEndedThenB('late-refusal');
+    const failed = fake.fail('session.send', 'The engine host could not take the message'); // the oldest: A’s
+    await vi.advanceTimersByTimeAsync(0);
+    await failed;
+    await flush();
+    expect(useGrantsOut.getState().out.size, 'B is still out').toBe(1);
+    expect([...useGrantsOut.getState().notices.values()], 'A’s words are no answer to B').toEqual([]);
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    expect(fake.invoked('session.send')).toHaveLength(2);
+  });
+
+  it('a late success of an earlier press does not start the newer press’s clock: B, unanswered, stays out past SETTLE_MS', async () => {
+    await aEndedThenB('late-success');
+    await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' }); // the oldest: A’s
+    await vi.advanceTimersByTimeAsync(SETTLE_MS * 3);
+    expect([...useGrantsOut.getState().out.values()].map((out) => out.phase), 'B, still sending').toEqual(['sending']);
+  });
+
+  /** A pane over the session as the app mounts one: the composer's queue attachment, and the transcript's source. */
+  async function pane(id: AppSessionId) {
+    const releaseQueue = attachQueue(id, fake.client);
+    const transcript = await blockedSession(id);
+    await flush();
+    return { transcript, close: () => (releaseQueue(), useTranscriptStore.getState().detach(id)) };
+  }
+  // the pane's composer attaches over the bridge itself (as the queue's own tests do), so its events carry the address;
+  // the host's answer to a read through the page's client carries the bare id the client lifts
+  const queued = (appSessionId: AppSessionId) => ({ queueId: 'q-g', appSessionId, content: grant(BUILD), createdAt: T0, state: 'queued' as const, messageUuid: null, submittedAt: null, uncertain: false, steer: false });
+  const queueEvent = (id: AppSessionId, entries: unknown[]) => act(() => fake.event('session.queue', { appSessionId: id, entries, paused: false, pauseReason: null }));
+
+  it('the pane closed, its composer and its source let go: the queue’s word still reaches the grant, which ends by its clock once the grant is removed elsewhere', async () => {
+    const id = at('pane-closed') as AppSessionId;
+    ready(id);
+    const view = await pane(id);
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-g' });
+    queueEvent(id, [queued(id)]);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS * 3);
+    expect(useGrantsOut.getState().out.size, 'listed: the clock is stopped').toBe(1);
+    view.close();
+    expect(useTranscriptStore.getState().attached(id), 'the grant keeps the transcript attached').toBe(true);
+    queueEvent(id, []);
+    await vi.advanceTimersByTimeAsync(SETTLE_MS);
+    expect(useGrantsOut.getState().out.size, 'removed elsewhere: the clock ran').toBe(0);
+    expect(useTranscriptStore.getState().attached(id), 'the last grant ended: let go').toBe(false);
+    queueEvent(id, [queued(id)]);
+    expect(useQueueStore.getState().bySession.get(id)?.entries, 'the queue no longer followed').toEqual([]);
+  });
+
+  it('the pane closed: the transcript’s approval row still reaches the grant, which ends at once', async () => {
+    const id = at('pane-closed-row') as AppSessionId;
+    ready(id);
+    const view = await pane(id);
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-g' });
+    queueEvent(id, [queued(id)]);
+    view.close();
+    act(() => view.transcript.push(echo(G, 'echo')));
+    expect(useGrantsOut.getState().out.size).toBe(0);
+  });
+
+  it('the pane closed before any waiting snapshot: the grant reads the queue itself, and the guard does not run out while the queue lists it', async () => {
+    const id = at('no-snapshot') as AppSessionId;
+    ready(id);
+    const view = await pane(id); // its snapshot: an empty queue
+    view.close();
+    let listed: unknown[] = [];
+    fake = fakeClient({ 'session.queue.list': () => ({ entries: listed, paused: false }) });
+    window.maws = fake.client as unknown as PreloadBridge;
+    vi.useFakeTimers();
+    listed = [queued(bareOf(id))]; // the host queued it before its answer
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-g' });
+    await vi.advanceTimersByTimeAsync(SETTLE_MS * 3);
+    expect(useGrantsOut.getState().out.size, 'the queue lists it: no clock').toBe(1);
+  });
+
+  it('the session goes (its record removed; another machine’s, its machine gone from the roster): its grants end and nothing it held stays attached', async () => {
+    const id = at('goes') as AppSessionId;
+    useSessions.setState({ records: new Map([[id, record(id)]]) });
+    ready(id);
+    const view = await pane(id);
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    view.close();
+    expect(useTranscriptStore.getState().attached(id)).toBe(true);
+    act(() => useSessions.setState({ records: new Map() }));
+    expect(useGrantsOut.getState().out.size).toBe(0);
+    expect(useTranscriptStore.getState().attached(id), 'nothing outlives its session').toBe(false);
+
+    const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-r', { lane: 'B' }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]), records: new Map([[remote, record(remote)]]) });
+    applyRemoteSession(remoteSessionState(remote));
+    const there = await pane(remote);
+    void approve(remote, BUILD, PRESSED);
+    await flush();
+    there.close();
+    expect(useTranscriptStore.getState().attached(remote)).toBe(true);
+    act(() => useMachines.getState().applyRoster([]));
+    expect(useGrantsOut.getState().out.size).toBe(0);
+    expect(useTranscriptStore.getState().attached(remote)).toBe(false);
+  });
+
+  /** A session whose history comes in pages: the newest holds `make build` blocked (t1); an older page joins later. */
+  async function paged(id: AppSessionId, first?: SessionEvent[]) {
+    const b = builder('2026-09-28T10:00:00.000Z');
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make build' });
+    b.result('t1', `${OPENING}Builds. If you have other tasks`, { isError: true, denial: 'automode-blocked' });
+    b.end(['u1']);
+    let events = first ?? later(b.events, 'newest');
+    let listener: ((batch: SessionEvent[]) => void) | null = null;
+    let rebuild: (() => void) | null = null;
+    const source: TranscriptSource = {
+      key: id,
+      subscribe: (l) => ((listener = l), () => (listener = null)),
+      snapshot: () => Promise.resolve(events),
+      onRebuild: (l) => ((rebuild = l), () => (rebuild = null)),
+    };
+    await useTranscriptStore.getState().attach(id, source);
+    return {
+      push: (batch: SessionEvent[]) => {
+        events = [...events, ...batch];
+        act(() => listener?.(batch));
+      },
+      older: async (page: SessionEvent[]) => {
+        events = [...page, ...events];
+        act(() => rebuild?.());
+        await flush();
+      },
+    };
+  }
+  /** An earlier block of the same command (t0) and the person's read approval of it: the older page. */
+  const earlier = () => {
+    const b = builder('2026-09-28T09:00:00.000Z');
+    b.turn('u0');
+    b.toolUse('t0', 'Bash', { command: 'make build' });
+    b.result('t0', `${OPENING}Builds. If you have other tasks`, { isError: true, denial: 'automode-blocked' });
+    b.end(['u0']);
+    b.emit('turn.started', { userMessageUuid: G0, origin: 'human' });
+    b.emit('user.message', { messageUuid: G0, content: grant(BUILD), isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'make build' }] });
+    b.end([G0]);
+    return later(b.events, 'older');
+  };
+  const approvalOfThisPress = () => {
+    const b = builder('2026-09-28T11:00:00.000Z');
+    b.emit('turn.started', { userMessageUuid: G, origin: 'human' });
+    b.emit('user.message', { messageUuid: G, content: grant(BUILD), isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'make build' }] });
+    return later(b.events, 'this-press');
+  };
+
+  it('an older page that holds an earlier approval of the same command does not end the grant; the approval of this press, after the pressed row, does (finding 1)', async () => {
+    const id = at('older-page') as AppSessionId;
+    ready(id);
+    const history = await paged(id);
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.send', { disposition: 'sent', messageUuid: G, queueId: 'q-1' });
+    await history.older(earlier());
+    const { rows, state } = useTranscriptStore.getState().entries[id]!;
+    expect(rows.some((row) => row.kind === 'user' && row.consent !== undefined), 'the earlier approval is held').toBe(true);
+    expect(expandedTurnRows(state, state.index.toolUses.get('t1' as never)!).some((row) => row.id === PRESSED), 'the pressed row keeps its id through the rebuild').toBe(true);
+    expect(useGrantsOut.getState().out.size, 'an approval before the pressed row is no answer to it').toBe(1);
+    history.push(approvalOfThisPress());
+    expect(useGrantsOut.getState().out.size).toBe(0);
+  });
+
+  it('the command blocked twice in one transcript: a press on the later row is not ended by the approval between the two rows, through a rebuild; its own approval ends it (finding 1)', async () => {
+    const id = at('blocked-twice') as AppSessionId;
+    ready(id);
+    const history = await paged(id);
+    await history.older(earlier());
+    vi.useFakeTimers();
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.send', { disposition: 'sent', messageUuid: G, queueId: 'q-1' });
+    await history.older([]);
+    expect(useGrantsOut.getState().out.size).toBe(1);
+    history.push(approvalOfThisPress());
+    expect(useGrantsOut.getState().out.size).toBe(0);
+  });
+
+  it('a press during a running turn on a row blocked again: the turn ends and folds its work away, the earlier approval still held, and the grant stays out; this press’s approval ends it (finding 1)', async () => {
+    const id = at('again-folds') as AppSessionId;
+    ready(id, { turn: humanTurn });
+    const b = builder('2026-09-28T10:00:00.000Z');
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make build' });
+    b.result('t1', `${OPENING}Builds. If you have other tasks`, { isError: true, denial: 'automode-blocked' });
+    b.toolUse('t-held', 'Bash', { command: 'sleep 30' });
+    const history = await paged(id, [...earlier(), ...later(b.events, 'running')]);
+    vi.useFakeTimers();
+    expect(useTranscriptStore.getState().rows(id).some((row) => row.id === PRESSED), 'the turn runs: the row is drawn').toBe(true);
+    void approve(id, BUILD, PRESSED);
+    await flush();
+    await answer('session.steer', { messageUuid: G });
+    const ended = builder('2026-09-28T10:30:00.000Z');
+    ended.result('t-held', 'done', { structured: { stdout: 'done', stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+    ended.end(['u1']);
+    history.push(later(ended.events, 'ended'));
+    expect(useTranscriptStore.getState().rows(id).some((row) => row.id === PRESSED), 'the turn closed: its work folded away').toBe(false);
+    expect(useGrantsOut.getState().out.size, 'the approval before the pressed row is no answer to it').toBe(1);
+    history.push(approvalOfThisPress());
+    expect(useGrantsOut.getState().out.size).toBe(0);
+  });
+
+  it('the expansion of the pressed call’s turn runs only while a grant is out: a store change with none out expands nothing; with one out, one turn per count', async () => {
+    const id = at('expansions') as AppSessionId;
+    ready(id);
+    const history = await paged(id);
+    vi.useFakeTimers();
+    expect(useTranscriptStore.getState().rows(id).some((row) => row.id === PRESSED), 'the turn is closed: its work is folded away').toBe(false);
+    const before = pressedTurnExpansions.count;
+    act(() => useTranscriptStore.getState().setFollowing(id, false));
+    act(() => useQueueStore.setState({ bySession: new Map() }));
+    history.push(approvalOfThisPress());
+    expect(pressedTurnExpansions.count, 'no grant out').toBe(before);
+    void approve(id, CHECK, PRESSED);
+    expect(pressedTurnExpansions.count - before, 'the press’s own count').toBe(1);
+    await flush();
+    const settled = pressedTurnExpansions.count;
+    act(() => useQueueStore.setState({ bySession: new Map() }));
+    expect(pressedTurnExpansions.count - settled, 'one store change, one turn').toBe(1);
   });
 });
