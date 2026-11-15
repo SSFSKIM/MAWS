@@ -408,6 +408,7 @@ describe('comments on lines in Review', () => {
     addOn('src/report.ts', 'new', 12);
     await painted(() => card() !== null && (bodyOf('src/report.ts')?.contains(card()) ?? false));
     expect(useCommentCard.getState().open?.hostId).toBe(`diff:${A}:uncommitted`);
+    type('Quote only where a comma is.');
     expect(sendButton().textContent).toBe('Send 2 comments');
   });
 

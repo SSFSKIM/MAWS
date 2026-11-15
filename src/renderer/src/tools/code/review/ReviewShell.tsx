@@ -14,6 +14,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
+import { focusAtEnd } from '../../../side/card/CommentCard';
 import { useTranscriptStore } from '../../../transcript';
 import { REFUSAL, REVIEW_COPY } from '../copy';
 import { useViewer } from '../viewer/viewer-store';
@@ -181,15 +182,20 @@ function StackView({ appSessionId, hostId, hostMode, visible, ui, data, files, p
     if (holdPath === null) setHeld(null);
     else if (section?.hunks) setHeld({ path: holdPath, hunks: section.hunks, blocks: section.blocks });
   }
-  // Refresh: the held file takes its latest hunks, and the card is drawn again at its comment's place there. The keyboard
-  // is put in the card's field first, so the card drawn again takes it back (CardComposer's remount rule).
-  const onRefresh = useCallback(
-    (path: string) => {
-      row?.querySelector<HTMLTextAreaElement>('[data-comment-card] textarea')?.focus();
-      setHeld((was) => (was?.path === path ? null : was));
-    },
-    [row],
-  );
+  // Refresh: the held file takes its latest hunks, and the card is drawn again at its comment's place there, the
+  // keyboard back in its field once it is (the library drops the old row's elements before the card leaves them, so the
+  // card's own remount rule cannot tell the keyboard was there).
+  const refocus = useRef(false);
+  const onRefresh = useCallback((path: string) => {
+    refocus.current = true;
+    setHeld((was) => (was?.path === path ? null : was));
+  }, []);
+  useEffect(() => {
+    const field = row?.querySelector<HTMLTextAreaElement>('[data-comment-card] textarea');
+    if (!refocus.current || !field) return;
+    refocus.current = false;
+    focusAtEnd(field);
+  }, [row]);
   const { rows, card, add } = comments;
   const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, rows, add]);
 
