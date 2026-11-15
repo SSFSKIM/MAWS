@@ -18,10 +18,10 @@ export type CompactingSource = { kind: 'engine' } | { kind: 'bridge'; rpc: strin
 interface Held {
   since: number; // ms since the epoch, this window's clock
   source: CompactingSource;
-  // a bridge's: the ids of the compaction boundaries among the session's rows when it went on (null: no rows held yet;
-  // the first rows that arrive are taken as those), so a new boundary is told by its id and never by its time, which is
-  // the transcript machine's clock
-  known?: ReadonlySet<string> | null;
+  // a bridge's: the ids of the session's compaction boundaries that are its history: those among its rows when it went
+  // on, taken again at every change while its transcript hydrates (an attach's snapshot, a reset, an older page's
+  // rebuild). A boundary that ends it is told by its id, never by its time, which is the transcript machine's clock.
+  known?: ReadonlySet<string>;
 }
 
 interface CompactingState {
@@ -32,7 +32,9 @@ export const useCompacting = create<CompactingState>(() => ({ held: new Map() })
 
 const ENGINE: CompactingSource = { kind: 'engine' };
 const LIVE_BRIDGE: ReadonlySet<string | undefined> = new Set(['live', 'starting']); // `starting` passes; nothing else holds one
-const boundaries = (rows: readonly Row[]) => new Set(rows.flatMap((row) => (row.kind === 'boundary' && row.boundaryKind === 'compaction' ? [row.id] : [])));
+const isCompaction = (row: Row) => row.kind === 'boundary' && row.boundaryKind === 'compaction';
+const boundaries = (rows: readonly Row[]) => new Set<string>(rows.flatMap((row) => (isCompaction(row) ? [row.id] : [])));
+const newestBoundary = (rows: readonly Row[]): string | null => rows.findLast(isCompaction)?.id ?? null;
 // A session's transcript is kept under its id, on this machine's route and on another machine's (`ipcSource`,
 // `remoteTranscriptOf`).
 const rowsOf = (appSessionId: AppSessionId): readonly Row[] | undefined => useTranscriptStore.getState().entries[appSessionId]?.rows;
@@ -53,7 +55,7 @@ export function noteCompacting(appSessionId: AppSessionId, source: CompactingSou
   if (on) {
     if (current === undefined) {
       const rows = source.kind === 'bridge' ? rowsOf(appSessionId) : undefined;
-      put(appSessionId, { since: Date.now(), source, ...(source.kind === 'bridge' && { known: rows === undefined ? null : boundaries(rows) }) });
+      put(appSessionId, { since: Date.now(), source, ...(source.kind === 'bridge' && { known: boundaries(rows ?? []) }) });
     } else if (!sameSource(current.source, source)) put(appSessionId, { ...current, source });
   } else if (current !== undefined && sameSource(current.source, source)) put(appSessionId, null);
 }
@@ -88,16 +90,21 @@ export function connectCompacting(): () => void {
       if (held.source.kind === 'bridge' && !LIVE_BRIDGE.has(state.states.get(appSessionId)?.bridge)) clearCompacting(appSessionId);
     }
   });
-  // ... and with a compaction's boundary that was not among its rows when it went on (told by id). Read only while a
-  // bridge holds one, and only for a key whose rows changed.
+  // ... and with a compaction's boundary that is new: it arrives in a live batch (a change while the key hydrates, or the
+  // one that ends its hydration, is history, whose boundaries are taken as known), it is the newest compaction boundary
+  // of the rows in drawn order (an older page that reaches the rows by another way brings none newer), and its id is
+  // not known. Read only while a bridge holds one, and only for a key whose rows changed.
   const offRows = useTranscriptStore.subscribe((state, before) => {
     for (const [appSessionId, held] of useCompacting.getState().held) {
       if (held.source.kind !== 'bridge') continue;
-      const rows = state.entries[appSessionId]?.rows;
-      if (rows === undefined || rows === before.entries[appSessionId]?.rows) continue;
-      const known = held.known;
-      if (!known) put(appSessionId, { ...held, known: boundaries(rows) }); // the history it started over
-      else if (rows.some((row) => row.kind === 'boundary' && row.boundaryKind === 'compaction' && !known.has(row.id))) clearCompacting(appSessionId);
+      const now = state.entries[appSessionId];
+      const was = before.entries[appSessionId];
+      if (now === undefined || now.rows === was?.rows) continue;
+      if (was === undefined || was.phase === 'hydrating' || now.phase === 'hydrating') put(appSessionId, { ...held, known: boundaries(now.rows) });
+      else {
+        const newest = newestBoundary(now.rows);
+        if (newest !== null && !(held.known?.has(newest) ?? false)) clearCompacting(appSessionId);
+      }
     }
   });
   return () => {
