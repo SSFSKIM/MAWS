@@ -110,7 +110,7 @@ export type CellLabelInput =
   | { kind: 'shell'; command: string; status: 'running' | 'done' | 'error' | 'stopped'; durationMs: number; background: boolean }
   | { kind: 'edit'; path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number }
   | { kind: 'read'; paths: string[] }
-  | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null }
+  | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null; again?: boolean; approved?: boolean } // UX wave U1c: `again` and `approved` are read for `auto_denied` alone
   | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null }
   | { kind: 'moved'; name: string; durationMs: number }; // UX wave U4a (decision 33): a call the engine moved to the background so a message sent now could be read
 
@@ -137,7 +137,8 @@ export function cellLabel(input: CellLabelInput): string {
       const reason = input.reason ? ` · ${input.reason}` : '';
       switch (input.disposition) {
         case 'denied': return `Denied: \`${input.subject}\`${reason}`;
-        case 'auto_denied': return `Auto mode blocked: \`${input.subject}\`${input.denialKind === 'automode-parsing-error' ? ' · review unreadable' : reason}`;
+        case 'auto_denied': // UX wave U1c (Interfaces §A): blocked again, and approved, as the rule over the rows says (blocked.ts)
+          return `Auto mode blocked${input.again ? ' again' : ''}: \`${input.subject}\`${input.denialKind === 'automode-parsing-error' ? ' · review unreadable' : reason}${input.approved ? ' · approved' : ''}`;
         case 'stopped': return `${stoppedLabel(input.subject, true)}${input.denialKind === 'automode-unavailable' ? ' · auto mode unavailable' : ''}`;
       }
       break;
@@ -164,6 +165,16 @@ export function cellLabel(input: CellLabelInput): string {
   }
   return '';
 }
+
+// UX wave U1c (l4-approvals-12; Interfaces §A): the words of a call auto mode blocked beside its label: the button, and
+// the one muted line under a row blocked again that still offers it (`call` is unused until a later landing names a call)
+export const BLOCKED = {
+  approve: 'Approve and retry',
+  always: {
+    command: 'A rule that always denies this command blocks it every time. Change the rule or the mode to run it.',
+    call: 'A rule that always denies this call blocks it every time. Change the rule or the mode to run it.',
+  },
+} as const;
 
 // UX wave U2 (decision 23, R2): one form for every stopped call, a member of its run or a call with no result in a closed
 // turn: `Stopped: ` and the call's subject, in code marks but for a shell call's description, with no duration.

@@ -16,6 +16,7 @@ import type { ListingSection } from './agent-listing'; // E7
 import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import type { BlockedCall } from './blocked'; // UX wave U1c
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts
@@ -300,6 +301,8 @@ export interface Cell {
   // UX wave U2 (decision 13): why a failed call failed, the first line of its error, which its row draws after the label;
   // only on a cell whose status is `error` (a refused call says why in its label, a stopped one did not fail)
   error?: string;
+  /** UX wave U1c: what a grant for this call names; present only on a call auto mode blocked that has a name. */
+  blocked?: BlockedCall;
 }
 
 export type CellDetail =

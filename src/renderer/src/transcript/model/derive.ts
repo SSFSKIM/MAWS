@@ -296,7 +296,8 @@ type Item =
   | { kind: 'later'; row: () => Row } // E7: a message or listing row, filled once the turn's results and agents are known
   | { kind: 'artifact'; toolUseId: ToolUseId } // E2: as E1's, for an artifact call
   | { kind: 'browser_action'; toolUseId: ToolUseId } // E4c: as E2's, for a browser tool call
-  | { kind: 'message'; toolUseId: ToolUseId }; // P4-R7: a message tool's call, a message or (refused) a cell
+  | { kind: 'message'; toolUseId: ToolUseId } // P4-R7: a message tool's call, a message or (refused) a cell
+  | { kind: 'advisory'; toolUseId: ToolUseId; row: RowOf<'error'> }; // UX wave U1c: the engine's advisory for a refused call, drawn unless that call's own row says it
 
 // UX wave U3: the questions of an ask call, by its tool-use id, for the words of an answer's line
 type CallQuestions = (call: string) => ReadonlyArray<{ question: string; header?: string }> | null;
@@ -820,7 +821,10 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         break;
       case 'notice.posted':
         if (isHistoryGap(event)) items.push({ kind: 'row', row: gapRow(event, turn.id) }); // P5 O7 M2
-        else if (!supersededByHookRow(event)) items.push({ kind: 'row', row: noticeRow(event, event.text, turn.id) });
+        else if (!supersededByHookRow(event)) {
+          const advised = advisedCall(event); // UX wave U1c (Design 1, ruling F6)
+          items.push(advised === null ? { kind: 'row', row: noticeRow(event, event.text, turn.id) } : { kind: 'advisory', toolUseId: advised, row: noticeRow(event, event.text, turn.id) });
+        }
         break;
       case 'plugin.log':
       case 'plugin.load_issue':
@@ -921,6 +925,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       // E1 end
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
+        break;
+      case 'advisory': // UX wave U1c (Design 1, ruling F6): a classifier block's call row carries what its advisory says
+        if (results.get(item.toolUseId)?.denial !== 'automode-blocked') resolved.push({ kind: 'row', row: item.row });
         break;
       case 'artifact': // E2
         resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id, context) });
@@ -1740,6 +1747,11 @@ function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): R
 // occurred · ctrl+o to see", also sent when a Stop hook re-prompts) and the informational "UserPromptSubmit operation
 // blocked by hook: …" (2.1.283 cli.pretty.js 807758, 919121).
 const supersededByHookRow = (event: Event<'notice.posted'>) => event.key === 'stop-hook-error' || event.text.startsWith('UserPromptSubmit operation blocked by hook:');
+// UX wave U1c (Design 1, ruling F6): the call the engine's advisory for a refusal names (`permission_denied:<tool use id>`,
+// normalizer-system.ts); the turn draws it unless the turn's results say auto mode blocked that call, whose row then
+// says it on every route (a transcript file has no advisory)
+const ADVISORY_KEY = 'permission_denied:';
+const advisedCall = (event: Event<'notice.posted'>): ToolUseId | null => (event.key?.startsWith(ADVISORY_KEY) ? (event.key.slice(ADVISORY_KEY.length) as ToolUseId) : null);
 
 // P5 O7 M2: the gap bar, where the transcript's source put its event (model/gap.ts).
 function gapRow(event: Event<'notice.posted'>, turnId: TurnId | null): RowOf<'gap'> {

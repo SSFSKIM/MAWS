@@ -52,6 +52,7 @@ const cellShape = {
   status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), moved: z.literal(true).optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
   background: z.boolean(), doneLabel: z.string().optional(), error: z.string().optional(), // UX wave U2
+  blocked: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional(), // UX wave U1c
 };
 export const CellSchema = z.strictObject(cellShape);
 

@@ -6,7 +6,8 @@ import { createContext, useContext, type ReactNode } from 'react';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
 import { baseName, descriptionLabel, SHELL_CELL } from '../../model/copy';
-import { shellToolOf } from '../../model/cells';
+import { blockedLabel, shellToolOf } from '../../model/cells';
+import { blockedStates, hiddenTurnsOf, isBlockedCell, type BlockedState } from '../../model/blocked'; // UX wave U1c
 import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
@@ -69,8 +70,20 @@ export function CellLabel({ cell }: { cell: Cell }) {
   return <CodeText text={label} />;
 }
 
-export function CellLine({ cell, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
+// UX wave U1c (Design 3; Interfaces §D): what the rule says of a blocked call's row, read from the store's rows (before
+// any projection, so a fold changes nothing it answers); undefined at once for every other cell
+function useBlockedState(storeKey: string, cell: Cell): BlockedState | undefined {
+  const blocked = isBlockedCell(cell);
+  return useTranscriptStore((state) => {
+    const entry = blocked ? state.entries[storeKey] : undefined;
+    return entry === undefined ? undefined : blockedStates(entry.rows, hiddenTurnsOf(entry.state)).get(cell.id);
+  });
+}
+
+export function CellLine({ cell: model, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
   const { storeKey } = useTranscriptContext();
+  const blocked = useBlockedState(storeKey, model);
+  const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
   const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
@@ -89,7 +102,7 @@ export function CellLine({ cell, turnId, focusable = false, renderDetail, onTogg
         <Chevron />
       </button>
       <DisclosureBody open={cell.expanded}>
-        {renderDetail ? renderDetail(cell) : <CellDetailView cell={cell} turnId={turnId} />}
+        {renderDetail ? renderDetail(model) : <CellDetailView cell={model} turnId={turnId} />}
       </DisclosureBody>
     </div>
   );
