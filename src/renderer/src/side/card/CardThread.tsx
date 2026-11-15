@@ -179,9 +179,10 @@ function Echo({ text }: { text: string }) {
 
 // The thread's artifact row opening the artifact whose page the card is on (P3-L M5b; E2's record before the cutover)
 // shows that version in the card's viewer (the latest followed when it is the last); any other artifact goes the
-// registered way (the panel's tool). P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on
-// its row. P2-F F-C1: a bubble's Edit edits the thread's message (the registered default reads the main pane's active
-// tab, which is never this thread).
+// registered way (the panel's tool). UX wave U6d: a mention's look for an open main tab passes over the card's own
+// artifact. P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a
+// bubble's Edit edits the thread's message (the registered default reads the main pane's active tab, which is never
+// this thread).
 function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
@@ -201,6 +202,15 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
         }
         if (location) registeredActions().openArtifact(appSessionId, id, at, location); // P4-B4: a link's place
         else registeredActions().openArtifact(appSessionId, id, at);
+      },
+      // UX wave U6d (decision 7): a mention of the card's own artifact opens in the card's viewer above, also while a
+      // main tab shows it, so a click in the thread never takes the person off the page they comment on; any other
+      // artifact follows the registered rule (the main tab that already shows it comes forward)
+      showOpenArtifactTab(appSessionId, id, location) {
+        if (target?.kind === 'artifact-page' && showVersion.current !== undefined && id === target.artifactId) return false;
+        const registered = registeredActions().showOpenArtifactTab;
+        if (!registered) return false;
+        return location ? registered(appSessionId, id, location) : registered(appSessionId, id);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),

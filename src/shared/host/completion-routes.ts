@@ -16,6 +16,7 @@
 export type StartedAtKey = string;
 export const startedAtKey = (pid: number, startedAt: string): StartedAtKey => `${pid}@${startedAt}`;
 export const pidOfStartedAtKey = (incarnation: StartedAtKey): number => Number.parseInt(incarnation, 10);
+export const startedAtOfKey = (incarnation: StartedAtKey): string => incarnation.slice(incarnation.indexOf('@') + 1); // #473
 
 export type CompletionRoute<L> = { link: L; process: StartedAtKey } | { hold: StartedAtKey } | null;
 

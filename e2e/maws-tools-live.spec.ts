@@ -420,14 +420,16 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
 
     // E2 landed the Deliverables tool after E1's sitting, so the pane exists and target "none" names nothing (the replay
     // spec's expectation, maws-tools.spec.ts); E1's build answered "not available in this build". P3-L M6b: the
-    // `artifact` pane and the Artifacts tool
-    await test.step('4 show_pane: the Terminal opens, an artifact that does not exist and an unknown pane are error cells', async () => {
+    // `artifact` pane and the Artifacts tool. UX wave U6d (O-44): the pane is retired; the engine still sends the call (a
+    // pane outside the listed enum reaches the server, pass3/p1-maws-show-pane's `nope`), the host refuses it with the
+    // sentence that teaches the link and asks no window
+    await test.step('4 show_pane: the Terminal opens, the retired artifact pane and an unknown pane are error cells', async () => {
       const session = await begin(s, 'show_pane', showPaneId, PROMPTS.showPane);
       await drive(s, session, 'the turn end', async () => ofKind(await s.events(session.id), 'turn.ended').some((e) => e.parentToolUseId === null) && (await idleNow(s, session.id)));
       const shown = ofKind(await s.events(session.id), 'maws.pane.shown');
       expect(shown.map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
         ['terminal', 'panel-tool', null],
-        ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
+        ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
       ]);
       await expect(surface(s.page, 'terminal')).toBeVisible();
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
@@ -435,11 +437,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       // the cells' own labels, since the model's reply may quote the same words (a live run's read "opened Terminal panel")
       const cell = (text: string | RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
       await expect(cell(/^Opened Terminal$/)).toBeVisible();
-      await expect(cell(/^Could not open pane: no artifact "none" in this session$/)).toBeVisible();
+      await expect(cell(/^Could not open pane: MAWS no longer opens an artifact for the user\./)).toBeVisible();
       await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible();
       await shoot(s, 'pane');
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
-      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no artifact "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
+      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: MAWS no longer opens an artifact for the user. …", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
       await end(s, session, before);
     });
   } finally {

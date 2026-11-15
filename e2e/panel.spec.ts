@@ -1086,7 +1086,7 @@ async function withScenario(body: (maws: MawsLaunch, panel: Locator) => Promise<
 const tabNamed = (title: string) => new RegExp(`^${title.replace(/[+]/g, '\\+')}`);
 
 test.describe('the product host over a scenario derived from C5’s records', () => {
-  test('floating cards follow the focused session and leave non-session main tabs unreserved', async () => {
+  test('cards follow the session in view, and a non-session tab alone earns neither cards nor a reserved column', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       await (await sidebarRow(page, CHARTER)).click();
@@ -1098,6 +1098,15 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await expect(openScm).toHaveText('1 ahead of origin/main');
       await expect(openScm).toHaveAccessibleDescription('Open Source control');
       await expect(environment).toContainText('Trust this folder to see PR state');
+
+      // UX2: a non-session tab alone earns neither cards nor an empty right column, but keeps remembered tool context.
+      await menu(app, 'diagnostics.open');
+      await expect(sessionCards(page)).toHaveCount(0);
+      await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
+      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
+      await expect(surfaceRow(page).getByRole('button', { name: 'Review', exact: true })).toBeEnabled();
+      await menu(app, 'tab.close');
+      await expect(sessionCards(page)).toBeVisible();
 
       await (await sidebarRow(page, SIDEBAR_DRAG)).click({ modifiers: ['Meta'] });
       await menu(app, 'pane.split');
@@ -1111,10 +1120,11 @@ test.describe('the product host over a scenario derived from C5’s records', ()
       await unfoldSessionCard(page, 'Environment');
       await expect(environment).toContainText('⎇ main');
       await menu(app, 'diagnostics.open');
-      // UX2: a non-session tab earns neither cards nor an empty right column, but keeps remembered tool context.
-      await expect(sessionCards(page)).toHaveCount(0);
+      // #692: the other pane still shows a session, so the column stays beside it and speaks of that session, not of the focused tab.
+      await expect(sessionCards(page)).toBeVisible();
+      await expect(environment).toContainText(/Not a git repository|Git unavailable/);
+      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeEnabled();
       await expect.poll(async () => (await panel.boundingBox())?.width ?? 0).toBe(0);
-      await expect(surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true })).toBeDisabled();
       await expect(surfaceRow(page).getByRole('button', { name: 'Review', exact: true })).toBeEnabled();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });

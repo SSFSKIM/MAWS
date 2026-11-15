@@ -13,7 +13,8 @@
 // One exit order for every reason: (1) the server stops accepting; (2) the host's `shutdown` (bounded); (3) on a clean
 // exit, the host's own `clean` step, then the socket file, its tmpdir fallback directory when empty, and the lock are
 // removed if the lock still names this process (a successor that replaced a stale lock keeps its files); (4) the client
-// is closed; (5) exit. A fatal error exits 1 and skips (3), so the successor's staleness check finds the lock.
+// is closed, and what was written to it leaves its socket (bounded by the close's grace); (5) exit. A fatal error exits 1
+// and skips (3), so the successor's staleness check finds the lock.
 import { randomBytes } from 'node:crypto';
 import * as fs from 'node:fs';
 import { createServer, type Server } from 'node:net';
@@ -26,6 +27,7 @@ import { clearSocketPath, makePrivateDirectory } from './private-listen';
 import { createHostRuntime, type HostRegister } from './runtime';
 import { SOCKET_PROTOCOL } from './socket-protocol';
 import { serveSocketClients } from './socket-server';
+import { CLOSE_GRACE_MS } from './socket-port';
 
 // The exit codes of a start: START_EXIT_HELD (3) when another live process holds the lock, START_EXIT_ABORTED when a
 // SIGTERM aborted it (128 + SIGTERM; its lock, if it took one, is already removed); 1 is fatal.
@@ -185,7 +187,9 @@ export async function startSocketHost(opts: SocketHostOptions, proc: HostProcess
           unlinkQuietly(join(dir, files.lock));
         }
       }
-      clients.closeClient(); // (4)
+      // (4), and #473: the exit waits for what was written to leave the sockets (a slow reader's kernel buffer fills, and
+      // an exit drops the rest: an engine host's last status, the evidence its handover completed), within the close's grace
+      await Promise.race([clients.closeClient(), new Promise((resolve) => setTimeout(resolve, CLOSE_GRACE_MS))]);
       proc.exit(code); // (5)
     })();
     return stopping;

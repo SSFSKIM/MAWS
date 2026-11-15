@@ -4,7 +4,7 @@
 // nothing. `host.opQuery` answers RL4's states with the stored binding and tombstones an absent id when asked.
 // The first block drives the commands over a stand-in handler table; the second through registerEngineIpc's own handlers
 // and a replayed engine session, so a reseal shows one effect in a real session.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,6 +65,7 @@ function ops(edit: Partial<OpsDeps> = {}) {
     ['session.launch', async (input) => (ran.push({ name: 'session.launch', input }), { status: 'refused', reason: 'already_live', message: 'stand-in' })],
     ['fs.sessionText', async (input) => (ran.push({ name: 'fs.sessionText', input }), { text: 'a transcript', cursor: null, size: 12, mtimeMs: 0 })],
     ['artifacts.versionState', async (input) => (ran.push({ name: 'artifacts.versionState', input }), { bytes: new Uint8Array([0, 1, 255]) })],
+    ['connectors.addJson', async (input) => (ran.push({ name: 'connectors.addJson', input }), { opId: 'op-add' })], // UX wave U11g: an act on no session
   ]);
   const statusReads: string[] = [];
   const deps: OpsDeps = {
@@ -284,6 +285,20 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
     // and host.op still runs an artifact command only on a session: with a context it is `unavailable`, as before
     expect(await h.op(op({ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+  });
+
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, G6): a custom connector's add names
+  // no session, so a remote action naming it is refused before anything is claimed, and neither command runs it
+  it('refuses connectors.addJson `unavailable`, through host.op and host.artifactOp alike, running nothing and claiming nothing', async () => {
+    const h = ops();
+    const input = { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', folder: '/tmp/files-probe', entry: { type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }] } };
+    expect(validateCommandInput('connectors.addJson', input).ok).toBe(true);
+    expect(await h.op(op({ name: 'connectors.addJson', input }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.op(op({ name: 'connectors.addJson', input: { ...input, appSessionId: 'app-1' } }), CTX)).toEqual({ state: 'refused', reason: 'malformed' }); // no session can be named into it
+    expect(await h.artifactOp(save({ name: 'connectors.addJson', input }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(h.ran).toEqual([]);
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+    expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('connectors.addJson');
   });
 
   it('names the thirteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {

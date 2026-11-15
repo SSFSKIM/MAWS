@@ -31,11 +31,10 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { AppSessionId } from '@shared/graph/ids';
-import { isAddress, machineOf } from '@shared/machine/address';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { Icon } from '../../app/IconButton';
-import { artifactMachineOf, recordArtifactMachine } from '../../artifacts/machines';
+import { artifactMachineOf, recordArtifactMachine, sessionArtifactMachine } from '../../artifacts/machines';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { releaseArtifactEditorState } from '../../artifacts/registry';
 import { ipc } from '../../ipc/client';
@@ -83,9 +82,8 @@ const restoredParams = (stored: unknown): ArtifactsParams | undefined => {
 // only the pins: the artifact opens in a pinned Artifacts tab when there is one, and nothing pins one for it.
 export function openArtifactInPanel(appSessionId: AppSessionId | null, artifactId: string, at?: ArtifactOpenAt, location?: ArtifactLocation): void {
   if (!canShowArtifactInPanel(appSessionId)) return;
-  // P5 O7 M5a: a session's artifacts are on its machine
-  const remote = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine ? machineOf(appSessionId) : null;
-  const machine = remote ?? artifactMachineOf(artifactId) ?? ipc.localMachine;
+  // P5 O7 M5a: a session's artifacts are on its machine (UX wave U6d: the rule a mention's look for its main tab shares)
+  const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
   recordArtifactMachine(artifactId, machine, ipc.localMachine);
   const params: ArtifactsParams = { target: artifactId, machine, ...(at !== undefined && { at }), ...(location !== undefined && { location }) };
   panelHost.addTool<ArtifactsParams>(ARTIFACTS_TOOL_ID, { appSessionId, pin: appSessionId === null, params, activate: true });
