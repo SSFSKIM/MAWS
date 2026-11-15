@@ -180,9 +180,9 @@ export function useRecord(appSessionId: AppSessionId): SessionRecord | null {
   return held ?? (fetched?.appId === appSessionId ? fetched : null);
 }
 
-// Fork in place: no sheet.
-export async function forkInPlace(appSessionId: AppSessionId): Promise<void> {
-  const answer = await forkSession(appSessionId, { kind: 'inPlace' });
+// Fork in place: no sheet. UX wave U3b: from before `rewindTo` (an answer's "Fork from here"), else the whole conversation.
+export async function forkInPlace(appSessionId: AppSessionId, rewindTo: MessageUuid | null = null): Promise<void> {
+  const answer = await forkSession(appSessionId, { kind: 'inPlace' }, { message: null, rewindTo });
   if (!answer.ok) fail(answer.error);
 }
 

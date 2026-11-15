@@ -216,7 +216,7 @@ describe('Fork from here for a session on another machine', () => {
     const [input] = client.invoked('session.fork');
     expect(input).toEqual({ appSessionId: 'app-far', target: { kind: 'inPlace' }, message: null, rewindTo: 'u-next' });
     expect(OFFERS.commands['session.fork']!.accepts!(input)).toBe(true);
-    await client.fail('session.fork', 'The session is working; try again when it’s done.', 'conflict');
+    await act(() => client.fail('session.fork', 'The session is working; try again when it’s done.'));
     expect(useNotices.getState().notices.map((notice) => notice.text)).toContain('The session is working; try again when it’s done.'); // a refusal is the act's toast
     expect(fork()!.disabled).toBe(false);
   });

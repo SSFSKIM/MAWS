@@ -148,6 +148,15 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 
 /* Assistant text: a long path or URL wraps rather than scrolling a narrow transcript sideways (as the bubble does) */
 .transcript-answer { padding: 4px 0 12px; line-height: var(--lh-prose); overflow-wrap: anywhere; }
+/* UX wave U3b (decision 12, Interfaces §C; ruled R15 and R22): the action row under the answer its mount placed it on:
+   Copy, Fork from here and the time, always laid out, so hovering moves nothing, and shown on hover or focus within the
+   row. 20 px tall, it stands 12 px up in the answer's own bottom padding with 8 px under it: an answer that carries it is
+   16 px taller. Its controls' focus rings sit on their boxes, clear of the answer's last line and the next bubble. */
+.transcript-answer-actions { display: flex; align-items: center; gap: 8px; height: 20px; margin: -12px 0 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 20px; white-space: nowrap; opacity: 0; transition: opacity 0.12s; }
+.transcript-row:hover > .transcript-answer-actions, .transcript-row:focus-within > .transcript-answer-actions { opacity: 1; }
+.transcript-answer-actions button:hover:not(:disabled) { color: var(--fg); }
+.transcript-answer-actions button:disabled { color: var(--fg-faint); }
+.transcript .transcript-answer-actions button:focus-visible { outline-offset: 0; }
 /* P5 O9: a terminal session's reply an interrupt cut before the engine kept it: muted, under its note */
 .transcript-cut { padding: 2px 0 6px; color: var(--fg-muted); line-height: var(--lh-prose); overflow-wrap: anywhere; }
 .transcript-cut-note { font-size: var(--text-ui-sm); color: var(--fg-muted); margin-bottom: 2px; }

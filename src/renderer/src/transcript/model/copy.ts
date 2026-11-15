@@ -321,6 +321,8 @@ export const bashHeader = (command: string) => `! ${command}`;
 // lines until opened; one that stands with no bubble of its command names the command the engine ran first
 export const COMMAND_LINE = { mark: '⎿', showMore: 'Show more', showLess: 'Show less' } as const;
 export const commandLead = (run: { command: string }) => `/${run.command} · `;
+// UX wave U3b (Interfaces §L): an answer's action row; a disabled Fork says U9's sentence (useForkUnavailable), never one of these
+export const ANSWER_ACTIONS = { copy: 'Copy', fork: 'Fork from here', forkTitle: 'Starts a new session from this point. This one stays as it is.' } as const;
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 // W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
 // and a steer the engine took, inside the turn at the step where it arrived.

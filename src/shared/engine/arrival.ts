@@ -238,6 +238,16 @@ function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTur
   };
 }
 
+/**
+ * UX wave U3b (Interfaces §D, Probes 5): a prompt's text as the person's own words. Where it opens with a whole sminos
+ * frame line that names `human`, the words after it, as the `own` class reads them (with its guard for words that read
+ * as the interrupt marker); else the text. The rewind's text of a prompt sminos delivered opens with that line.
+ */
+export function ownWordsOf(text: string): string {
+  const { frame, body } = sminosParts(text);
+  return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : text;
+}
+
 /** The person's own words sminos delivered; words that alone would read as the engine's interrupt marker keep their frame line before them. */
 function own(via: 'chat' | 'steer', frame: string, words: string): Own {
   return { class: 'own', via, words: INTERRUPT_MARKER.test(words.trim()) ? `${frame}\n${words}` : words, frame };

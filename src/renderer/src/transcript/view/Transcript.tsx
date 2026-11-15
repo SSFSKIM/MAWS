@@ -17,10 +17,11 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { HYDRATION, OLDER, REACH } from '../model/copy';
 import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
+import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
-import { listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
+import { AnswerActionsStore, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
 import { WorkMotion } from './motion';
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
@@ -62,10 +63,13 @@ const ESTIMATES: Record<RowKind, number> = {
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
 };
-export function estimateRow(row: Row): number {
+// UX wave U3b (ruled R15): an answer's action row is 20 px with 8 px under it, 12 of them in the answer's own bottom
+// padding, so an answer that carries one is 16 px taller.
+const ANSWER_ACTIONS_HEIGHT = 16;
+export function estimateRow(row: Row, answerActions = false): number {
   if (row.kind === 'group' && row.expanded) return 280;
   if (row.kind === 'cell' && row.expanded) return 220;
-  return ESTIMATES[row.kind];
+  return ESTIMATES[row.kind] + (answerActions ? ANSWER_ACTIONS_HEIGHT : 0);
 }
 
 export interface TranscriptListHandle {
@@ -86,6 +90,9 @@ export interface TranscriptListProps {
   // where this list leaves them as it unmounts
   takeCarried?: () => TranscriptScroll | null;
   onLeave?: (scroll: TranscriptScroll) => void;
+  // UX wave U3b, additive: a row's first guess, `estimateRow` when omitted; a new function invalidates the measurements,
+  // so it changes only with the rows
+  estimate?: (row: Row) => number;
 }
 
 // A nested tool/group scroller owns input it can consume. Containment blocks chaining even when its contents fit.
@@ -98,7 +105,7 @@ function nestedScrollerOwnsUp(target: EventTarget | null, scroller: HTMLElement)
   return false;
 }
 
-export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave }: TranscriptListProps) {
+export function TranscriptList({ rows, renderRow, onFollowChange, handle, className, id, takeCarried, onLeave, estimate = estimateRow }: TranscriptListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const followingRef = useRef(true);
   const scrollbarPointer = useRef<number | null>(null);
@@ -146,7 +153,7 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
   const followGrowth = useRef<() => void>(() => undefined);
   // New functions invalidate the virtualiser's measurements, so they change only with the rows.
   const getItemKey = useCallback((index: number) => rows[index].id, [rows]);
-  const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimateRow(rows[index]), [rows]);
+  const estimateSize = useCallback((index: number) => measured.current.get(rows[index].id) ?? estimate(rows[index]), [rows, estimate]);
   const measure = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Parameters<typeof measureElement>[2]) => {
     // Notice a return or browser clamp to the DOM end before measurement moves it or anchoring replaces the offset.
     const scroller = scrollRef.current;
@@ -553,6 +560,12 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     const start = startAt(merged, loaded);
     return start === null ? NO_ROWS : start === 0 ? merged : merged.slice(start);
   }, [merged, startAt, loaded]);
+  // UX wave U3b (decision 12, Interfaces §C): which drawn answers carry Copy, Fork from here and the time, placed once per
+  // change of the list and published to the rows through this mount's store
+  const placement = useMemo(() => answerActionsOf(rows), [rows]);
+  const [answerActions] = useState(() => new AnswerActionsStore());
+  useLayoutEffect(() => answerActions.publish(placement), [answerActions, placement]);
+  const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);
   const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
@@ -646,15 +659,15 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   // Every row reads this context: it changes only with the props, never with the rows.
   const context = useMemo<TranscriptContextValue>(
-    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
-    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, presentation, promptAuthor],
+    () => ({ storeKey, variant, actions: { ...DEFAULT_ACTIONS, ...actions }, rewind: rewind ?? null, renderRequest: renderRequest ?? null, disclosures, idPrefix, sessionDirectory: sessionDirectory ?? null, sessionCwd: sessionCwd ?? null, effort, motion, answerActions, ...(presentation && { presentation }), ...(promptAuthor && { promptAuthor }) }),
+    [storeKey, variant, actions, rewind, renderRequest, disclosures, idPrefix, sessionDirectory, sessionCwd, effort, motion, answerActions, presentation, promptAuthor],
   );
 
   return (
     <TranscriptProvider value={context}>
       {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
-        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
+        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} estimate={estimate} />
         {reach !== null ? (
           // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
           // how it ended when it did not land (the store's `reachMessage`)

@@ -10,6 +10,7 @@ import type { Row } from '../../transcript/model/rows';
 import { ipcRewind } from '../../transcript/source/ipc';
 import { useAgentLookup } from '../../transcript/view/agent-lookup';
 import { useRegisteredActions, useRegisteredRequestRenderer } from '../../transcript/view/registry';
+import type { TranscriptActions } from '../../transcript/view/context'; // UX wave U3b
 import { Transcript, type TranscriptListHandle } from '../../transcript/view/Transcript';
 import type { TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
 import { useRemoteTranscript } from '../remote-source';
@@ -24,7 +25,13 @@ const NO_ROWS: readonly Row[] = [];
 
 export function RemoteTranscriptSlot({ appSessionId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
-  const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
+  // UX wave U3b ("Routes"): no "Fork from here": the link finds a session by a MAWS session id, which a terminal session
+  // on another machine has none of (U9's rule for its session menu)
+  const actions = useMemo(() => {
+    const merged: Partial<TranscriptActions> = { ...registered, ...overrides };
+    delete merged.forkFrom;
+    return merged;
+  }, [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer();
   const transcript = useRemoteTranscript(appSessionId)!;
   const state = useStore(transcript.state);

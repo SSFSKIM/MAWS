@@ -33,6 +33,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { commandLineOf, confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, commandOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { ownWordsOf } from '@shared/engine/arrival'; // UX wave U3b
 import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
@@ -1805,7 +1806,9 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
         const id = rowId.boundary(event.id);
         const revealed = state.ui.revealedBoundaries.has(id);
         const hiddenRows = state.hidden?.branches.get(id)?.rows ?? 0;
-        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText, hiddenRows, revealed });
+        // UX wave U3b (Probes, 5): the one place the rewind's text reaches a fork's window, as the person's own words (a
+        // prompt sminos delivered opens with its frame line)
+        rows.push({ id, turnId: null, at: event.at, kind: 'boundary', boundaryKind: 'rewind', text: boundaryCopy({ kind: 'rewind', hiddenRows, revealed }), detail: event.prefillText === null ? null : ownWordsOf(event.prefillText), hiddenRows, revealed });
         break;
       }
       case 'api.retry':
