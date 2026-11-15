@@ -316,6 +316,8 @@ export class StackPlacer {
       else if (layout.bodyTops[index] <= edge) unsure = true;
     });
     this.recount = unsure;
+    // eslint-disable-next-line no-console
+    console.log('PROBE count', JSON.stringify({ at, unsure, current, top: el.scrollTop, edge, stops: order.slice(8, 14).map((hunk) => topOfPlace(layout, hunkPlace(hunk), rows)), bodyTop5: layout.bodyTops[5], body5: layout.bodies[5] }));
     if (at < current && atEnd(el)) return;
     if (at !== current) this.host.counted(at);
   }
