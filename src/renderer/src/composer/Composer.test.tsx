@@ -467,7 +467,7 @@ describe("composer DOM under C5's dispatcher", () => {
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false);
     expect(composerOf(0).querySelector('[data-request-card], [data-docked-frame]')).toBeNull();
     expect(composerOf(0).textContent).not.toMatch(/Composer paused|more waiting/);
-    expect(useComposerStore.getState().focusTargets.get(A)!.draftShown()).toBe(true);
+    expect(useComposerStore.getState().focusTargets.get(A)!.draftShown?.()).toBe(true);
     await key(document.body, { key: 'l', code: 'KeyL', metaKey: true });
     await waitFor(() => expect(editorOf().editor.isFocused).toBe(true));
     await type('after the turn');
