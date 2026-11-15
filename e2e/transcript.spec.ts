@@ -1126,13 +1126,13 @@ test('a command’s output is a dim line under its command, cut at the bottom of
   await mounted(page, context);
   const drawn = await context.locator('.transcript-command-output').evaluate((output) => {
     const prose = output.querySelector('.transcript-prose')!;
-    const blocks = [...prose.children].flatMap((child) => (child.hasAttribute('dir') || getComputedStyle(child).display === 'contents' ? [...child.children] : [child])); // a per-block wrapper, where one is drawn
+    const blocks = Array.from(prose.children).flatMap((child) => (child.hasAttribute('dir') || getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child])); // a per-block wrapper, where one is drawn
     const heading = prose.querySelector('h2')!;
     const style = getComputedStyle(heading);
     return {
       heading: { size: style.fontSize, lineHeight: style.lineHeight, weight: style.fontWeight },
       gaps: blocks.slice(1).map((block, i) => Math.round((block.getBoundingClientRect().top - blocks[i]!.getBoundingClientRect().bottom) * 10) / 10),
-      cells: [...output.querySelectorAll('th, td')].map((cell) => getComputedStyle(cell).fontSize),
+      cells: Array.from(output.querySelectorAll('th, td')).map((cell) => getComputedStyle(cell).fontSize),
       text: output.textContent ?? '',
     };
   });
@@ -1207,7 +1207,7 @@ test('a code block wraps its long lines in one frame the column’s width, with 
       const textRects = (el: Element) => {
         const range = document.createRange();
         range.selectNodeContents(el);
-        return [...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
+        return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
       };
       const row = frame.closest('.transcript-row')!;
       const rowStyle = getComputedStyle(row);
@@ -1222,11 +1222,11 @@ test('a code block wraps its long lines in one frame the column’s width, with 
         header: getComputedStyle(frame.querySelector('[data-streamdown="code-block-header"]')!).display,
         band: box(body).top - (box(frame).top + parseFloat(style.borderTopWidth) + parseFloat(style.paddingTop)),
         sideways: [frame, body, pre].map((el) => el.scrollWidth - el.clientWidth),
-        lines: [...pre.querySelector('code')!.children].map((line) => ({ box: box(line), pad: getComputedStyle(line).paddingRight, text: textRects(line) })),
+        lines: Array.from(pre.querySelector('code')!.children).map((line) => ({ box: box(line), pad: getComputedStyle(line).paddingRight, text: textRects(line) })),
         button: box(frame.querySelector('[data-streamdown="code-block-copy-button"]')!),
         controlGround: getComputedStyle(actions).backgroundColor,
         // the 480 px bound (STREAMDOWN_OPTIONS.codeBlockMaxHeight), on whichever of the body's boxes Streamdown puts it
-        bound: [body, ...body.querySelectorAll('*')].filter((el) => getComputedStyle(el).maxHeight === '480px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight })),
+        bound: [body, ...Array.from(body.querySelectorAll('*'))].filter((el) => getComputedStyle(el).maxHeight === '480px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight })),
       };
     });
 
@@ -1313,7 +1313,7 @@ test('a wide table and a code block are the text column’s width in an answer, 
       const rowStyle = getComputedStyle(row);
       const rowBox = row.getBoundingClientRect();
       const text = { left: rowBox.left + parseFloat(rowStyle.paddingLeft), width: rowBox.width - parseFloat(rowStyle.paddingLeft) - parseFloat(rowStyle.paddingRight) };
-      const blocks = [...element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"], [data-streamdown="code-block"]')].map((block) => {
+      const blocks = Array.from(element.querySelectorAll<HTMLElement>('[data-streamdown="table-wrapper"], [data-streamdown="code-block"]')).map((block) => {
         const { left, width } = block.getBoundingClientRect();
         const table = block.querySelector('table');
         const scroller = table === null ? null : (block.lastElementChild as HTMLElement);
@@ -1358,7 +1358,7 @@ test('a wide table and a code block are the text column’s width in an answer, 
     return {
       frame: [style.borderTopWidth !== '0px', style.backgroundColor !== 'rgba(0, 0, 0, 0)'],
       scroller: [inner.borderTopWidth, inner.backgroundColor],
-      cells: [...new Set([...frame.querySelectorAll('td')].map((cell) => getComputedStyle(cell).whiteSpace))],
+      cells: [...new Set(Array.from(frame.querySelectorAll('td')).map((cell) => getComputedStyle(cell).whiteSpace))],
       controlsPlaced: getComputedStyle(controls).position,
       addedHeight: frame.getBoundingClientRect().height - chrome - scroller.getBoundingClientRect().height,
     };
@@ -1390,7 +1390,7 @@ test('a wide table and a code block are the text column’s width in an answer, 
   const bound = await tall.evaluate((frame) => {
     const scroller = frame.lastElementChild as HTMLElement;
     // the 320 px bound (STREAMDOWN_OPTIONS.tableMaxHeight), on the scroller or a box inside it
-    return [scroller, ...scroller.querySelectorAll('*')].filter((el) => getComputedStyle(el).maxHeight === '320px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
+    return [scroller, ...Array.from(scroller.querySelectorAll('*'))].filter((el) => getComputedStyle(el).maxHeight === '320px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
   });
   expect(bound, 'the inner scroller keeps its 320 px bound').toHaveLength(1);
   expect(bound[0]!.scroll > bound[0]!.client && bound[0]!.client <= 320, `the tall table scrolls down inside it (${bound[0]!.client} of ${bound[0]!.scroll} px)`).toBe(true);
@@ -1432,7 +1432,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
         lineScrolls: line.scrollWidth > line.clientWidth + 1,
         actions: box(actions),
         shown: getComputedStyle(actions).opacity,
-        parts: [...actions.children, ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
+        parts: [...Array.from(actions.children), ...(tail ? [tail] : [])].map((part) => ({ text: part.textContent ?? '', box: box(part) })),
         tail: tail && { box: box(tail), whole: tail.scrollWidth <= tail.clientWidth, title: tail.title, last: line.lastElementChild === tail },
       };
     });
@@ -1505,9 +1505,9 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
           if (!el) return [];
           const range = document.createRange();
           range.selectNodeContents(el);
-          return [...range.getClientRects()].filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
+          return Array.from(range.getClientRects()).filter((rect) => rect.width > 0).map((rect) => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom, width: rect.width, height: rect.height }));
         };
-        const user = [...document.querySelectorAll(`.transcript-row[data-kind="user"][data-turn-id="${turn}"]`)].find((row) => row.textContent?.includes('Check the north gauge'));
+        const user = Array.from(document.querySelectorAll(`.transcript-row[data-kind="user"][data-turn-id="${turn}"]`)).find((row) => row.textContent?.includes('Check the north gauge'));
         return [...rects(user?.querySelector('[data-user-content]') ?? null), ...rects(document.querySelector(`.transcript-row[data-kind="divider"][data-turn-id="${turn}"] button`))];
       },
       [turnId] as const,
