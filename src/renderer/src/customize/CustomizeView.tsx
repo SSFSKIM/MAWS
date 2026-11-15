@@ -70,6 +70,8 @@ export function CustomizeView({ view, show }: { view: PageView; show: CustomizeS
     const request = useOpenRequest.getState().request;
     if (request !== null && (view !== 'mine' || request.show !== show || request.place !== cwd)) dropOpenRequest();
   }, [view, show, cwd]);
+  // and with the page: a request left when Customize closes is not opened by a later way in (the branch panel's finding)
+  useEffect(() => dropOpenRequest, []);
 
   const projectSelect = (
     <label className="flex min-w-0 max-w-full items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:w-full">
@@ -92,11 +94,13 @@ export function CustomizeView({ view, show }: { view: PageView; show: CustomizeS
       data-customize-page
       data-customize-view={view}
       data-customize-show={show}
+      // the keyboard's place when what held it leaves (a detailed plugin gone from the list), inside the `/` below
+      tabIndex={-1}
       // `/` focuses the head's search field, as the libraries' frame did; not from a sheet drawn over the page
       onKeyDown={(event) => {
         if (event.currentTarget.contains(event.target as Node)) focusSearch(event);
       }}
-      className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg"
+      className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg outline-none"
     >
       <CustomizePlace cwd={cwd} name={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))} attached={attached?.appSessionId ?? null}>
         <CustomizeHead view={view} show={show} inDetail={inDetail} onView={onView} onShow={onShow} project={projectSelect} live={liveScope} />
