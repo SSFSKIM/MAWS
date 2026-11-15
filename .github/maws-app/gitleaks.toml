@@ -123,6 +123,13 @@ paths = ['''^spikes/protocol-probe/fixtures/(?:pass3/)?uxwave/[^/]+\.jsonl$''']
 regexes = ['''^msg_[0-9A-Za-z]{6,18}$''']
 
 [[allowlists]]
+description = "The producers' events frozen beside those fixtures (<name>.base-events.json and <name>.base-backfill.json, U3a and ticket 704): the same message ids carried into events as apiMessageId, whole or cut where the scanner's read of a large file ends (one event per line, so a file over 125 kB is cut inside a line, as the journals are): msg_ and 6 to 24 base62 characters, an identifier, not a credential"
+targetRules = ["generic-api-key"]
+condition = "AND"
+paths = ['''^spikes/protocol-probe/fixtures/uxwave/[^/]+\.base-(?:events|backfill)\.json$''']
+regexes = ['''^msg_[0-9A-Za-z]{6,24}$''']
+
+[[allowlists]]
 description = "gitleaks' default global allowlist of values (placeholders, booleans, repeated letters, template expressions, home and system paths) and its two stopwords; its list of exempt paths is removed"
 regexes = [
     '''(?i)^true|false|null$''',
