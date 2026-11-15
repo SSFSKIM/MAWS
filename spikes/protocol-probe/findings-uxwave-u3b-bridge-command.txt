@@ -1,0 +1,89 @@
+UX wave, landing U3b, probe 2: a slash command the sminos bridge ran, beside the same command typed, engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, "Probes" 2; it serves `userRow` in
+model/derive.ts, as a follow-on, and "Engine facts" 6; 2026-11-15, VM dc-uxwave5-26dc, branch ux-wave/U3b-probes)
+
+Question. When the bridge runs a slash command in a session (`$.command.run`, the bridge's `command` op), does the
+live frame's `local_command_run` or the file row's `commandRun` carry a mark a typed command's does not (the bundle's
+schema names `plugin`), and does the command's own row differ?
+
+Verdict. `local_command_run` and `commandRun` carry NO mark: both are {command, args} for the bridge's command as for
+the typed one, with no `plugin` key (4 bridge runs and 4 typed, in 2 terminal sessions and 1 headless one). The
+`system` row of subtype `local_command` that holds the output is the same field for field. What differs is elsewhere:
+  - In a terminal session's file, the command's other rows are the same as well. The bridge's run is preceded by a
+    `queue-operation` enqueue and dequeue pair, which a typed one does not have. The isMeta `user` row the command
+    leaves for the model (here /rename's "<system-reminder> The user named this session …") carries `origin: {kind:
+    "plugin", name: "sminos"}` and `queuePriority: "later"`, where a typed one's has neither.
+  - In a headless session (the bridge controlling, no MAWS_LANE), the replayed command frame on the wire (the `user`
+    frame holding <command-name>, isReplay true) and the turn's `result` carry `origin: {kind: "plugin", name:
+    "sminos"}`, where a typed one's has no origin (replay) and `{kind: "human"}` (result). In the file, the caveat row
+    and the <command-name> `user` row carry the same origin. The output (`assistant` <synthetic> with
+    `local_command_run` on the wire, the `system` local_command row with `commandRun` in the file) carries none.
+  - In a session MAWS runs (MAWS_LANE=B) the bridge refuses the op: {ok: false, error: "MAWS controls this session",
+    code: "lane-b"}. A command run by the bridge therefore never reaches a session MAWS drives itself; it arises only
+    in the sessions MAWS reads by the file (terminal sessions, lane A).
+  So the document's default, "no rule; such a command draws as the person's", holds for the command's output row,
+  which is what `userRow` would read. If the follow-on wants the mark, it is the command's `user` rows' `origin`
+  (headless file and wire) or, in a terminal's file, only the meta row's origin and the queue-operation pair. The
+  output row has none.
+  `/cost` and `/context`, the commands the brief names, cannot be run through the bridge on this engine: its route
+  table (sminos 1.47.0, routes measured at 2.1.310) refuses `cost` as {code: "unknown-builtin", error: "not a command
+  this session knows"} (it is an alias the listing does not name), `usage` as {code: "panel", "opens a panel in the
+  terminal; it would hold the session's queue"}, and `context` as {code: "routed", "the desk does this with its own
+  control (read usage), not as a command"}. All three are refused within 15 ms with nothing written. `/rename <name>`
+  (a `run` route, whose output is "Session renamed to: <name>") stands in for them.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md); sminos 1.47.0
+from the VM's marketplace copy (/var/lib/devcloud/marketplaces/doperpowers/sminos, nothing installed), loaded with
+`--plugin-dir` and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1, its state the scratch HOME's (the containment checks of
+uxwave-u3-sminos.mjs: HOME under /tmp, the owner's sminos state and mawsd endpoint not visible, no enrolment, no
+managed settings), `sminos project init --name uxw` in the work folder first. The op is posted as MAWS's lane A
+driver posts it (src/services/lane-a/driver.ts `control`): `POST /command?wait=30000` on
+$HOME/.claude/sminos/bridge/<session>.sock with {op: "command", name, args, launch: <from /status>}. The bridge's
+/status: sminos 1.47.0, protocol 2, engine 2.1.322, `command` among its ops.
+  Terminal: scenarios/pass3/uxwave-u3b-bridge-command.mjs, the interactive engine in tmux (`--model haiku
+  --session-id <id> --plugin-dir …`, auto mode). Steps: a warm prompt; /rename typed ("uxw typed one"), by the bridge
+  ("uxw bridge one", "uxw bridge two"), typed ("uxw typed two"); the bridge asked for cost, usage, context; then
+  `sminos send` while idle (for probe 5). A recorder reads the file every 100 ms. u3b-bridge-command-r1 and -r2
+  (.terminal.json with the bridge's answers and /events, .transcript.jsonl).
+  Headless: scenarios/pass3/uxwave-u3b-bridge-command-headless.mjs, the launch of uxwave-common-arrivals.mjs with the
+  plugin, arm `bridge` (no MAWS_LANE) and arm `maws` (MAWS_LANE=B); /rename sent as a prompt (as MAWS's composer
+  sends it) and posted to the bridge. u3b-bridge-command-headless-bridge and -maws (.jsonl, .transcript.jsonl). The
+  VM's host name, which the harness's redaction misses (it appears in the scratch session's sminos attribution
+  line), is replaced by <host> in the two headless transcripts, as uxwave-u8d-terminal.mjs's own redaction does.
+
+Observed: the terminal file (u3b-bridge-command-r1.transcript.jsonl; r2 the same at the lines in brackets).
+  typed one   38 custom-title, 39 agent-name; 40 system local_command <command-name>/rename … uxw typed one; 41 system
+              local_command "<local-command-stdout>Session renamed to: uxw typed one</local-command-stdout>",
+              commandRun {command: "rename", args: "uxw typed one"}; 42 user isMeta, the reminder, no origin.
+              [35, 36, 37]
+  bridge one  answer 200 {ok: true, result: {queued: true, route: "run", id}} at +84 ms; 43 custom-title, 44
+              agent-name; 45 queue-operation enqueue, 46 dequeue (no content); 47 system local_command <command-name>;
+              48 system local_command output, commandRun {command: "rename", args: "uxw bridge one"}; 49 user isMeta,
+              the reminder, origin {kind: "plugin", name: "sminos"}, queuePriority "later". [40-44]
+  bridge two  50-56, as bridge one. [47-51]
+  typed two   57-61, as typed one. [54-56]
+  The bridge's /events: `command` (op command), `result` {queued: true, route: "run"}, `run` phase start, `run` phase
+  end with settled {ok: true, context: [the reminder]} and readback {how: "row", text: "Session renamed to: …"} about
+  110 ms later.
+  Row 41 and row 48, field by field: the same keys (parentUuid, isSidechain, type, subtype, content, level,
+  timestamp, uuid, isMeta false, commandRun, userType, entrypoint "cli", cwd, sessionId, version, gitBranch).
+  Neither row carries an origin or a plugin.
+Observed: the headless wire and file (u3b-bridge-command-headless-bridge.jsonl / .transcript.jsonl).
+  typed one   wire 54 assistant <synthetic>, local_command_run {command: "rename", args: "uxw typed one"},
+              local_command_source the stdout; 55 user <command-name> replay, isReplay true, no origin; 56 result
+              origin {kind: "human"}. File 33 caveat (isMeta), 34 user <command-name>, no origin; 35 system
+              local_command with commandRun.
+  bridge one  wire 64 assistant <synthetic>, local_command_run {command: "rename", args: "uxw bridge one"} (no other
+              key); 65 user <command-name> replay, origin {kind: "plugin", name: "sminos"}; 66 result origin plugin
+              sminos. File 40 caveat, origin plugin sminos; 41 user <command-name>, origin plugin sminos; 42 system
+              local_command with commandRun, no origin.
+  bridge two  wire 74-76, file 47-49, as bridge one. typed two: wire 86-88, file 54-56, as typed one.
+  The `maws` arm: both posts answered {ok: false, error: "MAWS controls this session", code: "lane-b"}; only the two
+  typed renames are in its file (lines 35, 42).
+
+Inference, in the document's terms.
+  - "Does a mark exist?": not on `local_command_run`, not on `commandRun`, and not on the output row. The bundle's
+    `plugin` field was absent in every run. The default (no rule) applies to `userRow` as it reads the output.
+  - The only mark is the origin on the command's `user` rows (headless) or on its meta reminder (terminal), plus the
+    queue-operation pair in a terminal file. A follow-on that wants to draw a bridge-run command as a line can key
+    on those. In a terminal's file it would have to look past the output row to the meta row after it.
