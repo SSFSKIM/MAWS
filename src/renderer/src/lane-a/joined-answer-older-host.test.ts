@@ -60,7 +60,8 @@ describe('a joined answer from a host of build G, drawn in this build’s window
       expect(row!.attachments.map((attachment) => attachment.kind)).toEqual(typeof prompt === 'string' ? [] : ['image']);
       expect(copiedUserText(row!)).toBe(promptText(prompt));
       expect(rowPrefill(row!).text).toBe(promptText(prompt));
-      // u704-rewind-1's joined message was rewound (probe 2), which takes it out of the recall; the next case still reads it
+      // u704-rewind-1's joined message was rewound (probe 2): its turn is then not among the turn activity's, so the recall
+      // passes it over; the next case still reads every entry for an envelope
       if (name !== 'u704-rewind-1') expect(recallEntries(rows, turnActivity(state()), []).map(recallText)).toContain(promptText(prompt));
     });
 
