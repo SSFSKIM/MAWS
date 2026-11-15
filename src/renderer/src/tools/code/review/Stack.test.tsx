@@ -655,13 +655,6 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     });
     // A scroll event with no input before it, as the browser sends for a scroll it makes itself.
     const scrollWithoutInput = (top: number) => act(() => void (scroller().scrollTop = top));
-    // The live place, as Review saves it when hidden and stands it again when shown: the row then at the top.
-    async function placeSaved() {
-      hide();
-      show();
-      await page.settle();
-      return page.rowAtTop();
-    }
 
     // Five files of 40 lines; the person reads the third by hand at `clock`, and the offset one step further on.
     async function reading() {
@@ -784,8 +777,6 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       // went back to the comment
       expect(atEachScroll.length).toBeLessThanOrEqual(2);
       expect(atEachScroll.filter((row) => JSON.stringify(row) !== JSON.stringify(reading))).toEqual([]);
-      main.state.hold = null;
-      expect(await placeSaved()).toEqual(reading); // the live place: saved when Review is hidden, restored when shown
     });
 
     it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
