@@ -117,6 +117,7 @@ describe('a compaction in a session MAWS runs, from the recordings', () => {
     s.to(150);
     expect(s.last()).toBe(s.compaction());
     expect(s.line()).toBe('Compacting session…');
+    expect(useTranscriptStore.getState().entries[s.id]!.rows.some((row) => row.kind === 'activity')).toBe(false); // the view's, never the store's
     s.wait(1_000);
     expect(s.line()).toBe('Compacting session… 1s');
     s.to(151);
