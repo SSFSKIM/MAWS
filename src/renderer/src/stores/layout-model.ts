@@ -463,3 +463,12 @@ export function repairMain(main: Strip, known: (appSessionId: AppSessionId) => b
   });
   return { ...asSet(withPanes(main, panes, main.focusedPane)), closedTabs: main.closedTabs.filter(keep) };
 }
+
+// UX wave U6b-1 (RED stub): the two exports, the repair not yet written
+export function paramsHoldFile(params: unknown): boolean {
+  return typeof params === 'object' && params !== null && !Array.isArray(params) && typeof (params as { file?: unknown }).file === 'string' && (params as { file: string }).file !== '';
+}
+export interface StoredSide { main: Strip; panelPinned: import('@shared/ipc/schema/layout').PanelTabRef[]; panelBySession: Map<AppSessionId, import('@shared/ipc/schema/layout').PanelSessionState>; panelParams: Record<string, unknown> }
+export function repairFileTabs<T extends StoredSide>(read: T): T {
+  return read;
+}

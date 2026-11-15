@@ -6,7 +6,9 @@ import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, LayoutMainSchema, storedMain, type Proj
 import {
   activateTab, activeTab, closeTab, currentSet, cycleTab, dockSplit, dropSession, floatingPane, floatSplit, focusPane, moveTab, openSession, openTab,
   rekeyExpanded, reopenClosed, repairMain, replaceActive, retargetTab, selectTab, sessionOfTab, setSplitRatio, splitWithActive, togglePinned, type RekeyOf,
+  paramsHoldFile, repairFileTabs, type StoredSide, // UX wave U6b-1
 } from './layout-model';
+import { addressOf } from '@shared/machine/address'; // UX wave U6b-1
 import { frontOf } from './layout';
 
 const S = (id: string) => ({ kind: 'session' as const, appSessionId: id as AppSessionId });
@@ -494,5 +496,75 @@ describe('rekeying the expanded rows to org keys', () => {
   it('rekeys the expanded rows: an address to its org key once, a gone one dropped, a waiting one kept, Other sessions to this machine’s row', () => {
     const list = [PA, PG, PL, 'other', SHARED] as ProjectKey[];
     expect(rekeyExpanded(list, rekeyOf, M)).toEqual([SHARED, PL, OWN]);
+  });
+});
+
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 16 and 17, sequence 8): what
+// the read makes of the files beside the chat, whatever build stored them.
+describe('the files beside the chat at the read', () => {
+  const SA = addressOf(M, 'sa') as AppSessionId;
+  const SB = addressOf(OTHER_MACHINE, 'sb') as AppSessionId; // a session of another machine
+  const files = (id: string, pinned = false) => ({ id: `files:${id}`, toolId: 'files', pinned });
+  const review = { id: 'review:r', toolId: 'review', pinned: false };
+  const fileMain = (path: string, machine = M): TabTarget => ({ kind: 'file', path, line: null, appSessionId: SA, machine });
+  const side = (over: Partial<StoredSide> = {}): StoredSide => ({ main: base, panelPinned: [], panelBySession: new Map(), panelParams: {}, ...over });
+  const list = (...tabs: { id: string; toolId: string; pinned: boolean }[]) => ({ tabs, activeTabId: tabs[0]?.id ?? null });
+
+  it('reads params that hold a file: an object with a non-empty string file, nothing else', () => {
+    expect(paramsHoldFile({ file: '/r/a.ts', line: 3 })).toBe(true);
+    expect(paramsHoldFile({ file: 'relative.ts' })).toBe(true); // the gate asks the key, not whether this build can show it
+    for (const no of [undefined, null, 'x', 7, [], {}, { file: '' }, { file: 7 }, { path: '/r/a.ts' }, [{ file: '/r/a.ts' }]]) expect(paramsHoldFile(no), JSON.stringify(no)).toBe(false);
+  });
+
+  it('a pinned tab that holds a file stays pinned as the tree alone: its file, line and preview dropped, any other key kept', () => {
+    const read = side({ panelPinned: [files('p', true), files('q', true)], panelParams: { 'files:p': { file: '/r/a.ts', line: 2, preview: true }, 'files:q': { file: '/r/b.ts', other: 1 } } });
+    const out = repairFileTabs(read);
+    expect(out.panelPinned).toEqual(read.panelPinned);
+    expect(out.panelParams).toEqual({ 'files:q': { other: 1 } });
+  });
+
+  it('a side tab of a file a main tab shows is dropped and the main tab kept; the same path on another machine is another file', () => {
+    const main = openTab(base, fileMain('/r/a.ts'));
+    const read = side({
+      main,
+      panelBySession: new Map([[SA, list(files('a'), files('b'), review)], [SB, list(files('c'))]]),
+      panelParams: { 'files:a': { file: '/r/a.ts', line: null }, 'files:b': { file: '/r/b.ts', line: null }, 'files:c': { file: '/r/a.ts', line: null } },
+    });
+    const out = repairFileTabs(read);
+    expect(out.main).toBe(main);
+    expect(out.panelBySession.get(SA)!.tabs.map((t) => t.id)).toEqual(['files:b', 'review:r']);
+    expect(out.panelBySession.get(SB)).toBe(read.panelBySession.get(SB)); // OTHER_MACHINE's /r/a.ts is not this machine's
+    expect(Object.keys(out.panelParams)).toEqual(['files:b', 'files:c']);
+  });
+
+  it('puts the tree-only tab before the first tab that holds a file, and keeps every other tab where it stands', () => {
+    const read = side({
+      panelBySession: new Map([[SA, list(review, files('a'), files('b'), files('t'), files('u'))]]),
+      panelParams: { 'files:a': { file: '/r/a.ts', line: null }, 'files:b': { file: '/r/b.ts', line: null } },
+    });
+    expect(repairFileTabs(read).panelBySession.get(SA)!.tabs.map((t) => t.id)).toEqual(['review:r', 'files:t', 'files:a', 'files:b', 'files:u']);
+  });
+
+  it('reads a list’s second preview tab as a kept one', () => {
+    const read = side({
+      panelBySession: new Map([[SA, list(files('a'), files('b'))]]),
+      panelParams: { 'files:a': { file: '/r/a.ts', line: null, preview: true }, 'files:b': { file: '/r/b.ts', line: 4, preview: true } },
+    });
+    expect(repairFileTabs(read).panelParams).toEqual({ 'files:a': { file: '/r/a.ts', line: null, preview: true }, 'files:b': { file: '/r/b.ts', line: 4 } });
+  });
+
+  it('repairs all at once, a second run changes nothing, and a layout that needs nothing is answered as read', () => {
+    const read = side({
+      main: openTab(base, fileMain('/r/m.ts')),
+      panelPinned: [files('p', true)],
+      panelBySession: new Map([[SA, list(files('a'), files('m'), files('b'), files('t'))]]),
+      panelParams: { 'files:p': { file: '/r/p.ts', line: null }, 'files:a': { file: '/r/a.ts', line: null, preview: true }, 'files:m': { file: '/r/m.ts', line: 1 }, 'files:b': { file: '/r/b.ts', line: null, preview: true } },
+    });
+    const once = repairFileTabs(read);
+    expect(once.panelBySession.get(SA)!.tabs.map((t) => t.id)).toEqual(['files:t', 'files:a', 'files:b']);
+    expect(once.panelParams).toEqual({ 'files:a': { file: '/r/a.ts', line: null, preview: true }, 'files:b': { file: '/r/b.ts', line: null } });
+    expect(repairFileTabs(once)).toBe(once);
+    const clean = side({ panelBySession: new Map([[SA, list(files('t'), files('a'))]]), panelParams: { 'files:a': { file: '/r/a.ts', line: null } } });
+    expect(repairFileTabs(clean)).toBe(clean);
   });
 });

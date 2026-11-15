@@ -395,7 +395,7 @@ describe('files tool', () => {
     offs.splice(0).forEach((off) => off());
   });
 
-  const openTool = (params?: { path?: string; line?: number }) => act(() => void panelHost.addTool('files', { appSessionId: A, params }));
+  const openTool = () => act(() => void panelHost.addTool('files', { appSessionId: A }));
 
   it('gives the semantic tree its virtual content extent as directories expand and collapse, with Refresh outside it', async () => {
     render(<TestHost />);
@@ -435,17 +435,21 @@ describe('files tool', () => {
     expect(screen.queryByText('src')).toBeNull();
   });
 
-  it('opens a clicked file in the main area for the session and leaves the panel; a symlink opens nothing', async () => {
+  // UX wave U6b-1: a file opens beside the chat; the first one takes the session's tree-only tab (the tree at its left
+  // is M3's), and nothing opens in the main area
+  it('opens a clicked file beside the chat in the tree-only tab, the main area unchanged; a symlink opens nothing', async () => {
     render(<TestHost />);
     openTool();
-    await screen.findByText('src');
+    const [tab] = panelOf(A)!.tabs;
     fireEvent.click(await screen.findByText('src'));
+    fireEvent.click(await screen.findByText('link-out'));
+    expect(useLayout.getState().panelParams[tab.id]).toBeUndefined();
     fireEvent.click(await screen.findByText('app.ts'));
-    expect(fileTabs()).toEqual([{ id: `file:${TEST_MACHINE}:/r/src/app.ts`, kind: 'file', path: '/r/src/app.ts', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false }]);
-    expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual(['files']);
-    expect(item('app.ts').getAttribute('aria-selected')).toBe('true');
-    fireEvent.click(item('link-out'));
-    expect(fileTabs()).toHaveLength(1);
+    expect(fileTabs()).toEqual([]);
+    expect(panelOf(A)!.tabs.map((t) => t.id)).toEqual([tab.id]);
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/r/src/app.ts', line: null, preview: true });
+    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('/r/src/app.ts');
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/src/app.ts');
   });
 
   it('shows a refused root as the refusal with its path, and retries it when expanded again', async () => {
@@ -459,24 +463,14 @@ describe('files tool', () => {
     await waitFor(() => expect(main.callsOf('files.list').filter((input) => input.path === '/docs')).toHaveLength(2));
   });
 
-  it('open reveals a path: expands its ancestors, selects it and opens the file at the line', async () => {
+  // UX wave U6b-1 (Decision 8): the reveal of `params.path`, which nothing in the window asked for, is gone
+  it('a tab with params of the older reveal draws the tree and opens nothing', async () => {
     render(<TestHost />);
-    openTool({ path: '/r/src/../src/staged.ts', line: 5 });
-    await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/r/src/staged.ts', line: 5, appSessionId: A })]));
-    expect(item('staged.ts').getAttribute('aria-selected')).toBe('true');
-    expect(item('src').getAttribute('aria-expanded')).toBe('true');
-    openTool({ path: '/r/src/app.ts', line: 9 }); // re-targeting the open tab
-    await waitFor(() => expect(fileTabs().map((t) => t.kind === 'file' && [t.path, t.line])).toContainEqual(['/r/src/app.ts', 9]));
-    expect(panelOf(A)?.tabs).toHaveLength(1);
-  });
-
-  it('open with a path that only ends like a root opens it as given, in no root', async () => {
-    main = mainWith({ '': [dir('/Users/new/work/app')], '/Users/new/work/app': [file('/Users/new/work/app/config.ts')] });
-    render(<TestHost />);
-    openTool({ path: '/app/config.ts', line: 2 });
-    await waitFor(() => expect(fileTabs()).toEqual([expect.objectContaining({ path: '/app/config.ts', line: 2, appSessionId: A })]));
-    expect(item('app').getAttribute('aria-expanded')).toBe('true');
-    expect(main.callsOf('files.list').filter((input) => input.path !== undefined)).toEqual([{ appSessionId: bareOf(A), path: '/Users/new/work/app' }]);
+    act(() => void panelHost.addTool('files', { appSessionId: A, params: { path: '/r/src/app.ts', line: 5 } as never }));
+    await waitFor(() => expect(items()).toHaveLength(5));
+    expect(fileTabs()).toEqual([]);
+    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('');
+    expect(main.callsOf('files.read')).toEqual([]);
   });
 
   // UX wave U8c-2 (M4 decision 4, §I): while the session is moved, the root that is the working folder is listed first,

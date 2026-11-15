@@ -39,7 +39,7 @@ describe('editor registrations', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
     useEditorDialog.setState({ open: null });
     offs.push(registerEditor());
   });
@@ -52,7 +52,7 @@ describe('editor registrations', () => {
   async function openApp({ dirty }: { dirty: boolean }) {
     const disk = installDisk({ [APP]: 'const a = 1;\n' });
     offs.push(connectCodeEvents());
-    openFile(A, APP);
+    openFile(A, APP, null, { main: true });
     const shown = render(
       <>
         <FileViewer tab={fileTab()} />

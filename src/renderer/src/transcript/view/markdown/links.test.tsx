@@ -41,9 +41,16 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
   it('a scheme-less link is a path chip that opens the file, with a line when the path names one', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts) and [y](src/y.ts#L42).', live);
     fireEvent.click(screen.getByRole('button', { name: 'x.ts' }));
-    expect(actions.openFile).toHaveBeenCalledWith('src/renderer/x.ts', undefined, null);
+    expect(actions.openFile).toHaveBeenCalledWith('src/renderer/x.ts', undefined, null, { main: false });
     fireEvent.click(screen.getByRole('button', { name: 'y' }));
-    expect(actions.openFile).toHaveBeenCalledWith('src/y.ts', 42, null);
+    expect(actions.openFile).toHaveBeenCalledWith('src/y.ts', 42, null, { main: false });
+  });
+
+  // UX wave U6b-1 (L3): a click opens the file beside the chat, a ⌘-click in the main area
+  it('a ⌘-click on a path chip asks for the main area', () => {
+    const { actions } = renderWith('Open [x.ts](src/renderer/x.ts#L3).', live);
+    fireEvent.click(screen.getByRole('button', { name: 'x.ts' }), { metaKey: true });
+    expect(actions.openFile).toHaveBeenCalledExactlyOnceWith('src/renderer/x.ts', 3, null, { main: true });
   });
 
   it('an image that is not inline data is a chip naming its alt text and source, and loads nothing', () => {

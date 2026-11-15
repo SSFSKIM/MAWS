@@ -129,7 +129,7 @@ describe('TranscriptSlot', () => {
     fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP, { main: false });
 
     const again = vi.fn();
     let dispose = () => {};

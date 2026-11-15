@@ -18,11 +18,21 @@ import { useViewer } from './viewer/viewer-store';
 // daemon's check reads a path as the click does; exported here as before.
 export { normalizeLexically };
 
-export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null): void {
+export interface OpenFileOptions { main?: boolean; keep?: boolean; asked?: 'agent' }
+export type Opened = { surface: 'main' | 'side'; tabId: string };
+export type NotOpened = 'unknown-session' | 'not-ready';
+export const PANE_LAYOUT_WAIT_MS = 5_000;
+// RED stub: today's opener, a main tab whatever the options
+export function openFile(appSessionId: AppSessionId | null, path: string, line?: number | null, _options: OpenFileOptions = {}): Opened | null {
   const target: TabTarget = { kind: 'file', path: normalizeLexically(path), line: line ?? null, appSessionId, machine: machineFor(appSessionId) };
   useLayout.getState().openTab(target);
   useViewer.getState().revisit(tabId(target), appSessionId);
+  return { surface: 'main', tabId: tabId(target) };
 }
+export function openFileWhenRead(appSessionId: AppSessionId, path: string, line: number | null, options: OpenFileOptions = {}): Promise<Opened | NotOpened> {
+  return Promise.resolve(openFile(appSessionId, path, line, options)!);
+}
+export function resetKeptOpens(): void {}
 
 // The session a turn belongs to, for a call outside a click: the transcript store key whose state holds the turn, the
 // session's own (`<appSessionId>`) or a child agent's (`<appSessionId>:<agentId>`), when the session is known.

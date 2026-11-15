@@ -32,7 +32,7 @@ describe('unsaved files for the quit guard', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
   });
   afterEach(() => {
     cleanup();
@@ -45,7 +45,7 @@ describe('unsaved files for the quit guard', () => {
     offs.push(connectCodeEvents());
     const views = new Map<string, () => EditorView>();
     for (const path of [APP, LIB]) {
-      openFile(A, path);
+      openFile(A, path, null, { main: true });
       const { container } = render(<FileViewer tab={fileTab(path)} />);
       views.set(path, () => EditorView.findFromDOM(container.querySelector('.cm-editor') as HTMLElement)!);
       await waitFor(() => expect(entry(path)?.editable).toBe(true));

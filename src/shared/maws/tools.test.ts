@@ -232,6 +232,11 @@ describe('X9 refusals: one text per offender', () => {
     expect(TOOL_ERRORS.fileNotFound('/r/x')).toBe('show_pane: file not found: /r/x');
     expect(TOOL_ERRORS.paneTimeout).toBe('show_pane: no MAWS window answered within 8 s');
   });
+
+  // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
+  it('carries the exact text of a window still loading its layout', () => {
+    expect(TOOL_ERRORS.paneNotReady).toBe('show_pane: the MAWS window was still loading its layout; try again');
+  });
 });
 
 describe('X9 results', () => {

@@ -151,7 +151,7 @@ describe('viewer', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
   });
   afterEach(() => {
     cleanup();
@@ -508,13 +508,13 @@ describe('viewer', () => {
       await gates[n].promise;
       return ok({ encoding: 'utf8', content: answers[n], bytes: 4, offset: 0, length: 4, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     });
-    openFile(A, '/r/a.txt');
+    openFile(A, '/r/a.txt', null, { main: true });
     const first = render(<FileViewer tab={fileTab('/r/a.txt')} />);
     await waitFor(() => expect(reads).toBe(1));
     first.unmount();
     act(() => useLayout.getState().closeTab(FILE('/r/a.txt'))); // pruned while its read is in flight
     expect(useViewer.getState().entries.has(FILE('/r/a.txt'))).toBe(false);
-    openFile(A, '/r/a.txt');
+    openFile(A, '/r/a.txt', null, { main: true });
     render(<FileViewer tab={fileTab('/r/a.txt')} />);
     await waitFor(() => expect(reads).toBe(2));
     await act(async () => gates[1].resolve());
@@ -551,7 +551,7 @@ describe('viewer', () => {
 
   it('a tab with no session, or one main does not know, says so and reads nothing', async () => {
     const main = serve({ '/r/a.ts': { refusal: 'unknown app session: app-z' } });
-    openFile(null, '/r/../r/./a.ts', 3);
+    openFile(null, '/r/../r/./a.ts', 3, { main: true });
     const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'file') as Extract<TabRef, { kind: 'file' }>;
     expect(tab).toMatchObject({ path: '/r/a.ts', line: 3, appSessionId: null });
     const { unmount } = render(<FileViewer tab={tab} />);
@@ -564,7 +564,7 @@ describe('viewer', () => {
 
   it('prunes the state of a tab the layout dropped and keeps at most twenty', async () => {
     serve(Object.fromEntries(Array.from({ length: 25 }, (_, i) => [`/r/f${i}.ts`, `${i}\n`])));
-    for (let i = 0; i < 25; i++) openFile(A, `/r/f${i}.ts`);
+    for (let i = 0; i < 25; i++) openFile(A, `/r/f${i}.ts`, null, { main: true });
     for (let i = 0; i < 25; i++) {
       const { unmount } = render(<FileViewer tab={fileTab(`/r/f${i}.ts`)} />);
       unmount();
@@ -583,7 +583,7 @@ describe('a read-only mount (E2)', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
   });
   afterEach(() => cleanup());
 
@@ -597,7 +597,7 @@ describe('a read-only mount (E2)', () => {
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('false');
     cleanup();
 
-    openFile(A, '/r/app.ts');
+    openFile(A, '/r/app.ts', null, { main: true });
     render(<FileViewer tab={fileTab('/r/app.ts')} />);
     await waitFor(() => expect(useViewer.getState().entries.get(FILE('/r/app.ts'))).toMatchObject({ editable: true, readOnly: false }));
   });
@@ -616,7 +616,7 @@ describe('a file the transcript names (U6c)', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
   });
   afterEach(() => cleanup());
 
@@ -633,7 +633,7 @@ describe('a file the transcript names (U6c)', () => {
   }
   // A file tab the layout holds (so a remount finds its entry), shown.
   const show = (path = OUT, appSessionId: AppSessionId = A) => {
-    act(() => openFile(appSessionId, path));
+    act(() => void openFile(appSessionId, path, null, { main: true }));
     return render(<FileViewer tab={fileTab(path, null, appSessionId)} />);
   };
 
@@ -684,7 +684,7 @@ describe('a file the transcript names (U6c)', () => {
     await settle();
     expect(main.callsOf('files.read')).toHaveLength(1);
     main.names.add(OUT); // the row that links it is written
-    act(() => openFile(A, OUT)); // the link clicked again, its tab already shown
+    act(() => void openFile(A, OUT)); // the link clicked again, its tab already shown
     await waitFor(() => expect(codeText()).toBe('written later'));
     expect(shown()).toMatchObject({ status: 'ready', named: true, editable: false });
     expect(main.callsOf('files.read')).toHaveLength(2);
@@ -726,7 +726,7 @@ describe('a file the transcript names (U6c)', () => {
     const first = show(PATH);
     expect((await screen.findByRole('alert')).textContent).toContain(`not found: ${PATH}`);
     files[PATH] = 'one\n'; // the folder and the file are made
-    if (how === 'its link is clicked again') act(() => openFile(A, PATH));
+    if (how === 'its link is clicked again') act(() => void openFile(A, PATH));
     else {
       first.unmount();
       render(<FileViewer tab={fileTab(PATH)} />);
@@ -789,7 +789,7 @@ describe('a file the transcript names (U6c)', () => {
     show();
     await waitFor(() => expect(codeText()).toBe('was named'));
     main.names.delete(OUT); // the transcript no longer names it
-    act(() => openFile(A, OUT));
+    act(() => void openFile(A, OUT));
     expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
     expect(shown()).toMatchObject({ status: 'error', named: false, text: '', kind: null, hash: null, editable: false });
     expect(codeText()).toBeNull();
@@ -806,7 +806,7 @@ describe('a file the transcript names (U6c)', () => {
     await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: true, editable: false, text: 'const a = 1;\n' }));
     await waitFor(() => expect(title()).toBe(OUTSIDE_TITLE));
     main.outside.delete('/r'); // the session's again
-    act(() => openFile(A, '/r/app.ts'));
+    act(() => void openFile(A, '/r/app.ts'));
     await waitFor(() => expect(shown('/r/app.ts')).toMatchObject({ named: false, editable: true }));
     expect(shown('/r/app.ts')!.updated).toBe(0); // neither read changed the bytes
     offs.forEach((off) => off());
@@ -851,7 +851,7 @@ describe('a file the transcript names (U6c)', () => {
     const gate = main.hold('files.read');
     const { rerender } = show();
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
-    act(() => openFile(B, OUT)); // the tab is one per machine and path: it takes session B
+    act(() => void openFile(B, OUT)); // the tab is one per machine and path: it takes session B
     rerender(<FileViewer tab={fileTab(OUT, null, B)} />);
     expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
     gate.release(); // session A's answer, the file's text
@@ -863,7 +863,7 @@ describe('a file the transcript names (U6c)', () => {
 });
 
 describe('open file', () => {
-  beforeEach(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main }));
+  beforeEach(() => useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true }));
 
   it('normalises a path lexically before opening its tab', () => {
     expect(normalizeLexically('/r/src/../README.md')).toBe('/r/README.md');
@@ -872,9 +872,10 @@ describe('open file', () => {
     expect(normalizeLexically('a/../../b')).toBe('../b');
   });
 
-  it("codeTranscriptActions.openFile opens the tab for the focused pane's session", () => {
+  // UX wave U6b-1: a plain click opens it beside that session's chat (files/tabs.test.tsx); a ⌘-click in the main area
+  it("codeTranscriptActions.openFile opens the file for the focused pane's session, a ⌘-click as a main tab", () => {
     useLayout.getState().openTab({ kind: 'session', appSessionId: B });
-    codeTranscriptActions.openFile('/w/x.ts', 7);
+    codeTranscriptActions.openFile('/w/x.ts', 7, undefined, { main: true });
     expect(currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'file')).toMatchObject({ path: '/w/x.ts', line: 7, appSessionId: B });
   });
 
