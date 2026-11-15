@@ -7,7 +7,7 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
 import { baseName, descriptionLabel, SHELL_CELL } from '../../model/copy';
 import { blockedLabel, shellToolOf } from '../../model/cells';
-import { blockedStates, hiddenTurnsOf, isBlockedCell, type BlockedState } from '../../model/blocked'; // UX wave U1c
+import { blockedStates, hiddenTurnsOf, isBlockedCell, withoutRefusalText, type BlockedState } from '../../model/blocked'; // UX wave U1c
 import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
@@ -102,7 +102,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
         <Chevron />
       </button>
       <DisclosureBody open={cell.expanded}>
-        {renderDetail ? renderDetail(model) : <CellDetailView cell={model} turnId={turnId} />}
+        {renderDetail ? renderDetail(model) : <CellDetailView cell={withoutRefusalText(model)} turnId={turnId} />}
       </DisclosureBody>
     </div>
   );

@@ -59,6 +59,24 @@ export const readsApproved = (state: BlockedState): boolean => state.grant === '
 export const isBlockedCell = (cell: Cell): cell is Cell & { blocked: BlockedCall } =>
   cell.blocked !== undefined && cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';
 
+// M2's review (fix 1): the cell an opened blocked row draws. The engine's text to the model (its stand-in reason and the
+// instructions after it) is the call's result, which the detail would draw as the call's output; a call auto mode
+// blocked never ran, so its detail draws what it would have run and no output, as a refused file change draws no diff.
+// The label carries the classifier's own reason where it gave one. The cell itself, its result and the copy keep the
+// text; every other call is returned as it is.
+export function withoutRefusalText(cell: Cell): Cell {
+  if (cell.status !== 'denied' || cell.classification.denial?.kind !== 'automode-blocked') return cell;
+  const { detail } = cell;
+  switch (detail.kind) {
+    case 'shell': return { ...cell, detail: { ...detail, stdout: '', stderr: '', truncated: null, spill: null } };
+    case 'mcp': return { ...cell, detail: { ...detail, result: '', structured: null, spill: null } };
+    case 'generic': return { ...cell, detail: { ...detail, result: '', structured: null, spill: null, truncated: null } };
+    case 'read': return { ...cell, detail: { ...detail, preview: null, truncated: null } };
+    case 'search': case 'web': return { ...cell, detail: { ...detail, output: '', truncated: null } };
+    default: return cell;
+  }
+}
+
 const NO_TURNS: readonly TurnId[] = [];
 /** A transcript's hidden turns, the list `blockedStates` and `approvalsFor` take: the same array while it is unchanged. */
 export const hiddenTurnsOf = (state: Pick<TranscriptState, 'hidden'>): readonly TurnId[] => state.hidden?.turns ?? NO_TURNS;
