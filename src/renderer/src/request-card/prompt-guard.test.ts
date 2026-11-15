@@ -24,6 +24,7 @@ function clip(r: DOMRect, by: DOMRect): DOMRect {
   const bottom = Math.min(r.bottom, by.bottom);
   return right > left && bottom > top ? rect(left, top, right - left, bottom - top) : rect(0, 0, 0, 0);
 }
+const touches = (a: DOMRect, b: DOMRect) => a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 class FakeObserver {
   observed: Element[] = [];
   constructor(private readonly callback: (entries: IntersectionObserverEntry[], observer: unknown) => void) {
@@ -42,7 +43,9 @@ class FakeObserver {
       const r = rects.get(target) ?? rect(0, 0, 0, 0);
       const seen = clip(clip(r, scrollerRect()), WINDOW());
       const area = (x: DOMRect) => x.width * x.height;
-      return { target, boundingClientRect: r, intersectionRect: seen, isIntersecting: area(seen) > 0, intersectionRatio: area(r) > 0 ? area(seen) / area(r) : 0, rootBounds: WINDOW(), time: performance.now() } as unknown as IntersectionObserverEntry;
+      // as the browser says it: a target that only touches the root's edge intersects, with an empty rectangle
+      const isIntersecting = touches(r, scrollerRect()) && touches(r, WINDOW());
+      return { target, boundingClientRect: r, intersectionRect: seen, isIntersecting, intersectionRatio: area(r) > 0 ? area(seen) / area(r) : 0, rootBounds: WINDOW(), time: performance.now() } as unknown as IntersectionObserverEntry;
     });
     this.callback(entries, this);
   }
@@ -63,6 +66,10 @@ const IN_VIEW = () => place(rect(10, 100, 600, 200), rect(10, 250, 600, 40));
 const PARTLY = () => place(rect(10, 500, 600, 200), rect(10, 650, 600, 40));
 // scrolled far away
 const AWAY = () => place(rect(10, 2000, 600, 200), rect(10, 2150, 600, 40));
+// its top on the scroller's bottom edge: touching the view, nothing of it shown
+const EDGE = () => place(rect(10, 600, 600, 200), rect(10, 750, 600, 40));
+// its top 5 px above that edge: a sliver shown
+const SLIVER = () => place(rect(10, 595, 600, 200), rect(10, 745, 600, 40));
 
 const now = () => performance.now();
 // the geometry the guard reads: rectangles, computed styles, hit tests
@@ -184,6 +191,23 @@ describe('the guard of a prompt at a transcript’s end', () => {
     expect(guard.mayAllow(shownAt + GRACE - 1)).toBe(false);
     expect(guard.mayDeny(shownAt + GRACE)).toBe(true);
     expect(guard.mayAllow(shownAt + GRACE)).toBe(true);
+  });
+
+  // The branch review (2026-11-15 UTC): the observer's "shown" is the same test as the press's, any area of the card
+  // left once clipped, so a card that only touches the view's edge starts no clock.
+  it('a card that only touches the view’s edge is not shown: a sliver that arrives later waits the full 400 ms from its own arrival', () => {
+    AWAY();
+    const { guard } = watch();
+    vi.advanceTimersByTime(1000);
+    EDGE();
+    intersect(); // intersecting, by the browser's word, with an empty rectangle
+    vi.advanceTimersByTime(2 * GRACE);
+    SLIVER();
+    intersect();
+    const arrivedAt = now();
+    expect(guard.mayDeny(arrivedAt)).toBe(false);
+    expect(guard.mayDeny(arrivedAt + GRACE - 1)).toBe(false);
+    expect(guard.mayDeny(arrivedAt + GRACE)).toBe(true);
   });
 
   it('buttons covered by another element refuse an allow, and re-arm 400 ms after they are uncovered', async () => {
