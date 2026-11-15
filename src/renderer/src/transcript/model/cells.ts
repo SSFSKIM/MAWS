@@ -373,7 +373,8 @@ function errorOf(rec: ToolRecord): string | undefined {
 }
 // UX wave U2 end
 
-// What a refused call's row names: a shell call's command, a file change's path, every other call's tool name
+// What a refused call's row names: a shell call's command, a file change's path, every other call's tool name (UX wave
+// U1c: one helper, for the model's label and the view's recomposed one)
 export const refusedSubject = (detail: CellDetail, toolName: string): string => (detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : toolName);
 
 // UX wave U1c (Design 1 and 3; Interfaces §D's label half): a blocked row's label with what the rule says of it, "again"
