@@ -1058,6 +1058,13 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation: the three menu chords of the composer ask a predicate the composer registers, not the context that hides the toolbar's popovers.
   Evidence: `draftShown: () => !promptState.current.docked` in `composer/Composer.tsx`, read by `toggleFocusedMenu` in `ComposerAppKeys.tsx`. Found by the adversarial review; hence §F.3's predicate.
 
+- Observation: the probe switch rewrites more than the changed tool's entry. `MAWS_WRITE_PROBE_TOOLS=1` also rewrites the instructions, `show_pane` and `message`, which the snapshot holds at older text on purpose, and the `message` hunk interleaves with a new last entry.
+  Evidence: M4's run on the VM. The generated `artifact_delete` entry was spliced alone onto the committed snapshot, and a second run of the switch showed that the committed entry equals the generated one. A later merge with U10b-1's snapshot edits re-splices that entry the same way.
+- Observation: a host op's store refusal reaches the device as `{ state: 'failed', error: { code, message } }`, not as `done` with `ok: false`. And `src/main/lane-b/remote.ts` already refuses a command listed in `REMOTE_NEEDS` as `not-offered` before it is sent to a peer that lacks the capability.
+  Evidence: `src/endpoint/actions.ts`; `test/endpoint/undelete-row.test.ts`; `src/main/lane-b/remote-artifacts.test.ts`.
+- Observation: an owner passes the endpoint's `artifact` target for an artifact that `library.entry` no longer lists, so `artifacts.get` and the undelete reach a deleted artifact without any change to `targets.ts`.
+  Evidence: `test/endpoint/undelete-row.test.ts`, which pins both.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
@@ -1110,6 +1117,20 @@ The architect's rulings of 2026-11-15 (UTC) on the six points revision 2 could n
 - What an older build's accept of a suggestion does with the page setting is accepted as written: the scenes of U10b-1 on both exact peers are the proof. §G; M3 decision 6.
 - Whether the history rail shows a page-only revision as an empty change is accepted as written: M2's executor reads it and reports.
 - The architect read the three statements the mark of §C.1 rests on in the code, and they hold: the update log has two inserts and no third; the prune keeps each artifact's newest row; both older builds read `meta` by key only.
+
+M4's executor, 2026-11-15 (U10b-2, branch `ux-wave/U10b-2`), on means the document leaves open. Folded by the controller.
+
+- The three statements the mark rests on were read again on the tree U10b-2 is built on (master `63c97b5c0` merged) and hold: `artifact_updates` has two inserting statements (`appendInBatch`, `appendContentInBatch`); `pruneLog` keeps each artifact's newest row; both older builds read `meta` with `SELECT value FROM meta WHERE key = ?` only.
+- The fence is the row itself: `isDeleted` reads `deletedAt` through the batch's own connection, so it goes up at the statement that writes `deletedAt`, inside the same synchronous savepoint as the rules and on the thread that admits frames. A frame is admitted before that savepoint, and the rules read it, or refused after it. A lost batch lowers the fence through its rollback. Rejected: an in-memory set beside the row, which could drift from it.
+- The fence also refuses the host's own writes into a deleted artifact (`writeAs`, and the accept or reject of a suggestion), with `ArtifactStoreError('notFound', 'deleted: the artifact was deleted')`. §C.5 names only a content frame and a replica's open. A restore, a migration or an accept into a deleted artifact is the same hole, and "a deleted artifact takes no content, whoever deleted it" covers them.
+- A replica's open is refused in `attach`: the connection closes with the refusal's reason, and no document is opened.
+- The agent's refusal for a design system in use keeps the person's refusal JSON and adds `why: 'designSystemInUse'`, so the row reads every refusal by `why`. §C.4's table has that row with no `why` named. The person's `artifacts.delete` refusal is unchanged.
+- `deleted.by` in the mark is the calling session (`lineage[0]`), not the creator.
+- The mark is also written when a session copies or imports an artifact, since §C.1's rule is "an artifact whose `createdBy` is a session". An unreadable mark counts as no mark, and the mark is parsed loosely, so a later build's keys survive the read-modify-write.
+- `artifacts.get` answers `{ artifact: null, deleted }` for a deleted artifact. With `includeDeleted: true`, the row and `deleted` are both answered. The key is absent for a live or an unknown artifact.
+- `SUGGESTION_SUFFIX`, `suggestionKey` and `mainOf` move to `src/engine-host/documents/doc-keys.ts`, which `service.ts` re-exports, so `storage.ts` reads the document pair without a circular import.
+- Two pins outside M4's touch list gained one row each for the new last tool: `src/engine-host/session-maws.test.ts` and `src/engine-host/tool-server/documents-wired.test.ts`. Neither is another child's file.
+- The minors are commits of their own: `WIRE_MINOR` 49 is `708497934` (the number, its note, and the manifest and fingerprint as `pnpm wire:manifest` wrote them on the VM). `RL2_PROTOCOL.minor` 15 is `8477361e4`. Both are provisional until the chain merge.
 
 ## Outcomes & Retrospective
 
