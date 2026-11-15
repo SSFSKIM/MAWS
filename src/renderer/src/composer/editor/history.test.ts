@@ -126,12 +126,13 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(plain(recallDoc(recalls[0]!))).toBe('Count to ten.');
   });
 
-  // the engine joins the waiting messages into one text (U4b, form (b), step 1): ↑ recalls the person's words alone
+  // the engine joins the waiting messages into one text (U4b, form (b), step 1): ↑ recalls the person's words alone, as
+  // the transcript's row holds them (finding 4 of the architect's review: the recall reads the row's text as derived)
   it('recalls a joined envelope and prompt as the prompt alone, in either order, and the search reads the same', () => {
     const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
     const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
     for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
-      const recalls = recallEntries([userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', text), steer: true } as Row], [turn('t1', 'human')], []);
+      const recalls = recallEntries([userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', userTextOf(text).text), steer: true } as Row], [turn('t1', 'human')], []);
       expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.', 'Also fix the footer.']);
       expect(recalls.map(recallText)).toEqual(['Count to ten.', 'Also fix the footer.']);
     }
