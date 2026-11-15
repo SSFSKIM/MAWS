@@ -41,6 +41,18 @@ describe('the status patch', () => {
     expect(agentRows(graph, 'disk')).toEqual([]); // no recorded agent sits under "On disk"
   });
 
+  // Card C1 (option 2): an exited agent's row word turns on what its status rests on, so an exited node keeps it.
+  it('keeps on an exited node what its status rests on, and on no other node', () => {
+    const graph = patched([
+      entry('b', 'bridge', { status: 'exited', evidence: 'bridge', running: false }),
+      entry('p', 'parent', { status: 'exited', evidence: 'parent' }),
+      entry('s', 'session', { status: 'exited', evidence: 'session' }),
+      entry('r', 'running', { status: 'running', evidence: 'bridge', running: true }),
+      entry('c', 'completed', { status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: AT } }),
+    ]);
+    expect(['b', 'p', 's', 'r', 'c'].map((id) => graph.tasks.get(id as never)!.evidence)).toEqual(['bridge', 'parent', 'session', undefined, undefined]);
+  });
+
   it('leaves an agent DX4 leaves unknown as unknown, under the section that says so', () => {
     const graph = patched([entry('a1', 'forked skill', { status: 'unknown', evidence: 'none' })]);
     expect(statusOf(graph, 'a1')).toBe('unknown');

@@ -857,6 +857,30 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
     expect(heading('done')).toBe('Done 5 · 1 failed · 1 stopped');
   });
 
+  // Card C1, the owner's answer (option 2, 2026-11-15): with the terminal still open, an agent known to have ended with
+  // no record of how (the bridge holds it as stopped; its starter ended) reads "ended"; once the terminal went, one the
+  // rows hold no end for reads "ended with the session". The other outcomes keep their words.
+  it('reads ended for an agent the bridge holds as stopped or whose starter ended, and ended with the session once the terminal went', async () => {
+    await mountTerminal([sidecar('ok'), sidecar('bad'), sidecar('halt'), sidecar('quit'), sidecar('p'), sidecar('orphan', 'p')]);
+    const quit = { agentId: 'quit', meta: meta('quit'), status: 'exited', evidence: 'bridge', running: false, outcome: { status: 'running', raw: 'async_launched', at: at(0) }, startedAt: at(0) };
+    const orphan = { agentId: 'orphan', meta: meta('orphan', 'p'), status: 'exited', evidence: 'parent', startedAt: at(0) };
+    body('snapshot', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), quit, ends('p', 'stopped', 'killed'), orphan]);
+    expandDone();
+    toggleUnder('p');
+    const lines = () => Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]));
+    expect(lines()).toEqual({ ok: `finished · ${M3}`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, quit: 'ended', p: `stopped · ${M3}`, orphan: 'ended' });
+    expect(row('quit').querySelector('[data-part="state"]')?.className).toContain('text-fg-muted');
+    body('subagents', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), { ...gone('quit') }, ends('p', 'stopped', 'killed'), { ...orphan, evidence: 'session' }]);
+    expect(lines()).toMatchObject({ quit: 'ended with the session', orphan: 'ended with the session', ok: `finished · ${M3}` });
+  });
+
+  it('keeps under Running, reading ended beside (+1), an agent the bridge holds as stopped while its nested agent runs', async () => {
+    await mountTerminal([sidecar('p'), sidecar('c', 'p')]);
+    body('snapshot', [{ agentId: 'p', meta: meta('p'), status: 'exited', evidence: 'bridge', running: false, startedAt: at(0) }, runs('c', 'p')]);
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    expect(rowsOf('running')[0]).toMatchObject({ id: 'p', line: 'ended', elapsed: '' });
+  });
+
   // Decision Log 6, N1: a nested background agent can outlive its parent; the parent stays under Running with its ended
   // word and (+1), as on a session MAWS runs.
   it('keeps an ended parent under Running with its ended word and (+1) while its nested background agent runs', async () => {
