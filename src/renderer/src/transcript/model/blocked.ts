@@ -60,8 +60,8 @@ export const readsApproved = (state: BlockedState): boolean => state.grant === '
 export const LINE_SUBJECT_MAX = 200;
 /** Whether the row's line shows the grant's subject whole and exactly: a command with no line break and no backtick, drawn as that same string. */
 export function lineNamesWhole(drawn: Cell, call: BlockedCall): boolean {
-  void drawn; void call; // M3's tests first: a stub of today's drawing, where the line never names it
-  return false;
+  if (call.kind !== 'command' || drawn.detail.kind !== 'shell' || drawn.detail.command !== call.subject) return false;
+  return call.subject.length <= LINE_SUBJECT_MAX && !/[\n\r`]/.test(call.subject);
 }
 
 /** A call auto mode blocked that has a name, as the model drew it (a mod's draw-time status is not one). */

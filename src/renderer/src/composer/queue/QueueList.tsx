@@ -282,23 +282,25 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
           <button type="button" aria-label="Delete" title={deleteRefused ?? undefined} className={ICON_BUTTON} disabled={inFlight || deleteRefused !== null} onClick={() => void run(row.key, () => acts.remove(row))}>
             <BinGlyph />
           </button>
-          <DropdownMenu.Root modal={false}>
-            <DropdownMenu.Trigger aria-label="More" className={ICON_BUTTON} disabled={inFlight}>
-              <MoreGlyph />
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Portal>
-              <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
-                <DropdownMenu.Item className={ITEM} disabled={editRefused !== null} title={editRefused ?? undefined} onSelect={() => onTakeBack?.(row)}>
-                  Edit
-                </DropdownMenu.Item>
-                {move !== null && (
-                  <DropdownMenu.Item className={ITEM} onSelect={() => void run(row.key, () => acts.move(row))}>
-                    {move}
+          {row.grant === null && ( // UX wave U1c (Interfaces §G; card 2): a grant's row is not edited or moved: an edited grant is no grant
+            <DropdownMenu.Root modal={false}>
+              <DropdownMenu.Trigger aria-label="More" className={ICON_BUTTON} disabled={inFlight}>
+                <MoreGlyph />
+              </DropdownMenu.Trigger>
+              <DropdownMenu.Portal>
+                <DropdownMenu.Content align="end" sideOffset={4} className="z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
+                  <DropdownMenu.Item className={ITEM} disabled={editRefused !== null} title={editRefused ?? undefined} onSelect={() => onTakeBack?.(row)}>
+                    Edit
                   </DropdownMenu.Item>
+                  {move !== null && (
+                    <DropdownMenu.Item className={ITEM} onSelect={() => void run(row.key, () => acts.move(row))}>
+                      {move}
+                    </DropdownMenu.Item>
                 )}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
+          )}
         </>
       )}
     </div>

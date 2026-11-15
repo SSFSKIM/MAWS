@@ -7,7 +7,7 @@ import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
 import { baseName, descriptionLabel, SHELL_CELL } from '../../model/copy';
 import { blockedLabel, shellToolOf } from '../../model/cells';
-import { blockedStates, hiddenTurnsOf, isBlockedCell, withoutRefusalText, type BlockedState } from '../../model/blocked'; // UX wave U1c
+import { blockedStates, hiddenTurnsOf, isBlockedCell, lineNamesWhole, readsApproved, withoutRefusalText, type BlockedState } from '../../model/blocked'; // UX wave U1c
 import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
 import { useTranscriptContext } from '../context';
@@ -81,9 +81,14 @@ function useBlockedState(storeKey: string, cell: Cell): BlockedState | undefined
 }
 
 export function CellLine({ cell: model, turnId, focusable = false, renderDetail, onToggle }: { cell: Cell; turnId: TurnId | null; focusable?: boolean; renderDetail?: (cell: Cell) => ReactNode; onToggle?: () => void }) {
-  const { storeKey } = useTranscriptContext();
+  const { storeKey, variant, actions } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
+  // UX wave U1c (Design 6; Interfaces §D): "Approve and retry" under a blocked row that does not read approved, in a
+  // session's own transcript only (a subagent's grant never reaches the subagent: ruling J), where the mount supplies it;
+  // the line wraps to hold the subject whole where it names it, else the control draws the subject itself
+  const offered = blocked !== undefined && !readsApproved(blocked) && variant === 'session' && actions.renderBlockedCall !== undefined ? blocked : null;
+  const onLine = offered !== null && lineNamesWhole(model, offered.call);
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
   const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   return (
@@ -92,6 +97,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
       data-cell-id={cell.id}
       data-status={cell.status}
       data-expanded={cell.expanded ? '' : undefined}
+      data-names-whole={onLine ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
@@ -102,6 +108,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}
         <Chevron />
       </button>
+      {offered !== null && actions.renderBlockedCall!({ call: offered.call, again: offered.again, grant: offered.grant as 'none' | 'waiting', onLine })}
       <DisclosureBody open={cell.expanded}>
         {renderDetail ? renderDetail(opened) : <CellDetailView cell={opened} turnId={turnId} />}
       </DisclosureBody>
