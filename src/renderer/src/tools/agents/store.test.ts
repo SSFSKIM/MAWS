@@ -2,14 +2,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
+import type { SessionRecord } from '@shared/graph/session';
 import type { LaneAAgent } from '@shared/lane-a/agents';
 import { addressOf, bareOf } from '@shared/machine/address';
-import { status } from '../../../../../test/support/builders';
+import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { laneAState } from '../../lane-a/test-support/lane-a-state';
 import { resetLaneAWatches } from '../../lane-a/watches';
 import { applyLaneAState, noteLaneAAgents, resetLaneAStore, useLaneA } from '../../stores/lane-a';
-import { createSessionsStore } from '../../stores/sessions';
+import { createSessionsStore, useSessions } from '../../stores/sessions';
 import { preloadOf } from '../../test-support/preload-of';
 import { setAgentWorkClient } from './client';
 import { applyTaskEvents, emptyGraph } from './model/task-graph';
@@ -462,6 +463,9 @@ describe('a terminal session this Mac drives', () => {
   const entryOf = (id: AppSessionId) => store.getState().entries.get(id)!;
   const statusesOf = (id: AppSessionId) => Object.fromEntries([...entryOf(id).graph.tasks.values()].map((n) => [n.taskId, n.status]));
   const setStatusOf = (id: AppSessionId, s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: id, status: s }, TEST_MACHINE);
+  // the session's holder as the page's records say it (the terminal that drives it is pid 4242)
+  const TERMINAL = { kind: 'terminal', pid: 4242 } as const;
+  const holderOf = (id: AppSessionId, holder: SessionRecord['holder']) => useSessions.setState((s) => ({ records: new Map(s.records).set(id, record(id, { holder })) }));
   const earlierRun = (id: AppSessionId) => ({ ...status(id), launchId: 'earlier', launchedAt: EARLIER, process: 'exited' as const });
   // the store's watch of a session with no engine status here, its disk answered with these sidecars
   const watchDisk = async (id: AppSessionId, sidecars: SubagentEntry[]) => {
@@ -477,12 +481,73 @@ describe('a terminal session this Mac drives', () => {
     window.maws = preloadOf(bridge);
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(Date.parse(T1));
+    // the page's sessions store, which the watch reads the holder from
+    sessions = useSessions;
+    store = createTaskGraphStore({ sessions });
+    holderOf(D, TERMINAL);
+    holderOf(E, TERMINAL);
     applyLaneAState(D, laneAState(D));
     applyLaneAState(E, laneAState(E));
   });
   afterEach(() => {
     resetLaneAWatches();
     resetLaneAStore();
+    useSessions.setState({ records: new Map(), engine: new Map(), listed: new Map() });
+  });
+
+  // The panel's finding (fix-wave-panel.md): the statuses are fenced by where they came from, not by time. When this
+  // app launches a replacement, the terminal's driver is dropped and its final body goes out; the page can hear it before
+  // or after the replacement's first status, and its receipt is later than the replacement's launch either way.
+  const replacement = (id: AppSessionId) => ({ ...status(id), launchId: 'second', launchedAt: T1 });
+  const replacementFrames = [event('subagent.started', { taskId: 'a1' }, { seq: 1, launch: 'second' }), event('subagent.finished', { taskId: 'a1', status: 'stopped' }, { seq: 2, launch: 'second' })];
+
+  it('does not lay the driver’s final body, heard before the replacement’s first status, once this app holds the session', async () => {
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [running('a1')]);
+    vi.setSystemTime(Date.parse(T2)); // received after the replacement's launch
+    plane(D, 'subagents', [gone('a1')]); // the dropped driver's final body
+    watchEnded(D);
+    holderOf(D, { kind: 'self' });
+    setStatusOf(D, replacement(D));
+    applyLaneAState(D, null);
+    await fake.answer('events', { events: replacementFrames, lastSeq: 2, complete: true });
+    expect(statusesOf(D)).toEqual({ a1: 'stopped' }); // the replacement's own reading
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+  });
+
+  it('does not lay the driver’s final body heard after the replacement’s first status', async () => {
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [running('a1')]);
+    holderOf(D, { kind: 'self' });
+    setStatusOf(D, replacement(D));
+    vi.setSystemTime(Date.parse(T2));
+    plane(D, 'subagents', [gone('a1')]); // a driver that no longer holds the session
+    watchEnded(D);
+    applyLaneAState(D, null);
+    await fake.answer('events', { events: replacementFrames, lastSeq: 2, complete: true });
+    expect(statusesOf(D)).toEqual({ a1: 'stopped' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+  });
+
+  it('discards the statuses when the session is handed to another machine, and does not lay them again when it comes back', async () => {
+    let remote = false;
+    const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'a1' }, { seq: 1 })]);
+    const off = registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null));
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [gone('a1')]);
+    watchEnded(D);
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    remote = true;
+    useSessions.setState({ listed: new Map() }); // the listing moved: the store binds the session to that machine's feed
+    expect(entryOf(D).graph).toBe(fed);
+    remote = false;
+    useSessions.setState({ listed: new Map() }); // and back to this machine's reads
+    await fake.answer('subagents', [sidecar('a1')]);
+    await fake.answer('workflows', []);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    off();
   });
 
   it('holds the session’s lane A watch while its graph is watched and its bridge is live, and lets it go with the last watcher and when the state goes', async () => {
