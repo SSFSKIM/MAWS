@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import * as z from 'zod';
 import { MAWS_SERVER_INSTRUCTIONS } from './instructions';
 import {
   ARTIFACT_SEARCH_DEFAULTS,
@@ -12,7 +13,7 @@ import {
   SEARCH_TOOL_NAMES,
   searchHint,
 } from './search-tools';
-import { artifactRefusalOf, MAWS_TOOL_NAMES, mawsToolList, parseToolArguments } from './tools';
+import { artifactRefusalOf, MAWS_TOOL_NAMES, mawsToolList, parseToolArguments, ShowPaneRecordedInputSchema } from './tools';
 
 const UUID = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
@@ -72,13 +73,14 @@ describe('artifact_search (X33, P4-B4)', () => {
 describe('the maws server’s instructions (X33, route (b))', () => {
   it('is the one paragraph, word for word', () => {
     expect(MAWS_SERVER_INSTRUCTIONS).toBe(
-      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. Call mcp__maws__show_pane only when the user should see it now. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
+      "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
     );
+    expect(MAWS_SERVER_INSTRUCTIONS).toHaveLength(635); // UX wave U6d: 699 before O-44 took out the sentence that invited show_pane
   });
 
   it('names only tools the server lists', () => {
     const named = [...MAWS_SERVER_INSTRUCTIONS.matchAll(/mcp__maws__(\w+)/g)].map((m) => m[1]);
-    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search', 'show_pane']));
+    expect(new Set(named)).toEqual(new Set(['artifact_read', 'artifact_search'])); // U6d: show_pane no longer
     for (const name of named) expect(MAWS_TOOL_NAMES as readonly string[], name).toContain(name);
   });
 });
@@ -93,11 +95,43 @@ const probeTools = () => `${JSON.stringify({ instructions: MAWS_SERVER_INSTRUCTI
 // P4-R7z (the P4 spec's Decision Log 92) took P4-R7's `message` off the server after the probe recorded its fixtures
 // against this snapshot, which keeps it so the fixtures still match what they were served; less that one tool it is the
 // source. Re-recording the probe drops it (the tracker's row).
+// The places where the snapshot is older than the source for the same reason: the recorded fixtures are compared with
+// them (spikes/protocol-probe/fixtures.test.mjs: `served4.instructions`, and `show_pane`'s `at`). Each holds what the
+// snapshot has there, with the date and the reason; the snapshot's case checks it there and compares the rest whole, so
+// a difference nobody named fails. An entry leaves the list when P4-B4's and P4-A3's scenarios are recorded again, at
+// the next probe pass that touches them (the tracker's P4-R7z row).
+const showPaneServed = () => ({
+  ...mawsToolList().find((tool) => tool.name === 'show_pane')!,
+  description: 'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+  inputSchema: z.toJSONSchema(ShowPaneRecordedInputSchema) as Record<string, unknown>,
+});
+const OLDER_IN_SNAPSHOT = [
+  {
+    place: 'instructions',
+    since: '2026-11-14',
+    reason: 'UX wave U6d (O-44) took the sentence that invited show_pane out of the source; the fixtures were served it',
+    held: () => "MAWS artifacts are the user's documents, presentations, designs, dashboards, html pages and files. When you name one to the user, write a Markdown link to it, [its title](maws-artifact:<artifactId>): a click opens it in MAWS, so the user never has to ask where it is. To open it at a place, add a fragment: #block=<blockId> for a document's block, #tab=<tabId> for a document's tab, #slide=<slideId> for a presentation's slide, #v<version> for a retained version, with the ids mcp__maws__artifact_read and mcp__maws__artifact_search return. Call mcp__maws__show_pane only when the user should see it now. To find an artifact you did not make or open in this session, call mcp__maws__artifact_search.",
+  },
+  {
+    place: 'tools.show_pane',
+    since: '2026-11-14',
+    reason: 'UX wave U6d (O-44) retired the artifact pane and at; the snapshot keeps the description before it and the recorded input schema',
+    held: showPaneServed,
+  },
+] as const;
+
 describe('the probe’s snapshot of the maws server', () => {
-  it('is the paragraph and tools/list as the source has them, less the message tool P4-R7z took out', () => {
+  it('is the paragraph and tools/list as the source has them, less the message tool P4-R7z took out and the places named older', () => {
     if (process.env.MAWS_WRITE_PROBE_TOOLS === '1') writeFileSync(PROBE_TOOLS, probeTools());
     const snapshot = JSON.parse(readFileSync(PROBE_TOOLS, 'utf8')) as { instructions: string; tools: { name: string }[] };
     expect(snapshot.tools.map((tool) => tool.name).filter((name) => !MAWS_TOOL_NAMES.includes(name as never))).toEqual(['message']);
-    expect(`${JSON.stringify({ instructions: snapshot.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message') }, null, 2)}\n`).toBe(probeTools());
+    const source = JSON.parse(probeTools()) as typeof snapshot;
+    const [instructions, showPane] = OLDER_IN_SNAPSHOT;
+    expect(snapshot.instructions, `${instructions.place}, older since ${instructions.since}: ${instructions.reason}`).toBe(instructions.held());
+    expect(snapshot.tools.find((tool) => tool.name === 'show_pane'), `${showPane.place}, older since ${showPane.since}: ${showPane.reason}`).toEqual(showPane.held());
+    // the rest whole: the named places as the source has them, everything else as the snapshot holds it
+    const sourcePane = source.tools.find((tool) => tool.name === 'show_pane')!;
+    const rest = { instructions: source.instructions, tools: snapshot.tools.filter((tool) => tool.name !== 'message').map((tool) => (tool.name === 'show_pane' ? sourcePane : tool)) };
+    expect(`${JSON.stringify(rest, null, 2)}\n`).toBe(probeTools());
   });
 });

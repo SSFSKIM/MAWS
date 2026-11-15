@@ -1,10 +1,10 @@
 // E1 (M3): the window side of the pane bridge (residue 3). On `maws.pane.show` a window that knows the session opens
 // what `PANES` names (a main tab for `file`, else the panel tool) and answers `maws.pane.answer` with what it opened; a
 // pane whose tool this build lacks is answered with the host's own "not available" text; a session this window does not
-// know is left to the window that does.
+// know is left to the window that does. UX wave U6d: a request for the retired `artifact` pane is refused with the
+// host's sentence, and nothing is opened or read.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import type { Lineage } from '@shared/graph/session';
 import { tabId } from '@shared/ipc/schema/layout';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
@@ -90,233 +90,45 @@ describe('the pane bridge, window side (E1)', () => {
     expect(probe.created.map((init) => init.params)).toEqual([{ scope: 'uncommitted', path: '/repo/src/a.ts' }]);
   });
 
-  it('artifact with no Artifacts tool registered: the host’s "not available in this build" text, nothing opened', async () => {
-    show(fake, { pane: 'artifact', target: 'none' });
-    await settle();
-    expect(panelOf(A)?.tabs ?? []).toEqual([]);
-    expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') } }]);
-  });
-
-  // E2 (Design §4 "show_pane 'deliverable'"; P3-L M6b: the `artifact` pane and the Artifacts tool): the target is
-  // resolved through the engine host's store before anything opens, so the model reads that its id was wrong rather
-  // than "shown" over a list.
-  describe('artifact (E2; P3-L M6b)', () => {
+  // UX wave U6d (O-44; Interfaces §D): the agent opens no artifact by itself. A request for the `artifact` pane, as an
+  // engine host of an earlier build still sends it (with a target and an `at`), is answered with the host's own sentence
+  // and nothing is opened or read: no tab is added and no command but the answer is invoked
+  describe('the retired artifact pane (UX wave U6d)', () => {
     const DASH = '00000000-0000-4000-8000-000000000001';
-    const made = (id: string, by: AppSessionId, handle = 'dash') => ({
-      id, kind: 'html', title: 'Dashboard', handle, createdBy: { kind: 'session', appSessionId: by }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3,
-    });
-    const artifact = made(DASH, A);
-    beforeEach(() => {
-      disconnect();
-      fake = fakeClient({
-        'maws.pane.answer': { outcome: 'delivered' },
-        'artifacts.get': (input: { artifactId: string }) => ({ artifact: input.artifactId === DASH ? artifact : null }),
-        'artifacts.list': { artifacts: [artifact] },
-      });
-      disconnect = connectPaneShows(fake.client);
-    });
+    const reads = () => [fake.invoked('artifacts.get'), fake.invoked('artifacts.list'), fake.invoked('session.get')];
+    const refused = (requestId: string) => ({ appSessionId: A, requestId, result: { ok: false, error: TOOL_ERRORS.artifactPaneRetired } });
 
-    it('an artifact’s id opens the Artifacts tool on it and answers panel-tool', async () => {
+    it('refuses a request in an earlier build’s form, with a target and an at, with the sentence; nothing opened or read', async () => {
       const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
       registerPanelTool(tool);
-      show(fake, { pane: 'artifact', target: DASH });
-      await settle();
-      expect(fake.invoked('artifacts.get')).toEqual([{ artifactId: DASH }]);
-      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-      const [opened] = panelOf(A)!.tabs;
-      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: opened!.id, title: 'Artifacts' } } }]);
-    });
-
-    // P4-B4: `at` opens it at a place: the Artifacts tool is given it as the open's location (the latest version unless
-    // the place names one); with no target there is no artifact to open at a place, and the list opens
-    it('an artifact opened at a place gives the Artifacts tool the place; no target opens the list without it', async () => {
-      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-      registerPanelTool(tool);
+      const before = useLayout.getState().main;
       show(fake, { pane: 'artifact', target: DASH, at: { tab: 't2', block: 'b7' } });
       await settle();
-      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH, location: { tab: 't2', block: 'b7' } }]);
-      show(fake, { requestId: 'r2', pane: 'artifact', target: 'dash', at: { version: 3 } });
-      await settle();
-      expect(probe.opens.map((open) => open.params)).toEqual([{ target: DASH, location: { version: 3 } }]);
-      show(fake, { requestId: 'r3', pane: 'artifact', at: { slide: 's1' } });
-      await settle();
-      expect(probe.opens.map((open) => open.params).at(-1)).toEqual({});
-      expect(fake.invoked('maws.pane.answer').map((answer) => (answer as { result: { ok: boolean } }).result.ok)).toEqual([true, true, true]);
-    });
-
-    it('the handle the agent named it by finds it', async () => {
-      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-      registerPanelTool(tool);
-      show(fake, { pane: 'artifact', target: 'dash' });
-      await settle();
-      expect(fake.invoked('artifacts.get')).toEqual([]); // not an id: the host is not asked to read one
-      expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: A } }]);
-      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-    });
-
-    it('a handle shaped like a uuid is still found among the handles when no artifact has that id', async () => {
-      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-      registerPanelTool(tool);
-      const shaped = '00000000-0000-4000-8000-0000000000aa';
-      disconnect();
-      fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' }, 'artifacts.get': { artifact: null }, 'artifacts.list': { artifacts: [made(DASH, A, shaped)] } });
-      disconnect = connectPaneShows(fake.client);
-      show(fake, { pane: 'artifact', target: shaped });
-      await settle();
-      expect(fake.invoked('artifacts.get')).toEqual([{ artifactId: shaped }]);
-      expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-    });
-
-    it('a refused read answers artifactUnreadable with the host’s message, nothing opened', async () => {
-      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-      registerPanelTool(tool);
-      disconnect();
-      fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' } });
-      disconnect = connectPaneShows(fake.client);
-      show(fake, { pane: 'artifact', target: DASH });
-      await settle();
-      await fake.fail('artifacts.get', 'unavailable');
-      await settle();
+      expect(fake.invoked('maws.pane.answer')).toEqual([refused('r1')]);
+      expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { error: 'show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.' } });
       expect(probe.created).toEqual([]);
-      expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.artifactUnreadable(DASH, 'unavailable') } }]);
+      expect(panelOf(A)?.tabs ?? []).toEqual([]);
+      expect(useLayout.getState().main).toBe(before);
+      expect(reads()).toEqual([[], [], []]);
     });
 
-    it('a target no artifact answers to: artifactNotFound, nothing opened', async () => {
-      const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-      registerPanelTool(tool);
-      const missing = '00000000-0000-4000-8000-000000000009';
-      show(fake, { pane: 'artifact', target: missing });
-      show(fake, { pane: 'artifact', target: 'none', requestId: 'r2' });
-      await settle();
-      expect(probe.created).toEqual([]);
-      // the two answers in whichever order their reads settle (the uuid is read, then searched for among the handles)
-      const answers = fake.invoked('maws.pane.answer') as { requestId: string }[];
-      expect([...answers].sort((a, b) => a.requestId.localeCompare(b.requestId))).toEqual([
-        { appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.artifactNotFound(missing) } },
-        { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.artifactNotFound('none') } },
-      ]);
-    });
-
-    it('no target opens the list', async () => {
+    it('refuses the same request without a target, which opened the list before', async () => {
       const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
       registerPanelTool(tool);
       show(fake, { pane: 'artifact', target: null });
       await settle();
-      expect(probe.created.map((init) => init.params)).toEqual([{}]);
-      expect(fake.invoked('maws.pane.answer')[0]).toMatchObject({ result: { ok: true, opened: { kind: 'panel-tool', toolId: 'artifacts' } } });
+      expect(fake.invoked('maws.pane.answer')).toEqual([refused('r1')]);
+      expect(probe.created).toEqual([]);
+      expect(panelOf(A)?.tabs ?? []).toEqual([]);
+      expect(reads()).toEqual([[], [], []]);
     });
 
-    // P2-F L122: a side thread's handle resolves over its ancestor chain, nearest first, as its artifact tools do
-    // (`artifactScopeOf`); the artifact found opens in the thread's own panel.
-    describe('from a side thread (P2-F L122)', () => {
-      const THREAD_OWN = '00000000-0000-4000-8000-000000000002';
-      const threadOf = (parent: AppSessionId): Lineage => ({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: null, openedBy: 'comment' });
-      // C is a thread of B, a thread of root A; each session made the artifacts given. `archived` sessions are in main's
-      // index (`session.get` answers them) but not in the window's records: the window's feed lists unarchived sessions.
-      const holding = (held: Partial<Record<AppSessionId, ReturnType<typeof made>[]>>, archived: AppSessionId[] = []) => {
-        const index = new Map(useSessions.getState().records);
-        index.set(B, { ...index.get(B)!, lineage: threadOf(A) });
-        index.set(C, { ...index.get(C)!, lineage: threadOf(B) });
-        useSessions.setState({ records: new Map([...index].filter(([id]) => !archived.includes(id))) });
-        disconnect();
-        fake = fakeClient({
-          'maws.pane.answer': { outcome: 'delivered' },
-          'session.get': (input: { appSessionId: AppSessionId }) => index.get(input.appSessionId) ?? null,
-          'artifacts.get': (input: { artifactId: string }) => ({ artifact: Object.values(held).flat().find((one) => one!.id === input.artifactId) ?? null }),
-          'artifacts.list': (input: { filter: { appSessionId: AppSessionId } }) => ({ artifacts: held[input.filter.appSessionId] ?? [] }),
-        });
-        disconnect = connectPaneShows(fake.client);
-      };
-
-      it("a thread's target its parent made opens in the thread's panel, by id or by handle", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact] });
-        show(fake, { appSessionId: B, pane: 'artifact', target: DASH });
-        await settle();
-        show(fake, { appSessionId: B, pane: 'artifact', target: 'dash', requestId: 'r2' });
-        await settle();
-        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]); // the second call reuses the one tab
-        expect(fake.invoked('artifacts.get')).toEqual([{ artifactId: DASH }]);
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: B } }, { filter: { appSessionId: A } }]);
-        const [opened] = panelOf(B)!.tabs;
-        const answer = { ok: true, opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: opened!.id, title: 'Artifacts' } };
-        expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: B, requestId: 'r1', result: answer }, { appSessionId: B, requestId: 'r2', result: answer }]);
-      });
-
-      it("a thread of a thread reaches the family root's artifact", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact] });
-        show(fake, { appSessionId: C, pane: 'artifact', target: 'dash' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: C } }, { filter: { appSessionId: B } }, { filter: { appSessionId: A } }]);
-        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-      });
-
-      it("the nearest session that made an artifact of the handle owns it: the thread's own before its parent's", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact], [B]: [made(THREAD_OWN, B)] });
-        show(fake, { appSessionId: B, pane: 'artifact', target: 'dash' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: B } }]);
-        expect(probe.created.map((init) => init.params)).toEqual([{ target: THREAD_OWN }]);
-      });
-
-      it("a handle a session is only linked to (not its maker) is not that session's: the maker's is found", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact], [B]: [artifact] }); // B edited A's page: linked, but A made it
-        show(fake, { appSessionId: B, pane: 'artifact', target: 'dash' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: B } }, { filter: { appSessionId: A } }]);
-        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-      });
-
-      // review fix: an archived intermediate thread is read from main's index, so the chain still reaches the family root
-      // as the host's artifact tools see it (archiving B leaves its thread C active)
-      it("an archived intermediate thread missing from the window's records is read through session.get; the root's artifact is found", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact] }, [B]);
-        show(fake, { appSessionId: C, pane: 'artifact', target: 'dash' });
-        await settle();
-        expect(fake.invoked('session.get')).toEqual([{ appSessionId: B }]);
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: C } }, { filter: { appSessionId: B } }, { filter: { appSessionId: A } }]);
-        expect(probe.created.map((init) => init.params)).toEqual([{ target: DASH }]);
-      });
-
-      it("an ancestor main's index does not hold ends the chain there, as main's own walk does", async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({ [A]: [artifact] }, [B]);
-        disconnect();
-        fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' }, 'session.get': null, 'artifacts.list': { artifacts: [] } });
-        disconnect = connectPaneShows(fake.client);
-        show(fake, { appSessionId: C, pane: 'artifact', target: 'dash' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: C } }, { filter: { appSessionId: B } }]);
-        expect(probe.created).toEqual([]);
-        expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: C, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.artifactNotFound('dash') } }]);
-      });
-
-      it('a target no session of the chain holds is artifactNotFound; a root session reads only its own', async () => {
-        const { tool, probe } = probeTool('artifacts', { title: 'Artifacts', multiInstance: false });
-        registerPanelTool(tool);
-        holding({});
-        show(fake, { appSessionId: C, pane: 'artifact', target: 'none' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: C } }, { filter: { appSessionId: B } }, { filter: { appSessionId: A } }]);
-        show(fake, { appSessionId: A, pane: 'artifact', target: 'none', requestId: 'r2' });
-        await settle();
-        expect(fake.invoked('artifacts.list')).toEqual([{ filter: { appSessionId: C } }, { filter: { appSessionId: B } }, { filter: { appSessionId: A } }, { filter: { appSessionId: A } }]);
-        expect(probe.created).toEqual([]);
-        expect(fake.invoked('maws.pane.answer')).toEqual([
-          { appSessionId: C, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.artifactNotFound('none') } },
-          { appSessionId: A, requestId: 'r2', result: { ok: false, error: TOOL_ERRORS.artifactNotFound('none') } },
-        ]);
-      });
+    it('refuses it whether or not the Artifacts tool is registered', async () => {
+      show(fake, { pane: 'artifact', target: 'launch-plan' });
+      await settle();
+      expect(fake.invoked('maws.pane.answer')).toEqual([refused('r1')]);
+      expect(panelOf(A)?.tabs ?? []).toEqual([]);
+      expect(reads()).toEqual([[], [], []]);
     });
   });
 
@@ -433,11 +245,11 @@ describe('the pane bridge, window side (E1)', () => {
 });
 
 // UX wave U7b (M6, decision 5; Interfaces §F, "Not the person's act"): what an agent shows closes neither a page nor the
-// Settings dialog, and what it brings forward is in front of the strip behind them; across the artifact's lookup the
-// origin travels with the call, so the person's act in between closes the page as usual and the late add leaves it so.
+// Settings dialog, and what it brings forward is in front of the strip behind them; across an await (U6d: the browser's
+// open, since the artifact's lookup left with the retired pane) the origin travels with the call, so the person's act in
+// between closes the page as usual and the late add leaves it so.
 describe('show_pane behind a page (UX wave U7b)', () => {
   const PAGE = { kind: 'projects' } as const;
-  const DASH = '00000000-0000-4000-8000-000000000002';
 
   it('file: beside the chat of its session, which is in front of the strip, and the page and the dialog stay', async () => {
     useLayout.getState().openDestination(PAGE);
@@ -459,34 +271,28 @@ describe('show_pane behind a page (UX wave U7b)', () => {
     expect(useLayout.getState().destination).toEqual(PAGE);
   });
 
-  describe('across the artifact’s lookup', () => {
-    beforeEach(() => {
-      disconnect();
-      fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' } }); // `artifacts.get` waits for the test's reply
-      disconnect = connectPaneShows(fake.client);
-      registerPanelTool(probeTool('artifacts', { title: 'Artifacts', multiInstance: false }).tool);
-    });
-    const artifact = { id: DASH, kind: 'html', title: 'Dashboard', handle: 'dash', createdBy: { kind: 'session', appSessionId: B }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3 };
+  describe('across the browser’s open', () => {
+    beforeEach(() => registerPanelTool(probeTool('browser', { title: 'Browser', multiInstance: false }).tool)); // `browser.tabs.open` waits for the test's reply
 
-    it('the add that arrives after the read leaves the page open', async () => {
+    it('the add that arrives after the open leaves the page open', async () => {
       useLayout.getState().openDestination(PAGE);
-      show(fake, { appSessionId: B, pane: 'artifact', target: DASH });
+      show(fake, { appSessionId: B, pane: 'browser', target: 'https://a.test/' });
       await settle();
-      expect(fake.pending('artifacts.get')).toBe(1);
-      await fake.reply('artifacts.get', { artifact });
-      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['artifacts']);
+      expect(fake.pending('browser.tabs.open')).toBe(1);
+      await fake.reply('browser.tabs.open', { tab: {}, reused: false, page: 'opened' });
+      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['browser']);
       expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
       expect(useLayout.getState().destination).toEqual(PAGE);
     });
 
-    it('a session’s row clicked while the read is out closes the page, and the add that then arrives leaves it closed', async () => {
+    it('a session’s row clicked while the open is out closes the page, and the add that then arrives leaves it closed', async () => {
       useLayout.getState().openDestination(PAGE);
-      show(fake, { appSessionId: B, pane: 'artifact', target: DASH });
+      show(fake, { appSessionId: B, pane: 'browser', target: 'https://a.test/' });
       await settle();
       useLayout.getState().openSession(C); // the person's act
       expect(useLayout.getState().destination).toBeNull();
-      await fake.reply('artifacts.get', { artifact });
-      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['artifacts']);
+      await fake.reply('browser.tabs.open', { tab: {}, reused: false, page: 'opened' });
+      expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['browser']);
       expect(useLayout.getState().destination).toBeNull();
     });
   });

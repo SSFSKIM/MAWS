@@ -1,7 +1,9 @@
 // X9, the `maws` tool server (P1 spec §3 A and §10 X9; E1 execution document, Interfaces "X9"): the server's name, the
 // tools' names, descriptions, input and result schemas, the JSON schemas `tools/list` answers with, the annotations and
 // the exact texts of every refusal. The engine host and the normaliser parse a call's arguments with the same schemas
-// (`parseToolArguments`), so the host refuses exactly the calls the normaliser declines to map (residue 1). The owner's
+// (`parseToolArguments`), so the host refuses exactly the calls the normaliser declines to map (residue 1), with one
+// exception since U6d: a call for the retired `artifact` pane, which the host refuses with `artifactPaneRetired` and the
+// normaliser, reading every record with `parseRecordedToolArguments`, still maps to its `maws.pane.shown`. The owner's
 // skills target these names and shapes: they change only by a dated line in the P1 spec's Decision Log (A-1).
 // E2 appends the four artifact tools (E2 execution document, Design §6 and Interfaces "X9 additions"), listed from the
 // first `tools/list` (Decision Log 3), each with its own annotations (Decision Log 4).
@@ -24,14 +26,18 @@
 // (the P4 spec's Decision Log 92, the X9 amendment) takes out P4-R7's `message`: a MAWS session messages its human
 // through the to-human plugin's `mcp__to-human__message`. U12a (docs/doperpowers/plans/2026-11-12-ux-wave-U12a-browser-
 // computer-use-delivery.md, Interfaces §A; the X9 amendment) gives `show_pane` its reload clause, the result's `page` and
-// `note` with the note texts, and the refusal for a page MAWS could not open.
+// `note` with the note texts, and the refusal for a page MAWS could not open. UX wave U6d (docs/doperpowers/plans/
+// 2026-11-14-ux-wave-U6d-artifact-link.md, Interfaces §A and §B; the X9 amendment of 2026-11-14) takes the `artifact`
+// pane and `at` out of `show_pane`: a call that names the pane is refused with `artifactPaneRetired`, the description and
+// `artifact_create`'s lose their invitation to call it, and records are read with the schema they were written under
+// (`ShowPaneRecordedInputSchema`, `parseRecordedToolArguments`).
 import * as z from 'zod';
 import { ArtifactKindSchema } from '../artifacts/entity'; // P3-A
 import { ArtifactLocationSchema } from '../artifacts/link'; // P4-B4
 import { AppSessionIdSchema } from '../graph/ids'; // P2-E1
 import { ARTIFACT_ID } from './artifact-id';
 import { ArtifactEditorSchema, ListedArtifactSchema } from './listed-artifact'; // P4-B4
-import { CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PANE_NAMES, PaneSchema } from './panes';
+import { AGENT_PANE_NAMES, AgentPaneSchema, CAPTURE_ANSWER_MS, PANE_ANSWER_MS, PaneSchema } from './panes';
 import { DOCUMENT_TOOL_NAMES, DOCUMENT_TOOLS } from './document-tools'; // P3-B (M7)
 import { DASHBOARD_TOOL_NAMES, DASHBOARD_TOOLS } from './dashboard-tools'; // P3-E (E2 M2)
 import { SEARCH_TOOL_NAMES, SEARCH_TOOLS } from './search-tools'; // P4-B4
@@ -159,7 +165,19 @@ export function askQuestionId(question: Pick<AskQuestion, 'id'>, index: number):
   return question.id ?? `q${index + 1}`;
 }
 
+// U6d: what `tools/list` answers and the host carries out, six panes and no `at`
 export const ShowPaneInputSchema = z
+  .strictObject({
+    pane: AgentPaneSchema,
+    target: z.string().max(4096).optional(),
+    line: z.number().int().min(1).optional(),
+  })
+  .superRefine((input, ctx) => {
+    if (input.line !== undefined && input.pane !== 'file') ctx.addIssue({ code: 'custom', path: ['line'], message: 'line is for the file pane only' });
+  });
+export type ShowPaneInput = z.infer<typeof ShowPaneInputSchema>;
+// U6d: the schema every earlier build carried out, kept to read records only: every pane a record can name, and `at`
+export const ShowPaneRecordedInputSchema = z
   .strictObject({
     pane: PaneSchema,
     target: z.string().max(4096).optional(),
@@ -170,7 +188,7 @@ export const ShowPaneInputSchema = z
     if (input.line !== undefined && input.pane !== 'file') ctx.addIssue({ code: 'custom', path: ['line'], message: 'line is for the file pane only' });
     if (input.at !== undefined && input.pane !== 'artifact') ctx.addIssue({ code: 'custom', path: ['at'], message: 'at is for the artifact pane only' }); // P4-B4
   });
-export type ShowPaneInput = z.infer<typeof ShowPaneInputSchema>;
+export type ShowPaneRecordedInput = z.infer<typeof ShowPaneRecordedInputSchema>;
 
 // E2: a path is resolved against the working directory; the screenshot's size defaults to ARTIFACT_SCREENSHOT_DEFAULT
 // where it is read. P3-A (Decision Log 3): every tool that names an artifact takes its id (the store's UUID) or a handle
@@ -484,7 +502,7 @@ export const MAWS_TOOLS = {
   show_pane: {
     title: 'Show pane',
     description:
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a URL for browser (a page already open is reloaded, unless the user is using that tab). Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     input: ShowPaneInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
   },
@@ -492,7 +510,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS; call show_pane only when the user should see it now.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -595,7 +613,9 @@ export const TOOL_ERRORS = {
   notAFile: (path: string) => `send_file: not a file: ${path}`,
   deliveryUnavailable: 'send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered', // P3-L (M6b): no X12 record stands in for it
   sessionEnded: 'ask: the session ended before the user answered',
-  unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${PANE_NAMES.join(', ')}`,
+  unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${AGENT_PANE_NAMES.join(', ')}`,
+  // UX wave U6d (O-44): a call for the retired `artifact` pane, whatever else it holds; the agent is told to write the link
+  artifactPaneRetired: 'show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.',
   paneUnavailable: (pane: string) => `show_pane: the ${pane} pane is not available in this build of MAWS`,
   targetRequired: (pane: string) => `show_pane: a target is required for the ${pane} pane`,
   fileNotFound: (path: string) => `show_pane: file not found: ${path}`,
@@ -612,9 +632,6 @@ export const TOOL_ERRORS = {
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
-  // P3-L (M6b): the `artifact` pane's target names no artifact the session's lineage holds, or main refused the read
-  artifactNotFound: (id: string) => `show_pane: no artifact "${id}" in this session`,
-  artifactUnreadable: (id: string, message: string) => `show_pane: could not read artifact "${id}": ${message}`,
   // E2 end
   // E10: a bridge request made while no app is connected to the engine host (the detached supervisor), answered at once
   appNotOpen: (tool: 'show_pane' | 'artifact_screenshot' | 'artifact_export') => `${tool}: MAWS is not open; the ${tool === 'show_pane' ? 'pane cannot be shown' : tool === 'artifact_export' ? 'artifact cannot be exported' : 'artifact cannot be captured'}`,
@@ -647,11 +664,26 @@ function issuesText(error: z.ZodError): string {
 type ToolInput<N extends MawsToolName> = z.infer<(typeof MAWS_TOOLS)[N]['input']>;
 
 // A call's arguments through the tool's input schema: the data, or the refusal text the host answers (an unknown pane
-// named with the known ones, every other refusal by its issues).
+// named with the known ones, every other refusal by its issues). U6d (decision 17): a `show_pane` that names the retired
+// `artifact` pane is answered `artifactPaneRetired` before the schema is consulted, so the agent always reads the sentence
+// that teaches the link, never a list of issues.
 export function parseToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: ToolInput<N> } | { ok: false; error: string } {
+  if (name === 'show_pane' && (args as { pane?: unknown } | null | undefined)?.pane === 'artifact') return { ok: false, error: TOOL_ERRORS.artifactPaneRetired };
   const parsed = MAWS_TOOLS[name].input.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as ToolInput<N> };
   const pane = (args as { pane?: unknown } | null | undefined)?.pane;
   if (name === 'show_pane' && pane !== undefined && parsed.error.issues.some((issue) => issue.path.length === 1 && issue.path[0] === 'pane')) return { ok: false, error: TOOL_ERRORS.unknownPane(String(pane)) };
+  return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };
+}
+
+// U6d (Interfaces §B; decision 18): a record's arguments, read with the schema they were written under, so a journal of
+// any build yields the events it always did. For `show_pane` the recorded schema decides (every pane a record can name,
+// and `at`; its refusal's text is read by nobody); every other tool is `parseToolArguments`. The normaliser's one parser
+// of a `maws` call; the host's tools keep `parseToolArguments`.
+type RecordedToolInput<N extends MawsToolName> = N extends 'show_pane' ? ShowPaneRecordedInput : ToolInput<N>;
+export function parseRecordedToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string } {
+  if (name !== 'show_pane') return parseToolArguments(name, args) as { ok: true; data: RecordedToolInput<N> } | { ok: false; error: string };
+  const parsed = ShowPaneRecordedInputSchema.safeParse(args);
+  if (parsed.success) return { ok: true, data: parsed.data as RecordedToolInput<N> };
   return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };
 }

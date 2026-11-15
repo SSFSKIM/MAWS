@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import * as z from 'zod';
-import { PANE_NAMES } from './panes';
+import { AGENT_PANE_NAMES } from './panes';
 import {
   ARTIFACT_ID,
   ARTIFACT_MAX_BYTES,
@@ -31,10 +31,12 @@ import {
   MAWS_TOOLS,
   mawsServerInfo,
   mawsToolList,
+  parseRecordedToolArguments, // U6d
   parseToolArguments,
   SendFileInputSchema,
   SendFileResultSchema,
   ShowPaneInputSchema,
+  ShowPaneRecordedInputSchema, // U6d
   ShowPaneResultSchema,
   SHOW_PANE_NOTES, // U12a
   TOOL_ERRORS,
@@ -70,7 +72,7 @@ describe('X9: the maws server and its twelve tools', () => {
       'Ask the user one or several questions at once through a MAWS sheet; without this tool, use AskUserQuestion. Each question has a modality: "choice" (options, single or multi, with an Other row), "text" (free text), "file" or "folder" (a native picker returning absolute paths), "repository" (one of the user\'s MAWS projects), or "design_system" (one of the user\'s design systems, answered with its designSystemId and name; unless allowCreate is false, the user may answer create: true instead, asking you to build a new one with them). The user may answer any question with "decide for me" or skip it. With blocking true (the default) the call waits for the answers and returns them; with blocking false it returns {status: "asked", askId} at once and the answers arrive later as a user message that names the askId, so you can keep working meanwhile. In a subagent the call always waits and returns the answers, as with blocking true.',
     );
     expect(MAWS_TOOLS.show_pane.description).toBe(
-      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "artifact", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), an artifact id or handle for artifact, a URL for browser (a page already open is reloaded, unless the user is using that tab). at opens an artifact at a place: {block} or {tab} of a document, {slide} of a presentation, {version} of any. Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
+      'Open a MAWS pane for the user: "diff", "file", "terminal", "tasks", "browser" or "source-control"; without this tool, describe where the user should look. target names what to open: a file path for diff or file (line optional), a URL for browser (a page already open is reloaded, unless the user is using that tab). Returns what was opened, or an error for an unknown pane or a pane this build of MAWS does not have.',
     );
   });
 
@@ -117,7 +119,17 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { readOnlyHint: true, openWorldHint: false, title: 'Search artifacts' }], // P4-B4
     ]);
-    expect(list.find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({ properties: { pane: { enum: [...PANE_NAMES] } }, required: ['pane'] });
+    // U6d: six panes and no `at`
+    const showPane = list.find((t) => t.name === 'show_pane')!.inputSchema;
+    expect(showPane).toMatchObject({ properties: { pane: { enum: [...AGENT_PANE_NAMES] } }, required: ['pane'] });
+    expect(Object.keys(showPane.properties as Record<string, unknown>)).toEqual(['pane', 'target', 'line']);
+  });
+
+  // U6d (O-44): the agent opens no artifact by itself, and nothing it is served invites the call that did
+  it('invites no call of show_pane for an artifact: artifact_create ends on the link, and no other tool names show_pane', () => {
+    expect(MAWS_TOOLS.artifact_create.description.endsWith('To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.')).toBe(true);
+    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1275);
+    for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
   });
 });
 
@@ -191,29 +203,40 @@ describe('X9 inputs: strict, bounded, never defaulted', () => {
     expect(ShowPaneInputSchema.safeParse({ pane: 'file', target: 'a', line: 0 }).success).toBe(false);
     expect(ShowPaneInputSchema.safeParse({ pane: 'file', target: 'x'.repeat(4097) }).success).toBe(false);
     expect(ShowPaneInputSchema.safeParse({ pane: 'nope' }).success).toBe(false);
+    // U6d: the six panes; the retired `artifact` and `at` are not taken
+    for (const pane of AGENT_PANE_NAMES) expect(ShowPaneInputSchema.safeParse({ pane }).success, pane).toBe(true);
+    expect(ShowPaneInputSchema.safeParse({ pane: 'artifact' }).success).toBe(false);
+    expect(ShowPaneInputSchema.safeParse({ pane: 'terminal', at: { slide: 's1' } }).success).toBe(false);
   });
 
-  // P4-B4 (X9 amendment): an artifact opened at a place, the link grammar's location
-  it('show_pane takes at, a place in an artifact, for the artifact pane only', () => {
+  // P4-B4 (X9 amendment): an artifact opened at a place, the link grammar's location. U6d: no longer carried out; the
+  // recorded schema reads it as every earlier build took it, and nothing else does
+  it('the recorded schema reads at, a place in an artifact, on the artifact pane only, as earlier builds took it', () => {
     const target = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
     for (const at of [{ block: 'b7k2m9qx' }, { tab: 't1' }, { slide: 's-02' }, { version: 3 }, { tab: 't1', block: 'b1' }]) {
-      expect(parseToolArguments('show_pane', { pane: 'artifact', target, at }), JSON.stringify(at)).toEqual({ ok: true, data: { pane: 'artifact', target, at } });
+      expect(ShowPaneRecordedInputSchema.safeParse({ pane: 'artifact', target, at }), JSON.stringify(at)).toEqual({ success: true, data: { pane: 'artifact', target, at } });
     }
-    expect(parseToolArguments('show_pane', { pane: 'file', target: 'src/a.ts', at: { block: 'b1' } })).toEqual({ ok: false, error: 'show_pane: invalid arguments: at: at is for the artifact pane only' });
+    const onFile = ShowPaneRecordedInputSchema.safeParse({ pane: 'file', target: 'src/a.ts', at: { block: 'b1' } });
+    expect(onFile.success === false && onFile.error.issues.map((issue) => [issue.path, issue.message])).toEqual([[['at'], 'at is for the artifact pane only']]);
     for (const at of [{ version: 0 }, { block: 'a b' }, { tab: '' }, { line: 3 }]) {
-      const refused = parseToolArguments('show_pane', { pane: 'artifact', target, at });
-      expect(refused.ok === false && refused.error, JSON.stringify(at)).toMatch(/^show_pane: invalid arguments: at[.:]/);
+      const refused = ShowPaneRecordedInputSchema.safeParse({ pane: 'artifact', target, at });
+      expect(refused.success === false && refused.error.issues[0]!.path[0], JSON.stringify(at)).toBe('at');
     }
-    expect(mawsToolList().find((t) => t.name === 'show_pane')!.inputSchema).toMatchObject({
-      properties: { at: { type: 'object', additionalProperties: false, properties: { version: { type: 'integer', minimum: 1 }, tab: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,64}$' }, block: { type: 'string' }, slide: { type: 'string' } } } },
-    });
+    // the rest is the execution schema's: the six panes, a target up to 4096 characters, a line only for a file
+    for (const pane of AGENT_PANE_NAMES) expect(ShowPaneRecordedInputSchema.safeParse({ pane }).success, pane).toBe(true);
+    expect(ShowPaneRecordedInputSchema.safeParse({ pane: 'artifact', target, line: 3 }).success).toBe(false);
+    expect(ShowPaneRecordedInputSchema.safeParse({ pane: 'artifact', target, extra: 1 }).success).toBe(false);
+    expect(ShowPaneRecordedInputSchema.safeParse({ pane: 'nope' }).success).toBe(false);
   });
 });
 
 describe('X9 refusals: one text per offender', () => {
   it('names an unknown pane with the known ones, and every other refusal by its issues', () => {
-    expect(parseToolArguments('show_pane', { pane: 'nope' })).toEqual({ ok: false, error: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control' });
-    expect(TOOL_ERRORS.unknownPane('nope')).toBe('show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, artifact, browser, source-control');
+    expect(parseToolArguments('show_pane', { pane: 'nope' })).toEqual({ ok: false, error: 'show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, browser, source-control' });
+    expect(TOOL_ERRORS.unknownPane('nope')).toBe('show_pane: unknown pane "nope"; known panes: diff, file, terminal, tasks, browser, source-control');
+    // U6d: an `at` on any pane is now a key the schema does not have
+    const at = parseToolArguments('show_pane', { pane: 'file', target: 'src/a.ts', at: { block: 'b1' } });
+    expect(at.ok === false && at.error).toMatch(/^show_pane: invalid arguments: .*"at"/);
     const missing = parseToolArguments('show_pane', {});
     expect(missing.ok === false && missing.error).toMatch(/^show_pane: invalid arguments: pane: /);
     const files = parseToolArguments('send_file', { files: [] });
@@ -224,6 +247,17 @@ describe('X9 refusals: one text per offender', () => {
     expect(parseToolArguments('show_pane', null).ok).toBe(false);
   });
 
+  // U6d (decision 17): a call that names the retired pane reads the sentence that teaches the link, whatever else it
+  // holds; only the exact name is the retired pane
+  it('answers a call for the artifact pane with the sentence that teaches the link, before any other refusal', () => {
+    const target = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+    for (const args of [{ pane: 'artifact' }, { pane: 'artifact', target }, { pane: 'artifact', target, at: { block: 'b7' } }, { pane: 'artifact', target, line: 3 }, { pane: 'artifact', extra: true }, { pane: 'artifact', target: 'x'.repeat(4097) }]) {
+      expect(parseToolArguments('show_pane', args), JSON.stringify(args).slice(0, 80)).toEqual({ ok: false, error: TOOL_ERRORS.artifactPaneRetired });
+    }
+    expect(parseToolArguments('show_pane', { pane: 'Artifact' })).toEqual({ ok: false, error: TOOL_ERRORS.unknownPane('Artifact') });
+    expect(parseToolArguments('show_pane', { pane: 'artifacts' })).toEqual({ ok: false, error: TOOL_ERRORS.unknownPane('artifacts') });
+  });
+
   it('carries the exact texts of every host refusal', () => {
     expect(TOOL_ERRORS.notAFile('/r/x')).toBe('send_file: not a file: /r/x');
     expect(TOOL_ERRORS.sessionEnded).toBe('ask: the session ended before the user answered');
@@ -231,6 +265,36 @@ describe('X9 refusals: one text per offender', () => {
     expect(TOOL_ERRORS.targetRequired('file')).toBe('show_pane: a target is required for the file pane');
     expect(TOOL_ERRORS.fileNotFound('/r/x')).toBe('show_pane: file not found: /r/x');
     expect(TOOL_ERRORS.paneTimeout).toBe('show_pane: no MAWS window answered within 8 s');
+    expect(TOOL_ERRORS.artifactPaneRetired).toBe('show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.'); // U6d
+    expect(TOOL_ERRORS.artifactPaneRetired).toHaveLength(178);
+  });
+});
+
+// U6d (Interfaces §B): records are read with the schema they were written under; only show_pane's differs
+describe('X9 records: parseRecordedToolArguments', () => {
+  const target = '7d1c2b3a-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+  it('reads an earlier build\'s call for the artifact pane, with its at, as that build took it', () => {
+    expect(parseRecordedToolArguments('show_pane', { pane: 'artifact', target, at: { tab: 't2', block: 'b7' } })).toEqual({ ok: true, data: { pane: 'artifact', target, at: { tab: 't2', block: 'b7' } } });
+    expect(parseRecordedToolArguments('show_pane', { pane: 'artifact' })).toEqual({ ok: true, data: { pane: 'artifact' } });
+    expect(parseRecordedToolArguments('show_pane', { pane: 'terminal' })).toEqual({ ok: true, data: { pane: 'terminal' } });
+  });
+
+  it('refuses what every earlier build refused: a line or an unknown key on the artifact pane, an at on another pane, an unknown pane', () => {
+    for (const args of [{ pane: 'artifact', target, line: 3 }, { pane: 'artifact', extra: true }, { pane: 'file', target: 'a.ts', at: { block: 'b1' } }, { pane: 'nope' }, null]) {
+      const refused = parseRecordedToolArguments('show_pane', args);
+      expect(refused.ok === false && refused.error, JSON.stringify(args)).toMatch(/^show_pane: invalid arguments: /);
+    }
+  });
+
+  it('is parseToolArguments for every other tool', () => {
+    const calls: [Parameters<typeof parseToolArguments>[0], unknown][] = [
+      ['send_file', { files: ['a.txt'], caption: 'Report' }], ['send_file', { files: [] }],
+      ['ask', { questions: [{ question: 'Q?', modality: 'choice', options: [{ label: 'Yes' }] }] }], ['ask', { questions: [] }],
+      ['artifact_create', { kind: 'document', title: 'Notes', content: '# Notes' }], ['artifact_read', { id: 'dash' }], ['artifact_read', { id: 3 }],
+      ['artifact_search', { query: 'launch plan' }], ['artifact_list', {}], ['artifact_screenshot', { id: 'dash', width: 10 }],
+    ];
+    for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
   });
 
   // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
@@ -248,6 +312,8 @@ describe('X9 results', () => {
     expect(ShowPaneResultSchema.safeParse({ status: 'shown', pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:1', title: 'Terminal' } }).success).toBe(true);
     expect(ShowPaneResultSchema.safeParse({ status: 'shown', pane: 'file', opened: { kind: 'main-tab', tabId: 'file:/r/a.ts', path: '/r/a.ts', line: null } }).success).toBe(true);
     expect(ShowPaneResultSchema.safeParse({ status: 'shown', pane: 'file', opened: { kind: 'main-tab', tabId: 't', path: '/r/a.ts' } }).success).toBe(false);
+    // U6d: an earlier build's answer for the artifact pane, as a journal holds it, still parses
+    expect(ShowPaneResultSchema.safeParse({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: 'artifacts:1', title: 'Artifacts' } }).success).toBe(true);
     expect(SendFileResultSchema.safeParse({ status: 'delivered', deliverables: [], extra: 1 }).success).toBe(false);
   });
 });
@@ -406,8 +472,9 @@ describe('X9 artifact tools (E2)', () => {
     expect(stale).toBe('artifact_publish: read the artifact again {"reason":"staleBase","liveRevision":7}');
     expect(artifactRefusalOf(stale)).toEqual({ reason: 'staleBase', liveRevision: 7 });
     expect(artifactRefusalOf('artifact_publish: no artifact "x" in this session')).toBeNull();
-    expect(TOOL_ERRORS.artifactNotFound('d1')).toBe('show_pane: no artifact "d1" in this session'); // P3-L M6b
-    expect(TOOL_ERRORS.artifactUnreadable('d1', 'EIO')).toBe('show_pane: could not read artifact "d1": EIO');
+    // U6d: P3-L M6b's artifactNotFound and artifactUnreadable left with the window's lookup of the retired pane
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactNotFound');
+    expect(Object.keys(TOOL_ERRORS)).not.toContain('artifactUnreadable');
     expect(TOOL_ERRORS.deliveryUnavailable).toBe('send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered');
     expect(TOOL_ERRORS.unknownTool('echo')).toMatch(/^unknown tool "echo"; the maws server has send_file, ask, show_pane, artifact_create, artifact_list, artifact_screenshot, /); // E4c: thirteen; P1 A-54: seven; P3-A: twelve
   });

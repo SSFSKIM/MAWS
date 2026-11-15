@@ -11,12 +11,9 @@
 // than a new one: the model asks the human to look there, not for another shell. Every other pane goes through
 // `addTool` with its params, so a target always reaches its tool.
 //
-// E2 (E2 execution document, Design §4 "show_pane 'deliverable'"; Decision Log 13; P3-L M6b: the `artifact` pane and
-// the Artifacts tool): the `artifact` pane resolves its target through the engine host's store first, so the answer
-// waits on that read (the bridge allows 8 s; a read takes milliseconds). An artifact that exists opens the Artifacts
-// tool on it; a target no artifact answers to is the model's error to read (`artifactNotFound`), never "shown" over a
-// list; no target opens the list. P4-B4: `at` (the place to open it at) is given to the tool as the open's location, as
-// an artifact link's fragment is; with no target there is no artifact to place, and the list opens.
+// UX wave U6d (O-44; Interfaces §D): the agent opens no artifact by itself. A request for the `artifact` pane, from an
+// engine host of any build (an older one on this Mac outlives an update of the app), is refused with the host's own
+// sentence as the function's first statement: nothing is looked up, opened or awaited, whatever the target and `at`.
 //
 // E4a (E4a execution document, Interfaces "The renderer"; Decision Log 7): the `browser` pane checks its target as main
 // will (`validateBrowserUrl`), so a refused address answers `navigationRefused` before anything opens; otherwise main
@@ -26,15 +23,12 @@
 // UX wave U7b (its execution document, Interfaces §F, "Not the person's act"; M6, decision 5): what an agent shows is not
 // the person's act, so it closes neither a page nor the Settings dialog, and what it brings to the front is in front of
 // the strip behind them. The calls that reach the layout store run inside `quietly`; every `addTool` says `asked`, which
-// the host keeps across its own deferral, and the ones made after an await (the artifact's lookup, the browser's open)
-// carry it across theirs, where no `quietly` scope reaches.
-import * as z from 'zod';
-import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
+// the host keeps across its own deferral, and the one made after an await (the browser's open) carries it across its
+// own, where no `quietly` scope reaches.
 import { validateBrowserUrl } from '@shared/browser/url'; // E4a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { MawsPaneAnswerResult, MawsPaneShow } from '@shared/ipc/schema/maws';
-import { artifactScopeOf, type LineageSource } from '@shared/maws/artifact-scope'; // P2-F L122
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
@@ -63,7 +57,8 @@ function selectTerminal(tool: PanelTool<unknown, unknown>, appSessionId: AppSess
   return existing.id;
 }
 
-export function showPane({ appSessionId, requestId, pane, target, line, at }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
+export function showPane({ appSessionId, requestId, pane, target, line }: MawsPaneShow, client: MawsBridge = ipc): MawsPaneAnswerResult | Promise<MawsPaneAnswerResult> {
+  if (pane === 'artifact') return { ok: false, error: TOOL_ERRORS.artifactPaneRetired }; // U6d: before any tool is looked up
   const where = PANES[pane];
   if ('mainTab' in where || pane === 'file') {
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
@@ -71,7 +66,6 @@ export function showPane({ appSessionId, requestId, pane, target, line, at }: Ma
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
-  if (pane === 'artifact') return showArtifact(tool, appSessionId, target, at, client); // E2; P3-L M6b; P4-B4: at
   if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target, client); // E4a; U12a: client
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true, asked: 'agent' });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
@@ -101,63 +95,6 @@ export function connectPaneShows(client: MawsBridge = ipc): () => void {
       });
   });
 }
-
-// E2 start: the `artifact` pane (P3-L M6b; E2's `deliverable` pane before the cutover). The target is the artifact's id
-// (what `send_file` and `artifact_create` answer as the deliverable id; a pre-P3 record's id is its artifact's), or the
-// handle the agent named it by (`dash`), since the model holds both; an id that names no artifact falls through to the
-// handles (a handle may itself be shaped like a uuid). P2-F L122: a handle resolves over the session's ancestor chain
-// as its artifact tools resolve it (`ancestorsOf`), the nearest session that made an artifact of that handle holding it.
-async function artifactIn(client: MawsBridge, owner: AppSessionId, target: string): Promise<{ id: string | null } | { error: string }> {
-  const listed = await client.invoke('artifacts.list', { filter: { appSessionId: owner } });
-  if (!listed.ok) return { error: listed.error.message };
-  const own = listed.value.artifacts.find((artifact) => artifact.handle === target && artifact.createdBy.kind === 'session' && artifact.createdBy.appSessionId === owner);
-  return { id: own?.id ?? null };
-}
-
-// The session's ancestors as main's index walks them for the artifact tools: this window's records first, and an
-// ancestor they lack (an archived thread: the window's feed lists unarchived sessions only) read through `session.get`,
-// which reads the whole index. An ancestor neither holds (or a read that fails) ends the chain there, as in main.
-async function ancestorsOf(client: MawsBridge, appSessionId: AppSessionId): Promise<AppSessionId[]> {
-  const records = useSessions.getState().records;
-  const read = new Map<AppSessionId, ReturnType<LineageSource['get']>>();
-  const source: LineageSource = { get: (id) => records.get(id) ?? read.get(id) };
-  const lineage = records.get(appSessionId)?.lineage ?? null;
-  for (;;) {
-    const chain = artifactScopeOf(source, lineage);
-    const unread = chain.find((id) => !records.has(id) && !read.has(id));
-    if (unread === undefined) return chain;
-    const found = await client.invoke('session.get', { appSessionId: unread });
-    read.set(unread, found.ok ? found.value : null);
-  }
-}
-
-// The artifact the target names, by its id, else by a handle the session or the nearest ancestor holds; null when none.
-async function artifactOf(client: MawsBridge, appSessionId: AppSessionId, target: string): Promise<{ id: string } | null | { error: string }> {
-  if (z.uuid().safeParse(target).success) {
-    const found = await client.invoke('artifacts.get', { artifactId: target.toLowerCase() });
-    if (!found.ok) return { error: found.error.message };
-    if (found.value.artifact) return { id: found.value.artifact.id };
-  }
-  for (const owner of [appSessionId, ...(await ancestorsOf(client, appSessionId))]) {
-    const found = await artifactIn(client, owner, target);
-    if ('error' in found) return found;
-    if (found.id !== null) return { id: found.id };
-  }
-  return null;
-}
-
-async function showArtifact(tool: PanelTool<unknown, unknown>, appSessionId: AppSessionId, target: string | null, at: ArtifactLocation | undefined, client: MawsBridge): Promise<MawsPaneAnswerResult> {
-  const open = (params: { target?: string; location?: ArtifactLocation }): MawsPaneAnswerResult => {
-    const opened = panelHost.addTool(tool.id, { appSessionId, params, activate: true, asked: 'agent' });
-    return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
-  };
-  if (target === null) return open({});
-  const found = await artifactOf(client, appSessionId, target);
-  if (found === null) return { ok: false, error: TOOL_ERRORS.artifactNotFound(target) };
-  if ('error' in found) return { ok: false, error: TOOL_ERRORS.artifactUnreadable(target, found.error) };
-  return open({ target: found.id, ...(at !== undefined && { location: at }) });
-}
-// E2 end
 
 // E4a start: the `browser` pane. U12a (M1; Interfaces §B): a target is opened by the window itself, through main's
 // `browser.tabs.open` with `reload` and the request's own id, before the Browser tool opens, so the panel mounts on the
