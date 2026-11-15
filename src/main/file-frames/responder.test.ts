@@ -396,6 +396,19 @@ describe('one failure path (A3; sequence 4)', () => {
     expect(told).toEqual([]);
   });
 
+  it('a first read that fails after the token’s release answers 404 and tells nobody', async () => {
+    const file = fileSource(pattern(10));
+    const go = file.hold(1);
+    file.fail(1);
+    const { ask, tokens, token, told } = serving(file.source);
+    const pending = ask();
+    await expect.poll(() => file.reads.length).toBe(1);
+    tokens.release(token.token, owner);
+    go();
+    await expectNotFound(await pending);
+    expect(told).toEqual([]);
+  });
+
   it('a first read held while the token is released answers 404 and tells nobody', async () => {
     const file = fileSource(pattern(10));
     const go = file.hold(1);

@@ -17,8 +17,7 @@
 // The headers are the store's (`createSchemeHandler`), with the type and the policy the token was issued with (none for a
 // PDF), and no `Access-Control-Allow-Origin`: nothing loads a file's frame across origins.
 import { frameTokenOf } from '@shared/files/framed';
-import type { SchemeResponder } from '../../services/artifacts/scheme/artifact-handler';
-import { rangeOf } from '../../services/artifacts/scheme/scheme-handler';
+import { rangeOf, type SchemeResponder } from '../../render/store-serving';
 import { FRAME_PAGE_BYTES, type Page } from './source';
 import type { FrameToken, FrameTokens } from './tokens';
 
