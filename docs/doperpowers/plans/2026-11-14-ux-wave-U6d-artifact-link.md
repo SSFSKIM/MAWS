@@ -554,6 +554,16 @@ The draft estimated about 17 files and 400 lines. What it did not count: the tes
   Evidence: `src/main/browser/inspect.ts` at `04deff757`.
 - Observation: M1's red was seen as decision 24 orders. The journal cases passed alone on today's code (78/78); with the narrowed schema and the normaliser untouched, exactly three failed, each for the missing `maws.pane.shown` ("reads an earlier build's call for the artifact pane, with a target and an at, answered shown"; "reads an earlier build's call for the artifact pane answered with an error"; "reads this build's call for the artifact pane answered with the refusal"); with the recorded parser at both gates, green. Each half-switch (admission only, read only), tried as a transient edit on the VM, fails the same three.
   Evidence: commits `6ef9a2acd`, `63383b660`, `8bdb3164a`; the M1 report's TDD section.
+- Observation: the renderer's suites run under happy-dom, not jsdom (`vitest.config.ts`, projects `renderer` and `renderer-compiled`); M2's "selection test in jsdom" ran there and needed no fallback.
+  Evidence: `vitest.config.ts`; M2's `links.test.tsx` selection case, green.
+- Observation: `transcript/index.test.ts` pins every runtime export of the transcript's public surface (frozen at C6's M5; its header asks for a dated Decision Log entry on a change), so §F's export turns it red; M2's list of tests did not name it.
+  Evidence: `src/renderer/src/transcript/index.test.ts`, edited in `ca8f9484e`.
+- Observation: `openArtifactTab` calls `revealMain()`, so "Show that tab" docks a maximized or floating side column before the main tab comes forward, as ⌘-click does today; what the column shows is untouched.
+  Evidence: `src/renderer/src/library/actions.ts` (`openArtifactTab`); M2's report.
+- Observation: the e2e TypeScript project has no DOM iterable lib, so an in-page `evaluate` cannot spread a `DOMRectList`.
+  Evidence: `c04d96e6c`.
+- Observation: M2's acceptance run on the shared VM (load 19 to 20, another branch's suite alongside): `pnpm test` named 21 failed files, the brief's known 8 and 13 load-bound timeouts in files M2 did not change; each of the 13 passed when rerun alone as the load fell. `pnpm typecheck`, `pnpm lint`, `pnpm test:probes` and the gate's script tests were green.
+  Evidence: M2's report and its logs; the reading of record is class 1a.
 
 ## Decision Log
 
@@ -581,6 +591,14 @@ The draft estimated about 17 files and 400 lines. What it did not count: the tes
    - Decision: the half-switch tries were transient edits inside the VM's command, restored there, never committed. The red commit holds only `panes.ts`, `tools.ts` and `tools.test.ts`, so the red isolates the schema the normaliser reads.
    - Decision: the charter's §19 entry is placed last in §19, after the P5 closing entry; the new tracker row names M2's `.transcript-inline-link` ahead of M2, since both land in one pull request.
    - Where: M1; Interfaces §C; decision 21.
+9. **2026-11-14 (UTC) · M2's decisions, folded from its executor's report.**
+   - Decision: the machine rule both `openArtifactInPanel` and `showOpenArtifactTab` use is `sessionArtifactMachine` in `src/renderer/src/artifacts/machines.ts`, not in `ArtifactsTool.tsx`. Rationale: `machines.ts` is the leaf that already decides an artifact's machine; placing the rule in the panel tool would make `library/actions.ts` import that tool's module tree, which reaches `library/actions.ts` again (an import cycle). `machines.ts` is a P5 file no wave child owns.
+   - Decision: `endsSelection` is exported through `transcript/index.ts` beside `openArtifactMention` (§E: the mod surface reaches the transcript only through that file), and the transcript's frozen public surface (`transcript/index.test.ts`, C6's M5) gains the two names. This entry is the dated record that file's header asks for.
+   - Decision: the link's key handler reads the native event's `defaultPrevented` (the live value; the dispatcher's capture listener has run before React's root listener, so it is decision 8's test). Under a mod's surface a click that ends a selection is still prevented and stopped, and opens nothing, so the component's own handler cannot open it with the host's actions.
+   - Decision: the card's `showOpenArtifactTab` answers false for its own artifact and when no action is registered, and otherwise passes `location` only when there is one (the argument forms).
+   - Decision: decision 5's "the side column is left as it is" means what the column shows and where it stands in it: through `openArtifactTab`'s `revealMain()`, "Show that tab" docks a maximized or floating side column before the tab comes forward, as ⌘-click does, since a maximized column would hide the tab the click shows. Reported to the architect with the recommendation to accept; recorded as built pending a contrary ruling.
+   - Decision: the scene's picture passes `shootThemes`'s existing `before` hook through the scene's `shoot`, so each theme's shot is of the focused mention; A14.6's "nothing opened" is read at the end of A14.4 rather than by a timed wait.
+   - Where: M2; Interfaces §E and §F; decision 5.
 
 ## Outcomes & Retrospective
 
