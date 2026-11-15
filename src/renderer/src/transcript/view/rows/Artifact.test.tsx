@@ -11,7 +11,7 @@ import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { remoteRow } from '../../../../../../test/support/builders';
-import { OTHER_MACHINE } from '../../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { artifactMachineOf, resetArtifactMachines } from '../../../artifacts/machines';
 import { connectLibrary, resetLibrary } from '../../../library/store';
 import { resetRemoteLaneBStore } from '../../../lane-b/remote-session';
@@ -214,7 +214,7 @@ describe('the row of an agent’s delete', () => {
     expect(heading(container)).toBe('Deleted Draft plan');
     expect(undoButton().disabled).toBe(true); // the library has not answered yet
     await act(async () => {});
-    expect(reads).toEqual([undefined]); // this Mac's library: the session is this Mac's
+    expect(reads).toEqual([TEST_MACHINE]); // this Mac's library: the session is this Mac's
     expect(undoButton().disabled).toBe(false);
     fireEvent.click(undoButton());
     fireEvent.click(undoButton());

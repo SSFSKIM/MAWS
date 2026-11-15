@@ -6,10 +6,8 @@ import { useSyncExternalStore } from 'react';
 
 const held = new Map<object, { artifactId: string; unsent: number }>();
 const listeners = new Set<() => void>();
-let version = 0;
 
 const changed = () => {
-  version += 1;
   for (const listener of [...listeners]) listener();
 };
 
@@ -35,8 +33,7 @@ const subscribe = (listener: () => void) => {
 
 /** The same, followed in a render. */
 export function useUnsentWhileDeleted(artifactId: string): boolean {
-  useSyncExternalStore(subscribe, () => version);
-  return unsentWhileDeleted(artifactId);
+  return useSyncExternalStore(subscribe, () => unsentWhileDeleted(artifactId));
 }
 
 // Tests.
