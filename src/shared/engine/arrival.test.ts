@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { askSteerText } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, nothingOpen, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, nothingOpen, ownWordsOf, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -462,5 +462,32 @@ describe('readNext and turnOriginOf', () => {
       ).map((arrival) => [arrival.class, turnOriginOf(arrival)]),
     );
     expect(origins).toEqual({ own: 'human', consent: 'human', peer: 'peer', subagent: 'engine', task: 'engine', schedule: 'engine', answer: 'engine', command: 'engine', wake: 'engine' });
+  });
+});
+
+// UX wave U3b (M3; Interfaces §D, Probes 5): a prompt's text as the person's own words, the reader's `own` reading for a
+// text alone: the rewind's text of a prompt sminos delivered opens with the frame line, which the fork's window never
+// shows as the person's words.
+describe('ownWordsOf', () => {
+  it('takes the words after a whole frame line that names the person', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nDraft the volunteers’ note.')).toBe('Draft the volunteers’ note.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nLine one.\nLine two.')).toBe('Line one.\nLine two.');
+  });
+
+  it('keeps the frame line before words that alone would read as the engine’s interrupt marker, as the reader does', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]')).toBe('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]');
+  });
+
+  it('leaves every other text as it is: a typed prompt, another sender’s frame, a frame line with nothing after it', () => {
+    expect(ownWordsOf('Check the gauges.')).toBe('Check the gauges.');
+    expect(ownWordsOf('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.')).toBe('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]')).toBe('[sminos message from human id=0a1b2c3d]');
+  });
+
+  it('reads the recorded rewind of a delivered prompt (u3b-fork-delivered, seq 25) as its words', () => {
+    const row = loadUxwaveJournal('u3b-fork-delivered').find((entry) => entry.seq === 25)!;
+    const prefill = (row.frame as { response: { response: { prefillText: string } } }).response.response.prefillText;
+    expect(prefill.startsWith('[sminos message from human id=')).toBe(true);
+    expect(ownWordsOf(prefill)).toBe('UXW delivered: reply with only the word DELIVERED.');
   });
 });

@@ -12,7 +12,7 @@ import { journalToEvents } from '../dev/journal';
 import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
 import type { OlderPagesState, SeekResult, TranscriptSource } from '../source/types';
 import { createStore } from 'zustand/vanilla';
-import { Transcript } from './Transcript';
+import { estimateRow, Transcript } from './Transcript';
 import { markTranscriptCarry, recordTranscriptScroll, scrollSignature, takeTranscriptCarry } from './scroll-carry'; // P4-B3
 
 // happy-dom has no layout: give the scroller a viewport and every row a height so the virtualiser mounts rows.
@@ -759,5 +759,40 @@ describe('a jump to a message older than what is loaded', () => {
     expect(screen.getByTestId('reach').dataset.phase).toBe('loading');
     await act(async () => walks[1]!.settle({ outcome: 'absent' }));
     await waitFor(() => expect(screen.getByTestId('reach').dataset.phase).toBe('missing'));
+  });
+});
+
+// UX wave U3b (M3; decision 12, Interfaces §C, ruled R15): the mount places each answer's action row from the list it
+// draws, once per change of the list, and a row draws it from the mount's store.
+describe('the answers’ action rows', () => {
+  const words = () => [...document.querySelectorAll('.transcript-answer-actions')].map((line) => line.previousElementSibling?.textContent); // the answer's body, which the row draws first
+
+  it('stand under the last answer before each prompt and under the list’s last answer, and follow a turn that arrives', async () => {
+    const b = builder();
+    b.turn('u1', 'Check the gauges.');
+    b.text('m1', 0, 'Looking at the log.');
+    b.toolUse('t1', 'Read', { file_path: '/work/gauges.csv' }, 'm1', 1);
+    b.result('t1', 'station,offset');
+    b.text('m2', 0, 'All five are inside the limit.');
+    b.end(['u1']);
+    b.turn('u2', 'Draft the note.');
+    b.text('m3', 0, 'Here is the note.');
+    b.end(['u2']);
+    let push: (batch: SessionEvent[]) => void = () => {};
+    const source: TranscriptSource = { key: `transcript-test-${++keys}`, subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve([...b.events]) };
+    render(<Transcript source={source} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+    await waitFor(() => expect(words()).toEqual(['All five are inside the limit.', 'Here is the note.']));
+    const from = b.events.length;
+    b.turn('u3', 'Send it.');
+    b.text('m4', 0, 'Sent.');
+    b.end(['u3']);
+    act(() => push(b.events.slice(from)));
+    await waitFor(() => expect(words()).toEqual(['All five are inside the limit.', 'Here is the note.', 'Sent.']));
+  });
+
+  it('make an answer that has one 16 px taller in the list’s first guess', () => {
+    const answer = { id: 'text:a' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'assistant_text' as const, messageUuid: null, blockIndex: 0, markdown: 'Done.', live: false, phase: 'answer' as const, model: null };
+    expect(estimateRow(answer, true) - estimateRow(answer)).toBe(16);
   });
 });

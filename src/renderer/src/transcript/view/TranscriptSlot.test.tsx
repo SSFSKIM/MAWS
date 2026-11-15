@@ -699,6 +699,28 @@ describe('TranscriptSlot for another machine’s terminal session', () => {
     expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toContain('Two files.');
   });
 
+  // UX wave U3b (M3; "Routes"): a terminal session on another machine has no MAWS session id there to fork by, so its
+  // answers carry Copy and the time and no Fork, whatever the registered actions hold.
+  it('draws no Fork from here under an answer, though the app registered the act', async () => {
+    listed();
+    register({ forkFrom: { useUnavailable: () => null, run: vi.fn(async () => {}) } });
+    const listeners = new Map<string, (payload: unknown, machine: string) => void>();
+    const invoke = vi.fn((name: string) => Promise.resolve(name === 'laneA.watch' ? { ok: true, value: { watch: 'w1' } } : { ok: false, error: { code: 'internal', message: 'unexpected' } }));
+    const on = vi.fn((name: string, listener: (payload: unknown, machine: string) => void) => (listeners.set(name, listener), () => {}));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on } as unknown as PreloadBridge;
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    const c = new Chain('c4a1f000', 'sminos');
+    c.prompt('List the files.');
+    c.answer('Two files.');
+    const snapshot = { project: 'p', machine: OTHER_MACHINE, session: SESSION, kind: 'snapshot', sub: 'up-1', n: 0, body: { rows: [...c.rows].reverse(), more: false, subagents: [], presence: { record: { status: 'idle' }, bridge: true }, streaming: [] } };
+    act(() => listeners.get('laneA.plane')!({ appSessionId: SESSION, watch: 'w1', messages: [snapshot] }, OTHER_MACHINE));
+    await settle();
+    await settle();
+    expect(document.querySelector('[data-kind="assistant_text"] .transcript-answer-actions')?.textContent).toContain('Copy');
+    expect(screen.queryByRole('button', { name: 'Fork from here' })).toBeNull();
+  });
+
   // Fix wave 2: an underfilled pane cannot scroll to ask again, so an older page the link could not carry says why at
   // the top with a Retry, and the pane does not ask again by itself meanwhile.
   it('offers Retry with the reason for an older page the link could not carry, and asks it again on a click', async () => {
