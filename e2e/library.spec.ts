@@ -821,7 +821,9 @@ test('“Make something new”: four cards and More in one row that wraps in a n
   expect(made!.designSystemId, 'bound to the chosen system').toBe(classroom.id);
   await expect(pageRegion(page), 'Blank left the page for the artifact’s tab').toHaveCount(0);
   await expect(page.locator(`[data-region="main"] [data-artifact-tab="${made!.id}"]`)).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-region="main"]').getByText('Design: Classroom', { exact: true }).first(), 'the document’s breadcrumb names its system').toBeVisible({ timeout: 15_000 });
+  // the breadcrumb is one element whose segments are text between its separators, so it is read whole, not by a segment's exact text
+  const crumb = page.locator('[data-region="main"] [data-header-breadcrumb]').filter({ hasText: 'Design: Classroom' }).first();
+  await expect(crumb, 'the document’s breadcrumb names its system').toBeVisible({ timeout: 15_000 });
 
   // the same for a deck, whose Theme panel names it
   library = await libraryPage(page);
