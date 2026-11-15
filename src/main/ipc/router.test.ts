@@ -432,6 +432,31 @@ describe('main ipc router', () => {
     await expect(invoke(appWindow(DEV_URL), 'settings.get')).resolves.toMatchObject({ error: { code: 'forbidden_sender' } });
   });
 
+  // UX wave U6e: the origin test moved to ./app-origin.ts, which the guard's predicate shares; the sender check answers each
+  // kind of address exactly as before the move, an address that does not parse included
+  it('answers the origin test as before: the built app’s file: page, the dev origin, another origin and an address that does not parse', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const BUILT = 'file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html';
+    const table: [appUrl: string, frameUrl: string, accepted: boolean][] = [
+      [BUILT, BUILT, true],
+      [BUILT, 'file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html#/settings', true],
+      [BUILT, DEV_URL, false],
+      [BUILT, 'not an address', false],
+      [DEV_URL, DEV_URL, true],
+      [DEV_URL, 'http://localhost:5173/index.html?session=1', true],
+      [DEV_URL, 'https://evil.example/', false],
+      [DEV_URL, 'http://localhost:5174/', false],
+      [DEV_URL, 'not an address', false],
+      [DEV_URL, '', false],
+    ];
+    for (const [appUrl, frameUrl, accepted] of table) {
+      await load(appUrl);
+      router.registerMainHandler('settings.get', () => LIGHT);
+      const answer = await invoke(appWindow(frameUrl), 'settings.get');
+      expect(answer, `${frameUrl} under ${appUrl}`).toEqual(accepted ? { ok: true, value: LIGHT } : { ok: false, error: { code: 'forbidden_sender', message: 'settings.get may only be invoked by the app window' } });
+    }
+  });
+
   it('answers host-owned commands with host_unavailable when no supervisor is passed', async () => {
     await expect(invoke(appWindow(), 'engine.ping')).resolves.toMatchObject({
       ok: false,
