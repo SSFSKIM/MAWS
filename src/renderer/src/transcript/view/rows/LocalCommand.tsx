@@ -5,7 +5,8 @@
 // (`plain`), preformatted, and that one drawing is clipped to two lines of the row's type while the disclosure
 // `line:<row id>` is closed. "Show more" is offered when the closed drawing is measured as cut, as the bubble measures its
 // fold (rows/User.tsx), and opens it; "Show less" closes it. So both states hold the same text. A line with no bubble of
-// its command in its turn names the command first, where the engine said which it ran.
+// its command in its turn names the command first, where the engine said which it ran. Line ends are kept (ruling R4) by
+// the transcript's markdown itself, whose remark-breaks draws each source line break as a break.
 import { useLayoutEffect, useRef, useState } from 'react';
 import { COMMAND_LINE, commandLead } from '../../model/copy';
 import type { Row } from '../../model/rows';
@@ -32,20 +33,25 @@ export function LocalCommandRow({ row }: { row: Extract<Row, { kind: 'local_comm
     return () => observer.disconnect();
   }, [open, row.text, row.plain]);
 
+  // Ruling R2: a one-line output sits on the bubble's side, as wide as its words; one whose text has a line end is a block
+  // of the column's width in both states, so opening it moves nothing sideways. The text decides, not a measured width.
+  const block = row.text.includes('\n');
   return (
-    <div className="transcript-command" data-error={row.error ? '' : undefined}>
-      <div className="transcript-command-line">
-        <span className="transcript-command-mark" aria-hidden="true">{COMMAND_LINE.mark}</span>
-        {row.lone && row.run && <span className="transcript-command-name">{commandLead(row.run)}</span>}
-        <div ref={output} className="transcript-command-output" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
-          {row.plain ? <pre>{row.text}</pre> : <Markdown markdown={row.text} live={false} />}
+    <div className="transcript-command" data-error={row.error ? '' : undefined} data-block={block ? '' : undefined}>
+      <span className="transcript-command-mark" aria-hidden="true">{COMMAND_LINE.mark}</span>
+      <div className="transcript-command-body">
+        <div className="transcript-command-text">
+          {row.lone && row.run && <span className="transcript-command-name">{commandLead(row.run)}</span>}
+          <div ref={output} className="transcript-command-output" data-open={open ? '' : undefined} data-collapsed={overflows && !open ? '' : undefined}>
+            {row.plain ? <pre>{row.text}</pre> : <Markdown markdown={row.text} live={false} />}
+          </div>
         </div>
+        {(open || overflows) && (
+          <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
+            {open ? COMMAND_LINE.showLess : COMMAND_LINE.showMore}
+          </button>
+        )}
       </div>
-      {(open || overflows) && (
-        <button type="button" className="transcript-quiet-button" aria-expanded={open} onClick={toggle}>
-          {open ? COMMAND_LINE.showLess : COMMAND_LINE.showMore}
-        </button>
-      )}
     </div>
   );
 }
