@@ -7,9 +7,10 @@
 // that rests on, from the rows, the metas, the bridge's agents, the parents' rows and whether the process runs. Pure:
 // rows in, in file order, in any batches; the body out. Not ported: `mcp` (answered empty: the MCP widget reads its own
 // source), an entry's `file` (the agent file's facts, which nothing here reads), `jobs_body`'s `also`, `view`, `copy` and
-// the `output` answer. Beside the rules stand `callAt` and `facts`, which change nothing derived; and one rule is read
-// more widely than sminos reads it, every <task-id> of a notification block (R9). Keep it in step with sminos (the
-// PROVENANCE note).
+// the `output` answer. Beside the rules stand `callAt`, `calledInBackground` and `facts`, which change nothing derived.
+// Two rules are ahead of sminos's, by ruling (doperpowers issue 504 asks sminos to follow): every <task-id> of a
+// notification block is read (R9), and the parent rule spares a background agent (N1). Keep it in step with sminos
+// otherwise (the PROVENANCE note).
 import type { Job, JobStatus, SubagentOutcome, SubagentSpawn, SubagentStatus } from 'desk-hub/protocol';
 import type { AgentMeta, BridgeAgent, DerivedAgent } from '@shared/lane-a/agents';
 
@@ -183,6 +184,7 @@ interface Started {
 export class Ledger {
   private readonly calls = new Map<string, Call>(); // toolUseId → an Agent, Task, Bash, Monitor or TaskStop call, until its result
   private readonly callTimes = new Map<string, string>(); // toolUseId → an Agent or Task call's row time, kept after its result
+  private readonly backgroundCalls = new Set<string>(); // the Agent and Task calls whose input asked for the background
   private readonly evidence: Said[] = []; // every word a row said, in row order
   private readonly byTask = new Map<string, number[]>(); // task id → indexes into evidence
   private readonly byTool = new Map<string, number[]>(); // toolUseId → indexes into evidence
@@ -243,6 +245,12 @@ export class Ledger {
     return this.callTimes.get(toolUseId) ?? null;
   }
 
+  // Whether an Agent or Task call's input asked for the background (`run_in_background` true or "true"), kept after
+  // its result: one of the three ways derive knows a background agent (N1).
+  calledInBackground(toolUseId: string): boolean {
+    return this.backgroundCalls.has(toolUseId);
+  }
+
   private read(value: unknown): void {
     const row = record(value);
     if (row === null) return;
@@ -272,7 +280,10 @@ export class Ledger {
     if (typeof input.command === 'string') call.command = input.command;
     if (typeof input.task_id === 'string') call.taskId = input.task_id;
     if (AGENT_CALLS.includes(name)) {
-      if (input.run_in_background === true || input.run_in_background === 'true') call.background = true;
+      if (input.run_in_background === true || input.run_in_background === 'true') {
+        call.background = true;
+        this.backgroundCalls.add(id);
+      }
       if (typeof at === 'string') this.callTimes.set(id, at);
       this.rowFacts++;
     }
@@ -384,9 +395,12 @@ export interface DeriveInput {
 
 // DX4's `subagents` body as derived here: each meta's agent with its status and what that rests on, the loop's jobs.
 // `mcp` is empty: a local session's MCP servers are read from MAWS's own source. The status and its evidence, the first
-// that holds (DX4, "Precedence"): the rows' outcome is terminal; the session's process is gone; the parent has ended;
-// the bridge holds the agent as not running; the bridge holds it as running; the rows say it runs (a launch); none.
-// The bridge counts only while the process runs.
+// that holds (DX4, "Precedence"): the rows' outcome is terminal; the session's process is gone; the parent has ended,
+// for an agent that is not a background one; the bridge holds the agent as not running; the bridge holds it as running;
+// the rows say it runs (a launch); none. The bridge counts only while the process runs. The parent rule is narrower
+// than sminos's (U8d's Decision Log 6, N1; doperpowers issue 504): a background agent can outlive its parent, so the
+// parent's end is no evidence of its own. A background agent is one its meta (`requestShape`), the bridge's spawn or
+// its call's input says runs in the background.
 export function derive(ledger: Ledger, { metas, bridge, parents, sessionRunning }: DeriveInput): { subagents: DerivedAgent[]; jobs: Job[]; mcp: [] } {
   const held = new Map<string, BridgeAgent>();
   for (const agent of bridge ?? []) if (record(agent) !== null) held.set(agent.agentId, agent);
@@ -406,11 +420,12 @@ export function derive(ledger: Ledger, { metas, bridge, parents, sessionRunning 
     const tool = str(meta.toolUseId) ?? str(spawn?.toolUseId);
     const loop = parent !== null ? (parents.get(parent) ?? null) : ledger;
     const outcome = loop?.agentOutcome(agentId, tool, background) ?? null;
+    const backgroundAgent = background || (tool !== null && loop?.calledInBackground(tool) === true);
     const running = live !== null && typeof live.running === 'boolean' ? live.running : null;
     const decided = ((): Pick<DerivedAgent, 'status' | 'evidence'> => {
       if (outcome !== null && outcome.status !== 'running') return { status: outcome.status, evidence: 'rows' };
       if (!sessionRunning) return { status: 'exited', evidence: 'session' };
-      if (parent !== null && metaOf.has(parent) && !busy.has(parent) && ENDED.includes(entry(parent).status)) return { status: 'exited', evidence: 'parent' };
+      if (!backgroundAgent && parent !== null && metaOf.has(parent) && !busy.has(parent) && ENDED.includes(entry(parent).status)) return { status: 'exited', evidence: 'parent' };
       if (running === false) return { status: 'exited', evidence: 'bridge' };
       if (running === true) return { status: 'running', evidence: 'bridge' };
       if (outcome !== null) return { status: 'running', evidence: 'rows' };
