@@ -21,3 +21,20 @@ export function disableChromiumFeatures(commandLine: FeatureSwitches, features: 
   const merged = [...new Set([...current, ...features].map((feature) => feature.trim()).filter(Boolean))];
   commandLine.appendSwitch('disable-features', merged.join(','));
 }
+
+// Board ticket 662: Blink's settings main sets for every renderer, before the app is ready. A `<link rel="dns-prefetch">`
+// connected to a document makes Chromium resolve the name it holds, so a page in a store frame (an HTML artifact's
+// script, or markup it writes into its document) could send data out of the machine in DNS queries; the frame's policy,
+// its sandbox, main's request filter and the store-frame policies never see that query
+// (spikes/viewer-frame/FINDINGS.md, "2026-11-14 follow-up: the DNS-prefetch channel"). `dnsPrefetchingEnabled=false`
+// closes it. The cost is app-wide: no page in the app gets DNS-prefetch hints, the in-app browser included (its anchors
+// lose their hover prefetch); name resolution and page loads are untouched. The page-side controls do not govern an
+// explicit link on Chromium 152: an `X-DNS-Prefetch-Control: off` header or meta leaves it sending, and Electron's web
+// preferences and sessions have nothing that reaches the setting.
+export const STARTUP_BLINK_SETTINGS: readonly string[] = ['dnsPrefetchingEnabled=false'];
+
+// Chromium reads one `--blink-settings=a=b,c=d` list and a second append replaces the first, so this is the only writer
+// of the switch (the unit guard holds every other source to that) and runs once, in main's entry.
+export function setBlinkSettings(commandLine: Pick<FeatureSwitches, 'appendSwitch'>, settings: readonly string[]): void {
+  commandLine.appendSwitch('blink-settings', settings.join(','));
+}

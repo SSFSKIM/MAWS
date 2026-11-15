@@ -213,6 +213,83 @@ test('the capture renders a scheme-served artifact offscreen at the asked size; 
   }
 });
 
+// Ticket 662: a page in a store frame cannot send data out through DNS. A `<link rel="dns-prefetch">` connected to the
+// document makes Chromium resolve the name it holds, past the frame's policy, its sandbox and main's request filter;
+// main's `blink-settings` switch (src/main/chromium-features.ts) turns Blink's DNS prefetching off. An HTML artifact,
+// framed as the viewer frames it (the handler's policy, a scripts-only sandbox), connects a prefetch link made by script
+// and one written as markup into the live document, each for a name of the run's own under example.com. Chromium's net
+// log of the window's session records the resolver's jobs; the positive control is a name main resolves on purpose
+// through the same resolver after the page's links, so an absent name means no job was asked for, not a log that
+// records none. Whether the control resolves does not matter: its job is logged when it starts.
+const prefetchPage = (names: { script: string; markup: string }) =>
+  `<!doctype html><html><head><meta charset="utf-8"><title>Travel notes</title></head><body style="margin:0;padding:24px;font:16px system-ui">
+<h1>Travel notes</h1><div id="hints"></div>
+<script>
+const link = document.createElement('link');
+link.rel = 'dns-prefetch';
+link.href = '//${names.script}';
+document.head.append(link);
+document.getElementById('hints').innerHTML = '<link rel="dns-prefetch" href="//${names.markup}">';
+parent.postMessage('e2-prefetch-attached', '*');
+</script></body></html>`;
+
+test('ticket 662: an HTML artifact’s dns-prefetch links ask the resolver for nothing; a name main resolves on purpose is in the same net log', async () => {
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0' } });
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2-dns-')));
+  try {
+    const label = randomUUID().slice(0, 8);
+    const names = { script: `maws-e2e-${label}-script.example.com`, markup: `maws-e2e-${label}-markup.example.com`, control: `maws-e2e-${label}-control.example.com` };
+    const id = randomUUID();
+    const copy = join(maws.userData, 'deliverables', APP, id, 'v1.html');
+    mkdirSync(join(copy, '..'), { recursive: true });
+    writeFileSync(copy, prefetchPage(names));
+    const at = new Date().toISOString();
+    seed(maws.userData, { id, appSessionId: APP, kind: 'artifact', artifactId: 'notes', title: 'Travel notes', path: copy, versions: [{ path: copy, at }], createdAt: at, updatedAt: at });
+    await importSeeded(maws.page);
+    const url = await pageUrlOf(maws.page, id);
+
+    // the net log of the window's session, the frame's (its default capture mode keeps a request's host)
+    const log = join(scratch, 'net-log.json');
+    await maws.app.evaluate(({ BrowserWindow }, path) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.startLogging(path), log);
+    const attached = maws.page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 10_000);
+          window.addEventListener('message', (event) => {
+            if (event.data === 'e2-prefetch-attached') {
+              clearTimeout(timer);
+              resolve(true);
+            }
+          });
+        }),
+    );
+    await mountFrame(maws, url, 'allow-scripts');
+    expect(await attached, 'the page’s script ran and connected both links').toBe(true);
+    // a prefetch goes from the frame's renderer to the browser process and on to the resolver after the insertion
+    await maws.page.waitForTimeout(2_000);
+    await maws.app.evaluate(async ({ BrowserWindow }, host) => {
+      const { session } = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents;
+      await Promise.race([session.resolveHost(host).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    }, names.control);
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.stopLogging()); // flushed to disk when it resolves
+
+    const { constants, events } = JSON.parse(readFileSync(log, 'utf8')) as { constants: { logEventTypes: Record<string, number> }; events: { type: number; params?: unknown }[] };
+    const typeNames = new Map(Object.entries(constants.logEventTypes).map(([name, type]) => [type, name]));
+    // each event that names one of the run's names, by its type alone: its other params hold the machine's resolver
+    // settings (search domains among them), which a report keeps out
+    const mentions = (name: string) => events.filter((event) => JSON.stringify(event.params ?? {}).includes(name)).map((event) => typeNames.get(event.type) ?? String(event.type));
+    const found = { control: mentions(names.control), script: mentions(names.script), markup: mentions(names.markup) };
+    const report = `net log: ${events.length} events\n${Object.entries(found).map(([which, types]) => `${which} ${names[which as keyof typeof names]}: ${types.length} events ${JSON.stringify(types)}`).join('\n')}`;
+    console.log(`[dns-prefetch] ${report}`);
+    expect(found.control.length, `the control's resolver job is in the log\n${report}`).toBeGreaterThan(0);
+    expect(found.script, `the script-made link asked for no name\n${report}`).toEqual([]);
+    expect(found.markup, `the markup link asked for no name\n${report}`).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 // M6: the bridge script on the real Chromium (Design §10): served into an artifact whose doctype follows a comment that
 // mentions `<head>` (the placement M3's review found wrong: the page must stay in standards mode and the script must
 // run), it picks in a scripts-only sandboxed frame when the app asks, swallows the click it picks with, posts the pick to
