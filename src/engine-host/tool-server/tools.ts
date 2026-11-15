@@ -11,6 +11,7 @@ import { ArtifactSession, type ArtifactToolDeps } from './artifact-context';
 import { artifactExportTool, type ExportBridge } from './artifact-export';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactSearchTool } from './artifact-search'; // P4-B4
+import { artifactDeleteTool } from './artifact-delete'; // UX wave U10b (M4)
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { artifactScreenshotTool, type CaptureBridge } from './artifacts';
 import { askTool } from './ask';
@@ -68,5 +69,6 @@ export function mawsTools(deps: {
       ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
     ], genericRead).map(afterImport),
     afterImport(artifactSearchTool(artifacts)), // P4-B4: after the document tools
+    afterImport(artifactDeleteTool(artifacts)), // UX wave U10b (M4): last, as in MAWS_TOOL_NAMES
   ];
 }
