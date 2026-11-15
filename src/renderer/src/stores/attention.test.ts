@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { CommandResult } from '@shared/ipc/schema';
@@ -8,7 +8,8 @@ import { item, record, remoteRow } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { ANSWERED_ELSEWHERE, connectAnswers, createAttentionStore, NOT_PENDING_MS, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall, selectWaitingForms, selectWaitingRequests } from './attention';
+import { resetShellStores } from '../test-support/shell-stores';
+import { ANSWERED_ELSEWHERE, connectAnswers, createAttentionStore, NOT_PENDING_MS, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall, selectWaitingForms, selectWaitingRequests, useAttention } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -643,5 +644,31 @@ describe('a settling receipt', () => {
     expect(store.getState().settling.get(S)?.map((e) => e.id)).toEqual(['b']);
     store.getState().releaseSettling(S, 'b' as never);
     expect(store.getState().settling.has(S)).toBe(false);
+  });
+});
+
+// UX wave U1b M3 (the architect's ruling of 2026-11-15): the test reset clears the answers the app's store holds in
+// flight, so a case that leaves one out keeps no later case's answer to the same request from being sent. The two cases
+// run in this order: the first leaves its answer out, the second answers the same item.
+describe('the test reset and an answer left in flight', () => {
+  const asked = item('s1', 'question', '2026-09-28T09:00:00Z', { id: 'att-left' as never, request: { requestId: 'req-left' as never, toolUseId: 'toolu_left' as never, taskId: null, agentId: null } });
+  const ANSWERS: RequestAnswer = { kind: 'question', answers: { 'Which file?': 'a.ts' } };
+  let sent = 0;
+  let off: () => void = () => {};
+  beforeEach(() => {
+    resetShellStores();
+    sent = 0;
+    off = connectAnswers({ send: () => ((sent += 1), new Promise<never>(() => {})), terminalOnly: () => false }); // a write that never answers
+  });
+  afterEach(() => off());
+
+  it('an earlier case leaves its answer out', () => {
+    void useAttention.getState().deliver(asked, ANSWERS);
+    expect(sent).toBe(1);
+  });
+
+  it('a later case answering the same request still sends it', () => {
+    void useAttention.getState().deliver(asked, ANSWERS);
+    expect(sent).toBe(1);
   });
 });
