@@ -71,9 +71,9 @@ export class ArtifactSession {
 // An answer about a Space (a create in it, a read of an artifact in it, a describe of a kind there) carries the Space's
 // instructions when the Space has some and the session was not given them at this stamp (M9 restamps a text only when
 // it changes), so once per session and Space, again after a change or a compaction. What an answer carries is settled
-// with the answer; it counts as given only once the server hands that answer to the engine (`instructedOnDelivery`, the
-// result's `delivered`; the branch review of U10b-4), so a call that fails, or one the engine withdrew while it ran,
-// gives nothing. A replayed call answers what it recorded and marks nothing.
+// with the answer; it counts as given only once that answer's write to the engine succeeded (`instructedOnDelivery`, the
+// result's `delivered`, run as the write's `flushed`; the branch review of U10b-4), so a call that fails, one the engine
+// withdrew while it ran, or one whose answer could not be written gives nothing. A replayed call answers what it recorded and marks nothing.
 export interface HeldInstructions {
   given: SpaceInstructionsAnswer;
   at: number;

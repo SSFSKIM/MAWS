@@ -205,10 +205,11 @@ export function spaceInstructionsOf(s: LibraryState): ReadonlyMap<string, string
   return answer === undefined ? NO_INSTRUCTIONS : instructionsMapOf(answer);
 }
 
-// The same read as a writer needs it (the branch review of U10b-4): not read yet, failed (no answer yet and a refusal,
-// whose message it keeps while it is read again), or read (the last good answer, which a later refused read keeps). A
-// field that would overwrite the stored text is held until it is read. One value per read, so a selector over it is
-// stable.
+// The same read as a writer needs it (the branch review of U10b-4): not read yet, failed (the last read was refused,
+// before or after a good answer, until a read succeeds; its message kept while it is read again), or read. A field that
+// would overwrite the stored text is held until it is read: a refused refresh may hide text written since, so it is
+// failed here, while `spaceInstructionsOf` keeps the last good map for the marks and the cards' chip. One value per
+// read, so a selector over it is stable.
 export type SpaceInstructionsRead = { status: 'unread' } | { status: 'failed'; error: string } | { status: 'read'; instructions: ReadonlyMap<string, string> };
 const UNREAD: SpaceInstructionsRead = { status: 'unread' };
 const readsOfInstructions = new WeakMap<LibraryRead<unknown>, SpaceInstructionsRead>();
@@ -218,7 +219,7 @@ export function spaceInstructionsReadOf(s: LibraryState): SpaceInstructionsRead 
   let known = readsOfInstructions.get(read);
   if (!known) {
     const answer = read.value as { spaceId: string; text: string }[] | undefined;
-    known = answer === undefined ? { status: 'failed', error: read.error! } : { status: 'read', instructions: instructionsMapOf(answer) };
+    known = read.error !== null || answer === undefined ? { status: 'failed', error: read.error! } : { status: 'read', instructions: instructionsMapOf(answer) };
     readsOfInstructions.set(read, known);
   }
   return known;

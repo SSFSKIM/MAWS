@@ -41,8 +41,9 @@ export interface McpToolResult {
   content: McpContentBlock[];
   isError?: true;
   // UX wave U10b (the branch review of U10b-4): what the tool counts as done only once the engine has this answer (a
-  // Space's instructions given, artifact-context.ts's `instructedOnDelivery`). The server runs it as it hands the answer
-  // over, never for a call withdrawn or answered from outside, and writes the answer without it.
+  // Space's instructions given, artifact-context.ts's `instructedOnDelivery`). The server passes it to the answer's write
+  // as `flushed`, which the outbound writer runs once the frame is written and journaled, before any inbound frame held
+  // meanwhile; never for a write refused, a call withdrawn or one answered from outside. The answer is written without it.
   delivered?: () => void;
 }
 
@@ -243,8 +244,7 @@ export class MawsToolServer {
     }
     if (controller.signal.aborted || call.answered) return this.retire(requestId);
     const { delivered, ...answer } = result;
-    delivered?.();
-    await this.result(requestId, id, answer);
+    await this.result(requestId, id, answer, delivered && { flushed: delivered }); // run once the write succeeded
     this.retire(requestId);
   }
 
@@ -253,8 +253,8 @@ export class MawsToolServer {
     if (this.delivering.delete(requestId)) this.deps.onChange?.();
   }
 
-  private result(requestId: RequestId, id: RpcId, result: unknown): Promise<void> {
-    return this.write(requestId, { jsonrpc: '2.0', id, result }); // the key order the engine echoes back (E0a seqs 6 and 9)
+  private result(requestId: RequestId, id: RpcId, result: unknown, opts?: WriteOptions): Promise<void> {
+    return this.write(requestId, { jsonrpc: '2.0', id, result }, opts); // the key order the engine echoes back (E0a seqs 6 and 9)
   }
 
   private error(requestId: RequestId, id: RpcId | null, code: number, message: string): void {
@@ -262,7 +262,7 @@ export class MawsToolServer {
   }
 
   // Settles once the write did, either way: a refused write is logged, never thrown.
-  private write(requestId: RequestId, rpc: Record<string, unknown>): Promise<void> {
-    return this.deps.respond(requestId, { mcp_response: rpc }).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
+  private write(requestId: RequestId, rpc: Record<string, unknown>, opts?: WriteOptions): Promise<void> {
+    return this.deps.respond(requestId, { mcp_response: rpc }, opts).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
   }
 }
