@@ -148,7 +148,8 @@ import { reachMachine } from '../src/mawsd/machine-client';
 import { answered, ENGINE_HOST_BROWSER_WORK, SCREENCAST, startPages as startHeadlessPages } from './support/headless-browser'; // P5 O17 M8; M7: the pre-O17 app's cell
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M7
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
-import { AgentSeam } from './support/dashboards';
+import { AgentSeam, refusalOf } from './support/dashboards'; // UX wave U10b: refusalOf
+import { TOOL_ERRORS } from '../src/shared/maws/tools'; // UX wave U10b
 import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
 import { readSealedText } from './support/connector-direct-checks';
 import { expectMockCustody } from './support/connector-direct-oauth';
@@ -1788,6 +1789,10 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
 //   |                                               | build finds                                           | standing beside the message, each said             |
+//   | the artifact store (UX wave U10b-2): the key  | (deleted draft, both ways): F's `artifacts.status` is | the return of (deleted draft, both ways): the     |
+//   | `agentDraft:<id>` in `meta` (the mark), an    | `ok`; the draft this build's agent deleted is not in  | delete of the draft F's person typed in is refused |
+//   | agent's delete recorded in it, and a cleared  | F's library; F's person types in the agent's other    | (`why: 'unknown'`); the agent's delete made before |
+//   | `deletedAt`                                   | draft and F's store holds the text                    | the stay is still undone, and the store is `ok`    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -2258,6 +2263,85 @@ test('(sidebar, both ways) this build hides a session and quits; the peer, which
     expect(again.maws.consoleErrors()).toEqual([]);
     await s.quit(again);
     said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
+});
+
+// ---- UX wave U10b-2: an agent's draft, its delete and its undo, across a stay under the peer ------------------------------
+
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M4 and M5, §C.1, §G; the wave's root,
+// UC-14): an agent's draft carries a mark in the store's `meta` table (`agentDraft:<id>`), which this build keeps with
+// every content row its own sessions write, and which a build from before U10b never reads (its `meta` is read by key
+// only) and never keeps: a content row it appends leaves the mark behind the artifact's newest row. No migration is
+// added, so the peer's store stays `ok`. Its row is in UC-14's coverage table above (U13a's block).
+//   (deleted draft, both ways) this build's agent, a session of the host's agent seam, makes two drafts and deletes the
+//                              second, and quits. The peer opens the profile: its `artifacts.status` is `ok`, its library
+//                              lists the first draft and not the deleted one, and a person types in the first, which
+//                              the peer's store holds. This build opens the profile again: the agent's delete of the
+//                              draft the person typed in is refused with §C.1's sentence (`why: 'unknown'`, the mark
+//                              behind the newest row), the delete made before the stay is still undone, and the store
+//                              is `ok`. Skipped for a peer whose store keeps the mark (its storage.ts names agentDraft).
+const keepsAgentDrafts = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/engine-host/documents/storage.ts'), 'utf8').includes('agentDraft');
+const DRAFTER = 'xb-drafter'; // the agent's session, as the host's seam names it
+const PERSON_TYPED = ' A person added this under the older build.';
+
+test('(deleted draft, both ways) this build’s agent makes two drafts and deletes one; the peer’s store is ok, lists the kept draft alone, and takes a person’s edit there; this build refuses the agent’s delete of the edited draft and still undoes the earlier delete', async () => {
+  const { here, peer } = builds();
+  test.skip(keepsAgentDrafts(peer), `the peer (wire ${wireOf(peer)}) keeps the agent-draft mark (its storage.ts names agentDraft): a build from U10b on, not one that has never heard of it`);
+  await withScratch('xb-deleted-draft', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) drafts and deletes; ${peer.label} (wire ${wireOf(peer)}) opens the profile and a person types; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam, on every launch of the scene
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const statusOf = async (page: Page) => value(await invoke(page, 'artifacts.status', undefined));
+    const listed = async (page: Page) => value(await invoke(page, 'library.list', {})).rows.map((row) => row.id);
+
+    // this build: the agent's two drafts, the second deleted by the agent
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const plan = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this.' })).artifactId;
+    const notes = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft notes', handle: 'draft-notes', content: '# Draft notes\n\nAn agent wrote these.' })).artifactId;
+    expect(await agent.ok(DRAFTER, 'artifact_delete', { artifact: notes })).toEqual({ status: 'deleted', artifactId: notes, kind: 'document', title: 'Draft notes' });
+    expect(value(await invoke(ours.page, 'artifacts.get', { artifactId: notes })).deleted, 'an agent’s delete, which Undo can take back').toEqual({ title: 'Draft notes', kind: 'document', undoable: true });
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  drafted: ${plan} (kept), ${notes} (deleted by the agent)`);
+
+    // the peer: its store ok, the deleted draft not listed, a person's edit in the kept one
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    expect(await statusOf(theirs.page), `${peer.label}'s store after this build wrote: ok, not readOnly (no migration added)`).toMatchObject({ status: 'ok' });
+    await expect.poll(() => listed(theirs.page), { timeout: 20_000, message: `${peer.label}'s library lists the kept draft` }).toContain(plan);
+    expect(await listed(theirs.page), `${peer.label}'s library leaves out the draft the agent deleted`).not.toContain(notes);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 20_000 });
+    const editor = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${plan}"] .ProseMirror[data-editor="live"]`);
+    await expect(editor, `${peer.label} draws the draft`).toContainText('An agent wrote this.', { timeout: 20_000 });
+    await editor.click();
+    await theirs.page.keyboard.press('End');
+    await theirs.page.keyboard.type(PERSON_TYPED);
+    const read = async () => JSON.stringify(await agent.ok('xb-reader', 'artifact_read', { artifact: plan }));
+    await expect.poll(read, { timeout: 20_000, message: `${peer.label}'s store holds the person's edit` }).toContain(PERSON_TYPED.trim());
+    expect(await statusOf(theirs.page), `${peer.label}'s store after its own write`).toMatchObject({ status: 'ok' });
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: status ok, ${notes} not listed, a person's edit in ${plan}`);
+
+    // this build again: the edited draft refused, the earlier delete undone
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const refused = await agent.call(DRAFTER, 'artifact_delete', { artifact: plan });
+    expect(refused.text, 'the delete of a draft a person wrote to under the peer').toContain(TOOL_ERRORS.deleteUnknown('Draft plan'));
+    expect(refusalOf(refused)).toMatchObject({ reason: 'invalid', why: 'unknown' });
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: plan })).artifact?.title, 'the edited draft stays').toBe('Draft plan');
+    value(await invoke(again.page, 'artifacts.undelete', { artifactId: notes }));
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: notes })).artifact?.title, 'the agent’s delete made before the stay, undone after it').toBe('Draft notes');
+    await expect.poll(() => listed(again.page), { timeout: 20_000, message: 'the library lists the restored draft' }).toContain(notes);
+    expect(await statusOf(again.page)).toMatchObject({ status: 'ok' });
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the delete of ${plan} refused (${refusalOf(refused).why as string}), ${notes} undeleted`);
     record(said);
   });
 });
