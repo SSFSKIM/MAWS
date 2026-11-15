@@ -17,6 +17,9 @@
 // Board 525: another member's session on either lane whose read its machine refused at the member's grade (Can message)
 // reads as what the member can do there and whom to ask for View, with no transcript and no composer; a pane opening the
 // session asks afresh (sessions/share/reader-connect.ts).
+// UX wave U1b (M5; acceptance 10): the compact composer of a closed floating card, which shows no transcript, has one
+// line above it while requests of the session wait, "Waiting for you · N"; its click opens the card and goes to the oldest
+// of them. The composer's own toolbar is not touched (the architect's ruling A4).
 import { useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -38,6 +41,9 @@ import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 5
 import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
 import { ComputerUseStrip } from '../computer-use/Strip'; // UX wave U12a
 import { BtwCard } from '../side/BtwCard'; // UX wave U4a
+import { selectWaitingRequests, useAttention } from '../stores/attention'; // UX wave U1b
+import { showWaiting } from '../request-card/show-waiting'; // UX wave U1b
+import { openCard } from '../shell/floating'; // UX wave U1b
 
 type PaneIndex = 0 | 1;
 
@@ -134,6 +140,7 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
       </div>}
       <div className={`shrink-0 ${compact ? "py-2" : "scroll-gutter-under pt-4 pb-4"}`}>
         <ComposerColumn>
+          {compact && <WaitingLine appSessionId={id} /* UX wave U1b: no transcript here, so the count above the composer */ />}
           {compact && <BtwCard appSessionId={id} placement="flow" /* UX wave U4a: no transcript here, so directly above the frame */ />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
@@ -148,5 +155,21 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
         </ComposerColumn>
       </div>
     </div>
+  );
+}
+
+// UX wave U1b (M5): how many requests of the session wait, as one line above the compact composer; the card opens on a
+// click, and the oldest of them is shown in its transcript once that mounts.
+function WaitingLine({ appSessionId }: { appSessionId: AppSessionId }) {
+  const waiting = useAttention((s) => selectWaitingRequests(s, appSessionId).length);
+  if (waiting === 0) return null;
+  const go = () => {
+    openCard();
+    showWaiting(appSessionId, null);
+  };
+  return (
+    <button type="button" data-waiting-count={waiting} onClick={go} className="flex w-full min-w-0 items-center rounded-sm px-2 py-1 text-left text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+      Waiting for you · {waiting}
+    </button>
   );
 }

@@ -638,4 +638,9 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-cell[data-waiting] > .transcript-cell-line::before { content: '◐'; width: 12px; height: auto; border: 0; border-radius: 0; animation: none; color: var(--warning); }
 .transcript-waiting-form { margin: 4px 0 10px; }
 .transcript-ask-form { padding: 8px 12px; border-top: 1px solid var(--border); }
+/* M5 (Interfaces §D, the jump button; the architect's ruling A1): while a waiting request is out of view the round button
+   becomes the pill "Needs your input". It keeps the round button's right edge, bottom and height and grows to the left,
+   so it may stand over the right end of the text column; its mark is the waiting glyph in the warning tone. */
+.transcript-jump[data-state="input"] { width: auto; gap: 6px; padding: 0 12px; border-radius: 16px; color: var(--fg); font-size: var(--text-ui-sm); white-space: nowrap; }
+.transcript-jump-mark { color: var(--warning); }
 /* UX wave U1b end */

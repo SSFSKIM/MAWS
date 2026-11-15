@@ -3,23 +3,27 @@
 // calls once to register the card in C5's `requestCard` slot and C6's request renderer. UX wave U1b: it also starts the
 // follower of a terminal session's settlements, which writes a question's receipt, and the one that drops a session's
 // receipts when the session leaves, and the one that holds a request answered first elsewhere as a settling receipt where
-// it stood (receipts.ts).
+// it stood (receipts.ts). M5: it registers the card column's first card, `WaitingCard`, in U8b's slot.
 import { registerSlot } from '../app/slots';
 import { registerRequestRenderer } from '../transcript';
 import { renderSessionRequest } from './inline';
 import { followSessionsLeaving, followSettlements, followSettling } from './receipts';
 import { RequestCard } from './RequestCard';
+import { WaitingCard } from './WaitingCard';
 
 export { RequestCard, type Placement, type RequestCardProps } from './RequestCard';
 export { scopeOptions, isDowngraded, type Scope, type ScopeOption } from './scope';
 export { quickApproval, type QuickApproval } from './quick-approval';
 export { toAnswer, type VariantState } from './answers';
 export { renderInlineRequest, renderSessionRequest, type RequestRenderer } from './inline';
+export { WaitingCard } from './WaitingCard';
+export { showWaiting } from './show-waiting';
 
 // C5's slot (docked, card, hover) and C6's transcript slot (inline). The slot registration has no disposer in C5's
 // registry; the returned function removes the transcript renderer and stops the followers.
 export function connectRequestCard(): () => void {
   registerSlot('requestCard', RequestCard);
+  registerSlot('sessionCardWaiting', WaitingCard);
   const offRenderer = registerRequestRenderer(renderSessionRequest);
   const offSettlements = followSettlements();
   const offLeaving = followSessionsLeaving();
