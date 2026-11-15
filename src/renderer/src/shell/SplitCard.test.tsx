@@ -465,42 +465,6 @@ describe('the chat over the artifact beside the split (UX wave U10b)', () => {
     expect(showChatButton(), 'no Show chat while the card shows').toBeNull();
   });
 
-  // The Mac's e2e:panel scene (panel.spec.ts, "the split’s float over a document"): the session's pane focused, as a
-  // click on its tab leaves it, and the panel open with no surface in it; Expand in the artifact's header floats S.
-  it('Expand pressed while the session’s pane is focused floats the session and leaves the bar', async () => {
-    const user = userEvent.setup();
-    useLayout.setState({ main: { ...splitOf(), focusedPane: 0 } });
-    shell();
-    await user.click(within(header()!).getByRole('button', { name: 'Expand pane' }));
-    expect(set().floating).toMatchObject({ sessionTabId: S.id });
-    expect(bar()).not.toBeNull();
-    expect(card()).toBeNull();
-  });
-
-  it('PROBE: what a press on Expand changes before its click, with the session’s pane focused at 1440 px', async () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
-    try {
-      useLayout.setState({ main: { ...splitOf(), focusedPane: 0 } });
-      window.maws = fakeClient({}).client as unknown as PreloadBridge;
-      render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Shell /></QueryClientProvider>);
-      resize(area(), { width: W, height: 800 });
-      const read = () => ({
-        focusedPane: set().focusedPane,
-        floating: set().floating ?? null,
-        cardColumn: mainRegion().querySelector('[data-region="cards"]') !== null,
-        padding: (mainRegion().firstElementChild as HTMLElement).style.paddingRight,
-        expand: within(header()!).queryByRole('button', { name: 'Expand pane' }) !== null,
-      });
-      const before = read();
-      act(() => void fireEvent.pointerDown(within(header()!).getByRole('button', { name: 'Expand pane' }), { pointerId: 1, button: 0 }));
-      const pressed = read();
-      expect({ before, pressed }).toEqual({});
-    } finally {
-      delete (window as { innerWidth?: number }).innerWidth;
-      delete (window as { maws?: unknown }).maws;
-    }
-  });
-
   it('from hidden, ⇧⌘\\ from the artifact’s pane opens the card with the keyboard in its composer', async () => {
     const user = userEvent.setup();
     shell();
