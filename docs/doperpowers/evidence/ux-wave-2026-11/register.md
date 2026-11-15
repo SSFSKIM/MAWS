@@ -2,15 +2,15 @@
 
 Every item the wave considered, one row each: where it came from, its state, and the line it was given when the cut was put to the owner (so "you" in a line is the owner). Kept beside `docs/doperpowers/specs/2026-11-12-ux-wave-design.md`, which cites the items by these ids. Generated from the wave's cut on 2026-11-12; the architect regenerates it when a state changes.
 
-240 items: 148 to build (140 of them in children now), 3 that still wait for the owner to answer (four of the questions to the owner are still open: "Questions still open" below), 2 for a design round, 7 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
+240 items: 152 to build (144 of them in children now), none that still waits for the owner to answer (every question put to the owner is answered), 2 for a design round, 6 hands-on checks, 25 already built, 23 keep, 13 the same ask as another item, 4 not MAWS's to fix, 3 handed to the visual renewal, 12 later.
 
-Built and on master, as the state column says: 54 items whole and 9 in part (a later landing of the same child owes the rest), from pull requests #631, #632, #634, #635, #637, #642, #643, #650 and #651. The rows of four earlier landings (#604, #618, #623 and the working-folder selector's) still read "build"; they are marked in the register's next revision.
+Built and on master, as the state column says: 81 items whole and 17 in part, from pull requests #604, #618, #623, #626, #631, #632, #634, #635, #637, #642, #643, #650, #651, #652, #655, #656 and #657 and the working-folder selector's landing (U8a, which has no pull request). Of an item built in part, the rest is owed by a later landing or a hands-on check, or the child's spec dropped it.
 
 Ids: `l<n>-…` a mark on the comparison of 2026-10-23, `O-nn` an observation, `#nnn` a board ticket, `S-nn` a finding from P5's sittings, `X-nnn` a tracker row that rides with an item.
 
-## The owner's answers of 2026-11-12 and 2026-11-13
+## The owner's answers of 2026-11-12 to 2026-11-14
 
-Verbatim, as chosen on the question cards; a note is the owner's own text.
+Verbatim, as chosen on the question cards; a note is the owner's own text. An answer marked (typed) was typed in the chat with no card; its note quotes it.
 
 | question | the owner's answer | the owner's note |
 |---|---|---|
@@ -82,17 +82,33 @@ Verbatim, as chosen on the question cards; a note is the owner's own text.
 | Working folder landing, on a drawn example with invented names: the Environment card's folder row has room for about 28 characters and today cuts a longer path at its end, so after the agent moves into a worktree under the launch folder the row reads almost as before and the worktree's own name is not visible. Which end should a long path lose? (The answer also changes the row of a session that never moved, when its launch path is long.) | Cut at the start (Recommended) |  |
 | Working folder landing, on the same drawn example: after the agent moves into a worktree the Environment card gains one muted line naming the folder the session was launched in ("moved from <name>"). Where should it sit? | Under the folder row (Recommended) |  |
 | Working folder landing, on the same drawn example: an agent often steps into a sub-folder of its checkout and back. How should the Environment card show the sub-folder? | In the folder row (Recommended) |  |
+| Do you want files the agent writes to open inside MAWS? | Not PDF alone (typed) | typed, not on a card, in reply to a list of the four questions still open: "MAWS preview shouldn't be limited to PDF, and agent's artifact mention opens in the side panel. for the rest, need more detail." |
+| What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | In the side panel (typed) | the same typed message as the answer above |
+| When you type yourself, Korean or English, in a MAWS deck or document, have you ever seen the first letter or a jamo of a word go missing? (The comparison of 10-23 reported it; it only reproduced under automated typing.) | No, never seen it |  |
+| Connector switches (ticket #476): which model? A running session cannot drop a connector, so a switch for one session restarts that session's engine process. | Two switches, as scopes (typed) | typed on the card in place of an option; the options were "Two switches (Recommended)" (a default per machine and a switch per session), "One switch, like Claude Desktop" and "Per-machine default only": "two switches mean that a connector can be installed like plugin -- user scope and project scope." |
+| Where should "Add custom connector…" write: Claude Code's own config, or the list MAWS keeps in Settings that only sessions MAWS starts can see? | Claude Code's config (Recommended) |  |
+| Between the two scopes an off always wins in the engine: a connector off at user scope cannot be switched on for one project by an on/off setting (a plugin can). Which behaviour do you need for a connector with many tools? | Off by default, on per project (Recommended) |  |
+| In the "Add custom connector" form, should the value fields of request headers and environment variables show what is typed, or hide it behind dots with an eye button? | Plain text (Recommended) |  |
+| Word, PowerPoint and Excel files can be drawn inside MAWS with nothing installed on the Mac, but not exactly as Office draws them (a long Word file is one tall page with footnotes at the end; a slide deck has no animations; an Excel chart loses axis numbers and the legend). Is this look good enough to be how these files open in MAWS? | Yes, as drawn (Recommended) | the preview ships only if the containment test of the viewer passes; Excel's computed totals are a separate question |
+| In the agent's text in a chat, which look should a mention of an artifact and a link to a file have? | As Claude Desktop (Recommended) |  |
+| You click the agent's mention of an artifact that is already open as a main tab. What should happen? | Show that tab (Recommended) |  |
+| After the artifact-link change the agent can no longer open an artifact beside the chat by itself. It can still put six things on screen by itself: Review at a file, a file's tab at a line, the session's terminal, the Tasks panel, a page in the in-app browser, and Source control. Should "a file's tab" stay among them? | Keep all six (Recommended) |  |
+| An Excel file that an agent writes holds formulas but not their results. If MAWS previews Excel files (the last step of the preview work, and only if the viewer's containment test passes), may the preview work the totals out itself, with a calculator that is not Excel's? | Compute and say so (Recommended) | applies only if the Excel preview ships |
+| You chose "Off by default, on per project" for connectors. The mechanism my earlier card described (an allow list by name) cannot work: it cannot name a connector that a plugin brings. Which mechanism should carry your choice? | Engine's project switch (Recommended) |  |
+| Each connector gets two switches in Customize: "All projects" and the current project's. What should they mean together? | Last press wins (Recommended) |  |
+| On the first day with the connector switches, what should the connectors you already have start as? | On for all projects (Recommended) | connectors that come with the Claude account are not covered until a check on a signed-in machine |
+| Servers listed today in MAWS's Settings › MCP servers are used only by the chats MAWS runs. How should the servers already in that Settings list move to Claude Code's config? | On a press (Recommended) |  |
+| The agent can put a file's tab on screen by itself. For a file outside the folders its session works in, MAWS today opens it only if the conversation already holds a link to that file. What should happen when the agent opens a file from outside the session's folders by itself? | Keep it as it is (Recommended) |  |
+| When MAWS shows a Markdown file as a rendered page, the links that the file itself contains can be clicked. If such a link points to a file outside the session's folders, should a click open that file? | Yes, and editable too (typed) | typed on the card in place of an option: "I'd go even further to make it editable too. There are lots of situations where I have to open a file from external folder that need to be edited or be looked at. I don't see a good reason to block it from editing or reading." |
+| When you open a subagent's own transcript, a link the subagent wrote to a file outside the session's folders is refused today unless the main conversation holds the same link. Should a subagent's link open like a link in the main conversation? | Yes, the same rule (Recommended) |  |
+| A file opened beside the chat has the Files list at its left. When the side column is too narrow to show both, the list folds away and a button in the file's bar brings it back. Where should the Files list appear when you press that button in a narrow column? | In the file's place (Recommended) |  |
+| MAWS will show Word and PowerPoint files inside the app as a read-only page. What should a click on a link inside a previewed Word or PowerPoint file do? | Nothing; show the address (Recommended) |  |
+| You answered that a file from outside the session's folders should be editable too, not only readable. How far should editing of files outside the session's folders go? | Every outside file (Recommended) | reverses the read-only half of the answer of 2026-11-13 ("Files the transcript names"); nothing is written until Save is pressed; which files may open stays as answered |
+| Should MAWS also get an "Open File…" command that shows the Mac's file chooser and opens whatever file you pick in a tab beside the chat, with no link needed? | Yes, add it (Recommended) |  |
 
 ## Questions still open
 
-A question is put to the owner when its child starts, unless the last column says otherwise. The last one was raised when the spec was assembled or after it.
-
-| items | question | recommended answer | when |
-|---|---|---|---|
-| l6-artifacts-01 | Do you want files the agent writes to open inside MAWS? | PDF only, now. | when its child starts |
-| O-44 | What did "opens the artifact on the new path" mean, and where should a click on an artifact link open it? | Keep opening it in the session's side panel. | when its child starts |
-| l6-artifacts-14 | Have you ever lost a first letter or a jamo while typing Korean yourself in a deck or document? | If not, the tracker row closes as not reproduced. | when its child starts |
-| #476, l8-settings-05 | Where should a per-chat connector switch sit, and does the Settings connector list go once "Add custom connector" moves to Customize? | Put to you with the result of the hands-on check of #476, which shows which switches can act on a running session. | after the hands-on check of #476 |
+None: every question put to the owner is answered.
 
 ## Decisions the sections made that the owner may see differently
 
@@ -153,7 +169,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | O-21 | observation | build | An answer to an async question fills the question's own row, on every route; the row no longer reads "Not answered" forever. |
 | l4-approvals-02 | mark | built in part, on master (#631) | The permission card becomes three buttons with key hints (Deny, Allow once, Always allow), about half its height; "Composer paused" and "Main session wants to" go. |
 | l4-approvals-04 | mark | build | A call that waits for approval reads "Waiting for approval", not "Running" or "Edited". |
-| O-23 | observation | built, on master (#631) | Double-click picks and submits on a single-choice question and on Allow once. Not on multi-select or "Other". Claude Desktop has no double-click: by default its question card answers at one click on an option, and in its layout behind a server switch it preselects the first option. Your double-click is kept, because a single click that submits is easy to make by accident. |
+| O-23 | observation | built in part, on master (#631) | Double-click picks and submits on a single-choice question and on Allow once. Not on multi-select or "Other". Claude Desktop has no double-click: by default its question card answers at one click on an option, and in its layout behind a server switch it preselects the first option. Your double-click is kept, because a single click that submits is easy to make by accident. |
 | l4-approvals-05 | mark | built, on master (#631) | A file-change approval shows a real diff, says "create" for a new file, and shortens paths. |
 | l4-approvals-11 | mark | built, on master (#631) | The plan approval button names the mode that follows, with a menu. Editing the plan is left out. |
 | l4-approvals-13 | mark | built, on master (#631) | The trust card lists only what would really load. |
@@ -175,23 +191,23 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-29 | observation | build | A run of tool calls collapses into one line worded as Claude Desktop words it ("Ran 3 commands, edited 2 files +12 −4, used 1 agent"), collapsed by default even while running, and opens to today's rows at full height (your answer of 11-12; Claude Desktop does not bound it either). MAWS had collapsed groups until the 10-23 fix flattened them. |
-| O-27 | observation | build | You answered on 11-12: thinking is its own step, in order, inside the group. Your two conditions hold: thinking keeps the shape it has today and does not look like a tool row, and an opened group must not grow too long. In a session MAWS runs every thought has text (MAWS asks the engine for summaries), so only a thought of ten seconds or more gets a line in an opened group, which is the threshold you chose on 11-12 on the card "Thoughts 2". My first version tested for text and would have drawn every thought there; corrected on 11-12. You also chose, on 11-12, what the line of a thought in progress reads: the label alone (its tier, the effort and the time), with the summary read by opening the line. That reverses one clause of your 10-24 ruling (the live line shows the summary). |
-| O-15 | observation | build | The closed turn's line carries a summary of the whole turn in Claude Desktop's words, at most three parts and "and N more actions", with what changed first (files, then agents). |
-| #479 | ticket | build | Inside an opened group, a thinking block with no text gets a "Thought for Ns" line when it ran ten seconds or more, by the same test as a thought with text (O-27), and thoughts next to each other merge. Such blocks are now rare in a session MAWS runs (none among 85 thoughts since 10-31) and are the rule in terminal sessions (99%). The engine records every thought's duration in the session file since 2.1.287, which MAWS did not read, so the same line appears in a terminal session too: there about one thought in seven lasts ten seconds or more. |
-| O-49 | observation | build | No path loses a description that a call carried. When a call has none, the row shows the command itself, or "Ran a command" when it is unsafe to show, as Claude Desktop does. Found on 11-12: in one session MAWS ran that day the agent gave no description on any of its 82 shell calls (its subagents did on all of theirs), which is probably what you saw. Checked the same day: the description is an optional field and the model left it out for that whole session; one terminal session of the last two weeks did the same (2 of 80 sessions), so it is not MAWS's doing and no setting of yours removed it. The fallback is the fix. |
-| l6-artifacts-12 | mark | build | Artifact tool rows read by the artifact's title; a failed call shows the first line of its error. |
+| O-29 | observation | built, on master (#657) | A run of tool calls collapses into one line worded as Claude Desktop words it ("Ran 3 commands, edited 2 files +12 −4, used 1 agent"), collapsed by default even while running, and opens to today's rows at full height (your answer of 11-12; Claude Desktop does not bound it either). MAWS had collapsed groups until the 10-23 fix flattened them. |
+| O-27 | observation | built, on master (#657) | You answered on 11-12: thinking is its own step, in order, inside the group. Your two conditions hold: thinking keeps the shape it has today and does not look like a tool row, and an opened group must not grow too long. In a session MAWS runs every thought has text (MAWS asks the engine for summaries), so only a thought of ten seconds or more gets a line in an opened group, which is the threshold you chose on 11-12 on the card "Thoughts 2". My first version tested for text and would have drawn every thought there; corrected on 11-12. You also chose, on 11-12, what the line of a thought in progress reads: the label alone (its tier, the effort and the time), with the summary read by opening the line. That reverses one clause of your 10-24 ruling (the live line shows the summary). |
+| O-15 | observation | built, on master (#657) | The closed turn's line carries a summary of the whole turn in Claude Desktop's words, at most three parts and "and N more actions", with what changed first (files, then agents). |
+| #479 | ticket | built, on master (#657) | Inside an opened group, a thinking block with no text gets a "Thought for Ns" line when it ran ten seconds or more, by the same test as a thought with text (O-27), and thoughts next to each other merge. Such blocks are now rare in a session MAWS runs (none among 85 thoughts since 10-31) and are the rule in terminal sessions (99%). The engine records every thought's duration in the session file since 2.1.287, which MAWS did not read, so the same line appears in a terminal session too: there about one thought in seven lasts ten seconds or more. |
+| O-49 | observation | built, on master (#657) | No path loses a description that a call carried. When a call has none, the row shows the command itself, or "Ran a command" when it is unsafe to show, as Claude Desktop does. Found on 11-12: in one session MAWS ran that day the agent gave no description on any of its 82 shell calls (its subagents did on all of theirs), which is probably what you saw. Checked the same day: the description is an optional field and the model left it out for that whole session; one terminal session of the last two weeks did the same (2 of 80 sessions), so it is not MAWS's doing and no setting of yours removed it. The fallback is the fix. |
+| l6-artifacts-12 | mark | built, on master (#657) | Artifact tool rows read by the artifact's title; a failed call shows the first line of its error. |
 | O-13 | observation | build | You answered on 11-12: the mod draws first, and MAWS mirrors it. In sessions MAWS runs, the to-human mod draws its own view; in terminal and remote sessions, where no mod can draw, MAWS applies the mod's fold rule itself. The mod change you ruled on 10-24 is an unmerged branch: I rebase it onto 0.7.2, try it in one MAWS session and open the pull request, and you merge it. |
 | O-30 | observation | build | Answered with O-13 on 11-12: the mod draws first and MAWS mirrors it. "Working record" folding is the mod's rule, applied by the mod where it runs and by MAWS elsewhere. In the folded view a turn's "Worked for …" line shows only while one of that turn's records is open (your answer of 11-12); a running turn keeps its line until it ends. |
 | #332 | ticket | build | MAWS draws what the mod draws, orange included, as you ruled on 10-24. If orange reads as an error, that is settled in the mod; the ticket moves there. |
-| l2-transcript-04 | mark | build | A turn a subagent's report opens no longer reads "Peer session worked for"; it reads "Continued for". A turn that another session's message really opened keeps "Peer session worked for", because that message folds with its turn and the line is what still says who woke the session. |
+| l2-transcript-04 | mark | built, on master (#657) | A turn a subagent's report opens no longer reads "Peer session worked for"; it reads "Continued for". A turn that another session's message really opened keeps "Peer session worked for", because that message folds with its turn and the line is what still says who woke the session. |
 | #351 | ticket | later | Deferred on 11-12 after its probe: the engine recalls no memory on your configuration (automatic memory is off in your settings, and the engine's own switch for recall is off for your sessions), so a "Recalled 2 memories" step could never appear. The frame and its transcript row are recorded for a later build. The engine's permission-check and intent frames stay silent. |
 | l2-transcript-01 | mark | already built | Built and still works. O-07 and O-08 are a different component, not regressions of it. |
 | l2-transcript-03 | mark | already built | Built and still works: single line breaks are kept. Tracker row 367 closes with it. |
 | l2-transcript-12 | mark | keep | Dismissed by you; nothing to do. |
 | l2-transcript-14 | mark | keep | Kept: a subagent's started and finished rows stay as they are. Messages to and from it become one line (O-12). |
-| O-26 | observation | same ask as another item | The first half of O-29. |
-| O-25 | observation | same ask as another item | "Thought for 0s" is already fixed. The "Internal activity" wrapper goes with O-27. |
+| O-26 | observation | built, on master (#657) | The first half of O-29. |
+| O-25 | observation | built, on master (#657) | "Thought for 0s" is already fixed. The "Internal activity" wrapper goes with O-27. |
 | l2-transcript-05 | mark | same ask as another item | The double fold is fixed; the summary text is O-15. |
 | O-06 | observation | same ask as another item | Once the mod draws, its own toggle appears above the composer with no MAWS work. Follows O-13. |
 | l2-transcript-06 | mark | same ask as another item | The same as O-13. |
@@ -227,26 +243,26 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | id | from | state | the line |
 |---|---|---|---|
 | X-049 | tracker | build | The queue row for such an answer reads "Answer to <question>: <choice>", not the raw envelope. |
-| l3-input-01 | mark | build | Probed on 11-12: the engine no longer kills a running command when a message is sent "now"; it moves the command to the background, where it runs on. MAWS's Send now kills it today only because it sends a plain interrupt. One thing differs from what I first wrote: behind a command the engine ends the turn and answers your message in a new turn that starts at once (the cut turn reads "Ended for your message"); only behind a subagent call is the message read in the same turn. A Stop afterwards leaves the moved command running; it is in the Background tasks card. The accepted proposal also moved a command to the background by itself when your message had waited a few seconds behind it; you answered on 11-12 that a command moves only on Send now, so that part is not built. |
-| l3-input-02 | mark | build | Stop keeps pausing the queue; Send now no longer does. |
-| l3-input-03 | mark | build | ⌘Enter queues a message for after the turn. This reverses the 10-01 rule "no hold, no send menu". |
-| l3-input-04 | mark | build | Up-arrow in an empty box takes back a waiting message for editing. |
-| l3-input-05 | mark | build | Waiting messages live only in the stack above the composer; the transcript shows a message once it is delivered. This drops the dimmed tail bubbles of the 10-01 ruling. |
-| l3-input-15 | mark | build | Send is an up-arrow in a filled circle, stop a square, and a distinct mark while a turn runs and the box has text, as you described. |
-| l3-input-08 | mark | build | Enter always sends; Shift+Enter and Option+Enter break the line. |
-| l3-input-06 | mark | build | The slash palette lists names only, one list in the engine's order, an icon per kind; the description shows for the highlighted row (hover or arrow keys, as Claude Desktop). MAWS's window actions leave it for ⌘K. |
-| l3-input-07 | mark | build | Same-named projects show their path suffix beside the name in the New chat chooser. |
-| l3-input-09 | mark | build | A paste stays as text, as in Claude Desktop. Only a very large paste (over 20,000 characters) becomes a chip, with "Show in text field". |
-| l3-input-10 | mark | build | The mode menu reads Auto, Manual, Accept edits, Plan, then Bypass apart. |
-| l3-input-12 | mark | build | Claude Desktop's chords: ⇧⌘I model, ⇧⌘E effort, ⇧⌘M mode, Ctrl+R history search. |
-| l3-input-14 | mark | build | The model chip shows the model's display name everywhere. |
-| O-32 | observation | build | The lightning is the fast-mode switch, not decoration; it becomes a "Fast mode" row. Each effort stop gets a full-height hit area and the track snaps to the nearest stop. |
-| O-20 | observation | build | /btw shows an elapsed timer (the engine streams nothing for a side question, so it cannot show real thinking) and moves from the side tab to a small card at the bottom right of the session. |
+| l3-input-01 | mark | built in part, on master (#656) | Probed on 11-12: the engine no longer kills a running command when a message is sent "now"; it moves the command to the background, where it runs on. MAWS's Send now kills it today only because it sends a plain interrupt. One thing differs from what I first wrote: behind a command the engine ends the turn and answers your message in a new turn that starts at once (the cut turn reads "Ended for your message"); only behind a subagent call is the message read in the same turn. A Stop afterwards leaves the moved command running; it is in the Background tasks card. The accepted proposal also moved a command to the background by itself when your message had waited a few seconds behind it; you answered on 11-12 that a command moves only on Send now, so that part is not built. |
+| l3-input-02 | mark | built, on master (#656) | Stop keeps pausing the queue; Send now no longer does. |
+| l3-input-03 | mark | built, on master (#656) | ⌘Enter queues a message for after the turn. This reverses the 10-01 rule "no hold, no send menu". |
+| l3-input-04 | mark | built, on master (#656) | Up-arrow in an empty box takes back a waiting message for editing. |
+| l3-input-05 | mark | built, on master (#656) | Waiting messages live only in the stack above the composer; the transcript shows a message once it is delivered. This drops the dimmed tail bubbles of the 10-01 ruling. |
+| l3-input-15 | mark | built, on master (#656) | Send is an up-arrow in a filled circle, stop a square, and a distinct mark while a turn runs and the box has text, as you described. |
+| l3-input-08 | mark | built, on master (#656) | Enter always sends; Shift+Enter and Option+Enter break the line. |
+| l3-input-06 | mark | built, on master (#656) | The slash palette lists names only, one list in the engine's order, an icon per kind; the description shows for the highlighted row (hover or arrow keys, as Claude Desktop). MAWS's window actions leave it for ⌘K. |
+| l3-input-07 | mark | built, on master (#656) | Same-named projects show their path suffix beside the name in the New chat chooser. |
+| l3-input-09 | mark | built, on master (#656) | A paste stays as text, as in Claude Desktop. Only a very large paste (over 20,000 characters) becomes a chip, with "Show in text field". |
+| l3-input-10 | mark | built, on master (#656) | The mode menu reads Auto, Manual, Accept edits, Plan, then Bypass apart. |
+| l3-input-12 | mark | built, on master (#656) | Claude Desktop's chords: ⇧⌘I model, ⇧⌘E effort, ⇧⌘M mode, Ctrl+R history search. |
+| l3-input-14 | mark | built, on master (#656) | The model chip shows the model's display name everywhere. |
+| O-32 | observation | built, on master (#656) | The lightning is the fast-mode switch, not decoration; it becomes a "Fast mode" row. Each effort stop gets a full-height hit area and the track snaps to the nearest stop. |
+| O-20 | observation | built in part, on master (#656) | /btw shows an elapsed timer (the engine streams nothing for a side question, so it cannot show real thinking) and moves from the side tab to a small card at the bottom right of the session. |
 | l2-transcript-13 | mark | later | You dismissed this but marked the same feature "fix" twice (l3-input-11, l6-artifacts-11). One answer for all three. |
 | l3-input-11 | mark | later | The same feature as l2-transcript-13 (dismissed) and l6-artifacts-11 (fix). One answer for all three. |
 | l6-artifacts-11 | mark | later | The same feature as l2-transcript-13 and l3-input-11. One answer for all three. |
 | l3-input-13 | mark | keep | Kept. |
-| X-050 | tracker | same ask as another item | Part of l3-input-05: two-line rows with the whole text on hover. |
+| X-050 | tracker | built, on master (#656) | Part of l3-input-05: two-line rows with the whole text on hover. |
 
 ## U5 · Review, comments and source control
 
@@ -280,15 +296,15 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l5-code-10 | mark | build | "Open in" for VS Code, Cursor, Zed, Xcode, Terminal and Finder, where installed. |
 | l9-browser-delivery-08 | mark | build | The same "Open in" on a session's menu and its sidebar row. |
 | O-37 | observation | built in part, on master (#642) | The choice does not exist: the engine's SendUserFile is already retired and MAWS's own send-file tool delivers. Fixed: the refusal reads as a permissions problem when it is not; a link to a PDF, HTML or media file opens outside the app; file:// links and relative paths are not clickable. One correction to what I told you: a link to a file outside the session's own folders is refused on this Mac too, not only on another machine. Your answers of 11-13: on this Mac a file outside the session's folders opens read-only when that session's transcript writes its path as a link or a file chip ('Files the transcript names'); the machine's daemon, which reads files, checks the path against the transcript before it reads, which stops a direct request for another path but not someone who can also send a message into that session; a session on another machine keeps the refusal. It is built now as a small landing of its own, U6c, after the tab strip landing ('Own small landing, now'); the rest of this item follows in U6b, on top of it. |
+| O-44 | observation | build | The inline link exists already, drawn as a boxed chip that does not read as a link; it will look like a link. The agent's ability to open artifacts by itself is removed. You answered on 11-14: a click on the link opens the artifact in the session's side panel. |
+| l6-artifacts-01 | mark | build | You answered on 11-14: files the agent writes open inside MAWS, and not PDF alone. PDF is the clear first step. Claude Desktop converts DOCX and PPTX in its cloud, which MAWS cannot copy, so how Word, PowerPoint and Excel files are drawn on the Mac is chosen after a probe of the local routes. |
 | l9-browser-delivery-03 | mark | build | A local session's localhost links open in the in-app browser, as a remote session's already do; ⌘-click sends one to the system browser. |
-| l5-code-08 | mark | build | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
+| l5-code-08 | mark | built in part, on master (#604) | Chords for the surfaces (⌘J Terminal, ⌘⇧D Review, ⌘⇧F Files, as in Claude Desktop) and "Attach selection to chat". No bottom drawer. Letting the agent read your terminal is left out. |
 | l7-shell-06 | mark | build | ⌘K opens on your recent sessions and artifacts and can find artifacts. |
-| l7-shell-07 | mark | build | A shortcut sheet, and a View menu in groups. |
+| l7-shell-07 | mark | built in part, on master (#604) | A shortcut sheet, and a View menu in groups. |
 | l7-shell-08 | mark | build | Zoom in and out; Actual Size has no chord because ⌘0 is the Overview. |
 | l7-shell-09 | mark | build | Back and Forward across tabs, by chord and the Go menu. |
 | l7-shell-13 | mark | build | A key jumps between regions; ⇧Tab's mode change is announced. |
-| O-44 | observation | question to the owner | The inline link exists already, drawn as a boxed chip that does not read as a link; it will look like a link. The agent's ability to open artifacts by itself is removed. One thing is unclear. |
-| l6-artifacts-01 | mark | question to the owner | You left this one unmarked. Claude Desktop previews DOCX and PPTX through its cloud; only PDF is a clear step for MAWS. |
 | l5-code-07 | mark | hands-on check (U14) | Cannot be confirmed from code: MAWS adds no handling of its own, and your own typing was recorded as correct on 10-12. The corruption was only seen with cua's synthetic typing. Fixed only on a failing trace; the check is written out. |
 | l5-code-13 | mark | already built | Settled by the 10-24 layout. One small piece remains and rides with l5-code-11. |
 
@@ -302,8 +318,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #407 | ticket | built, on master (#632) | While the machine daemon restarts, the sidebar shows what it has with a "reconnecting" mark instead of ending the skeleton early. |
 | S-11 | sitting | built, on master (#632) | A new session is titled by the first six words of its prompt (60 characters at most) until a title is generated. The whole prompt stays searchable. |
 | O-03 | observation | built, on master (#632) | One regression from 10-24: the project chip's box is 96 px wide but its text may grow to 192 px, so a long name runs under the first tab. |
-| O-40 | observation | build | You answered "a page, like Desktop" on 11-12, on a card of mine that was wrong about Claude Desktop, and then, on the corrected card the same day, "As Desktop really does". Settings opens as a dialog over the window (over your tabs, or over the Customize page when that is showing). Customize, Projects and the Library open as pages that replace the main area with the sidebar kept. None of them is a tab. |
-| O-47 | observation | build | Usage becomes a small ring in the title bar that opens a compact one-column popover; the full multi-account grid moves to a Settings › Usage section. The sidebar footer keeps only the gear. |
+| O-40 | observation | built, on master (#652) | You answered "a page, like Desktop" on 11-12, on a card of mine that was wrong about Claude Desktop, and then, on the corrected card the same day, "As Desktop really does". Settings opens as a dialog over the window (over your tabs, or over the Customize page when that is showing). Customize, Projects and the Library open as pages that replace the main area with the sidebar kept. None of them is a tab. |
+| O-47 | observation | built, on master (#652) | Usage becomes a small ring in the title bar that opens a compact one-column popover; the full multi-account grid moves to a Settings › Usage section. The sidebar footer keeps only the gear. |
 | S-03 | sitting | hands-on check (U14) | The mini's own window showed none of one project's sessions. The cause is not found; it has to be diagnosed on the mini, and the fix goes on top of the registry branch. |
 | S-08 | sitting | hands-on check (U14) | Chromium slows a hidden window; it matters to agents driving MAWS more than to a person. One timed check first, then throttling goes off only while something drives the app, as Claude Desktop does. |
 | l7-shell-10 | mark | later | Not chosen: your answers on O-40 keep Settings and the pages inside the one window, so pop-out windows are not built in this wave. |
@@ -339,7 +355,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #359 | ticket | built, on master (#637) | Mostly built already: an ended agent reads finished, finished with errors, stopped or ended with the session, and one with a request of its own reads "Approval needed". What remains: an agent with work still running under it says how much; Done counts the failed and the stopped; a terminal session's agents stop reading "Working" once its process is gone (tracker row X-168). |
 | X-165 | tracker | built, on master (#637) | A panel width saved as exactly 380 px is no longer read as "automatic". |
 | X-168 | tracker | built, on master (#637) | A terminal session's background agent stops reading "working" once its terminal has ended. |
-| l5-code-14 | mark | build | Larger than the display you asked for: once the agent moves into a worktree, Review, Source control, Files and the Environment card all keep reading the launch folder. They will follow the agent into a worktree of the same repository (Claude Desktop follows its own worktree tool; MAWS also follows a cd into a worktree, if the engine records it), and the card shows the live folder and branch. Another repository is not followed. A probe of the engine's record comes first. |
+| l5-code-14 | mark | built, on master (U8a, #626, #655) | Larger than the display you asked for: once the agent moves into a worktree, Review, Source control, Files and the Environment card all keep reading the launch folder. They will follow the agent into a worktree of the same repository (Claude Desktop follows its own worktree tool; MAWS also follows a cd into a worktree, if the engine records it), and the card shows the live folder and branch. Another repository is not followed. A probe of the engine's record comes first. |
 | l5-code-16 | mark | built, on master (#637) | The Environment card's change line already opens Review; it is drawn as a control so that this shows. The second Review button and the Claude Code version row leave the card (the version stays in Session info). |
 | l7-shell-04 | mark | same ask as another item | Your words on this mark are O-05. |
 | l6-artifacts-06 | mark | same ask as another item | Overtaken by your later O-44 (no automatic opening) and O-05 (card order). |
@@ -354,7 +370,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #563 | ticket | built, on master (#650) | A remote tab stays mounted and readable under a thin "Reconnecting…" line, so the reader keeps their place. |
 | #565 | ticket | built, on master (#650) | No whole-history read beside a live resume when a link returns; a failed hold heals by itself. |
 | S-05 | sitting | built, on master (#650) | A remote row with its tab open reads the tab's live stream, so it shows Working at once instead of 5 to 10 s late. |
-| O-48 | observation | built, on master (#650) | Fork, Archive and Rename were left off the link to other machines on purpose in P5. They are added together, with Unarchive; Fork is for the machine's owners in this wave, needs no Touch ID on a machine you own, and also becomes a /fork item and "Fork from here" on an answer, for local sessions too. Stopping a turn already works there; ending a remote session's process without archiving is not added. |
+| O-48 | observation | built in part, on master (#650, #656) | Fork, Archive and Rename were left off the link to other machines on purpose in P5. They are added together, with Unarchive; Fork is for the machine's owners in this wave, needs no Touch ID on a machine you own, and also becomes a /fork item and "Fork from here" on an answer, for local sessions too. Stopping a turn already works there; ending a remote session's process without archiving is not added. |
 | S-02 | sitting | built, on master (#650) | Archive and Rename for a session on another machine, in the same change as O-48. |
 | S-01 | sitting | built, on master (#650) | A Stop that fails says so, and reads "Stopping…" while it is on its way. |
 | S-13 | sitting | built, on master (#650) | The Touch ID sheet names the machine by its name. |
@@ -370,8 +386,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| l6-artifacts-07 | mark | build | A format cleanup is never a write of its own. Checked on 11-12 with a failing test through the real document service: the cause is the one inferred, and the refused edit is one that leaves part of a bold run without its bold. The fix is to switch the library's clean-up off on every document; the narrower fix I had first described misses three paths (restore, accepting and rejecting a suggestion). Page size and density are document settings the agent can set. The agent may delete its own drafts, with Undo. |
-| X-141 | tracker | build | A presence redraw no longer writes a phantom revision. |
+| l6-artifacts-07 | mark | built in part, on master (#618) | A format cleanup is never a write of its own. Checked on 11-12 with a failing test through the real document service: the cause is the one inferred, and the refused edit is one that leaves part of a bold run without its bold. The fix is to switch the library's clean-up off on every document; the narrower fix I had first described misses three paths (restore, accepting and rejecting a suggestion). Page size and density are document settings the agent can set. The agent may delete its own drafts, with Undo. |
+| X-141 | tracker | built, on master (#618) | A presence redraw no longer writes a phantom revision. |
 | O-43 | observation | build | The compact composer becomes the bar alone, and can be closed; a "Show chat" control in the artifact's header brings it back: the place and the word of Claude Desktop's hosted-artifact frame, where the labelled button is behind server switches. A request that arrives while the chat is hidden leaves it hidden and marks "Show chat". |
 | l6-artifacts-08 | mark | build | "Make something new" keeps four kinds as cards and the rest under More, with a small design-system picker. |
 | l6-artifacts-15 | mark | build | Design-system components are drawn on a smaller canvas so they read at size. |
@@ -379,7 +395,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | l8-settings-13 | mark | build | A Space can carry instructions for the agent. |
 | l6-artifacts-09 | mark | build, after a check (U14) | Your P1. Probably one mechanism with l6-artifacts-07: a formatting cleanup written with no author, which the live document rejects and replicas echo back as writes nobody made. The work starts from a failing test. |
 | l6-artifacts-16 | mark | build, last | Check against the design law resolves real colours and shows the agent's verdict per rule. Large; scheduled last. |
-| l6-artifacts-14 | mark | question to the owner | Never reproduced. One fact only you hold decides it. |
+| l6-artifacts-14 | mark | closes, nothing to build | Never reproduced with a person's typing. You answered on 11-14 that you have never seen it yourself, so the tracker row closes as not reproduced. |
 | l6-artifacts-17 | mark | already built | Nothing left beyond l6-artifacts-07. |
 | l6-artifacts-04 | mark | already built | Fixed on 10-24; one hands-on look at the 1280 px layout is owed. |
 | l6-artifacts-02 | mark | keep | Kept. |
@@ -394,6 +410,8 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | X-184 | tracker | build | Plugin-provided connectors appear under My items, with Sign in. |
 | l8-settings-03 | mark | built, on master (#635) | The libraries work before the first message. |
 | l8-settings-04 | mark | built in part, on master (#635) | The MCP widget's rows are compact and called Connectors; its switch means "off in this chat". |
+| l8-settings-05 | mark | build | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope, as you confirmed on 11-14; the list MAWS keeps in Settings goes. |
+| #476 | ticket | build | You answered on 11-14: the two switches are scopes, as for a plugin: a connector is switched at user scope and at project scope. The probe of 11-14 on the pinned engine showed how an off connector is kept out of a session (it is not contacted, its tools are not listed, its sign-in is kept), and that between scopes off always wins: a connector off at user scope cannot be switched back on for one project by an on/off setting. You answered the same day: off by default, on per project. The mechanism first described to you (a list of allowed connectors kept by MAWS) cannot name a connector that a plugin brings, and you were told. You answered the same day on four cards: the engine's own switch per project carries the choice, and MAWS carries out "All projects" project by project through the chats it starts; when the two switches of a connector disagree, the last press wins; on the first day the connectors you already have are on for all projects; and the servers in the old Settings list move on a press. The form that adds a custom connector is built first; the switches follow in later landings. |
 | #455 | ticket | build | A security call: reading another machine's connectors asks for Touch ID each time the sheet opens. |
 | l8-settings-06 | mark | built, on master (#635) | Settings is regrouped and its long notes shortened, then gets a search. |
 | l8-settings-11 | mark | build | Option B rested on a misreading of Claude Desktop: its "make default" stores an app preference and writes no Claude Code settings file. |
@@ -404,9 +422,7 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 | #456 | ticket | built, on master (#635) | The LiveQuery sheet gets its missing line for a paused query. |
 | S-09 | sitting | built, on master (#635) | The Channel tab says it is offline and retrying as soon as its read fails. |
 | S-10 | sitting | built, on master (#635) | The Channel opens from the command palette (one entry per project that has one, with its waiting count) and from the View menu. No new button; the project row already shows its waiting count. |
-| l8-settings-05 | mark | build, after an answer | "Add custom connector…" moves to Customize and writes the Claude Code config with a scope. |
 | l8-settings-07 | mark | build, after an answer | A skill can be switched off (the engine now supports it), revealed in Finder and opened. "New skill…" starts a chat with the skill creator. |
-| #476 | ticket | hands-on check (U14) | The ticket names switches that do not exist in MAWS, and no engine setting is yet shown to drop a server's tools at launch. A probe first, then its own design. |
 | l8-settings-12 | mark | later | A project settings page: after the registry lands, because a project then has locations on several machines. |
 | l8-settings-02 | mark | already built | Built: Customize is the home for plugins, skills and connectors. |
 | l8-settings-08 | mark | keep | Kept. |
@@ -432,9 +448,9 @@ Each goes beyond the line the owner was given. They were listed for the owner wi
 
 | id | from | state | the line |
 |---|---|---|---|
-| O-01 | observation | build | You answered on 11-12: one strip for everything open, across projects and machines, restored after a relaunch, with no hidden per-project sets. So New chat no longer seems to replace your tabs (that was the strip switching to another project's set), and pressing it again reuses an empty unstarted chat instead of piling up another. This reverses the 10-01 ruling of a tab set per project. |
-| O-31 | observation | build | The click that starts a session is the project chip in the title bar, not the sidebar row; the chip stops creating a session. With one strip (your 11-12 answer) a group is a named set of sessions that you open as tabs; groups get a design round with drawn examples before they are built. |
-| #497 | ticket | build | A New chat tab that arrives late no longer takes the selection from a tab you opened meanwhile. |
+| O-01 | observation | built, on master (#623) | You answered on 11-12: one strip for everything open, across projects and machines, restored after a relaunch, with no hidden per-project sets. So New chat no longer seems to replace your tabs (that was the strip switching to another project's set), and pressing it again reuses an empty unstarted chat instead of piling up another. This reverses the 10-01 ruling of a tab set per project. |
+| O-31 | observation | built in part, on master (#623) | The click that starts a session is the project chip in the title bar, not the sidebar row; the chip stops creating a session. With one strip (your 11-12 answer) a group is a named set of sessions that you open as tabs; groups get a design round with drawn examples before they are built. |
+| #497 | ticket | built, on master (#623) | A New chat tab that arrives late no longer takes the selection from a tab you opened meanwhile. |
 | O-42 | observation | design round with the owner | A machine filter on the sidebar can come first, as you offered. Project / machine / group views follow the groups design. |
 | O-24 | observation | design round with the owner | Depends on the groups design. Claude Desktop has no icon rail: folded, hovering shows the whole sidebar as a popup, which is the cheaper option. |
 | l6-artifacts-13 | mark | hands-on check (U14) | Opening a file from the panel replaced the deck tab. MAWS has no preview tabs; the likely cause is the same tab-set switch as O-01. Needs a reproduction. |

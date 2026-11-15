@@ -1,0 +1,95 @@
+UX wave, U11: a plugin's connectors on engine 2.1.322. What name the engine gives a plugin's server, what a session
+says of where it came from, which of two same-named plugins' servers is live, and what a templated address, a plugin
+turned off and an odd or long name do. For the design that lists a plugin's connectors in Customize and offers
+"Sign in" on a row named `plugin:<manifest name>:<server>`. (2026-11-14, build VM under vm-run.sh, branch
+ux-wave/probe-plugin-connectors; the dedup of a plugin's server by a configured server's address is in
+findings-uxwave-u11-plugin-server-dedup.txt and not repeated here.)
+
+Verdict, per question.
+  1. Name: the manifest's. A plugin installed as `key-alpha@m4-a` whose plugin.json says `mani-alpha` is installed
+     without complaint and its servers are `plugin:mani-alpha:alpha-http` and `plugin:mani-alpha:alpha-stdio`, in
+     mcp_status and in init's `mcp_servers` alike; init's `plugins` lists it as name `mani-alpha`, source
+     `key-alpha@m4-a`. Nothing is normalised. Confidence: high (both runs).
+  2. Provenance: none on the server's entry. An mcp_status entry of a plugin's server carries exactly `config`,
+     `name`, `scope` ("dynamic"), `serverInfo`, `source` ("plugin"), `status`, `tools`, `transport` ("http" or
+     "stdio"); `config` holds only the transport's fields (`type`, `url`, or `type`, `command`, `args`), with no
+     `pluginSource`, `pluginPath` or other key naming the plugin or its folder. Init's `mcp_servers` entry carries only
+     `name`, `status`, `source`. What names the plugin is init's `plugins` list (`name` = the manifest name, `source`
+     = `<key>@<marketplace>`, `path` = the plugin's folder, `version`), joined to a server only through the name's
+     middle part. Confidence: high.
+  3. Collision: one server, the last enabled plugin's, and nothing said. With two enabled plugins whose manifest name
+     and server name are the same (`twin`, `srv`), the session has one `plugin:twin:srv`, connected to the address of
+     the plugin that comes later in the user settings' `enabledPlugins`; the other plugin's address is never
+     contacted. Install order decides only because `claude plugin install` appends to `enabledPlugins`: rewriting that
+     object in the other order, with installed_plugins.json unchanged, flips the winner. The same holds when only the
+     manifest names match (keys `twin@m4-a` and `twin-c@m4-c`). Nothing in mcp_status, init (no `plugin_errors`,
+     `plugin_warnings` or `mcp_server_errors`), stderr or the debug file mentions it; init's `plugins` lists both
+     plugins under the one name `twin`. A reader can tell which plugin won only by matching the entry's `config.url`
+     (or command) against each plugin's own .mcp.json. Confidence: high (five cases, both runs).
+  4. Templated address: reported expanded. `url: <base>/h/tpl/${M4_SEG}` with M4_SEG set in the launch environment
+     reads `<base>/h/tpl/inv-seg` in mcp_status's `config.url`, and that path is the one the stub received. (A stdio
+     plugin server's `${CLAUDE_PLUGIN_ROOT}` is likewise reported expanded, second pass, line 2.) Confidence: high.
+  5. Plugin off: absent, silently. `claude plugin disable key-alpha@m4-a` at `--scope user`, `--scope project` (writes
+     <root>/.claude/settings.json) and `--scope local` (writes <root>/.claude/settings.local.json), the user scope
+     still enabled in the last two: both of its servers are absent from mcp_status and init, never contacted; the
+     other plugins' servers are unchanged. Nothing is said but the debug file's count, "Found 8 plugins (7 enabled, 1
+     disabled)". Confidence: high.
+  6. Odd and long names: listed as written. Server keys `sp ace` and `co:lon` become `plugin:odd:sp ace` and
+     `plugin:odd:co:lon`, connected with their tool; a 147-character name (`plugin:` + a 95-character plugin name + `:`
+     + a 44-character server name) is listed whole and connected, and its tool, whose name would be 158 characters, is
+     withheld from the model with a debug-file line only: "[ERROR] MCP server "<name>" Tool "<tool name>" is not
+     sent to Claude: its name has 158 characters and the API ac…" (the record cuts the line). The install accepted the
+     long plugin name. Confidence: high for the listing; the tool's absence from the model's list is the engine's own
+     line, not a separate reading.
+
+Where the run differs from the source reading in the brief.
+  - `hss` (cli.pretty.js:474719-474729) sets `pluginSource` and `pluginPath` on the entry: they are not in what a
+    session reports. mcp_status's entry and its `config` carry neither (fixtures/uxwave/u11-plugin-conn-names.jsonl
+    seq 25; every case's mcp_status alike).
+  - "Of two equal names the later wins" (`Object.assign`, :477037-477041): run as stated, the later being the later
+    key of the user settings' `enabledPlugins` (u11-plugin-conn-twin-ab.jsonl seq 22 reached twin-b;
+    -twin-ab-settings-reversed.jsonl seq 22 reached twin-a with installed_plugins.json unchanged; -twin-ba, -twin-ac,
+    -twin-ca seq 22 likewise). Init's `plugins` lists them in that order (seq 28 of each).
+  - `r$` (:954009-954011) returning the name unchanged: run as stated; the name is the manifest's, not the key's.
+
+Method.
+  Engine 2.1.322 under spikes/protocol-probe/vm-run.sh (VM.md), the build VM of the earlier passes, shared with other
+  builds (load average about 2). Scenario scenarios/pass3/uxwave-u11-plugin-connectors.mjs, run twice as
+    ./vm-run.sh --prefix conn4a --out /tmp/conn4-r1 run run-pass3.mjs uxwave-u11-plugin-connectors
+  (conn4b, /tmp/conn4-r2). Scratch HOME and repository; three scratch marketplaces of invented plugins (m4-a: key-alpha
+  with manifest name mani-alpha, tpl, odd, the long one, twin; m4-b: twin; m4-c: twin-c with manifest name twin), each
+  added and installed with `claude plugin marketplace add` and `claude plugin install --scope user`; HTTP servers are
+  paths of one loopback stub (/h/<id>) that records each request; one stdio server. Every session is MAWS's launch
+  (uxwave-common-arrivals.mjs mawsLaunch, cwd <root>, `--debug-file`, M4_SEG=inv-seg in its environment): mcp_status
+  until the plugin servers settle, then the local command `/cost`, which makes the engine send `system/init` and a
+  result with cost 0; no model is called. The two records agree field by field (install timestamps aside). Earlier
+  trial runs of the same cases differed only in one read race unrelated to the plugins: whether the `maws` SDK server
+  was already in the settled mcp_status answer (`status.otherNames`).
+  Run 1 is committed: the record fixtures/uxwave/u11-plugin-conn.ndjson (line 1 setup, then one case a line: 2 names,
+  3 off-user, 4 off-project, 5 off-local, 6 twin-ab, 7 twin-ab-settings-reversed, 8 twin-ba, 9 twin-ac, 10 twin-ca)
+  and one journal per case, fixtures/uxwave/u11-plugin-conn-<case>.jsonl, trimmed as in passes 2 and 3 (stream events
+  dropped; initialize's answer reduced to its size and keys; the maws SDK server's own mcp_message traffic dropped).
+  The settled mcp_status is seq 25 and init seq 30 in -names, seq 22 and 28 in every other journal (the record's
+  `status.seq`, `init.seq`). Ten cases, 159 KB (13 to 19 KB a journal, the record 29 KB). No engine transcript.
+
+Cases (record line).
+  names (2): `status.servers` the six plugin servers with `keys`, `configKeys`, `config`; `init.pluginServers`,
+    `init.entryKeys` ["name","source","status"], `init.plugins`; `reached` the five HTTP paths, /h/tpl/inv-seg
+    among them; `debug.matched` the 158-character tool line.
+  off-user, off-project, off-local (3 to 5): `cliDisable` ("Successfully disabled plugin: key-alpha (scope: …)"),
+    `enabledPlugins` as written; the mani-alpha servers absent from `status.servers` and `init`, /h/alpha not in
+    `reached`; `stderr` [], no plugin errors or warnings.
+  twin-ab (6): installed a then b; `plugin:twin:srv` at /h/twin-b; `reached` ["/h/twin-b"].
+  twin-ab-settings-reversed (7): the same install, `enabledPlugins` rewritten b first; /h/twin-a.
+  twin-ba (8): installed b then a; /h/twin-a.
+  twin-ac (9): twin@m4-a then twin-c@m4-c (manifest name twin); /h/twin-c.
+  twin-ca (10): twin-c then twin; /h/twin-a.
+  In 6 to 10: `stderr` [], `init.plugin_errors`, `plugin_warnings`, `mcp_server_errors` absent, nothing about a
+  second plugin of that name in `debug.matched`.
+
+What could not be provoked or was not run.
+  - A collision between a plugin enabled at user scope and one enabled only in the project's or local settings (which
+    file's order wins then) was not run.
+  - Whether the loser's sign-in, if it had one, would be used for the winner: no OAuth was run, as asked.
+  - The model-facing tool list was not read (init's `tools` was not recorded); the long tool's absence rests on the
+    engine's debug line.
