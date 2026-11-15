@@ -834,6 +834,9 @@ Each body names: its class 1a run (`scripts/ci-gate.sh "$PWD" --gates static,uni
 - Observation (M2): the question machinery of `owner/report/answering.ts` (the card's send, its report to main, its Cancel, Record again, and their stores) had no caller once the cards went: only the request card's Mark read reads the file. M2 removed it with the cards, kept `markRead`, and added the bar's "mark every item read, or say why not"; `test/lane-b/renderer-guards.test.ts`'s entry for the file now names `ownerChannel.markRead` alone, and `test/one-predicate.test.ts` drops `QuestionCard.tsx`'s exception. Main's `ownerChannel.answered` and `ownerChannel.cancel` stay on the wire, now with no caller in the renderer.
   Evidence: `git grep` for the removed exports over `src`, `apps` and `test`; the two guards' tables.
 
+- Observation (M2, fix wave): Streamdown's root component is memoised on its text, its mode and a few display props, not on its plugins, so a `Markdown` handed another decoration over the same text keeps drawing with the old one until the text or the mode changes. The presenter remounts its `Markdown` when the decoration's kind changes (`owner/to-human/Presenter.tsx`, `key`).
+  Evidence: the root `memo`'s comparator in streamdown's dist (`children`, `mode`, `isAnimating`, `className` … and no `rehypePlugins`); `owner/report/report-view.test.tsx`'s full-transcript case, which drew a head's messages-only drawing after the view switched until the key was given.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts (the architect dispatches it). Each pull request's branch gets `doperpowers:review-code` at the xhigh panel, with the lenses of "Size and review"; each milestone a single reviewer at its boundary. Class 1a on GitHub Actions is the gate of record; the Electron groups, the two cross-build runs, the trial and the measured scene are the architect's.
@@ -873,6 +876,10 @@ Each body names: its class 1a run (`scripts/ci-gate.sh "$PWD" --gates static,uni
 
 - Decision: §D's "the only place these strings are written" amended for one string: the palette command's title `Mark all read` is written in its row of `src/shared/keymap/actions.ts` (§K already gives that row the title), because the palette reads every action's title from there and shared code cannot import the renderer's `copy.ts`. The words are unchanged.
   Date/Author: 2026-11-15 (UTC), the controller of the first pull request, at M2's report.
+
+- Decision (M2, fix wave after M2's review): decision (a)'s "a nested mark inside one line keeps its paragraph, one wrapper" now holds for the full drawing alone. A closed stretch's head (`reportOnly`) keeps exactly the marked ranges: a block that holds a tag at any depth (a code span's excepted) is cut at every tag into the runs `parseMarked` reads, each run its own message under its own label, and the words outside every mark are dropped, so `Before <message>For you</message> after.` draws `● message` over `For you`, and two marks inside one line draw two messages. A tag inside an inline element (`**<message>…</message>**`) takes that element whole under its message. The full drawing keeps the authored paragraph whole, as the scene "the report folds work while marked text retains its authored flow and geometry" reads it (`owner/to-human/message-ink.ts`, `runs`). The presenter keys its `Markdown` by the decoration's kind, so a head that opens or folds over the same text draws afresh.
+  Rationale: the review's Important finding, reproduced; the mod draws a folded mixed row by its parsed spans.
+  Date/Author: 2026-11-15, the executor of M2.
 
 ## Outcomes & Retrospective
 
