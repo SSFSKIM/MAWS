@@ -10,11 +10,13 @@
 //   joining one in flight, and derives after it.
 // - The first listing is owed until it is answered: a failed read is asked again on the backoff's steps and when the
 //   engine host streams again, at which a held listing is read again too (a restarted host says changes only for the
-//   sessions it has read). An answer older than the one held, or one that lands after the follow stopped, is dropped.
+//   sessions it has read). An answer to any read but the latest asked, or one that lands after the follow stopped, is
+//   dropped.
 // - A parent's follower follows the grades of its nested agents ("Settled and provisional", N2): open (read on each
 //   tick) while one of them runs or has provisionally ended; read once when it becomes a parent or a new agent is listed
 //   under it; once settled with nothing under it open, read once more and closed for good, its ledger kept. A parent
-//   that cannot be read is tried again only when the listing changes its own entry or names a new agent under it.
+//   that cannot be read is tried again only when the listing changes its own entry or names a new agent under it. A
+//   parent no entry names any more (its nested agents' entries went or moved) rests, its ledger kept, until one does.
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { AgentMeta, DerivedAgent, LaneAAgent } from '@shared/lane-a/agents';
 import type { BridgeAgents } from './agents';
@@ -40,7 +42,7 @@ interface Parent {
   held: boolean; // a read found its file: its ledger is its nested agents' loop
   readable: boolean | null; // null until its first read lands
   key: string | null; // its listing entry when it was last read (null: not listed)
-  children: Set<string>; // the agents listed under it
+  children: Set<string>; // the agents listed under it now
   open: boolean; // read on each tick
   reading: boolean;
   final: boolean; // its last read began once it was settled with nothing under it open
@@ -70,7 +72,6 @@ export class SessionFollow {
   private listedKey: string | null = null;
   private listingVersion = 0;
   private asked = 0; // the listings asked for, a change event counted as one asked and answered at once
-  private applied = 0;
   private retry: NodeJS.Timeout | null = null;
   private delays: { next(): number } | null = null;
   private failureLogged = false;
@@ -136,7 +137,9 @@ export class SessionFollow {
     if (this.round !== null) return this.round;
     const open = [...this.parents.values()].filter((p) => p.open && !p.reading);
     const round = Promise.all([
-      this.main.read().catch((error: unknown) => this.deps.log(`${this.deps.session}: its transcript could not be read for its jobs and subagents (${message(error)})`)),
+      this.main.read().catch((error: unknown) => {
+        if (!this.stopped) this.deps.log(`${this.deps.session}: its transcript could not be read for its jobs and subagents (${message(error)})`);
+      }),
       ...open.map((p) => this.readParent(p, false, false)),
     ]);
     this.round = round.then(() => {
@@ -185,8 +188,9 @@ export class SessionFollow {
     );
   }
 
-  // Every read is owed until answered: the first, and the one at the host's streaming signal. One that fails leaves the
-  // last listing standing and is asked again on the backoff's steps, unless a later read or a change answers first.
+  // Every read is owed until answered: the first, and the one at the host's streaming signal. Only an answer to the
+  // latest read asked (or a change, which counts as one) discharges it: an older read's answer, success or failure, is
+  // dropped. One that fails leaves the last listing standing and is asked again on the backoff's steps.
   private listingFailed(error: unknown, asked: number): void {
     if (this.stopped || asked !== this.asked) return;
     if (!this.failureLogged) this.deps.log(`${this.deps.session}: its subagents’ listing could not be read (${message(error)}); it is asked again`);
@@ -200,8 +204,7 @@ export class SessionFollow {
   }
 
   private applyListing(entries: SubagentEntry[], asked: number): void {
-    if (this.stopped || asked < this.applied) return;
-    this.applied = asked;
+    if (this.stopped || asked !== this.asked) return;
     this.failureLogged = false;
     this.delays = null;
     if (this.retry) clearTimeout(this.retry);
@@ -269,11 +272,18 @@ export class SessionFollow {
       if (nested === undefined) under.set(parent, [e]);
       else nested.push(e);
     }
+    for (const p of this.parents.values()) {
+      if (under.has(p.id) || p.reading) continue;
+      // no entry names it now (its nested agents' entries went or moved): it rests, its ledger kept, and an entry that
+      // names it again is a new agent under it
+      p.open = false;
+      p.children.clear();
+    }
     for (const [id, nested] of under) {
       const p = this.parents.get(id) ?? this.parent(id);
       if (p.reading) continue; // decided again when its read lands
       const named = nested.filter((n) => !p.children.has(n.agentId));
-      for (const n of named) p.children.add(n.agentId);
+      p.children = new Set(nested.map((n) => n.agentId)); // one that left and comes back is named again
       const open = nested.some((n) => n.status === 'running' || (ENDED.includes(n.status) && !settled(n, this.entries)));
       const own = this.entries.get(id);
       const done = !open && own !== undefined && settled(own, this.entries);
