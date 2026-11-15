@@ -5,8 +5,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_TREE_EXPANDED_MAX } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../../../test/support/fake-client';
-import { at } from '../../../../../../test/support/machine';
-import { createTreeStateStore, FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, type TreePlace } from './tree-state';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { useMachines } from '../../../stores/machines';
+import { useSetup } from '../../../sessions/store';
+import { createTreeStateStore, FILE_WIDTH_MIN, knownSession, treeOf, treePlace, TREE_WIDTH_DEFAULT, type TreePlace } from './tree-state';
 
 const A = at('app-a') as AppSessionId;
 const B = at('app-b') as AppSessionId;
@@ -202,5 +204,28 @@ describe('the session’s tree state', () => {
     store.getState().toggle(A, '/r');
     vi.advanceTimersByTime(DELAY);
     expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [A]: { width: null, folded: false, expanded: ['/r'] } }) }]);
+  });
+});
+
+// The branch review's first finding: an unstarted chat has no record yet, only its setup intent; the window knows it, so
+// a write keeps its tree.
+describe('the sessions the window knows', () => {
+  const U = at('app-unstarted') as AppSessionId;
+  afterEach(() => {
+    vi.useRealTimers();
+    useMachines.setState({ loaded: new Set() });
+    useSetup.setState({ intents: new Map() });
+  });
+
+  it('an unstarted chat, known by its setup intent alone, keeps its tree at a write of another session’s', async () => {
+    useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
+    useSetup.getState().applyIntents([{ appSessionId: U, location: null, additionalDirectories: [], updatedAt: '2026-11-15T10:00:00.000Z', progress: { worktree: null } } as never]);
+    const fake = fakeClient({ 'layout.get': { value: stored({ [U]: { width: 300, folded: true, expanded: ['/u'] } }) }, 'layout.set': undefined });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: knownSession });
+    await store.getState().load();
+    vi.useFakeTimers();
+    store.getState().setWidth(U, 310);
+    vi.advanceTimersByTime(DELAY);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [U]: { width: 310, folded: true, expanded: ['/u'] } }) }]);
   });
 });

@@ -200,7 +200,7 @@ export function createTreeStateStore(
 
 // A session the window no longer knows: this Mac's, with this Mac's sessions loaded and no record of it. Another machine's
 // session is never dropped for its absence (its machine may be away).
-function knownSession(id: AppSessionId): boolean {
+export function knownSession(id: AppSessionId): boolean {
   const local = ipc.localMachine;
   if (!isAddress(id) || machineOf(id) !== local || !useMachines.getState().loaded.has(local)) return true;
   return useSessions.getState().records.has(id);
