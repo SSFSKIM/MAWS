@@ -61,7 +61,8 @@ export function answerWords(text: string, questions: Read['questions']): string 
   const envelope = readAnswerEnvelope(text);
   if (envelope === null) return null;
   const asked = questions(envelope.call);
-  const pairs = envelope.answers.map((answer) => {
+  // MAWS's own envelope always carries its answers; the class's null is another tool's shape
+  const pairs = (envelope.answers ?? []).map((answer) => {
     const question = asked?.find((candidate) => candidate.id === answer.id);
     return { title: question === undefined ? answer.question : askQuestionTitle(question), words: askAnswerCopy(answer) };
   });
