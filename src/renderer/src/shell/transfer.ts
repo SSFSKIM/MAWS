@@ -354,6 +354,13 @@ export function moveToPanel(mainTabId: string): boolean | Promise<boolean> {
   return allTabs(layout().main).find((t) => t.id === mainTabId)?.kind === 'file' ? moveFileToSide(mainTabId) : moveArtifactToPanel(mainTabId);
 }
 
+// U6e (decision 19): a move the person makes is the person's open of the file: the entry's agent mark goes (a main tab
+// carries none of its own, and the side tab a move makes is unmarked), and the file is read again as the person's when its
+// view is next drawn. No act of the agent's moves a file's tab.
+export function movedByPerson(key: string, appSessionId: AppSessionId | null): void {
+  useViewer.getState().revisit(key, appSessionId);
+}
+
 // Side → main (Decision 13): a main tab of the file where `at` says, else at the end of the focused pane's strip, in
 // front; every side tab of it goes, in every session's list (rule 3). False: refused, nothing changed.
 export function moveFileToMain(panelTabId: string, at: TabPlace = {}): boolean {
@@ -364,6 +371,7 @@ export function moveFileToMain(panelTabId: string, at: TabPlace = {}): boolean {
     placeInMain({ kind: 'file', path: held.file, line: held.line, appSessionId, machine: machineOf(appSessionId) }, at);
     dropSideViews(key);
   });
+  movedByPerson(key, appSessionId);
   return true;
 }
 
