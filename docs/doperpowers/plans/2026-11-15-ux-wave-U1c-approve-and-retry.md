@@ -220,7 +220,7 @@ The send is awaited, and its answer and the record arrive on different channels.
 | delivered | the clock reaches `SETTLE_MS` (5 s) | none | what the record says |
 | none, with a notice | a press | sending, no notice | — |
 
-"The approval rows the transcript holds for a key" counts every one, read, waiting or dropped (`approvalsFor`). The linearisation point of a press is the synchronous step that puts "sending" in the store before the send is called; a second press, on this row, on another row of the same key, or on the same row mounted again, finds the gate closed and sends nothing.
+"The approval rows the transcript holds for a key" counts every one, read, waiting or dropped, that stands after the pressed blocked row (`approvalsFor`, from the press's remembered cell; where a closed turn folded that cell away, over that one turn's expanded rows; only when no held turn holds the call, every approval of the key in the held rows, which is correct or an undercount; Decision Log 33). The linearisation point of a press is the synchronous step that puts "sending" in the store before the send is called; a second press, on this row, on another row of the same key, or on the same row mounted again, finds the gate closed and sends nothing.
 
 The evidence is the transcript's own approval row, which every grant that reached a session leaves wherever its host marks it. The clock is the fallback for what leaves none, and it counts from the delivery's outcome, not from the press: the send is acknowledged and the queue no longer lists the grant. It serves a host that marks no grant (build F, where the button then returns), a grant deleted from the queue before it was written, and the moment between a queue entry's release and its row. A send that never answers stays out: the port's own bounds end every send (a host's command deadline, the bridge's 5 s answer, the link's hold). After a reload nothing is out, and the record alone decides.
 
@@ -549,7 +549,7 @@ In `transcript/model/blocked.ts`, the reason's constants, as the engine writes t
     /** Every blocked call's row that has a name and is outside a hidden branch, by its cell id (the rule of Design 3). */
     export function blockedStates(rows: readonly Row[], hidden: readonly TurnId[]): ReadonlyMap<CellId, BlockedState>;
     /** The approval rows for a key outside a hidden branch, read, waiting or dropped: what a press remembers and compares. */
-    export function approvalsFor(rows: readonly Row[], hidden: readonly TurnId[], key: string): number;
+    export function approvalsFor(rows: readonly Row[], hidden: readonly TurnId[], key: string, after: CellId | null): number;
 
 `hidden` is the state's own list (`state.hidden?.turns`, or an empty constant), so the memo holds on its identity.
 
@@ -632,6 +632,8 @@ In `CellLine`: a selector on the transcript's store gives the cell's `BlockedSta
 
 The grants out are a store (`useGrantsOut`), a map from session and key to `{ phase: 'sending' | 'delivered'; rows: number; quietSince: number | null }`, and beside it the notices by session and key. Its transitions are the table of Design 4. It is followed from the transcript's store (`approvalsFor`), the queue store and the lane A store by subscriptions the store itself holds while the map is not empty; nothing in it depends on a mounted component.
 
+One insertion in another child's file serves the store: `hold(key)` in `src/renderer/src/stores/transcript.ts`, which joins the transcript's counted attachment that is there, so a grant out keeps the session's transcript attached after its pane closes; the store does not attach a source of its own because attaching the IPC source would replace another machine's pane source (Decision Log 34).
+
 ### §G. The stack's row (U4's files, M3)
 
 In `composer/queue/stack.ts`: a row that has content carries `grant: BlockedCall | null`, set when `readConsents(messageText(content))` reads the whole text as exactly one grant; `rowText` answers `${CONSENT.approved} ${grant.subject}` for such a row, and for a row that has only text (`sending`, `handed`) when the whole text reads so; `newestToTake` skips a grant, as it skips an answer. In `QueueList.tsx`: a grant's row draws Send now and Delete and no More menu. An answer's row and every other row are unchanged.
@@ -698,6 +700,7 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
 - Observation 15 (M2): on the live route a subagent's blocked call reads `Failed: …` with the engine's whole text, and the advisory repeats that text: as long as the main loop's row was before M2.
 - Observation 16 (M3): the renderer's React Compiler test project catches a component that reads a store through `getState` beside unused subscriptions; a gate of that shape needs a snapshot it reads.
 - Observation 17 (M3): a completed turn with no work draws no divider (`derive.ts`), so the newest divider is not the newest turn.
+- Observation 18 (M3's fix): a closed turn folds its blocked cell out of the store's rows (`derive.ts`), while its user rows and approvals stay; a count over the held rows therefore overcounts after a fold.
 
 ## Decision Log
 
@@ -779,6 +782,10 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   Date/Author: 2026-11-15, M3's executor; recorded by the controller.
 - Decision 32 (the owner, 2026-11-15, on the three cards): card 1, "Button greys out (Recommended)", is the default built in `readsApproved`; card 2, "\"You approved cmd\" (Recommended)", is the default built in §G (a waiting grant's row draws Send now and Delete and no More menu; the uncertain row keeps U4a's Resume, Edit and Delete); card 3, "Yes, in the newest turn (Recommended)", is board ticket 703's, blocked by this landing, and nothing of it is built here (M5's tracker rows need nothing for it). No behaviour of this landing changes.
   Date/Author: 2026-11-15, the owner, through the architect; recorded by the controller.
+- Decision 33 (the architect, on M3's review, finding 1): the count a press compares is over approvals of the key that stand AFTER the pressed blocked row. The press remembers the row's cell id (`BlockedCallProps.cell`); `approvalsFor(rows, hidden, key, after)`. Where the held rows lack the cell because a closed turn folded its work away (`derive.ts`, a turn not expanded keeps only the rows that stay in view, and its approvals stay), the turn that holds the call is found by the tool use's id through the reducer's index (`state.index.toolUses`) and counted over its expanded rows (`expandedTurnRows`, one turn, only while a grant is out); only when no held turn holds the call is the count every approval of the key in the held rows, which is then correct or an undercount. The simpler readings fail: counting every held approval is raised by an older page holding an earlier approval of the same command (the reproducing case: the grant-out ended while the send was unanswered) and by a folded turn after a press on a "blocked again" row; counting after the turn's first row overcounts a block, an approval and a block inside one turn (M2 pins it). Tests: an older page with an earlier approval; the cell id through a rebuild; two blocked rows of one key; the press during a running turn on an "again" row, the turn folding; a cell inside a run of calls, the run open and folded; the expansion counted to run only while a grant is out. An auto mode block never joins a run of calls today (`classify.ts`: `auto_denied` is not groupable), so the run case is tested over hand-made rows only: accepted as it stands.
+  Date/Author: 2026-11-15, the architect, on the M3 fixer's case; built in `e9708ba9e`; recorded by the controller.
+- Decision 34 (M3's review, findings 2 and 3; the architect): each press takes an attempt number, and a send's answer moves the grant only while its own attempt is current, so a late refusal or success of an earlier press never erases or advances a newer one. While a grant is out for a session the store holds that session's queue attachment (`attachQueue`) and its transcript (`hold(key)`, a named insertion in `stores/transcript.ts`, accepted: attaching the IPC source would replace another machine's pane source), released when its last grant settles; the lane A store is not held (main lists into it whatever is mounted). A session goes when it has no unarchived record and no listing row, or its machine is off the roster (archiving read as closing: accepted); then its grants end and every attachment they held is let go.
+  Date/Author: 2026-11-15, M3's fixer; accepted by the architect; recorded by the controller.
 
 ## Outcomes & Retrospective
 
