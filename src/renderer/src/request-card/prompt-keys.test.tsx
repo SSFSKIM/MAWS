@@ -419,10 +419,15 @@ describe('the session’s end and a child transcript’s end in one pane', () =>
 // its allow is sent for its own request id. Over the recorded child run whose main turn was still open at Stop
 // (u1b-intpend-child-r2), its events up to the interrupt.
 describe('Stop while a subagent’s prompt waits (probe 8)', () => {
-  it('sends the interrupt and withdraws nothing: the child’s card stays at its end and its Allow once answers its request', async () => {
+  it('sends the interrupt and withdraws nothing: through the turn’s recorded end the child’s card stays at its end, and its Allow once answers its request', async () => {
     const rows = loadUxwaveJournal('u1b-intpend-child-r2');
     const interrupt = rows.find((row) => row.direction === 'out' && (row.frame as { request?: { subtype?: unknown } }).request?.subtype === 'interrupt')!;
-    events = journalToEvents(rows.filter((row) => row.seq < interrupt.seq));
+    // the main turn's end the interrupt brings (`result` error_during_execution), before the late Allow the record makes
+    const ended = rows.find((row) => row.seq > interrupt.seq && row.direction === 'in' && (row.frame as { type?: unknown }).type === 'result')!;
+    expect((ended.frame as { subtype?: unknown }).subtype, 'the record’s main result after the Stop').toBe('error_during_execution');
+    const recorded = journalToEvents(rows.filter((row) => row.seq <= ended.seq)); // one normaliser through the result, as main runs it
+    events = recorded.filter((event) => event.seq < interrupt.seq);
+    const afterStop = recorded.filter((event) => event.seq > interrupt.seq);
     const asked = events.find((event): event is Extract<SessionEvent, { kind: 'permission.requested' }> => event.kind === 'permission.requested')!;
     expect(asked.agentId, 'the recorded request is a subagent’s').not.toBeNull();
     requests.set(asked.requestId, asked);
@@ -447,6 +452,15 @@ describe('Stop while a subagent’s prompt waits (probe 8)', () => {
     expect(selectPendingOf(useAttention.getState(), APP).map((item) => item.id), 'the item still listed').toEqual([child.id]);
     expect(childPrompt().textContent).toContain('touch uxw-ran-child.txt');
     expect(within(end()!).getByRole('group', { name: 'Approval needed' }), 'and at the session’s end').toBeTruthy();
+
+    // then what the session reports after the interrupt, through the main turn's end: the card still stands and answers
+    const openTurns = () => [...useTranscriptStore.getState().entries[APP]!.state.turns.values()].filter((turn) => turn.state === 'open');
+    expect(openTurns(), 'the main turn open before its end arrives').not.toEqual([]);
+    act(() => fake.event('session.eventBatch', { appSessionId: bareOf(APP), events: afterStop }));
+    await flush();
+    expect(openTurns(), 'the main turn closed by its recorded result').toEqual([]);
+    expect(selectPendingOf(useAttention.getState(), APP).map((item) => item.id), 'the item still listed after the turn’s end').toEqual([child.id]);
+    expect(childPrompt().textContent).toContain('touch uxw-ran-child.txt');
     arm();
     await act(async () => void within(childPrompt()).getByRole('button', { name: 'Allow once' }).click());
     await waitFor(() => expect(answered()).toEqual([{ requestId: asked.requestId, answer: ALLOW_ONCE }]));
