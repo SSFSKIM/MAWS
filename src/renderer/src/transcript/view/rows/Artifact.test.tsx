@@ -270,7 +270,7 @@ describe('the row of an agent’s delete', () => {
     const view = renderRow(DELETED, { storeKey: R, actions: withUndo(async () => null) });
     await act(async () => {});
     refused = true;
-    await libraryChanged();
+    await act(async () => main.emit('library.changed', { revision: 2 }, OTHER_MACHINE));
     await waitFor(() => expect(reads.length).toBe(2));
     await act(async () => {});
     expect(heading(view.container)).toBe('Deleted Draft plan');

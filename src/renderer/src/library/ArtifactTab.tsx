@@ -40,6 +40,7 @@ import { markArtifactViewed, undeleteArtifact } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
 import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
+import { unsentWhileDeleted } from '../artifacts/deleted-replicas'; // fix wave 4
 import { artifactMachineOf } from '../artifacts/machines'; // UX wave U10b
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's Undo
 
@@ -239,10 +240,13 @@ function Gone({ scope }: { scope: EditorHostScope }) {
 // editor's header says its changes are not saved yet (saving, unsaved, or waiting to reconnect), when the tab stays and
 // the session opens beside it, as an unsaved file's does. Replacing skips the closeGuard, so the sync answer is the
 // header's saved state.
+// Fix wave 4 (the panel's P1): a replica parked by an agent's delete reads read-only in the header, yet keeps the edit the
+// deletion's fence refused, which a replacement would close away; such a tab stays too.
 export function artifactReplaceVerdict(ref: TabRef): ReplaceVerdict {
   if (ref.kind !== 'artifact') return null;
   const saved = editorHostOf({ surface: 'main', tabId: ref.id })?.saved;
-  if (saved !== 'saving' && saved !== 'unsaved' && saved !== 'reconnecting') return null;
+  const kept = unsentWhileDeleted(ref.artifactId);
+  if (!kept && saved !== 'saving' && saved !== 'unsaved' && saved !== 'reconnecting') return null;
   const title = libraryRow(library.getState(), ref.artifactId).value?.title ?? LIBRARY_COPY.fallbackTitle;
   return { keep: saved === 'saving' ? LIBRARY_COPY.beingSaved(title) : LIBRARY_COPY.unsaved(title) };
 }

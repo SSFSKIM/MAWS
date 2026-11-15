@@ -330,7 +330,11 @@ export class DocumentTabState {
     const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
     if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
-    if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;
+    if (!handle || handle.state().unsaved === 0) return true;
+    // UX wave U10b fix wave 4: read-only or not, an edit the host never acknowledged is asked about; a read-only replica
+    // (one an agent's delete parked) will acknowledge nothing meanwhile, so it is asked at once
+    const ask = () => this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
+    if (handle.state().readOnly) return ask();
     const saved = await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         off();
@@ -343,7 +347,7 @@ export class DocumentTabState {
         resolve(true);
       });
     });
-    return saved || this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
+    return saved || ask();
   };
 
   /**

@@ -52,7 +52,11 @@ export function useUndoAct(undo: () => Promise<string | null>): UndoAct {
 /** Whether the library of the artifact's machine lists it: null until the read has answered. */
 export function useListed(artifactId: string): boolean | null {
   const read = useLibraryRow(artifactId);
-  return read.value === undefined ? null : read.value !== null;
+  // fix wave 4 (the ruling's predicate): a row is restoration only as a successful read's answer; a read refused since
+  // keeps its last good row (library/store.ts), which proves nothing, so it is not known (a read under way keeps the last
+  // successful answer: nothing has contradicted it yet)
+  if (read.status === 'error' || read.value === undefined) return null;
+  return read.value !== null;
 }
 
 /**

@@ -710,6 +710,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'updated' });
     await settle(1_000);
     expect(opens(h)).toBe(asked); // only the undelete's `created` ends the wait
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: and the read it makes, answering live
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
     await settle();
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
@@ -729,15 +730,16 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: true }));
     expect(unsentWhileDeleted(ARTIFACT)).toBe(false); // nothing typed: nothing kept
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the read `created` makes answers live
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
-    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false });
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }));
     handle.doc.get('root').insert(0, 'After the restore. ');
     await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
     expect(text(h.host.doc)).toBe('After the restore. ');
     handle.close();
   });
 
-  it('is done waiting when an open the host’s ready brings syncs, though it never heard the restore', async () => {
+  it('is done waiting at the host’s ready when the read it makes answers live, though it never heard the restore (fix wave 4: a sync alone never ends it)', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const h = harness();
     const handle = await h.artifacts.open(ARTIFACT);
@@ -747,6 +749,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     await settle(RECONNECT_BACKOFF_MS[0]);
     expect(handle.state().readOnly).toBe(true);
     h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never);
     h.hostState('ready', 9);
     await settle();
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false }));
@@ -849,6 +852,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
     expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
     h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: Undo landed, as the read after `created` says
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
     await settle();
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
@@ -867,6 +871,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     await settle(RECONNECT_BACKOFF_MS[0]);
     expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
     h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the host answers the read `created` makes
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
     await settle();
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
@@ -911,6 +916,7 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
       expect(handle.state(), reason).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
       expect(handle.state().refused, reason).toBeUndefined();
       h.answers.delete('artifacts.open');
+      h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the read `created` makes answers live
       h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
       await settle();
       await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
