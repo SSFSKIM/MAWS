@@ -797,6 +797,26 @@ describe('the Files list’s menu (U6e)', () => {
     await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
   });
 
+  // The architect's ruling 2: a second right-click while the menu is open closes it and opens it again in one gesture (its
+  // press lands outside the open menu); Escape then hands the keyboard back to the row that held it when the menu first
+  // opened, not to the page.
+  it('right-clicked again while open, so it opens again, then closed by Escape, the menu hands the keyboard back to the row it first opened from', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus()); // a right-click on a row puts the keyboard on it
+    fireEvent.contextMenu(item('src'));
+    const first = await screen.findByRole('menu');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0))); // the open menu listens for a press outside it
+    fireEvent.pointerDown(item('src')); // the second right-click: its press outside the open menu closes it …
+    fireEvent.contextMenu(item('src')); // … and its contextmenu opens it again
+    const second = await screen.findByRole('menu');
+    expect(first.isConnected).toBe(false);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0))); // the first menu's deferred hand-back runs
+    fireEvent.keyDown(second, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(item('src')));
+  });
+
   it('closed by Escape and not opened again, the menu hands the keyboard back to the row it was on', async () => {
     await openTree(A);
     await waitFor(() => expect(items().length).toBeGreaterThan(0));

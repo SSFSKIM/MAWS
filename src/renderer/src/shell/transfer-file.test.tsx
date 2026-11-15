@@ -715,6 +715,24 @@ describe('the person’s moves of a file the agent marked (U6e)', () => {
     await readAsPersons(before);
   });
 
+  // The architect's ruling 1, the review's own path: a main tab restored with the layout and not in front holds a file the
+  // person chose (a grant, no name in the transcript); the agent shows it before its viewer has read anything, so its fresh
+  // entry is the agent's while the tab has no mark; the person moves it beside the chat by its menu, without a click on it
+  // first. The destination's mount has no mark either: only the person's act takes the entry's back.
+  it('beside the chat by its tab’s menu, a restored main tab the agent’s show read first, never clicked, reads as the person’s there', async () => {
+    renderBoth();
+    act(() => useLayout.getState().openTab({ kind: 'file', path: OUT, line: null, appSessionId: A, machine: TEST_MACHINE }, { activate: false }));
+    expect(entry()).toBeUndefined(); // restored: nothing read yet
+    act(() => void openFile(A, OUT, null, { asked: 'agent', main: true })); // the agent's show brings it in front
+    await waitFor(() => expect(refusal()).not.toBeNull());
+    expect(entry()).toMatchObject({ status: 'error', agent: true });
+    const before = reads().length;
+    fireEvent.click(await menuItem(mainTabElement(KEY(OUT)), TRANSFER_COPY.moveToPanel));
+    expect(mainTabOf(OUT)).toBeUndefined();
+    expect(paramsOf(sideTabOf(OUT)!)).toEqual({ file: OUT, line: null });
+    await readAsPersons(before);
+  });
+
   // U6b-1's branch review, finding 4: a file with unsaved edits or a save under way opens kept, and the agent's mark stays
   // on such a kept tab; the tab here is given that state directly.
   it.each([['its menu'], ['a drag onto the column’s lower part']])('into the other group by %s, the agent’s kept tab loses its mark and reads as the person’s', async (way) => {
