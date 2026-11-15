@@ -47,7 +47,7 @@ import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { withdrawVersionRequest } from '../tools/artifacts/viewers/requests'; // P4-B4: a stale main ask goes with a move
 import { holdCover } from '../tools/browser/covering'; // Decision Log 39
-import { dropSideTabs, fileKey, FILES_TOOL_ID, sideFileKeys, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { asOneStep, dropSideTabs, fileKey, FILES_TOOL_ID, sideFileKeys, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
 import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
 import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
@@ -357,9 +357,11 @@ export function moveToPanel(mainTabId: string): boolean | Promise<boolean> {
 export function moveFileToMain(panelTabId: string, at: TabPlace = {}): boolean {
   if (transferRefusal({ to: 'tab', panelTabId, ...at }) !== null) return false;
   const { appSessionId, held, key } = sideFileOf(panelTabId)!;
-  holdSideViews(key);
-  placeInMain({ kind: 'file', path: held.file, line: held.line, appSessionId, machine: machineOf(appSessionId) }, at);
-  dropSideViews(key);
+  asOneStep(() => {
+    holdSideViews(key);
+    placeInMain({ kind: 'file', path: held.file, line: held.line, appSessionId, machine: machineOf(appSessionId) }, at);
+    dropSideViews(key);
+  });
   return true;
 }
 
@@ -370,10 +372,12 @@ export function moveFileToSide(mainTabId: string): boolean {
   if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
   const tab = allTabs(layout().main).find((t) => t.id === mainTabId) as Extract<TabRef, { kind: 'file' }>;
   const appSessionId = tab.appSessionId!;
-  useViewer.getState().holdKey(mainTabId);
-  layout().openTab({ kind: 'session', appSessionId });
-  panelHost.addTool(FILES_TOOL_ID, { appSessionId, params: { file: tab.path, line: tab.line } });
-  layout().closeTab(mainTabId, { remember: false }); // a move is not a close: no entry for Reopen closed tab
+  asOneStep(() => {
+    useViewer.getState().holdKey(mainTabId);
+    layout().openTab({ kind: 'session', appSessionId });
+    panelHost.addTool(FILES_TOOL_ID, { appSessionId, params: { file: tab.path, line: tab.line } });
+    layout().closeTab(mainTabId, { remember: false }); // a move is not a close: no entry for Reopen closed tab
+  });
   writeInOrder([`panel.${appSessionId}`, 'panelTools.params'], ['main.tabs']);
   return true;
 }

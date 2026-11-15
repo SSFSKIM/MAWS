@@ -139,7 +139,7 @@ export interface SideFilesViewer {
 
 export function connectSideFiles(viewer: SideFilesViewer): () => void {
   let holding = false; // the subscriber's own writes notify again: the outer run has the whole change in hand
-  const off = useLayout.subscribe((state, prev) => {
+  const settle = (state: LayoutState, prev: LayoutState) => {
     if (holding || !state.hydrated) return;
     if (state.panelBySession === prev.panelBySession && state.panelPinned === prev.panelPinned && state.panelParams === prev.panelParams) return;
     holding = true;
@@ -150,12 +150,34 @@ export function connectSideFiles(viewer: SideFilesViewer): () => void {
       holding = false;
     }
     viewer.prune();
+  };
+  const off = useLayout.subscribe((state, prev) => {
+    if (stepping === null) settle(state, prev);
   });
+  afterStep.add(settle);
   const offEdited = viewer.edited(keepFile);
   return () => {
     off();
+    afterStep.delete(settle);
     offEdited();
   };
+}
+
+// M4 (sequence 1): a move's writes are one step for the subscriber above, which holds the layout to its rules once, on
+// what the step leaves (measured against what it found). Within the step the file is beside the chat and in the main
+// area at once (the destination is written before the source is removed, so no write leaves it in neither), which the
+// rules would otherwise resolve, mid-step, against the move.
+let stepping: LayoutState | null = null;
+const afterStep = new Set<(state: LayoutState, prev: LayoutState) => void>();
+export function asOneStep(run: () => void): void {
+  if (stepping !== null) return run();
+  const before = (stepping = useLayout.getState());
+  try {
+    run();
+  } finally {
+    stepping = null;
+    for (const settle of afterStep) settle(useLayout.getState(), before);
+  }
 }
 
 // The preview tabs that hold the file, in every list, become kept tabs (its first edit): so a preview tab is never
