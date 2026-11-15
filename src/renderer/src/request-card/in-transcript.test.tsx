@@ -241,6 +241,30 @@ describe('the end row', () => {
   });
 });
 
+// The branch review (2026-11-15 UTC): inside the floating card the transcript keeps a floor while the session has a request
+// waiting that it draws, in its call's row or at its end (`session/SessionPane.tsx`). Both places carry one mark, which
+// that floor's selector reads; a settling line is no waiting request and carries none.
+describe('the mark a floating card’s floor reads', () => {
+  const marked = () =>
+    [...document.querySelectorAll<HTMLElement>('[data-request-waiting]')].map((element) => (element.matches('[data-request-end]') ? 'the end' : element.closest('.transcript-row[data-kind="question"]') !== null ? 'the question’s row' : 'elsewhere')).sort();
+
+  it('stands on a waiting request’s form in its row and on the end while a request stands there, and on nothing once none waits', async () => {
+    const { question, prompt } = scene();
+    await mount([question, prompt]);
+    await waitFor(() => expect(within(questionRow()).queryByRole('radio', { name: 'Red' })).not.toBeNull());
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    expect(marked()).toEqual(['the end', 'the question’s row']);
+    const settled: LaneAState['settled'][number] = { request: 'rp', session: 'eng', winner: 'terminal', outcome: 'allow', by: 'terminal' };
+    act(() => applyLaneAState(APP, laneAState(APP, { engineSessionId: 'eng', settled: [settled] })));
+    list([question]); // the prompt answered in the terminal: its settling line stands at the end
+    expect(end()?.textContent).toBe('Bash: make check · Answered in the terminal: Allowed');
+    expect(marked()).toEqual(['the question’s row']);
+    list([]);
+    await waitFor(() => expect(questionRow().querySelector('[data-request-card]')).toBeNull());
+    expect(marked()).toEqual([]);
+  });
+});
+
 // Decision 8b: a plan's row keeps the known answer. While it has no outcome of its own it reads its call's lasting
 // receipt in the place of Pending; its own outcome wins; the receipt goes with its session. The three-second settling
 // line is the end's only, and the end leaves this one out, since the row says it.
