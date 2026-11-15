@@ -15,7 +15,7 @@ const B = 'app-b' as AppSessionId;
 // A card another child docks (C10's trust card, here a stub): its own content and outcome, the frame's rules.
 function ForeignCard({ appSessionId, onAccept, onDecline }: { appSessionId: AppSessionId; onAccept: () => void; onDecline: (() => void) | null }) {
   return (
-    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" titleAlone onAccept={onAccept} onDecline={onDecline}>
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" onAccept={onAccept} onDecline={onDecline}>
       <p>Do you trust the files in this folder?</p>
       <textarea aria-label={`note ${appSessionId}`} />
       <button type="button">Trust</button>
@@ -344,7 +344,7 @@ describe('the frame’s title line', () => {
         <DockedCardFrame appSessionId={A} title="Relay is down" onAccept={null} onDecline={null}>
           <p>a card</p>
         </DockedCardFrame>
-        <DockedCardFrame appSessionId={B} title="Trust this folder?" titleAlone onAccept={null} onDecline={null}>
+        <DockedCardFrame appSessionId={B} title="Trust this folder?" onAccept={null} onDecline={null}>
           <p>a setup card</p>
         </DockedCardFrame>
       </Pane>,

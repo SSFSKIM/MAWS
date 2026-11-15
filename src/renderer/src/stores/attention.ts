@@ -53,6 +53,10 @@ export interface AttentionState {
   // item leaves; `failed` with the answer a Retry sends again. An entry goes when its item leaves the list.
   deliveries: ReadonlyMap<AttentionId, Delivery>;
   deliver(item: AttentionItem, answer: RequestAnswer): Promise<Outcome>; // the card's submit: the session's port (`connectAnswers`), its outcome, the receipt
+  // UX wave U1b M3 (the architect's ruling of 2026-11-15): the test reset's (`fillStores`), which no `setState` reaches:
+  // the answers held in flight, so a case that left one out keeps no later case's answer from being sent. The app never
+  // calls it.
+  forgetAnswersInFlight(): void;
   // UX wave U1b (Interfaces §G "The settling receipt", decision 20): a terminal session's request answered first elsewhere
   // says so for SETTLED_MS where it stood, held here (the end row leaves with its last request). Written and removed by
   // the card's follower (`request-card/receipts.ts`); never a waiting request: no list, count or key reads it.
@@ -344,6 +348,9 @@ export function createAttentionStore() {
         if (rest.length > 0) settling.set(appSessionId, rest);
         else settling.delete(appSessionId);
         set({ settling });
+      },
+      forgetAnswersInFlight() {
+        answering.clear();
       },
       deliver(item, answer) {
         const out = answering.get(item.id);

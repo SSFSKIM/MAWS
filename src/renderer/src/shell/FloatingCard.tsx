@@ -281,9 +281,10 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
           </span>
         </IconButton>
       </div>
-      {/* A pane-focus boundary as a main pane is (`data-pane`): a docked request that arrives while the card's composer
-          has the keyboard takes it (DockedCardFrame), and the transcript's pointer finds the card's own frame. It scrolls
-          when the card is shorter than the pane's floor (a docked request and the composer at the minimum size): the
+      {/* A pane-focus boundary as a main pane is (`data-pane`): a card another child docks (trust, relay down) that
+          arrives while the card's composer has the keyboard takes it (DockedCardFrame); a request is drawn in the card's
+          transcript, in its call's row or at its end (UX wave U1b), never in the composer's place. It scrolls
+          when the card is shorter than the pane's floor (a docked card and the composer at the minimum size): the
           transcript shrinks to nothing and every control stays reachable, the header and the resize edges in place. A
           child wider than the card is clipped, never scrolled sideways (P3-F L132). */}
       <div data-pane="card" className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">

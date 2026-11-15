@@ -20,7 +20,6 @@ import { useComposerStore } from '../../stores/composer';
 export interface DockedCardFrameProps {
   appSessionId: AppSessionId;
   title: string;
-  titleAlone?: boolean; // U1a §J; no effect since U1b, every frame reads its title alone (its callers drop it when next edited)
   onAccept: (() => void) | null;
   onDecline: (() => void) | null;
   onAllowOnce?: (() => void) | null; // U1a: only a permission prompt has them

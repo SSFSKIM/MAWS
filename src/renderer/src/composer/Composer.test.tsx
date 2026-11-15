@@ -490,7 +490,7 @@ describe("composer DOM under C5's dispatcher", () => {
     for (const menu of menus) {
       await menu.open();
       await waitFor(() => expect(menu.shown()).not.toBeNull());
-      const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" titleAlone onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame> });
+      const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame> });
       await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
       await waitFor(() => expect(menu.shown()).toBeNull());
       act(() => undock());

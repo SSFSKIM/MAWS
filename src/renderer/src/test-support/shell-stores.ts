@@ -68,6 +68,7 @@ export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): voi
     settling: new Map(), // UX wave U1b (M3): no settling receipt held from an earlier case
     greyed: new Set(), // P5 O7 M6
   });
+  useAttention.getState().forgetAnswersInFlight(); // UX wave U1b (M3): no answer left in flight by an earlier case
 }
 
 export function resetShellStores(): void {
