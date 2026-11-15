@@ -53,7 +53,8 @@ describe('localSource', () => {
   });
 
   it('an answer with no identity is unserved', async () => {
-    const { identity: _, ...older } = (answer(Buffer.from('%PDF')) as { value: FilesReadOutput }).value;
+    const older: FilesReadOutput = { ...(answer(Buffer.from('%PDF')) as { value: FilesReadOutput }).value };
+    delete older.identity; // a daemon that does not know `raw` answers the plain read
     const source = localSource(async () => ({ ok: true, value: older }), owner, { appSessionId: SESSION, path: PATH }, { named: true });
     expect((await why(source.read(0, 4))).why).toBe('unserved');
   });
