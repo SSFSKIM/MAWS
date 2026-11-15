@@ -10,7 +10,7 @@ import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, CellId, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
-import { parseAskSteer } from '@shared/maws/ask'; // E1
+import { readAnswerEnvelopes } from '@shared/engine/arrival'; // E1; UX wave U4b: the envelopes inside a joined message
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
@@ -975,16 +975,18 @@ function apply(batch: Batch, event: SessionEvent): void {
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
 // its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
-// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers.
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers. UX wave U4b (the
+// joined answer, step 2): the engine joins a waiting envelope with the prompts waiting beside it into one message, so
+// every envelope the shared reader finds in the text answers its ask, not only a text that is all envelope.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
-  const steer = parseAskSteer(text);
-  if (steer === null) return;
-  const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
-  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) return;
-  const turn = batch.touch(owner);
-  turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
-  turn.version += 1;
+  for (const steer of readAnswerEnvelopes(text).envelopes) {
+    const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
+    if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) continue;
+    const turn = batch.touch(owner);
+    turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
+    turn.version += 1;
+  }
 }
 // E1 end
 

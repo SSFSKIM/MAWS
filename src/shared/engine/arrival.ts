@@ -91,6 +91,7 @@ const TAG_OPENS = '[MAWS ask ';
  * is the other members, the newline that separated each envelope gone; a text that is all envelope has an empty rest.
  */
 export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
+  if (!text.includes(TAG_OPENS)) return { envelopes: [], rest: text }; // read on every user text the transcript draws
   const lines = text.split('\n');
   const envelopes: AskSteer[] = [];
   const kept: string[] = [];
