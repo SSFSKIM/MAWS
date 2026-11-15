@@ -106,6 +106,8 @@ describe('the remote reader over the recorded journals', () => {
     // measurements.
     ...readdirSync(join(FIXTURES, 'uxwave')).filter((name) => name.endsWith('.transcript.jsonl')).map((name) => `uxwave/${name}`),
     'uxwave/u5-p2-diffview.jsonl',
+    // A `.jsonl` under a fixtures folder named `…-subagents/` is an agent's transcript kept beside its session's, not a journal.
+    ...files(FIXTURES).map((path) => path.slice(FIXTURES.length + 1)).filter((name) => name.split('/').slice(0, -1).some((dir) => dir.endsWith('-subagents'))),
   ];
   const named = (file: string) => file.slice(FIXTURES.length + 1);
   const journal = (file: string): JournalRow[] =>
