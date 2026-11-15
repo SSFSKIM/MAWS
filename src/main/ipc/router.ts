@@ -48,6 +48,7 @@ import { gradeOf } from '@shared/ipc/grades';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { AppSessionIdSchema, type AppSessionId } from '@shared/graph/ids';
 import * as z from 'zod';
+import { atAppOrigin } from './app-origin'; // UX wave U6e: the origin test, shared with the guard's predicate
 import { clientOf } from './clients';
 
 export { emit } from './events';
@@ -223,13 +224,15 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
-    // UX wave U6e: the guards, before anything is forwarded; the first refusal is the answer
+    // UX wave U6e: the guards, before anything is forwarded; the first refusal is the answer, and any throw is `internal`
+    // (a typed failure's code included: a guard refuses only by its answer)
     for (const guard of guards.get(name) ?? []) {
       let refusal: IpcError | undefined;
       try {
         refusal = guard(name as CommandName, input.value, context);
       } catch (error) {
-        return failed(name, error);
+        console.error(`[ipc] the guard of ${name} failed`, error);
+        return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
       }
       if (refusal !== undefined) return { ok: false, error: refusal };
     }
@@ -385,11 +388,5 @@ function isAppSender(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>, 
   const frame = event.senderFrame;
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!frame || !win || frame !== win.webContents.mainFrame) return false;
-  try {
-    const url = new URL(frame.url);
-    const app = new URL(appUrl);
-    return app.protocol === 'file:' ? url.protocol === 'file:' : url.origin === app.origin;
-  } catch {
-    return false;
-  }
+  return atAppOrigin(frame.url, appUrl);
 }

@@ -2,9 +2,11 @@
 // §C; write rule line 2, decisions 3, 9 and 14).
 //
 // The guard: `files.writeOutside` and `layout.openFile` are answered only for a live page of an app window, the window
-// `createWindow` registered (`appWindows()`). The router's sender check already refuses a subframe, a web contents that
+// `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's own origin test,
+// ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a web contents that
 // is no window's and a page at another origin; this refuses, too, a window of the app's origin that is not an app window
-// (a presentation, the repair window) and main's in-process callers, whose asker is no page. The app registers it with
+// (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through `dispatchLocal`
+// and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app registers it with
 // `guardCommand`, which runs it before anything is forwarded (src/main/ipc/router.ts).
 //
 // Open File…: `layout.openFile` is main's own command, as `layout.pickFiles` is, since a request to the daemon has ten
@@ -18,18 +20,22 @@ import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { OpenFileOutput } from '@shared/ipc/schema/layout';
+import { atAppOrigin } from '../ipc/app-origin';
 import { pageOf } from '../ipc/clients';
 import type { CommandGuard, MainContext } from '../ipc/router';
 import { appWindows } from '../windows';
 
-// The asker is a page instance that still lives, shown by a window the app registered as its own.
-export function isAppPage(client: ClientRef): boolean {
+// The asker is a page instance that still lives, shown by a window the app registered as its own, at the app's origin
+// (`appUrl`, the URL the app window loads).
+export function isAppPage(client: ClientRef, appUrl: string): boolean {
   const page = pageOf(client);
-  return page !== null && appWindows().some((win) => win.webContents === page);
+  return page !== null && appWindows().some((win) => win.webContents === page) && atAppOrigin(page.mainFrame.url, appUrl);
 }
 
-export const appPageOnly: CommandGuard = (name, _input, ctx) =>
-  isAppPage(ctx.client) ? undefined : ipcError('forbidden_sender', `${name} may only be invoked by the app window`);
+export const appPageOnly =
+  (appUrl: string): CommandGuard =>
+  (name, _input, ctx) =>
+    isAppPage(ctx.client, appUrl) ? undefined : ipcError('forbidden_sender', `${name} may only be invoked by the app window`);
 
 export interface OpenFileDeps {
   port: Pick<ClientPort, 'pick'>;
@@ -40,13 +46,15 @@ export interface OpenFileDeps {
 const CANCELLED: OpenFileOutput = { status: 'cancelled' };
 const UNAVAILABLE: OpenFileOutput = { status: 'refused', reason: 'unavailable' };
 
-// The askers whose Open File… is being answered: one chooser per page, and one grant from it.
+// The askers whose Open File… is being answered: one chooser per page, and one grant from it, until the ask completes or
+// the page ends.
 const asking = new WeakSet<ClientRef>();
 
 export async function openChosenFile(input: CommandInput<'layout.openFile'>, ctx: Pick<MainContext, 'client' | 'target'>, deps: OpenFileDeps): Promise<OpenFileOutput> {
   const { client } = ctx;
   if (asking.has(client)) return CANCELLED; // C2: its chooser is open
   asking.add(client);
+  const released = client.onGone(() => asking.delete(client)); // a page that ends (destroyed, reloaded, navigated) holds no ask
   try {
     let answer: PickAnswer;
     try {
@@ -68,6 +76,7 @@ export async function openChosenFile(input: CommandInput<'layout.openFile'>, ctx
     if (!granted.ok) return UNAVAILABLE; // C3: refused, unknown to an older daemon, or not answered in time; nothing is assumed granted
     return granted.value.status === 'granted' ? { status: 'opened', path: granted.value.path } : { status: 'refused', reason: 'not-a-file' }; // C4
   } finally {
+    released();
     asking.delete(client);
   }
 }

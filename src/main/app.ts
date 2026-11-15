@@ -554,7 +554,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
   // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
-  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly);
+  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly(appUrl));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -760,7 +760,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   registerMainHandler('layout.pickFiles', (input, { client }) => pickFiles(input, client, { port: clientPort }));
   // UX wave U6e (decision 3): Open File…, the chooser through the same port, then the grant as main's own call
   registerMainHandler('layout.openFile', (input, ctx) =>
-    openChosenFile(input, ctx, { port: clientPort, isAppPage, grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
+    openChosenFile(input, ctx, { port: clientPort, isAppPage: (client) => isAppPage(client, appUrl), grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
   );
   shutdown.add('usage', () => usage.stop());
   // C7 end
