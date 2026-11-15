@@ -59,8 +59,9 @@ export function refOf(node: TaskNode): SubagentRef {
 
 // Card C1, the owner's answer (option 2): an agent that exited by the bridge's word or its starter's end, while its
 // session still runs, ended with no record of how; one whose session's process went ended with the session. Neither has
-// an end time of its own.
-const exitedWord = (node: TaskNode): string => (node.evidence === 'bridge' || node.evidence === 'parent' ? SUBAGENTS_COPY.ended : SUBAGENTS_COPY.endedWithSession);
+// an end time of its own. The one rule the row's word and the drill-in's relay reason read (Decision Log 17 (a)).
+export const endedUnrecorded = (node: TaskNode): boolean => node.status === 'exited' && (node.evidence === 'bridge' || node.evidence === 'parent');
+const exitedWord = (node: TaskNode): string => (endedUnrecorded(node) ? SUBAGENTS_COPY.ended : SUBAGENTS_COPY.endedWithSession);
 
 // A Done row's outcome: the terminal status with how long ago it ended, the bare word when no end time is known.
 export function outcomeOf(node: TaskNode, now: number): string {

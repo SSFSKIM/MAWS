@@ -90,6 +90,7 @@ export const RELAY_COPY = {
     finished: 'This agent has finished',
     stopped: 'This agent was stopped',
     exited: 'This agent ended with the session',
+    ended: 'This agent ended', // card C1: its row reads ended (Decision Log 17 (a))
     diskOnly: 'Known only from disk',
     pending: 'Waiting for the last relay',
   },
