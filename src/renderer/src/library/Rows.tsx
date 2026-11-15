@@ -76,8 +76,13 @@ export function Rows({ lines }: { lines: Line[] }) {
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [focusNext, setFocusNext] = useState<string | null>(null);
 
-  // the lines kept mounted out of range: the focused row and the row whose menu is open
-  const kept = useMemo(() => rowLines.filter((r) => r.id === focused || r.id === menuFor).map((r) => r.index), [rowLines, focused, menuFor]);
+  // the lines kept mounted out of range: the focused row and the row whose menu is open, and "Make something new", whose
+  // design-system choice holds while the page is open (UX wave U10b, M8)
+  const making = lines[0]?.kind === 'make';
+  const kept = useMemo(
+    () => [...(making ? [0] : []), ...rowLines.filter((r) => r.id === focused || r.id === menuFor).map((r) => r.index)],
+    [making, rowLines, focused, menuFor],
+  );
   const rangeExtractor = useCallback(
     (range: Range) => {
       const base = defaultRangeExtractor(range);

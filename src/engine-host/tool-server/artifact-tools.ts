@@ -25,6 +25,7 @@ import { isDocKind, type Artifact, type ArtifactKind, type Space } from '@shared
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
+  DESIGN_SYSTEM_KINDS,
   parseToolArguments,
   TOOL_ERRORS,
   type ArtifactCreateResult,
@@ -81,6 +82,25 @@ export async function spaceNamed(store: ArtifactStore, ref: string | undefined, 
   if (named.length > 1) throw refused({ reason: 'invalid', space: ref }, `${named.length} Spaces are named "${ref}"; name the one you mean by its id: ${named.map((space) => space.id).join(', ')}`);
   const there = spaces.length === 0 ? 'the library has no Spaces' : `the Spaces are ${spaces.map((space) => JSON.stringify(space.name)).join(', ')}`;
   throw refused({ reason: 'notFound', space: ref }, `no Space "${ref}"; ${there}`);
+}
+
+// UX wave U10b (l6-artifacts-08): the design system a create names, by its id, else its title (exactly, then in any case
+// and spacing; H18: the artifact's title, the name the Library and the person's choice show), among the live design
+// systems, read once the batch it was read in committed. None is refused with the systems there are, a title two
+// systems share with their ids; a kind no system governs is refused before anything is read. A system deleted after
+// this read is refused by the store's own check at the create.
+export async function designSystemNamed(store: ArtifactStore, kind: ArtifactKind, ref: string | undefined): Promise<Artifact | undefined> {
+  if (ref === undefined) return undefined;
+  if (!(DESIGN_SYSTEM_KINDS as readonly ArtifactKind[]).includes(kind)) throw new ToolRefusal(TOOL_ERRORS.designSystemNotForKind(kind));
+  const systems = await store.readCommitted(() => store.list({ kind: 'design_system' }));
+  const byId = systems.find((system) => system.id === ref);
+  if (byId) return byId;
+  const loose = (title: string) => title.replace(/\s+/g, '').toLowerCase();
+  const exact = systems.filter((system) => system.title === ref);
+  const named = exact.length > 0 ? exact : systems.filter((system) => loose(system.title) === loose(ref));
+  if (named.length === 1) return named[0];
+  if (named.length > 1) throw new ToolRefusal(TOOL_ERRORS.designSystemAmbiguous(ref, named.map((system) => system.id).sort()));
+  throw new ToolRefusal(TOOL_ERRORS.noDesignSystem(ref, systems.map((system) => system.title).sort((a, b) => a.localeCompare(b, 'en'))));
 }
 
 // What a create's answer says of the Space it was made in.
@@ -163,6 +183,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         return toolText(answer);
       }
       const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse('artifact_create', refusal, sentence)); // F5
+      const system = await designSystemNamed(store, kind, input.designSystem); // UX wave U10b
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
@@ -204,10 +225,11 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
 
       // The first answer's decorations, settled before the write so the recorded answer is the whole first answer: the
       // kind's guide when this session has not had it, the governing design system's guide as the registered chain names
-      // it (Decision Log 22d, 42; a new artifact has no system of its own, and the Space it is made in, if any; `{builtin}`
-      // attaches nothing, and the artifact's `designSystemId` stays unset, so the chain keeps deciding by reference)
+      // it (Decision Log 22d, 42; a new artifact has no system of its own unless the call names one (UX wave U10b), and
+      // the Space it is made in, if any; `{builtin}` attaches nothing; without a named system the artifact's
+      // `designSystemId` stays unset, so the chain keeps deciding by reference)
       const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind];
-      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(space ? { spaceId: space.id } : {}) : null;
+      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({ ...(system && { designSystemId: system.id }), ...(space && { spaceId: space.id }) }) : null;
       const files = isDocKind(kind) ? input.files : undefined;
       let base: { revision: number; state: Uint8Array } | null = null;
       const recorded = await store.writeCommitted(() =>
@@ -231,7 +253,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
               op.record(answer);
             };
             await store.create(
-              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
+              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }), ...(system && { designSystemId: system.id }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
               actor,
               complete,
             );

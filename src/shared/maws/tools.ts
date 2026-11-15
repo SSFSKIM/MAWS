@@ -204,7 +204,9 @@ const FileTextSchema = z.string().max(ARTIFACT_MAX_BYTES); // characters; the st
 // `file` artifact from `path` (in place), a `document` from nothing or markdown `content` (P3-B's create, ledger X25),
 // another Y kind from nothing or `files`. E2's `id` and `html_path` are accepted as
 // `handle` and `path`, so the call skills already make keeps working. P3-F wave S (F5, the owner's DL13 change): `space`
-// names the Space the artifact is made in, by its id or its name, resolved by the host.
+// names the Space the artifact is made in, by its id or its name, resolved by the host. UX wave U10b (l6-artifacts-08):
+// `designSystem` binds the new artifact to a design system, by its id or its title, for the kinds a system governs.
+export const DESIGN_SYSTEM_KINDS = ['document', 'presentation', 'design', 'dashboard'] as const;
 export const ArtifactCreateInputSchema = z
   .strictObject({
     kind: ArtifactKindSchema.optional(),
@@ -214,6 +216,7 @@ export const ArtifactCreateInputSchema = z
     files: z.record(FilePathSchema, FileTextSchema).optional(),
     content: FileTextSchema.optional(),
     space: z.string().min(1).max(200).optional(), // F5: a Space's id or its name
+    designSystem: z.string().min(1).max(200).optional(), // UX wave U10b (l6-artifacts-08): a design system's id or its name, for a kind of DESIGN_SYSTEM_KINDS
     id: ArtifactIdSchema.optional(), // E2's name for `handle`
     html_path: PathSchema.optional(), // E2's name for `path`
   })
@@ -510,7 +513,7 @@ export const MAWS_TOOLS = {
   artifact_create: {
     title: 'Create artifact',
     description:
-      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
+      "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
     input: ArtifactCreateInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -627,6 +630,10 @@ export const TOOL_ERRORS = {
   artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_publish`,
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
   artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
+  // UX wave U10b (l6-artifacts-08): a create's `designSystem` names no live design system, more than one, or a kind no system governs
+  noDesignSystem: (ref: string, names: readonly string[]) => `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}`,
+  designSystemAmbiguous: (ref: string, ids: readonly string[]) => `artifact_create: more than one design system is named "${ref}"; give one of these ids: ${ids.join(', ')}`,
+  designSystemNotForKind: (kind: string) => `artifact_create: a ${kind} takes no design system`,
   noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
