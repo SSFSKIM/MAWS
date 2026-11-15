@@ -57,8 +57,9 @@ describe('artifacts.undelete over the link', () => {
     expect(await act(b, b.device.action({ machine: f.ref, action: 'artifacts.update', args: { artifactId: held, title: 'Renamed' } }))).toBe('ok'); // the grade is there
   });
 
-  it('runs an owner’s once through `host.artifactOp`, its claim naming the artifact', async () => {
+  it('runs an owner’s once through `host.artifactOp`, its claim naming the artifact, which the library no longer lists', async () => {
     const { f, held, a } = await setup();
+    f.host.artifacts.delete(held); // deleted: `library.entry` answers no row, as the store does after a soft delete
     const undelete = a.device.action({ machine: f.ref, action: 'artifacts.undelete', args: { artifactId: held } });
     const from = a.inbox.length;
     expect(await act(a, undelete)).toBe('ok');
