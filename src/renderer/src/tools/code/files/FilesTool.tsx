@@ -10,7 +10,8 @@
 // store, for a tab restored and for one opened now alike; an add of a tab with a file writes its params before the tab
 // is listed, so no reader meets a file's tab without its file. An add with no file shows the tree-only tab the scope has
 // (`reuse`), and adds one only when it has none. The reveal of `params.path`, which nothing in the window asked for,
-// is gone with its two waiting states.
+// is gone with its two waiting states. M2: a tab that holds a file closes as a main file tab closes, asking about unsaved
+// edits (`beforeClose`), and its viewer is where ⌘S and Comment on this line act while it holds the keyboard.
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useStore } from 'zustand';
@@ -18,15 +19,17 @@ import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
+import { panelHost } from '../../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { machineFor } from '../../../ipc/machine';
 import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
 import { FILES_COPY, REFUSAL } from '../copy';
+import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { listingKey, useFiles } from './store';
-import { fileKey, fileOfTab, FILES_TOOL_ID, type FilesTabParams } from './tabs';
+import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, sideFileOf, type FilesTabParams } from './tabs';
 import { firstRoot, roleOf, rootsFor, rowsOf, workingRoot, type RootRole, type TreeRow } from './tree';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
@@ -84,6 +87,17 @@ function reuse(refs: readonly { id: string }[], params: FilesParams): string | n
   return refs.find((ref) => !paramsHoldFile(held[ref.id]))?.id ?? null;
 }
 
+// M2 (sequence 2): a tab that holds a file asks what a main file tab's close asks, of the file's key, and its answer acts
+// only while this tab still holds that file; a merge view's veto brings the tab into view. A close let through is
+// marked as answered, so the side tabs' subscriber does not keep the file as a main tab when the tab leaves.
+async function beforeClose(state: FilesState): Promise<boolean> {
+  const at = sideFileOf(state.tabId);
+  if (!at) return true;
+  const allowed = await closeGuardOf(at.key, { reveal: () => panelHost.selectTab(state.tabId), holds: () => sideFileOf(state.tabId)?.key === at.key });
+  if (allowed) closeAnswered(state.tabId);
+  return allowed;
+}
+
 export function FilesIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinejoin="round">
@@ -108,15 +122,22 @@ const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
   const held = fileOfTab(useLayout((s) => s.panelParams[state.tabId]));
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
-  if (held) return <div data-files-tab data-file={held.file} className="h-full min-h-0"><SideFile appSessionId={ctx.appSessionId} held={held} /></div>;
+  if (held) return <SideFile appSessionId={ctx.appSessionId} held={held} visible={ctx.visible} />;
   return <div data-files-tab data-file="" className="h-full min-h-0"><SessionTree key={ctx.appSessionId} ui={state.ui} appSessionId={ctx.appSessionId} session={ctx.session} /></div>;
 }
 
 // The file a side tab holds, drawn as a main file tab draws it (law 3): the same viewer and its bar, under the key the
-// file's main tab would have.
-function SideFile({ appSessionId, held }: { appSessionId: AppSessionId; held: FilesTabParams }) {
+// file's main tab would have. While the tab is visible its body is where the keyboard can hold the file (R4).
+function SideFile({ appSessionId, held, visible }: { appSessionId: AppSessionId; held: FilesTabParams; visible: boolean }) {
   const machine = machineFor(appSessionId);
-  return <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} />;
+  const key = fileKey(machine, held.file);
+  const body = useRef<HTMLDivElement>(null);
+  useEffect(() => (visible && body.current ? registerSideFile(body.current, key) : undefined), [visible, key]);
+  return (
+    <div ref={body} data-files-tab data-file={held.file} className="h-full min-h-0">
+      <FileViewer tab={{ id: key, kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} />
+    </div>
+  );
 }
 
 function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; appSessionId: AppSessionId; session: SessionRecord | null }) {
@@ -343,7 +364,7 @@ export const filesTool: PanelTool<FilesState, FilesParams> = {
   multiInstance: true,
   createState,
   reuse,
-  beforeClose: async () => true, // read-only: nothing to lose
+  beforeClose, // the tree alone: nothing to lose; a file: the question a main file tab asks
   dispose: () => {}, // the watches are the mounted tree's, released when it unmounts (after the grace)
   render: FilesBody,
 };

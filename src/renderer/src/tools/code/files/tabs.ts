@@ -5,7 +5,8 @@
 // from the layout store. One document per file in the window (Decision 3): a side tab's viewer key is the id the file's
 // main tab would have (`fileKey`), and an open selects the main tab when there is one (`placeOpen`). A file's tab is its
 // session's and never pinned (Decision 16; the store's gate reads `paramsHoldFile`). Pure but for `keep`, `showFiles`
-// and `connectSideFiles`, which write through the layout store and the panel host.
+// and `connectSideFiles`, which write through the layout store and the panel host. M2: a file beside the chat is an
+// editor: its first edit keeps the preview tab, and an unsaved file whose session goes becomes a main tab (R5).
 import type { AppSessionId } from '@shared/graph/ids';
 import { normalizeLexically } from '@shared/files/named';
 import { tabId, type PanelTabRef } from '@shared/ipc/schema/layout';
@@ -123,26 +124,96 @@ export function showFiles(appSessionId: AppSessionId): string {
 
 // The one subscriber on the side tabs (Interfaces §B; sequence 6): when a list, the pins or the params change, the live
 // layout is held to the read's rules (`repairFileTabs`: within a list the tree-only Files tab before those that hold a
-// file, Decision 17; no pin and no second preview), and then the viewer's prune runs, which counts the side files'
-// keys. Connected once with the code tools; `prune` is the viewer store's, handed in so this module imports no viewer.
+// file, Decision 17; no pin and no second preview); then a file that left the side tabs unsaved, by no close the person
+// answered, becomes a main tab (`keepUnsaved`); and only then the viewer's prune runs, which counts the side files' keys,
+// so it never meets such an entry with nothing holding it. Beside it, a file's first edit keeps the preview tab that
+// holds it (L1). Connected once with the code tools; the viewer is handed in (`editor/register.ts`), so this module
+// imports no viewer.
 export interface SideFilesViewer {
   prune(): void;
-  unsaved(key: string): boolean;
+  unsaved(key: string): boolean; // edits not yet saved, or a save under way
+  edited(listener: (key: string) => void): () => void; // a file's entry turning dirty
 }
 
-export function connectSideFiles({ prune }: SideFilesViewer): () => void {
-  let holding = false; // the repair's own writes notify again: the outer run has the whole repair in hand
-  return useLayout.subscribe((state, prev) => {
+export function connectSideFiles(viewer: SideFilesViewer): () => void {
+  let holding = false; // the subscriber's own writes notify again: the outer run has the whole change in hand
+  const off = useLayout.subscribe((state, prev) => {
     if (holding || !state.hydrated) return;
     if (state.panelBySession === prev.panelBySession && state.panelPinned === prev.panelPinned && state.panelParams === prev.panelParams) return;
     holding = true;
     try {
       holdToRules(state);
+      keepUnsaved(prev, viewer.unsaved);
     } finally {
       holding = false;
     }
-    prune();
+    viewer.prune();
   });
+  const offEdited = viewer.edited(keepFile);
+  return () => {
+    off();
+    offEdited();
+  };
+}
+
+// The preview tabs that hold the file, in every list, become kept tabs (its first edit): so a preview tab is never
+// unsaved, and nothing replaces an unsaved file beside the chat.
+function keepFile(key: string): void {
+  const layout = useLayout.getState();
+  for (const [appSessionId, own] of layout.panelBySession) {
+    for (const ref of own.tabs) {
+      const held = ref.toolId === FILES_TOOL_ID ? fileOfTab(layout.panelParams[ref.id]) : null;
+      if (held?.preview && fileKey(machineOf(appSessionId), held.file) === key) keep(ref.id);
+    }
+  }
+}
+
+// The file a session's side tab holds, with the session and the viewer's key; null for a tree-only tab, a pinned one, or
+// an id no session's list holds.
+export function sideFileOf(tabId: string): { appSessionId: AppSessionId; held: FilesTabParams; key: string } | null {
+  const layout = useLayout.getState();
+  for (const [appSessionId, own] of layout.panelBySession) {
+    const ref = own.tabs.find((tab) => tab.id === tabId);
+    if (!ref) continue;
+    const held = ref.toolId === FILES_TOOL_ID ? fileOfTab(layout.panelParams[tabId]) : null;
+    return held ? { appSessionId, held, key: fileKey(machineOf(appSessionId), held.file) } : null;
+  }
+  return null;
+}
+
+// The tabs whose close the person answered (Files' `beforeClose`): what they held leaves with them, as a main file tab's
+// does after its question. Each mark is spent when its tab leaves every list.
+const answered = new Set<string>();
+export function closeAnswered(tabId: string): void {
+  answered.add(tabId);
+}
+
+// R5 (sequence 6): a file that left the side tabs with unsaved edits or a save under way (its session archived or
+// deleted, through `dropSession`), by no close the person answered, and that no other session's list and no main tab
+// holds, becomes a main tab under the session it was opened for, not in front: today's rule for a main file tab, which
+// leaves only by a close that asked.
+function keepUnsaved(before: Pick<LayoutState, 'panelBySession' | 'panelParams'>, unsaved: (key: string) => boolean): void {
+  const now = useLayout.getState();
+  const held = sideFileKeys(now);
+  const open = new Set(allTabs(now.main).map((tab) => tab.id));
+  const left = new Map<string, { appSessionId: AppSessionId; file: FilesTabParams }>();
+  const asked = new Set<string>();
+  for (const [appSessionId, own] of before.panelBySession) {
+    for (const ref of own.tabs) {
+      const file = ref.toolId === FILES_TOOL_ID ? fileOfTab(before.panelParams[ref.id]) : null;
+      if (!file) continue;
+      const key = fileKey(machineOf(appSessionId), file.file);
+      if (held.has(key) || open.has(key)) continue;
+      if (answered.has(ref.id)) asked.add(key);
+      else if (!left.has(key)) left.set(key, { appSessionId, file });
+    }
+  }
+  for (const [key, { appSessionId, file }] of left) {
+    if (asked.has(key) || !unsaved(key)) continue;
+    useLayout.getState().openTab({ kind: 'file', path: file.file, line: file.line, appSessionId, machine: machineOf(appSessionId) }, { activate: false });
+  }
+  const listed = new Set([...now.panelBySession.values()].flatMap((own) => own.tabs.map((tab) => tab.id)));
+  for (const id of answered) if (!listed.has(id)) answered.delete(id);
 }
 
 function holdToRules(state: LayoutState): void {

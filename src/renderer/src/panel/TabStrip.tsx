@@ -12,11 +12,13 @@
 // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 6 and 16): a tab of Files
 // that holds a file is titled by the file's name, in italics while it is the session's preview tab (`data-preview`),
 // which a double-click on it keeps; it has no pin glyph. "+ ▸ Files" shows the tree-only tab the scope has (the tool's
-// `reuse`) and adds one only when it has none.
+// `reuse`) and adds one only when it has none. M2: while the file has unsaved edits the tab carries the dot a main file
+// tab carries (`data-dirty`), read from the viewer's entry under the file's key.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
+import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
 import { useLayout } from '../stores/layout';
 import { COPY } from './copy';
@@ -24,7 +26,9 @@ import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
-import { fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { EDITOR_COPY } from '../tools/code/copy'; // UX wave U6b-1
+import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import { groupOf, sideGroups, type SideGroupName } from './surface-model';
 
@@ -72,7 +76,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
           const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
-          return <Tab key={tab.id} tab={tab} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
+          return <Tab key={tab.id} tab={tab} appSessionId={appSessionId} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
         })}
       </div>
       <AddMenu appSessionId={appSessionId} group={group} />
@@ -158,6 +162,7 @@ type TabShape = 'whole' | 'icon' | 'cut';
 
 interface TabProps {
   tab: PanelTabRef;
+  appSessionId: AppSessionId | null; // the strip's scope: the session whose list holds a file's tab
   group: SideGroupName; // the group whose strip draws it
   selected: boolean;
   shape: TabShape;
@@ -169,13 +174,14 @@ interface TabProps {
   onMove(to: SideGroupName): SideGroupName | null; // answers the group the tab ended up in
 }
 
-function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
+function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
   const label = useTabLabel(tab); // the header reads the same label (P3-G)
   const { tool, suffix } = label;
   const params = useLayout((s) => s.panelParams[tab.id]);
   const file = tab.toolId === FILES_TOOL_ID ? fileOfTab(params) : null; // UX wave U6b-1
   const title = file ? file.file.slice(file.file.lastIndexOf('/') + 1) : label.title;
   const preview = file?.preview === true;
+  const dirty = useViewer((s) => file !== null && appSessionId !== null && (s.entries.get(fileKey(machineOf(appSessionId), file.file))?.dirty ?? false));
   const closing = usePanelHost((s) => s.closing.has(tab.id));
   const pinnable = (tool ? tool.pinnable : true) && pinnableTab(params);
   const ToolIcon = tool?.icon;
@@ -198,6 +204,7 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
       data-tab-id={tab.id}
       data-tab-shape={shape}
       data-preview={preview ? 'true' : undefined}
+      data-dirty={dirty ? 'true' : undefined}
       draggable={record !== null || undefined}
       onDragStart={record === null ? undefined : (event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, artifactId: record })}
       style={maxWidth === null ? undefined : { maxWidth }}
@@ -224,6 +231,11 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
           </span>
         )}
       </button>
+      {!iconOnly && dirty && (
+        <span role="img" aria-label={EDITOR_COPY.unsaved} className="shrink-0 px-0.5 text-fg">
+          •
+        </span>
+      )}
       {!iconOnly && pinnable && (
         <GlyphButton
           label={tab.pinned ? COPY.unpin(title) : COPY.pin(title)}
