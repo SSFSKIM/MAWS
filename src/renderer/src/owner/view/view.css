@@ -1,0 +1,9 @@
+/* The to-human view where MAWS draws it (UX wave U2b; the execution document, Interfaces §D). Tokens only, light first. */
+
+/* A stretch's record line (ruling 3 of 2026-11-15, items ii and iii): one muted line at the transcript's ordinary row
+   spacing, with no row above it (the mod's own line stands one row lower) and no bullet before it; full contrast on
+   hover. Under an opened stretch it is indented two columns, as the mod indents its `‹ fold to report`. */
+.owner-record-fold { padding: 2px 0 8px; }
+.owner-record-fold[data-open] { padding-inline-start: 2ch; }
+.owner-record-fold > button { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
+.owner-record-fold > button:hover { color: var(--fg); }

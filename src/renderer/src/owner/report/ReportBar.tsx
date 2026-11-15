@@ -11,7 +11,7 @@ import { useOwnerChannelStore } from '../../stores/owner-channel';
 import { useTranscriptStore } from '../../stores/transcript';
 import { markRead } from './answering';
 import { ESSENTIAL, REPORT } from './copy';
-import { reportViewOf } from './project';
+import { reportViewOf } from '../view/mirror';
 import './report.css';
 
 // Mark all read has no card to say a failure on: a toast says it, with Retry.

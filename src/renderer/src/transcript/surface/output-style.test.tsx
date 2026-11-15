@@ -21,7 +21,7 @@ async function mounted(text: string) {
   const store = await storeWith(b.events);
   const id = store.key as AppSessionId;
   useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
-  act(() => useTranscriptStore.getState().setOwnerLane(store.key, true));
+  act(() => useTranscriptStore.getState().setToHumanView(store.key, { lane: true, tailMessage: false }));
   const view = renderRow(rowOf(store.rows(), 'assistant_text'), { storeKey: store.key });
   return { store, view };
 }

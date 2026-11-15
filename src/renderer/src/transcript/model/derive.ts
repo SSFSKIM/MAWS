@@ -142,7 +142,6 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
   || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome, a scheduled fire and, until U1b, an answer stay
-  || row.kind === 'owner_record' // P2-C (2026-10-09): placed by the report projection, never a work row
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
 // P5 O9 (the M10 sitting): the rows the fold leaves in view, the persistent ones and, while any agent it names still
@@ -372,7 +371,8 @@ export const turnDerivations = { count: 0 };
 function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivation {
   turnDerivations.count += 1;
   const ui = state?.ui;
-  const expanded = ui ? ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
+  // UX wave U2b (decision 8): while the to-human view is in force no turn folds, in either view (`noTurnFold`)
+  const expanded = ui ? ui.noTurnFold === true || ui.expandedTurns.has(turn.id) || (turn.state === 'open' && !ui.collapsedTurns.has(turn.id)) : false;
   const context: TurnContext = turnContextOf(turn); // UX wave U2: shared with the mods' asks
   const items: Item[] = [];
   const tools = new Map<ToolUseId, ToolRecord>();

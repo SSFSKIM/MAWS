@@ -75,30 +75,30 @@ describe('a message tool’s call in a mounted transcript', () => {
     return b.events;
   }
 
-  it('the report draws unboxed message ink at level 0, and down to the work rows never as an MCP row', async () => {
+  it('the to-human view draws the message in sight and the command after it under one record, never as an MCP row', async () => {
     await mounted(turn(), true);
     const cards = () => [...document.querySelectorAll('[data-kind="to_human"] .owner-message-ink')].map((element) => element.textContent);
     const cells = () => [...document.querySelectorAll('[data-kind="cell"] [data-cell-id]')].map((element) => element.getAttribute('data-cell-id'));
     await waitFor(() => expect(cards()).toEqual(['Stage 1 is done.']));
-    const record = screen.getByRole('button', { name: 'Working record · 1 tool call' }); // the call is the message, not one of the calls
+    const record = screen.getByRole('button', { name: '› working record' }); // the call is the message, not one of the calls
     expect(record.getAttribute('aria-expanded')).toBe('false');
     expect(cells()).toEqual([]);
     expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
 
-    // The record opens directly onto the command, without a second turn-level disclosure or an MCP cell for the ink.
+    // The record opens directly onto the command, the turn's line in its place with no fold of its own.
     fireEvent.click(record);
     await waitFor(() => expect(cells()).toEqual(['cell:t1']));
-    expect(record.getAttribute('aria-expanded')).toBe('true');
-    expect(record.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15): the turn's line
-    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
-    expect(document.querySelector('[data-kind="divider"]')).toBeNull();
+    const fold = screen.getByRole('button', { name: '‹ fold to report' });
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('[data-kind="divider"] .transcript-turn-line')?.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15)
+    expect(document.querySelector('[data-kind="divider"] .transcript-disclosure')).toBeNull();
+    expect(document.querySelectorAll('[data-kind="record_fold"]')).toHaveLength(1);
     expect(cards()).toEqual(['Stage 1 is done.']);
-    expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
 
-    fireEvent.click(record);
+    fireEvent.click(fold);
     await waitFor(() => expect(cells()).toEqual([]));
-    expect(record.getAttribute('aria-expanded')).toBe('false');
-    expect(record.textContent).toBe('Working record · 1 tool call');
+    expect(screen.getByRole('button', { name: '› working record' }).getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[data-kind="divider"]')).toBeNull(); // a closed turn's line shows only with a record of it open
     expect(cards()).toEqual(['Stage 1 is done.']);
   });
 

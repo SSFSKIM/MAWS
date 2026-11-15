@@ -29,9 +29,7 @@ import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
 import { withBrowserActivityRows } from '../model/browser-activity'; // E13
 import type { AppSessionId } from '@shared/graph/ids'; // E13
-// P2-C start (2026-10-09)
-import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/project';
-// P2-C end
+import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
 import './transcript.css';
 
 // Leaving the end, and the logical end (the virtualiser's total against the committed sizer), are read within a pixel:
@@ -57,7 +55,7 @@ const ESTIMATES: Record<RowKind, number> = {
   artifact: 44, // E2
   browser_action: 34, // E4c: one line and its bottom padding
   browser_activity: 34, // E13: as a browser action's
-  owner_record: 32, // P2-C: one line
+  record_fold: 32, // UX wave U2b: one line
   to_human: 96, // P4-R7: a message card, its label and a few lines
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
@@ -530,22 +528,35 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
   const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail, waiting), [derived, activity, withdrawn, tail, waiting]);
-  // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane, when the mount knows it,
-  // told to the store (a marked commentary then stays in view when its turn folds), and while the lane is on and the
-  // reader has not chosen the transcript, the report projection of the rows: a marked turn's work in one working record
-  const storedLane = useTranscriptStore((state) => (state.entries[storeKey] ? (state.entries[storeKey].state.ui.ownerLane ?? false) : null));
-  useEffect(() => {
-    // again whenever the key's state starts over (an attach, a source's reset), which starts its ui afresh
-    if (ownerLane !== undefined && storedLane !== null && storedLane !== ownerLane) useTranscriptStore.getState().setOwnerLane(storeKey, ownerLane);
-  }, [storeKey, ownerLane, storedLane]);
-  const report = useTranscriptStore((state) => reportViewOf(state.entries[storeKey]?.state.ui));
-  const openRecords = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.reportOpenTurns);
-  const liveMarked = useTranscriptStore((state) => (report ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
-  const merged = useMemo(() => {
-    const state = useTranscriptStore.getState().entries[storeKey]?.state; // read when the rows change, as the rows are
-    return report && state ? reportRows(queued, state, { reportOpenTurns: openRecords }, liveMarked) : queued;
-  }, [queued, report, openRecords, liveMarked, storeKey]);
-  // P2-C end
+  // UX wave U2b (the execution document, M1, "The flag"; R5): the session's owner-channel lane, when the mount knows
+  // it, and whether the rows handed in from outside the store hold a message (a streaming reply's open mark included),
+  // told to the store before paint, which sets `noTurnFold` from them in the same update; again whenever the key's state
+  // starts over (an attach, a source's reset), which starts its ui afresh. This mount writes the outside rows' part when
+  // its own reading changes or the key started over, so two mounts of one key never undo each other. While the flag is
+  // set, the view is the report and MAWS draws it, the rows are mirrored: a render that sees a first mark in the tail
+  // before the flag is written draws them as they are, with the turn fold, and is replaced before paint.
+  const outsideMessage = useMemo(() => holdsMessage(tail) || holdsMessage(placed), [tail, placed]);
+  const storedView = useTranscriptStore((state) => {
+    const ui = state.entries[storeKey]?.state.ui;
+    return ui ? `${ui.ownerLane ?? false} ${ui.tailMessage ?? 'unset'}` : null;
+  });
+  const toldOutside = useRef<{ storeKey: string; message: boolean } | null>(null);
+  useLayoutEffect(() => {
+    const ui = useTranscriptStore.getState().entries[storeKey]?.state.ui;
+    if (!ui || storedView === null) return;
+    const lane = ownerLane ?? ui.ownerLane ?? false;
+    const ours = toldOutside.current?.storeKey !== storeKey || toldOutside.current.message !== outsideMessage;
+    toldOutside.current = { storeKey, message: outsideMessage };
+    const tailMessage = ours || ui.tailMessage === undefined ? outsideMessage : (ui.tailMessage ?? false);
+    if (lane !== (ui.ownerLane ?? false) || tailMessage !== (ui.tailMessage ?? false)) useTranscriptStore.getState().setToHumanView(storeKey, { lane, tailMessage });
+  }, [storeKey, ownerLane, outsideMessage, storedView]);
+  const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
+  const openStretches = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.openStretches);
+  const storedMarks = useTranscriptStore((state) => (mirrored ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
+  const merged = useMemo(
+    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail)) : queued),
+    [queued, mirrored, openStretches, storedMarks, tail],
+  );
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
   const rows = useMemo(() => {
@@ -575,10 +586,6 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   }, [storeKey, sendFollowRequest]);
   const disclosures = useDisclosures();
   const [motion] = useState(() => new WorkMotion());
-  useLayoutEffect(() => {
-    // Restoring Report reopens its saved records in the store; retire this view's older fold intents as well.
-    if (report) for (const turn of openRecords ?? []) motion.unfold(turn);
-  }, [report, openRecords, motion]);
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   // P4-B3 (its Decision Log 14): the place a card's float or dock carries to this mount (once), and where it leaves
   const takeCarried = useCallback(() => takeTranscriptCarry(storeKey), [storeKey]);

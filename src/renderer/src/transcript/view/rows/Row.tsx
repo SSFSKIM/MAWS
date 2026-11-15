@@ -17,7 +17,7 @@ import { AgentListRow } from './AgentList'; // E7
 import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
-import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
+import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
@@ -63,7 +63,7 @@ function body(row: Row) {
     case 'artifact': return <ArtifactRowView row={row} />; // E2
     case 'browser_action': return <BrowserActionRow row={row} />; // E4c
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
-    case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
+    case 'record_fold': return <RecordFold row={row} />; // UX wave U2b: placed by the mirror
     case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
   }
 }

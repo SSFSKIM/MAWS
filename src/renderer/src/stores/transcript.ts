@@ -7,8 +7,8 @@ import { create } from 'zustand';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
-import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
-import { foldedInReport, reportViewOf } from '../owner/report/project'; // P2-C (2026-10-09)
+import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
+import { holdsMessage, liveMarkedRowIds, mirrorsView, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -101,12 +101,14 @@ export interface TranscriptStore {
   setReceipt(key: string, receipt: RowId, patch: Partial<ReceiptUndo>): void; // the receipt row's state, canUndo and canReapply follow
   setSpill(key: string, path: string, patch: Partial<SpillLoad>): void; // the spill's state and content in its cell detail follow
   toggleBoundary(key: string, boundary: RowId): void; // a rewind boundary reveals or hides the branch it hid
-  // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane as main reports it (a
-  // marked commentary then stays in view when its turn folds); the view the reader chose for the tab; and a marked
-  // turn's working record in the report, opened directly to the work or closed again
-  setOwnerLane(key: string, on: boolean): void;
+  // P2-C start (2026-10-09; the P2-C document, Design §7): the view the reader chose for the tab.
+  // UX wave U2b (the execution document, Interfaces §C): the session's owner-channel lane as the mount knows it (a
+  // marked commentary then stays in view when its turn folds) and whether the rows the mount hands the transcript from
+  // outside the store hold a message, with `noTurnFold` recomputed in the same update; and a stretch of the to-human
+  // view opened or closed again
+  setToHumanView(key: string, view: { lane: boolean; tailMessage: boolean; modDraws?: boolean }): void;
   setView(key: string, view: 'report' | 'transcript'): void;
-  toggleReportRecord(key: string, turn: TurnId): void;
+  toggleStretch(key: string, stretch: string): void;
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
   // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
   jumpToMessage(key: string, anchor: MessageAnchor): boolean;
@@ -151,7 +153,7 @@ export function workingDurationMs(entry: TranscriptEntry | undefined, startedAt:
 export const ticks = (store: TranscriptStore, key: string) => store.live[key] !== false;
 
 const isExpanded = (state: TranscriptState, id: TurnId) =>
-  state.ui.expandedTurns.has(id) || (state.turns.get(id)?.state === 'open' && !state.ui.collapsedTurns.has(id));
+  state.ui.noTurnFold === true /* UX wave U2b: no turn folds while the view is in force */ || state.ui.expandedTurns.has(id) || (state.turns.get(id)?.state === 'open' && !state.ui.collapsedTurns.has(id));
 
 // A copy of the ui for one change. `turns` names the turns whose rows the change touches (their stamps bump, so only
 // they re-derive); `'all'` is a whole-transcript change.
@@ -163,9 +165,42 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
     expandedTurns: new Set(ui.expandedTurns), collapsedTurns: new Set(ui.collapsedTurns), expandedGroups: new Set(ui.expandedGroups),
     expandedCells: new Set(ui.expandedCells), revealedBoundaries: new Set(ui.revealedBoundaries), receipts: new Map(ui.receipts), spills: new Map(ui.spills),
     global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
-    ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), reportOpenTurns: new Set(ui.reportOpenTurns), // P2-C
+    ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), // P2-C
+    openStretches: new Set(ui.openStretches), ...(ui.tailMessage !== undefined && { tailMessage: ui.tailMessage }), ...(ui.noTurnFold !== undefined && { noTurnFold: ui.noTurnFold }), ...(ui.modDraws !== undefined && { modDraws: ui.modDraws }), // UX wave U2b
     ...(ui.revealed !== undefined && { revealed: ui.revealed }), // UX wave U3
   };
+}
+
+// UX wave U2b (decision 8, R5): whether the session's stored events hold a message, read over each turn's rows as
+// derived (kept per rows array, so an unchanged turn is read once). Under the lane a message of a folded turn stays in
+// view (`forHuman`, a message tool's call), so the folded rows hold it too; a streaming block is read by its buffer
+// (`liveMarkedRowIds`), not by its row's first delta.
+const turnMessages = new WeakMap<Row[], boolean>();
+function holdsStoredMessage(state: TranscriptState): boolean {
+  for (const id of state.order) {
+    const rows = turnRows(state, id);
+    if (rows === undefined) continue;
+    let holds = turnMessages.get(rows);
+    if (holds === undefined) turnMessages.set(rows, (holds = holdsMessage(rows, '')));
+    if (holds) return true;
+  }
+  return false;
+}
+
+// `noTurnFold`: the lane is on and the session holds a message, in its stored events, in a streaming block of the
+// store, or in the rows the mount hands in from outside (`tailMessage`, which `Transcript` writes before paint). Not
+// sticky: when none holds one any more (a reset, a reply an interrupt cut), the turn fold returns.
+const inForce = (state: TranscriptState): boolean =>
+  state.ui.ownerLane === true && (state.ui.tailMessage === true || holdsStoredMessage(state) || liveMarkedRowIds(state) !== '');
+
+// The state with `noTurnFold` as its events, its streaming blocks, its lane and its outside rows make it: a change of
+// it re-derives every turn once (no turn folds while it is set).
+function withViewFlag(state: TranscriptState): TranscriptState {
+  const flag = inForce(state);
+  if (flag === (state.ui.noTurnFold === true)) return state;
+  const ui = copyUi(state.ui, 'all');
+  ui.noTurnFold = flag;
+  return withUi(state, ui);
 }
 
 // The turn a visible row or cell belongs to (a toggle acts on what the reader sees), or null when it is not shown.
@@ -304,8 +339,9 @@ export function createTranscriptStore() {
       if (!current) return;
       const next = { ...current, ...patch };
       if (patch.state) {
-        next.rows = rowsOf(patch.state);
-        next.working = patch.state.current !== null;
+        next.state = withViewFlag(patch.state); // UX wave U2b: in the same update as the events, the lane, the outside rows
+        next.rows = rowsOf(next.state);
+        next.working = next.state.current !== null;
       }
       set({ entries: { ...get().entries, [key]: next } });
     };
@@ -330,9 +366,10 @@ export function createTranscriptStore() {
       const before = current.state.ui.revealed;
       const left = before === undefined || before === id ? [] : [turnOfShown(current.rows, before)].filter((turn): turn is TurnId => turn !== null);
       const touched = (turn: TurnId | null): TurnId[] => [...new Set([...(turn === null ? [] : [turn]), ...left])];
-      // P2-C: in the report a row of a marked turn's closed working record is out of sight: the jump opens the record
-      const folded = (row: Row) => reportViewOf(current.state.ui) && row.turnId !== null && !current.state.ui.reportOpenTurns?.has(row.turnId) && foldedInReport(row);
-      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && !folded(visible.row)) {
+      // UX wave U2b (Interfaces §C): in the to-human view MAWS draws, a row inside a closed stretch is out of sight: the
+      // jump opens the stretch that holds it
+      const closed = closedStretchHolding(current, id);
+      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && closed === null) {
         const ui = copyUi(current.state.ui, touched(visible.row.turnId));
         ui.revealed = id;
         put(key, { state: withUi(current.state, ui), jump: request(visible.row.id) });
@@ -342,10 +379,17 @@ export function createTranscriptStore() {
       if (!found) return;
       const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : touched(found.row.turnId));
       ui.revealed = id; // UX wave U3
-      if (folded(found.row)) ui.reportOpenTurns!.add(found.row.turnId!); // P2-C
+      if (closed !== null) ui.openStretches!.add(closed); // UX wave U2b
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
       if (found.group) ui.expandedGroups.add(found.group.id);
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
+    };
+    // The key of the closed stretch whose record holds the row or cell out of sight, while the view is the report, is in
+    // force and MAWS draws it; null otherwise.
+    const closedStretchHolding = (current: TranscriptEntry, id: RowId | CellId): string | null => {
+      if (!mirrorsView(current.state.ui)) return null;
+      const stretch = stretchHolding(current.rows, id, liveMarkedRowIds(current.state));
+      return stretch !== null && !(current.state.ui.openStretches?.has(stretch) ?? false) ? stretch : null;
     };
     const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
     // A jump to a cell wherever its turn has it (`jumpTo`'s search); false when the key holds no such cell.
@@ -523,24 +567,28 @@ export function createTranscriptStore() {
       toggleBoundary: (key, boundary) => changeUi(key, () => 'all', (ui) => toggle(ui.revealedBoundaries, boundary)),
 
       // P2-C start (2026-10-09)
-      setOwnerLane(key, on) {
-        if ((entry(key)?.state.ui.ownerLane ?? false) !== on) changeUi(key, () => 'all', (ui) => void (ui.ownerLane = on));
+      // UX wave U2b (R5): the flag is guessed with the lane as it will be, from the turns as they are (no turn derived
+      // for it), so a lane turned on over a history that holds a message derives every turn once; `put` settles it
+      setToHumanView(key, { lane, tailMessage, modDraws }) {
+        const current = entry(key);
+        if (!current) return;
+        const was = current.state.ui;
+        const laneChanged = (was.ownerLane ?? false) !== lane;
+        if (!laneChanged && (was.tailMessage ?? false) === tailMessage && (modDraws === undefined || (was.modDraws ?? false) === modDraws)) return;
+        const flag = inForce({ ...current.state, ui: { ...was, ownerLane: lane, tailMessage } });
+        const flagChanged = flag !== (was.noTurnFold === true);
+        changeUi(key, () => (laneChanged || flagChanged ? 'all' : []), (ui) => {
+          ui.ownerLane = lane;
+          ui.tailMessage = tailMessage;
+          ui.noTurnFold = flag;
+          if (modDraws !== undefined) ui.modDraws = modDraws;
+        });
       },
       setView(key, view) {
         if (entry(key)?.state.ui.view === view) return;
-        changeUi(key, (current) => view === 'report' ? current.state.ui.reportOpenTurns ?? [] : [], (ui) => {
-          ui.view = view;
-          if (view === 'report') for (const turn of ui.reportOpenTurns ?? []) expandTurn(ui, turn);
-        });
+        changeUi(key, () => [], (ui) => void (ui.view = view));
       },
-      toggleReportRecord(key, turn) {
-        changeUi(key, () => [turn], (ui) => {
-          if (ui.reportOpenTurns!.delete(turn)) return;
-          ui.reportOpenTurns!.add(turn);
-          // The record is the turn's disclosure in Report; opening it reveals the work directly.
-          expandTurn(ui, turn);
-        });
-      },
+      toggleStretch: (key, stretch) => changeUi(key, () => [], (ui) => toggle(ui.openStretches!, stretch)), // UX wave U2b
       attached: (key) => attachments.has(key),
 
       async reachMessage(key, target) {
