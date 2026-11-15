@@ -1,7 +1,7 @@
 import { Markdown } from '../../transcript/view/markdown/Markdown';
 import { markedSpans } from '@shared/owner/marked';
 import { MessageLabel, MessageView, useReportOnly } from '../view/Message';
-import { hasMessages, liveMessageInk, messageInk } from './message-ink';
+import { hasMessages, liveMessageInk, messageInk, unglued } from './message-ink';
 
 // The native fallback is the authored Markdown with each message drawn as the mod draws it (`owner/view/Message.tsx`).
 // Attached engine mods get first refusal; history and local mounts use this same drawing without inventing cards or a
@@ -14,7 +14,7 @@ function AssistantInk({ text, live }: { text: string; live: boolean }) {
   // component, so a head that opens or folds over the same text mounts afresh (Streamdown's root re-renders for a new
   // text or mode, never for new plugins).
   if (useReportOnly()) return <HeadMessages text={text} live={live} />;
-  return <div className="transcript-answer"><Markdown markdown={text} live={live} decorate={live ? liveMessageInk : messageInk} /></div>;
+  return <div className="transcript-answer"><Markdown markdown={unglued(text, live)} live={live} decorate={live ? liveMessageInk : messageInk} /></div>;
 }
 
 // A closed stretch's head (UX wave U2b; the architect's direction of 2026-11-15): exactly the one reading's message

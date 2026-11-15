@@ -11,6 +11,7 @@
 // message of the text carries the bullet (`spanRows`, 1411; the engine marks every text row of its conversation as the
 // first of its reply, ruling 4), a later one none; while the text streams a mark still open at its end is drawn under
 // its label and ` …`. A closed stretch's head draws the reading's spans alone (`Presenter.tsx`), not through this tree.
+// The full drawing hands Markdown its text through `unglued`, so a fence the reading closes is a fence Markdown closes.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
 import type { Plugin } from 'unified';
 import { readMarked } from '@shared/owner/marked';
@@ -42,6 +43,20 @@ export const hasMessages = (text: string, live = false): boolean => readMarked(t
 // `transcript/surface/Rows.tsx`'s question of a completed text the engine's surface drew natively.
 export const hasClosedMarks = (text: string): boolean => hasMessages(text);
 
+// A closing fence with mark tags glued after it on its line (the shared grammar's glued reading, `to-human-parser.ts`'s
+// `GLUED`): the reading closes the fence there and takes the tags, but CommonMark reads such a line as no closing
+// fence, so the code would run on and take the tags and every line after them. The text the full drawing hands to
+// Markdown therefore breaks each such line where the reading takes its tags: the fence alone on its line, the tags on
+// the next under the same indent. Nothing the reading takes moves between message and record, and a line the reading
+// leaves literal (inside a longer fence, say) is kept as written.
+const GLUED_CLOSER = /^([ \t]*)((?:`{3,}|~{3,})[ \t]*)((?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)+)$/gm;
+export function unglued(text: string, live = false): string {
+  if (text.search(GLUED_CLOSER) === -1) return text;
+  const taken = new Set(readMarked(text, live).tags);
+  return text.replace(GLUED_CLOSER, (line, indent: string, fence: string, tags: string, at: number) =>
+    taken.has(at + indent.length + fence.length) ? `${indent}${fence.trimEnd()}\n${indent}${tags}` : line);
+}
+
 const blank = (node: RootContent | undefined): boolean => node?.type === 'text' && !node.value.trim();
 const lineBreak = (node: RootContent | undefined): boolean => node?.type === 'element' && node.tagName === 'br';
 type Unit = { node: RootContent; message: number | null };
@@ -64,23 +79,6 @@ const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (t
   const isMarkTag = (token: Token) => MARKS.includes(token.name);
   const marks = tokens.filter((token) => isMarkTag(token) && taken.has(token.node.position!.start.offset!));
   const byNode = new Map<RootContent, Token>([...marks, ...paired(tokens.filter((token) => !isMarkTag(token)))].map((token) => [token.node, token]));
-  // A tag the reading takes that Markdown put inside code: a closer glued after a closing fence (the glued reading),
-  // which CommonMark reads as more of the fence's code. It comes out of the code with its fence line, as the reading
-  // closes the fence before it.
-  const glued = (node: Element): Token[] => {
-    const at = node.position;
-    if (!at) return [];
-    return reading.tags.filter((offset) => offset >= at.start.offset! && offset < at.end.offset! && !marks.some((token) => token.node.position!.start.offset === offset))
-      .map((offset) => tokenOf(/^<\/?[a-z-]+>/.exec(source.slice(offset))![0]));
-  };
-  const unglue = (node: Element, count: number) => {
-    const fenceLine = /\n?[ \t]*(?:`{3,}|~{3,})?[ \t]*(?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)+\n?$/;
-    const strip = (child: ElementContent): void => {
-      if (child.type === 'text') child.value = child.value.replace(fenceLine, '');
-      else if (child.type === 'element') child.children.forEach(strip);
-    };
-    if (count > 0) node.children.forEach(strip);
-  };
   const open: { name: string; message: number }[] = []; // message: the ordinal of an open mark's current run, else 0
   let messages = 0;
   let touched: number | null = null; // the message whose text the block being drawn holds
@@ -105,12 +103,7 @@ const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (t
       if (token) { enter(token); return []; }
       const before = removed;
       // Code keeps its own syntax styling and literal tags, even inside a message.
-      if (node.tagName === 'code' || node.tagName === 'pre') {
-        touch();
-        const inside = glued(node);
-        unglue(node, inside.length);
-        inside.forEach(enter);
-      }
+      if (node.tagName === 'code' || node.tagName === 'pre') touch();
       else node.children = node.children.flatMap(transform) as Element['children'];
       if (node.tagName === 'p' && before !== removed && node.children.every((child) => blank(child) || lineBreak(child))) return [];
     }
