@@ -561,6 +561,16 @@ describe('the grant a sminos bridge carried to a terminal session (U1c, M4; prob
     expect(readArrivals(queued([{ type: 'text', text: GRANT }], { origin: { kind: 'plugin', name: 'sminos' } }))).toEqual([]);
   });
 
+  // M4's review, finding 1: the submitted row is read whole, its every block, never its first text block alone
+  it('a submitted row of blocks is the grant only when its content is text alone and its text, the blocks joined by a line break, is the sentence whole', () => {
+    const blocks = (...content: unknown[]) => ({ type: 'user', uuid: 'u-b', origin: { kind: 'plugin', name: 'sminos', asUser: true }, promptSource: 'system', message: { role: 'user', content } });
+    const text = (t: string) => ({ type: 'text', text: t });
+    expect(readArrivals(blocks(text(GRANT))), 'one text block, the sentence').toEqual([grant('make build')]);
+    expect(readArrivals(blocks(text(GRANT), text('Also run the linter.'))), 'the sentence, then words').toEqual([]);
+    expect(readArrivals(blocks(text(GRANT), text(`${PEER_FRAME}\nCould you rerun the lint?`))), 'the sentence, then a peer’s frame').toEqual([]);
+    expect(readArrivals(blocks(text(GRANT), { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } })), 'the sentence, then an image').toEqual([]);
+  });
+
   it('a grant behind a sminos frame line is the delivery it was: the person’s own words, or a peer’s, never an approval', () => {
     const own = '[sminos message from human id=0f0e0d0c]';
     expect(readArrivals(submitted(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
