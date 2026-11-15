@@ -7,6 +7,7 @@
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
 import { readAnchoredMessage } from '../anchor/message';
+import { readArrivals } from '../engine/arrival';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1006,10 +1007,13 @@ export interface PendingCall {
   toolUseId: string;
   when: 'mcp' | 'edit';
 }
+// `other`: a `user` row whose text links the path but that someone other than the person wrote (UX wave U6e, Decision
+// Log 8): a result form already resolved, which names the path for a read and admits no save.
 export type RowClaim = { names: true } | { names: false; pending: PendingCall[]; other?: true };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
+const OTHER: RowClaim = { names: false, pending: [], other: true };
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
@@ -1117,7 +1121,11 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      if (yield* personNames(content, path)) return NAMES;
+      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8): the text is
+      // the person's when U3a's reader of arrivals reads none off the row's marks, or only the person's own words
+      // sminos delivered; a peer's message, a notification, MAWS's answer and consent texts and every other arrival are
+      // text someone else wrote, the class of a tool's result
+      if (yield* personNames(content, path)) return readArrivals(row).every((arrival) => arrival.class === 'own') ? NAMES : OTHER;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const value of listOf(content)) {

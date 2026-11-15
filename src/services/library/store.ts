@@ -215,8 +215,13 @@ export class LibraryStore {
   // the live File artifacts whose maker is a session of `appSessionId`'s line (the session or a side thread's ancestor),
   // which only the agent's own `send_file` or `artifact_create` records; each as the host recorded it.
   fileSentPaths(appSessionId: AppSessionId): string[] {
-    void appSessionId;
-    return [];
+    const makers = this.lineageOf(appSessionId).map((id) => actorKey({ kind: 'session', appSessionId: id as AppSessionId }));
+    return this.db
+      .all<{ linked_path: string }>(
+        `SELECT DISTINCT linked_path FROM library_artifacts WHERE kind = 'file' AND linked_path IS NOT NULL AND created_by IN (${makers.map(() => '?').join(', ')})`,
+        ...makers,
+      )
+      .map((row) => row.linked_path);
   }
 
   // ---- internals -----------------------------------------------------------------------------------------------------

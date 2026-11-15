@@ -5,6 +5,9 @@
 
 // The outermost ancestor of `execPath` whose name ends in `.app`; null when none does (a development run's Node).
 export function bundleOf(execPath: string): string | null {
-  void execPath;
-  return null;
+  if (!execPath.startsWith('/')) return null;
+  const parts = execPath.split('/');
+  // every ancestor, the executable itself left out; a name that is only `.app` is no bundle
+  const at = parts.slice(0, -1).findIndex((name) => name.length > '.app'.length && name.endsWith('.app'));
+  return at === -1 ? null : parts.slice(0, at + 1).join('/');
 }
