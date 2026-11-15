@@ -864,6 +864,128 @@ describe('a parked replica leaves only on a current read that answers live (fix 
       handle.close();
     });
   }
+
+  // Fix 6b: the coalescer's invariant, read at each step: parked, at most one read of the standing out, and never one
+  // with the backoff's timer armed (with its port off, the one timer a parked replica holds)
+  const heldReads = (h: ReturnType<typeof harness>) => {
+    const pending: ((result: unknown) => void)[] = [];
+    let answered = 0;
+    h.answers.set('artifacts.get', (() => new Promise((resolve) => pending.push(resolve))) as never);
+    return {
+      count: () => pending.length,
+      out: () => pending.length - answered,
+      answer: (index: number, result: unknown) => {
+        answered += 1;
+        pending[index]!(result);
+      },
+    };
+  };
+  const coalesced = (reads: { out: () => number }, holds: 'read' | 'timer') => {
+    expect(reads.out(), 'reads out').toBe(holds === 'read' ? 1 : 0);
+    expect(vi.getTimerCount(), 'timers armed').toBe(holds === 'timer' ? 1 : 0);
+  };
+  // a reopen whose answer is held until the test refuses it notFound; the opens after it are answered
+  const heldOpen = (h: ReturnType<typeof harness>) => {
+    let refuse!: () => void;
+    const result = new Promise((resolve) => (refuse = () => resolve(NOT_FOUND)));
+    h.answers.set('artifacts.open', (() => result) as never);
+    return {
+      refuse: () => {
+        h.answers.delete('artifacts.open');
+        refuse();
+      },
+    };
+  };
+  // a replica with an edit the host lacks, its reopen pending, parked by the `deleted` read: the backoff armed
+  async function parkedWithAReopenPending() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    const open = heldOpen(h);
+    const reads = heldReads(h);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen, pending
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await settle();
+    expect(reads.count()).toBe(1); // unparked: the direct read
+    reads.answer(0, DELETED);
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'timer');
+    return { h, handle, open, reads };
+  }
+
+  it('fix 6b: a reopen refused only after a `deleted` parked the replica asks through the coalescer: one read out or the timer, never both', async () => {
+    const { h, handle, open, reads } = await parkedWithAReopenPending();
+    open.refuse();
+    await settle();
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2);
+    stillParked(handle);
+    reads.answer(1, DELETED);
+    await settle();
+    coalesced(reads, 'timer');
+    await settle(CAP);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(3);
+    reads.answer(2, LIVE);
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('fix 6b: `ready` while a parked poll’s read is out and a reopen is still pending marks it to ask again: a gone answer then ends nothing, and one more read follows', async () => {
+    const { h, handle, open, reads } = await parkedWithAReopenPending();
+    await settle(RECONNECT_BACKOFF_MS[1]); // the poll
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2);
+    h.hostState('ready', 9);
+    await settle();
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2); // marked, not asked
+    reads.answer(1, GONE); // it may predate the `ready`
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(3);
+    reads.answer(2, LIVE);
+    await settle();
+    expect(handle.state().readOnly).toBe(false);
+    open.refuse(); // the reopen from before the park, refused at last: unparked, the replica reads directly
+    await settle();
+    expect(reads.count()).toBe(4);
+    reads.answer(3, LIVE);
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('fix 6b: a direct read still out when another read parks the replica holds the backoff back until it settles, and its live answer decides nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    const reads = heldReads(h);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' }); // the first direct read, out
+    await settle();
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the second direct read
+    expect(reads.count()).toBe(2);
+    reads.answer(1, DELETED); // parks the replica, the first still out
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    reads.answer(0, LIVE); // issued before the deletion was observed
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'timer');
+    expect(reads.count()).toBe(2);
+    handle.close();
+  });
 });
 
 describe('an artifact an agent deleted (UX wave U10b)', () => {
