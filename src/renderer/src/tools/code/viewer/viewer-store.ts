@@ -415,7 +415,8 @@ export function createViewerStore(client: MawsBridge) {
         if (!settledAlready) patch(tabId, ready);
         return;
       }
-      const { utf8, real: _real, ...file } = read;
+      const { utf8, real: _real, ...file } = read; // the read's real path is the pin's, by `pinAfter` above
+      void _real;
       const textEditable = isEditable({ ...file, utf8 });
       patch(tabId, { ...ready, ...file, textEditable, editable: textEditable && admits({ readOnly: entry.readOnly, ...admission }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
     };
