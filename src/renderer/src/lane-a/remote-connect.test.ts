@@ -2,7 +2,7 @@
 // registry, and the requests its bridge raised are cards in its pane, put in the attention store with their request views
 // while the page watches it.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
@@ -23,7 +23,7 @@ const raised = { request: 'toolu_1', session: 'eng-r', tool: 'Bash', input: { co
 let off: () => void = () => {};
 beforeEach(() => {
   resetLaneAStore();
-  useAttention.setState({ bySession: new Map(), requests: new Map(), drafts: new Map() });
+  useAttention.setState({ bySession: new Map(), requests: new Map(), drafts: new Map(), receipts: new Map() });
   off = connectRemoteLaneA();
 });
 afterEach(() => off());
@@ -77,6 +77,19 @@ describe('connectRemoteLaneA', () => {
     applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [] }));
     expect(useAttention.getState().bySession.get(there)).toHaveLength(1);
     expect(useAttention.getState().drafts.has(third.id)).toBe(true); // the other machine's settling leaves this one's draft
+    // UX wave U1b (Interfaces §G, decision 21): a question's receipt is the addressed session's with the call, so the
+    // answer given on one machine's question is never the other's, and dropping one session's list drops its receipts alone
+    const call = 'toolu_1' as ToolUseId;
+    const receipts = () => useAttention.getState().receipts;
+    useAttention.getState().recordReceipt(there, call, { answers: { 'Which file?': 'a.ts' } });
+    useAttention.getState().recordReceipt(REMOTE, call, { settled: 'Answered in the terminal' });
+    expect(receipts().get(there)?.get(call)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    expect(receipts().get(REMOTE)?.get(call)).toEqual({ settled: 'Answered in the terminal' });
+    applyLaneAState(REMOTE, null); // the last watch ended: the mirror empties the list
+    useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }); // the machine's snapshot drops it
+    expect(useAttention.getState().bySession.has(REMOTE)).toBe(false);
+    expect(receipts().has(REMOTE)).toBe(false);
+    expect(receipts().get(there)?.get(call)).toEqual({ answers: { 'Which file?': 'a.ts' } });
   });
 
   // UC-1 (U1a's Interfaces §B, "A window on another machine"): main says in the session's state which requests the

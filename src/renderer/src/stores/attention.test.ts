@@ -6,7 +6,7 @@ import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { swapOf } from '../composer/docked/swap';
-import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall } from './attention';
+import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall, selectWaitingForms, selectWaitingRequests } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -376,5 +376,71 @@ describe('attention partitions its snapshots by machine', () => {
     expect(store.getState().bySession.get(onB('s9'))).toEqual([onBItem]);
     expect(store.getState().bySession.get(onB('s8'))).toEqual([]);
     expect(store.getState().pendingReplacements).toBeNull();
+  });
+});
+
+// UX wave U1b (Interfaces §A): the session's waiting requests and the calls its transcript marks, each by the shared
+// rule and the same object until the session's list changes.
+describe('the list a transcript draws', () => {
+  const form = item('s1', 'question', '2026-09-28T09:00:00Z', { id: 'att-form' as never, request: { requestId: 'req-f' as never, toolUseId: 'toolu_f' as never, taskId: null, agentId: null } });
+  const prompt = item('s1', 'permission', '2026-09-28T08:00:00Z', { id: 'att-prompt' as never, request: { requestId: 'req-p' as never, toolUseId: 'toolu_p' as never, taskId: null, agentId: null } });
+  const answered = item('s1', 'question', '2026-09-28T07:00:00Z', { id: 'att-done' as never, state: 'delivered', request: { requestId: 'req-d' as never, toolUseId: 'toolu_d' as never, taskId: null, agentId: null } });
+
+  it('selects the waiting requests oldest first and the calls of the forms among them, memoised per list', () => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot([form, prompt, answered], M);
+    const requests = selectWaitingRequests(store.getState(), S);
+    const forms = selectWaitingForms(store.getState(), S);
+    expect(requests.map((i) => i.id)).toEqual(['att-prompt', 'att-form']);
+    expect([...forms]).toEqual(['toolu_f']);
+    expect(selectWaitingRequests(store.getState(), S)).toBe(requests);
+    expect(selectWaitingForms(store.getState(), S)).toBe(forms);
+    store.getState().applyChanged({ appSessionId: S, items: [prompt] }, M);
+    expect(selectWaitingForms(store.getState(), S).size).toBe(0);
+    expect(selectWaitingRequests(store.getState(), 'nobody' as AppSessionId)).toEqual([]);
+  });
+});
+
+// UX wave U1b (Interfaces §G, decisions 8 and 21): what is known of a question's answer before the transcript's own row
+// carries it, by the addressed session together with the call.
+describe('a question’s receipt', () => {
+  const call = 'toolu_r' as never;
+
+  it('is kept per session and call; a settlement never replaces an answer or a dismissal, an answer replaces a settlement', () => {
+    const store = createAttentionStore();
+    const receipt = () => store.getState().receipts.get(S)?.get(call);
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    expect(receipt()).toEqual({ settled: 'Answered in the terminal' });
+    store.getState().recordReceipt(S, call, { answers: { 'Which file?': 'a.ts' } });
+    expect(receipt()).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    store.getState().recordReceipt(S, call, { settled: 'Answered elsewhere' });
+    expect(receipt()).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    store.getState().recordReceipt(S, 'toolu_x' as never, { dismissed: true });
+    store.getState().recordReceipt(S, 'toolu_x' as never, { settled: 'Answered in the terminal' });
+    expect(store.getState().receipts.get(S)?.get('toolu_x' as never)).toEqual({ dismissed: true });
+  });
+
+  it('writing what is held already changes nothing', () => {
+    const store = createAttentionStore();
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    const held = store.getState().receipts;
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    expect(store.getState().receipts).toBe(held);
+  });
+
+  it('goes with its session’s list when the store drops that list, and only its own', () => {
+    const store = createAttentionStore();
+    const T = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
+    const kept = addressOf(TEST_MACHINE, 'eng-t' as AppSessionId);
+    const asked = item(T, 'question', '2026-09-28T09:00:00Z', { id: addressOf(OTHER_MACHINE, 'lane-a:eng-t:toolu_r') as never });
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().recordReceipt(T, call, { answers: { q: 'a' } });
+    store.getState().recordReceipt(kept, call, { answers: { q: 'b' } }); // one engine session and call id on another machine
+    store.getState().applyMirrored({ appSessionId: T, items: [] }, OTHER_MACHINE); // answered: the list is empty, not dropped
+    expect(store.getState().receipts.get(T)?.get(call)).toEqual({ answers: { q: 'a' } });
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }); // the machine's snapshot drops it
+    expect(store.getState().bySession.has(T)).toBe(false);
+    expect(store.getState().receipts.has(T)).toBe(false);
+    expect(store.getState().receipts.get(kept)?.get(call)).toEqual({ answers: { q: 'b' } });
   });
 });

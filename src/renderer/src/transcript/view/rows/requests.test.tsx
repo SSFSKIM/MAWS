@@ -159,14 +159,15 @@ describe('question row', () => {
   });
 
   // Debt wave 4: Esc on the card answers a question with a plain permission deny, which C3 reports as
-  // `question.answered` with no answers (recorded: pass3/question-deny). The row reads the question as skipped.
-  it('a question declined through a plain deny reads Skipped, in the row and its export (pass3/question-deny)', async () => {
+  // `question.answered` with no answers (recorded: pass3/question-deny). UX wave U1b (decision 10): the row reads the
+  // question as dismissed, as the card's Dismiss names that decline.
+  it('a question declined through a plain deny reads Dismissed, in the row and its export (pass3/question-deny)', async () => {
     const store = await expanded(journalToEvents(loadJournal('pass3', 'question-deny')));
     const row = rowOf(store.rows(), 'question');
     expect(row.answers).toEqual({});
     const view = renderRow(row, { storeKey: store.key });
-    expect(lines(view.container)).toEqual(['Color→Skipped']);
-    expect(serializeRows([row])).toBe('**Color** Red or Blue?: Skipped');
+    expect(lines(view.container)).toEqual(['Color→Dismissed']);
+    expect(serializeRows([row])).toBe('**Color** Red or Blue?: Dismissed');
   });
 
   it('a partially answered row (the stepper skipped one) says Not answered for each question without an answer, and only for those', async () => {

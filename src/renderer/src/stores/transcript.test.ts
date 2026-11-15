@@ -627,3 +627,72 @@ describe('transcript store: a message tool’s call', () => {
     expect(read('maws')).toEqual(['message m1']);
   });
 });
+
+// UX wave U1b (Interfaces §B, rule 2; decision 2): the store is told which calls hold a waiting form, and the rows a
+// transcript has of those calls today (read from its file; a request a bridge raised, whose row is never withheld) carry
+// the mark; nothing else decides it, and every other turn keeps its rows.
+describe('transcript store: the calls that hold a waiting form', () => {
+  const QUESTIONS = [{ question: 'Which file?', header: 'File', multiSelect: false, options: [{ label: 'a.ts' }, { label: 'b.ts' }] }];
+  const ASYNC = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
+  function waitingTurns() {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('q-async', 'mcp__sminos__AskUserQuestion', { questions: QUESTIONS, async: true });
+    b.result('q-async', ASYNC);
+    b.text('m1', 0, 'Asked; going on.');
+    b.end(['u1']);
+    b.turn('u2');
+    b.toolUse('q-raised', 'AskUserQuestion', { questions: QUESTIONS }); // a terminal's blocking question: no result yet
+    b.toolUse('plan-1', 'ExitPlanMode', { plan: '1. Read the notes.' });
+    b.toolUse('ask-1', 'mcp__maws__ask', { title: 'Setup', questions: [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }] }] });
+    b.turn('u3');
+    b.toolUse('t1', 'Bash', { command: 'ls' }, 'm3', 0);
+    b.result('t1', 'a', { structured: BASH_RESULT('a') });
+    return b;
+  }
+  const marked = (rows: Row[]) => rows.flatMap((row) => ((row.kind === 'question' || row.kind === 'plan' || row.kind === 'ask') && row.waiting === true ? [`${row.kind}:${row.toolUseId}`] : []));
+  const calls = (...ids: string[]) => new Set(ids.map((id) => tool(id)));
+
+  it('marks exactly the rows of those calls, file-read and bridge-raised alike, and leaves the other turns’ rows by reference', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(waitingTurns().events).source);
+    store.getState().expandAll(KEY);
+    const before = store.getState().rows(KEY);
+    expect(marked(before)).toEqual([]);
+    store.getState().setWaitingForms(KEY, calls('q-async', 'q-raised', 'plan-1', 'ask-1'));
+    const after = store.getState().rows(KEY);
+    expect(marked(after)).toEqual(['question:q-async', 'question:q-raised', 'plan:plan-1', 'ask:ask-1']);
+    const third = (rows: Row[]) => rows.filter((row) => row.turnId === turnId.ofMessage(uuid('u3')));
+    expect(third(after).length).toBeGreaterThan(0);
+    third(after).forEach((row, i) => expect(row).toBe(third(before)[i]));
+    // a row whose request left the set loses the mark
+    const first = (rows: Row[]) => rows.filter((row) => row.turnId === turnId.ofMessage(uuid('u1')));
+    const firstBefore = first(after);
+    store.getState().setWaitingForms(KEY, calls('q-raised', 'plan-1', 'ask-1'));
+    expect(marked(store.getState().rows(KEY))).toEqual(['question:q-raised', 'plan:plan-1', 'ask:ask-1']);
+    expect(first(store.getState().rows(KEY))).not.toEqual(firstBefore);
+  });
+
+  it('an equal set changes nothing; the row carries no mark of its own (no field at all while nothing waits)', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(waitingTurns().events).source);
+    store.getState().setWaitingForms(KEY, calls('q-raised'));
+    const entry = store.getState().entries[KEY];
+    store.getState().setWaitingForms(KEY, calls('q-raised'));
+    expect(store.getState().entries[KEY]).toBe(entry);
+    store.getState().setWaitingForms(KEY, new Set());
+    const question = store.getState().rows(KEY).find((row) => row.kind === 'question' && row.toolUseId === tool('q-raised'))!;
+    expect('waiting' in question).toBe(false);
+  });
+
+  it('a waiting plan stays in view when its turn folds; one that waits for nothing folds with its work', async () => {
+    const store = createTranscriptStore();
+    const b = waitingTurns();
+    b.end(['u3']); // u3's start closed u2
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const plans = () => store.getState().rows(KEY).filter((row) => row.kind === 'plan');
+    expect(plans()).toEqual([]);
+    store.getState().setWaitingForms(KEY, calls('plan-1'));
+    expect(plans().map((row) => row.toolUseId)).toEqual(['plan-1']);
+  });
+});
