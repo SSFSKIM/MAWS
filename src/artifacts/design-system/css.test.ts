@@ -1,6 +1,6 @@
 import { Window } from 'happy-dom';
 import { describe, expect, it } from 'vitest';
-import { generateTokensCss } from './css';
+import { documentPageSize, generateTokensCss } from './css';
 import complete from './fixtures/complete.tokens.json';
 import { edited } from './fixtures/edit';
 import lenient from './fixtures/lenient.tokens.json';
@@ -178,6 +178,12 @@ describe('the page size (Decision Log 15; X28’s page-size names)', () => {
     expect([a4.get('--ds-page-width'), a4.get('--ds-page-height'), a4.get('--ds-page-margin')]).toEqual(['210mm', '297mm', '72px']);
     const aliased = props(generateTokensCss(page({ size: 'letter', margin: '{space.8}' })), ':root');
     expect([aliased.get('--ds-page-width'), aliased.get('--ds-page-margin')]).toEqual(['8.5in', '4rem']);
+  });
+
+  // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the size a document's Export
+  // menu shows as the system's page, the same the stylesheet writes
+  it('names the page size it writes for the documents it governs', () => {
+    expect([documentPageSize(set(complete)), documentPageSize(page({ size: 'a4' })), documentPageSize(page({ size: 'letter' }))]).toEqual(['letter', 'a4', 'letter']);
   });
 
   it('writes no page in a deck scope', () => {

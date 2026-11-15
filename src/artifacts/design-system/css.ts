@@ -122,10 +122,17 @@ function writtenComposite(token: ResolvedToken, resolved: ResolvedTokens): Recor
 
 const PAGE_SIZE_CSS: Record<PageSize, [width: string, height: string]> = { letter: ['8.5in', '11in'], a4: ['210mm', '297mm'] };
 
+/** The page size a system gives its documents (the root's `dev.maws.page`): Letter unless it names A4. UX wave U10b: the
+ * document's Export menu reads it to say which size is in force. */
+export function documentPageSize(tokens: TokenSet): PageSize {
+  const page = tokens.groups.get('')?.$extensions?.[PAGE_KEY] as { size?: unknown } | undefined;
+  return page?.size === 'a4' ? 'a4' : 'letter';
+}
+
 /** The document's page from the root's `dev.maws.page`: Letter and a 1in margin unless the system says otherwise. */
 function pageDeclarations(tokens: TokenSet, resolved: ResolvedTokens): [string, string][] {
-  const page = tokens.groups.get('')?.$extensions?.[PAGE_KEY] as { size?: PageSize; margin?: unknown } | undefined;
-  const [width, height] = PAGE_SIZE_CSS[page?.size ?? 'letter'] ?? PAGE_SIZE_CSS.letter;
+  const page = tokens.groups.get('')?.$extensions?.[PAGE_KEY] as { margin?: unknown } | undefined;
+  const [width, height] = PAGE_SIZE_CSS[documentPageSize(tokens)];
   const margin = page?.margin === undefined ? null : resolveValueAgainst(resolved, 'dimension', page.margin, 'margin').value;
   return [
     [PAGE_CSS_NAMES[0], width],
