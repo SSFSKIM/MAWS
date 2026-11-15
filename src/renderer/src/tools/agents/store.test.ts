@@ -447,6 +447,7 @@ describe('a terminal session this Mac drives', () => {
   const T2 = '2026-11-15T10:05:00.000Z';
   const LATER = '2026-11-15T11:00:00.000Z'; // a launch by this app after the terminal's run
   let bridge: FakeClient;
+  const releases: (() => void)[] = [];
 
   const sidecar = (agentId: string, over: Record<string, unknown> = {}): SubagentEntry => ({
     agentId: agentId as AgentId,
@@ -484,12 +485,17 @@ describe('a terminal session this Mac drives', () => {
     // the page's sessions store, which the watch reads the holder from
     sessions = useSessions;
     store = createTaskGraphStore({ sessions });
+    // every watch a case takes is let go after it: the sessions store is the page's, and a store left bound to it would
+    // answer the next case's statuses and lane A changes
+    const watch = store.getState().watch;
+    store.setState({ watch: (id) => (releases.push(watch(id)), releases.at(-1)!) });
     holderOf(D, TERMINAL);
     holderOf(E, TERMINAL);
     applyLaneAState(D, laneAState(D));
     applyLaneAState(E, laneAState(E));
   });
   afterEach(() => {
+    releases.splice(0).forEach((release) => release());
     resetLaneAWatches();
     resetLaneAStore();
     useSessions.setState({ records: new Map(), engine: new Map(), listed: new Map() });
