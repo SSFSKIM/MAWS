@@ -145,6 +145,10 @@ const box = () => within(card()!).getByRole('checkbox', { name: 'Send to main' }
 const leave = () => fireEvent.keyDown(field(), { key: 'Escape' }); // a draft is kept: the card goes, its comment stays
 const chip = () => document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]');
 const surfaceChip = () => document.querySelector<HTMLElement>('[data-review] [data-unsent-chip]'); // in the toolbar or where it stands
+const lineLeft = () => document.querySelector<HTMLElement>('[data-review-line-left]'); // the row under the toolbar
+const stackElement = () => document.querySelector<HTMLElement>('[data-review-stack]');
+// Other's line 2 rewritten: a comment on it is on a line no longer in the diff.
+const OTHER_GONE = () => OTHER('export const total = 2;');
 const scopeChip = (id: string) => document.querySelector<HTMLButtonElement>(`[data-chip="${id}"]`);
 const unsentRows = (path?: string) => [...((path ? bodyOf(path) : document)?.querySelectorAll<HTMLElement>('[data-review-unsent-comment]') ?? [])];
 const changedLine = (path: string) => sectionOf(path)?.querySelector<HTMLElement>('[data-review-file-changed]') ?? null;
@@ -328,6 +332,142 @@ describe('comments on lines in Review', () => {
     expect(card()!.textContent).toContain('the session is not running');
   });
 
+  it('opens from the chip a comment whose line left the diff in a row under the toolbar, below “The line this comment was on is no longer in this diff.”, and keeps it open there, under no line', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    expect(lineLeft()!.querySelector('[data-review-line-left-words]')!.textContent).toBe('The line this comment was on is no longer in this diff.');
+    const toolbar = document.querySelector('[data-review-toolbar]')!;
+    expect(toolbar.compareDocumentPosition(lineLeft()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // under the toolbar
+    expect(lineLeft()!.compareDocumentPosition(stackElement()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // above the stack
+    expect(stackElement()!.contains(card())).toBe(false); // attached to no line
+    expect(field().value).toBe('Name it for what it counts.');
+    for (let turn = 0; turn < 10; turn++) await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+    expect(lineLeft()?.contains(card())).toBe(true); // it stays open
+    expect(useCommentCard.getState().open?.phase.kind).toBe('composing');
+  });
+
+  it('reads, edits, sends and removes there a comment whose line left the diff', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    type('Name it for what it adds up to.');
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it adds up to.']);
+    fireEvent.click(within(card()!).getByRole('button', { name: 'Close' })); // the card's Close drops the comment
+    await painted(() => card() === null && pass() === null);
+    expect(lineLeft()).toBeNull();
+
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+    leave();
+    await reread(REPORT().replace('+return quoted(value);', '+return escaped(value);') + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/report.ts')?.textContent?.includes('escaped') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+    expect(main.callsOf('side.comment.content')).toEqual([
+      { comments: [{ anchor: { kind: 'file-line', locator: '/repo/src/report.ts#L12', label: 'report.ts:12', path: '/repo/src/report.ts', line: 12 }, text: '`return quoted(value);`\nQuote only where a comma is.', screenshot: null }] },
+    ]);
+    await painted(() => card() === null && pass() === null && lineLeft() === null);
+  });
+
+  it('shows a refused send there, its reason and Retry in the card under the toolbar, and sends it again from there', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    const held = deferred<ReturnType<typeof ok>>();
+    main.state.content = () => held.promise;
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(main.callsOf('side.comment.content')).toHaveLength(1));
+    held.resolve(fail('the session is not running'));
+    await painted(() => lineLeft()?.querySelector('[role="alert"]') != null);
+    const refusal = within(lineLeft()!).getByRole('alert');
+    expect(refusal.textContent).toContain('the session is not running');
+    expect(lineLeft()!.contains(card())).toBe(true);
+    main.state.content = null;
+    fireEvent.click(within(refusal).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+    await painted(() => card() === null && pass() === null && lineLeft() === null);
+  });
+
+  it('places it under its line again when the line returns: Refresh on the file the card holds draws it there, with its words and the keyboard', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    field().focus();
+    await reread(REPORT() + OTHER(), FILES()); // the agent puts the line back
+    await painted(() => changedLine('src/other.ts') !== null);
+    expect(lineLeft()?.contains(card())).toBe(true); // held, as any file under an open card: never another line
+    fireEvent.click(within(changedLine('src/other.ts')!).getByRole('button', { name: 'Refresh' }));
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:2' && card() !== null && lineLeft() === null);
+    expect(lineRow('src/other.ts', 'new', 2)!.nextElementSibling?.contains(card())).toBe(true);
+    expect(field().value).toBe('Name it for what it counts.');
+    expect(document.activeElement).toBe(field());
+  });
+
+  it('returns the keyboard to the stack’s scroller on Escape, the draft kept, from a card under a line and from one under the toolbar; the card is worked from the keyboard there', async () => {
+    const user = userEvent.setup();
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    field().focus();
+    await user.keyboard('{Escape}');
+    await painted(() => card() === null);
+    expect(document.activeElement).toBe(stackElement());
+    expect(stackElement()!.tabIndex).toBe(-1); // focusable for the keyboard's return, and no new tab stop
+
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    field().focus();
+    const visited: Element[] = [];
+    for (let step = 0; step < 6 && document.activeElement !== sendButton(); step++) {
+      await user.tab();
+      visited.push(document.activeElement!);
+    }
+    expect(visited).toContain(box());
+    expect(document.activeElement).toBe(sendButton());
+    field().focus();
+    await user.keyboard('{Escape}');
+    await painted(() => card() === null);
+    expect(document.activeElement).toBe(stackElement());
+    fireEvent.click(chip()!);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    sendButton().focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+    await painted(() => card() === null && pass() === null);
+    expect(document.activeElement).toBe(stackElement()); // after a send, too
+  });
+
   it('keeps a comment whose line left the diff in the pass and the chip, drawn under no line', async () => {
     await mountReview();
     addOn('src/other.ts', 'new', 2);
@@ -342,23 +482,28 @@ describe('comments on lines in Review', () => {
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
   });
 
-  it('keeps the card’s host while the scope has no files: the chip stands for a draft, and when the file returns the card opens on its words', async () => {
+  it('keeps the card’s host while the scope has no files: the open card stands where the toolbar stands, under the line that says its line left, and goes back under its line when the file returns; a draft left there is the chip’s', async () => {
     await mountReview();
     addOn('src/report.ts', 'new', 12);
     await painted(() => card() !== null);
     type('Quote only where a comma is.');
     await reread('', []); // the agent reverts everything
-    await painted(() => document.querySelector('[data-review-empty]') !== null && surfaceChip() !== null);
-    expect(surfaceChip()!.textContent).toBe('1 unsent comment');
-    expect(card()).toBeNull();
-    expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote only where a comma is.']);
+    await painted(() => document.querySelector('[data-review-empty]') !== null && (lineLeft()?.contains(card()) ?? false));
+    expect(lineLeft()!.textContent).toContain('The line this comment was on is no longer in this diff.');
+    expect(field().value).toBe('Quote only where a comma is.');
 
     await reread(REPORT() + OTHER(), FILES());
     await drawn('src/report.ts');
-    await painted(() => chip() !== null);
-    fireEvent.click(chip()!);
     await painted(() => cardRow()?.dataset.reviewCardRow === 'new:12' && card() !== null);
+    expect(lineLeft()).toBeNull();
     expect(field().value).toBe('Quote only where a comma is.');
+
+    await reread('', []);
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    leave();
+    await painted(() => card() === null && surfaceChip() !== null);
+    expect(surfaceChip()!.textContent).toBe('1 unsent comment');
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote only where a comma is.']);
   });
 
   it('keeps the place line after a confirmed send while the scope has no files', async () => {
