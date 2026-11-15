@@ -451,18 +451,26 @@ describe('the row actions', () => {
   });
 
   // M5b (Decision Log 14): Export lists the formats main's exporters serve for the kind, and a File artifact's Save a copy…
-  it('Export › a format exports the artifact and saves it; a File artifact saves a copy; a kind with neither has no Export', async () => {
-    answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
+  // UX wave U10b (l6-artifacts-18, H9): an html page has Save a copy… too, and its html format is that item, not a row
+  it('Export › a format exports the artifact and saves it; a File artifact and an html page save a copy; a kind with neither has no Export', async () => {
+    answers['library.exportFormats'] = (input) => ok({ formats: input.kind === 'html' ? ['pdf', 'png', 'html'] : [] });
     answers['artifacts.export'] = () => ok({ path: '/store/x/exports/1-pdf.pdf', revision: 1 });
     answers['library.saveAs'] = () => ok({ saved: true, path: '/Users/me/Downloads/Pricing page.pdf' });
     const user = userEvent.setup();
     render(<Library />);
     await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
-    const formats = await screen.findAllByRole('menuitem', { name: /^(PDF|PNG|Save a copy…)$/ });
-    expect(formats.map((item) => item.textContent)).toEqual(['PDF', 'PNG']);
+    await screen.findByRole('menuitem', { name: 'PDF' });
+    const formats = screen.getAllByRole('menuitem', { name: /^(PDF|PNG|HTML|Save a copy…)$/ });
+    expect(formats.map((item) => item.textContent)).toEqual(['PDF', 'PNG', 'Save a copy…']);
     fireEvent.click(formats[0]!);
     await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: id(2), source: { export: { revision: 1, format: 'pdf' } } }]));
     expect(main.callsOf('artifacts.export')).toEqual([{ artifactId: id(2), format: 'pdf', ownFile: true }]); // P4 (W1, L302): a file of its own
+
+    await user.keyboard('{Escape}');
+    await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Save a copy…' }));
+    await waitFor(() => expect(main.callsOf('library.saveAs')).toContainEqual({ artifactId: id(2), source: { content: {} } }));
+    expect(main.callsOf('artifacts.export')).toHaveLength(1); // the stored page itself: nothing is exported
 
     await user.keyboard('{Escape}');
     await user.click(within(await openMenu(user, 'export.csv')).getByRole('menuitem', { name: 'Export' }));
@@ -478,13 +486,14 @@ describe('the row actions', () => {
   // P3-H (P3 Decision Log 92): the first menu to ask for a kind shows Export once main answers, in the same opening. Run
   // in `renderer-compiled` too, where a format read from the module's cache in render was memoized on the kind and the
   // answer never showed until the menu was opened again.
+  // (UX wave U10b: on the deck's row, since an html page's Save a copy… shows Export before main answers)
   it('Export appears in the opening that asked, when main answers after the menu opened', async () => {
     const answer = deferred<unknown>();
-    answers['library.exportFormats'] = (input) => (input.kind === 'html' ? answer.promise : ok({ formats: [] }));
+    answers['library.exportFormats'] = (input) => (input.kind === 'presentation' ? answer.promise : ok({ formats: [] }));
     const user = userEvent.setup();
     render(<Library />);
-    const menu = await openMenu(user, 'Pricing page');
-    await waitFor(() => expect(main.callsOf('library.exportFormats')).toEqual([{ kind: 'html' }]));
+    const menu = await openMenu(user, 'Quarterly deck');
+    await waitFor(() => expect(main.callsOf('library.exportFormats')).toEqual([{ kind: 'presentation' }]));
     expect(within(menu).queryByRole('menuitem', { name: 'Export' })).toBeNull();
     await act(async () => answer.resolve(ok({ formats: ['pdf', 'png'] })));
     expect(await within(menu).findByRole('menuitem', { name: 'Export' })).toBeTruthy();
@@ -502,7 +511,7 @@ describe('the row actions', () => {
     await user.click(within(await openMenu(user, 'Pricing page')).getByRole('menuitem', { name: 'Export' }));
     await screen.findByRole('menuitem', { name: 'PDF' });
     const items = screen.getAllByRole('menuitem').map((item) => item.textContent);
-    expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Send to Google Drive…']);
+    expect(items.slice(items.indexOf('PDF'))).toEqual(['PDF', 'PNG', 'Save a copy…', 'Send to Google Drive…']); // U10b: the page's copy
     fireEvent.click(screen.getByRole('menuitem', { name: 'Send to Google Drive…' }));
     await waitFor(() => expect(useDelivery.getState().sheet?.subject).toEqual({ artifactId: id(2), kind: 'html', title: 'Pricing page' }));
     expect(useDelivery.getState().sheet?.run.state.getState().target).toBe('drive');

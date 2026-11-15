@@ -623,6 +623,7 @@ export const LayoutKeySchema = z.union([
   z.literal('cards.open'), z.literal('panelTools.widths'), z.literal('panelTools.groups'), // UX wave U8b: the three above
   z.literal('library.exportFolder'), // UX wave U5: ExportFolderSchema, main's own key
   z.literal('destination'), // UX wave U7b (O-40): StoredDestinationSchema
+  z.literal('files.tree'), // UX wave U6b-1 (M3): FilesTreeSchema
 ]);
 // P5 O8 M5 (docs/doperpowers/plans/2026-10-28-p5-o8-org-interface.md, "The People toggle"): the sidebar rows (org projects'
 // and machines' row keys) whose People toggle is on, written by `stores/people.ts`; an absent key means every toggle off.
@@ -691,6 +692,17 @@ export function pageAtStart(input: { rawMain: unknown; canonical: boolean; store
   return input.canonical ? input.stored : null; // rules 4 and 5: the stored page over tabs of the stored form's shape
 }
 export type LayoutKey = z.infer<typeof LayoutKeySchema>;
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M3 and Interfaces §A and §C): Files'
+// tree at the left of every Files tab, one state per session (keyed by its address): the tree column's width (null: the
+// default), whether it is folded away, and the folders open, oldest opened first, at most the 200 opened last. Written by
+// `tools/code/files/tree-state.ts`; an absent or invalid value is every session's default. A key of its own, which build F
+// never asks for and its main keeps whole through its own writes.
+export const FILES_TREE_EXPANDED_MAX = 200;
+export const FilesTreeSchema = z.strictObject({
+  version: z.literal(1),
+  sessions: z.record(z.string(), z.strictObject({ width: z.number().int().nullable(), folded: z.boolean(), expanded: z.array(z.string()).max(FILES_TREE_EXPANDED_MAX) })),
+});   // key `files.tree`
+export type FilesTree = z.infer<typeof FilesTreeSchema>;
 
 // C7 start: the composer's file picker and the near-limit banners' dismissals (C7 execution document, Interfaces "X2
 // additions"). A picked file carries its bytes (base64) only for an image up to 20 MiB or a PDF up to 32 MiB; anything

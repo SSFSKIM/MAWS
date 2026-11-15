@@ -243,6 +243,49 @@ describe('the panel header', () => {
     expect(calls).toEqual(['basic']);
   });
 
+  // UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; L3): an entry that carries a
+  // checked state is a checkbox item after a separator, and every row of a menu that has one keeps the check's room
+  it('draws an export entry with a checked state as a checkbox item after a separator, every row keeping the check’s room', async () => {
+    const user = userEvent.setup();
+    const calls: string[] = [];
+    const entry = (id: string, checked?: boolean) => ({ id, label: id, onSelect: () => calls.push(id), ...(checked !== undefined && { checked }) });
+    const { tool } = editorTool('editor', () => ({ title: 'Memo', exports: [entry('PDF (.pdf)'), entry('Word (.docx)'), entry('Letter', true), entry('A4', false), entry('Compact', false)] }));
+    offs.push(registerPanelTool(tool));
+    mount();
+    add('editor');
+    await user.click(within(header()).getByRole('button', { name: 'Export' }));
+    const menu = await screen.findByRole('menu');
+    expect(calls, 'opening the menu chooses nothing').toEqual([]);
+    expect(within(menu).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['PDF (.pdf)', 'Word (.docx)']);
+    const checks = within(menu).getAllByRole('menuitemcheckbox');
+    expect(checks.map((item) => [item.textContent, item.getAttribute('aria-checked')])).toEqual([
+      ['Letter', 'true'],
+      ['A4', 'false'],
+      ['Compact', 'false'],
+    ]);
+    expect(checks[0]!.querySelector('[data-menu-check] svg'), 'the checked item draws its check').not.toBeNull();
+    expect(checks[1]!.querySelector('[data-menu-check] svg'), 'an unchecked one draws none').toBeNull();
+    const rows = [...menu.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]')];
+    expect(rows.map((row) => row.firstElementChild?.matches('[data-menu-check]')), 'every row starts with the check’s room').toEqual([true, true, true, true, true]);
+    const separator = menu.querySelector('[role="separator"]');
+    expect([separator?.previousElementSibling?.textContent, separator?.nextElementSibling?.textContent], 'one separator, between the formats and the checked items').toEqual(['Word (.docx)', 'Letter']);
+    expect(menu.querySelectorAll('[role="separator"]')).toHaveLength(1);
+    await user.click(checks[1]!);
+    expect(calls).toEqual(['A4']);
+  });
+
+  it('keeps no check’s room in an Export menu none of whose entries can be checked', async () => {
+    const user = userEvent.setup();
+    const { tool } = editorTool('editor', () => ({ title: 'Deck', exports: [{ id: 'pdf', label: 'PDF', onSelect: () => {} }] }));
+    offs.push(registerPanelTool(tool));
+    mount();
+    add('editor');
+    await user.click(within(header()).getByRole('button', { name: 'Export' }));
+    const [item] = within(await screen.findByRole('menu')).getAllByRole('menuitem');
+    expect(item!.querySelector('[data-menu-check]')).toBeNull();
+    expect((await screen.findByRole('menu')).querySelector('[role="separator"]')).toBeNull();
+  });
+
   it('returns to the tool’s plain title when the registration is disposed', () => {
     offs.push(registerPanelTool(probeTool('t', { title: 'Plain' }).tool));
     mount();

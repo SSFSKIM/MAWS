@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { hideSurfaces, mainTabById, openArtifactInPanel, openSurface, surface } from './support/shell';
+import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sideColumn, sideTab, surface } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -193,7 +193,9 @@ async function showSession(page: Page, id: string): Promise<void> {
   await expect(mainTabById(page, `session:${await addressed(page, id)}`)).toHaveAttribute('aria-selected', 'true');
 }
 
-// Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer.
+// Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer. UX wave U6b-1
+// (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens beside the chat,
+// as a tab of Files in the side column, which `showFileTab` brings back into view where another tab took its place.
 async function openFile(page: Page, repo: ScratchRepo, relative: string): Promise<Locator> {
   await openSurface(page, 'Files');
   const files = surface(page, 'files');
@@ -206,9 +208,17 @@ async function openFile(page: Page, repo: ScratchRepo, relative: string): Promis
     await expect(row(at)).toHaveAttribute('aria-expanded', 'true');
   }
   await row(repo.path(relative)).click();
+  await expect(sideColumn(page).locator(`[data-file-viewer][data-path="${repo.path(relative)}"]`), `${relative} beside the chat`).toBeVisible();
   const viewer = page.locator(`[data-file-viewer][data-path="${repo.path(relative)}"]`);
   await expect(viewer.locator('.cm-line').first()).toBeVisible();
   return viewer;
+}
+
+// The file's side tab brought into view, in the place of the tab its group showed (the Side pane, after a thread opens).
+async function showFileTab(page: Page, name: string): Promise<void> {
+  const tab = sideTab(sideColumn(page), name);
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
 // The comment mark of `line` (shown while its gutter is hovered), clicked; answers E3's sheet.
@@ -370,9 +380,15 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect.poll(() => projectRows(page, parent)).toEqual([{ id: parent, level: '2' }, { id: child, level: '3' }]);
     await expect((await sidebarRow(page, { appSessionId: child })).getByTestId('row-nested')).toHaveText('↳');
 
-    // the head's label opens the file at the line, in the parent's context
+    // the head's label opens the file at the line, in the parent's context: beside the parent's chat (UX wave U6b-1), its
+    // side tab in view in the thread's place, the parent's tab still in front and no main file tab
+    const strip = await mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
     await threadPane.getByRole('button', { name: 'Open app.ts:3' }).click();
-    await expect(mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(sideTab(sideColumn(page), 'app.ts')).toHaveAttribute('aria-selected', 'true');
+    await expect(sideColumn(page).locator(`[data-files-tab][data-file="${repo.path(APP)}"] [data-file-viewer][data-path="${repo.path(APP)}"]`)).toBeVisible();
+    await expect(mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`), 'no main file tab').toHaveCount(0);
+    await expect(mainTabById(page, `session:${await addressed(page, parent)}`)).toHaveAttribute('aria-selected', 'true');
+    expect(await mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? '')), 'the main strip as it was').toEqual(strip);
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -482,7 +498,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     value(await invoke(page, 'session.send', { appSessionId: parent as never, content: slowPrompt }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { message: 'the slow turn is running' }).not.toBeNull();
     const steerComment = 'While you are in there, check line 7 too.';
-    await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+    await showFileTab(page, 'app.ts'); // beside the parent's chat (UX wave U6b-1)
     const busySheet = await commentOn(page, viewer, 7);
     await busySheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await expect(busySheet.locator('label:has([data-send-to-main])'), 'the composer’s words for a steer').toHaveAttribute('title', 'Sends at the next step');
@@ -715,9 +731,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       card.permission(prompt, 'Bash', { command: 'echo themed', description: 'Print a word' });
       return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY]).write(dir, 'thread'), card.write(dir, 'card')];
     });
-    const { page, maws, repo, parent } = c;
+    const { page, maws, parent } = c;
     const { child, viewer } = await openThreadFromGutter(c);
-    // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row
+    // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row; the file's tab is
+    // beside the chat, where the Side pane took its place (UX wave U6b-1)
+    await showFileTab(page, 'app.ts');
     const sheet = await commentOn(page, viewer, 3);
     await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill('Is the recompute intended?');
@@ -746,16 +764,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
         if (dir !== null) await target.screenshot({ path: join(dir, `${name}.png`) });
       };
 
-      // the sheet, over the file's tab
-      await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+      // the sheet, over the file's tab (beside the chat: UX wave U6b-1)
+      await showFileTab(page, 'app.ts');
       const open = await commentOn(page, viewer, 3);
       await open.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
       await shoot(open, 'comment-sheet');
       await open.getByRole('button', { name: 'Cancel' }).click();
       await expect(open).toHaveCount(0);
 
-      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar
+      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar; the Side pane back in view in
+      // the file's place
       await showSession(page, parent);
+      await sideTab(sideColumn(page), /^Side\b/).click();
       await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
       await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');

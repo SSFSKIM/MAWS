@@ -4,9 +4,10 @@
 // `machine.sock` client's `invoke` through the typed adapter (a `HostResponse` turned into one). Both serve the same
 // exporter registry, kind by kind and format by format, and the library's export of a document writes the same file
 // through either; `composeRender` registers nothing on IPC, and its `stop` withdraws every exporter.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { schemaFor } from '@artifacts/document/schema';
 import { createDocument } from '@artifacts/document/tabs';
@@ -22,6 +23,9 @@ import { composeRender, type HostCall, type Render } from './compose';
 vi.mock('electron', () => ({ BrowserWindow: class {} }));
 
 const DOC = '2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f';
+const PAGE = '3d4e5f6a-7b8c-4d9e-8f0a-2b3c4d5e6f7a'; // UX wave U10b: an html page, its stored file under the stand-in store
+// a page whose bytes are not UTF-8, which only a copy keeps
+const PAGE_BYTES = Buffer.concat([Buffer.from('<!doctype html><p>caf'), Buffer.from([0xe9, 0xff, 0xc0]), Buffer.from('</p>\n')]);
 
 function documentState(): Uint8Array {
   const doc = newDoc();
@@ -33,12 +37,19 @@ function documentState(): Uint8Array {
 }
 
 // The engine host both roots reach: a document at revision 4 under the bundled design system
-function engineHost(): (name: string) => CommandResult<CommandName> {
+function engineHost(): (name: string, input?: unknown) => CommandResult<CommandName> {
   const state = documentState();
-  return (name) => {
+  return (name, input) => {
     switch (name) {
       case 'artifacts.get':
+        if ((input as { artifactId?: string } | undefined)?.artifactId === PAGE) return { ok: true, value: { artifact: { id: PAGE, kind: 'html', title: 'Pricing page', revision: 6 } } } as never;
         return { ok: true, value: { artifact: { id: DOC, kind: 'document', title: 'Plan', revision: 4 } } } as never;
+      case 'artifacts.content': {
+        const page = join(root!, PAGE, 'files', 'page.html');
+        mkdirSync(dirname(page), { recursive: true });
+        writeFileSync(page, PAGE_BYTES);
+        return { ok: true, value: { revision: 6, kind: 'html', name: 'index.html', size: PAGE_BYTES.length, sha256: createHash('sha256').update(PAGE_BYTES).digest('hex'), path: page } } as never;
+      }
       case 'artifacts.state':
         return { ok: true, value: { bytes: state, revision: 4 } } as never;
       case 'designSystems.governing':
@@ -61,10 +72,10 @@ function roots(): { embedded: Render; renderHost: Render } {
   root = mkdtempSync(join(tmpdir(), 'maws-compose-'));
   const host = engineHost();
   // main's embedded root: hosts.dispatch('engine-host', …) narrowed, a CommandResult as the host answered it
-  const embeddedCall: HostCall = async (name, input) => (void input, host(name)) as never;
+  const embeddedCall: HostCall = async (name, input) => host(name, input) as never;
   // the render host's: machine.sock's HostResponse through the typed adapter
-  const invoke = async (name: string): Promise<HostResponse> => {
-    const result = host(name);
+  const invoke = async (name: string, input?: unknown): Promise<HostResponse> => {
+    const result = host(name, input);
     return result.ok ? { t: 'res', id: 'r', ok: true, value: result.value } : { t: 'res', id: 'r', ok: false, error: result.error };
   };
   const renderHostCall = hostCall(invoke);
@@ -83,7 +94,7 @@ describe('composeRender under both roots', () => {
     const { embedded, renderHost } = roots();
     expect(servable(renderHost)).toEqual(servable(embedded));
     expect(servable(embedded).sort()).toEqual(
-      ['dashboard/docx', 'dashboard/html', 'dashboard/md', 'dashboard/pdf', 'design/pdf', 'design/png', 'design_system/claude', 'document/docx', 'document/html', 'document/md', 'document/pdf', 'document/png', 'html/pdf', 'html/png', 'presentation/claude', 'presentation/html', 'presentation/pdf', 'presentation/png', 'presentation/pngs', 'presentation/pptx'].sort(),
+      ['dashboard/docx', 'dashboard/html', 'dashboard/md', 'dashboard/pdf', 'design/pdf', 'design/png', 'design_system/claude', 'document/docx', 'document/html', 'document/md', 'document/pdf', 'document/png', 'html/html', 'html/pdf', 'html/png', 'presentation/claude', 'presentation/html', 'presentation/pdf', 'presentation/png', 'presentation/pngs', 'presentation/pptx'].sort(),
     );
   });
 
@@ -95,6 +106,19 @@ describe('composeRender under both roots', () => {
     expect(readFileSync(b.path, 'utf8')).toBe(readFileSync(a.path, 'utf8'));
     expect(readFileSync(a.path, 'utf8')).toContain('Both roots export this line.');
     expect(a.path.startsWith(join(root!, DOC, 'exports'))).toBe(true);
+  });
+
+  // UX wave U10b (l6-artifacts-18, §A.3): an html page exported as html is its stored file, copied unchanged
+  it('exports an html page as html: the stored file byte for byte, through either root', async () => {
+    const { embedded, renderHost } = roots();
+    const sha = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
+    for (const render of [embedded, renderHost]) {
+      const exported = await render.exportForLibrary({ artifactId: PAGE, format: 'html', ownFile: true });
+      expect(exported.revision).toBe(6);
+      expect(exported.path.startsWith(join(root!, PAGE, 'exports'))).toBe(true);
+      expect(exported.path.endsWith('.html')).toBe(true);
+      expect(sha(exported.path)).toBe(createHash('sha256').update(PAGE_BYTES).digest('hex'));
+    }
   });
 
   it('answers the library’s refusal alike, and withdraws every exporter at stop', async () => {

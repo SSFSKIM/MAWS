@@ -365,3 +365,40 @@ describe('F6 from a control at the end of a side group\'s strip', () => {
     expect(named(document.activeElement)).toBe('panel-host-body-upper');
   });
 });
+
+// UX wave U6b-1 (M4): the F6 stop on a side group's strip lands on its selected tab, which the strip then scrolls into
+// view (the focus itself never scrolls: `preventScroll`), however far the person had scrolled the strip away from it.
+describe('F6 onto a side strip that scrolls', () => {
+  let offTools: (() => void)[] = [];
+  beforeEach(() => {
+    resetPanelStores();
+    offTools = [registerPanelTool(probeTool('terminal', { title: 'Terminal' }).tool)];
+  });
+  afterEach(() => offTools.splice(0).forEach((off) => off()));
+
+  it('brings the selected tab into view as the stop lands on it', () => {
+    let scroll = 0;
+    const room = 150;
+    const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 28, height: 28, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tablist' && this.closest('[data-side-strip]')) return rect(0, room);
+      if (this.dataset.tabId === undefined || !this.closest('[data-side-strip]')) return rect(0, 0);
+      return rect([...this.parentElement!.children].indexOf(this) * 100 - scroll, 100);
+    });
+    render(<>
+      <section id="region-sidebar"><button>Sidebar destination</button></section>
+      <section id="region-panel"><TestHost /></section>
+    </>);
+    act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    Object.defineProperty(document.querySelector('[data-side-strip] [role="tablist"]')!, 'scrollLeft', { configurable: true, get: () => scroll, set: (value: number) => void (scroll = value) });
+    for (let i = 0; i < 5; i++) act(() => void panelHost.addTool('terminal', { appSessionId: A }));
+    expect(scroll).toBe(450); // the sixth, added and selected
+    scroll = 0; // the person scrolled the strip back to its start
+    screen.getByRole('button', { name: 'Sidebar destination' }).focus();
+    pressMenu({ key: 'F6', code: 'F6' });
+    const selected = document.querySelector<HTMLElement>('[data-side-strip] [role="tab"][aria-selected="true"]');
+    expect(document.activeElement).toBe(selected);
+    expect(scroll).toBe(450);
+    vi.restoreAllMocks();
+  });
+});

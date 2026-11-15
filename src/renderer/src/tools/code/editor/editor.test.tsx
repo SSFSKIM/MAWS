@@ -56,7 +56,7 @@ describe('editor', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
   });
   afterEach(() => {
     cleanup();
@@ -67,7 +67,7 @@ describe('editor', () => {
   async function open(files: Record<string, DiskFile>, path = APP, options?: DiskOptions) {
     const disk = installDisk(files, options);
     offs.push(connectCodeEvents());
-    openFile(A, path); // the layout holds the tab, so a remount finds its entry
+    openFile(A, path, null, { main: true }); // the layout holds the tab, so a remount finds its entry
     const shown = render(<FileViewer tab={fileTab(path)} />);
     await waitFor(() => expect(entry(path)?.editable).toBe(true));
     await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
@@ -654,7 +654,7 @@ describe('editor', () => {
       const BIG = '/r/big.log';
       const disk = installDisk({ [BIG]: { text: 'log line\n', bytes: 5 * MiB } });
       offs.push(connectCodeEvents());
-      openFile(A, BIG);
+      openFile(A, BIG, null, { main: true });
       render(<FileViewer tab={fileTab(BIG)} />);
       await waitFor(() => expect(entry(BIG)?.kind).toBe('head'));
       expect(disk.callsOf('files.read')[0].hash).toBe(true); // an open load: the kind is undecided
@@ -706,7 +706,7 @@ describe('editor', () => {
     it('never evicts an idle tab with unsaved edits past the bound, and removes it once the layout drops its tab', async () => {
       const files = Object.fromEntries(Array.from({ length: VIEWER_ENTRIES_MAX + 3 }, (_, i) => [`/r/f${i}.ts`, `${i}\n`]));
       installDisk(files);
-      for (let i = 0; i < VIEWER_ENTRIES_MAX + 3; i++) openFile(A, `/r/f${i}.ts`);
+      for (let i = 0; i < VIEWER_ENTRIES_MAX + 3; i++) openFile(A, `/r/f${i}.ts`, null, { main: true });
       const first = render(<FileViewer tab={fileTab('/r/f0.ts')} />);
       await waitFor(() => expect(entry('/r/f0.ts')?.editable).toBe(true));
       await waitFor(() => expect(view().state.facet(EditorView.editable)).toBe(true));
@@ -775,7 +775,7 @@ describe('editor', () => {
         expect(useViewer.getState().entries.has(FILE(APP))).toBe(false);
 
         const read = disk.hold('files.read');
-        openFile(A, APP);
+        openFile(A, APP, null, { main: true });
         render(<FileViewer tab={fileTab(APP)} />);
         await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
         expect(entry()).toMatchObject({ status: 'loading', saving: false, dirty: false });
@@ -809,7 +809,7 @@ describe('editor', () => {
       await waitFor(() => expect(disk.callsOf('files.read').at(-1)?.length).toBe(FILES_READ_MAX_LENGTH));
       shown.unmount();
       act(() => useLayout.getState().closeTab(FILE(APP)));
-      openFile(A, APP);
+      openFile(A, APP, null, { main: true });
       render(<FileViewer tab={fileTab(APP)} />);
       await waitFor(() => expect(entry()?.editable).toBe(true));
       await act(async () => conflictRead.release());

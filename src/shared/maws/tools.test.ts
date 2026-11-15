@@ -13,6 +13,7 @@ import {
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
   artifactExportName,
+  ArtifactExportResultSchema,
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
@@ -300,6 +301,11 @@ describe('X9 records: parseRecordedToolArguments', () => {
     ];
     for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
   });
+
+  // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
+  it('carries the exact text of a window still loading its layout', () => {
+    expect(TOOL_ERRORS.paneNotReady).toBe('show_pane: the MAWS window was still loading its layout; try again');
+  });
 });
 
 describe('X9 results', () => {
@@ -338,6 +344,13 @@ describe('X9 artifact tools (E2)', () => {
     expect(MAWS_TOOLS.artifact_publish.description).toContain('baseRevision is the revision your last artifact_read');
   });
 
+  // UX wave U10b (l6-artifacts-18, §A.2 and §A.3): the publish's path and the html page's own export, word for word
+  it('tells the agent of a publish from a file and an html page exported as itself', () => {
+    expect(MAWS_TOOLS.artifact_publish.description).toContain('(an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file\'s bytes in place of files; baseRevision is');
+    expect(MAWS_TOOLS.artifact_export.description).toContain('Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them.');
+    expect(MAWS_TOOLS.artifact_export.description).not.toContain('Formats: pdf or png for an html page;');
+  });
+
   it("publishes each input's JSON schema: strict, with the bounds of the contract", () => {
     const schemaOf = (name: 'artifact_create' | 'artifact_list' | 'artifact_screenshot' | 'artifact_publish') => mawsToolList().find((t) => t.name === name)!.inputSchema;
     const id = { type: 'string', pattern: ARTIFACT_ID.source };
@@ -350,7 +363,22 @@ describe('X9 artifact tools (E2)', () => {
       type: 'object', additionalProperties: false, required: ['id'],
       properties: { id, version: { type: 'integer', minimum: 1 }, width: { type: 'integer', minimum: 320, maximum: 2560 }, height: { type: 'integer', minimum: 240, maximum: 2560 } },
     });
-    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision', 'files'] });
+    // UX wave U10b (§A.2): an html page publishes from path or files, one of them, so neither is required
+    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision'], properties: { path: { type: 'string', minLength: 1 } } });
+  });
+
+  // UX wave U10b (l6-artifacts-18, §A.2): path or files, exactly one, refused by the schema with the one sentence
+  it('takes path or files on a publish, not both and not neither', () => {
+    const base = { artifact: 'dash', baseRevision: 3 };
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, path: 'page.html' }).success).toBe(true);
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, files: { 'index.html': '<p/>' } }).success).toBe(true);
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base, { ...base, path: '' }]) {
+      expect(ArtifactPublishInputSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base]) {
+      const refused = parseToolArguments('artifact_publish', bad);
+      expect(refused.ok === false && refused.error, JSON.stringify(bad)).toBe(TOOL_ERRORS.publishPathOrFiles);
+    }
   });
 
   it('parses the inputs strictly and never defaults', () => {
@@ -501,6 +529,8 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.notHtml('artifact_create', '/r/x.txt')).toBe('artifact_create: not an HTML file: /r/x.txt');
     expect(TOOL_ERRORS.tooLarge('artifact_create', '/r/x.html', 16777217)).toBe('artifact_create: too large: /r/x.html (16777217 bytes; the limit is 16 MiB)');
     expect(TOOL_ERRORS.artifactExists('dash')).toBe('artifact_create: an artifact "dash" already exists in this session; use artifact_publish');
+    expect(TOOL_ERRORS.publishPathOrFiles).toBe('artifact_publish: give path or files, not both and not neither'); // U10b (§A.2)
+    expect(TOOL_ERRORS.publishPathHtmlOnly('document')).toBe('artifact_publish: path publishes an html page; send files for a document');
     expect(TOOL_ERRORS.noArtifact('artifact_publish', 'nope')).toBe('artifact_publish: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noArtifact('artifact_screenshot', 'nope')).toBe('artifact_screenshot: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noVersion('dash', 3, 2)).toBe('artifact_screenshot: version 3 does not exist; "dash" has 2 version(s)');
@@ -608,5 +638,37 @@ describe('artifact_edit’s reply', () => {
     expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
     expect(description.split(sentence)).toHaveLength(2);
     expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
+  });
+});
+
+// UX wave U10b (l6-artifacts-07 (b), M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2 to §B.4): a
+// document's page, set with `set_page` and read back with `page`, and a PDF export's `pages`, each placed word for word
+describe('a document’s page in the tools', () => {
+  const edit = { artifact: 'memo', baseRevision: 3 };
+
+  it('takes set_page with a size, a density or both, and refuses one with neither or with another field', () => {
+    const schema = MAWS_TOOLS.artifact_edit.input;
+    for (const op of [{ size: 'a4' }, { density: 'compact' }, { size: 'system', density: 'standard' }, { size: 'letter' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(true);
+    }
+    for (const op of [{}, { size: 'legal' }, { density: 'airy' }, { size: 'a4', margin: '1in' }]) {
+      expect(schema.safeParse({ ...edit, ops: [{ op: 'set_page', ...op }] }).success, JSON.stringify(op)).toBe(false);
+    }
+    expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({
+      properties: { ops: { items: { oneOf: expect.arrayContaining([expect.objectContaining({ additionalProperties: false, properties: { op: { type: 'string', const: 'set_page' }, size: { type: 'string', enum: ['letter', 'a4', 'system'] }, density: { type: 'string', enum: ['standard', 'compact'] } } })]) } } },
+    });
+  });
+
+  it('tells the agent of set_page after the list of ops, of page in a document’s read, and of a pdf’s pages', () => {
+    expect(MAWS_TOOLS.artifact_edit.description).toContain('set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document\'s exports print on (give at least one; a document only). A replace_block, delete or set_cell');
+    expect(MAWS_TOOLS.artifact_read.description).toContain("an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata");
+    expect(MAWS_TOOLS.artifact_export.description).toContain("Returns the exported file's path; a pdf's answer also names pages, its page count; to (a path under the working directory)");
+  });
+
+  it('answers pages for a pdf as a positive whole number, or not at all', () => {
+    const exported = { status: 'exported', artifactId: '11111111-1111-4111-8111-111111111111', format: 'pdf', revision: 4, path: '/x/4-pdf.pdf' };
+    expect(ArtifactExportResultSchema.safeParse({ ...exported, pages: 2 }).success).toBe(true);
+    expect(ArtifactExportResultSchema.safeParse(exported).success).toBe(true);
+    for (const pages of [0, 1.5, -1]) expect(ArtifactExportResultSchema.safeParse({ ...exported, pages }).success, String(pages)).toBe(false);
   });
 });

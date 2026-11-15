@@ -5,7 +5,7 @@ import { newDoc } from '../../yjs';
 import { comparable, HUMAN } from '../convert.fixture';
 import { everyKindJSON } from '../fixtures';
 import { importMarkdown } from '../import/markdown';
-import { setDsOverrides } from '../meta';
+import { setDocPage, setDsOverrides } from '../meta';
 import { schemaFor } from '../schema';
 import { addTab, createDocument, moveTab, tabBody } from '../tabs';
 import { addThread, anchorOfMark } from '../threads';
@@ -36,5 +36,14 @@ describe('exportSource', () => {
 
     expect(exportMarkdown(source).startsWith('# Notes\n\n## 회의 메모')).toBe(true);
     expect(await exportHtml(source)).toMatch(/\.ds-doc mark[^{]*\{[^}]*background: color-mix\(in srgb, #0b5fff 25%, #faf9f6\);[^}]*color: inherit;/);
+  });
+
+  // UX wave U10b (M2; §B.4): the document's page, read as the settings node holds it
+  it('reads the document’s page, empty when the document follows its system', () => {
+    const doc = newDoc();
+    createDocument(doc, { title: 'Memo', body: importMarkdown('One line.') });
+    expect(exportSource(doc, 'Memo').page).toEqual({});
+    setDocPage(doc, { size: 'a4', density: 'compact' });
+    expect(exportSource(doc, 'Memo').page).toEqual({ size: 'a4', density: 'compact' });
   });
 });

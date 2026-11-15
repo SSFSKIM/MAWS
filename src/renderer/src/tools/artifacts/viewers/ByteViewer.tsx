@@ -57,7 +57,7 @@ import { startArtifactSession } from '../../../artifacts/session-context';
 import { ipc } from '../../../ipc/client';
 import { openArtifactCopy } from '../../../lane-b/open-copy';
 import { toastFailure } from '../../../library/dialogs';
-import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
+import { exportArtifact, saveArtifactCopy, savesCopy, useExportFormats } from '../../../library/export';
 import { useLibraryRow } from '../../../library/store';
 import { useRegionMarkupSurface } from '../../../markup/surface';
 import { focusEditorHostAction, useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
@@ -460,7 +460,8 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
       if (selection) void exportArtifact(artifactId, format, selection.versionId);
     },
   }));
-  if (kind === 'file') {
+  if (savesCopy(kind)) {
+    // U10b (l6-artifacts-18): an html page's copy is its stored page, as a File artifact's is its file
     exports.push({
       id: 'copy',
       label: VIEWERS_COPY.saveCopy,

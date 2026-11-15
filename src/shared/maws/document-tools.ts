@@ -37,6 +37,9 @@ export const EditOpSchema = z.discriminatedUnion('op', [
   z.strictObject({ op: z.literal('delete'), id: BlockIdSchema }),
   z.strictObject({ op: z.literal('move'), id: BlockIdSchema, after: BlockIdSchema.nullable() }),
   z.strictObject({ op: z.literal('set_cell'), table: BlockIdSchema, row: z.number().int().min(0), col: z.number().int().min(0), markdown: TextSchema }),
+  // UX wave U10b (§B.2 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): a document's page; at least one
+  // of the two (the batch's refinement below)
+  z.strictObject({ op: z.literal('set_page'), size: z.enum(['letter', 'a4', 'system']).optional(), density: z.enum(['standard', 'compact']).optional() }),
 ]);
 
 export const ArtifactEditInputSchema = z
@@ -53,6 +56,7 @@ export const ArtifactEditInputSchema = z
   .superRefine((input, ctx) => {
     input.ops.forEach((op, i) => {
       if (op.op === 'insert' && (op.after === undefined) === (op.before === undefined)) ctx.addIssue({ code: 'custom', path: ['ops', i], message: 'an insert names one of after or before' });
+      if (op.op === 'set_page' && op.size === undefined && op.density === undefined) ctx.addIssue({ code: 'custom', path: ['ops', i], message: 'a set_page names size, density or both' });
     });
   });
 export type ArtifactEditInput = z.infer<typeof ArtifactEditInputSchema>;
@@ -75,11 +79,17 @@ export interface EditOpResultLine {
   target: string;
   newIds: string[];
 }
+/** A `set_page`'s line: the page in force after it (UX wave U10b, §B.2). */
+export interface EditPageResult {
+  op: 'set_page';
+  size: 'letter' | 'a4' | 'system';
+  density: 'standard' | 'compact';
+}
 export interface ArtifactEditResult {
   status: 'edited';
   artifactId: string;
   revision: number;
-  results: EditOpResultLine[];
+  results: Array<EditOpResultLine | EditPageResult>; // one per op, in op order
   orphaned: string[]; // open threads no live text carries after the batch
   answered?: { threadId: string; messageId: string };
   viewWarnings?: DashboardViewWarning[]; // P3-E (E's Decision Log 9): a dashboard's, the specs this batch wrote
@@ -108,7 +118,13 @@ export interface DocumentReadResult {
   complete?: true; // with sinceRevision: the revision is beyond what the host can compare, so the whole range is shown
   version?: DocumentVersionSummary; // when a retained version was read
   versions: DocumentVersionSummary[]; // the latest ones, newest first (the ids `version` takes)
+  page?: DocumentPage; // UX wave U10b (§B.3): a document's (never a dashboard's), the read state's own
   spaceInstructions?: SpaceInstructionsAnswer; // UX wave U10b (M10, §E.4): the artifact's Space's, the first time and after a change
+}
+/** A document's page as `artifact_read` names it: `system` and `standard` where the document sets none. */
+export interface DocumentPage {
+  size: 'letter' | 'a4' | 'system';
+  density: 'standard' | 'compact';
 }
 export interface DocumentVersionSummary {
   id: number;
@@ -162,6 +178,12 @@ export type DocumentRefusal = { reason: DocumentRefusalReason } & Record<string,
 export const documentRefused = (tool: string, refusal: DocumentRefusal, sentence: string): string => `${tool}: ${sentence} ${JSON.stringify(refusal)}`;
 export const documentInvalidArguments = (tool: string, issues: string): string => `${tool}: invalid arguments: ${issues}`;
 
+// UX wave U10b (§B.2, H6 and H8): a batch holding `set_page` refused whole, each sentence after `artifact_edit: `
+export const SET_PAGE_REFUSALS = {
+  dashboard: 'set_page: a dashboard has no page setting',
+  suggestion: 'set_page cannot be a suggestion; send it in a batch that is not suggested, or ask the user to set the page in the Export menu',
+} as const;
+
 // ── the tools as `tools/list` describes them ──
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false } as const;
@@ -171,7 +193,7 @@ export const DOCUMENT_TOOLS = {
   artifact_edit: {
     title: 'Edit document',
     description:
-      'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
+      'Edit a MAWS document with one atomic batch of block operations; without this tool, tell the user what to change. Read it first (artifact_read): blocks carry ids (^id) and baseRevision is the revision that read returned. ops: replace_text {block?, old, new, all?} (old must match exactly once in the block, or in the whole document when block is absent; it is checked against the live text, so the user typing elsewhere does not refuse it), replace_block {id, markdown}, insert {after | before, markdown}, delete {id}, move {id, after} (after: null moves to the start), set_cell {table, row, col, markdown}. set_page {size: letter | a4 | system, density: standard | compact} sets the page a document\'s exports print on (give at least one; a document only). A replace_block, delete or set_cell whose target changed since baseRevision is refused naming the block and its current text. Either every op lands or none does. answering: a comment thread id posts the result into that thread (not on a suggested batch: reply with artifact_reply after it). With answering, give reply: one or two sentences in your own words saying what you changed; it is posted as your reply in the thread. Returns the new revision, one line per op with the ids of the blocks it made, and the comment threads left without text.',
     input: ArtifactEditInputSchema,
     annotations: WRITER,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it

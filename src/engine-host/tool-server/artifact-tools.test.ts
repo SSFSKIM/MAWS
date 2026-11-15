@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeSystem } from '@artifacts/design-system/model';
 import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import { KIND_GUIDES } from '@artifacts/types/guides';
@@ -21,11 +21,22 @@ import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
 import { ArtifactStore } from '../documents/store';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
-import { artifactExportTool, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
+import { readHtmlSource } from './artifact-context';
+import { artifactExportTool, countPdfPages, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 import { HostBridge } from './bridge';
+
+// UX wave U10b (§B.4): a test may hold one file's read (the exported pdf's) in its own hands; every other read is the
+// real one
+const reads = vi.hoisted(() => ({ hold: undefined as ((path: string) => Promise<Buffer> | undefined) | undefined }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const readFile = ((path: string, ...rest: unknown[]) => reads.hold?.(String(path)) ?? (actual.readFile as (...args: unknown[]) => unknown)(path, ...rest)) as typeof actual.readFile;
+  return { ...actual, default: { ...actual, readFile }, readFile };
+});
+afterEach(() => void (reads.hold = undefined));
 
 const PAGE = '<!doctype html><h1>Dashboard</h1><img src="https://example.com/a.png">';
 let w: World;
@@ -596,6 +607,9 @@ describe('artifact_upload_asset and artifact_list_assets', () => {
   });
 });
 
+// Two page objects under one page tree, the second written without a space (both forms Chromium may write).
+const TWO_PAGES = '%PDF-1.7\n1 0 obj << /Type /Catalog /Pages 2 0 R >>\n2 0 obj << /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>\n3 0 obj << /Type /Page /Parent 2 0 R >>\n4 0 obj << /Type/Page /Parent 2 0 R >>\n%%EOF';
+
 describe('artifact_export', () => {
   it('asks main’s export service for a path under the artifact’s exports and copies the file to `to` (a stubbed answer)', async () => {
     const page = jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
@@ -619,6 +633,44 @@ describe('artifact_export', () => {
     expect(jsonOf(await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'a4' }, w.ctx()))).toMatchObject({ status: 'exported' });
     expect(sent).toEqual([expect.objectContaining({ format: 'pdf', pageSize: 'a4' })]);
     expect((await artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf', pageSize: 'legal' }, w.ctx())).isError).toBe(true);
+  });
+
+  // UX wave U10b (l6-artifacts-07 (b), M2 decision 5; §B.4): a pdf's answer names its page count, read by the tool server
+  // from the file main wrote; no count found, or a file it cannot read, leaves the field out
+  it('answers a pdf’s pages from the exported file, and names none for another format or a file with no page', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    let bytes = TWO_PAGES;
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (writeFileSync(request.path, bytes), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+    const tool = artifactExportTool({ ...w.deps(), exporter });
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).toMatchObject({ status: 'exported', format: 'pdf', pages: 2 });
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'png' }, w.ctx()))).not.toHaveProperty('pages');
+    bytes = '%PDF-1.7\n%%EOF';
+    expect(jsonOf(await tool.call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).not.toHaveProperty('pages');
+  });
+
+  it('answers a pdf without pages when the read of its file fails, after waiting on that read', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (writeFileSync(request.path, TWO_PAGES), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+    const held: { path: string; fail: (error: Error) => void }[] = [];
+    reads.hold = (path) => (path.endsWith('-pdf.pdf') ? new Promise<Buffer>((_, fail) => void held.push({ path, fail })) : undefined);
+    let answered = false;
+    const pending = artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf' }, w.ctx()).then((answer) => ((answered = true), answer));
+    for (let i = 0; i < 200 && held.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(held).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 1));
+    expect(answered).toBe(false); // the tool waits on the file's read
+    held[0]!.fail(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+    const answer = jsonOf(await pending);
+    expect(answer).toMatchObject({ status: 'exported', format: 'pdf', path: held[0]!.path });
+    expect(answer).not.toHaveProperty('pages');
+  });
+
+  it('counts the page objects of a pdf as Chromium writes them, never its page tree or labels', () => {
+    const latin1 = (text: string) => Uint8Array.from(text, (ch) => ch.charCodeAt(0));
+    expect(countPdfPages(latin1(TWO_PAGES))).toBe(2);
+    expect(countPdfPages(latin1('%PDF-1.7\n1 0 obj << /Type /Pages /Kids [] /Count 0 >>\n2 0 obj << /Type /PageLabel >>\n%%EOF'))).toBeNull();
+    expect(countPdfPages(new Uint8Array())).toBeNull();
+    expect(countPdfPages(Uint8Array.from([0xff, 0xfe, ...latin1('<< /Type /Page >>'), 0x00, 0xc3]))).toBe(1);
   });
 
   // P3-C M9 (H2-4): a presentation's PPTX faces travel to main as the agent named them
@@ -695,5 +747,25 @@ describe('artifact_export', () => {
     const closed = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: () => {}, answerMs: 60_000, hasClient: () => false });
     expect(textOf(await artifactExportTool({ ...w.deps(), exporter: closed }).call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).toBe(TOOL_ERRORS.appNotOpen('artifact_export'));
     expect(existsSync(join(w.cwd, 'out'))).toBe(false);
+  });
+});
+
+// UX wave U10b (§A.1): the one reader of an html source, artifact_create's steps taken out unchanged, which
+// artifact_publish's path uses too: relative to the working folder or absolute, .html or .htm, a regular file
+describe('readHtmlSource', () => {
+  it('reads the file as it is, named by its own name, at the path it resolved', async () => {
+    const raw = Buffer.from([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x3c, 0x2f, 0x70, 0x3e]);
+    writeFileSync(join(w.cwd, 'Raw.HTM'), raw);
+    const read = await readHtmlSource('artifact_publish', w.cwd, 'Raw.HTM');
+    expect(read).toEqual({ bytes: raw, name: 'Raw.HTM', source: join(w.cwd, 'Raw.HTM') });
+    expect(await readHtmlSource('artifact_create', '/elsewhere', join(w.cwd, 'dashboard.html'))).toMatchObject({ name: 'dashboard.html', source: join(w.cwd, 'dashboard.html') });
+  });
+
+  it('refuses what is not a regular .html or .htm file in the calling tool’s name', async () => {
+    writeFileSync(join(w.cwd, 'notes.txt'), 'x');
+    mkdirSync(join(w.cwd, 'folder.html'));
+    await expect(readHtmlSource('artifact_publish', w.cwd, 'notes.txt')).rejects.toMatchObject({ text: TOOL_ERRORS.notHtml('artifact_publish', join(w.cwd, 'notes.txt')) });
+    await expect(readHtmlSource('artifact_publish', w.cwd, 'gone.html')).rejects.toMatchObject({ text: TOOL_ERRORS.artifactNotAFile('artifact_publish', join(w.cwd, 'gone.html')) });
+    await expect(readHtmlSource('artifact_create', w.cwd, 'folder.html')).rejects.toMatchObject({ text: TOOL_ERRORS.artifactNotAFile('artifact_create', join(w.cwd, 'folder.html')) });
   });
 });
