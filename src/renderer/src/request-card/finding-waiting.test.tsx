@@ -317,6 +317,42 @@ describe('a way to a request from outside its transcript', () => {
     expect(openPrompt()).toContain('make check');
   });
 
+  // The third review pass: a floating card behind a page is no session in front.
+  const carriedByCard = () =>
+    act(() => {
+      useLayout.setState((s) => ({
+        main: { ...s.main, panes: [{ tabs: [{ id: `session:${APP}`, kind: 'session', appSessionId: APP, pinned: false }], activeTabId: `session:${APP}` }] },
+        regions: { ...s.regions, panel: { ...s.regions.panel, collapsed: false, floating: true } },
+        panelBySession: new Map([[APP, { tabs: [{ id: 'terminal-1', toolId: 'terminal', pinned: false }], activeTabId: 'terminal-1' }]]),
+      }));
+      useFloatingCard.setState({ closed: false });
+    });
+
+  it('a remembered request for a session in the floating card is let go when a page covers the shell', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    carriedByCard();
+    act(() => showWaiting(APP, second.id));
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+  });
+
+  it('a remembered request for a session in the floating card does not fire after a page came and went', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    carriedByCard();
+    act(() => showWaiting(APP, second.id));
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    act(() => useLayout.getState().closeDestination());
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+  });
+
   it('a remembered request still lands when the session stays in front until its transcript is ready', async () => {
     const showWaiting = await showWaitingOf();
     const { question, prompt, second } = scene();
