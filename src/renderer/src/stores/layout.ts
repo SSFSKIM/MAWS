@@ -1126,14 +1126,17 @@ const orderedWriters = new Map<typeof useLayout, (first: LayoutKey[], then: Layo
 export function persistLayout(client: MawsBridge, store = useLayout): () => void {
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
-  let published = new Set(written ? openSessionsOf(store.getState().main) : []); // the sessions main's `main.tabs` holds open
+  // The sessions main's `main.tabs` holds open once the log has landed. Counted as the log takes `main.tabs`, not as it is
+  // sent (the branch review's second finding): a join waiting in the log is a join made, so the file's close later in a
+  // move's step is an ordinary change, debounced and so left to the move's own snapshots, never a second join that would
+  // put a `main.tabs` without the file ahead of the move's destination.
+  let published = new Set(written ? openSessionsOf(store.getState().main) : []);
   const log: { key: LayoutKey; slice: unknown }[] = []; // a null slice deletes the key
   let flight: number | null = null; // the write of the log's head in flight
   let failed = false; // the head's last write failed: it waits for the next change
   let writes = 0;
 
   const write = (key: LayoutKey, slice: unknown): number => {
-    if (key === 'main.tabs') published = new Set(openSessionsOf(slice as Strip));
     const sent = ++writes;
     void client.invoke('layout.set', { key, value: storedValue(key, slice) }).then((result) => {
       if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
@@ -1153,6 +1156,7 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     pump();
   };
   const append = (key: LayoutKey, slice: unknown) => {
+    if (key === 'main.tabs') published = new Set(openSessionsOf(slice as Strip));
     const tail = log.at(-1);
     if (tail?.key === key && !(log.length === 1 && flight !== null)) tail.slice = slice;
     else log.push({ key, slice });
