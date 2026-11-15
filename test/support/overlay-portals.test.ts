@@ -89,7 +89,9 @@ describe('an overlay that takes keys is portalled to the body', () => {
   });
 
   it('holds for every renderer source', () => {
-    const violations = rendererSources(RENDERER).flatMap((path) => overlayPortalViolations(readFileSync(path, 'utf8'), relative(RENDERER, path).split(sep).join('/')));
+    // only a source that names a portal can make one: the parser reads those alone (the tree's other files would cost seconds)
+    const sources = rendererSources(RENDERER).map((path) => ({ path, text: readFileSync(path, 'utf8') })).filter(({ text }) => text.includes('Portal'));
+    const violations = sources.flatMap(({ path, text }) => overlayPortalViolations(text, relative(RENDERER, path).split(sep).join('/')));
     expect(violations).toEqual([]);
   });
 });

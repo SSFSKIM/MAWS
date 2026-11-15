@@ -235,9 +235,12 @@ export function useTranscriptWaiting({ storeKey, agent, rows, list, idPrefix }: 
   );
 
   // §E: a request asked for before this transcript was mounted, once its history is read and its rows carry the
-  // session's waiting forms (else a form whose row is about to be drawn would still read as placed at the end)
+  // session's waiting forms (else a form whose row is about to be drawn would still read as placed at the end). Until
+  // its history is read the transcript is not offered to a caller outside either (`waitingViewsOf`), so such a caller
+  // waits for it in the same way.
   const phase = useTranscriptStore((s) => s.entries[storeKey]?.phase);
-  const ready = session !== null && phase !== undefined && phase !== 'hydrating' && sameCalls(ui?.waitingForms ?? NO_CALLS, forms);
+  const read = session !== null && phase !== undefined && phase !== 'hydrating';
+  const ready = read && sameCalls(ui?.waitingForms ?? NO_CALLS, forms);
   useEffect(() => {
     if (!ready) return;
     const then = awaiting.get(storeKey);
@@ -247,7 +250,7 @@ export function useTranscriptWaiting({ storeKey, agent, rows, list, idPrefix }: 
   }, [ready, storeKey, show]);
 
   useEffect(() => {
-    if (session === null) return;
+    if (!read) return;
     const view = { show };
     let views = mounted.get(storeKey);
     if (views === undefined) mounted.set(storeKey, (views = new Set()));
@@ -256,7 +259,7 @@ export function useTranscriptWaiting({ storeKey, agent, rows, list, idPrefix }: 
       views.delete(view);
       if (views.size === 0) mounted.delete(storeKey);
     };
-  }, [storeKey, session, show]);
+  }, [storeKey, read, show]);
 
   const view = useMemo<WaitingView>(() => ({ placed, open, track, show }), [placed, open, track, show]);
   // decision 8a (5): a request closed as answered elsewhere is drawn nowhere and is not gone to
