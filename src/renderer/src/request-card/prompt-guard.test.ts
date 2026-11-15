@@ -6,7 +6,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { watchPrompt } from './prompt-guard';
 
 const GRACE = 400;
-const FRAME = 16;
 
 // ---- the geometry the test sets ---------------------------------------------------------------------------------------
 const rects = new Map<Element, DOMRect>();
@@ -50,7 +49,7 @@ const PARTLY = () => place(rect(10, 500, 600, 200), rect(10, 650, 600, 40));
 const AWAY = () => place(rect(10, 2000, 600, 200), rect(10, 2150, 600, 40));
 
 const now = () => performance.now();
-const frame = () => vi.advanceTimersByTime(FRAME); // the guard re-tests on the next animation frame
+const frame = () => vi.advanceTimersToNextFrame(); // the guard re-tests on the next animation frame
 const scrolled = () => {
   scroller.dispatchEvent(new Event('scroll'));
   frame();

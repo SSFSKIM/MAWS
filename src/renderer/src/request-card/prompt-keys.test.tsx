@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -37,9 +37,9 @@ import { hostStatus } from '../test-support/host-status';
 import { preloadOf } from '../test-support/preload-of';
 import { layOutPrompts } from '../test-support/prompt-layout';
 import { resetShellStores } from '../test-support/shell-stores';
-import { TranscriptSlot, useTranscriptStore } from '../transcript';
+import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
 import { builder, request, tool } from '../transcript/model/test-events';
-import { connectRequestCard } from './index';
+import { connectRequestCard, renderSessionRequest } from './index';
 import { itemFor, type RequestEvent } from './test-requests';
 
 const APP = at('app-keys' as AppSessionId);
@@ -335,10 +335,14 @@ describe('a prompt’s keys do not reach it', () => {
 
   it('from inside a child transcript drawn in the same pane', async () => {
     const { prompt } = scene();
+    const c = builder();
+    c.turn('c1', 'Survey the folder');
+    c.text('cm0', 0, 'Looking.');
+    const source = { subscribe: () => () => {}, snapshot: () => Promise.resolve(c.events) }; // a subagent's rows
     await mount(
       [prompt],
       <div data-testid="child">
-        <TranscriptSlot appSessionId={APP} agentId={'agent-child' as AgentId} />
+        <Transcript source={source} variant="child" renderRequest={renderSessionRequest} />
       </div>,
     );
     await waitFor(() => expect(screen.getByTestId('child').querySelector('.transcript-row')).not.toBeNull());
