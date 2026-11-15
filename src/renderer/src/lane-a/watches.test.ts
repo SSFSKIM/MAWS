@@ -1,7 +1,7 @@
 // The page's lane A watches (P5 O9 M5): one `laneA.watch` per session per page, shared by its consumers, opened while a
 // consumer holds it and the session's bridge is live or starting, a late consumer replayed the snapshot and what
 // followed, and its `op` and `compact` messages kept by id for a caller that learns an op's id after it ended.
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at } from '../../../../test/support/machine';
@@ -18,6 +18,7 @@ beforeEach(() => {
   resetLaneAStore();
   resetLaneAWatches();
 });
+afterEach(() => vi.useRealTimers());
 
 describe('watchLaneA', () => {
   it('opens one watch for the session once its bridge is live, shares it, and lets it go with the last consumer', async () => {
@@ -120,6 +121,81 @@ describe('watchLaneA', () => {
   });
 });
 
+// UX wave U8d (M3 decision 1; Interfaces §B and §C): a terminal session's subagents, as main derives them, ride the watch
+// beside its jobs. A watch's end keeps them only when none still runs; an older driver's message, with no agents key,
+// notes none.
+describe('the subagents a watch carries', () => {
+  const T1 = '2026-11-15T10:00:00.000Z';
+  const T2 = '2026-11-15T10:05:00.000Z';
+  const ran = { agentId: 'a1', meta: { agentType: 'general-purpose', description: 'survey the tests' }, status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: T1 }, startedAt: T1 };
+  const finished = { ...ran, status: 'completed', outcome: { status: 'completed', raw: 'completed', at: T2, summary: 'all green' } };
+  const gone = { ...ran, status: 'exited', evidence: 'session', outcome: undefined };
+  const job = { taskId: 'bsleep01', kind: 'shell', toolUseId: 'toolu_bsleep01', startedAt: T1, description: 'run the suites', outputFile: null, status: 'running' };
+  const agentsOf = () => useLaneA.getState().agents?.get(A);
+  const opened = async () => {
+    const fake = fakeClient({ 'laneA.watch': { watch: 'w-1' }, 'laneA.unwatch': undefined });
+    applyLaneAState(A, laneAState(A));
+    const off = watchLaneA(A, () => {}, { client: fake.client });
+    await settle();
+    return { fake, off, plane: (...messages: unknown[]) => fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages }) };
+  };
+
+  it('keeps a snapshot’s agents, then each subagents message’s, beside the jobs, with the time each was noted', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { plane } = await opened();
+    vi.setSystemTime(Date.parse(T1));
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [job], subagents: [ran] }, 0));
+    expect(agentsOf()).toEqual({ agents: [ran], notedAt: T1 });
+    expect(useLaneA.getState().jobs.get(A)).toEqual([job]);
+    vi.setSystemTime(Date.parse(T2));
+    plane(msg('subagents', { subagents: [finished], jobs: [job], mcp: [] }));
+    expect(agentsOf()).toEqual({ agents: [finished], notedAt: T2 });
+  });
+
+  it('keeps the same list when a body says the same again, noting the later time', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    const { plane } = await opened();
+    vi.setSystemTime(Date.parse(T1));
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [ran] }, 0));
+    const held = agentsOf()!.agents;
+    vi.setSystemTime(Date.parse(T2));
+    plane(msg('subagents', { subagents: [structuredClone(ran)], jobs: [], mcp: [] }));
+    expect(agentsOf()!.agents).toBe(held);
+    expect(agentsOf()!.notedAt).toBe(T2);
+  });
+
+  it('keeps them past the watch’s end when none runs, and drops them when one still runs', async () => {
+    const { fake, plane } = await opened();
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [finished, gone] }, 0));
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', ended: 'the session’s bridge went away' });
+    expect(agentsOf()?.agents).toEqual([finished, gone]);
+    await settle(); // the watch opens again, the bridge being live
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [finished, ran] }, 0));
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', ended: 'the session’s bridge went away' });
+    expect(agentsOf()).toBeUndefined();
+  });
+
+  it('drops them when the last consumer lets the watch go while one still runs, and keeps them when none does', async () => {
+    const first = await opened();
+    first.plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [ran] }, 0));
+    first.off();
+    expect(agentsOf()).toBeUndefined();
+    const second = await opened();
+    second.plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [finished] }, 0));
+    second.off();
+    expect(agentsOf()?.agents).toEqual([finished]);
+  });
+
+  it('notes no agents from an older driver’s messages, which carry no agents key, and keeps their jobs as before', async () => {
+    const { plane } = await opened();
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [job] }, 0), msg('subagents', { jobs: [job, { ...job, taskId: 'bdone02', status: 'completed' }] }));
+    expect(agentsOf()).toBeUndefined();
+    expect(useLaneA.getState().jobs.get(A)).toHaveLength(2);
+    plane(msg('subagents', { subagents: [], jobs: [job], mcp: [] })); // an older driver's message, its list empty
+    expect(agentsOf()?.agents).toEqual([]);
+  });
+});
+
 // 2026-11-06 (the remote lane A drill-in): a subagent's own transcript is a watch of its own (`laneA.watch` naming the
 // agent), beside the session's and shared only by that agent's consumers; it carries that transcript alone, so none of
 // the session's jobs, usage or ops are taken from it; a read names that watch; the machine's pause before its first
@@ -134,11 +210,12 @@ describe('watchLaneA of one subagent', () => {
     const offAgent = watchLaneA(A, (e) => agent.push(e), { client: fake.client, agentId: 'a1' });
     await settle();
     expect(fake.invoked('laneA.watch')).toEqual([{ appSessionId: A }, { appSessionId: A, agentId: 'a1' }]);
-    const agentSnapshot = msg('snapshot', { streaming: [], jobs: [{ taskId: 'bash_9' }], usage: { context: 1 } }, 0);
+    const agentSnapshot = msg('snapshot', { streaming: [], jobs: [{ taskId: 'bash_9' }], subagents: [{ agentId: 'a2', meta: {}, status: 'running', evidence: 'bridge' }], usage: { context: 1 } }, 0);
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-a1', messages: [agentSnapshot, msg('op', { rpc: 'x', op: 'btw', id: 'op-9' }, null)] });
     expect(agent).toEqual([{ kind: 'messages', messages: [agentSnapshot, msg('op', { rpc: 'x', op: 'btw', id: 'op-9' }, null)] }]);
     expect(main).toEqual([]);
     expect(useLaneA.getState().jobs.get(A)).toBeUndefined();
+    expect(useLaneA.getState().agents.get(A)).toBeUndefined();
     expect(useLaneA.getState().usage.get(A)).toBeUndefined();
     expect(opMessagesOf(A, 'op-9')).toEqual([]);
     expect(await readLaneA(A, 'rows', fake.client, { before: 'r1', limit: 100 }, 'a1')).toEqual({ ok: true, result: { requested: true } });

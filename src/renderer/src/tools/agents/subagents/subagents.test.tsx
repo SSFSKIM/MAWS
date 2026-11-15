@@ -42,6 +42,10 @@ import { remoteRow } from '../../../../../../test/support/builders'; // P5 O9 M9
 import { OTHER_MACHINE } from '../../../../../../test/support/machine'; // P5 O9 M9
 import { LANE_A_WORDS } from '../../../session/controls/lane-a'; // P5 O9 M9
 import { useMachines } from '../../../stores/machines'; // 2026-11-06
+import { bareOf } from '@shared/machine/address'; // UX wave U8d
+import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client'; // UX wave U8d
+import { preloadOf } from '../../../test-support/preload-of'; // UX wave U8d
+import { resetLaneAWatches } from '../../../lane-a/watches'; // UX wave U8d
 
 const M3 = REL.agoNarrow(3, 'minute'); // 3m ago, 3분 전
 
@@ -790,6 +794,112 @@ describe('drill-in', () => {
       expect((screen.getByRole('button', { name: 'Stop agent' }) as HTMLButtonElement).disabled).toBe(false);
       expect(screen.getByText('May not have stopped')).toBeTruthy();
     });
+  });
+});
+
+// UX wave U8d (M3; A2, A4, A7, R3): a terminal session this Mac drives, its agents' statuses derived in main and carried
+// by the session's watch, which the task-graph store holds and lays over the sidecars it read. The card, the rows and
+// the drill-in read the graph as for a session MAWS runs.
+describe('a terminal session this Mac drives, its statuses from its watch', () => {
+  let bridge: FakeClient;
+  const NOW = at(10 + 180);
+  const meta = (agentId: string, parent: string | null = null) => ({ agentType: 'general-purpose', description: `Agent ${agentId}`, toolUseId: `toolu_${agentId}`, requestShape: 'background', spawnDepth: parent === null ? 1 : 2, ...(parent !== null && { parentAgentId: parent }) });
+  const sidecar = (agentId: string, parent: string | null = null): SubagentEntry => ({ agentId: agentId as AgentId, meta: meta(agentId, parent), transcriptPath: `/work/agents/agent-${agentId}.jsonl`, size: 10, mtimeMs: 1_790_000_000_000, runId: null });
+  const runs = (agentId: string, parent: string | null = null) => ({ agentId, meta: meta(agentId, parent), status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: at(0) }, startedAt: at(0) });
+  const ends = (agentId: string, status: 'completed' | 'failed' | 'stopped', raw: string, parent: string | null = null) => ({ agentId, meta: meta(agentId, parent), status, evidence: 'rows', outcome: { status, raw, at: at(10) }, startedAt: at(0) });
+  const gone = (agentId: string) => ({ agentId, meta: meta(agentId), status: 'exited', evidence: 'session', startedAt: at(0) });
+  const unknown = (agentId: string) => ({ agentId, meta: meta(agentId), status: 'unknown', evidence: 'none' });
+  const body = (kind: 'snapshot' | 'subagents', subagents: unknown[]) =>
+    act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs: [], subagents } : { subagents, jobs: [], mcp: [] } }] }));
+  const SENTENCE = 'Status is known only while the session runs here';
+
+  beforeEach(() => {
+    bridge = fakeClient({ 'laneA.watch': { watch: 'w1' }, 'laneA.unwatch': null });
+    window.maws = preloadOf(bridge);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(NOW));
+  });
+  afterEach(() => {
+    resetLaneAWatches();
+    resetLaneAStore();
+  });
+
+  // The tool for session A, held by a terminal whose bridge is live, with no engine status here; its disk read answered.
+  async function mountTerminal(sidecars: SubagentEntry[], params?: SubagentsParams) {
+    seedSessions(null);
+    act(() => {
+      useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...s.records.get(A)!, holder: { kind: 'terminal', pid: 4242 } }) }));
+      applyLaneAState(A, laneAState(A));
+    });
+    const handle = create(params);
+    const view = render(<Mounted state={handle} />);
+    await act(async () => {
+      await fake.answer('subagents', sidecars);
+      await fake.answer('workflows', []);
+    });
+    await waitFor(() => expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: bareOf(A) }]));
+    return { handle, ...view };
+  }
+
+  it('lists Running, then Done with each agent’s own outcome, in place of On disk; one row moves when its agent ends', async () => {
+    await mountTerminal(['ok', 'bad', 'halt', 'gone', 'busy'].map((id) => sidecar(id)));
+    expect(rowsOf('disk').map((r) => r.id)).toEqual(['ok', 'bad', 'halt', 'gone', 'busy']);
+    body('snapshot', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), gone('gone'), runs('busy')]);
+    expect(section('disk')).toBeNull();
+    expect(heading('running')).toBe('Running 1');
+    expect(rowsOf('running').map((r) => [r.id, r.line])).toEqual([['busy', 'Working']]);
+    expect(heading('done')).toBe('Done 4 · 1 failed · 1 stopped');
+    expandDone();
+    expect(Object.fromEntries(rowsOf('done').map((r) => [r.id, r.line]))).toEqual({ ok: `finished · ${M3}`, bad: `finished with errors · ${M3}`, halt: `stopped · ${M3}`, gone: 'ended with the session' });
+    expect(row('bad').querySelector('[data-part="state"]')?.className).toContain('text-danger');
+    body('subagents', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), gone('gone'), ends('busy', 'completed', 'completed')]);
+    expect(section('running')).toBeNull();
+    expect(heading('done')).toBe('Done 5 · 1 failed · 1 stopped');
+  });
+
+  // Decision Log 6, N1: a nested background agent can outlive its parent; the parent stays under Running with its ended
+  // word and (+1), as on a session MAWS runs.
+  it('keeps an ended parent under Running with its ended word and (+1) while its nested background agent runs', async () => {
+    await mountTerminal([sidecar('p'), sidecar('c', 'p')]);
+    body('snapshot', [ends('p', 'completed', 'completed'), runs('c', 'p')]);
+    expect(heading('running')).toBe('Running 1');
+    expect(treeOf('running')).toEqual(['p (+1)▸']);
+    expect(rowsOf('running')[0]).toMatchObject({ id: 'p', line: 'finished', elapsed: '' });
+    toggleUnder('p');
+    expect(rowsOf('running').map((r) => [r.id, r.line])).toEqual([['p', 'finished'], ['c', 'Working']]);
+    expect(section('done')).toBeNull();
+  });
+
+  // R3: the sentence is not drawn once the body reports a status other than unknown.
+  it('draws the sentence about status with no body, an empty one, or one whose every entry is unknown, and not once an entry runs or has ended', async () => {
+    await mountTerminal([sidecar('a1'), sidecar('a2')]);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    body('snapshot', []);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    body('subagents', [unknown('a1'), unknown('a2')]);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(rowsOf('disk').map((r) => r.id)).toEqual(['a1', 'a2']);
+    body('subagents', [runs('a1'), unknown('a2')]);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    body('subagents', [ends('a1', 'completed', 'completed'), unknown('a2')]);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    expect(screen.queryByText('Live activity · includes nested agents')).toBeNull(); // the footer stays this app's own
+  });
+
+  it('offers Stop agent for a running agent of the session and not for one that has ended', async () => {
+    const { handle } = await mountTerminal([sidecar('a1'), sidecar('a2')], { agentId: 'a1' as AgentId });
+    body('snapshot', [runs('a1'), ends('a2', 'completed', 'completed')]);
+    expect(screen.getAllByRole('button', { name: 'Stop agent' })).toHaveLength(1);
+    act(() => handle.openAgent('a2' as AgentId));
+    expect(screen.queryByRole('button', { name: 'Stop agent' })).toBeNull();
+  });
+
+  it('a pinned Subagents tab that follows from this session to another lets go of the first session’s watch', async () => {
+    const { handle, rerender } = await mountTerminal([sidecar('a1')]);
+    body('snapshot', [runs('a1')]);
+    rerender(<Mounted state={handle} appSessionId={B} />);
+    expect(handle.snapshot().appSessionId).toBe(B);
+    expect(bridge.invoked('laneA.unwatch')).toEqual([{ appSessionId: bareOf(A), watch: 'w1' }]);
   });
 });
 
