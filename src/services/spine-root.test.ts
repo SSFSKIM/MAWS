@@ -310,8 +310,8 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const listed = (agentId: string) => ({ agentId, meta: { agentType: 'general-purpose' }, transcriptPath: join(dir.path, `agent-${agentId}.jsonl`), size: 0, mtimeMs: 0, runId: null });
     const host = new FakeSpineHost();
     host.answer('fs.subagents', ({ appSessionId: asked }) => ({ agents: asked === appSessionId ? [listed('a0b1c2d3e4f500001')] as never : [] }));
-    // the host's holder registry still says the terminal holds it, so the connect's refresh keeps the session driven
-    host.answer('fs.holders', () => ({ refreshedAt: '2026-11-15T10:00:00.000Z', holders: [{ sessionId: engineSessionId as SessionId, appSessionId, holder: { kind: 'terminal', pid: 4242 }, cwd: null }] }));
+    // the host's holder registry still says the terminal holds it, so the connect's fold keeps the session driven
+    host.answer('fs.state', () => ({ configHome: '/nonexistent/.claude', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [{ sessionId: engineSessionId as SessionId, appSessionId, holder: { kind: 'terminal', pid: 4242 } }], lastScanAt: null, lastScan: null }));
     const bus = fakeBus();
     compose(await openSpineData(profile, { build: BUILD }), host, bus);
     await host.ready();
