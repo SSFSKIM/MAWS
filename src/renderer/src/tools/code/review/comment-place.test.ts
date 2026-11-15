@@ -1,7 +1,8 @@
 // A comment's line in Review (UX wave U5b, M5; §G, decision 11): the line a comment quotes, the anchor Review makes for
 // it (card 4 at its default), the place an unsent comment is drawn at after a refresh, and where the card stands (D3).
 import { describe, expect, it } from 'vitest';
-import { absolutePathOf, cardOffset, diffLines, lineText, placeOf, reviewLineAnchor } from './comment-place';
+import { REVIEW_COPY } from '../copy';
+import { absolutePathOf, cardOffset, diffLines, lineText, placementOf, placeOf, reviewLineAnchor, UNPLACED_WORDS, type ScopeLines } from './comment-place';
 
 // Line 12 was `return value;` and is `return quoted(value);`.
 const HUNK = ['@@ -10,5 +10,5 @@', ' function cell(value) {', " if (value === '') return value;", '-return value;', '+return quoted(value);', ' }', ' const end = 1;'].join('\n');
@@ -69,6 +70,35 @@ describe('an unsent comment placed again at a refresh', () => {
   it('places nothing when the line left the diff: the comment is drawn under no line', () => {
     expect(placeOf(added, [[HUNK.replace('+return quoted(value);', '+return escaped(value);')]])).toBeNull();
     expect(placeOf(added, [])).toBeNull();
+  });
+});
+
+describe('whether a comment can be placed (Decision Log 21): the table, row by row', () => {
+  const added = { anchor: reviewLineAnchor('/repo/src/report.ts', 12, 'new'), quote: 'return quoted(value);' };
+  const file = (blocks: string[][], read = true) => ({ path: 'src/report.ts', absolute: '/repo/src/report.ts', blocks, read });
+  const ready = (...files: ScopeLines['files']): ScopeLines => ({ state: 'ready', files });
+
+  it('placeable: the scope holds the file, read, with a line whose text is the quote', () => {
+    expect(placementOf(added, ready(file([[MOVED]])))).toEqual({ kind: 'placed', path: 'src/report.ts', place: { block: 0, side: 'new', line: 14 } });
+  });
+  it('its line left the diff: the file is in the scope and read, and no line has the quote', () => {
+    expect(placementOf(added, ready(file([[HUNK.replace('+return quoted(value);', '+return escaped(value);')]])))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
+  });
+  it('its file is not in the scope', () => {
+    expect(placementOf(added, ready({ path: 'src/other.ts', absolute: '/repo/src/other.ts', blocks: [[HUNK]], read: true }))).toEqual({ kind: 'not-in-scope' });
+  });
+  it('the scope is empty or cannot be read', () => {
+    expect(placementOf(added, { state: 'none', files: [] })).toEqual({ kind: 'no-files' });
+    expect(placementOf(added, ready())).toEqual({ kind: 'no-files' });
+  });
+  it('not read yet, which is not unplaceable: the scope is still being read, or the file’s own read has not answered', () => {
+    expect(placementOf(added, { state: 'reading', files: [] })).toEqual({ kind: 'pending', path: null });
+    expect(placementOf(added, ready(file([], false)))).toEqual({ kind: 'pending', path: 'src/report.ts' });
+  });
+  it('names the sentence over each unplaceable kind, and none for the others', () => {
+    expect(UNPLACED_WORDS).toEqual({ 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope });
+    expect(REVIEW_COPY.lineLeftDiff).toBe('The line this comment was on is no longer in this diff.');
+    expect(REVIEW_COPY.fileNotInScope).toBe('The file this comment is on is not in this diff.');
   });
 });
 

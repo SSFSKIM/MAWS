@@ -26,6 +26,7 @@ import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
+import { UNPLACED_ROWS_SHOWN } from './LineComments';
 import { reviewLayout } from './measure';
 import { useReview } from './review-store';
 import { reviewTool } from './ReviewTool';
@@ -145,10 +146,15 @@ const box = () => within(card()!).getByRole('checkbox', { name: 'Send to main' }
 const leave = () => fireEvent.keyDown(field(), { key: 'Escape' }); // a draft is kept: the card goes, its comment stays
 const chip = () => document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]');
 const surfaceChip = () => document.querySelector<HTMLElement>('[data-review] [data-unsent-chip]'); // in the toolbar or where it stands
-const lineLeft = () => document.querySelector<HTMLElement>('[data-review-line-left]'); // the row under the toolbar
+const lineLeft = () => document.querySelector<HTMLElement>('[data-review-unplaced]'); // the row under the toolbar
+const unplacedRows = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-comment]')];
+const unplacedEdit = (index: number) => unplacedRows()[index].querySelector<HTMLButtonElement>('[data-review-unplaced-edit]')!;
+const unplacedWords = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words]')];
 const stackElement = () => document.querySelector<HTMLElement>('[data-review-stack]');
 // Other's line 2 rewritten: a comment on it is on a line no longer in the diff.
 const OTHER_GONE = () => OTHER('export const total = 2;');
+// Report's line 12, on both its sides, and line 11 rewritten.
+const REPORT_GONE = () => REPORT().replace('+return quoted(value);', '+return escaped(value);').replace('-return value;', '-return value ;').replace(" if (value === '') return value;", ' if (value === null) return value;');
 const scopeChip = (id: string) => document.querySelector<HTMLButtonElement>(`[data-chip="${id}"]`);
 const unsentRows = (path?: string) => [...((path ? bodyOf(path) : document)?.querySelectorAll<HTMLElement>('[data-review-unsent-comment]') ?? [])];
 const changedLine = (path: string) => sectionOf(path)?.querySelector<HTMLElement>('[data-review-file-changed]') ?? null;
@@ -167,6 +173,20 @@ async function reread(patch: string, files: GitDiffFile[]) {
   main.state.files = files;
   act(() => main.emit('git.changed', { repoRoot: '/repo', status: STATUS, reason: 'worktree' }));
   await waitFor(() => expect(main.callsOf('git.diff').length).toBeGreaterThan(before));
+}
+
+// Two comments, other.ts's line 2 first (the older) and report.ts's line 12, each left as a draft.
+async function twoComments() {
+  addOn('src/other.ts', 'new', 2);
+  await painted(() => card() !== null);
+  type('Name it for what it counts.');
+  leave();
+  await painted(() => card() === null);
+  addOn('src/report.ts', 'new', 12);
+  await painted(() => card() !== null);
+  type('Quote only where a comma is.');
+  leave();
+  await painted(() => card() === null && chip() !== null);
 }
 
 async function mountReview() {
@@ -342,7 +362,7 @@ describe('comments on lines in Review', () => {
     await painted(() => (bodyOf('src/other.ts')?.textContent?.includes('total') ?? false) && chip() !== null);
     fireEvent.click(chip()!);
     await painted(() => lineLeft()?.contains(card()) ?? false);
-    expect(lineLeft()!.querySelector('[data-review-line-left-words]')!.textContent).toBe('The line this comment was on is no longer in this diff.');
+    expect(lineLeft()!.querySelector('[data-review-unplaced-words]')!.textContent).toBe('The line this comment was on is no longer in this diff.');
     const toolbar = document.querySelector('[data-review-toolbar]')!;
     expect(toolbar.compareDocumentPosition(lineLeft()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // under the toolbar
     expect(lineLeft()!.compareDocumentPosition(stackElement()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // above the stack
@@ -431,7 +451,7 @@ describe('comments on lines in Review', () => {
     expect(document.activeElement).toBe(field());
   });
 
-  it('returns the keyboard to the stack’s scroller on Escape, the draft kept, from a card under a line and from one under the toolbar; the card is worked from the keyboard there', async () => {
+  it('returns the keyboard on Escape to the stack from a card under a line, and to its row from a card opened from the row under the toolbar; the card is worked from the keyboard there', async () => {
     const user = userEvent.setup();
     await mountReview();
     addOn('src/other.ts', 'new', 2);
@@ -457,15 +477,124 @@ describe('comments on lines in Review', () => {
     expect(document.activeElement).toBe(sendButton());
     field().focus();
     await user.keyboard('{Escape}');
-    await painted(() => card() === null);
-    expect(document.activeElement).toBe(stackElement());
-    fireEvent.click(chip()!);
+    await painted(() => card() === null && unplacedRows().length === 1 && document.activeElement === unplacedEdit(0));
+    expect(document.activeElement).toBe(unplacedEdit(0)); // its row, not the scroller
+    await user.keyboard('{Enter}'); // the row opens the card again from the keyboard
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    field().focus();
+    await user.keyboard('{Escape}');
+    await painted(() => card() === null && document.activeElement === unplacedEdit(0));
+    await user.keyboard(' ');
+    await painted(() => lineLeft()?.contains(card()) ?? false);
+    expect(field().value).toBe('Name it for what it counts.');
     await painted(() => lineLeft()?.contains(card()) ?? false);
     sendButton().focus();
     await user.keyboard('{Enter}');
     await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
     await painted(() => card() === null && pass() === null);
     expect(document.activeElement).toBe(stackElement()); // after a send, too
+  });
+
+  it('reaches and edits both of two comments whose lines left the diff from the row under the toolbar, oldest first, and keeps both', async () => {
+    await mountReview();
+    await twoComments();
+    await reread(REPORT_GONE() + OTHER_GONE(), FILES());
+    await painted(() => unplacedRows().length === 2);
+    expect(unplacedWords().map((words) => words.textContent)).toEqual(['The line this comment was on is no longer in this diff.']); // once, over both
+    expect(unplacedRows().map((row) => row.textContent)).toEqual(['export const b = 2;Name it for what it counts.', 'return quoted(value);Quote only where a comma is.']);
+    fireEvent.click(unplacedEdit(0));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Name it for what it counts.');
+    expect(unplacedRows().map((row) => row.textContent)).toEqual(['return quoted(value);Quote only where a comma is.']); // the card in its row's place
+    type('Name it for the total.');
+    leave();
+    await painted(() => card() === null && unplacedRows().length === 2);
+    fireEvent.click(unplacedEdit(1));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Quote only where a comma is.');
+    type('Quote where a comma or a quote is.');
+    leave();
+    await painted(() => card() === null && unplacedRows().length === 2);
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for the total.', 'Quote where a comma or a quote is.']);
+    expect(chip()!.textContent).toBe('2 unsent comments');
+  });
+
+  it('reaches an older comment whose line left the diff while the newest is placeable: the chip opens the newest under its line, the row the older one', async () => {
+    await mountReview();
+    await twoComments(); // other's is the older
+    await reread(REPORT() + OTHER_GONE(), FILES());
+    await painted(() => unplacedRows().length === 1 && chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:12' && card() !== null);
+    expect(field().value).toBe('Quote only where a comma is.');
+    expect(unplacedRows().map((row) => row.textContent)).toEqual(['export const b = 2;Name it for what it counts.']); // drawn with a card open elsewhere
+    fireEvent.click(unplacedEdit(0));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Name it for what it counts.');
+    expect(unsentRows('src/report.ts').map((row) => row.textContent)).toEqual(['Quote only where a comma is.']);
+  });
+
+  it('removes the row under the toolbar with its last comment', async () => {
+    await mountReview();
+    await twoComments();
+    await reread(REPORT_GONE() + OTHER_GONE(), FILES());
+    await painted(() => unplacedRows().length === 2);
+    fireEvent.click(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' }));
+    await painted(() => unplacedRows().length === 1);
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote only where a comma is.']);
+    fireEvent.click(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' }));
+    await painted(() => lineLeft() === null);
+    expect(pass()).toBeNull();
+  });
+
+  it(`shows at most ${UNPLACED_ROWS_SHOWN} rows of comments it cannot place and scrolls the rest inside the row`, async () => {
+    expect(UNPLACED_ROWS_SHOWN).toBe(3);
+    const items = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-item]')];
+    vi.spyOn(reviewLayout, 'height').mockImplementation((element) => (element.matches('[data-review-unplaced-item]') ? 24 : 0));
+    vi.spyOn(reviewLayout, 'offsetWithin').mockImplementation((element) => (element.matches('[data-review-unplaced-item]') ? 20 + 26 * items().indexOf(element as HTMLElement) : 0));
+    await mountReview();
+    await twoComments();
+    for (const [side, line, text] of [['old', 12, 'Why was the plain return dropped?'], ['new', 11, 'Say what an empty value means.']] as const) {
+      addOn('src/report.ts', side, line);
+      await painted(() => card() !== null && cardRow()?.dataset.reviewCardRow === `${side}:${line}`);
+      type(text);
+      leave();
+      await painted(() => card() === null);
+    }
+    await reread(REPORT_GONE() + OTHER_GONE(), FILES());
+    await painted(() => unplacedRows().length === 4);
+    const list = lineLeft()!.querySelector<HTMLElement>('[data-review-unplaced-list]')!;
+    expect(list.className).toMatch(/(^| )overflow-y-auto( |$)/);
+    expect(list.style.maxHeight).toBe(`${20 + 26 * 2 + 24}px`); // to the third row's bottom
+    fireEvent.click(within(unplacedRows()[3]).getByRole('button', { name: 'Remove comment' }));
+    await painted(() => unplacedRows().length === 3);
+    expect(list.style.maxHeight).toBe(''); // three fit
+  });
+
+  it('says which comments’ lines left the diff and which comments’ files it does not hold, each sentence over its own', async () => {
+    main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
+    main.state.staged = { patch: REPORT_GONE(), files: [FILES()[0]] }; // Staged: report.ts alone, its line 12 rewritten
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    await mountReview();
+    await twoComments();
+    await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
+    fireEvent.click(scopeChip('staged')!);
+    await painted(() => unplacedRows().length === 2);
+    const order = [...lineLeft()!.querySelectorAll<HTMLElement>('[data-review-unplaced-words], [data-review-unplaced-comment]')].map((each) => each.dataset.reviewUnplacedWords ?? each.textContent);
+    expect(order).toEqual(['line-left', 'return quoted(value);Quote only where a comma is.', 'not-in-diff', 'export const b = 2;Name it for what it counts.']);
+    expect(unplacedWords().map((words) => words.textContent)).toEqual(['The line this comment was on is no longer in this diff.', 'The file this comment is on is not in this diff.']);
+  });
+
+  it('reaches the rows in order from the toolbar by Tab', async () => {
+    const user = userEvent.setup();
+    await mountReview();
+    await twoComments();
+    await reread(REPORT_GONE() + OTHER_GONE(), FILES());
+    await painted(() => unplacedRows().length === 2);
+    screen.getByRole('button', { name: 'View' }).focus(); // the toolbar's last control
+    await user.tab();
+    expect(document.activeElement).toBe(unplacedEdit(0));
+    await user.tab();
+    expect(document.activeElement).toBe(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' }));
+    await user.tab();
+    expect(document.activeElement).toBe(unplacedEdit(1));
   });
 
   it('keeps a comment whose line left the diff in the pass and the chip, drawn under no line', async () => {
@@ -479,6 +608,7 @@ describe('comments on lines in Review', () => {
     await painted(() => bodyOf('src/other.ts')?.textContent?.includes('total') ?? false);
     expect(unsentRows()).toEqual([]);
     expect(chip()?.textContent).toBe('1 unsent comment');
+    expect(unplacedRows().map((row) => row.textContent)).toEqual(['export const b = 2;Name it for what it counts.']); // its place: the row under the toolbar
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
   });
 
@@ -489,7 +619,7 @@ describe('comments on lines in Review', () => {
     type('Quote only where a comma is.');
     await reread('', []); // the agent reverts everything
     await painted(() => document.querySelector('[data-review-empty]') !== null && (lineLeft()?.contains(card()) ?? false));
-    expect(lineLeft()!.textContent).toContain('The line this comment was on is no longer in this diff.');
+    expect(lineLeft()!.textContent).toContain('The file this comment is on is not in this diff.');
     expect(field().value).toBe('Quote only where a comma is.');
 
     await reread(REPORT() + OTHER(), FILES());
@@ -503,6 +633,7 @@ describe('comments on lines in Review', () => {
     leave();
     await painted(() => card() === null && surfaceChip() !== null);
     expect(surfaceChip()!.textContent).toBe('1 unsent comment');
+    expect(unplacedRows().map((row) => row.textContent)).toEqual(['return quoted(value);Quote only where a comma is.']); // and its row stands under the toolbar's place
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote only where a comma is.']);
   });
 
