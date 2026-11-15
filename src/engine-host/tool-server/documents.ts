@@ -71,6 +71,7 @@ import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
 import { designSystemNamed, spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5); UX wave U10b: designSystemNamed
+import { instructionsField, instructionsIn, markInstructed } from './artifact-context'; // UX wave U10b (M10)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 
@@ -79,14 +80,17 @@ import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-
 const PRESENCE_EDITING_MS = 4_000;
 
 // What one session's document tools remember between calls: its views of each replica, the kinds whose guide it was
-// given (A's `ArtifactSession.guided` once A's tools are here), its presence timers.
+// given (A's `ArtifactSession.guided` once A's tools are here), the Spaces whose instructions it was given (A's
+// `ArtifactSession.instructed`, UX wave U10b M10), its presence timers.
 export class DocumentToolSession {
   readonly views = new DocumentViews();
   readonly guided: Set<ArtifactKind>;
+  readonly instructed: Map<string, number>;
   readonly presence = new Map<string, ReturnType<typeof setTimeout>>(); // by document key (main or suggestions)
 
-  constructor(guided?: Set<ArtifactKind>) {
+  constructor(guided?: Set<ArtifactKind>, instructed?: Map<string, number>) {
     this.guided = guided ?? new Set();
+    this.instructed = instructed ?? new Map();
   }
 }
 
@@ -591,7 +595,10 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
         const artifact = await documentOf(TOOL, store, input.artifact, ctx, deps);
         if (input.revision !== undefined || input.paths !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a document is read by tab, range and sinceRevision (or a retained version), not by revision or paths');
         const options = { tab: input.tab, from: input.from, count: input.count ?? DOCUMENT_LIMITS.readCount };
-        const versions = await store.readCommitted(() => store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)));
+        const { versions, instructions } = await store.readCommitted(() => ({
+          versions: store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)),
+          instructions: ctx.linkedRead ? null : instructionsIn(store, artifact.spaceId), // UX wave U10b (M10): a linked read gives none
+        }));
         const head = { status: 'read' as const, artifactId: artifact.id, kind: artifact.kind as DocumentLikeKind /* P3-E */, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }), versions };
         // P3-E: a dashboard's read closes with its datasets as the read doc holds them (the footer of the parent's §2)
         const footer = (doc: Doc) => {
@@ -644,7 +651,9 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           // a store a newer MAWS wrote is read-only: the read stands, its viewed link is not recorded (A's reader's rule)
           if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }
-        return toolText(result);
+        const given = instructionsField(deps.session, instructions); // UX wave U10b (M10)
+        markInstructed(deps.session, instructions, given);
+        return toolText({ ...result, ...given });
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
@@ -693,7 +702,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         const replayed = await store.replayOf(opIdOf(ctx));
         if (replayed.found) {
           deps.session.guided.add(kind); // P3-E
-          return toolText(replayed.result);
+          return toolText(replayed.result); // UX wave U10b (M10, decision 4): its instructions as recorded, nothing marked given
         }
         const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse(TOOL, refusal, sentence)); // P3-F wave S (F5)
         const system = await designSystemNamed(store, kind, input.designSystem, (text) => new Refusal(text)); // UX wave U10b (H10: a dashboard too)
@@ -710,6 +719,8 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
         // this session has not had it, the governing system's guide (the system the create names, if any, and the Space
         // it is made in, if any)
         const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind]; // P3-E: by kind
+        const instructions = space ? await store.readCommitted(() => instructionsIn(store, space.id)) : null; // UX wave U10b (M10)
+        const given = instructionsField(deps.session, instructions);
         const designSystem = await store.designSystemContextFor({ ...(system && { designSystemId: system.id }), ...(space && { spaceId: space.id }) });
         const created = await store.writeCommitted(() =>
           store.withOp(
@@ -743,6 +754,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
                     ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
                     ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
                     ...spaceFields(space), // F5
+                    ...given, // UX wave U10b (M10): recorded with the op, so a replay says it too
                   };
                   if (made.doc) deps.session.views.record(made.doc, revision);
                   op.record(made.answer);
@@ -754,6 +766,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
           ),
         );
         deps.session.guided.add(kind); // P3-E
+        markInstructed(deps.session, instructions, given); // UX wave U10b (M10)
         store.service.replica(ctx.appSessionId, created.artifactId); // the session's replica keeps the document loaded
         return toolText(created);
       });

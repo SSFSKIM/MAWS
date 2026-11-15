@@ -28,6 +28,9 @@ export interface McpToolContext {
   // P2-C3 (the P2 spec's Decision Log 35): the call is a subagent's, told by its tool use having arrived in an assistant
   // frame whose `parent_tool_use_id` is set (MawsToolServerDeps.fromSubagent); false when nothing tells
   fromSubagent: boolean;
+  // UX wave U10b (M10): the read MAWS makes for an artifact a human message links (P4-A3, SessionMaws.readLinked), not a
+  // call of the agent's; absent for every call the engine makes
+  linkedRead?: boolean;
 }
 
 // E2: an image block (`artifact_screenshot`'s PNG) reaches the model unchanged; the engine inserts its own text block

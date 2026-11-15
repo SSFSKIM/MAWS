@@ -1,6 +1,6 @@
 // What the artifact tools share (X25; the P3-A document's M6 and Decision Log 3, 9, 11, 33): the engine host's artifact
 // store, the calling session's lineage, the session's own memory (its bases for byte kinds, the kinds whose guide it was
-// given), and the refusals.
+// given, the Spaces whose instructions it was given), and the refusals.
 //
 // Store state reaches a tool's answer only once it may be revealed (Decision Log 33): reads go through
 // `readCommitted`, writes run inside `writeCommitted`, and an answer that carries store state is re-read through
@@ -15,7 +15,7 @@ import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
+import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName, type SpaceInstructionsAnswer } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { McpToolContext, McpToolResult } from './server';
@@ -33,6 +33,7 @@ export interface ByteBase {
 export class ArtifactSession {
   readonly byteBases = new Map<string, ByteBase>(); // by artifact id
   readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+  readonly instructed = new Map<string, number>(); // UX wave U10b (M10, §E.4): per Space, the stamp of the instructions this session was given
   private readonly calls = new Map<string, Promise<McpToolResult>>(); // by op id: the writing calls still answering
 
   // One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
@@ -46,6 +47,42 @@ export class ArtifactSession {
     this.calls.set(opId, call);
     return call;
   }
+
+  // UX wave U10b (M10): the session's context was compacted, so what it was given may be gone from it: every Space's
+  // instructions go with the next answer about that Space again.
+  forgetInstructed(): void {
+    this.instructed.clear();
+  }
+}
+
+// ── a Space's instructions in an answer (UX wave U10b, M10; §E.4) ──
+//
+// An answer about a Space (a create in it, a read of an artifact in it, a describe of a kind there) carries the Space's
+// instructions when the Space has some and the session was not given them at this stamp (M9 restamps a text only when
+// it changes), so once per session and Space, again after a change or a compaction. What an answer carries is settled
+// with the answer; it counts as given once the answer is made (`markInstructed`, after the call's last fallible step),
+// so a call that fails gives nothing. A replayed call answers what it recorded and marks nothing.
+export interface HeldInstructions {
+  given: SpaceInstructionsAnswer;
+  at: number;
+}
+
+// The Space's instructions as the store holds them now, with its name; null for no Space, no text or a Space gone.
+// Called inside the read or write that reads the rest of the answer.
+export function instructionsIn(store: ArtifactStore, spaceId: string | undefined): HeldInstructions | null {
+  if (spaceId === undefined) return null;
+  const space = store.getSpace(spaceId);
+  const held = space && store.spaceInstructions(spaceId);
+  return space && held ? { given: { spaceId, name: space.name, text: held.text }, at: held.at } : null;
+}
+
+// What an answer adds: the instructions, unless this session was given them at this stamp.
+export function instructionsField(session: { instructed: ReadonlyMap<string, number> }, held: HeldInstructions | null): { spaceInstructions?: SpaceInstructionsAnswer } {
+  return held && session.instructed.get(held.given.spaceId) !== held.at ? { spaceInstructions: held.given } : {};
+}
+
+export function markInstructed(session: { instructed: Map<string, number> }, held: HeldInstructions | null, field: { spaceInstructions?: SpaceInstructionsAnswer }): void {
+  if (held && field.spaceInstructions) session.instructed.set(held.given.spaceId, held.at);
 }
 
 export interface ArtifactToolDeps {
