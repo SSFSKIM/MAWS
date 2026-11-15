@@ -42,6 +42,12 @@ export async function closeGuardOf(key: string, site: CloseSite = mainTabSite(ke
   }
   const choice = await askClose(key, basename(entry.path));
   if (choice === 'cancel' || !site.holds()) return false;
+  // A save under way while the question was open can have settled as a conflict: the merge view's veto holds after the
+  // answer too, so neither answer writes the unresolved document over the disk's change nor drops it unresolved.
+  if (useViewer.getState().entries.get(key)?.theirs?.view === 'merge') {
+    site.reveal();
+    return false;
+  }
   if (choice === 'discard') return true;
   if ((await useViewer.getState().save(key)) !== 'ok') return false;
   return !useViewer.getState().entries.get(key)?.dirty;

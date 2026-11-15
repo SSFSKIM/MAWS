@@ -41,10 +41,11 @@ export const fileKey = (machine: MachineRef, path: string): string => tabId({ ki
 // The strip's pin glyph: never on a tab that holds a file (Decision 16).
 export const pinnableTab = (params: unknown): boolean => !paramsHoldFile(params);
 
-// The keys of every file a side tab holds, in every session's list (a pinned tab never holds one): the viewer's prune
-// keeps their entries, in view or not (Decision 20a).
+// The keys of every file a side tab holds, in every session's list (a pinned tab never holds one), and of the files on
+// their way from the side tabs to a main tab (`keepUnsaved`): the viewer's prune keeps their entries, in view or not
+// (Decision 20a).
 export function sideFileKeys(state: Pick<LayoutState, 'panelBySession' | 'panelParams'>): Set<string> {
-  const keys = new Set<string>();
+  const keys = new Set<string>(rescuing);
   for (const [appSessionId, own] of state.panelBySession) {
     for (const ref of own.tabs) {
       const held = ref.toolId === FILES_TOOL_ID ? fileOfTab(state.panelParams[ref.id]) : null;
@@ -184,6 +185,8 @@ export function sideFileOf(tabId: string): { appSessionId: AppSessionId; held: F
 // The tabs whose close the person answered (Files' `beforeClose`): what they held leaves with them, as a main file tab's
 // does after its question. Each mark is spent when its tab leaves every list.
 const answered = new Set<string>();
+// The keys `keepUnsaved` is moving to main tabs, for the length of its loop (`sideFileKeys` counts them).
+const rescuing = new Set<string>();
 export function closeAnswered(tabId: string): void {
   answered.add(tabId);
 }
@@ -208,9 +211,16 @@ function keepUnsaved(before: Pick<LayoutState, 'panelBySession' | 'panelParams'>
       else if (!left.has(key)) left.set(key, { appSessionId, file });
     }
   }
-  for (const [key, { appSessionId, file }] of left) {
-    if (asked.has(key) || !unsaved(key)) continue;
-    useLayout.getState().openTab({ kind: 'file', path: file.file, line: file.line, appSessionId, machine: machineOf(appSessionId) }, { activate: false });
+  // Every file to keep is decided, and held as the side's, before the first main tab opens: each open notifies the
+  // viewer's own layout subscriber, whose prune would otherwise take the next file's entry, unsaved, before its tab exists.
+  const kept = [...left].filter(([key]) => !asked.has(key) && unsaved(key));
+  for (const [key] of kept) rescuing.add(key);
+  try {
+    for (const [, { appSessionId, file }] of kept) {
+      useLayout.getState().openTab({ kind: 'file', path: file.file, line: file.line, appSessionId, machine: machineOf(appSessionId) }, { activate: false });
+    }
+  } finally {
+    rescuing.clear();
   }
   const listed = new Set([...now.panelBySession.values()].flatMap((own) => own.tabs.map((tab) => tab.id)));
   for (const id of answered) if (!listed.has(id)) answered.delete(id);
