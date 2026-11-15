@@ -26,7 +26,7 @@ import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
-import { UNPLACED_ROWS_SHOWN } from './LineComments';
+import { UNPLACED_ROWS_SHOWN } from './UnplacedComments';
 import { reviewLayout } from './measure';
 import { useReview } from './review-store';
 import { reviewTool } from './ReviewTool';

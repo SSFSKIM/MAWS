@@ -6,6 +6,7 @@
 // `commit` is null until U5b-2 (M9) shows a commit's diff and fills it.
 import type { FileLineAnchor } from '@shared/anchor/anchor';
 import { fileLineAnchor } from '../anchor/anchor';
+import { REVIEW_COPY } from '../copy';
 import type { ReviewFile } from './review-model';
 
 export type LineSide = 'old' | 'new';
@@ -81,6 +82,50 @@ export function placeOf(comment: { anchor: FileLineAnchor; quote?: string | null
     }
   }
   return best;
+}
+
+/**
+ * Whether a surface can place a comment, and where (Decision Log 21: a comment is always drawn at its place; one the
+ * surface cannot place has the row under the toolbar for its place). The one predicate, by this table:
+ *
+ *   the scope            its file            its file's diff        the answer      drawn                         the sentence over it
+ *   read, with files     held, read          a line has the quote   `placed`        under that line               none
+ *   read, with files     held, read          no line has it         `line-left`     the row under the toolbar     `REVIEW_COPY.lineLeftDiff`
+ *   read, with files     not held            -                      `not-in-scope`  the row under the toolbar     `REVIEW_COPY.fileNotInScope`
+ *   empty or unreadable  -                   -                      `no-files`      the row under the toolbar     `REVIEW_COPY.fileNotInScope`
+ *   still being read     -                   -                      `pending`       nowhere yet (not unplaceable) none
+ *   read, with files     held, not read yet  -                      `pending`       nowhere yet (not unplaceable) none
+ *
+ * A held file's diff is the hunks the surface draws (a file under an open card holds still, decision 10).
+ */
+export type Placement =
+  | { kind: 'placed'; path: string; place: LinePlace }
+  | { kind: 'line-left'; path: string }
+  | { kind: 'not-in-scope' }
+  | { kind: 'no-files' }
+  | { kind: 'pending'; path: string | null };
+export type Unplaced = Extract<Placement, { kind: 'line-left' | 'not-in-scope' | 'no-files' }>['kind'];
+
+// The surface's scope as the predicate reads it: `reading` while its list is not read yet, `none` while it cannot be read.
+export interface ScopeLines {
+  state: 'reading' | 'none' | 'ready';
+  files: readonly { path: string; absolute: string; blocks: readonly (readonly string[])[]; read: boolean }[]; // `path`, the stack's identity
+}
+
+// The sentence over each kind of comment the surface cannot place (the table's last column).
+export const UNPLACED_WORDS: Readonly<Record<Unplaced, string>> = { 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope };
+
+export const isUnplaced = (placement: Placement): placement is Extract<Placement, { kind: Unplaced }> => placement.kind in UNPLACED_WORDS;
+
+/** The table's answer for a comment in a scope; `block` is the block the comment was made in, when known (`placeOf`). */
+export function placementOf(comment: { anchor: FileLineAnchor; quote?: string | null }, scope: ScopeLines, block?: number): Placement {
+  if (scope.state === 'reading') return { kind: 'pending', path: null };
+  if (scope.state === 'none' || scope.files.length === 0) return { kind: 'no-files' };
+  const file = scope.files.find((each) => each.absolute === comment.anchor.path);
+  if (!file) return { kind: 'not-in-scope' };
+  if (!file.read) return { kind: 'pending', path: file.path };
+  const place = placeOf(comment, file.blocks, block);
+  return place ? { kind: 'placed', path: file.path, place } : { kind: 'line-left', path: file.path };
 }
 
 /**

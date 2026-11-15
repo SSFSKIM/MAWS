@@ -25,8 +25,9 @@ import '../code.css';
 import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
 import { defaultScope, latestTurnWithFiles, totals, type ReviewFile, type ReviewScope } from './review-model';
 import { diffOf, useReview, useReviewData, type ReviewData } from './review-store';
-import { CardSlot, LineCommentsContext, LineLeftRow, rowsIn, useCardSlot, useComposingHere, useLineComments, type LineCommentsValue } from './LineComments';
-import { Stack, useStack, type HeldFile } from './Stack';
+import { CardSlot, LineCommentsContext, rowsIn, useCardSlot, useLineComments, type LineCommentsValue } from './LineComments';
+import { UnplacedComments } from './UnplacedComments';
+import { Stack, useStack, type HeldFile, type StackSection } from './Stack';
 import { everyFolded } from './stack-model';
 import { Toolbar, totalsWords } from './Toolbar';
 import { decide, foldAll, placeKey, selectLastTurn, selectScope, type ReviewMode, type ReviewUi } from './view-state';
@@ -68,6 +69,8 @@ function useWidth(): [(element: HTMLDivElement | null) => void, number] {
   }, [element]);
   return [setElement, width];
 }
+
+const NO_SECTIONS: readonly StackSection[] = [];
 
 // The card's frame in Review: nothing is located or pinned (the `inline` layout).
 const CARD_FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'review' };
@@ -113,20 +116,28 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
   const key = scope ? placeKey(directory, scope, turnId, null) : '';
 
   // The comment card's host (M5, §B), mounted for as long as the surface is: in the toolbar while the stack is drawn, in
-  // a line of its own where the toolbar stands while it is not; the card in the row under its line (`row`), or under the
-  // toolbar while its line is in no diff here (`LineLeftRow`; with no files, every card's).
+  // a line of its own where the toolbar stands while it is not; the card in the row under its line (`row`), or in the
+  // row under the toolbar for a comment the surface cannot place (`UnplacedComments`; with no files, every comment).
   const slot = useCardSlot();
   const [row, setRow] = useState<HTMLElement | null>(null);
   const stacked = files !== null && files.length > 0;
   const noLines = data.list.phase === 'unavailable' || (files !== null && files.length === 0);
-  const composing = useComposingHere(hostId);
-  // Escape, Close or a send that dismissed the card: the keyboard goes back to the stack's scroller, a kept draft's card
-  // goes (its comment stays, the chip stands for it).
+  const bare = useLineComments({ appSessionId, hostId, repoRoot: data.status?.repoRoot ?? null, state: noLines ? 'none' : 'reading', sections: NO_SECTIONS });
+  // Escape, Close or a send that dismissed the card: the keyboard goes back to the comment's row under the toolbar when
+  // the card stood there, else to the stack's scroller; a kept draft's card goes (its comment stays, the chip stands for it).
+  const rowToFocus = useRef<string | null>(null);
+  const claimFocus = useCallback((commentId: string) => {
+    if (rowToFocus.current !== commentId) return false;
+    rowToFocus.current = null;
+    return true;
+  }, []);
   const restoreFocus = useCallback(() => {
     slot.closest('[data-review]')?.querySelector<HTMLElement>('[data-review-stack]')?.focus({ preventScroll: true });
     const open = useCommentCard.getState().open;
-    if (open?.hostId === hostId && open.phase.kind === 'composing') leaveCard(open.serial);
-  }, [slot, hostId]);
+    if (open?.hostId !== hostId || open.phase.kind !== 'composing') return;
+    rowToFocus.current = row?.hasAttribute('data-review-unplaced-item') ? open.phase.comment : null;
+    leaveCard(open.serial);
+  }, [slot, hostId, row]);
   // The keyboard follows the card into another row (Refresh, its line's return, the scope emptied under it): the row it
   // left is taken out of the page before the card is, so the card's own remount rule cannot tell the keyboard was there.
   const typing = useRef(false);
@@ -155,7 +166,7 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
           <CardSlot element={slot} />
         </div>
       )}
-      {noLines && composing ? <LineLeftRow onRow={setRow} /> : null}
+      {!stacked && bare.unplaced.length > 0 ? <UnplacedComments passKey={bare.key} hostId={hostId} unplaced={bare.unplaced} opened={bare.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       {data.list.phase === 'unavailable' ? (
         <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
           {data.list.message}
@@ -173,6 +184,7 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
           cardSlot={slot}
           setRow={setRow}
           keyboardToCard={keyboardToCard}
+          claimFocus={claimFocus}
           ui={ui}
           data={data}
           files={files}
@@ -197,6 +209,7 @@ interface StackViewProps {
   cardSlot: HTMLElement; // the card host's element, shown in the toolbar
   setRow(row: HTMLElement | null): void; // the row the card is drawn in: under its line, or under the toolbar
   keyboardToCard(): void; // Refresh asked for the card again: the keyboard goes to it once it is drawn
+  claimFocus(commentId: string): boolean; // a row under the toolbar its card left on Escape takes the keyboard
   ui: StoreApi<ReviewUi>;
   data: ReviewData;
   files: readonly ReviewFile[];
@@ -209,7 +222,7 @@ interface StackViewProps {
 
 // The toolbar over the stack, both from one resolution of the scope's files; the comment card's host shown in the
 // toolbar, and the comments on lines over the stack (M5).
-function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
+function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, claimFocus, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
   const [held, setHeld] = useState<HeldFile | null>(null);
   const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui, held });
   const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
@@ -221,7 +234,7 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, ui,
 
   // The file held still under the open card: its hunks as the card found them in this scope, taken when the card opens
   // on it and let go when the card goes or another scope is drawn (§G, decision 10).
-  const comments = useLineComments({ appSessionId, hostId, repoRoot: data.status?.repoRoot ?? null, sections });
+  const comments = useLineComments({ appSessionId, hostId, repoRoot: data.status?.repoRoot ?? null, state: 'ready', sections });
   const holdPath = comments.holdPath;
   if (holdPath === null ? held !== null : held?.path !== holdPath || held.placeKey !== key) {
     const section = holdPath === null ? undefined : sections.find((each) => each.file.path === holdPath);
@@ -257,7 +270,7 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, ui,
         onWrap={() => useViewer.getState().setWrap(!wrap)}
       />
       {refused !== null ? <RefusedPath path={refused} /> : null}
-      {comments.away ? <LineLeftRow onRow={setRow} /> : null}
+      {comments.unplaced.length > 0 ? <UnplacedComments passKey={comments.key} hostId={hostId} unplaced={comments.unplaced} opened={comments.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       <Stack
         key={key}
         appSessionId={appSessionId}
