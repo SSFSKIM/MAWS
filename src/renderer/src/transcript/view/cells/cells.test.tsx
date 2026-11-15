@@ -10,6 +10,13 @@ import { cellId } from '../../model/keys';
 import type { Cell, Row } from '../../model/rows';
 import { BASH_RESULT, builder, tool, type Builder } from '../../model/test-events';
 import { renderRow, storeWith } from '../rows/test-support';
+import { readFileSync } from 'node:fs'; // UX wave U1c
+import { join } from 'node:path';
+import type { SessionEvent } from '@shared/graph/events';
+import type { SessionId } from '@shared/graph/ids';
+import { ChainFollower } from '../../../../../engine-host/fs/chain-follower';
+import { FIXTURE_DIR } from '../../../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../../../test/support/memory-reader';
 import { shellLabel } from './CellLine';
 
 afterEach(cleanup);
@@ -540,6 +547,52 @@ describe('a call auto mode blocked', () => {
       return read;
     });
     expect(lines).toEqual([{ text: `Auto mode blocked: ${CURL} · approved`, code: CURL }, { text: `Auto mode blocked again: ${CURL}`, code: CURL }]);
+  });
+
+  // M2's review (fix 1): the stand-in is shown nowhere, the opened row included. Probe E's recorded block, from its
+  // journal and from its transcript file (L35), opened: the command, and none of the engine's text to the model.
+  it('u1c-e-1, opened: the detail draws the command and not the engine’s refusal text, live and from the file', async () => {
+    const fromFile = async (): Promise<SessionEvent[]> => {
+      const events: SessionEvent[] = [];
+      const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u1c-e-1.transcript.jsonl'))), '0f0e0d0c-0000-4000-8000-00000000c0de' as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+      await follower.start();
+      follower.stop();
+      return events;
+    };
+    for (const [route, events] of [['live', journalToEvents(loadUxwaveJournal('u1c-e-1'))], ['file', await fromFile()]] as const) {
+      const store = await storeWith(events);
+      useTranscriptStore.getState().expandAll(store.key);
+      const id = cellId.tool(tool('toolu_01WmFgn3LChVZ6HCzR6BSi21'));
+      useTranscriptStore.getState().toggleCell(store.key, id);
+      const view = renderRow(rowHolding(store.rows(), id), { storeKey: store.key });
+      const cell = view.container.querySelector<HTMLElement>(`[data-cell-id="${id}"]`)!;
+      expect(cell.hasAttribute('data-expanded'), route).toBe(true);
+      expect(cell.querySelector('.transcript-shell-command')?.textContent, route).toBe(`$ ${CURL}`);
+      expect(cell.textContent, route).not.toContain('it gave no explanation');
+      expect(cell.textContent, route).not.toContain('Permission for this action was denied');
+      view.unmount();
+    }
+  });
+
+  it('Acceptance 5, opened: over the fifteen recorded blocks, no opened blocked row draws the stand-in or the engine’s text', async () => {
+    let opened = 0;
+    for (const name of ['u1-soft-seeded-1', 'u1-soft-seeded-2', 'u1-soft-seeded-3', 'u1-soft-seeded-4', 'u1-soft-seeded-5', 'u1-hard-seeded-1', 'u1-hard-seeded-2', 'u1-hard-seeded-3', 'u1-streak-seeded-1', 'u1-streak-seeded-2']) {
+      const store = await storeWith(journalToEvents(loadUxwaveJournal(name)));
+      useTranscriptStore.getState().expandAll(store.key);
+      const ids = store.rows().flatMap((row) => (row.kind === 'cell' && row.classification.denial?.kind === 'automode-blocked' ? [row.id] : []));
+      for (const id of ids) useTranscriptStore.getState().toggleCell(store.key, id);
+      for (const id of ids) {
+        const view = renderRow(rowHolding(store.rows(), id), { storeKey: store.key });
+        const cell = view.container.querySelector<HTMLElement>(`[data-cell-id="${id}"]`)!;
+        expect(cell.hasAttribute('data-expanded'), `${name} ${id}`).toBe(true);
+        expect(cell.querySelector('.transcript-shell-command')?.textContent?.startsWith('$ curl -s -o marker-'), `${name} ${id}`).toBe(true);
+        expect(cell.textContent, `${name} ${id}`).not.toContain('it gave no explanation');
+        expect(cell.textContent, `${name} ${id}`).not.toContain('Permission for this action was denied');
+        view.unmount();
+        opened += 1;
+      }
+    }
+    expect(opened).toBe(15);
   });
 
   it('a call auto mode blocked that has no name reads its row as the model writes it', async () => {
