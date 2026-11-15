@@ -8,7 +8,7 @@
 // and the scope wraps it (Decision Log 22); the document's own `meta.dsOverrides` go to the scope as its overrides.
 import { createContext, useContext, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
 import { docPage, dsOverrides, type DocPage, type TokenOverrides } from '@artifacts/document/meta';
-import type { PageSize } from '@artifacts/document/export/design-system';
+import type { DesignSystemExport } from '@artifacts/document/export/design-system';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 
 export type DesignSystemRef = { id: string; versionSeq?: number };
@@ -31,11 +31,12 @@ export interface DocumentDesignSystem {
    */
   systemFor(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem;
   /**
-   * UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the page a system gives the
-   * documents it governs (D's `dev.maws.page`), null while it is not known (none given, still loading). A hook, as
-   * `systemFor` is; without it the window never knows a system's page.
+   * UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): D's export helpers bound to a
+   * system, as main's export binds the system governing a document, so the Export menu reads the document's page as the
+   * export does (./page.ts); null while they are not known (none given, still loading). A hook, as `systemFor` is;
+   * without it the window never knows a system's page.
    */
-  pageSizeOf?(system: GoverningSystem | null): PageSize | null;
+  exportSystemOf?(system: GoverningSystem | null): DesignSystemExport | null;
 }
 
 let provided: DocumentDesignSystem | null = null;
@@ -60,10 +61,10 @@ export function useSystemFor(artifact: { designSystemId?: string; spaceId?: stri
   return system ? system.systemFor(artifact) : null;
 }
 
-/** UX wave U10b: the provided `pageSizeOf`, a hook called in the body's render; null while nothing provides it. */
-export function useSystemPageSize(system: GoverningSystem | null): PageSize | null {
-  const pageSizeOf = provided?.pageSizeOf;
-  return pageSizeOf ? pageSizeOf(system) : null;
+/** UX wave U10b: the provided `exportSystemOf`, a hook called in the body's render; null while nothing provides it. */
+export function useExportSystem(system: GoverningSystem | null): DesignSystemExport | null {
+  const exportSystemOf = provided?.exportSystemOf;
+  return exportSystemOf ? exportSystemOf(system) : null;
 }
 
 interface PageSystem {

@@ -37,7 +37,7 @@ import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/Doc
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
 import { actorKey } from '@shared/artifacts/actor';
-import type { PageSize } from '@artifacts/document/export/design-system';
+import type { DesignSystemExport, PageSize } from '@artifacts/document/export/design-system';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -364,9 +364,10 @@ export class DocumentTabState {
 
   /**
    * UX wave U10b (§B.5): a page item of the Export menu, written on this replica as one row of the person's, given the
-   * system's page (null while it is not known); nothing while the document is shown read-only or as a version.
+   * governing system's export helpers (null while they are not known); nothing while the document is shown read-only
+   * or as a version.
    */
-  choosePage(item: PageItem, system: PageSize | null): void {
+  choosePage(item: PageItem, system: DesignSystemExport | null): void {
     const handle = this.current.handle;
     if (!handle || this.disposed || this.current.previewing || handle.state().readOnly) return;
     choosePage(handle.doc, item, system);

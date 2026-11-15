@@ -23,7 +23,7 @@ import { useSendToAction } from '../../delivery/header'; // P4-B5
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
-import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useDocumentPageSetting, useSystemFor, useSystemPageSize } from './design-system'; // P3-D: useSystemFor; UX wave U10b: the page
+import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useDocumentPageSetting, useSystemFor, useExportSystem } from './design-system'; // P3-D: useSystemFor; UX wave U10b: the page
 import { pageInForce } from './page'; // UX wave U10b
 import { documentExports, documentHeader, type DocumentHeaderCommands } from './header';
 import { useLibraryRow, useLibrarySpaces } from '../../library/store';
@@ -62,20 +62,20 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
   const governing = useSystemFor(snapshot.placement);
   // UX wave U10b (§B.5): the page in force, as the export decides it
   const kind = artifactKind === 'dashboard' ? 'dashboard' : 'document';
-  const systemPage = useSystemPageSize(governing);
+  const pageSystem = useExportSystem(governing);
   const setting = useDocumentPageSetting(snapshot.handle?.doc ?? null);
-  const inForce = pageInForce(setting.page, setting.overrides, systemPage);
+  const inForce = useMemo(() => pageInForce(setting.page, setting.overrides, pageSystem), [setting, pageSystem]); // resolves the system's tokens: once per change
   const commands = useMemo<DocumentHeaderCommands>(
     () => ({
       toggleRail: (rail) => state.toggleRail(rail),
       saveVersion: () => state.requestSaveVersion(),
       setSuggestions: (on) => void state.setSuggestions(on),
       export: (format, pageSize) => void state.export(format, pageSize),
-      choosePage: (item) => state.choosePage(item, systemPage), // UX wave U10b
+      choosePage: (item) => state.choosePage(item, pageSystem), // UX wave U10b
       dismissExport: () => state.dismissExport(),
       closeGuard: state.closeGuard,
     }),
-    [state, systemPage],
+    [state, pageSystem],
   );
   const writable = snapshot.document !== null && !snapshot.document.readOnly && !snapshot.previewing; // UX wave U10b: a version shown, or opened to view
   const header = documentHeader(
