@@ -1193,6 +1193,31 @@ describe('a Space’s instructions', () => {
     await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: WORK, text: 'Use metres. And Celsius.' }]));
   });
 
+  // the task review of the branch fix: a refresh that fails after a good answer may hide text written since (here from
+  // another window), so the sheet treats it as failed until a later read succeeds
+  it('a refresh that fails after a successful read shows the failure, holds the field and offers no Save until a read succeeds', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await waitFor(() => expect(field(sheet).readOnly).toBe(false)); // read: no instructions yet
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }]; // written from another window
+    answers['spaces.instructions'] = () => ({ ok: false, error: { code: 'internal', message: 'the engine host is unavailable' } });
+    await act(async () => main.emit('spaces.changed', { spaceId: WORK, change: 'updated' }));
+    await within(sheet).findByText('Couldn’t read this Space’s instructions: the engine host is unavailable');
+    expect(field(sheet).readOnly).toBe(true);
+    expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+    await store(held, WORK);
+    await waitFor(() => expect(field(sheet).value).toBe('Use metres.'));
+    expect(field(sheet).readOnly).toBe(false);
+    expect(within(sheet).queryByText(/Couldn’t read/)).toBeNull();
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+  });
+
   it('a failed read shows the failure, holds the field and offers no Save', async () => {
     answers['spaces.instructions'] = () => ({ ok: false, error: { code: 'internal', message: 'the engine host is unavailable' } });
     answers['spaces.setInstructions'] = () => ok();

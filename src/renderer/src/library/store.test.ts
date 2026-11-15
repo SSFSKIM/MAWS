@@ -190,7 +190,7 @@ describe('the Spaces’ instructions', () => {
   });
 
   // the branch review of U10b-4: the sheet holds its field until the text is known, and offers no Save when it cannot be
-  it('tell “not read yet”, “failed” and “read” apart: a failure before any answer is failed, one after an answer keeps it read', async () => {
+  it('tell “not read yet”, “failed” and “read” apart: any refusal is failed until a read succeeds, the stale map kept for the marks', async () => {
     expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
     watch(watchSpaceInstructions());
     expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
@@ -205,6 +205,12 @@ describe('the Spaces’ instructions', () => {
     expect(read.status === 'read' && [...read.instructions]).toEqual([[id(101), 'Use metres.']]);
     fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
     await fake.fail('spaces.instructions', 'the engine host is unavailable');
-    expect(spaceInstructionsReadOf(state()).status).toBe('read'); // the last good answer is what the person sees
+    // the task review of the branch fix: a writer must not take the last good answer for what is stored now
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'the engine host is unavailable' });
+    expect([...spaceInstructionsOf(state())]).toEqual([[id(101), 'Use metres.']]); // the cards' chip and the marks keep it
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres and Celsius.', at: 4 }] });
+    const again = spaceInstructionsReadOf(state());
+    expect(again.status === 'read' && [...again.instructions]).toEqual([[id(101), 'Use metres and Celsius.']]);
   });
 });

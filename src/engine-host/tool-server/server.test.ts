@@ -210,15 +210,35 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
   });
 
   // the branch review of U10b-4: what a tool counts as done only once the engine has its answer (a Space's instructions
-  // given, UX wave U10b M10) rides with the answer as `delivered`, which the server runs as it hands the answer over
-  it("runs a result's delivered once, as it hands the answer over, and writes the answer without it", async () => {
+  // given, UX wave U10b M10) rides with the answer as `delivered`. The task review of the branch fix: the server hands it
+  // to the answer's write as `flushed` (OutboundWriter: after the frame is written and journaled, before any held
+  // inbound frame), the moment the engine has the answer
+  it("runs a result's delivered as the answer's write flushes, once, never for a write held or refused, and writes the answer without it", async () => {
     let runs = 0;
     const tool = defineMawsTool('artifact_read', async () => ({ ...toolText({ status: 'read' }), delivered: () => void runs++ }));
-    const { send, rpcOf } = harness([tool]);
-    const id = send({ method: 'tools/call', params: { name: 'artifact_read', arguments: {} }, jsonrpc: '2.0', id: 5 });
+    const writes: { response: unknown; flushed?: () => void; settle: (ok: boolean) => void }[] = [];
+    const server = new MawsToolServer({
+      tools: [tool], instructions: MAWS_SERVER_INSTRUCTIONS, appSessionId: 'app-1' as AppSessionId, version: '0', cwd: () => '/r', log: () => {},
+      // the writer's contract: `flushed` runs only once the write succeeded, before the write's promise settles
+      respond: (_requestId, response, opts) =>
+        new Promise<void>((resolve, reject) => writes.push({ response, flushed: opts?.flushed, settle: (ok) => (ok ? (opts?.flushed?.(), resolve()) : reject(new Error('EPIPE'))) })),
+    });
+    const call = (requestId: string, id: number) =>
+      server.accept({ type: 'control_request', request_id: requestId, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'artifact_read', arguments: {} } } } } as ControlRequestFrame);
+    call('r1', 5);
+    await flush();
+    expect(writes).toHaveLength(1);
+    expect(writes[0]!.response).toEqual({ mcp_response: { jsonrpc: '2.0', id: 5, result: toolText({ status: 'read' }) } });
+    expect(writes[0]!.flushed).toBeTypeOf('function');
+    expect(runs).toBe(0); // the write is held
+    writes[0]!.settle(true);
     await flush();
     expect(runs).toBe(1);
-    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 5, result: toolText({ status: 'read' }) });
+    call('r2', 6);
+    await flush();
+    writes[1]!.settle(false); // refused
+    await flush();
+    expect(runs).toBe(1);
   });
 
   it('never runs delivered for a call withdrawn, abandoned, or answered from outside before its tool settled', async () => {
