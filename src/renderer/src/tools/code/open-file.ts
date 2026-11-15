@@ -138,16 +138,17 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   if (!agent) layout.closeDestination();
   const params = (preview: boolean, marked: boolean): FilesTabParams => ({ file: path, line, ...(preview ? { preview: true as const } : {}), ...(marked ? { agent: true as const } : {}) });
   let tabId: string;
+  let mark = agent && !options.keep; // the mark the tab holds after the open
   if (placement.tabId === null) {
-    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep, agent && !options.keep), asked: options.asked });
+    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep, mark), asked: options.asked });
   } else {
     // a reused tab is the preview unless kept; a selected one stays what it was, unless the opener keeps it. U6e: a reused
     // tab takes the agent's mark with the agent's open; a selected one keeps the mark it has from the agent's show, and
     // loses it with a person's open or a keep
     const held = fileOfTab(layout.panelParams[placement.tabId]);
     const preview = placement.how === 'reuse' ? !options.keep : held?.preview === true && !options.keep;
-    const marked = agent && !options.keep && (placement.how === 'reuse' || held?.agent === true);
-    layout.setPanelParams(placement.tabId, params(preview, marked));
+    mark = agent && !options.keep && (placement.how === 'reuse' || held?.agent === true);
+    layout.setPanelParams(placement.tabId, params(preview, mark));
     tabId = placement.tabId;
     showTab(session, tabId, options.asked);
     if (agent && placement.how === 'select') {
@@ -155,7 +156,7 @@ function place({ appSessionId, path, line, options }: Request): Opened {
       return { surface: 'side', tabId };
     }
   }
-  useViewer.getState().revisit(key, appSessionId);
+  useViewer.getState().revisit(key, appSessionId, mark);
   return { surface: 'side', tabId };
 }
 

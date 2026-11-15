@@ -161,8 +161,10 @@ export interface ViewerStore {
   saveAll(): Promise<UnsavedFailure[]>; // M5: every dirty tab saved at once; the ones not clean afterwards
   // E5 end
   // U6c (decision 15): a failed or named entry is read again, now when its tab is mounted, else at its next mount; nothing
-  // for an entry with a load in flight or unsaved edits, or one a session given is not the entry's (the mount replaces it)
-  revisit(tabId: string, appSessionId?: AppSessionId | null): void;
+  // for an entry with a load in flight or unsaved edits, or one a session given is not the entry's (the mount replaces it).
+  // U6e (decision 19): `agent`, the mark the open leaves on the tab (a person's open: none); an entry holding the other
+  // mark takes it and is read again under it, a read in flight under the other mark superseded
+  revisit(tabId: string, appSessionId?: AppSessionId | null, agent?: boolean): void;
   // UX wave U6e (decision 19, W9): the agent's show for `appSessionId` brings this file's view forward. The next mount of
   // the view is the agent's: a view it draws again reads nothing new, and one that must read fresh bytes (no entry yet,
   // or another session's) reads them as the agent's, with `agent` (a person's open, `revisit`, takes it back)
@@ -575,6 +577,17 @@ export function createViewerStore(client: MawsBridge) {
       });
     };
 
+    // U6e (decision 19): the entry's mark has just changed (the tab's own, or a person's open taking the agent's back): a
+    // read in flight under the other mark is superseded, since its admission differs (one still opening is opened again),
+    // and a failed or named entry is read again under the new one; unsaved edits stand. True when it read.
+    const readUnderMark = (tabId: string, entry: ViewerEntry): boolean => {
+      if (unsaved(entry)) return false;
+      if (entry.status === 'loading') void load(tabId, 'open', 'revisit');
+      else if (entry.status === 'error' || entry.named || entry.pending > 0) readAgain(tabId, entry, 'revisit');
+      else return false;
+      return true;
+    };
+
     const refresh = (tabId: string) => {
       if (mounted.get(tabId)) void load(tabId, 'change');
       else stale.set(tabId, 'event'); // read when next shown
@@ -695,7 +708,8 @@ export function createViewerStore(client: MawsBridge) {
         } else {
           const moved = line !== entry.line;
           // the agent's show of an entry that is there reads nothing new and leaves its mark as it is; the tab's own mark
-          // changing (a person's open, a keep) reads again under it
+          // changing (a keep, an open that marks or unmarks the tab) reads again under it, unless the open already gave the
+          // entry that mark (`revisit`)
           const marked = !byAgent && agent !== entry.agent;
           if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
           if (marked) patch(tabId, { agent });
@@ -705,9 +719,10 @@ export function createViewerStore(client: MawsBridge) {
           // under the other mark superseded, since its admission differs (one still opening is opened again)
           const left = stale.get(tabId);
           stale.delete(tabId);
-          if (marked && !unsaved(entry) && entry.status === 'loading') void load(tabId, 'open', 'revisit');
-          else if (left !== undefined) readAgain(tabId, entry, left);
-          else if (marked ? !unsaved(entry) && (entry.status === 'error' || entry.named || entry.pending > 0) : !moved && !byAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
+          if (!(marked && readUnderMark(tabId, entry))) {
+            if (left !== undefined) readAgain(tabId, entry, left);
+            else if (!marked && !moved && !byAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
+          }
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         held.delete(tabId); // the move's destination has mounted: the hold has done its work
@@ -860,10 +875,19 @@ export function createViewerStore(client: MawsBridge) {
         });
       },
 
-      revisit(tabId, appSessionId) {
-        shownByAgent.delete(tabId); // a person's open: the view reads again as asked
+      revisit(tabId, appSessionId, agent = false) {
+        shownByAgent.delete(tabId); // an open: the view reads again as asked
         const entry = get().entries.get(tabId);
-        if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId) || !revisitable(entry)) return;
+        if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId)) return;
+        if (entry.agent !== agent) {
+          // U6e (decision 19): the open's mark is the entry's now, so a person's open takes back the mark an agent's show
+          // gave the entry under a tab of the person's; read again under it now, or at the next mount
+          patch(tabId, { agent });
+          if (mounted.get(tabId)) readUnderMark(tabId, entry);
+          else if (!unsaved(entry) && !stale.has(tabId)) stale.set(tabId, 'revisit');
+          return;
+        }
+        if (!revisitable(entry)) return;
         if (mounted.get(tabId)) readAgain(tabId, entry, 'revisit');
         else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
       },
