@@ -25,6 +25,8 @@ import { fakeHash, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/co
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { existingViewState, readOnlyReason, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
+import { registerPanelTool } from '../../../panel/host'; // UX wave U6b-1: a link opens beside the chat, in a Files tab
+import { filesTool } from '../files/FilesTool';
 import { currentSet } from '../../../stores/layout-model';
 
 const text = { encoding: 'utf8' as const };
@@ -233,15 +235,27 @@ describe('viewer', () => {
     expect((await screen.findByRole('heading', { name: 'Title' })).tagName).toBe('H1');
   });
 
+  // UX wave U6b-1: the file's own session's, beside its chat (B's chat shown), and in the main area on ⌘-click
   it('opens links and path chips from standalone file Markdown', async () => {
-    const main = serve({ '/r/README.md': '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' });
-    useLayout.getState().openTab({ kind: 'file', path: '/r/README.md', line: null, appSessionId: A, machine: TEST_MACHINE });
-    useLayout.getState().openTab({ kind: 'session', appSessionId: B });
-    render(<FileViewer tab={fileTab('/r/README.md')} />);
-    fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
-    expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
-    fireEvent.click(screen.getByTitle('/r/app.ts'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/r/app.ts', line: 7, appSessionId: A }));
+    const off = registerPanelTool(filesTool);
+    try {
+      const main = serve({ '/r/README.md': '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' });
+      useLayout.getState().openTab({ kind: 'file', path: '/r/README.md', line: null, appSessionId: A, machine: TEST_MACHINE });
+      useLayout.getState().openTab({ kind: 'session', appSessionId: B });
+      render(<FileViewer tab={fileTab('/r/README.md')} />);
+      fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
+      expect(main.callsOf('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
+      const mainFiles = () => currentSet(useLayout.getState().main).panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file' && tab.path === '/r/app.ts');
+      act(() => void fireEvent.click(screen.getByTitle('/r/app.ts')));
+      const beside = (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+      expect(beside.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/r/app.ts', line: 7, preview: true }]);
+      expect(mainFiles()).toEqual([]);
+      act(() => void fireEvent.click(screen.getByTitle('/r/app.ts'), { metaKey: true }));
+      expect(mainFiles()).toEqual([expect.objectContaining({ line: 7, appSessionId: A })]);
+      expect(useLayout.getState().panelBySession.get(A)?.tabs.filter((tab) => tab.toolId === 'files')).toEqual([]);
+    } finally {
+      off();
+    }
   });
 
   it('does not retain the editor document after its parent releases a closed tab', async () => {

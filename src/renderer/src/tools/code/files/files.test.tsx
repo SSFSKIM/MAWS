@@ -670,6 +670,11 @@ describe('files tool', () => {
     await screen.findByText('src');
     fireEvent.click(await screen.findByText('src'));
     fireEvent.click(await screen.findByText('app.ts'));
+    // UX wave U6b-1: the click opened app.ts in this tab, beside the chat; until the tree sits at the file's left (M3), the
+    // tab is given back to the tree alone to read the selection the click made
+    const id = panelOf(A)!.tabs[0].id;
+    act(() => useLayout.getState().setPanelParams(id, null));
+    await screen.findByText('app.ts');
     REPO['/r/src'] = [file('/r/src/app.ts'), file('/r/src/new.ts'), file('/r/src/staged.ts')];
     try {
       act(() => main.emit('files.changed', { appSessionId: bareOf(A), path: '/r/src/new.ts', kind: 'created' }));

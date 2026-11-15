@@ -214,8 +214,8 @@ describe('opening a file beside the chat (openFile)', () => {
 
   it('⌘ opens a main tab, and the file’s side tabs go from every session’s list', () => {
     act(() => void openFile(A, '/r/a.ts'));
-    act(() => void openFile(B, '/r/a.ts'));
-    act(() => void openFile(B, '/r/b.ts', null, { keep: true }));
+    act(() => void openFile(B, '/r/a.ts', null, { keep: true }));
+    act(() => void openFile(B, '/r/b.ts'));
     expect(filesOf(A)).toHaveLength(1);
     expect(filesOf(B)).toHaveLength(2);
     act(() => void openFile(A, '/r/a.ts', 2, { main: true }));

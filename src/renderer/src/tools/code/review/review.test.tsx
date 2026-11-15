@@ -589,7 +589,11 @@ const openReview = (params?: ReviewParams) => act(() => void panelHost.addTool('
 // UX wave U6b-1: what the session's Files tabs hold, and the main strip's file tabs (none: a file opens beside the chat)
 const sideFiles = () => (panelOf(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
 const mainFileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).filter((t) => t.kind === 'file');
-const showReview = () => act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+// Review's tab brought back into view: its body is drawn again, and counts its hunks once it has its diff
+async function showReview() {
+  act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+  await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toMatch(/^Showing hunk \d+ of \d+$/));
+}
 // UX wave U8c-2: the agent in a worktree of /repo reached by `cd` (a fact on the record), or back at /repo (null)
 const WT = '/repo/.claude/worktrees/w1';
 const moveTo = (checkout: string | null) =>
@@ -742,13 +746,13 @@ describe('review tool', () => {
     fireEvent.click(screen.getByText('Open file ↗'));
     expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 5 })]);
     expect(mainFileTabs()).toEqual([]);
-    showReview(); // the file is in view in Review's place, Review's tab still in the strip
+    await showReview(); // the file is in view in Review's place, Review's tab still in the strip
     fireEvent.click(screen.getByLabelText('Next hunk'));
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 2 of 2');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByText('Open file ↗'));
     expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 14 })]); // the same tab, at the new line
-    showReview();
+    await showReview();
     fireEvent.click(screen.getByLabelText('Next file'));
     expect(selectedPath()).toBe('src/staged.ts');
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 1 of 1');

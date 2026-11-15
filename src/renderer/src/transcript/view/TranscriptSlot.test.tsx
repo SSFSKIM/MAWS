@@ -538,7 +538,7 @@ describe('TranscriptSlot', () => {
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id, { main: false });
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action
