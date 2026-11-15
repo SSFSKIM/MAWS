@@ -4,43 +4,58 @@
 // terminal session's lane A state says was settled, under that session's addressed id and the call the settlement names
 // (the bridge's request id for an asynchronous question is its call's tool-use id, C17): a dismissal, or the
 // settlement's own words. And a session's receipts go when the session leaves this window (the ruling of 2026-11-15 on
-// M1's D-2). And (M3) a terminal session's request answered first elsewhere is held SETTLED_MS as a settling receipt where
-// it stood (decision 20). All live here, started by `connectRequestCard()`, so MAWS alone runs them: a row's view reads the
+// M1's D-2). A late answer's port records what it was told of the settlement (`told`, `noteLaneASettlement`) before
+// it says `not_pending`: that is written as a state's settlement is, in the same words (the branch review). And (M3) a
+// terminal session's request answered first elsewhere is held SETTLED_MS as a settling receipt where it stood
+// (decision 20). All live here, started by `connectRequestCard()`, so MAWS alone runs them: a row's view reads the
 // attention store and never the lane A store, which imports MAWS's IPC client (desk web bundles the rows).
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { raceOf, SETTLED_MS, settledWords } from '../lane-a/race';
 import { selectWaitingRequests, useAttention, type Receipt, type Settling } from '../stores/attention';
-import { useLaneA } from '../stores/lane-a';
+import { useLaneA, type RequestSettlement } from '../stores/lane-a';
 import { useSessions, type SessionsState } from '../stores/sessions';
 
 // The bridge's own name for itself as the one who settled (sminos's `RESERVED_BY`): a `/clear`, or the session's end,
 // which says nothing of the question's answer.
 const BY_BRIDGE = 'bridge';
 
-// One settlement as its question's row says it, or null for one that says nothing of it.
-function receiptOfSettlement(state: LaneAState, settled: LaneAState['settled'][number]): Receipt | null {
-  if (settled.outcome === 'withdrawn') return settled.by === BY_BRIDGE ? null : { dismissed: true };
-  const race = raceOf(state, null, settled.request, 0).settled;
+// One settlement as its question's row says it, or null for one that says nothing of it: the state's own, or what a
+// late answer of this window was told (`told`), in the same words.
+function receiptOfSettlement(state: LaneAState | null, told: RequestSettlement | null, request: string, said: Pick<RequestSettlement, 'outcome' | 'by'>): Receipt | null {
+  if (said.outcome === 'withdrawn') return said.by === BY_BRIDGE ? null : { dismissed: true };
+  const race = raceOf(state, told, request, 0).settled;
   const words = race === null ? null : settledWords(race);
   return words === null ? null : { settled: words };
 }
 
-function writeSettlements(appSessionId: AppSessionId, state: LaneAState): void {
+function writeSettlements(appSessionId: AppSessionId, state: LaneAState | null, told: ReadonlyMap<string, RequestSettlement> | undefined): void {
   const { recordReceipt } = useAttention.getState();
-  for (const settled of state.settled) {
-    const receipt = receiptOfSettlement(state, settled);
+  for (const settled of state?.settled ?? []) {
+    const receipt = receiptOfSettlement(state, null, settled.request, settled);
     if (receipt !== null) recordReceipt(appSessionId, settled.request as ToolUseId, receipt);
+  }
+  // the branch review (2026-11-15 UTC): a late answer's port writes what it was told before it says `not_pending`, so a
+  // state stream that has not caught up still has the settlement's words; the state's own, once it lists one, comes first
+  for (const [request, settlement] of told ?? []) {
+    if (state?.settled.some((s) => s.request === request) === true) continue;
+    const receipt = receiptOfSettlement(state, settlement, request, settlement);
+    if (receipt !== null) recordReceipt(appSessionId, request as ToolUseId, receipt);
   }
 }
 
-/** Follows every lane A state's settlements into the attention store's receipts, those held now included. */
+/** Follows every lane A state's settlements, and what this window's late answers were told, into the attention store's
+ * receipts, those held now included. */
 export function followSettlements(): () => void {
-  for (const [id, state] of useLaneA.getState().states) writeSettlements(id, state);
+  const { states, told } = useLaneA.getState();
+  for (const id of new Set([...states.keys(), ...told.keys()])) writeSettlements(id, states.get(id) ?? null, told.get(id));
   return useLaneA.subscribe((now, before) => {
-    if (now.states === before.states) return;
-    for (const [id, state] of now.states) if (before.states.get(id)?.settled !== state.settled) writeSettlements(id, state);
+    if (now.states === before.states && now.told === before.told) return;
+    for (const id of new Set([...now.states.keys(), ...now.told.keys()])) {
+      const state = now.states.get(id) ?? null;
+      if (before.states.get(id)?.settled !== state?.settled || before.told.get(id) !== now.told.get(id)) writeSettlements(id, state, now.told.get(id));
+    }
   });
 }
 
