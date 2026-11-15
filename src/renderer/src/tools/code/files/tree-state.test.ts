@@ -217,7 +217,7 @@ describe('the sessions the window knows', () => {
     useSetup.setState({ intents: new Map() });
   });
 
-  it('an unstarted chat, known by its setup intent alone, keeps its tree at a write of another session’s', async () => {
+  it('an unstarted chat, known by its setup intent alone, keeps its tree at a write', async () => {
     useMachines.setState({ loaded: new Set([TEST_MACHINE]) });
     useSetup.getState().applyIntents([{ appSessionId: U, location: null, additionalDirectories: [], updatedAt: '2026-11-15T10:00:00.000Z', progress: { worktree: null } } as never]);
     const fake = fakeClient({ 'layout.get': { value: stored({ [U]: { width: 300, folded: true, expanded: ['/u'] } }) }, 'layout.set': undefined });

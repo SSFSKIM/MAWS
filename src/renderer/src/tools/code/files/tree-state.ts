@@ -22,6 +22,7 @@ import { FILES_TREE_EXPANDED_MAX, FilesTreeSchema, type FilesTree } from '@share
 import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../../../ipc/client';
 import { useMachines } from '../../../stores/machines';
+import { useSetup } from '../../../sessions/store';
 import { useSessions } from '../../../stores/sessions';
 
 export const FILES_TREE_KEY = 'files.tree';
@@ -198,12 +199,13 @@ export function createTreeStateStore(
   return store;
 }
 
-// A session the window no longer knows: this Mac's, with this Mac's sessions loaded and no record of it. Another machine's
-// session is never dropped for its absence (its machine may be away).
+// A session the window no longer knows: this Mac's, with this Mac's sessions loaded and neither a record of it nor (an
+// unstarted chat, the branch review's first finding) a setup intent. Another machine's session is never dropped for its
+// absence (its machine may be away).
 export function knownSession(id: AppSessionId): boolean {
   const local = ipc.localMachine;
   if (!isAddress(id) || machineOf(id) !== local || !useMachines.getState().loaded.has(local)) return true;
-  return useSessions.getState().records.has(id);
+  return useSessions.getState().records.has(id) || useSetup.getState().intents.has(id);
 }
 
 export const useTreeState = createTreeStateStore(ipc, { knows: knownSession });
