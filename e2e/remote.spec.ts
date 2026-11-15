@@ -3608,8 +3608,10 @@ test('U10b A4 on B: B’s agent deletes its own draft; A’s row of B’s sessio
     };
     const deletedOnB = async () => (await b.request<{ deleted?: { undoable: boolean } }>('artifacts.get', { artifactId: draft.artifactId })).deleted?.undoable ?? null;
     await b.request('session.start', { appSessionId: app, message: { content: 'Delete the draft plan.', display: 'Delete the draft plan.' }, options: {} });
+    // fix wave 3: the state the scene needs, B's store with the agent's delete, then the turn's end; a status read between
+    // the launch's ready and the turn's start reads as a turn over, so the turn's end alone says nothing of the delete
+    await expect.poll(deletedOnB, { timeout: 60_000, message: `B deleted the draft, as an agent’s delete Undo can take back\n${b.log().slice(-4000)}` }).toBe(true);
     await expect.poll(turnOver, { timeout: 60_000, message: `B's drafting session ends its turn\n${b.log().slice(-4000)}` }).toBe(true);
-    expect(await deletedOnB(), 'B deleted the draft, as an agent’s delete Undo can take back').toBe(true);
 
     // A: the session's row, its artifact row, and Undo over the link
     const engine = (await b.request<Status>('session.status', { appSessionId: app })).engineSessionId ?? DRAFTER_SESSION;

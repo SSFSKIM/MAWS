@@ -195,7 +195,8 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await page.getByRole('dialog', { name: 'Delete “budget.csv”?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(row('budget.csv')).toHaveCount(0);
-  expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null });
+  // UX wave U10b (§C.5): a deleted artifact's answer says so, `undoable` only for an agent's delete (a person's here)
+  expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null, deleted: { title: 'budget.csv', kind: 'file', undoable: false } });
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
 
   // a write main misses: its library holds change-driven refreshes (the seam), the stand-in writes, and the change event
