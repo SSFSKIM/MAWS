@@ -24,7 +24,7 @@ How to see it working: Acceptance, C1 to C12.
 - [x] (2026-11-15 UTC) M2 — The page: My items and Discover outside, Show inside, one place that holds what a person started. Commits `a55f72769`..`346071e46`, fix `b460aedab`..`02b9b0101`; reviewed clean. Red runs at `a55f72769` (C12, the import cycle, the page module), `3d91faa89` (a sheet after a change of project) and `b460aedab` (the review's four).
 - [x] (2026-11-15 UTC) M3 — My items, All; one search. Commits `9c78d2154`..`44eea0f0d`, fixes `bed4feb92`..`40e099f82` and `eccdb0555`; reviewed clean. Red runs at `9c78d2154` (22 of 22) and `bed4feb92`.
 - [x] (2026-11-15 UTC) M4 — Discover, All. Commits `f26c9665b`..`be3f17328`, fix `11ad36db5`..`c7340507b`; reviewed clean. Red runs at `f26c9665b` and `11ad36db5`.
-- [ ] M5 — The record, the e2e scenes written, the whole checks, the hand-back.
+- [x] (2026-11-15 UTC) M5 — The record, the e2e scenes written, the whole checks, the hand-back. Stage 1 `1913c523e` (`e2e:discover`, green on a Mac at that head, the architect's run); stage 2 `fb355e1f5`, master `63c97b5c0` merged at `0ade1fa45`, the tools line `6a9276514`, the record `ac2e1a380`; reviewed clean. C2 red by name under a per-visit hold-out.
 - [ ] The architect's: the e2e scenes on a Mac, the branch review, class 1a, the pull request (Proof, P1 to P5).
 
 ## Statements about U11g's code, checked on master
@@ -707,4 +707,14 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+2026-11-15 (UTC), at the executor's hand-back (code head `ac2e1a380`, on master `63c97b5c0`; the architect's P1 to P5 follow).
+
+**What exists.** Customize is one page: My items | Discover outside, Show (All, Plugins, Skills, Connectors) inside, the place's one kept book, one `Manage` and its sheets held per visit of a place; My items › All is one list of the four kinds with their kind words and one search; Discover › All is the Featured plugin and three shelves, and a search turns it into one grid across kinds; every row and card of a plugin, a skill, a connector or a built-in mod draws `ItemImage` (the directory's icon where a record names one, else the letter tile). An ended operation keeps only `EndedRequest`. The two connector sheets no longer import each other. No wire minor, no stored form, `CATALOG_EGRESS` unchanged.
+
+**How it was proved.** Each milestone was reviewed at its frontier by a task reviewer, every Important finding fixed and re-reviewed; red before green for C7 (`c54b22f0f`), C12 and the import cycle (`a55f72769`), C2 by name (a per-visit hold-out at M5). The whole checks at `ac2e1a380` on the build VM: `pnpm typecheck`, eslint, the e2e project, the scan, the script tests, the desk's web app (typecheck, build, tests) and the acceptance run (119 files, 1,776 tests) passed. `pnpm test` ran out its 40 minutes under a load of 11 to 34 on 8 cores; the four projects it had not reached ran as a second run, and every failure of either is a known VM-only file shown failing at master, fails at master too, or passes alone at the head. `e2e:discover` ran green on a Mac at `1913c523e`; stage 2's scenes are typechecked only.
+
+**What the review loop changed.** The detail heads keep their 44 px box (M1). A Discover detail obeys the head; a narrow plugin row gives up its version and date; a sheet belongs to one visit of a place; each kind's line keeps its own controls (M2). The empty state is the place's and its words the search's (M3). A shelf is drawn while its kind has anything (M4). The architect ruled the tools line between the wide head and the stack (M5).
+
+**Lessons.** (1) A test that fails to import is not a red run of the cases inside it: C2 had to be shown red again by a hold-out at the end; write the module's stub before its tests so the first red names cases. (2) A controller's fix instruction is reviewed like code: M3's second fix undid a wrong instruction of the controller's. (3) The shell's geometry decides which responsive states a person reaches; read it before sizing a scene (the 24rem stack needs a widened docked sidebar).
+
+**Left for later** (each a residue row, below the hand-back): the five rows of Concrete Steps 5, one widened (an install from the engine's own directory marketplace also draws its tile); the sentence `firstBody` in `widgets/copy.ts` that names the retired path "Customize › Skills › Discover", the architect's to reword; test names that still say "Customize › Plugins › Discover"; the deferred noise in the unit suite's output (`machineSettings.get` in `widgets/index.test.tsx` and `SettingsView.test.tsx`, "terminal token --term-bg has no value" in the timing projects, the desk web build's chunk-size warning), all present at base; `PluginGlyph` in `widgets/plugins/icons.tsx` exported and unused.
