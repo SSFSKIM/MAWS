@@ -13,10 +13,11 @@ import type { FoldChoice } from './stack-model';
 
 export type ReviewMode = 'unified' | 'split';
 // Where the scroller was left (§F, decision 7): the section's file, the diff row at the top edge and the pixels below
-// that row's top; with no row there, the offset is from the section's top.
+// that row's top; with no row there, the offset is from the section's top. A row is its block (the edit's index in
+// Last turn, 0 elsewhere), its side and its line (Decision Log 11).
 export interface StackPlace {
   path: string;
-  row: { side: 'old' | 'new'; line: number } | null;
+  row: { block: number; side: 'old' | 'new'; line: number } | null;
   offset: number;
 }
 
