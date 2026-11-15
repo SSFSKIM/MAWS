@@ -105,15 +105,16 @@ function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName, st
 // A side tab into the other group, by the drag or the menu, answering the group it ended in (`moveSurfaceTab` refuses a
 // group's only tab when it would make the second group; a tab no list holds any more moves nothing). A file's view mounts again
 // there, so its key is held first, as for a move to the main area (Decision 20b; the branch review's third finding): the
-// prune of the view that goes, and the viewer's cap, leave its entry for the view that comes. A tab that moved is kept
-// (Decision 6; the fifth finding: the menu's move as the drag's).
+// prune of the view that goes, and the viewer's cap, leave its entry for the view that comes. A tab whose move was made
+// is kept (Decision 6; the fifth finding: the menu's move as the drag's), wherever it lands: the upper group's only tab
+// moved below joins both groups into the upper one.
 function moveBetweenGroups(appSessionId: AppSessionId | null, tabId: string, to: SideGroupName): SideGroupName | null {
   const file = sideFileOf(tabId);
   if (file !== null) holdSideViews(file.key);
-  useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-  const landed = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
-  if (landed === to) keep(tabId);
-  return landed;
+  const before = useLayout.getState();
+  before.moveSurfaceTab(appSessionId, tabId, to);
+  if (useLayout.getState() !== before) keep(tabId); // a refused move sets nothing
+  return groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
 }
 
 // The highlight shows while a drag the strip would take is over it; it goes with that drag, by whichever path the drag
