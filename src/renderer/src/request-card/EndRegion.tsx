@@ -4,7 +4,8 @@
 // line per other request: its kind's glyph in its tone, its summary, who asked when an agent did. Choosing a line goes
 // through the transcript's one operation (`show`), which opens that card; the region keeps no selection of its own. Under
 // them, each settling receipt held for this end as one status line with no control. The open card is a prompt whose
-// chords are the pane's (`keys="pane"`, Interfaces §F, M4). The frame is the owner's card 1 of
+// chords are the pane's (`keys="pane"`, Interfaces §F, M4); at a child transcript's end, its own row's alone, under the
+// same guard (`keys="row"`), so that in one pane at most one end takes a press from the composer or from no focus. The frame is the owner's card 1 of
 // "The look" ("Column width, bordered"): `END_FRAME`, the one place it is set.
 import { useLayoutEffect, useRef } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
@@ -45,7 +46,7 @@ export function EndRegion({ appSessionId, agentId }: { appSessionId: AppSessionI
   if (atEnd.length === 0 && settling.length === 0) return null;
   return (
     <div ref={frame} data-request-end={agentId === null ? appSessionId : `${appSessionId}:${agentId}`} className={END_FRAME}>
-      {open !== null && <RequestCard key={open.id} item={open} request={null} placement="inline" region="end" keys="pane" askInPlace paneIndex={null} />}
+      {open !== null && <RequestCard key={open.id} item={open} request={null} placement="inline" region="end" keys={agentId === null ? 'pane' : 'row'} askInPlace paneIndex={null} />}
       {others.length > 0 && (
         <div className={`flex flex-col gap-1 border-t border-border pt-2 ${open !== null ? 'mt-3' : ''}`} data-also-waiting="">
           <Muted className="pb-0.5">Also waiting</Muted>

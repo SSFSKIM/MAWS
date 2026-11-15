@@ -12,9 +12,14 @@
 // *In view* and *whole* are Claude Desktop's two tests (`shared-192`:22930-23031, :22950-22981 in app-5.1231.2): the
 // element is rendered, its rectangle is clipped by every scrolling ancestor and by the window, and it is in view when
 // anything is left, whole when the whole rectangle is left to within half a pixel and the element at each of its four
-// inner corners is the row or inside it (a row another element covers is not whole). They are re-tested on the next
-// animation frame after an intersection change, a scroll or a resize (as the reference watches them, :23033-23075), or a
-// change to the page, and again at each press.
+// inner corners is the row or inside it (a row another element covers is not whole). The page's geometry is read in full
+// only when the watch starts and at a press (which stamps what it finds changed and refuses). Between them the guard
+// reads no layout of its own (the architect's ruling of 2026-11-15 UTC on M4's second concern): one intersection observer
+// of the card and the buttons says what a scroll, a resize or the card's own changes did (the browser clips by the window
+// and the scrolling ancestors); what an entry cannot see is something laid over the buttons, so the four hit tests run
+// again only when the buttons come wholly into the viewport and when the page's top layer changes (an element added to or
+// taken from the body, where overlays, menus and notices are portalled). An overlay's open and close are heard from the
+// `data-state` it toggles.
 import type { AppSessionId } from '@shared/graph/ids';
 import { useDictationStore } from '../composer/dictation/store';
 import { BUTTON_LIKE_INPUTS, OPEN_OVERLAY } from '../keymap/dispatcher';
@@ -39,6 +44,8 @@ interface Box {
   right: number;
   bottom: number;
 }
+// What is left of a rectangle is the whole of it, to within half a pixel.
+const within = (seen: Box, r: Box) => Math.abs(seen.left - r.left) <= HALF_PIXEL && Math.abs(seen.top - r.top) <= HALF_PIXEL && Math.abs(seen.right - r.right) <= HALF_PIXEL && Math.abs(seen.bottom - r.bottom) <= HALF_PIXEL;
 
 // What of the element's rectangle is left once every scrolling ancestor and the window clip it; null when nothing is.
 function visible(element: HTMLElement): Box | null {
@@ -46,7 +53,7 @@ function visible(element: HTMLElement): Box | null {
   const r = element.getBoundingClientRect();
   const box = { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
   for (let ancestor = element.parentElement; ancestor !== null && ancestor !== document.body && ancestor !== document.documentElement; ancestor = ancestor.parentElement) {
-    const style = getComputedStyle(ancestor);
+    const style = window.getComputedStyle(ancestor);
     const clipsX = CLIPS.has(style.overflowX);
     const clipsY = CLIPS.has(style.overflowY);
     if (!clipsX && !clipsY) continue;
@@ -62,12 +69,8 @@ function visible(element: HTMLElement): Box | null {
 /** Any sliver of the element is visible. */
 export const inView = (element: HTMLElement): boolean => visible(element) !== null;
 
-function whole(element: HTMLElement): boolean {
-  const seen = visible(element);
-  if (seen === null) return false;
-  const r = element.getBoundingClientRect();
-  const uncut = Math.abs(seen.left - r.left) <= HALF_PIXEL && Math.abs(seen.top - r.top) <= HALF_PIXEL && Math.abs(seen.right - r.right) <= HALF_PIXEL && Math.abs(seen.bottom - r.bottom) <= HALF_PIXEL;
-  if (!uncut) return false;
+// The four inner corners of `r` (1 px in) are the row or inside it: nothing is laid over it.
+function uncovered(element: HTMLElement, r: DOMRectReadOnly): boolean {
   const corners = [
     [r.left + 1, r.top + 1],
     [r.right - 1, r.top + 1],
@@ -80,7 +83,19 @@ function whole(element: HTMLElement): boolean {
   });
 }
 
+// The row wholly inside the viewport (`entirely`), and moreover uncovered (`whole`): the full reading of the page.
+function measure(element: HTMLElement): { entirely: boolean; whole: boolean } {
+  const seen = visible(element);
+  const r = element.getBoundingClientRect();
+  const entirely = seen !== null && within(seen, r);
+  return { entirely, whole: entirely && uncovered(element, r) };
+}
+
 const overlayOpen = () => document.querySelector(OPEN_OVERLAY) !== null;
+
+// An intersection entry's own rectangles say the target is wholly inside the viewport (within half a pixel).
+const entire = (entry: IntersectionObserverEntry) =>
+  entry.isIntersecting && within(entry.intersectionRect, entry.boundingClientRect);
 
 /** Watch one open prompt's card and its row of decision buttons until disposed. */
 export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: number = PROMPT_GRACE_MS): PromptGuard {
@@ -89,15 +104,15 @@ export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: nu
   let wholeAt = -Infinity;
   let clearedAt = -Infinity;
   let shown = inView(card);
-  let isWhole = whole(buttons);
+  const first = measure(buttons);
+  let entirely = first.entirely; // the buttons wholly inside the viewport, as last reported (what lies over them aside)
+  let isWhole = first.whole;
   if (isWhole) wholeAt = startedAt;
   let overlay = overlayOpen();
 
-  const observe = (now: number) => {
-    const nowShown = inView(card);
+  const see = (now: number, nowShown: boolean, nowWhole: boolean) => {
     if (nowShown && !shown) shownAt = now;
     shown = nowShown;
-    const nowWhole = whole(buttons);
     if (nowWhole && !isWhole) wholeAt = now;
     isWhole = nowWhole;
   };
@@ -106,30 +121,42 @@ export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: nu
     if (overlay && !open) clearedAt = now;
     overlay = open;
   };
-  let frame: number | null = null;
-  const schedule = () => {
-    if (frame !== null) return;
-    frame = requestAnimationFrame(() => {
-      frame = null;
-      observe(performance.now());
-    });
-  };
-  const intersections = new IntersectionObserver(schedule);
+
+  const intersections = new IntersectionObserver(
+    (entries) => {
+      const now = performance.now();
+      let nowShown = shown;
+      let nowWhole = isWhole;
+      for (const entry of entries) {
+        if (entry.target === card) nowShown = entry.isIntersecting;
+        if (entry.target !== buttons) continue;
+        const nowEntirely = entire(entry);
+        nowWhole = nowEntirely && (entirely && isWhole ? true : uncovered(buttons, entry.boundingClientRect));
+        entirely = nowEntirely;
+      }
+      see(now, nowShown, nowWhole);
+    },
+    { threshold: [0, 1] },
+  );
   intersections.observe(card);
   intersections.observe(buttons);
-  // a menu opening or closing, an element laid over the buttons: heard as the page changes
-  const mutations = new MutationObserver(() => {
-    overlays(performance.now());
-    schedule();
+  // the top layer: an element added to or taken from the body may lie over the buttons, or uncover them
+  const topLayer = new MutationObserver(() => {
+    const now = performance.now();
+    overlays(now);
+    if (entirely) see(now, shown, uncovered(buttons, buttons.getBoundingClientRect()));
   });
-  mutations.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-state'] });
-  window.addEventListener('scroll', schedule, { capture: true, passive: true });
-  window.addEventListener('resize', schedule);
+  topLayer.observe(document.body, { childList: true });
+  // an overlay opening or closing anywhere in the page (Radix toggles its content's `data-state`)
+  const overlayStates = new MutationObserver(() => overlays(performance.now()));
+  overlayStates.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['data-state'] });
 
-  // at a press: the watch as it is now, so a change no event announced counts from the press
+  // at a press: the page's geometry in full, so a change no observer reported counts from the press
   const refresh = (now: number) => {
     overlays(now);
-    observe(now);
+    const buttonsNow = measure(buttons);
+    entirely = buttonsNow.entirely;
+    see(now, inView(card), buttonsNow.whole);
   };
   return {
     mayDeny(now) {
@@ -141,11 +168,9 @@ export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: nu
       return shown && isWhole && now - Math.max(shownAt, wholeAt, clearedAt) >= graceMs;
     },
     dispose() {
-      if (frame !== null) cancelAnimationFrame(frame);
       intersections.disconnect();
-      mutations.disconnect();
-      window.removeEventListener('scroll', schedule, { capture: true });
-      window.removeEventListener('resize', schedule);
+      topLayer.disconnect();
+      overlayStates.disconnect();
     },
   };
 }
@@ -169,11 +194,13 @@ const HISTORY_LINE = '[aria-label="Prompt history"]';
  * inside it on what is not a text field, a button or a link; in the session's own composer in `row`'s pane, while none of
  * the composer's lists or its history line shows and no dictation is live in it; or on nothing, with `row`'s pane the one
  * the shell says holds the keyboard. Anything else is refused: another request's row, any other row, a child transcript,
- * another field, another pane. A transcript outside a pane has the first case only.
+ * another field, another pane. A transcript outside a pane, and a child transcript's end (`from: 'row'`, the architect's
+ * ruling of 2026-11-15 UTC: in one pane at most one end takes the composer's and no focus's presses), has the first case
+ * only.
  */
-export function promptFocused(row: HTMLElement, appSessionId: AppSessionId): boolean {
+export function promptFocused(row: HTMLElement, appSessionId: AppSessionId, from: 'pane' | 'row' = 'pane'): boolean {
   const focused = document.activeElement;
-  const pane = row.closest<HTMLElement>('[data-pane]');
+  const pane = from === 'pane' ? row.closest<HTMLElement>('[data-pane]') : null;
   if (focused === null || focused === document.body) return pane !== null && pane.dataset.pane === String(currentSet(useLayout.getState().main).focusedPane);
   if (row.contains(focused)) return focused === row || !(isTextEntry(focused) || isButtonOrLink(focused));
   if (pane === null) return false;

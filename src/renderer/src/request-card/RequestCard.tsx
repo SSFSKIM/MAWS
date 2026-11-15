@@ -93,8 +93,9 @@ export interface RequestCardProps {
   region?: 'row' | 'end';
   // UX wave U1b M4 (Interfaces §F): the end row's open card. A permission prompt's ⌘↩, ⇧⌘↩ and Esc then answer from its
   // row, from its session's composer in its pane, and from nothing with that pane active, once its guard is armed (decision
-  // 18); any other kind keeps its row's keys.
-  keys?: 'pane';
+  // 18); any other kind keeps its row's keys. `row` (a child transcript's end, the architect's ruling of 2026-11-15 UTC):
+  // the same chords under the same guard, from its own row only.
+  keys?: 'pane' | 'row';
 }
 
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike), and the card's group name.
@@ -300,8 +301,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     const root = rootRef.current;
     ownerRef.current = root ? (root.parentElement?.closest<HTMLElement>('[tabindex]') ?? root) : null;
   });
-  // U1b M4 (§F): the end row's open prompt binds its chords as the pane's; every other card, by the element that owns them
-  const paneKeys = keyScope === 'pane' && request?.kind === 'permission.requested';
+  // U1b M4 (§F): the end row's open prompt binds its chords by whose focus the press is, under its guard; every other
+  // card, by the element that owns them
+  const paneKeys = keyScope !== undefined && request?.kind === 'permission.requested';
   const owns = !paneKeys && (placement === 'card' || (placement === 'inline' && region !== undefined)); // U1b: a transcript's row owns an inline card's keys
   const cardKeys = (owns || paneKeys) && live;
   const prompt = usePromptGuard(paneKeys && live, rootRef, entry);
@@ -312,9 +314,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     (yieldsToDraft: boolean) => {
       const row = ownerRef.current;
       const card = rootRef.current;
-      return row !== null && card !== null && promptFocused(row, appSessionId) && inView(card) && (!yieldsToDraft || composerEmpty(appSessionId));
+      return row !== null && card !== null && promptFocused(row, appSessionId, keyScope) && inView(card) && (!yieldsToDraft || composerEmpty(appSessionId));
     },
-    [appSessionId],
+    [appSessionId, keyScope],
   );
   const claimsAny = useCallback(() => claimsPress(false), [claimsPress]);
   const claimsBesideEmpty = useCallback(() => claimsPress(true), [claimsPress]);
