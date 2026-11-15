@@ -316,7 +316,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
     expect(await bus.invoke('laneA.watch', { appSessionId })).toMatchObject({ ok: true });
     const agentIds = () => {
-      const bodies = bus.emittedOf('laneA.plane').filter((p) => p.appSessionId === appSessionId).flatMap((p) => p.messages ?? []).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents');
+      const bodies = bus.emittedOf('laneA.plane').filter((p) => p.appSessionId === appSessionId).flatMap((p) => ('messages' in p ? p.messages : [])).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents');
       return ((bodies.at(-1)?.body as { subagents?: { agentId: string; status: string }[] } | undefined)?.subagents ?? []).map((a) => `${a.agentId} ${a.status}`);
     };
     await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown']);
