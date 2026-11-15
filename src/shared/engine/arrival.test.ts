@@ -554,6 +554,7 @@ describe('the grant a sminos bridge carried to a terminal session (U1c, M4; prob
   it('a queued prompt of blocks is read only when they are text alone, of the person’s, as a prompt and not meta', () => {
     const queued = (prompt: unknown, over: Record<string, unknown> = {}) => ({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'u-q', ...over } });
     expect(readArrivals(queued([{ type: 'text', text: GRANT }]))).toEqual([grant('make build')]);
+    expect(readArrivals(queued([{ type: 'text', text: `Also run the linter.\n${GRANT}` }])), 'read whole, as the file reads the same appended words').toEqual([]);
     expect(readArrivals(queued([{ type: 'text', text: GRANT }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }]))).toEqual([]);
     expect(readArrivals(queued([{ type: 'text', text: GRANT }], { isMeta: true }))).toEqual([]);
     expect(readArrivals(queued([{ type: 'text', text: GRANT }], { commandMode: 'task-notification' }))).toEqual([]);

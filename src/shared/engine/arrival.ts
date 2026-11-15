@@ -11,7 +11,8 @@
 // it (its origin object, its envelope tag, its attachment type, `local_command_source`, the fields the engine writes for
 // a scheduled fire), and the person's typed prompt is never an arrival, but for MAWS's own two texts (its answer
 // envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line, and,
-// where a sminos bridge carried it for the person to a terminal session, read whole: UX wave U1c) and a background
+// where a sminos bridge carried it for the person to a terminal session (submitted as the user, or appended into the
+// running turn as another machine's rows draw it), read whole: UX wave U1c) and a background
 // session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
 // frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
 // hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
@@ -319,9 +320,17 @@ function scheduledRow(row: Json, text: string, open: OpenArrivals): Read {
 function attachmentRow(row: Json, open: OpenArrivals): Read {
   const attachment = object(row.attachment);
   if (attachment?.type === 'hook_additional_context') return { arrivals: answersOf(row), open };
-  if (attachment?.type !== 'queued_command' || typeof attachment.prompt !== 'string') return none(open);
-  const prompt = attachment.prompt;
+  if (attachment?.type !== 'queued_command') return none(open);
   const origin = object(attachment.origin);
+  const persons = origin?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
+  if (typeof attachment.prompt !== 'string') {
+    // UX wave U1c (M4, Interfaces §C, 7): a prompt of the person's whose content is text blocks alone, the form the
+    // reader of another machine's rows gives a row a sminos bridge appended into the running turn (`steerAsDrawn`),
+    // is read for the grant whole, as the bridge's words are on every route (§C, 6 and 8)
+    const text = persons ? textBlocksText(attachment.prompt) : null;
+    return text === null ? none(open) : { arrivals: readConsents(text), open };
+  }
+  const prompt = attachment.prompt;
   if (attachment.commandMode === 'task-notification') {
     if (attachment.isMeta === true) return none(open); // context, as the backfill reads it today
     const notifications = notificationText(prompt, origin?.kind ?? 'task-notification');
@@ -339,8 +348,14 @@ function attachmentRow(row: Json, open: OpenArrivals): Read {
     const delivery = framedDelivery(prompt, 'bridge', true);
     return { arrivals: delivery === null ? [] : [delivery], open };
   }
-  if (origin?.kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true) return { arrivals: personsText(prompt), open };
+  if (persons) return { arrivals: personsText(prompt), open };
   return none(open);
+}
+
+/** The text of content that is text blocks and nothing else, one or more; null for any other. */
+function textBlocksText(content: unknown): string | null {
+  if (!Array.isArray(content) || content.length === 0 || !content.every((block) => object(block)?.type === 'text' && typeof object(block)!.text === 'string')) return null;
+  return messageText(content.filter(isBlock));
 }
 
 /** The answers a plugin's prompt or a hook's context delivers, one arrival each, in order (rule 3). */

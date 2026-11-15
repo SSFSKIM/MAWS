@@ -10,7 +10,7 @@ import { slashCommandLine } from '@shared/wire/local-command';
 import { denialKindOf, INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
-import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { nothingOpen, readConsents, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2); U1c, readConsents
 import { localCommandText } from '@shared/engine/engine-markers';
 import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
 import { notificationText, taskNotificationBlocks, type TaskNotificationBlock } from '@shared/engine/task-notification';
@@ -78,7 +78,9 @@ export interface BackfillContext {
 
 // What the bridge delivered while no turn ran (withWaitingWords), placed when a turn starts: the owner's words (`words`
 // null when they were drawn at their row already, desk-web's older steer), or a peer's delivery as its events.
-type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | null } | { kind: 'peer'; events: SessionEvent[] };
+// UX wave U1c (M4, Interfaces §C, 8): `grants`, the consent marks of words the bridge appended, which their message carries.
+type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | null; grants?: Consent[] } | { kind: 'peer'; events: SessionEvent[] };
+type Consent = Extract<Arrival, { class: 'consent' }>;
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -570,8 +572,8 @@ function carried(messageUuid: MessageUuid, content: string | ContentBlock[], arr
 }
 
 // The owner's words taken into the running turn: what the live stream shows for a prompt folded in there.
-function steered(messageUuid: MessageUuid, words: string, base: Base, events: SessionEvent[]): void {
-  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+function steered(messageUuid: MessageUuid, words: string, base: Base, events: SessionEvent[], grants: Consent[] = []): void {
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(grants) });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
@@ -872,8 +874,11 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   const row = ctx.bridgeRows.get(key);
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
-  if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid, words: row.content });
-  else steered(row.uuid, row.content, base, events);
+  // UX wave U1c (M4, Interfaces §C, 8): words that are the grant whole are the person's grant, which a terminal
+  // session's bridge carried for "Approve and retry" during a turn or after a Stop; their message carries its mark
+  const grants = readConsents(row.content);
+  if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid, words: row.content, grants });
+  else steered(row.uuid, row.content, base, events, grants);
   return true;
 }
 
@@ -891,7 +896,8 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
 // delivery at its row, as one into a running turn.)
 function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
   const start = events.findIndex((event) => event.kind === 'turn.started');
-  const said = (row: Extract<Waiting, { kind: 'own' }>): SessionEvent[] => (row.words === null ? [] : [{ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null }]);
+  const said = (row: Extract<Waiting, { kind: 'own' }>): SessionEvent[] =>
+    row.words === null ? [] : [{ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(row.grants ?? []) }];
   const taken = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [...said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
   let out = events;
   if (start >= 0 && ctx.waitingWords.length > 0) {
