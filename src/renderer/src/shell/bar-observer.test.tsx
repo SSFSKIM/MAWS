@@ -151,9 +151,12 @@ it('typing in the bar’s box runs its observer at most once per keystroke and r
   await waitFor(() => expect(message()).toBeTruthy());
   const watch = surfaceWatch();
   const before = { runs: watch.runs, renders: marks.reads };
-  for (let i = 0; i < K; i += 1) await act(async () => void message().editor.commands.insertContent('a')); // a keystroke per task
+  const type = () => act(async () => void message().editor.commands.insertContent('a')); // a keystroke per task
+  await type();
+  const first = watch.runs - before.runs;
+  for (let i = 1; i < K; i += 1) await type();
   expect(message().textContent).toBe('a'.repeat(K));
-  expect(watch.runs - before.runs, `${K} keystrokes`).toBeLessThanOrEqual(K);
+  expect({ first, rest: watch.runs - before.runs - first }).toEqual({});
   expect(marks.reads - before.renders, `${K} keystrokes`).toBe(0);
 });
 
