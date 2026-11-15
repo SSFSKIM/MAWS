@@ -1081,6 +1081,21 @@ describe('subagents', () => {
     expect(readsOf(s.file(P))).toBeGreaterThanOrEqual(2);
   });
 
+  // M2's re-review: the same nested entry goes and comes back while its parent's read is out
+  it('reads a parent again when the agent under it is unlisted and listed again while its read was out', async () => {
+    const forked = { toolUseId: undefined, requestShape: undefined };
+    const s = await session({ main: chatter(1), files: { [P]: '' }, entries: (dir) => [entry(dir, P, forked), nested(dir, N, P)], hold: [P] });
+    await expect.poll(() => counts.timeline.includes(`held ${s.file(P)}`)).toBe(true); // its first read has read the empty file, and is out
+    s.listing.change([entry(s.dir, P, forked)]);
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).map((a) => a.agentId)).toEqual([P]);
+    appendFileSync(s.file(P), launched(N, 2)); // after that read
+    s.listing.change([entry(s.dir, P, forked), nested(s.dir, N, P)]);
+    await expect.poll(() => statusOf(s.h.planes, s.watch, N)).toBe('unknown/none');
+    s.releaseFile(P);
+    await expect.poll(() => statusOf(s.h.planes, s.watch, N)).toBe('running/rows');
+    expect(readsOf(s.file(P))).toBeGreaterThanOrEqual(2);
+  });
+
   // M2's review, finding 5
   it.each([
     ['the session is dropped', (s: Awaited<ReturnType<typeof session>>) => s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } })],
