@@ -930,6 +930,8 @@ Each body names: its class 1a run (`scripts/ci-gate.sh "$PWD" --gates static,uni
   Date/Author: 2026-11-15 (UTC), the fixer of the whole-branch review, on the architect's ruling.
 - Decision (the second look, 3, focus after a reshaped stretch): the press resolves the other line from the stretch it toggled, after the toggle: `toggleStretch` returns the keys the other line can carry (the key just opened; on folding, every key the stretch's rows answer to, over each mounted view's composition), and the hand-off names those lines (`handFocus(scope, lines)`), still scoped to its mount and one-shot, lapsing at the next frame. Proof: `focus.test.tsx` (after the run of one call unwraps; after a page above), red first, and the hand-off's several-lines case.
   Date/Author: 2026-11-15 (UTC), the fixer of the whole-branch review, on the architect's ruling.
+- Decision (the re-review, the carry over the composition): the carry reads the rows each mounted view composes, before and after the update (the composition `mountView` hands the store, which the jump reads), and the key's own rows only when no view is mounted, since what a view places among the key's rows (a standalone browser activity) splits a stretch there; over the store's rows the carry opened the earlier, closed stretch and left the reader's call closed. It composes only when the key's own rows lost a row an open key named (`lostKey`). Proof: `jump.test.tsx`, "an opened thought with no text that its call replaces stays open as the call, beside a closed stretch a standalone browser activity splits off", a real `Transcript` mount, red first.
+  Date/Author: 2026-11-15 (UTC), the fixer of the whole-branch review, on the re-review's finding.
 
 ## Outcomes & Retrospective
 
