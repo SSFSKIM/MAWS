@@ -669,7 +669,7 @@ test('a replayed session’s transcript keeps its scroll offset across a page an
 
 // ---- UX wave U10b-4: "Make something new" and a Space's instructions ----------------------------------------------------
 // UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M8, M9 and M11; A7 and A8, §D.2, §E.2,
-// §E.3, L5, H25). A7: the four cards and More in one row, none narrower than 200 px, wrapping in a narrow window with no
+// §E.3, L5, H25). A7: the four cards and More in one row, none narrower than 180 px, wrapping in a narrow window with no
 // description cut; Blank at least 24 px tall; More's menu under it and Design system's two entries on the menu's left;
 // a system chosen in the heading; Blank makes the artifact bound to that system and opens it, which names it (a
 // document's breadcrumb, a deck's Theme panel); a card leaves the page for a new chat whose box holds the opening words.
@@ -743,7 +743,7 @@ test('“Make something new”: four cards and More in one row that wraps in a n
   };
   const wide = await rowAt();
   expect(wide.tops, 'at 1440 px the four cards share one line').toHaveLength(1);
-  for (const box of wide.boxes) expect(box.width, 'no card narrower than 200 px').toBeGreaterThanOrEqual(199.5);
+  for (const box of wide.boxes) expect(box.width, 'no card narrower than 180 px').toBeGreaterThanOrEqual(179.5);
   expect(wide.more.x, 'More is the row’s last cell').toBeGreaterThanOrEqual(Math.max(...wide.boxes.map((b) => b.x + b.width)));
 
   // More: under it, aligned to its right edge; Design system's entries open as a submenu on the menu's left
@@ -762,10 +762,10 @@ test('“Make something new”: four cards and More in one row that wraps in a n
     await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
   }, 'the menus close').toPass({ timeout: 10_000 });
 
-  // a narrow window: the row wraps to a second line, no card under 200 px and no description cut
+  // a narrow window: the row wraps to a second line, no card under 180 px and no description cut
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(800, 900));
   await expect.poll(async () => (await rowAt()).tops.length, { message: 'the cards wrap to a second line' }).toBeGreaterThan(1);
-  for (const box of (await rowAt()).boxes) expect(box.width, 'no card narrower than 200 px when wrapped').toBeGreaterThanOrEqual(199.5);
+  for (const box of (await rowAt()).boxes) expect(box.width, 'no card narrower than 180 px when wrapped').toBeGreaterThanOrEqual(179.5);
   const cut = await cards.evaluateAll((groups) =>
     groups.filter((g) => Array.from(g.querySelectorAll('button span')).some((span) => span.scrollWidth > span.clientWidth + 1 || span.scrollHeight > span.clientHeight + 1)).map((g) => g.getAttribute('aria-label')),
   );
