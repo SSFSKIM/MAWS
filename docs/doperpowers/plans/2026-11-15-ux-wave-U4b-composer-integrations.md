@@ -24,7 +24,7 @@ How to see it working: the unit tests named under each milestone; in a running b
 - [x] (2026-11-15 11:20Z) Document written against master `63c97b5c0`: the code read, the in-flight branches' diffs read, the two binding builds read with `git show`.
 - [x] (2026-11-15 11:52Z) The adversarial review's three findings and the architect's rulings on them and on the thirteen reported points folded in, in one revision.
 - [x] (2026-11-15 12:40Z) The probe for M3's conditional step merged from `ux-wave/U4b-probes` at `f7e88d3c1` (a merge commit of its own); its findings pass decision 15's three conditions and the step is built in M3 (the Decision Log's lines on the probe's result).
-- [ ] M1 — a waiting answer reads as an answer.
+- [x] (2026-11-15 14:40Z) M1 — a waiting answer reads as an answer (`fe2523f77..eda29631e`, fix `bb22ac385..2b89a5a09`; reviewed clean). The desk web app's build and tests ran at `eda29631e`; at the fix's head its typecheck ran, and its build and tests run again at M3's head.
 - [x] (2026-11-15 14:05Z) M2 — the `/btw` card at the column's foot (`bbd9b53c6..b6dc4d66e`; reviewed clean).
 - [ ] M3 — Send now and taking back on another machine (and its conditional step: built, or not, with the reason).
 - [ ] M4 — the scenes, the record, the last run.
