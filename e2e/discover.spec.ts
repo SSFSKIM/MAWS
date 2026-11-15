@@ -808,7 +808,15 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
     await expect(discover.locator('[data-discover-home]')).toBeVisible();
   });
 
-  await test.step('the head at 1512, 900, 620 and 400 px, in My items and in Discover, All: the four Show choices on one line', async () => {
+  // The head's edges, measured (the architect's ruling of 2026-11-15 on the tools line)
+  const head = customizeHead(page);
+  const edges = (node: Locator) => node.evaluate((el) => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; });
+  const near = (a: number, b: number, what: string) => expect(Math.abs(a - b), `${what}: ${a} against ${b}`).toBeLessThanOrEqual(1);
+  const searchField = () => head.getByRole('searchbox').locator('xpath=ancestor::label[1]');
+  const actions = () => head.locator('[data-customize-actions] > *');
+  const showRow = () => head.locator('[data-customize-row="show"]');
+
+  await test.step('the head at 1512, 900, 620 and 400 px, in My items and in Discover, All: the four Show choices on one line; the tools line’s edges at 620 and 400 px', async () => {
     for (const [width, height] of [[1512, 982], [900, 820], [620, 820], [400, 820]] as const) {
       await app.evaluate(({ BrowserWindow }, [w, h]) => {
         const win = BrowserWindow.getAllWindows()[0]!;
@@ -822,8 +830,66 @@ test('all: My items lists the three kinds in one list; Discover’s home has a s
         const tops = await customizeHead(page).getByRole('radiogroup', { name: 'Show', exact: true }).getByRole('radio').evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().top)));
         expect(tops, `the Show choices at ${width} px, ${view}`).toHaveLength(4);
         expect(new Set(tops).size, `the Show choices on one line at ${width} px, ${view}: ${tops.join(', ')}`).toBe(1);
+        const at = `${width} px, ${view}`;
+        const row = await edges(showRow());
+        const search = await edges(searchField());
+        if (width === 620) {
+          // a line of their own: the search from the row's left, grown, the last action at the row's right
+          near(search.left, row.left, `${at}: the search's left edge`);
+          near((await edges(actions().last())).right, row.right, `${at}: the last action's right edge`);
+        }
+        if (width === 400) {
+          // the search takes the line; actions that no longer fit beside it start the next one from the left
+          near(search.left, row.left, `${at}: the search's left edge`);
+          near(search.right, row.right, `${at}: the search's right edge`);
+          const first = await edges(actions().first());
+          if (first.top >= search.bottom) near(first.left, row.left, `${at}: the first action's left edge, wrapped`);
+        }
         await info.attach(`customize-head-${view === 'My items' ? 'mine' : 'discover'}-all-${width}x${height}.png`, { body: await customizeHead(page).screenshot(), contentType: 'image/png' });
       }
     }
+  });
+
+  // The stacked head a person can reach. Under 700 px the sidebar is an overlay and takes no column (`sidebarAside`,
+  // src/renderer/src/app/shell-geometry.ts:15-16), so there the page is the whole window, never under the window's 600 px
+  // minimum; a docked sidebar is clamped to 200..480 px (SIDEBAR_BOUNDS, src/renderer/src/app/regions.ts). The page is under
+  // the `customize` container's 24rem only beside a widened docked sidebar: here the window at 700 px and the sidebar at
+  // 480, the page about 220 px.
+  await test.step('700 px with the sidebar docked at 480 px: the page under 24rem; the switch, Showing, the Show choices, then the search at full width', async () => {
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]!;
+      win.setMinimumSize(600, 600);
+      win.setContentSize(700, 820);
+    });
+    await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([700, 820]);
+    const resizer = page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
+    await resizer.focus();
+    await page.keyboard.press('End'); // the sidebar's widest
+    await expect(resizer).toHaveAttribute('aria-valuenow', '480');
+    await chooseCustomize(page, { view: 'My items', show: 'All' });
+    await expect(all).toBeVisible();
+    const [containerWidth, rem] = await customizePage(page).evaluate((el) => [el.getBoundingClientRect().width, parseFloat(getComputedStyle(document.documentElement).fontSize)]);
+    expect(containerWidth, `the customize container, ${containerWidth} px`).toBeLessThan(24 * rem!);
+    const viewRow = await edges(head.locator('[data-customize-row="view"]'));
+    const row = await edges(showRow());
+    const showing = await edges(head.getByRole('combobox', { name: 'Project', exact: true }).locator('xpath=ancestor::label[1]'));
+    const live = head.getByRole('combobox', { name: 'Live session', exact: true }).locator('xpath=ancestor::label[1]');
+    const stacked = [
+      ['the switch', await edges(head.getByRole('radiogroup', { name: 'Library', exact: true }))],
+      ['Showing', showing],
+      ...((await live.count()) > 0 ? [['Live session', await edges(live)] as const] : []),
+      ['the Show choices', await edges(head.getByRole('radiogroup', { name: 'Show', exact: true }))],
+      ['the search', await edges(searchField())],
+    ] as const;
+    for (let i = 1; i < stacked.length; i += 1) expect(stacked[i]![1].top, `${stacked[i]![0]} under ${stacked[i - 1]![0]}`).toBeGreaterThanOrEqual(stacked[i - 1]![1].bottom);
+    for (const [name, box] of stacked.filter(([part]) => part === 'Showing' || part === 'Live session')) {
+      near(box.left, viewRow.left, `${name}'s left edge`);
+      near(box.right, viewRow.right, `${name}'s right edge`);
+    }
+    const search = await edges(searchField());
+    near(search.left, row.left, 'the search’s left edge');
+    near(search.right, row.right, 'the search’s right edge');
+    await info.attach('customize-head-mine-all-700x820-sidebar-480.png', { body: await head.screenshot(), contentType: 'image/png' });
+    await info.attach('customize-page-mine-all-700x820-sidebar-480.png', { body: await page.screenshot(), contentType: 'image/png' });
   });
 });

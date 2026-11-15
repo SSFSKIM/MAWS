@@ -5,7 +5,10 @@
 // drawn in the shape the section tabs had (the chosen one on the active background, apart from Discover's bordered
 // chips), and at the right the tools of what is shown; none while a plugin's or a skill's detail is open. Pressing the
 // view shown, or any Show value, returns a detail to its list. Narrow: the tools take a line of their own under the
-// choices, which stay on one line; under the `customize` container's 24rem each row stacks.
+// choices, which stay on one line, and fill it (./ToolsLine.tsx); under the `customize` container's 24rem each row stacks.
+// How the tools fill a line of their own and only then (the architect's ruling of 2026-11-15): the choices and the tools
+// both grow, the choices by 9999 to the tools' 1, so on a shared line the free space goes to the choices (the tools keep
+// their content's width, at the line's right end) and on a line of their own the tools, alone, take all of it.
 // The tools, per view and Show (§D's table): My items, All: the search ("Search my items"), "Add custom connector…" and
 // Refresh; Plugins: the search, Filter, Sort by and the Add menu; Skills: the search, Sort by while a plugin brings a
 // skill, Refresh; Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
@@ -17,7 +20,7 @@ import { useMemo, type ReactNode } from 'react';
 import { SortIcon } from '../app/IconButton';
 import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
 import { AddMenu } from '../widgets/plugins/AddMenu';
-import { Choice, LibrarySwitch, PluginsToolbar, SearchField } from '../widgets/plugins/LibraryHeader';
+import { Choice, LibrarySwitch, PluginsChoices } from '../widgets/plugins/LibraryHeader';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { pluginsReadKey } from '../widgets/plugins/read';
 import { diskSkillGroups, hasPluginSkills } from '../widgets/skills/skills';
@@ -28,13 +31,13 @@ import { DISCOVER } from './discover/copy';
 import { DiscoverToolbar } from './discover/DiscoverToolbar';
 import { useCustomizePage, type CustomizeShow } from './page';
 import { usePlace } from './place';
+import { ToolsLine } from './ToolsLine';
 
 export type PageView = 'mine' | 'discover';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const CHOICE = 'shrink-0 rounded-sm px-3 py-1.5 text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2 data-[state=on]:bg-bg-active data-[state=on]:font-medium data-[state=on]:text-fg';
 const SHOWS: readonly CustomizeShow[] = ['all', 'plugins', 'skills', 'connectors'];
-const NARROW_FIELD = '@max-sm/customize:w-full';
 
 export function CustomizeHead({ view, show, inDetail, onView, onShow, project, live }: {
   view: PageView;
@@ -57,7 +60,7 @@ export function CustomizeHead({ view, show, inDetail, onView, onShow, project, l
         </div>
       </div>
       <div data-customize-row="show" className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 @max-sm/customize:flex-col @max-sm/customize:items-stretch">
-        <span className="flex shrink-0 items-center gap-2">
+        <span className="flex shrink-0 grow-[9999] items-center gap-2">
           <span className="text-ui-sm text-fg-muted">{PAGE.show}</span>
           <ToggleGroup.Root
             type="single"
@@ -75,7 +78,7 @@ export function CustomizeHead({ view, show, inDetail, onView, onShow, project, l
           </ToggleGroup.Root>
         </span>
         {!inDetail && (
-          <span data-customize-tools className="ml-auto flex min-w-0 max-w-full flex-wrap items-center gap-1 @max-sm/customize:ml-0 @max-sm/customize:w-full">
+          <span data-customize-tools className="flex min-w-0 max-w-full grow items-center @max-sm/customize:w-full">
             <Tools view={view} show={show} />
           </span>
         )}
@@ -92,46 +95,64 @@ function Tools({ view, show }: { view: PageView; show: CustomizeShow }) {
       {CONNECTORS.addCustom}
     </button>
   );
+  return <MineTools show={show} addCustom={addCustom} />;
+}
+
+// My items' tools: the page's one search text (held for the run: `/` focuses it, Esc clears it first) and the kind's actions.
+function MineTools({ show, addCustom }: { show: CustomizeShow; addCustom: ReactNode }) {
+  const { openDialog } = usePlace();
+  const text = useCustomizePage((s) => s.search);
+  const search = (label: string) => ({ label, value: text, onChange: (next: string) => useCustomizePage.setState({ search: next }) });
   switch (show) {
     case 'all':
       return (
-        <>
-          <MineSearch label={PAGE.searchMine} />
-          {addCustom}
-          <Refresh plugins />
-        </>
+        <ToolsLine
+          search={search(PAGE.searchMine)}
+          actions={
+            <>
+              {addCustom}
+              <Refresh plugins />
+            </>
+          }
+        />
       );
     case 'plugins':
-      return <PluginsTools />;
+      return (
+        <ToolsLine
+          search={search(LIBRARY.searchPlugins)}
+          actions={
+            <>
+              <PluginsChoices />
+              <AddMenu onOpen={openDialog} />
+            </>
+          }
+        />
+      );
     case 'skills':
       return (
-        <>
-          <MineSearch label={SKILLS_LIBRARY.search} />
-          <SkillsSort />
-          <Refresh />
-        </>
+        <ToolsLine
+          search={search(SKILLS_LIBRARY.search)}
+          actions={
+            <>
+              <SkillsSort />
+              <Refresh />
+            </>
+          }
+        />
       );
     case 'connectors':
       return (
-        <>
-          <MineSearch label={CONNECTORS.search} />
-          {addCustom}
-          <Refresh />
-        </>
+        <ToolsLine
+          search={search(CONNECTORS.search)}
+          actions={
+            <>
+              {addCustom}
+              <Refresh />
+            </>
+          }
+        />
       );
   }
-}
-
-// My items' one search text (the page's, held for the run): `/` focuses it, Esc clears it first.
-function MineSearch({ label }: { label: string }) {
-  const search = useCustomizePage((s) => s.search);
-  return <SearchField label={label} value={search} onChange={(next) => useCustomizePage.setState({ search: next })} className={NARROW_FIELD} />;
-}
-
-function PluginsTools() {
-  const { openDialog } = usePlace();
-  const search = useCustomizePage((s) => s.search);
-  return <PluginsToolbar add={<AddMenu onOpen={openDialog} />} search={{ value: search, onChange: (next) => useCustomizePage.setState({ search: next }) }} />;
 }
 
 // Sort by, while a plugin brings a skill (Desktop's rule, as the skills' own head had it); the library store's choice.

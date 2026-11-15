@@ -211,7 +211,10 @@ describe('the head', () => {
     expect(main.querySelector('[data-connector-trailing]')).toBeNull();
   });
 
-  it('draws the tools of each view and Show', async () => {
+  // the architect's ruling of 2026-11-15 on the tools line: one line, the search first, then the actions as one group, so
+  // that where they no longer fit beside the search they go to the next line together, in reading order (the widths are
+  // the e2e:discover case's, which measures the edges)
+  it('draws the tools of each view and Show: the search, then the actions as one group', async () => {
     servers = [];
     const table: [view: 'mine' | 'discover', show: 'all' | 'plugins' | 'skills' | 'connectors', search: string, present: string[], absent: string[]][] = [
       ['mine', 'all', 'Search my items', ['Add custom connector…', 'Refresh'], ['Filter', 'Sort by', 'Add', 'Sources']],
@@ -230,6 +233,13 @@ describe('the head', () => {
       await waitFor(() => expect(within(tools()!).getByRole('searchbox', { name: search }), at).toBeTruthy());
       for (const name of present) expect(within(tools()!).queryByRole('button', { name }), `${at}: ${name}`).not.toBeNull();
       for (const name of absent) expect(within(tools()!).queryByRole('button', { name }), `${at}: no ${name}`).toBeNull();
+      const line = tools()!.querySelector<HTMLElement>('[data-customize-tools-line]');
+      expect(line, `${at}: one line of tools`).not.toBeNull();
+      expect(tools()!.children, `${at}: the line alone`).toHaveLength(1);
+      const parts = [...line!.children].map((part) => (part.hasAttribute('data-customize-actions') ? 'actions' : part.querySelector('input[type="search"]') ? 'search' : part.tagName));
+      expect(parts, at).toEqual(['search', 'actions']);
+      const actions = line!.querySelector<HTMLElement>('[data-customize-actions]')!;
+      for (const name of present) expect(within(actions).queryByRole('button', { name }), `${at}: ${name} among the actions`).not.toBeNull();
     }
   });
 

@@ -119,14 +119,24 @@ export function Choice<T extends string>({ label, icon, value, values, words, is
 }
 
 export function PluginsToolbar({ add, search: page }: { add: ReactNode; search?: { value: string; onChange(value: string): void } }) {
-  const { search, filter, sort } = useLibraryStore((s) => s.plugins);
+  const search = useLibraryStore((s) => s.plugins.search);
   return (
     <span className="flex min-w-0 items-center gap-1 @max-sm/customize:w-full @max-sm/customize:flex-wrap">
       <SearchField value={page ? page.value : search} onChange={page ? page.onChange : (next) => set({ search: next })} className={NARROW} />
-      <Choice label={L.show} icon={<FilterIcon />} value={filter} values={FILTERS} words={L.filter} isDefault={filter === 'all'} onChange={(next) => set({ filter: next })} />
-      <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={L.sort} isDefault={sort === 'updated'} onChange={(next) => set({ sort: next })} />
+      <PluginsChoices />
       {add}
     </span>
+  );
+}
+
+// The plugin list's Filter and Sort by, the library store's (UX wave U11c: Customize's head draws them among its own tools).
+export function PluginsChoices() {
+  const { filter, sort } = useLibraryStore((s) => s.plugins);
+  return (
+    <>
+      <Choice label={L.show} icon={<FilterIcon />} value={filter} values={FILTERS} words={L.filter} isDefault={filter === 'all'} onChange={(next) => set({ filter: next })} />
+      <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={L.sort} isDefault={sort === 'updated'} onChange={(next) => set({ sort: next })} />
+    </>
   );
 }
 

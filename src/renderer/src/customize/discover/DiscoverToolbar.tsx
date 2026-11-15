@@ -9,8 +9,9 @@ import type { CatalogChip, CatalogSourceStatus, CatalogTab } from '@shared/ipc/s
 import { formatAgo } from '@shared/app/date-format';
 import { SECONDARY } from '../../sessions/ui';
 import { FilterIcon } from '../../widgets/plugins/icons';
-import { Choice, SearchField } from '../../widgets/plugins/LibraryHeader';
+import { Choice } from '../../widgets/plugins/LibraryHeader';
 import { useNow } from '../../app/use-now';
+import { ToolsLine } from '../ToolsLine';
 import { DISCOVER as D } from './copy';
 import { useCatalogHome, useCatalogRefresh, useCatalogSources } from './read';
 import { NO_CHOICES, setChoices, useDiscoverStore } from './store';
@@ -49,41 +50,46 @@ export function DiscoverToolbar({ tab, add }: { tab: Tab; add?: React.ReactNode 
   const fetched = statuses.flatMap((s) => (s.fetchedAt === null ? [] : [s.fetchedAt])).sort();
   const age = ageOf(fetched[0] ?? null, now);
   const troubled = statuses.some((s) => s.state === 'offline' || s.state === 'unavailable' || s.dropped > 0);
+  // UX wave U11c: one line of the head's tools, the search then the actions (../ToolsLine.tsx)
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1 @max-sm/customize:w-full">
-      <SearchField label={D.search} value={text} onChange={(next) => setChoices(tab, { text: next })} className="@max-sm/customize:w-full" />
-      <button type="button" data-catalog-refresh disabled={running} onClick={refresh} className={QUIET}>
-        {running ? D.refreshing : D.refresh}
-      </button>
-      <Popover.Root>
-        <Popover.Trigger asChild>
-          <button type="button" aria-label={D.sources} data-catalog-sources-trigger className={QUIET}>
-            {troubled && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
-            {age === null ? D.neverUpdated : D.updated(age)}
-          </button>
-        </Popover.Trigger>
-        <Popover.Portal>
-          <Popover.Content aria-label={D.sources} align="end" sideOffset={4} data-catalog-sources className="z-50 w-80 rounded-md border border-border-strong bg-bg-overlay p-2 text-ui text-fg shadow-float">
-            <p className="m-0 mb-1 px-1 text-ui-sm text-fg-muted">{D.sources}</p>
-            <ul className="m-0 flex max-h-80 list-none flex-col gap-1 overflow-y-auto p-0">
-              {statuses.map((status) => (
-                <li key={status.key} data-source={status.key} data-source-state={status.state} className="flex flex-col px-1 text-ui-sm">
-                  <span className="text-fg">{status.label}</span>
-                  <span className={status.state === 'offline' || status.state === 'unavailable' ? 'text-warning' : 'text-fg-muted'}>
-                    {status.state === 'unavailable' ? `${status.label} ${D.sourceState.unavailable}` : sourceWords(status, now)}
-                    {status.dropped > 0 && ` · ${D.dropped(status.dropped)}`}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <button type="button" disabled={running} onClick={refresh} className={`${SECONDARY} mt-2 w-full`}>
+    <ToolsLine
+      search={{ label: D.search, value: text, onChange: (next) => setChoices(tab, { text: next }) }}
+      actions={
+        <>
+            <button type="button" data-catalog-refresh disabled={running} onClick={refresh} className={QUIET}>
               {running ? D.refreshing : D.refresh}
             </button>
-          </Popover.Content>
-        </Popover.Portal>
-      </Popover.Root>
-      {add}
-    </span>
+            <Popover.Root>
+              <Popover.Trigger asChild>
+                <button type="button" aria-label={D.sources} data-catalog-sources-trigger className={QUIET}>
+                  {troubled && <span aria-hidden className="size-1.5 rounded-full bg-warning" />}
+                  {age === null ? D.neverUpdated : D.updated(age)}
+                </button>
+              </Popover.Trigger>
+              <Popover.Portal>
+                <Popover.Content aria-label={D.sources} align="end" sideOffset={4} data-catalog-sources className="z-50 w-80 rounded-md border border-border-strong bg-bg-overlay p-2 text-ui text-fg shadow-float">
+                  <p className="m-0 mb-1 px-1 text-ui-sm text-fg-muted">{D.sources}</p>
+                  <ul className="m-0 flex max-h-80 list-none flex-col gap-1 overflow-y-auto p-0">
+                    {statuses.map((status) => (
+                      <li key={status.key} data-source={status.key} data-source-state={status.state} className="flex flex-col px-1 text-ui-sm">
+                        <span className="text-fg">{status.label}</span>
+                        <span className={status.state === 'offline' || status.state === 'unavailable' ? 'text-warning' : 'text-fg-muted'}>
+                          {status.state === 'unavailable' ? `${status.label} ${D.sourceState.unavailable}` : sourceWords(status, now)}
+                          {status.dropped > 0 && ` · ${D.dropped(status.dropped)}`}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                  <button type="button" disabled={running} onClick={refresh} className={`${SECONDARY} mt-2 w-full`}>
+                    {running ? D.refreshing : D.refresh}
+                  </button>
+                </Popover.Content>
+              </Popover.Portal>
+            </Popover.Root>
+            {add}
+        </>
+      }
+    />
   );
 }
 
