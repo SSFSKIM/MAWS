@@ -386,7 +386,7 @@ describe('a stretch stays the one the reader opened', () => {
     };
     const thought = at('streaming').find((row) => row.kind === 'thinking')!;
     expect(at('finished').some((row) => row.id === thought.id)).toBe(false);
-    const openStretches = new Set([thought.id]); // a press on the thought's own key
+    const openStretches = new Set<string>([thought.id]); // a press on the thought's own key
     let before = at('streaming');
     for (const step of ['streaming', 'finished', 'called'] as const) {
       const rows = at(step);
