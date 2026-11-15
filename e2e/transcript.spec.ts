@@ -1018,6 +1018,49 @@ async function paneWidth(page: Page, width: number) {
   }, width);
   await settle(page, 300);
 }
+// The three values of `appearance.transcriptWidth` (settings-tab/transcript-width.ts): the column `--measure` the
+// transcript's rows share, set at the document's root.
+const TRANSCRIPT_WIDTHS = [768, 960, 1280] as const;
+// A window with room for the widest column (1280 px, the pane's scrollbar beside it), the pane on the harness's flex-1.
+async function roomForWidths({ app, page }: MawsLaunch) {
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 900));
+  await page.waitForFunction(() => window.innerWidth === 1440);
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>('[data-transcript-scroller]')!.closest<HTMLElement>('.transcript')!.style.flex = '';
+  });
+  await settle(page, 300);
+}
+// The transcript width set as the app sets it (applyTranscriptWidth: the default removes the root's `--measure`, the
+// others set it), settled, and the text column it gives held: the width less the column's two 16 px pads.
+async function transcriptWidth(page: Page, width: (typeof TRANSCRIPT_WIDTHS)[number]) {
+  await page.evaluate((w) => {
+    if (w === 768) document.documentElement.style.removeProperty('--measure');
+    else document.documentElement.style.setProperty('--measure', `${w}px`);
+  }, width);
+  await settle(page, 300);
+  const column = await page.evaluate(() => {
+    const row = document.querySelector('[data-transcript-scroller] .transcript-row')!;
+    const style = getComputedStyle(row);
+    return row.getBoundingClientRect().width - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+  });
+  expectNear(column, width - 32, `the transcript width ${width}: its text column`);
+}
+// Whether an element scrolls on `axis`: its computed overflow lets it, and an offset set on it reads back.
+const scrollsOn = (locator: Locator, axis: 'x' | 'y') =>
+  locator.evaluate((element, a) => {
+    const overflow = a === 'x' ? getComputedStyle(element).overflowX : getComputedStyle(element).overflowY;
+    if (a === 'x') element.scrollLeft = 40;
+    else element.scrollTop = 40;
+    const offset = a === 'x' ? element.scrollLeft : element.scrollTop;
+    if (a === 'x') element.scrollLeft = 0;
+    else element.scrollTop = 0;
+    return { overflow, offset };
+  }, axis);
+const expectScrolls = async (locator: Locator, axis: 'x' | 'y', message: string) => {
+  const { overflow, offset } = await scrollsOn(locator, axis);
+  expect(['auto', 'scroll'], `${message}: its overflow lets it (${overflow})`).toContain(overflow);
+  expect(offset, `${message}: an offset set on it holds`).toBeGreaterThan(0);
+};
 // A row brought into the list's mounted range and settled, so a measurement in the page finds it.
 async function mounted(page: Page, row: Locator) {
   await row.scrollIntoViewIfNeeded();
@@ -1162,7 +1205,8 @@ test('a command’s output is a dim line under its command, cut at the bottom of
     text: element.textContent,
   }));
   expect(pre.whiteSpace, 'R5: it does not wrap').toBe('pre');
-  expect(pre.sideways, 'R5: wider than the column, it scrolls sideways inside the row').toBe(true);
+  expect(pre.sideways, 'R5: wider than the column').toBe(true);
+  await expectScrolls(grid.locator('.transcript-command-output > pre'), 'x', 'R5: the grid scrolls sideways inside the row');
   expectNear(pre.clientHeight, 4 * pre.lineHeight, 'R5: each of the grid’s four lines on one drawn line');
   expect(pre.font, 'a terminal’s grid is monospace').toBe(await tokenValue(page, 'fontFamily', 'var(--font-mono)'));
   expect(pre.text, 'one drawing').toBe(gridShut.text);
@@ -1180,13 +1224,13 @@ test('a command’s output is a dim line under its command, cut at the bottom of
 // The words of the column-blocks fixture's fences (test/fixtures/transcript/events/column-blocks.events.jsonl)
 const CHECKSUM_LINE = 'gauge_offset_reading_'.repeat(15).slice(0, 300);
 const BENCH_LINES = ['north_bench_reading_', 'south_bench_reading_', 'west_bench_readings_'].map((word) => word.repeat(10));
-const BLOCK_WIDTHS = [768, 960, 1280];
 
-// Acceptance 4 (O-07; decision 7, R6 to R9): a fenced block is Streamdown's, restyled. At 768, 960 and 1280 px: one frame
-// (its outer box carries the one border and ground, at the table's radius) exactly the text column's width; no header
-// band, the code starting where the frame's padding ends; long lines wrap inside it and nothing scrolls sideways; the
+// Acceptance 4 (O-07; decision 7, R6 to R9): a fenced block is Streamdown's, restyled. At each transcript width (the
+// setting's 768, 960 and 1280 px): one frame (its outer box carries the one border and ground, at the table's radius)
+// exactly the text column's width; no header band, the code starting where the frame's padding ends; long lines wrap inside it and nothing scrolls sideways; the
 // first two source lines keep 32 px at their end on every line they wrap to, the third does not; the copy control is a
-// 24 px target on its own ground and covers none of those lines' text; the body keeps its 480 px bound and scrolls down.
+// 24 px target on its own ground and covers none of those lines' text; the body keeps its 480 px bound and scrolls down,
+// which leaves the control in its place, and the control's row is sticky in the transcript's viewport (R8).
 // The control copies the fence's one line as it is, and a selection of a whole block copied by hand has a line end
 // between source lines only.
 test('a code block wraps its long lines in one frame the column’s width, with no band over it and its copy control clear of the first lines’ text; the control and a selection copy the source’s line ends', async ({ harness }) => {
@@ -1230,8 +1274,9 @@ test('a code block wraps its long lines in one frame the column’s width, with 
       };
     });
 
-  for (const width of BLOCK_WIDTHS) {
-    await paneWidth(page, width);
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
     await mounted(page, checksum);
     const one = await measure(checksum);
     const three = await measure(bench);
@@ -1259,12 +1304,44 @@ test('a code block wraps its long lines in one frame the column’s width, with 
     expect(third!.pad, `${width} px: source line 3 keeps none`).toBe('0px');
     expect(Math.max(...third!.text.map((rect) => rect.right)), `${width} px: source line 3’s drawn lines run past where the room starts`).toBeGreaterThan(third!.box.right - 32);
   }
-  // the body's 480 px bound, and the code scrolls down inside it
+  // the body's 480 px bound, and the code scrolls down inside it; scrolling the code leaves the control where it is, at the
+  // frame's top right (R8)
   await mounted(page, loader);
   const tall = await measure(loader);
   expect(tall.bound, 'the body keeps its 480 px bound').toHaveLength(1);
   const [boxed] = tall.bound;
-  expect(boxed!.client <= 480 && boxed!.scroll > boxed!.client, `the forty lines scroll inside it (${boxed!.client} of ${boxed!.scroll} px)`).toBe(true);
+  expect(boxed!.client <= 480 && boxed!.scroll > boxed!.client, `the forty lines are taller than it (${boxed!.client} of ${boxed!.scroll} px)`).toBe(true);
+  const codeScroll = await loader.evaluate((frame) => {
+    const body = frame.querySelector<HTMLElement>('[data-streamdown="code-block-body"]')!;
+    const viewport = [body, ...Array.from(body.querySelectorAll<HTMLElement>('*'))].find((el) => getComputedStyle(el).maxHeight === '480px')!;
+    const control = frame.querySelector('[data-streamdown="code-block-copy-button"]')!;
+    const place = () => {
+      const [outer, own] = [frame.getBoundingClientRect(), control.getBoundingClientRect()];
+      return { top: Math.round(own.top - outer.top), right: Math.round(outer.right - own.right) };
+    };
+    const before = place();
+    viewport.scrollTop = 200;
+    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop, before, after: place() };
+  });
+  expect(['auto', 'scroll'], `the code’s viewport scrolls down (${codeScroll.overflow})`).toContain(codeScroll.overflow);
+  expect(codeScroll.offset, 'an offset set on the code’s viewport holds').toBeGreaterThan(0);
+  expect(codeScroll.after, 'R8: scrolling the code leaves the control in its place').toEqual(codeScroll.before);
+  expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)})`).toBe(true);
+  // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it
+  const stuck = await loader.evaluate(async (frame) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const control = frame.querySelector('[data-streamdown="code-block-copy-button"]')!;
+    let sticky = false;
+    for (let el = control.parentElement; el !== null && el !== frame; el = el.parentElement) sticky = sticky || getComputedStyle(el).position === 'sticky';
+    scroller.scrollTop += frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 160;
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const [view, outer, own] = [scroller.getBoundingClientRect(), frame.getBoundingClientRect(), control.getBoundingClientRect()];
+    return { sticky, above: Math.round(view.top - outer.top), fromViewTop: Math.round(own.top - view.top), inside: own.bottom <= outer.bottom };
+  });
+  expect(stuck.sticky, 'R8: the control’s row is sticky').toBe(true);
+  expect(stuck.above, 'the frame’s top is above the viewport').toBeGreaterThan(100);
+  expect(stuck.fromViewTop, 'R8: the control stays at the viewport’s top, not scrolled away with the frame’s').toBeGreaterThanOrEqual(-1);
+  expect(stuck.inside, 'and inside its frame').toBe(true);
 
   // the clipboard: the control takes the fence's one line as it is; a selection copied by hand, a line end between the
   // source lines only (a soft wrap is no character), with at most the one a selection that ends a block carries
@@ -1288,10 +1365,10 @@ test('a code block wraps its long lines in one frame the column’s width, with 
   expect(harness.consoleErrors()).toEqual([]);
 });
 
-// Acceptance 5 (O-08, reversing W2's breakout; decisions 8 and 9, R10, R11, M2-5): at 768, 960 and 1280 px a wide table
-// and a code block are exactly the text column's width in an answer, in a commentary block and in a message to the
-// person; a wide table's inner scroller scrolls sideways and its frame does not; a narrow table keeps the text's left
-// edge. A table is one frame with one ground; its inner scroller keeps the 320 px bound and its cells wrap as before; its
+// Acceptance 5 (O-08, reversing W2's breakout; decisions 8 and 9, R10, R11, M2-5): at each transcript width (768, 960 and
+// 1280 px) a wide table and a code block are exactly the text column's width in an answer, in a commentary block and in
+// a message to the person; a wide table's inner scroller scrolls sideways and its frame does not; a narrow table keeps
+// the text's left edge. A table is one frame with one ground; its inner scroller keeps the 320 px bound and its cells wrap as before; its
 // copy control adds no height, sits 9 px from the frame's outer top and right edges on its own ground, a 24 px target,
 // and shows on hover or focus within.
 test('a wide table and a code block are the text column’s width in an answer, a commentary and a message to the person; a wide table scrolls inside its one frame', async ({ harness }) => {
@@ -1326,8 +1403,9 @@ test('a wide table and a code block are the text column’s width in an answer, 
       return { text, column, blocks };
     });
 
-  for (const width of BLOCK_WIDTHS) {
-    await paneWidth(page, width);
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
     for (const [name, host] of Object.entries(hosts)) {
       await mounted(page, host);
       const { text, column, blocks } = await measure(host);
@@ -1398,14 +1476,22 @@ test('a wide table and a code block are the text column’s width in an answer, 
     return [scroller, ...Array.from(scroller.querySelectorAll('*'))].filter((el) => getComputedStyle(el).maxHeight === '320px').map((el) => ({ client: el.clientHeight, scroll: el.scrollHeight }));
   });
   expect(bound, 'the inner scroller keeps its 320 px bound').toHaveLength(1);
-  expect(bound[0]!.scroll > bound[0]!.client && bound[0]!.client <= 320, `the tall table scrolls down inside it (${bound[0]!.client} of ${bound[0]!.scroll} px)`).toBe(true);
+  expect(bound[0]!.scroll > bound[0]!.client && bound[0]!.client <= 320, `the tall table is taller than it (${bound[0]!.client} of ${bound[0]!.scroll} px)`).toBe(true);
+  const tallScroll = await tall.evaluate((frame) => {
+    const scroller = frame.lastElementChild as HTMLElement;
+    const viewport = [scroller, ...Array.from(scroller.querySelectorAll<HTMLElement>('*'))].find((el) => getComputedStyle(el).maxHeight === '320px')!;
+    viewport.scrollTop = 120;
+    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop };
+  });
+  expect(['auto', 'scroll'], `the tall table scrolls down inside it (${tallScroll.overflow})`).toContain(tallScroll.overflow);
+  expect(tallScroll.offset, 'an offset set on it holds').toBeGreaterThan(0);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
 // Acceptance 6 (O-02, amending W2's B2; decision 10, R12 to R14, R20 to R22, M2-2): the owner's time, Copy and Edit sit
 // on one line under the bubble, at its side, shown on hover or focus within, in the 16 px the row already has under the
 // bubble: the row is the bubble's height plus 16 px at rest, hovered and focused, a short message and one of twenty lines
-// alike. At rest the controls take no width, so a caption has the whole line; shown, they stand left of it in the order
+// alike, at each transcript width (768, 960 and 1280 px). At rest the controls take no width, so a caption has the whole line; shown, they stand left of it in the order
 // time, Copy, Edit, and the caption (or "Not sent") stays flush with the bubble's edge without moving. Tab reaches Copy.
 // In a pane too narrow for the line the caption alone shrinks. Copy's and Edit's targets overhang the line 6 px up and
 // 2 px down and overlap neither each other nor the turn line's button at 360 and 280 px; their focus rings, at offset 0,
@@ -1471,9 +1557,15 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on focus within`).toHaveCSS('opacity', '1');
     expect((await measure(row)).row.height, `${name}: focus adds no height`).toBe(rest.row.height);
   };
-  await checkRow(short, 'a one-line message', ['Copy', 'Edit'], null);
-  await checkRow(steer, 'a steer', ['Copy', 'Edit'], 'Sent during this turn');
-  await checkRow(long, 'a message of twenty lines', ['Copy', 'Edit'], null);
+  // at each transcript width
+  await roomForWidths(harness);
+  for (const width of TRANSCRIPT_WIDTHS) {
+    await transcriptWidth(page, width);
+    await checkRow(short, `${width} px, a one-line message`, ['Copy', 'Edit'], null);
+    await checkRow(steer, `${width} px, a steer`, ['Copy', 'Edit'], 'Sent during this turn');
+    await checkRow(long, `${width} px, a message of twenty lines`, ['Copy', 'Edit'], null);
+  }
+  await transcriptWidth(page, 768);
 
   // the nineteen-line fold still works under the line
   await mounted(page, long);

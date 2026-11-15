@@ -3231,8 +3231,10 @@ const sourceHas = (build: Build, file: string, text: string) => {
   const path = join(build.root ?? REPO_ROOT, file);
   return existsSync(path) && readFileSync(path, 'utf8').includes(text);
 };
-const readsCommandOutput = (build: Build) => sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
-const drawsLightLine = (build: Build) => sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
+// What the peer knows, read from its source; this build's side is pinned, not read: its host reads the frame as a
+// command's output and its window draws U3b's light line, so losing either fails the scene rather than changing it
+const readsCommandOutput = (build: Build) => build.root === undefined || sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
+const drawsLightLine = (build: Build) => build.root === undefined || sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
 const takesStubEngine = (build: Build) => sourceHas(build, 'src/engine-host/binary-info.ts', 'MAWS_E2E_ENGINE_BIN');
 
 // C3's permission round trip with the recorded `/rename` turn ahead of its prompt, written into the scratch: the rows
