@@ -9,6 +9,7 @@ import { useState } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
+import { commands as SIDE_COMMANDS, SIDE_QUESTION_CAP } from '@shared/ipc/schema/side';
 import { record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
@@ -202,5 +203,47 @@ describe('a pass of Review comments sent', () => {
     expect(card()).toBeNull();
     expect(pass()).toBeNull();
     expect(sidePaneOf(useSidePane.getState(), PARENT).view).toEqual({ kind: 'thread', childAppSessionId: at(CHILD_ID) });
+  });
+});
+
+// The quote and the caption lengthen the words a send carries, and a comment's text is capped by the commands' schema
+// (SIDE_QUESTION_CAP). A comment whose words alone fit is never refused for its quote: what does not fit is left out,
+// the span first, then the caption, and the words go as typed.
+describe('a Review comment near the cap on a comment’s text', () => {
+  const near = (room: number) => 'w'.repeat(SIDE_QUESTION_CAP - room);
+  const sent = (name: 'side.comment.content' | 'side.thread.open') => fake.invoked(name);
+  const BEFORE_ROOM = 'Before the change:\n'.length;
+
+  it('ticked: the quote is left out where it does not fit, and the input holds to the schema', () => {
+    render(<Review />);
+    comment(ADDED, 'const total = rows.length;');
+    type(near(10));
+    fireEvent.click(sendButton());
+    const [input] = sent('side.comment.content') as { comments: { text: string }[] }[];
+    expect(input?.comments.map((c) => c.text)).toEqual([near(10)]);
+    expect(SIDE_COMMANDS['side.comment.content'].input.safeParse(input).success).toBe(true);
+  });
+
+  it('unticked: the caption stays where it fits without the span, and the input holds to the schema', () => {
+    render(<Review />);
+    comment(REMOVED, 'if (row.berth) skip();');
+    type(near(BEFORE_ROOM));
+    fireEvent.click(box());
+    fireEvent.click(sendButton());
+    const [input] = sent('side.thread.open') as { from: { text: string } }[];
+    expect(input?.from.text).toBe(`Before the change:\n${near(BEFORE_ROOM)}`);
+    expect(SIDE_COMMANDS['side.thread.open'].input.safeParse(input).success).toBe(true);
+  });
+
+  it('keeps the quote while it fits, to the last unit of the cap', () => {
+    render(<Review />);
+    comment(ADDED, 'x');
+    const room = '`x`\n'.length;
+    type(near(room));
+    fireEvent.click(sendButton());
+    const [input] = sent('side.comment.content') as { comments: { text: string }[] }[];
+    expect(input?.comments[0]?.text).toBe(`\`x\`\n${near(room)}`);
+    expect(input?.comments[0]?.text).toHaveLength(SIDE_QUESTION_CAP);
+    expect(SIDE_COMMANDS['side.comment.content'].input.safeParse(input).success).toBe(true);
   });
 });

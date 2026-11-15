@@ -497,6 +497,12 @@ describe('a quoted line (UX wave U5b)', () => {
     expect(quotedComment(added, ' \t ', 'Why blank?')).toBe('Why blank?');
   });
 
+  it('has no quote for a line of spaces or tabs past QUOTE_MAX: blankness is read before the cut', () => {
+    expect(quotedComment(added, ' '.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(added, '\t'.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(removed, ' \t'.repeat(QUOTE_MAX), 'Why blank?')).toBe('Before the change:\nWhy blank?');
+  });
+
   it('sends nothing more for a comment with no words', () => {
     expect(quotedComment(added, 'const total = rows.length;', '')).toBe('');
     expect(quotedComment(removed, 'const total = rows.length;', '  ')).toBe('  ');
