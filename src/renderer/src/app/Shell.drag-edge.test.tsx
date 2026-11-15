@@ -117,12 +117,13 @@ describe('the /btw card at the column’s foot during an edge drag', () => {
     expect(cards.hidden).toBe(false);
     expect(btwCards()).toEqual([card]);
 
-    drag('dragStart', tabOf(A), payload);
+    // dropped: B's own tab opens the split, and its pane, focused, is still the one the column speaks of
+    drag('dragStart', tabOf(B), payload);
     expect(btwCards()).toEqual([card]);
     const edge = screen.getByTestId('drop-edge');
     expect(drag('dragOver', edge, payload)).toBe(true);
     drag('drop', edge, payload);
-    expect(currentSet(useLayout.getState().main).panes.map((pane) => pane.tabs.map((tab) => tab.id))).toEqual([[`session:${B}`], [`session:${A}`]]);
+    expect(currentSet(useLayout.getState().main).panes.map((pane) => pane.tabs.map((tab) => tab.id))).toEqual([[`session:${A}`], [`session:${B}`]]);
     expect(cards.hidden).toBe(false);
     expect(btwCards()).toEqual([card]);
     expect(cards.contains(card)).toBe(true);
