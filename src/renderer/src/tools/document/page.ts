@@ -40,9 +40,10 @@ function sizeOf(width: string, height: string): PageSize | null {
   return (Object.keys(SIZES) as PageSize[]).find((size) => near(w, SIZES[size][0]) && near(h, SIZES[size][1])) ?? null;
 }
 
-/** The size the export prints the document on, given the governing system's export helpers. */
+/** The size the export prints the document on, given the governing system's export helpers: at the document's density,
+ * since Compact scales the system's tokens before the overrides resolve against them (`exportHtml`). */
 function printedSize(page: DocPage, overrides: TokenOverrides, system: DesignSystemExport): PageSize | null {
-  const { width, height } = pageOf(exportDesign(system, overrides), page.size);
+  const { width, height } = pageOf(exportDesign(system, overrides, page.density), page.size);
   return sizeOf(width, height);
 }
 
@@ -63,7 +64,7 @@ export function choosePage(doc: Doc, item: PageItem, system: DesignSystemExport 
   const overrides = dsOverrides(doc);
   const inForce = pageInForce(page, overrides, system);
   if (system === null || !inForce.sizeKnown || inForce.size === item) return false;
-  const systemSize = printedSize({}, {}, system); // the page the system gives a document that sets none
+  const systemSize = printedSize({ density: page.density }, {}, system); // the page the system gives this document, setting no size
   transact(
     doc,
     () => {
