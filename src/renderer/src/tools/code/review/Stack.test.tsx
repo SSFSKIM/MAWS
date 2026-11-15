@@ -751,9 +751,13 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       await page.settle();
       expect(card()).toBeNull();
       const line = () => lineRow(files[0].path, files[0].added[0]);
-      page.scrollTo(page.topOf(line()) + ROW + 10 - VIEWPORT); // by hand: the line wholly in view, ten pixels above the bottom
+      // the line and its draft's row under it (the stack reads them as one), wholly in view, ten pixels above the bottom
+      const draft = line().nextElementSibling as HTMLElement;
+      expect(draft.dataset.state).toBe('extend');
+      const unit = ROW + page.height(draft);
+      page.scrollTo(page.topOf(line()) + unit + 10 - VIEWPORT); // by hand
       await page.settle();
-      expect(page.topOf(line()) + ROW).toBeLessThanOrEqual(scroller().scrollTop + VIEWPORT);
+      expect(page.topOf(line()) + unit).toBeLessThanOrEqual(scroller().scrollTop + VIEWPORT);
       clock += 1_000; // the wheel's window long over
       // The browser's focus scroll: a field focused below the viewport is scrolled to its bottom.
       const focus = HTMLElement.prototype.focus;
