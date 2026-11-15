@@ -3,7 +3,7 @@
 // `@git-diff-view/react` takes, the first changed line a hunk opens at, the size caps, and the file lists each scope
 // shows (the git scopes from `git.diff` and `git.status`, Last turn from divider metadata and C6's disclosure-independent
 // activity). No I/O and no React here.
-import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
+import type { GitDiffFile, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
 import type { CellDetail, Row, TurnActivity, TurnId } from '../../../transcript';
 
 export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged';
@@ -218,10 +218,12 @@ export function hunksSignature(hunks: readonly string[]): string {
 
 // ---- the files a scope shows ----------------------------------------------------------------------------------------
 
-export type ReviewFileKind = PatchFile['kind'] | 'untracked';
+// `conflict`: the status lists the path unmerged (UX wave U5b, M2; the stack's header badges it "Conflict").
+export type ReviewFileKind = PatchFile['kind'] | 'untracked' | 'conflict';
 
 export interface ReviewFile {
   path: string; // the file's identity in its scope: repository-relative for the git scopes, absolute for Last turn
+  displayPath: string; // what the header shows: repository-relative, and for Last turn absolute outside the repository (l5-code-12 a)
   oldPath: string | null;
   openPath: string | null; // what `Open file ↗` opens (absolute); null for a deleted file
   kind: ReviewFileKind;
@@ -234,8 +236,15 @@ export interface ReviewFile {
 
 const joinPath = (root: string, path: string): string => (path.startsWith('/') ? path : `${root.replace(/\/+$/, '')}/${path}`);
 
+// An unmerged entry (porcelain v2 writes `U`, `AA` and `DD` only for `u` records; moved here from Source control's
+// groups for the stack's Conflict badge, UX wave U5b).
+export function unmerged(file: GitFileStatus): boolean {
+  return file.index === 'U' || file.worktree === 'U' || (file.index === 'A' && file.worktree === 'A') || (file.index === 'D' && file.worktree === 'D');
+}
+
 // The git scopes: one row per `git.diff` file, with its hunks from the split patch when the scope was within its cap
-// (`patch` null otherwise, each file fetched on selection); Uncommitted adds the untracked files from the status.
+// (`patch` null otherwise, each file fetched on selection); Uncommitted adds the untracked files from the status. A file
+// the status lists unmerged is a conflict, but for a binary, whose body says "Binary file" whatever its state.
 export function gitScopeFiles(input: {
   scope: Exclude<ReviewScope, 'turn'>;
   repoRoot: string;
@@ -243,14 +252,16 @@ export function gitScopeFiles(input: {
   patch: ReadonlyMap<string, PatchFile> | null;
   status: GitStatus | null;
 }): ReviewFile[] {
+  const conflicts = new Set(input.status?.files.filter(unmerged).map((entry) => entry.path));
   const rows: ReviewFile[] = input.files.map((file) => {
     const split = input.patch?.get(file.path);
     const kind: ReviewFileKind = file.binary ? 'binary' : (split?.kind ?? (file.oldPath ? 'renamed' : 'modified'));
     return {
       path: file.path,
+      displayPath: file.path,
       oldPath: file.oldPath ?? split?.oldPath ?? null,
       openPath: kind === 'deleted' ? null : joinPath(input.repoRoot, file.path),
-      kind,
+      kind: kind !== 'binary' && conflicts.has(file.path) ? 'conflict' : kind,
       added: file.binary ? 0 : file.insertions,
       removed: file.binary ? 0 : file.deletions,
       hunks: kind === 'binary' ? null : input.patch ? (split?.hunks ?? []) : null,
@@ -262,7 +273,7 @@ export function gitScopeFiles(input: {
     const listed = new Set(rows.map((row) => row.path));
     for (const entry of input.status.files) {
       if (!entry.untracked || listed.has(entry.path)) continue;
-      rows.push({ path: entry.path, oldPath: null, openPath: joinPath(input.repoRoot, entry.path), kind: 'untracked', added: 0, removed: 0, hunks: null, blocks: [], header: null });
+      rows.push({ path: entry.path, displayPath: entry.path, oldPath: null, openPath: joinPath(input.repoRoot, entry.path), kind: 'untracked', added: 0, removed: 0, hunks: null, blocks: [], header: null });
     }
   }
   return rows;
@@ -272,8 +283,10 @@ const CHANGE_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'ad
 
 // Last turn: the divider's files, counts and kinds; each file's hunks from the turn's `edited` activity entries joined
 // on the edit's own `filePath`, one block per edit in their order, since each edit's hunks
-// are numbered against the file as that edit found it (amended 2026-09-29, M3 review).
-export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActivity | null): ReviewFile[] {
+// are numbered against the file as that edit found it (amended 2026-09-29, M3 review). A file is shown relative to the
+// repository when it is inside it, absolute outside it or while no repository is known; its identity stays absolute.
+export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActivity | null, repoRoot: string | null): ReviewFile[] {
+  const inside = repoRoot === null ? null : `${repoRoot.replace(/\/+$/, '')}/`;
   const edits = new Map<string, string[][]>();
   for (const entry of activity?.files ?? []) {
     if (entry.use !== 'edited' || !entry.edit || entry.edit.hunks.length === 0) continue;
@@ -286,6 +299,7 @@ export function turnScopeFiles(files: readonly ChangedFile[], activity: TurnActi
     const blocks = edits.get(file.path) ?? [];
     return {
       path: file.path,
+      displayPath: inside !== null && file.path.startsWith(inside) ? file.path.slice(inside.length) : file.path,
       oldPath: null,
       openPath: kind === 'deleted' ? null : file.path,
       kind,
@@ -312,6 +326,16 @@ export function blocksOf(hunks: readonly string[], sizes: readonly number[]): st
 // What a viewed mark signs: a binary's header (its `index` line names both blobs), else the hunks drawn.
 export const viewedSignature = (file: Pick<ReviewFile, 'kind' | 'header'>, hunks: readonly string[] | null): string =>
   hunksSignature(file.kind === 'binary' ? [file.header ?? ''] : (hunks ?? []));
+
+// The latest turn of a transcript whose divider lists files: what "Last turn" shows when chosen with no turn set
+// (l5-code-12 c); null before any turn changed a file.
+export function latestTurnWithFiles(rows: readonly Row[]): TurnId | null {
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const row = rows[i];
+    if (row.kind === 'divider' && (row.files?.length ?? 0) > 0) return row.turnId;
+  }
+  return null;
+}
 
 // The divider carrying a turn's changed-file metadata, whether its work area is folded or open.
 export function dividerOf(rows: readonly Row[], turnId: TurnId): Extract<Row, { kind: 'divider' }> | null {

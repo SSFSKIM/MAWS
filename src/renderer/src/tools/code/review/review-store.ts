@@ -205,7 +205,7 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
     if (scope === null) return { phase: 'pending' };
     if (scope === 'turn') {
       if (!turn) return { phase: 'unavailable', message: REVIEW_COPY.unavailable(REVIEW_COPY.turnNotLoaded) };
-      return { phase: 'ready', files: turnScopeFiles(turn.divider?.files ?? [], turn.activity) };
+      return { phase: 'ready', files: turnScopeFiles(turn.divider?.files ?? [], turn.activity, status?.repoRoot ?? null) };
     }
     if (!status) {
       if (gitError === NOT_A_REPOSITORY) return { phase: 'unavailable', message: REVIEW_COPY.notRepository };

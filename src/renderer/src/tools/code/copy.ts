@@ -73,7 +73,7 @@ export const REVIEW_COPY = {
   nothingStaged: 'Nothing staged',
   turnChangedNothing: 'This turn changed no files',
   // A file
-  kinds: { modified: 'Modified', added: 'Added', deleted: 'Deleted', binary: 'Binary', untracked: 'Untracked' },
+  kinds: { modified: 'Modified', added: 'Added', deleted: 'Deleted', binary: 'Binary', untracked: 'Untracked', conflict: 'Conflict' },
   renamedFrom: (old: string) => `Renamed from ${old}`,
   fileHeader: (path: string, kind: string) => `${path} · ${kind}`,
   untrackedNote: 'Untracked file · not in the diff',
