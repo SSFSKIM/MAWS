@@ -119,7 +119,8 @@ describe('the session’s server for a dynamic sign-in', () => {
 describe('a plugin’s connector, by the rule’s parts at the press (UX wave U11h)', () => {
   const NAME = 'plugin:mani-tides:tides-http';
   const URL_T = 'https://tides.example.com/mcp';
-  const entry = (over: Partial<PluginEntry> = {}): PluginEntry => ({ plugin: 'key-tides@harbour', name: NAME, version: '1.2.0', transport: 'http', url: URL_T, revision: 'rev-1', ...over });
+  // an entry found by its name (`name` is a string there); (d)'s cases also give one with none
+  const entry = (over: Partial<PluginEntry> = {}) => ({ plugin: 'key-tides@harbour', name: NAME, version: '1.2.0', transport: 'http', url: URL_T, revision: 'rev-1', ...over }) as PluginEntry & { name: string };
   // a server as 2.1.322's mcp_status reports a plugin's (spikes/protocol-probe/fixtures/uxwave/u11-plugin-conn.ndjson [2])
   const live = (over: Record<string, unknown> = {}, url: unknown = URL_T) => ({ name: NAME, status: 'needs-auth', scope: 'dynamic', source: 'plugin', transport: 'http', config: { type: 'http', url }, serverInfo: { name: 'tides', version: '1.2.0' }, tools: [], ...over });
   const DIFFERENT = `this session uses a different ${NAME}; start a new session to sign in`;
