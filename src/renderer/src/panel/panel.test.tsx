@@ -5,6 +5,7 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { storedLayout, useLayout } from '../stores/layout';
 import { A, B, mainShowing, panelOf, pinIds, probeTool, ref, resetPanelStores, TestHost, type ProbeState } from '../test-support/panel';
+import { COPY } from './copy';
 import { connectPanelHost, panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
 import { SurfaceRow } from './SurfaceRow';
@@ -545,5 +546,40 @@ describe('a side tab dragged between the groups', () => {
     expect(drag('dragOver', stripOf('lower'), dt)).toBe(false);
     drag('drop', stripOf('lower'), dt);
     expect(groupsOf()).toEqual([[review], [other], other]);
+  });
+  // M4's fix wave (finding 4): a strip's highlight lasts no longer than a drag it would take.
+  const highlightIn = (name: 'upper' | 'lower') => within(stripOf(name)).queryByText(name === 'lower' ? COPY.moveBelow : COPY.moveAbove);
+
+  it('a strip’s highlight goes when the dragged tab is removed mid-drag, and the next drag does not bring it back', async () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    const other = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, other, 'lower'));
+    const dt = transfer();
+    drag('dragStart', tabElement(terminal), dt);
+    expect(drag('dragEnter', stripOf('lower'), dt)).toBe(true);
+    expect(highlightIn('lower')).not.toBeNull();
+    await act(() => panelHost.closeTab(terminal));
+    expect(highlightIn('lower')).toBeNull();
+    drag('dragStart', tabElement(review), transfer()); // a drag the lower strip would take, not over it
+    expect(highlightIn('lower')).toBeNull();
+  });
+
+  it('a strip’s highlight goes when the drag ends elsewhere, and the next drag does not bring it back', () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower'));
+    const dt = transfer();
+    drag('dragStart', tabElement(review), dt);
+    expect(drag('dragEnter', stripOf('lower'), dt)).toBe(true);
+    expect(highlightIn('lower')).not.toBeNull();
+    drag('drop', document.body, dt); // dropped outside every target: the window's listener ends the drag
+    drag('dragEnd', tabElement(review), dt);
+    expect(useLayout.getState().dragging).toBeNull();
+    expect(highlightIn('lower')).toBeNull();
+    drag('dragStart', tabElement(review), transfer());
+    expect(highlightIn('lower')).toBeNull();
   });
 });

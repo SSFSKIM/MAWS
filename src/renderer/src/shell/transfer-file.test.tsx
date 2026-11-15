@@ -339,6 +339,59 @@ describe('Reopen closed tab on a file that is beside the chat', () => {
     act(() => void undo(main));
     expect(main.state.doc.toString()).toBe(ORIGINAL);
   });
+
+  // M4's fix wave (finding 2): the reopened tab takes the session of the side tab it replaces, as an open takes its own;
+  // nothing of the viewer's state is handed across entries.
+  async function closedUnderA() {
+    renderBoth();
+    await openInMain(APP);
+    act(() => runAction('tab.close'));
+    await waitFor(() => expect(mainTabOf(APP)).toBeUndefined());
+    expect(useLayout.getState().main.closedTabs.at(-1)).toMatchObject({ id: KEY(APP), appSessionId: A });
+  }
+
+  it('open nowhere, the file comes back under the session it was closed under', async () => {
+    await closedUnderA();
+    act(() => useLayout.getState().activateTab(`session:${B}`));
+    act(() => runAction('tab.reopen'));
+    expect(mainTabOf(APP)).toMatchObject({ appSessionId: A });
+    await editorShowing('main', ORIGINAL);
+  });
+
+  it.each([['saved'], ['with unsaved edits']])('beside another session’s chat, %s, it takes that session and keeps its undo history and its scroll', async (how) => {
+    await closedUnderA();
+    act(() => useLayout.getState().activateTab(`session:${B}`));
+    act(() => void openFile(B, APP, null, { keep: true }));
+    const side = await editorShowing('panel', ORIGINAL);
+    type(side, '// mine\n');
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    if (how === 'saved') {
+      expect(await act(() => useViewer.getState().save(KEY(APP)))).toBe('ok');
+      expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(false);
+    }
+    side.scrollDOM.scrollTop = 120;
+    act(() => runAction('tab.reopen'));
+    expect(mainTabOf(APP)).toMatchObject({ appSessionId: B });
+    expect(sideTabOf(APP, B)).toBeUndefined();
+    const main = await editorShowing('main', `// mine\n${ORIGINAL}`);
+    expect(existingViewState(KEY(APP))?.codeScroll).toBe(120);
+    expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(how !== 'saved');
+    act(() => void undo(main));
+    expect(main.state.doc.toString()).toBe(ORIGINAL);
+  });
+
+  it('beside the same session’s chat, it moves and its session does not change', async () => {
+    await closedUnderA();
+    act(() => useLayout.getState().activateTab(`session:${A}`));
+    const side = await openBeside(APP);
+    type(side, '// mine\n');
+    act(() => runAction('tab.reopen'));
+    expect(mainTabOf(APP)).toMatchObject({ appSessionId: A });
+    expect(sideTabOf(APP)).toBeUndefined();
+    const main = await editorShowing('main', `// mine\n${ORIGINAL}`);
+    act(() => void undo(main));
+    expect(main.state.doc.toString()).toBe(ORIGINAL);
+  });
 });
 
 // ---- the viewer's hold (Decision 20b; sequence 11) -------------------------------------------------------------------------
