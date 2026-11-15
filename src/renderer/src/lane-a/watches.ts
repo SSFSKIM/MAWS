@@ -15,8 +15,9 @@
 // The jobs a snapshot or a `subagents` message carries are kept in the lane A store (`useLaneAJobs`). UX wave U8d: so are
 // its subagents, when the body carries a list of them (`useLaneAAgents`; an older driver's carries none, or an empty one),
 // for every session's watch, another machine's too; a watch's end, or its last consumer letting it go, keeps them only
-// when none still runs. They are noted with their origin: the foreign holder the page's records named for the session
-// while this watch was open (a watch is one driver's; the next driver's is a new watch).
+// when none still runs and their body named an origin. They are noted with the origin their body names beside the list (`origin`: the holder whose
+// bridge child the facts came from, the fence review's ruling), or none when it names none (an older driver; another
+// machine's sminos today), and the lane A store fences them on it.
 //
 // The session-wide `op` and `compact` messages are kept by their op's id (the last 100 ops per session), so a caller that
 // learns an id from a control's answer after its op already ended still finds the op's messages.
@@ -41,8 +42,7 @@ import type { CommandInput, CommandResult, EventPayload, MawsBridge } from '@sha
 import { ipc } from '../ipc/client';
 import type { Job } from 'desk-hub/protocol';
 import type { LaneAAgent } from '@shared/lane-a/agents';
-import { holderOrigin, laneAAgentsWatchEnded, laneAJobsWatchEnded, noteLaneAAgents, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
-import { useSessions } from '../stores/sessions';
+import { laneAAgentsWatchEnded, laneAJobsWatchEnded, noteLaneAAgents, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
 import { learnReaderGrade, readerGradeOf, useReader } from '../sessions/share/reader';
 import { isRemoteLaneA } from './remote-session';
 
@@ -72,7 +72,6 @@ interface Entry {
   early: Payload[]; // what arrived while the open was in flight, its watch id not known yet
   log: SessionMessage[] | null; // the latest snapshot and what followed it, for a consumer that comes later
   overflowed: boolean; // the log was let go past LOG_MAX: a later consumer needs a fresh snapshot
-  origin: string | null; // UX wave U8d: the foreign holder the records named while this watch was open
   off: () => void;
 }
 
@@ -119,9 +118,9 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
         const usage = message.kind === 'usage' ? message.body : message.kind === 'snapshot' ? (message.body as { usage?: unknown }).usage : null;
         if (usage && typeof usage === 'object' && 'context' in usage) noteLaneAUsage(appSessionId, usage as LaneAUsage);
         if (message.kind !== 'snapshot' && message.kind !== 'subagents') continue;
-        const { jobs, subagents } = message.body as { jobs?: unknown; subagents?: unknown };
+        const { jobs, subagents, origin } = message.body as { jobs?: unknown; subagents?: unknown; origin?: unknown };
         if (Array.isArray(jobs)) noteLaneAJobs(appSessionId, jobs as Job[]);
-        if (Array.isArray(subagents)) noteLaneAAgents(appSessionId, subagents as LaneAAgent[], originOf(appSessionId, entry));
+        if (Array.isArray(subagents)) noteLaneAAgents(appSessionId, subagents as LaneAAgent[], typeof origin === 'string' ? origin : null);
       }
     }
     if (messages[0]?.kind === 'snapshot') {
@@ -151,16 +150,8 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
   // the session's `paused` is a remote link's transport state (M9): the state's link reason says it, and nothing is redrawn
 }
 
-// UX wave U8d: the watch's origin, taken from the session's holder whenever that names a foreign process.
-function originOf(appSessionId: AppSessionId, entry: Entry): string | null {
-  const holder = useSessions.getState().records.get(appSessionId)?.holder;
-  entry.origin = (holder && holderOrigin(holder)) ?? entry.origin;
-  return entry.origin;
-}
-
 function end(appSessionId: AppSessionId, entry: Entry, reason: string): void {
   entry.watch = null;
-  entry.origin = null; // the next watch is the next driver's
   entry.log = null;
   entry.overflowed = false;
   if (entry.agentId === null) {
@@ -196,7 +187,7 @@ function entryFor(appSessionId: AppSessionId, client: MawsBridge, agentId: strin
   const key = keyOf(appSessionId, agentId);
   const held = entries.get(key);
   if (held) return held;
-  const entry: Entry = { client, agentId, watchers: new Set(), watch: null, opening: null, early: [], log: null, overflowed: false, origin: null, off: () => {} };
+  const entry: Entry = { client, agentId, watchers: new Set(), watch: null, opening: null, early: [], log: null, overflowed: false, off: () => {} };
   const offPlane = client.on('laneA.plane', (payload) => {
     if (payload.appSessionId !== appSessionId) return;
     if (entry.watch === null) {

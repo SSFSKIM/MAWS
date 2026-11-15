@@ -19,7 +19,9 @@
 //   (./jobs.ts) only when one of those changed, go to each watch in its snapshot and as a `subagents` message each time
 //   they change (UX wave U8d M2). When the session's holder ends or its bridge goes, its process is taken as gone: each
 //   watch hears its running jobs and agents `exited` before it ends. A stop is refused for a job the transcript holds
-//   ended.
+//   ended. The body names its origin (the fence review's ruling): the holder a probe asked under when the bridge child
+//   whose agents it holds answered. A holder that moves to another process reprobes in place, so the body goes on naming
+//   the last child's holder, its final body included, until the next child's snapshot replaces that child's agents.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
@@ -43,6 +45,7 @@ import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
+import { holderOrigin } from '@shared/lane-a/agents';
 import { reportsMode } from '@shared/lane-a/mode';
 import type { ServiceHandler } from '@shared/spine/bus';
 import { createGitRunner, type GitRun } from '../git/runner';
@@ -157,7 +160,8 @@ interface Watch {
 interface Session {
   appId: AppSessionId;
   engine: string;
-  holder: string; // the holder as JSON: a new process holding the same session is probed again
+  holder: string; // the holder, as an origin (`holderOrigin`): a new process holding the same session is probed again
+  origin: string | null; // U8d: the holder whose bridge child the session's agents are of (see the header), which the body names
   socket: { path: string; fits: boolean };
   status: Record<string, unknown> | null;
   bridge: BridgeState | null; // null: no bridge answered; the session is not lane A
@@ -297,9 +301,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     try {
       do {
         s.again = false;
+        const asked = s.holder; // U8d: the child that answers is this holder's
         const status = await statusOf(s);
         if (s.gone) return;
-        apply(s, status);
+        apply(s, status, asked);
       } while (s.again && !s.gone);
     } finally {
       s.probing = false;
@@ -320,14 +325,15 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
   }
 
-  function apply(s: Session, status: Record<string, unknown> | null): void {
+  // `holder`: the holder the probe asked under, the origin of the bridge child that answered it.
+  function apply(s: Session, status: Record<string, unknown> | null, holder: string): void {
     if (status === null) {
       unbridge(s, 'the session’s bridge went away');
       return;
     }
     s.status = status;
     s.bridge = classify(status);
-    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s);
+    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder);
     else {
       closeState(s);
       endWatches(s, s.bridge.reason ?? NO_BRIDGE);
@@ -349,20 +355,25 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- the state stream -----------------------------------------------------------------------------------------------
-  function openState(s: Session): void {
+  // `origin`: the holder of the bridge child this stream is opened on. Its agents are that child's from its snapshot on;
+  // until then the last child's, kept while the stream reconnects, are still held, and so is their origin.
+  function openState(s: Session, origin: string): void {
     if (s.stream !== null || s.reconnect !== null) return;
     s.snapshotted = false;
+    if (s.agents.list() === null) s.origin = origin; // no child's agents are held: what follows is this child's
     const stream: EventStream = subscribe(s.socket.path, {
       onLines: (lines) => {
         if (s.stream !== stream) return;
         let dirty = false;
         const toolBefore = JSON.stringify(s.fold.mainTool());
         const agentsBefore = s.agents.version;
+        const originBefore = s.origin;
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
             s.snapshotted = true;
             s.fold.snapshot(line);
+            s.origin = origin; // its agents replace the last child's
             s.agents.snapshot(line.agents);
             s.lane.snapshotArrived();
             s.backoff.holding();
@@ -376,7 +387,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           } else if (line.type === 'agent') s.agents.event(line);
           else if (s.fold.event(line)) dirty = true;
         }
-        if (s.agents.version !== agentsBefore) s.follow?.bridgeChanged();
+        if (s.agents.version !== agentsBefore || s.origin !== originBefore) s.follow?.bridgeChanged();
         if (dirty) changed(s);
         else if (JSON.stringify(s.fold.mainTool()) !== toolBefore) tell(s);
       },
@@ -486,6 +497,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       session: s.engine,
       locate: locate(s),
       bridge: s.agents,
+      origin: () => s.origin,
       ...(listing !== undefined && { listing: () => listing(s.appId) }),
       pollMs: timing.jobsPollMs,
       backoff: () => new Backoff(timing.backoff),
@@ -563,11 +575,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- sessions -------------------------------------------------------------------------------------------------------
-  function create(hold: SessionHold & { engineSessionId: string }): Session {
+  function create(hold: SessionHold & { engineSessionId: string }, holder: string): Session {
     const s: Session = {
       appId: hold.appId,
       engine: hold.engineSessionId,
-      holder: JSON.stringify(hold.holder),
+      holder,
+      origin: null,
       socket: home === null ? { path: '', fits: false } : bridgeSocket(home, hold.engineSessionId),
       status: null,
       bridge: null,
@@ -755,14 +768,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   return {
     observe(hold) {
       if (stopped) return;
-      const foreign = hold.engineSessionId !== null && (hold.holder.kind === 'terminal' || hold.holder.kind === 'background_job');
+      const holder = hold.engineSessionId === null ? null : holderOrigin(hold.holder); // a foreign process's, else none
       const s = sessions.get(hold.appId);
-      if (!foreign) {
+      if (holder === null) {
         if (s) drop(s);
         return;
       }
       if (s && s.engine === hold.engineSessionId) {
-        const holder = JSON.stringify(hold.holder);
         if (holder !== s.holder) {
           s.holder = holder; // another process holds it now: its bridge is another child
           void probe(s);
@@ -770,7 +782,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
         return;
       }
       if (s) drop(s); // a new engine id is a new transcript: nothing follows one into the other
-      const fresh = create(hold as SessionHold & { engineSessionId: string });
+      const fresh = create(hold as SessionHold & { engineSessionId: string }, holder);
       sessions.set(hold.appId, fresh);
       syncDirWatch();
       void probe(fresh);

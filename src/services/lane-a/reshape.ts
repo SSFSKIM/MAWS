@@ -15,10 +15,15 @@ import type { Job } from 'desk-hub/protocol';
 import type { LaneARaised, LaneASettled, PlaneMessage } from '@shared/ipc/schema/lane-a';
 import type { LaneAAgent } from '@shared/lane-a/agents';
 
-/** What main derives of a session's tasks (U8d's Interfaces §B): its subagents and its loop's jobs. */
+/**
+ * What main derives of a session's tasks (U8d's Interfaces §B): its subagents and its loop's jobs, and `origin`, the
+ * holder whose bridge child the facts came from (`holderOrigin`; the fence review's ruling): a key beside the agents
+ * list that DX4 does not have, which a reader that does not know it reads past. Absent until a derivation names one.
+ */
 export interface SubagentsBody {
   subagents: readonly LaneAAgent[];
   jobs: readonly Job[];
+  origin?: string;
 }
 
 export const NO_SUBAGENTS: SubagentsBody = { subagents: [], jobs: [] };
@@ -62,14 +67,14 @@ export class Reshaper {
 
   // The subscription's snapshot line: one `snapshot` (n 0) carrying the session's jobs and subagents, then a `raised`
   // per pending request.
-  snapshot(snap: Event, { jobs, subagents }: SubagentsBody = NO_SUBAGENTS): PlaneMessage[] {
+  snapshot(snap: Event, { jobs, subagents, origin }: SubagentsBody = NO_SUBAGENTS): PlaneMessage[] {
     this.open.clear();
     this.n = 0;
     const streaming = Array.isArray(snap.streaming) ? (snap.streaming as Event[]) : [];
     for (const entry of streaming) this.open.set(stepKey(entry as Step), { turnId: entry.turnId, agentId: entry.agentId ?? null, step: entry.step });
     const pending = Array.isArray(snap.pending) ? (snap.pending as Event[]) : [];
     return [
-      this.envelope('snapshot', { streaming, usage: snap.usage ?? null, jobs, subagents }, 0),
+      this.envelope('snapshot', { streaming, usage: snap.usage ?? null, jobs, subagents, ...(origin !== undefined && { origin }) }, 0),
       ...pending.filter((p) => typeof p.request === 'string').map((p) => this.wide('raised', raisedOf(p, this.ctx.session))),
     ];
   }
@@ -120,8 +125,8 @@ export class Reshaper {
 
   // The session's subagents and jobs, changed since this subscription last carried them: DX4's `subagents` body, with no
   // MCP servers (locally those are read from MAWS's own source).
-  subagents({ subagents, jobs }: SubagentsBody): PlaneMessage {
-    return this.sub('subagents', { subagents, jobs, mcp: [] });
+  subagents({ subagents, jobs, origin }: SubagentsBody): PlaneMessage {
+    return this.sub('subagents', { subagents, jobs, mcp: [], ...(origin !== undefined && { origin }) });
   }
 
   private opened(e: Event): void {

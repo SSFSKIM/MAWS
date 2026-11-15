@@ -11,10 +11,11 @@
 // session this Mac drives has its subagents' statuses derived in main and carried by its lane A watch (the lane A store
 // keeps them, `noteLaneAAgents`). For a session bound to this machine's reads the store publishes the graph those reads
 // built with them laid over it (`withStatuses`), and keeps the reads' graph apart: every reduction of its own starts from
-// it, so a later body is never laid over an earlier one. They stand only while the process whose driver sent them holds
-// the session, or nothing does (`heldByOrigin`; the lane A store discards them at any other holder); the session handed
-// to another machine's feed discards them too. While the graph is watched and the session's
-// bridge is live or starting, the store holds the session's lane A watch, so the panel alone keeps the body coming.
+// it, so a later body is never laid over an earlier one. They stand only while the holder their body names holds the
+// session, or nothing does, or no record says yet (`heldByOrigin`; the lane A store discards them at any other holder);
+// any binding of a session of this Mac to another machine's feed, the first one included, discards them too. While the
+// graph is watched and the session's bridge is live or starting, the store holds the session's lane A watch, so the
+// panel alone keeps the body coming.
 import { create } from 'zustand';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { SessionEvent } from '@shared/graph/events';
@@ -82,6 +83,7 @@ export function placeInRow(eventId: string): number {
   return Number.isInteger(n) ? n : 0;
 }
 
+const thisMac = (id: AppSessionId): boolean => isAddress(id) && machineOf(id) === ipc.localMachine;
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const nowIso = () => new Date().toISOString();
 
@@ -118,12 +120,11 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const read = (id: AppSessionId) => get().entries.get(id) ?? blank();
 
     // U8d: the session's noted lane A agents, unless the session is bound to another machine's feed (whose graph carries
-    // them already) or its holder is no longer the process they came from.
+    // them already) or its holder is no longer the process their body named.
     const layable = (id: AppSessionId): readonly LaneAAgent[] | null => {
       const noted = watchOf(id).remote ? undefined : useLaneA.getState().agents.get(id);
       if (noted === undefined || noted.agents.length === 0) return null;
-      const holder = sessions.getState().records.get(id)?.holder;
-      return holder !== undefined && !heldByOrigin(holder, noted.origin) ? null : noted.agents;
+      return heldByOrigin(sessions.getState().records.get(id)?.holder, noted.origin) ? noted.agents : null;
     };
     // The graph to publish for the reads' graph: the same object again when neither it nor the agents changed.
     const publish = (id: AppSessionId, reads: TaskGraph): TaskGraph => {
@@ -374,6 +375,9 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const bindRemote = (id: AppSessionId, remote: (onGraph: (graph: TaskGraph) => void) => () => void) => {
       const w = watchOf(id);
       w.remote = true;
+      // U8d: a session of this Mac handed to that machine: what this Mac's driver said of it is that machine's to say now
+      // (a session's watch goes to the driver of the machine its address names, so what is noted for it is that driver's)
+      if (thisMac(id)) forgetLaneAAgents(id);
       write(id, { phase: 'loading', disk: { agents: [], runs: [], error: null, runsError: null } }); // no disk here to read
       w.offs.push(remote((graph) => write(id, { graph, phase: 'live', error: null })));
     };
@@ -413,7 +417,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
       let laneA: (() => void) | null = null;
       const holdLaneA = () => {
         const bridge = useLaneA.getState().states.get(id)?.bridge;
-        const up = (bridge === 'live' || bridge === 'starting') && isAddress(id) && machineOf(id) === ipc.localMachine;
+        const up = (bridge === 'live' || bridge === 'starting') && thisMac(id);
         if (up && laneA === null) laneA = watchLaneA(id, () => {});
         else if (!up && laneA !== null) {
           laneA();
@@ -446,7 +450,6 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         sessions.subscribe((state, previous) => {
           if (state.listed === previous.listed && state.records === previous.records) return;
           if (((remoteFeed?.(id) ?? null) !== null) === watchOf(id).remote) return;
-          if (!watchOf(id).remote) forgetLaneAAgents(id); // U8d: handed to another machine, its statuses are that machine's to say
           unbind(id);
           watchOf(id).binding += 1; // a disk read the old binding started is dropped
           write(id, { graph: emptyGraph(), launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map() });

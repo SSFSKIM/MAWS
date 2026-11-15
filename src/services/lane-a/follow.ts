@@ -3,8 +3,9 @@
 // session while a watch holds it (./driver.ts starts and stops it), holding the main transcript's follower, the engine
 // host's listing of the sidecars, and a follower of each parent agent's own transcript; the bridge's agents are the state
 // stream's (./agents.ts). DX4's body is derived from them (./jobs.ts `derive`) when, and only when, one of them changed:
-// a ledger's facts, the bridge's map, the listing, or the process going. Rows that name no agent and no job, nearly every
-// row of a transcript that streams, derive nothing and send nothing.
+// a ledger's facts, the bridge's map or the child it is of, the listing, or the process going. Rows that name no agent
+// and no job, nearly every row of a transcript that streams, derive nothing and send nothing. The body names the holder
+// whose bridge child its facts came from (`origin`, the fence review's ruling), as the driver gives it.
 //
 // - A tick (every `pollMs`) reads the main transcript and every open parent; a bridge event asks for a read at once,
 //   joining one in flight, and derives after it.
@@ -28,6 +29,7 @@ export interface FollowDeps {
   session: string; // the engine session id, which log lines name
   locate(): Promise<string | null>; // the main transcript's path now
   bridge: BridgeAgents; // the state stream's, held by the driver
+  origin(): string | null; // the holder whose bridge child those agents (and the process's life) are, as the driver probed it
   listing?(): Promise<SubagentEntry[]>; // `fs.subagents`; a rejection is a failed read
   pollMs: number;
   backoff(): { next(): number }; // a fresh backoff for a run of failed listings
@@ -234,6 +236,7 @@ export class SessionFollow {
       this.main.version,
       [...this.parents.values()].filter((p) => p.held).map((p) => [p.id, p.jobs.version]),
       this.deps.bridge.version,
+      this.deps.origin(),
       this.listingVersion,
       this.running,
     ]);
@@ -250,7 +253,8 @@ export class SessionFollow {
     for (const p of this.parents.values()) parents.set(p.id, p.held ? p.jobs.ledger : null);
     const { subagents, jobs } = derive(this.main.ledger, { metas: this.metas, bridge: this.deps.bridge.list(), parents, sessionRunning: this.running });
     this.entries = new Map(subagents.map((e) => [e.agentId, e]));
-    this.current = { subagents: subagents.map((e) => this.withStart(e, parents)), jobs };
+    const origin = this.deps.origin();
+    this.current = { subagents: subagents.map((e) => this.withStart(e, parents)), jobs, ...(origin !== null && { origin }) };
     this.deps.changed();
   }
 
