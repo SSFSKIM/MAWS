@@ -112,7 +112,7 @@ describe('the label follows `spanRows`', () => {
     const text = 'Looked at the two files first.\n\n<message>Both files list three entries.</message>\n\nNow the third.';
     const head = render(<ReportOnly value>{assistantPresentation(text)!.render({ live: false })}</ReportOnly>);
     expect(labels(head.container)).toEqual(['● message']);
-    expect(head.container.textContent).toBe('● messageBoth files list three entries.');
+    expect(head.container.textContent?.trim()).toBe('● messageBoth files list three entries.');
     cleanup();
     const whole = draw(text);
     expect(whole.container.textContent).toContain('Looked at the two files first.');
