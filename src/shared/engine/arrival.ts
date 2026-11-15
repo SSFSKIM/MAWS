@@ -278,7 +278,11 @@ function pluginRow(row: Json): Arrival[] {
   const text = deliveredText(prompts);
   const delivery = text === null ? null : framedDelivery(text, 'bridge', appended);
   if (delivery !== null) return [delivery];
-  return !appended && text !== null && isBridgePlugin(object(row.origin)?.name) ? readConsents(text) : [];
+  if (appended || !isBridgePlugin(object(row.origin)?.name)) return [];
+  // the grant is the row's whole content, every block of it (never its first text block alone): a string, or text
+  // blocks alone, joined by a line break as the reader joins them everywhere, so that only one block can hold it
+  const whole = typeof prompts.content === 'string' ? prompts.content : textBlocksText(prompts.content);
+  return whole === null ? [] : readConsents(whole);
 }
 const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly unknown[]).includes(name);
 
