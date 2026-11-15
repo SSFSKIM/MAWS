@@ -268,8 +268,8 @@ describe('the catalog service', () => {
     expect(JSON.stringify(before)).not.toMatch(/linear\.app|internal\.example/);
     await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A }); // the directory read once
     expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
-      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker' },
-      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null }, // Linear's name, not its endpoint
+      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker', iconUrl: null }, // U11c: its record's icon is on the vendor's own host
+      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null, iconUrl: null }, // Linear's name, not its endpoint
     ] });
     // each postures call asked, and the view's read asked once beside it (the baseline an MCP change is compared with)
     expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }, { cwd: PROJECT_A }]);

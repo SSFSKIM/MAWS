@@ -1558,9 +1558,9 @@ describe('plugins widget: the images', () => {
     expect(invoked('catalog.icon')).toEqual([{ url: ICON }]);
     expect(invoked('catalog.home')).toEqual([]); // no catalog of the engine is built for it
     fireEvent.click(within(row(BERTH)).getByRole('button', { name: /^View / }));
-    const detail = document.querySelector<HTMLElement>(`[data-plugin-detail="${BERTH}"] [data-item-image]`)!;
-    await waitFor(() => expect(detail.getAttribute('data-item-image')).toBe('icon'));
-    expect(detail.className).toContain('size-14');
+    const detailImage = () => document.querySelector<HTMLElement>(`[data-plugin-detail="${BERTH}"] [data-item-image]`)!;
+    await waitFor(() => expect(detailImage().getAttribute('data-item-image')).toBe('icon'));
+    expect(detailImage().className).toContain('size-14');
   });
 
   it('held open: while the icons’ read is out every row has its tile; its answer fills one box and no row is added, removed or moved', async () => {
