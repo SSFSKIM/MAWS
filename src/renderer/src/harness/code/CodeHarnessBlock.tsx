@@ -20,6 +20,14 @@ import { loadedSession, onTranscriptLoaded } from '../panel/summaryProbes';
 
 const TRANSCRIPT_OF = fakeId('A'); // the fake session whose transcript the column shows (P5 O6 M2: by its address, as loads name it)
 
+// The column's transcript is A's, rendered over its HarnessSession's own key (`<machine>/harness:<n>`), which names no
+// session, so a row's chip would name `<machine>/harness` as its session. UX wave U6b-1 (Interfaces §F, M5's row): a file
+// opens beside a session's chat, so a chip here opens its file for A, the session whose turn Review reads.
+const columnActions: typeof codeTranscriptActions = {
+  ...codeTranscriptActions,
+  openFile: (path, line, _rowSession, options) => codeTranscriptActions.openFile(path, line, TRANSCRIPT_OF, options),
+};
+
 // The session shown is taken when a load has released its history, never mid-load (C8a's page is then attaching it).
 let shown: HarnessSession | null = null;
 const subscribeLoads = (listener: () => void) =>
@@ -66,7 +74,7 @@ function ColumnTranscript({ source }: { source: TranscriptSource }) {
   }, [source]);
   return (
     <div data-code-harness-transcript className="flex h-full w-full min-w-0 flex-col self-stretch">
-      <Transcript source={source} variant="session" actions={codeTranscriptActions} className="min-h-0 flex-1" />
+      <Transcript source={source} variant="session" actions={columnActions} className="min-h-0 flex-1" />
     </div>
   );
 }
