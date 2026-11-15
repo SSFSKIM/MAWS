@@ -12,6 +12,7 @@ export type ReviewSurface = 'panel' | 'tab'; // the panel's Review tool, or a di
 
 // UX wave U5b (M3): Review is one stack of sections. `files` are its sections in order, each with its fold; `selected`
 // is the file whose section is at the top of the stack (`section` reads one by its path); `mode` is what the stack draws.
+// M6: the one-file `openSelectedFile` left with the scenes; `openFileOf` opens a section's file by its path.
 export interface CodeHarnessReview {
   scope: ReviewScope | null;
   turnId: string | null; // Last turn's turn (the panel tool's state, or a diff tab's ref)
@@ -58,7 +59,6 @@ export interface CodeHarnessApi {
   setMode(mode: 'unified' | 'split', surface?: ReviewSurface): void; // through the View menu: read `review().mode` after
   toggleWrap(surface?: ReviewSurface): void; // through the View menu: read `review().wrap` after
   markViewed(path: string, surface?: ReviewSurface): Promise<void>; // brings the file's section to the top, then marks it
-  openSelectedFile(surface?: ReviewSurface): void; // `Open file ↗` of the section at the top
   section(path: string, surface?: ReviewSurface): CodeHarnessSection | null; // null: no section for the path
   setFolded(path: string, folded: boolean, surface?: ReviewSurface): void; // a click on the header when it differs
   openFileOf(path: string, surface?: ReviewSurface): void; // `Open file ↗` of that file's section

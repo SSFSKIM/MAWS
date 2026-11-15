@@ -11,10 +11,10 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { anchoredMessage } from '../src/shared/anchor/message';
+import { anchoredMessage, commentsMessage, quotedComment } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { addressed, localRef } from './support/address';
 import { bareOf } from '../src/shared/machine/address';
@@ -261,6 +261,47 @@ async function projectRows(page: Page, parent: string): Promise<{ id: string; le
   const project = sidebarOf(page).locator('[data-kind="project"]').filter({ has: page.locator(`[data-menu="session:${await addressed(page, parent)}"]`) });
   const rows = await project.locator('[role="treeitem"][data-menu^="session:"]').evaluateAll((rows) => rows.map((r) => ({ id: r.getAttribute('data-menu')!.slice('session:'.length), level: r.getAttribute('aria-level') })));
   return rows.map((row) => ({ ...row, id: bareOf(row.id) })); // the rows name addresses; the callers, the raw bridge's bare ids
+}
+
+// ---- UX wave U5b (M6): comments on lines in Review ----------------------------------------------------------------------
+// docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, A6: the agent's change over two files of the
+// scratch repository (src/app.ts's line 3 rewritten; src/total.ts two lines added), commented on in Review's stack.
+
+const TOTAL = 'src/total.ts';
+const TOTAL_TEXT = 'export function sumOf(items: { price: number }[]): number {\n  return items.reduce((sum, item) => sum + item.price, 0);\n}\n';
+const OLD_TOTAL_LINE = APP_TEXT.split('\n')[2]!; // app.ts's line 3 as committed, removed by the change
+const NEW_TOTAL_LINE = 'export const total = sumOf(items);'; // and as the change has it
+const ROUNDING_LINE = 'export const rounding = 2;'; // total.ts's line 4, added
+const CURRENCY_LINE = "export const currency = 'EUR';"; // total.ts's line 5, added, then rewritten
+const CURRENCY_LINE_LATER = "export const currency = 'USD';";
+const COMMENT_REMOVED = 'Why was the reduce dropped here?';
+const COMMENT_ADDED = 'Should rounding come from the settings?';
+const COMMENT_LEFT = 'Is the currency fixed for every market?';
+const COMMENT_THREAD = 'Is sumOf safe for an empty list?';
+const REVIEW_REPLY = 'Read both comments: the reduce moved into sumOf, and rounding will come from the settings.';
+const REVIEW_THREAD_REPLY = 'sumOf returns 0 for an empty list, as reduce does with its seed.';
+const LINE_LEFT_DIFF = 'The line this comment was on is no longer in this diff.'; // REVIEW_COPY.lineLeftDiff
+
+// The anchor Review makes for a line (`reviewLineAnchor`): the absolute path and the line, `side: 'old'` for a removed one.
+const reviewAnchor = (repo: ScratchRepo, path: string, line: number, side: 'old' | 'new') => ({
+  kind: 'file-line' as const,
+  locator: `${repo.path(path)}#L${line}`,
+  label: `${basename(path)}:${line}`,
+  path: repo.path(path),
+  line,
+  ...(side === 'old' && { side: 'old' as const }),
+});
+
+// The add button the diff library draws on a line of Review while the line is hovered, pressed (the library acts on the
+// press); answers the comment card it opens under the line.
+async function commentOnLine(review: Locator, path: string, side: 'old' | 'new', line: number): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-${side}-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator(`[data-add-widget="${side}"] button`));
+  const card = review.getByRole('dialog', { name: `Comment on ${basename(path)}:${line}` });
+  await expect(card).toBeVisible();
+  return card;
 }
 
 test.describe('side threads, Send to main and /btw (E3)', () => {
@@ -1049,6 +1090,100 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(surface(page, 'side'), 'no Side surface').toHaveCount(0);
     expect(writtenUsers(maws, parent), 'the main conversation received nothing').toHaveLength(1);
     await shootCard(maws, viewer, 'card-thread-updated');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+  test('13. a line comment in Review: two comments on two files, one on a removed line, go to main as one message quoting each line; a draft whose line the agent rewrites is listed under the toolbar; an unticked comment opens its thread in the Side pane', async () => {
+    test.setTimeout(150_000);
+    const c = await begin((cwd, dir) => {
+      const parent = parentJournal(cwd);
+      parent.turn(REVIEW_REPLY); // the two comments, sent to main as one message
+      return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [REVIEW_THREAD_REPLY]).write(dir, 'thread')];
+    });
+    const { page, maws, repo, parent } = c;
+    await repo.fixture.write(TOTAL, TOTAL_TEXT);
+    await repo.git('add', TOTAL);
+    await repo.git('commit', '-q', '-m', 'total');
+    writeFileSync(repo.path(APP), APP_TEXT.replace(OLD_TOTAL_LINE, NEW_TOTAL_LINE));
+    writeFileSync(repo.path(TOTAL), `${TOTAL_TEXT}${ROUNDING_LINE}\n${CURRENCY_LINE}\n`);
+    await openSurface(page, 'Review');
+    const review = surface(page, 'review').locator('[data-review]');
+    await expect(review.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    for (const path of [APP, TOTAL]) await expect(review.locator(`[data-review-file="${path}"] [data-review-body] table`).first()).toBeVisible({ timeout: 20_000 });
+
+    // a draft on a line the agent then rewrites: kept in the pass, it leaves its line for the row under the toolbar, says
+    // so, and opens there (D11)
+    const draft = await commentOnLine(review, TOTAL, 'new', 5);
+    await expect(draft.getByRole('checkbox', { name: 'Send to main' }), 'Review asks for main').toBeChecked();
+    await draft.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_LEFT);
+    await draft.getByRole('textbox', { name: 'Comment' }).press('Escape');
+    await expect(review.locator('[data-comment-card]'), 'Escape keeps the draft and closes the card').toHaveCount(0);
+    await expect(review.locator(`[data-review-file="${TOTAL}"] [data-review-unsent-comment]`), 'the draft under its line').toHaveText(COMMENT_LEFT);
+    writeFileSync(repo.path(TOTAL), `${TOTAL_TEXT}${ROUNDING_LINE}\n${CURRENCY_LINE_LATER}\n`);
+    const unplaced = review.locator('[data-review-unplaced]');
+    await expect(unplaced.locator('[data-review-unplaced-words="line-left"]')).toHaveText(LINE_LEFT_DIFF, { timeout: 20_000 });
+    await expect(review.locator('[data-review-unsent-comment]'), 'under no line').toHaveCount(0);
+    await unplaced.locator('[data-review-unplaced-edit]').click();
+    const away = unplaced.getByRole('dialog', { name: `Comment on ${basename(TOTAL)}:5` });
+    await expect(away.getByRole('textbox', { name: 'Comment' }), 'its words, in the card under the toolbar').toHaveValue(COMMENT_LEFT);
+    await away.getByRole('button', { name: 'Close', exact: true }).click(); // Close discards
+    await expect(unplaced, 'with its last comment the row goes').toHaveCount(0);
+
+    // two comments on two files, the first on the removed line: "Send 2 comments" sends one message to main, each comment
+    // its lead, its quoted line (the removed one under "Before the change:") and its words
+    const first = await commentOnLine(review, APP, 'old', 3);
+    await first.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_REMOVED);
+    const second = await commentOnLine(review, TOTAL, 'new', 4);
+    await second.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_ADDED);
+    await expect(review.locator(`[data-review-file="${APP}"] [data-review-unsent-comment]`), 'the other comment, a row under its line').toHaveText(COMMENT_REMOVED);
+    await second.getByRole('button', { name: 'Send 2 comments', exact: true }).click();
+    await expect.poll(() => writtenUsers(maws, parent).length, { timeout: 20_000 }).toBe(2);
+    const removed = reviewAnchor(repo, APP, 3, 'old');
+    const added = reviewAnchor(repo, TOTAL, 4, 'new');
+    expect(writtenUsers(maws, parent)[1]!.frame.message!.content).toEqual([
+      {
+        type: 'text',
+        text: commentsMessage(
+          [
+            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED), screenshot: false },
+            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED), screenshot: false },
+          ],
+          'main',
+        ),
+      },
+    ]);
+    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED)).toBe(`Before the change:\n\`${OLD_TOTAL_LINE}\`\n${COMMENT_REMOVED}`);
+    // the transcript: one message, two chips, the two quoted lines as code, the removed one under its caption
+    const main = mainRegion(page);
+    await expect(main.getByText(REVIEW_REPLY)).toBeVisible({ timeout: 20_000 });
+    const bubble = main.locator('[data-bubble]').filter({ hasText: COMMENT_REMOVED });
+    await expect(bubble, 'one message').toHaveCount(1);
+    await expect(bubble).toContainText(COMMENT_ADDED);
+    await expect(bubble.locator('[data-chip="anchor"]')).toHaveText(['app.ts:3', 'total.ts:4']);
+    await expect(bubble.locator('code')).toHaveText([OLD_TOTAL_LINE, ROUNDING_LINE]);
+    await expect(bubble, 'the removed line under its caption').toContainText(/Before the change:\s*export const total = items\.reduce/);
+    await expect(main.getByText('2 comments, in the order made:', { exact: false }), 'no framing line drawn').toHaveCount(0);
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { timeout: 20_000 }).toBeNull();
+
+    // one comment with "Send to main" unticked: its side thread opens in the Side pane, in Review's place
+    const third = await commentOnLine(review, APP, 'new', 3);
+    const toMain = third.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain).toBeChecked();
+    await toMain.uncheck();
+    await third.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_THREAD);
+    await third.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent, 'comment');
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane, 'the Side pane opens on the new thread').toBeVisible({ timeout: 20_000 });
+    await expect(surface(page, 'review'), 'in Review’s place').toHaveCount(0);
+    await expect(pane.getByText(REVIEW_THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
+    await expect(pane.locator('[data-chip="anchor"]')).toHaveText('app.ts:3');
+    const threaded = reviewAnchor(repo, APP, 3, 'new');
+    const record = value(await invoke(page, 'session.get', { appSessionId: child as never }));
+    expect(record?.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: PARENT, anchor: threaded, openedBy: 'comment' });
+    expect(writtenUsers(maws, child).map((r) => r.frame.message!.content)).toEqual([
+      [{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD), screenshot: false }], 'thread') }],
+    ]);
+    expect(writtenUsers(maws, parent), 'the main conversation received the one message').toHaveLength(2);
     expect(maws.consoleErrors()).toEqual([]);
   });
 });

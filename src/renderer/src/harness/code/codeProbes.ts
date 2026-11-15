@@ -273,11 +273,6 @@ export const codeProbes: CodeHarnessApi = {
     const marked = control instanceof HTMLInputElement ? control.checked : control.getAttribute('aria-pressed') === 'true';
     if (!marked) control.click();
   },
-  openSelectedFile(surface) {
-    const section = topSection(mustRoot(surface));
-    if (!section) throw new Error('harness.code: no section in view');
-    click(section, '[data-open-file]', 'Open file ↗');
-  },
   section,
   setFolded(path, folded, surface) {
     const found = mustSection(path, surface);
