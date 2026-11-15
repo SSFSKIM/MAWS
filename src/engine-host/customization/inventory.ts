@@ -115,9 +115,10 @@ class Reading {
     this.check(); if (this.pluginServers.length >= INVENTORY_BOUNDS.rows) throw new Stop();
     const { plugin, installScope, version, name, transport, url } = configuration;
     this.pluginServers.push({ plugin, pluginName: row.pluginName, server: row.server, name, installScope, version, path: row.path, transport, address: url === null ? null : addressFormOf(url), sameAddressAs: this.sameAddressAs(transport, url) });
-    // the address is classified, compared and revised whole; only the endpoint's `url` is cut at its bound, so a cut
-    // text never equals another address and matches no live one
-    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url: url === null ? null : url.slice(0, URL_BOUND), revision: pluginRevisionOf(configuration) });
+    // the address is classified, compared and revised whole; an address past the endpoint's bound is sent as no `url` at
+    // all, never cut: a cut text is another address, which a session's live address could equal (M2's (c) refuses a
+    // remote entry with none)
+    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url: url !== null && url.length <= URL_BOUND ? url : null, revision: pluginRevisionOf(configuration) });
   }
   // The engine drops a plugin's server whose address a file-configured server names
   // (spikes/protocol-probe/findings-uxwave-u11-plugin-server-dedup.txt), after it has merged the files' servers by name
