@@ -10,12 +10,12 @@
 // `artifact_create` takes as its `space`. So while the narrowed Space is not known (the Spaces list not read yet, or
 // holding no such Space) a card, its Blank and More's entries that ask or make are disabled (H23); Add a file… is not.
 // U10b: one design-system choice in the heading, the system a new artifact here would get ("<name> · default") and the
-// library's others. It is this component's state: it holds while the page is open (the list keeps this line mounted)
-// and is not stored. A system chosen that is not the default is named in a card's words, which the agent's
+// library's others. It is the page's state (`MakeChoiceContext`, held by `Library`): it holds while the page is open,
+// through the views, searches and scrolls that take this section away, and is not stored. A system chosen that is not the default is named in a card's words, which the agent's
 // `artifact_create` takes as its `designSystem`, and passed by Blank as `designSystemId`.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
-import { useId, useState } from 'react';
+import { createContext, useContext, useId, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
@@ -38,6 +38,12 @@ const DEFAULT = 'default'; // the radio value of the default system (no system i
 // Radix places a submenu on the menu's right and flips it only on a collision. More ends the row, so its submenu opens
 // on the menu's left (§D.2): a right-hand padding no submenu fits makes the right-hand placement a collision.
 const OPEN_LEFT = { right: 100_000 };
+
+/** The design system chosen on the page (its id; null: the default), held by the page so it outlives this section. */
+export type MakeChoice = readonly [chosen: string | null, choose: (id: string | null) => void];
+export const MakeChoiceContext = createContext<MakeChoice | null>(null);
+/** The page's choice, owned by the Library page for its life. */
+export const useMakeChoiceState = (): MakeChoice => useState<string | null>(null);
 
 /** A design system as the choice shows it. */
 interface ShownSystem {
@@ -86,7 +92,9 @@ function useSystemChoice(spaceId: string | null) {
   const systems = useLibraryList({ kind: 'design_system' }).value?.rows;
   const defaultsRead = useSettings((s) => s.state !== null);
   const governing = useDocumentGoverningSystem(spaceId === null ? {} : { spaceId });
-  const [chosen, choose] = useState<string | null>(null);
+  const held = useContext(MakeChoiceContext);
+  if (held === null) throw new Error('"Make something new" is drawn inside the Library page, which holds its choice');
+  const [chosen, choose] = held;
   if (systems === undefined || !defaultsRead) return null;
   const defaultId = 'builtin' in governing ? null : governing.id;
   const defaultName = systems.find((system) => system.id === defaultId)?.title ?? P.floorSystem;

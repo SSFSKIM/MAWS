@@ -631,9 +631,10 @@ export const TOOL_ERRORS = {
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
   artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
   // UX wave U10b (l6-artifacts-08): a create's `designSystem` names no live design system, more than one, or a kind no system governs
-  noDesignSystem: (ref: string, names: readonly string[]) => `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}`,
+  noDesignSystem: (ref: string, names: readonly string[]) =>
+    names.length ? `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}` : `artifact_create: no design system "${ref}"; there are no design systems`,
   designSystemAmbiguous: (ref: string, ids: readonly string[]) => `artifact_create: more than one design system is named "${ref}"; give one of these ids: ${ids.join(', ')}`,
-  designSystemNotForKind: (kind: string) => `artifact_create: a ${kind} takes no design system`,
+  designSystemNotForKind: (kind: string) => `artifact_create: kind "${kind}" takes no design system; designSystem is for ${DESIGN_SYSTEM_KINDS.join(', ')}`,
   noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,

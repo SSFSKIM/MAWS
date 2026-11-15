@@ -19,6 +19,7 @@ import { LIBRARY_PAGE as P } from './copy';
 import { useLibraryDialog } from './dialogs';
 import { dateGroups, spaceGroups, type RowGroup } from './groups';
 import { LibraryHeader } from './LibraryHeader';
+import { MakeChoiceContext, useMakeChoiceState } from './MakeSomethingNew';
 import { DeleteSheet, InUseSheet, RenameSheet } from './RowMenu';
 import { Rows, type Line } from './Rows';
 import { DeleteSpaceSheet, NewSpaceSheet, RenameSpaceSheet, SpaceMenu } from './SpaceDialogs';
@@ -140,6 +141,7 @@ export function Library() {
   const spacesRead = useLibrarySpaces(machine);
   const spaces = spacesRead.value;
   const now = useNow();
+  const makeChoice = useMakeChoiceState(); // UX wave U10b (M8 decision 3): the design-system choice lives as long as the page
 
   const narrowedTo = view.view === 'bySpace' && view.spaceId !== null ? spaces?.find((s) => s.id === view.spaceId) : undefined;
   // a narrowed Space that is gone (deleted here or by an agent) gives way to every Space
@@ -152,7 +154,9 @@ export function Library() {
     <div data-library className="flex h-full min-h-0 flex-col bg-bg" onKeyDown={focusSearch}>
       <LibraryHeader counts={list?.counts} />
       {narrowedTo && <SpaceBar space={narrowedTo} />}
-      <Rows lines={linesOf(view, read, list, spaces, now)} />
+      <MakeChoiceContext.Provider value={makeChoice}>
+        <Rows lines={linesOf(view, read, list, spaces, now)} />
+      </MakeChoiceContext.Provider>
       <LibraryDialogs />
     </div>
   );
