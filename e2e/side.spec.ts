@@ -199,8 +199,10 @@ const columnBoxes = (page: Page): Promise<{ list: Box; cards: Box[] }> =>
   });
 const overlaps = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
 // The open side chat card at the column's foot: inside the column, its bottom edge within 8 px of the column's, over
-// neither the composer's frame nor the jump control (drawn only while the reader is away from the end), and the cards
-// above it in the boxes `before` recorded.
+// neither the composer's frame nor the jump control, and the cards above it in the boxes `before` recorded. The jump
+// control ("Jump to latest") is drawn only while the transcript is not following its end, which this scene's one short
+// exchange never leaves, so it is not measured itself: the transcript's own root is, since the control is placed inside
+// that box wherever it is drawn (`.transcript-jump` is absolute in the `relative` root, `transcript/view/transcript.css`).
 async function expectAtFoot(page: Page, before: { cards: Box[] }): Promise<void> {
   const column = (await sessionCards(page).boundingBox())!;
   const card = (await sessionCards(page).locator('[data-btw-card="foot"]').boundingBox())!;
@@ -209,11 +211,11 @@ async function expectAtFoot(page: Page, before: { cards: Box[] }): Promise<void>
   expect(gap, 'the card’s bottom edge at the column’s').toBeGreaterThanOrEqual(-0.5);
   expect(gap, 'the card’s bottom edge at the column’s').toBeLessThanOrEqual(8);
   const main = mainRegion(page);
-  for (const other of [main.locator('[data-composer-frame]'), main.getByRole('button', { name: /^Jump to latest/ })]) {
-    for (const element of await other.all()) {
-      const box = await element.boundingBox();
-      if (box !== null) expect(overlaps(card, box), `the card ${JSON.stringify(card)} clear of ${JSON.stringify(box)}`).toBe(false);
-    }
+  for (const [name, other] of [['the composer’s frame', main.locator('[data-composer-frame]:visible')], ['the transcript, which holds the jump control', main.locator('div.transcript[data-hydration]:visible')]] as const) {
+    await expect(other, `${name} is drawn`).toHaveCount(1);
+    const box = await other.boundingBox();
+    expect(box, `${name} has a box`).not.toBeNull();
+    expect(overlaps(card, box!), `the card ${JSON.stringify(card)} clear of ${name} ${JSON.stringify(box)}`).toBe(false);
   }
   expect((await columnBoxes(page)).cards, 'every card where it was before /btw').toEqual(before.cards);
 }

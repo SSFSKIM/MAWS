@@ -3788,7 +3788,7 @@ test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine th
     });
 
     await test.step('once the first session is idle on B, /fork picked in A’s palette opens the fork’s tab on B', async () => {
-      await expect.poll(async () => (await status(now.app))?.turn ?? 'running', { timeout: 60_000, message: 'B’s first session ends its turns' }).toBeNull();
+      await expect.poll(async () => { const s = await status(now.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s first session ends its turns' }).toBeNull();
       const row = sessionRow(page, addressOf(b.ref, now.app));
       await row.click();
       await expect(shownPrimary(page), 'A reads the session idle').not.toHaveText(/^Stop/, { timeout: 30_000 });
@@ -3869,7 +3869,7 @@ for (const withheld of [['rl2.send-now'], ['rl2.send-now', 'rl2.session-acts']])
       // ⌘. still stops: the steer held first, then B's turn interrupted
       await composerOf(page).click();
       await page.keyboard.press('Meta+.');
-      await quoting(expect.poll(async () => (await status(session.app))?.turn ?? 'running', { timeout: 60_000, message: 'B’s turn ends at ⌘.' }).toBeNull(), () => mainSaid(page));
+      await quoting(expect.poll(async () => { const s = await status(session.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s turn ends at ⌘.' }).toBeNull(), () => mainSaid(page));
       expect((await status(session.app))?.process, 'no unrecorded write ended B’s replay').toBe('ready');
       const controls = await controlsOnB(b, session.app);
       expect(controls.indexOf('cancel_async_message'), 'the steer is held before the interrupt').toBeGreaterThan(-1);
