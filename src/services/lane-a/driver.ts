@@ -331,6 +331,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     else {
       closeState(s);
       endWatches(s, s.bridge.reason ?? NO_BRIDGE);
+      s.agents.clear(); // nothing drives it: what its bridge held is read again from a stream's snapshot
     }
     changed(s);
   }
@@ -339,7 +340,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     closeState(s);
     s.follow?.processGone(); // no bridge: the session's process is taken as gone
     endWatches(s, reason);
-    s.agents.clear(); // what the gone bridge held runs no more
+    s.agents.clear(); // what the gone bridge held runs no more (its last body kept each spawn)
     s.lane.dropQueued(reason);
     if (s.bridge === null) return;
     s.bridge = null;

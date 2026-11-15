@@ -71,7 +71,6 @@ export class SessionFollow {
   private listingVersion = 0;
   private asked = 0; // the listings asked for, a change event counted as one asked and answered at once
   private applied = 0;
-  private owed = true;
   private retry: NodeJS.Timeout | null = null;
   private delays: { next(): number } | null = null;
   private failureLogged = false;
@@ -111,9 +110,8 @@ export class SessionFollow {
     this.applyListing(entries, ++this.asked);
   }
 
-  /** The engine host streams again: the listing is read again, and owed until that read is answered. */
+  /** The engine host streams again: the listing is read again, owed until that read is answered. */
   hostStreaming(): void {
-    this.owed = true;
     this.readListing();
   }
 
@@ -187,11 +185,12 @@ export class SessionFollow {
     );
   }
 
+  // Every read is owed until answered: the first, and the one at the host's streaming signal. One that fails leaves the
+  // last listing standing and is asked again on the backoff's steps, unless a later read or a change answers first.
   private listingFailed(error: unknown, asked: number): void {
-    if (this.stopped || asked !== this.asked) return; // a later read, or a change, decides
-    if (!this.failureLogged) this.deps.log(`${this.deps.session}: its subagents’ listing could not be read (${message(error)})${this.owed ? '; it is asked again' : ''}`);
+    if (this.stopped || asked !== this.asked) return;
+    if (!this.failureLogged) this.deps.log(`${this.deps.session}: its subagents’ listing could not be read (${message(error)}); it is asked again`);
     this.failureLogged = true;
-    if (!this.owed) return; // the last one stands
     this.delays ??= this.deps.backoff();
     this.retry = setTimeout(() => {
       this.retry = null;
@@ -203,7 +202,6 @@ export class SessionFollow {
   private applyListing(entries: SubagentEntry[], asked: number): void {
     if (this.stopped || asked < this.applied) return;
     this.applied = asked;
-    this.owed = false;
     this.failureLogged = false;
     this.delays = null;
     if (this.retry) clearTimeout(this.retry);
@@ -273,9 +271,9 @@ export class SessionFollow {
     }
     for (const [id, nested] of under) {
       const p = this.parents.get(id) ?? this.parent(id);
+      if (p.reading) continue; // decided again when its read lands
       const named = nested.filter((n) => !p.children.has(n.agentId));
       for (const n of named) p.children.add(n.agentId);
-      if (p.reading) continue; // decided again when its read lands
       const open = nested.some((n) => n.status === 'running' || (ENDED.includes(n.status) && !settled(n, this.entries)));
       const own = this.entries.get(id);
       const done = !open && own !== undefined && settled(own, this.entries);

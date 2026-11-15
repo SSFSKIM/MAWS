@@ -679,6 +679,7 @@ describe('subagents', () => {
     expect(mine.at(-1)?.ended).toBeDefined();
     expect(agentsOf(s.h.planes, s.watch).map((a) => [a.agentId, a.status, a.evidence])).toEqual([[A1, 'exited', 'session'], [A2, 'failed', 'rows']]);
     expect(agentsOf(s.h.planes, s.watch).some((a) => a.status === 'running' || a.running !== undefined)).toBe(false);
+    expect(agentsOf(s.h.planes, s.watch)[0]?.spawn).toMatchObject({ toolUseId: tool(A1) }); // the bridge's spawn, kept
   });
 
   it('derives once, after it, for a bridge event that arrives while a read is in flight', async () => {
