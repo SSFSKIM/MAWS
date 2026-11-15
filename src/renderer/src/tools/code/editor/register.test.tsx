@@ -183,10 +183,10 @@ describe('editor registrations', () => {
   describe('a conflict that lands while the question is open', () => {
     it('Save then writes nothing more, and the main tab stays in front in the merge view', async () => {
       const { disk } = await openApp({ dirty: true });
+      disk.files[APP] = 'const a = 2;\n'; // another writer, unseen by the tab: the held write answers a conflict
       const write = disk.hold('files.write');
       const saving = useViewer.getState().save(ID);
       await waitFor(() => expect(entry().saving).toBe(true));
-      disk.files[APP] = 'const a = 2;\n'; // another writer, before the held write is answered
       const closing = requestCloseTab(ID);
       const asked = await screen.findByRole('dialog');
       await act(async () => write.release());
@@ -390,10 +390,10 @@ describe('a file beside the chat as an editor', () => {
 
     it('a conflict that lands while the question is open: Save writes nothing more, the tab stays and comes into view', async () => {
       const tabId = await openBeside({ dirty: true });
+      disk.files[APP] = 'const a = 2;\n'; // another writer, unseen by the tab: the held write answers a conflict
       const write = disk.hold('files.write');
       const saving = useViewer.getState().save(ID);
       await waitFor(() => expect(entry().saving).toBe(true));
-      disk.files[APP] = 'const a = 2;\n'; // another writer, before the held write is answered
       const closing = closeSide(tabId);
       const asked = await screen.findByRole('dialog');
       await act(async () => write.release());
