@@ -147,6 +147,9 @@ export interface ViewerStore {
   revisit(tabId: string, appSessionId?: AppSessionId | null): void;
   // UX wave U6b-1 (sequence 6): the prune, run by the side tabs' one subscriber (`files/tabs.ts`) when they change
   prune(): void;
+  // UX wave U6b-1 (Decision 20b): a key on its way between two views (a move) is kept out of the ownership prune and the
+  // cap until its next mount, or until no tab holds it
+  holdKey(key: string): void;
 }
 
 // E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
@@ -739,6 +742,10 @@ export function createViewerStore(client: MawsBridge) {
       },
 
       prune,
+
+      holdKey(key) {
+        void key;
+      },
 
       reset() {
         for (const hold of holds.values()) hold.release();

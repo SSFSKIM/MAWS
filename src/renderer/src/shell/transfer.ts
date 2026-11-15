@@ -312,6 +312,35 @@ export function moveShownRecordToTab(): void {
 
 const refused = (text: string) => void toast({ id: 'transfer-refused', level: 'info', text, actions: [], dismissible: true });
 
+// ---- a file's moves (UX wave U6b-1, Interfaces §D) -------------------------------------------------------------------------
+
+export function moveToMain(panelTabId: string, at: TabPlace = {}): boolean | Promise<boolean> {
+  return moveArtifactToTab(panelTabId, at);
+}
+
+export function moveToPanel(mainTabId: string): boolean | Promise<boolean> {
+  return moveArtifactToPanel(mainTabId);
+}
+
+export function moveFileToMain(panelTabId: string, at: TabPlace = {}): boolean {
+  void panelTabId;
+  void at;
+  return false;
+}
+
+export function moveFileToSide(mainTabId: string): boolean {
+  void mainTabId;
+  return false;
+}
+
+export function holdSideViews(key: string): void {
+  void key;
+}
+
+export function dropSideViews(key: string): void {
+  void key;
+}
+
 // ---- the drag ------------------------------------------------------------------------------------------------------------
 
 // Decision Log 39 (3): a Browser page is a native view drawn above the whole renderer, so a drop target over a pane or

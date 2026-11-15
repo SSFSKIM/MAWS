@@ -259,3 +259,72 @@ describe('a file’s unsaved mark', () => {
     expect(within(tabOf(app.id)).queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
   });
 });
+
+// UX wave U6b-1 (M4; U8b's §C.3, "What U6b's reveal must cover"): the selected tab of a strip that scrolls is brought into
+// view, the nearest way, whether the host selected it, a click did, or an opener added it; the strip itself scrolls, and
+// nothing else (`keymap/shell-navigation.test.tsx` holds the F6 stop).
+describe('the selected tab kept in view', () => {
+  // Tabs of 100 px in a row 150 px wide that scrolls: tab i spans i × 100 − scroll to i × 100 + 100 − scroll.
+  function scrolling(room = 150) {
+    let scroll = 0;
+    const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 28, height: 28, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tablist') return rect(0, room);
+      if (this.dataset.tabId === undefined) return rect(0, 0);
+      return rect([...this.parentElement!.children].indexOf(this) * 100 - scroll, 100);
+    });
+    return {
+      install: () => Object.defineProperty(screen.getByRole('tablist'), 'scrollLeft', { configurable: true, get: () => scroll, set: (value: number) => void (scroll = value) }),
+      get scroll() {
+        return scroll;
+      },
+      set scroll(value: number) {
+        scroll = value;
+      },
+    };
+  }
+  const ids = ['t:aaaa0001', 't:aaaa0002', 't:aaaa0003', 't:aaaa0004', 't:aaaa0005', 't:aaaa0006'];
+  const seed = () => {
+    register(probeTool('t', { title: 'Tee' }).tool);
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: ids.map((id) => ref(id)), activeTabId: ids[0] }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: [ids[0]] }, pinnedTools: [], contexts: {} },
+    });
+  };
+
+  it('a tab the host selects is scrolled into view, rightwards and leftwards, the nearest way', () => {
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    expect(strip.scroll).toBe(0);
+    act(() => panelHost.selectTab(ids[5]));
+    expect(strip.scroll).toBe(450); // its right edge at the strip's
+    act(() => panelHost.selectTab(ids[1]));
+    expect(strip.scroll).toBe(100); // its left edge at the strip's
+    act(() => panelHost.selectTab(ids[2]));
+    expect(strip.scroll).toBe(150);
+    act(() => panelHost.selectTab(ids[2]));
+    expect(strip.scroll).toBe(150); // in view already: nothing moves
+  });
+
+  it('a tab chosen by a click is scrolled into view', async () => {
+    const user = userEvent.setup();
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    await user.click(within(screen.getByRole('tablist')).getAllByRole('tab')[1]); // cut by the strip's right edge
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual([ids[1]]);
+    expect(strip.scroll).toBe(50);
+  });
+
+  it('a tab an opener adds is in view as it is drawn', () => {
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    act(() => void panelHost.addTool('t', { appSessionId: A }));
+    expect(strip.scroll).toBe(550); // the seventh tab
+  });
+});

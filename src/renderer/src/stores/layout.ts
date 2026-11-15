@@ -82,9 +82,10 @@ export interface LayoutState {
   // Hydration's live record/intent resolver; derivation ignores stale contexts without deleting saved preferences.
   knownSession(appSessionId: AppSessionId): boolean;
   hydrated: boolean;
-  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab showing an artifact's record.
-  // Transient; the drop targets decide acceptance from it (`shell/transfer.ts`).
-  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId: string } | null;
+  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab (UX wave U6b-1, Decision 14: any
+  // side tab, the artifact it shows when it shows a record). Transient; the drop targets decide acceptance from it
+  // (`shell/transfer.ts`).
+  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId?: string } | null;
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
@@ -1174,4 +1175,11 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     window.removeEventListener('beforeunload', flush);
     flush();
   };
+}
+
+// UX wave U6b-1 (Decision 19): a move's stored writes in order, through the persistence running over `store`.
+export function writeInOrder(first: LayoutKey[], then: LayoutKey[], store = useLayout): void {
+  void first;
+  void then;
+  void store;
 }

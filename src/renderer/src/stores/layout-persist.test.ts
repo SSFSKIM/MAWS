@@ -4,7 +4,8 @@ import { EMPTY_TAB_SET, LAYOUT_DEFAULTS, NO_PROJECT, storedMain, stripOf, type L
 import { fakeClient } from '../../../../test/support/fake-client';
 import { addressOf } from '@shared/machine/address';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, quietly, storedLayout } from './layout';
+import type { MawsBridge } from '@shared/ipc/schema';
+import { createLayoutStore, LAYOUT_WRITE_DELAY_MS, persistLayout, quietly, storedLayout, writeInOrder } from './layout';
 import { sideGroups } from '../panel/surface-model'; // UX wave U8b
 import { buildFSchemaOf } from '../../../../test/support/layout-build-f'; // UX wave U8b
 
@@ -1106,5 +1107,187 @@ describe('the page’s key', () => {
     const fake = fakeClient({ 'layout.list': { keys: ['regions', 'main.tabs', 'panel.pinned', ...Object.keys(SIDE_COLUMN_KEYS)] }, 'layout.get': () => ({ value: null }), 'layout.set': undefined });
     await createLayoutStore().getState().hydrate(fake.client, () => true);
     expect((fake.invoked('layout.get') as { key: string }[]).map((read) => read.key)).not.toContain('destination');
+  });
+});
+
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decision 19; sequence 10): a move's
+// keys are written in order, the destination's first and answered before the source's removal is sent, so a reload or a
+// failed write at any moment leaves the file in both lists, which the read resolves to the main tab, never in neither.
+describe('a move’s ordered writes', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => {
+    running.splice(0).forEach((stop) => stop());
+    vi.useRealTimers();
+  });
+
+  const FILE = '/r/app.ts';
+  const KEY = `file:${TEST_MACHINE}:${FILE}`;
+  const LIST = `panel.${A}` as const;
+  const side = { id: 'files:aaaa0001', toolId: 'files', pinned: false };
+  const sessionStrip: Strip = { ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }] };
+  const fileTab = { kind: 'file', path: FILE, line: null, appSessionId: A, machine: TEST_MACHINE } as const;
+  const multiInstance = (toolId: string) => toolId === 'files';
+
+  // layout.json and a main process whose layout writes land (are kept) when answered ok; a key held answers only when
+  // the test says, and a write answered with a failure lands nothing.
+  function ordered(given: Record<string, unknown>) {
+    const values: Record<string, unknown> = { regions: LAYOUT_DEFAULTS.regions, 'main.tabs': storedMain(sessionStrip), 'panel.pinned': [], ...SIDE_COLUMN_KEYS, ...given };
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(values) }, 'layout.get': ({ key }: { key: string }) => ({ value: values[key] ?? null }) });
+    const landed: Record<string, unknown> = { ...values };
+    const sent: string[] = [];
+    const held = new Map<string, ((ok: boolean) => void)[]>();
+    const holding = new Set<string>();
+    const client = {
+      ...fake.client,
+      invoke(name: string, input: { key: string; value: unknown }, opts?: unknown) {
+        if (name !== 'layout.set') return (fake.client.invoke as (n: string, i: unknown, o?: unknown) => Promise<unknown>)(name, input, opts);
+        sent.push(input.key);
+        return new Promise((resolve) => {
+          const answer = (ok: boolean) => {
+            if (ok) landed[input.key] = input.value;
+            resolve(ok ? { ok: true, value: undefined } : { ok: false, error: { code: 'internal', message: 'disk full' } });
+          };
+          if (holding.has(input.key)) held.set(input.key, [...(held.get(input.key) ?? []), answer]);
+          else answer(true);
+        });
+      },
+    } as unknown as MawsBridge;
+    const store = createLayoutStore();
+    running.push(persistLayout(client, store));
+    const hydrate = async () => {
+      const hydrating = store.getState().hydrate(client, () => true, { multiInstance });
+      await vi.runAllTimersAsync();
+      await hydrating;
+    };
+    return {
+      store, hydrate, sent, landed,
+      hold: (key: string) => void holding.add(key),
+      // Answers the oldest held write of `key`; later writes of it answer at once.
+      answer: async (key: string, ok: boolean) => {
+        holding.delete(key);
+        held.get(key)?.shift()?.(ok);
+        await vi.advanceTimersByTimeAsync(0);
+      },
+    };
+  }
+
+  // A launch over what landed: the file once, as a main tab, and no side tab of it.
+  async function relaunch(landed: Record<string, unknown>) {
+    const fake = fakeClient({ 'layout.list': { keys: Object.keys(landed) }, 'layout.get': ({ key }: { key: string }) => ({ value: landed[key] ?? null }), 'layout.set': undefined });
+    const store = createLayoutStore();
+    const hydrating = store.getState().hydrate(fake.client, () => true, { multiInstance });
+    await vi.runAllTimersAsync();
+    await hydrating;
+    return { main: store.getState().main, sideIds: (store.getState().panelBySession.get(A)?.tabs ?? []).map((tab) => tab.id) };
+  }
+  const holdsFile = (strip: Strip) => strip.panes.some((pane) => pane.tabs.some((tab) => tab.id === KEY));
+
+  const beside = { [LIST]: { tabs: [side], activeTabId: side.id }, 'panelTools.params': { version: 1, params: { [side.id]: { file: FILE, line: null } } } };
+  const inMain = { 'main.tabs': storedMain({ ...sessionStrip, panes: [{ tabs: [...sessionStrip.panes[0].tabs, { id: KEY, ...fileTab, pinned: false }], activeTabId: KEY }] }) };
+
+  // The store side of a move: the main tab opened and the side ref removed (or the reverse), then the order asked for.
+  const toMain = (store: ReturnType<typeof createLayoutStore>) => {
+    store.getState().openTab(fileTab);
+    store.getState().updatePanelTabs(A, (refs) => refs.filter((ref) => ref.id !== side.id));
+    writeInOrder(['main.tabs'], [LIST, 'panelTools.params'], store);
+  };
+  const toSide = (store: ReturnType<typeof createLayoutStore>) => {
+    store.getState().setPanelParams(side.id, { file: FILE, line: null });
+    store.getState().updatePanelTabs(A, (refs) => [...refs, side]);
+    store.getState().closeTab(KEY, { remember: false });
+    writeInOrder([LIST, 'panelTools.params'], ['main.tabs'], store);
+  };
+
+  it('to the main area: main.tabs is written at once, the list only once main.tabs is answered; a reload between the two shows the file once, in the main area', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.hold('main.tabs');
+    const before = run.sent.length;
+    toMain(run.store);
+    expect(run.sent.slice(before)).toEqual(['main.tabs']);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    expect(run.sent.slice(before)).not.toContain(LIST);
+    const between = await relaunch(run.landed);
+    expect([holdsFile(between.main), between.sideIds]).toEqual([false, [side.id]]); // nothing answered yet: where it was
+    await run.answer('main.tabs', true);
+    const reloaded = await relaunch({ ...run.landed, [LIST]: beside[LIST], 'panelTools.params': beside['panelTools.params'] }); // the list's write not landed
+    expect([holdsFile(reloaded.main), reloaded.sideIds]).toEqual([true, []]);
+    expect(run.sent.slice(before).indexOf(LIST)).toBeGreaterThan(run.sent.slice(before).indexOf('main.tabs'));
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([true, []]);
+  });
+
+  it('beside the chat: the list and the params are written at once, main.tabs only once both are answered; a reload between shows the file once, in the main area', async () => {
+    const run = ordered(inMain);
+    await run.hydrate();
+    run.hold(LIST);
+    const before = run.sent.length;
+    toSide(run.store);
+    expect(run.sent.slice(before).sort()).toEqual([LIST, 'panelTools.params'].sort());
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    expect(run.sent.slice(before)).not.toContain('main.tabs');
+    await run.answer(LIST, true);
+    const between = await relaunch({ ...run.landed, 'main.tabs': inMain['main.tabs'] });
+    expect([holdsFile(between.main), between.sideIds]).toEqual([true, []]); // in both lists: the read keeps the main tab
+    await vi.advanceTimersByTimeAsync(0);
+    expect(run.sent.slice(before)).toContain('main.tabs');
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([false, [side.id]]);
+  });
+
+  it('a failed first write sends no removal; the next change of the destination’s key writes both, in order', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.hold('main.tabs');
+    const before = run.sent.length;
+    toMain(run.store);
+    await run.answer('main.tabs', false);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    expect(run.sent.slice(before)).toEqual(['main.tabs']);
+    const stored = await relaunch(run.landed);
+    expect([holdsFile(stored.main), stored.sideIds]).toEqual([false, [side.id]]); // still where it was
+    run.store.getState().openTab({ kind: 'diagnostics' }); // the destination's key changes again
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    const later = run.sent.slice(before);
+    expect(later.lastIndexOf(LIST)).toBeGreaterThan(later.lastIndexOf('main.tabs'));
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([true, []]);
+  });
+
+  it('a failed second write after the first landed leaves the file in both lists, which the read resolves to the main tab', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.hold(LIST);
+    toMain(run.store);
+    await vi.advanceTimersByTimeAsync(0);
+    await run.answer(LIST, false);
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([true, []]);
+  });
+
+  it('a change of a held key waits with it, and is written with its latest value', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.hold('main.tabs');
+    const before = run.sent.length;
+    toMain(run.store);
+    run.store.getState().updatePanelTabs(A, (refs) => [...refs, { id: 'terminal:aaaa0002', toolId: 'terminal', pinned: false }]);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    expect(run.sent.slice(before)).not.toContain(LIST);
+    await run.answer('main.tabs', true);
+    expect(run.sent.slice(before).filter((key) => key === LIST)).toHaveLength(1);
+    expect((run.landed[LIST] as { tabs: { id: string }[] }).tabs.map((tab) => tab.id)).toEqual(['terminal:aaaa0002']);
+  });
+
+  it('at beforeunload both are sent, the destination’s first', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.hold('main.tabs');
+    const before = run.sent.length;
+    toMain(run.store);
+    window.dispatchEvent(new Event('beforeunload'));
+    const sent = run.sent.slice(before);
+    expect(sent).toContain(LIST);
+    expect(sent.lastIndexOf('main.tabs')).toBeLessThan(sent.indexOf(LIST));
   });
 });
