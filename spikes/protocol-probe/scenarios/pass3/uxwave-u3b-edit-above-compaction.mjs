@@ -11,7 +11,11 @@ import {mawsLaunch,wireArrivals,fileArrivals,rowsOf,keepTranscript,waitFor,idle,
 
 const TARGET=process.env.UXW_TARGET||'one';
 const RESUMED=process.env.UXW_RESUMED==='1';
-const TAG=process.env.UXW_TAG||`u3b-editcmp-${TARGET}${RESUMED?'-resumed':''}`;
+// UXW_SHAPE=above (probe 7b): ONE, TWO, /compact, THREE, so a target before the boundary is not the first prompt; the
+// next prompt then asks the model, without a tool, for the words it was asked to reply with before.
+const SHAPE=process.env.UXW_SHAPE||'first';
+const TAG=process.env.UXW_TAG||`u3b-editcmp-${TARGET}${SHAPE==='above'?'-above':''}${RESUMED?'-resumed':''}`;
+const AFTER=SHAPE==='above'?'Without using any tool: list, in order, the words you were asked to reply with earlier in this conversation, separated by spaces, then the word AFTER. If there were none, reply with only the word AFTER.':'Without using any tool, reply with only the word AFTER.';
 const textOf=r=>typeof r.message?.content==='string'?r.message.content:Array.isArray(r.message?.content)?r.message.content.filter(b=>b.type==='text').map(b=>b.text).join(' '):typeof r.content==='string'?r.content:undefined;
 const brief=({line,row:r})=>Object.fromEntries(Object.entries({line,type:r.type,subtype:r.subtype,uuid:r.uuid,parentUuid:r.parentUuid,logicalParentUuid:r.logicalParentUuid,isMeta:r.isMeta,isCompactSummary:r.isCompactSummary,attachment:r.attachment?.type,text:textOf(r)?.slice(0,120)}).filter(([,v])=>v!==undefined));
 
@@ -19,14 +23,14 @@ async function rewindAndAfter(p,transcript,sent,label){
  const target=sent[TARGET];
  let lastLine=rowsOf(transcript).length;
  const from=p.seq;
- const r=await p.request('rewind_conversation',{target_message_uuid:target,last_seen_user_message_uuid:sent.two,interrupt_if_running:false},60000).catch(e=>({error:e.message}));
- p.note({event:'uxw_rewind',label,target:TARGET,targetUuid:target,lastSeen:sent.two,response:r});
+ const r=await p.request('rewind_conversation',{target_message_uuid:target,last_seen_user_message_uuid:sent.last,interrupt_if_running:false},60000).catch(e=>({error:e.message}));
+ p.note({event:'uxw_rewind',label,target:TARGET,targetUuid:target,lastSeen:sent.last,response:r});
  console.log(label,'rewind',JSON.stringify(r.response??r).slice(0,500));
  await delay(3000);
  let rows=rowsOf(transcript);
  p.note({event:'uxw_case',case:'after rewind',fromSeq:from,toSeq:p.seq,wire:wireArrivals(p,from),file:fileArrivals(rows,lastLine),fileRows:rows.filter(x=>x.line>lastLine).map(brief)});lastLine=rows.length;
  const from2=p.seq;
- const t=await turn(p,'Without using any tool, reply with only the word AFTER.',120000);await idle(p,60000,3000);
+ const t=await turn(p,AFTER,120000);await idle(p,60000,3000);
  rows=rowsOf(transcript);
  const answered=p.frames.some(x=>x.seq>from2&&x.frame.type==='assistant'&&/AFTER/.test(JSON.stringify(x.frame.message?.content??'')));
  const byUuid=new Map(rows.filter(x=>x.row.uuid).map(x=>[x.row.uuid,x]));
@@ -40,9 +44,12 @@ export default async()=>{
  const sent={};let sid=null;
  await mawsLaunch(TAG+(RESUMED?'-first':''),{model:'haiku',spendCap:'0.10',provenance:{probe:'U3b probe 7 (in-place rewind above a compaction)',target:TARGET,resumed:RESUMED}},async(p,{sessionId,transcript})=>{
   sid=sessionId;
-  let s=await turn(p,'Without using any tool, reply with only the word ONE.');sent.one=s.uuid;await idle(p,60000,3000);
-  const c=prompt(p,'/compact');sent.compact=c.uuid;await waitFor(p,f=>f.type==='result',{after:c.seq,timeout:180000});await idle(p,60000,3000);
-  s=await turn(p,'Without using any tool, reply with only the word TWO.');sent.two=s.uuid;await idle(p,60000,3000);
+  const steps=SHAPE==='above'?['ONE','TWO','/compact','THREE']:['ONE','/compact','TWO'];
+  for(const step of steps){
+   const text=step.startsWith('/')?step:`Without using any tool, reply with only the word ${step}.`;
+   const x=prompt(p,text);sent[step.startsWith('/')?step.slice(1):step.toLowerCase()]=x.uuid;if(!step.startsWith('/'))sent.last=x.uuid;
+   await waitFor(p,f=>f.type==='result',{after:x.seq,timeout:180000});await idle(p,60000,3000);
+  }
   p.note({event:'uxw_sent',sent});
   if(!RESUMED)await rewindAndAfter(p,transcript,sent,TARGET);
   keepTranscript(transcript,TAG+(RESUMED?'-first':''));

@@ -3,7 +3,22 @@ UX wave, landing U3b, probe 7: an IN-PLACE rewind (no fork) onto a message from 
 rewinds the session itself, src/engine-host/rewind.ts; landing 2 needs the fact; asked by the architect 2026-11-15
 after probe 6; VM dc-uxwave5-26dc, branch ux-wave/U3b-probes)
 
-Verdict.
+Verdict (updated with probe 7b, below).
+  - In the LIVE process that compacted, a rewind onto a message from before the boundary is accepted, and it
+    RESTORES the conversation as it stood before that message, from the rows written before the compaction. Probe
+    7b rewound onto TWO, the second prompt, and the next prompt hung under ONE's answer (ONE and its answer as
+    first written, line 3 and 25), with no boundary and no summary in its chain. Asked without a tool for the words
+    it had been asked to reply with, the model answered "ONE AFTER": it held ONE and nothing after it. Probe 7's
+    rewind onto ONE, the first prompt, emptied the conversation, which is what a correct rewind to a first prompt
+    gives.
+  - After a RESTART (`--resume`), the same rewinds are refused in both shapes, with {rewound: false, prefillText:
+    null, precedingAssistantUuid: null, error: "target not found", reason: "target_not_found"}. The session goes on
+    unchanged: in 7b it answered "ONE TWO THREE AFTER" from the summary and the later messages.
+  - Live rewinds onto the /compact row and onto the prompt after the compaction are accepted (probe 7, below).
+    precedingAssistantUuid then names an answer from before the boundary.
+  - A rewind sends nothing on the wire beyond its control_response, and writes only a `last-prompt` row.
+
+Probe 7 (the session's first prompt as the target before the boundary).
   - In the LIVE session that compacted, the engine ACCEPTS a rewind onto a message from before the boundary.
     Onto ONE, the first prompt: {rewound: true, targetMessageUuid: ONE, prefillText: ONE's text,
     precedingAssistantUuid: null}. The next prompt is then written with parentUuid null: the session starts over
@@ -66,3 +81,30 @@ Inference, for landing 2.
     the model's context after a compaction. Do not use it to find the row the cut lands on; the next prompt's
     parentUuid is the truth.
   - A refusal leaves the session usable (1 of 1): the next prompt is taken and answered.
+
+Probe 7b: a target before the boundary that is NOT the first prompt (asked by the architect after probe 7).
+  Method. The same scenario with UXW_SHAPE=above: ONE typed and answered; TWO typed and answered; "/compact"; THREE
+  typed and answered. Then `rewind_conversation` onto TWO (its sent uuid, which is its row), with
+  last_seen_user_message_uuid THREE, in the live process; then, in the restart case, in a process launched again with
+  `--resume`. The next prompt is "Without using any tool: list, in order, the words you were asked to reply with
+  earlier in this conversation, separated by spaces, then the word AFTER. …", so its answer shows what the model
+  holds. Each case once. Fixtures: u3b-editcmp-two-above (live), u3b-editcmp-two-above-resumed-first (the source
+  process) and u3b-editcmp-two-above-resumed (the resumed one), each .jsonl and .transcript.jsonl. Spend: US$0.010.
+  Observed, live (u3b-editcmp-two-above). The source's file: 3 ONE, 25 its answer "ONE" (8f7d6924…), 26 an attachment
+  (e9043a67…), 32 TWO (9d9d45bb…, parentUuid e9043a67…), 37 "TWO", 43 compact_boundary, 44 the summary, 45 the
+  caveat, 46 /compact, 47 "Compacted", 55 THREE, 75 "THREE". Rewind: {rewound: true, targetMessageUuid: 9d9d45bb…,
+  prefillText: "Without using any tool, reply with only the word TWO.", precedingAssistantUuid: 8f7d6924… (ONE's
+  answer)}. Then a `last-prompt` row (80) and nothing on the wire. The AFTER prompt: wire 97 requesting, 98 its
+  replay, 106 result success "ONE AFTER". In the file, its row (83) has parentUuid e9043a67…, the same parent TWO
+  had, and its chain runs 83, then 25 "ONE", then 3 ONE (attachments aside). The chain holds no boundary and no
+  summary. The answer at line 91 is "ONE AFTER".
+  Observed, after the restart (u3b-editcmp-two-above-resumed). Rewind onto TWO (a4ef3737…): {rewound: false,
+  prefillText: null, precedingAssistantUuid: null, error: "target not found", reason: "target_not_found"}; nothing
+  written. AFTER answered "ONE TWO THREE AFTER" (result success). Its row (83) hangs under THREE's answer (75), and
+  the chain runs back through the compaction (47 to 43) to TWO, ONE and their answers, as written.
+  Inference, for landing 2.
+  - A live Edit under a message from before a compaction is a real rewind across the boundary. The engine rebuilds
+    the conversation from the pre-compaction rows up to the target, and drops the summary and everything after it.
+    The model then holds those messages verbatim, not the summary (1 of 1, "ONE AFTER").
+  - The same Edit after a restart is refused, as probe 7 found. MAWS can only offer it while the session's process
+    is the one that compacted, or must report the engine's "target not found" as expected.
