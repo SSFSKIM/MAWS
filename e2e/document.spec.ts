@@ -521,7 +521,7 @@ function drawnBlocks({ content, skip }: { content: string; skip?: string }): Dra
   const box = root.getBoundingClientRect();
   const left = box.left + parseFloat(style.borderLeftWidth) + parseFloat(style.paddingLeft);
   const width = root.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-  const children = [...root.children].filter((child) => !(skip && child.matches(skip)) && ![...child.classList].some((name) => name.startsWith('ProseMirror-')) && child.getBoundingClientRect().height > 0);
+  const children = Array.from(root.children).filter((child) => !(skip && child.matches(skip)) && !Array.from(child.classList).some((name) => name.startsWith('ProseMirror-')) && child.getBoundingClientRect().height > 0);
   let bottom: number | null = null;
   const blocks = children.map((shown) => {
     // the editor may wrap a table in a box of its own (the table's node view): the table is the block either way
