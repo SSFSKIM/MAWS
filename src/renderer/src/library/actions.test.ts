@@ -9,6 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
+import { surfaceTabs } from '../panel/surface-model';
 import { useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { fail, installFakeMain, ok } from '../test-support/code';
@@ -140,15 +141,17 @@ describe('showing the main tab that already shows an artifact', () => {
   // showing the main tab docks the column so the tab can be seen, and nothing it shows changes: the same tool tab in
   // front, on the same artifact's record, with the same pins and surfaces
   it.each(['maximized', 'floating'] as const)('with the side column %s, shows the main tab, docks the column, and leaves what it shows as it was', (mode) => {
-    const SIDE_TAB = `${ARTIFACTS_TOOL_ID}-tab`;
+    const SIDE_TAB = `${ARTIFACTS_TOOL_ID}:probe`;
     const SHOWN = '00000000-0000-4000-8000-000000000002';
     openArtifactTab(A);
-    useLayout.getState().openTab({ kind: 'diagnostics' });
-    useLayout.setState({
-      panelBySession: new Map([[LOCAL_SESSION, { tabs: [{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }], activeTabId: SIDE_TAB }]]),
-      panelParams: { [SIDE_TAB]: { target: SHOWN, machine: TEST_MACHINE } },
-    });
+    // the session in front, whose transcript holds the mention, with its side column on another artifact's record: a
+    // column with nothing to show cannot stay maximized or floating (the store's surfaceRegions)
+    useLayout.getState().openTab({ kind: 'session', appSessionId: LOCAL_SESSION });
+    useLayout.getState().setPanelTabs(LOCAL_SESSION, { tabs: [{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }], activeTabId: SIDE_TAB });
+    useLayout.getState().showSurfaceTab(LOCAL_SESSION, SIDE_TAB);
+    useLayout.getState().setPanelParams(SIDE_TAB, { target: SHOWN, machine: TEST_MACHINE });
     useLayout.getState().setPanel({ [mode]: true });
+    expect(surfaceTabs(useLayout.getState(), LOCAL_SESSION).map((tab) => tab.id), 'the record is in view').toEqual([SIDE_TAB]);
     const before = useLayout.getState();
     expect(before.regions.panel[mode]).toBe(true);
 
@@ -158,7 +161,8 @@ describe('showing the main tab that already shows an artifact', () => {
     expect(after.regions.panel, 'the column docks, its width and fold as they were').toEqual({ ...before.regions.panel, maximized: false, floating: false });
     // what the column shows: the same objects, not only equal ones
     expect(after.panelBySession).toBe(before.panelBySession);
-    expect(after.panelBySession.get(LOCAL_SESSION)).toEqual({ tabs: [{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }], activeTabId: SIDE_TAB });
+    expect(after.panelBySession.get(LOCAL_SESSION)?.tabs).toEqual([{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }]);
+    expect(surfaceTabs(after, LOCAL_SESSION).map((tab) => tab.id), 'the record still in view').toEqual([SIDE_TAB]);
     expect(after.panelParams).toBe(before.panelParams);
     expect(after.panelParams[SIDE_TAB]).toEqual({ target: SHOWN, machine: TEST_MACHINE });
     expect([after.panelPinned, after.panelActiveNoSession, after.panelSurfaces, after.panelGroups]).toEqual([before.panelPinned, before.panelActiveNoSession, before.panelSurfaces, before.panelGroups]);
