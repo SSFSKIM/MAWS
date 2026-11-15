@@ -150,21 +150,27 @@ describe('exportHtml', () => {
 describe('the exported page', () => {
   const printBlock = (html: string): string => /@media print \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? '';
 
-  // The elements the browser gives a block margin of its own (Chromium's html.css, which the PDF is drawn with: p, the
-  // headings, the lists, dl, blockquote, figure, pre and its kin, hr, form); the editor's base stylesheet (Tailwind's
-  // preflight, `* { margin: 0 }`) removes every one of them, so the page must remove each one the export writes.
-  const BROWSER_BLOCK_MARGINS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'menu', 'dir', 'dl', 'blockquote', 'figure', 'pre', 'listing', 'xmp', 'hr', 'form']);
-  const zeroedOf = (html: string): string[] => /\n\.ds-doc :where\(([^)]*)\) \{ margin-block: 0; \}\n/.exec(html)?.[1].split(', ') ?? [];
+  // The elements the browser pads of its own accord (Chromium's html.css and mathml.css, which the PDF is drawn with:
+  // the lists' inline start, a table cell's 1px, the form controls, fieldset and legend, dialog; MathML's fraction and
+  // table cell). The editor's base stylesheet (Tailwind's preflight) zeroes margin and padding on every element; the page
+  // mirrors its margins whole, and leaves padding to the theme, which sets it on each HTML element the export writes
+  // with one. A fraction's padding is MathML's own layout: the editor draws math with KaTeX's HTML, not MathML.
+  const BROWSER_PADDINGS = new Set(['ul', 'ol', 'menu', 'dir', 'td', 'th', 'fieldset', 'legend', 'dialog', 'button', 'select', 'textarea', 'option', 'mtd', 'mfrac']);
 
-  it('removes the browser’s own block margin from every element the export writes, at zero specificity', async () => {
+  it('removes the browser’s own margin from every element at zero specificity, as the editor’s reset does', async () => {
     const { doc } = exportDashboard();
     const views = await prepareViews(doc, { read: async ({ ref }) => SNAPSHOTS[ref], theme: exportTheme(), authorName: defaultAuthorName });
     // one of each block kind, and a drawn view (its figure, caption, SVG and table)
     const pages = [await exportHtml(everyKindSource()), await exportHtml(exportSource(doc, 'Board'), { renderView: views })];
     const written = new Set(pages.flatMap((html) => [...(/<main[\s\S]*<\/main>/.exec(html)?.[0] ?? '').matchAll(/<([a-z][a-z0-9]*)[\s>]/g)].map((match) => match[1])));
-    const margined = [...written].filter((tag) => BROWSER_BLOCK_MARGINS.has(tag)).sort();
-    expect(margined).toEqual(['blockquote', 'figure', 'h1', 'h2', 'h3', 'hr', 'ol', 'p', 'pre', 'ul']);
-    for (const html of pages) expect(margined.filter((tag) => !zeroedOf(html).includes(tag))).toEqual([]);
+    // the padded elements the export writes (a checklist's box, its one input, is a checkbox, which the browser does not
+    // pad), and the theme's padding of each HTML one
+    expect([...written].filter((tag) => BROWSER_PADDINGS.has(tag)).sort()).toEqual(['mfrac', 'ol', 'td', 'th', 'ul']);
+    for (const html of pages) {
+      expect(html).toMatch(/\.ds-doc ul,\s*\.ds-doc ol \{[^}]*padding-left:/);
+      expect(html).toMatch(/\.ds-doc th,\s*\.ds-doc td \{[^}]*padding:/);
+      expect(html).toContain('\n.ds-doc :where(*) { margin: 0; }\n');
+    }
     // the theme's own gap rule still stands beside it, with the spacing token resolved
     expect(pages[0]).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 12px;/);
   });
