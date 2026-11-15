@@ -5,6 +5,8 @@
 import { describe, expect, it } from 'vitest';
 import { docPage, dsOverrides, setDocPage, setDsOverrides } from '@artifacts/document/meta';
 import { newDoc, onUpdate, type Doc } from '@artifacts/yjs';
+import { exportDesign, pageOf } from '@artifacts/document/export/design-system';
+import { A4_SYSTEM, LETTER_SYSTEM } from '../../test-support/page-systems';
 import { choosePage, PAGE_ORIGIN, pageInForce } from './page';
 
 /** The origins of the transactions `doc` saw while `act` ran. */
@@ -21,10 +23,10 @@ function writes(doc: Doc, act: () => void): unknown[] {
 
 describe('the size in force', () => {
   it('is the document’s size, else the system’s page; compact is the document’s density', () => {
-    expect(pageInForce({}, {}, 'letter')).toEqual({ size: 'letter', compact: false, sizeKnown: true });
-    expect(pageInForce({}, {}, 'a4')).toEqual({ size: 'a4', compact: false, sizeKnown: true });
-    expect(pageInForce({ size: 'a4' }, {}, 'letter')).toEqual({ size: 'a4', compact: false, sizeKnown: true });
-    expect(pageInForce({ density: 'compact' }, {}, 'letter')).toEqual({ size: 'letter', compact: true, sizeKnown: true });
+    expect(pageInForce({}, {}, LETTER_SYSTEM)).toEqual({ size: 'letter', compact: false, sizeKnown: true });
+    expect(pageInForce({}, {}, A4_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce({ size: 'a4' }, {}, LETTER_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce({ density: 'compact' }, {}, LETTER_SYSTEM)).toEqual({ size: 'letter', compact: true, sizeKnown: true });
   });
 
   // M3 decision 6 and the branch review's finding 1: a size choice rests on the system's page (choosing it clears the
@@ -32,36 +34,68 @@ describe('the size in force', () => {
   it('is not known while the system’s page is not, and still names the size the document sets', () => {
     expect(pageInForce({}, {}, null)).toEqual({ size: null, compact: false, sizeKnown: false });
     expect(pageInForce({ size: 'letter', density: 'compact' }, {}, null)).toEqual({ size: 'letter', compact: true, sizeKnown: false });
-    expect(pageInForce({}, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' }, null), 'both sides overridden').toEqual({ size: 'a4', compact: false, sizeKnown: false });
+    expect(pageInForce({}, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' }, null), 'both sides overridden: read only through the system’s resolver').toEqual({ size: null, compact: false, sizeKnown: false });
   });
 
   // L4: the document's own overrides of the page's width or height decide the size its exports print on
   it('is neither size when the document’s overrides set another page, and the size the overrides spell otherwise', () => {
-    expect(pageInForce({}, { '--ds-page-width': '6in', '--ds-page-height': '9in' }, 'letter')).toEqual({ size: null, compact: false, sizeKnown: true });
-    expect(pageInForce({}, { '--ds-page-width': '7in' }, 'letter'), 'one side overridden, the other the system’s').toMatchObject({ size: null, sizeKnown: true });
-    expect(pageInForce({}, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' }, 'letter')).toMatchObject({ size: 'a4' });
-    expect(pageInForce({}, { '--ds-page-width': '816px', '--ds-page-height': '11in' }, 'a4')).toMatchObject({ size: 'letter' });
-    expect(pageInForce({ size: 'a4' }, { '--ds-page-width': '6in', '--ds-page-height': '9in' }, 'letter'), 'the document’s size wins over its overrides, as at export').toMatchObject({ size: 'a4' });
+    expect(pageInForce({}, { '--ds-page-width': '6in', '--ds-page-height': '9in' }, LETTER_SYSTEM)).toEqual({ size: null, compact: false, sizeKnown: true });
+    expect(pageInForce({}, { '--ds-page-width': '7in' }, LETTER_SYSTEM), 'one side overridden, the other the system’s').toMatchObject({ size: null, sizeKnown: true });
+    expect(pageInForce({}, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' }, LETTER_SYSTEM)).toMatchObject({ size: 'a4' });
+    expect(pageInForce({}, { '--ds-page-width': '816px', '--ds-page-height': '11in' }, A4_SYSTEM)).toMatchObject({ size: 'letter' });
+    expect(pageInForce({ size: 'a4' }, { '--ds-page-width': '6in', '--ds-page-height': '9in' }, LETTER_SYSTEM), 'the document’s size wins over its overrides, as at export').toMatchObject({ size: 'a4' });
     expect(pageInForce({}, { '--ds-page-width': '7in' }, null), 'the other side is the system’s, not known yet').toMatchObject({ size: null, sizeKnown: false });
+  });
+});
+
+// The branch review's P2: the overrides' width and height are read as the export reads them, through the governing
+// system's resolver (`pageOf` over `exportDesign`), so a reference or a fallback names the page it prints on
+describe('the size in force, read as the export reads it', () => {
+  const both = (width: string, height: string) => ({ '--ds-page-width': width, '--ds-page-height': height });
+  it('reads a reference’s fallback in the width, the height or both', () => {
+    expect(pageInForce({}, both('var(--ds-print-width, 210mm)', '297mm'), LETTER_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce({}, both('210mm', 'var(--ds-print-height, 297mm)'), LETTER_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce({}, both('var(--ds-print-width, 210mm)', 'var(--ds-print-height, 297mm)'), LETTER_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce({}, { '--ds-page-width': 'var(--ds-print-width, 8.5in)' }, A4_SYSTEM), 'one side, the other the system’s').toMatchObject({ size: null });
+  });
+
+  it('follows a reference to another value to the length it names', () => {
+    const chained = { ...both('var(--ds-print-width)', 'var(--ds-print-height)'), '--ds-print-width': '210mm', '--ds-print-height': '297mm' };
+    expect(pageInForce({}, chained, LETTER_SYSTEM)).toMatchObject({ size: 'a4', sizeKnown: true });
+    expect(pageInForce({}, both('var(--ds-space-8)', 'var(--ds-space-8)'), LETTER_SYSTEM), 'a system length that is no page: neither').toMatchObject({ size: null, sizeKnown: true });
+  });
+
+  // what the export does with an override its resolver cannot resolve: drops it, and prints on the system's page
+  it('takes the system’s page where the export drops an override that resolves to nothing', () => {
+    const lost = both('var(--ds-nowhere)', 'var(--ds-nowhere)');
+    expect(pageOf(exportDesign(LETTER_SYSTEM, lost))).toMatchObject({ width: '8.5in', height: '11in' });
+    expect(pageOf(exportDesign(A4_SYSTEM, lost))).toMatchObject({ width: '210mm', height: '297mm' });
+    expect([pageInForce({}, lost, LETTER_SYSTEM).size, pageInForce({}, lost, A4_SYSTEM).size]).toEqual(['letter', 'a4']);
+  });
+
+  it('writes a fallback’s size as the size in force: choosing it writes nothing', () => {
+    const doc = newDoc();
+    setDsOverrides(doc, both('var(--ds-print-width, 210mm)', '297mm'));
+    expect(writes(doc, () => expect(choosePage(doc, 'a4', LETTER_SYSTEM)).toBe(false))).toEqual([]);
   });
 });
 
 describe('choosing a page item', () => {
   it('writes the other size as one transaction of the person’s origin, and nothing for the size in force', () => {
     const doc = newDoc();
-    expect(writes(doc, () => expect(choosePage(doc, 'letter', 'letter')).toBe(false)), 'the size in force: nothing written').toEqual([]);
-    expect(writes(doc, () => expect(choosePage(doc, 'a4', 'letter')).toBe(true))).toEqual([PAGE_ORIGIN]);
+    expect(writes(doc, () => expect(choosePage(doc, 'letter', LETTER_SYSTEM)).toBe(false)), 'the size in force: nothing written').toEqual([]);
+    expect(writes(doc, () => expect(choosePage(doc, 'a4', LETTER_SYSTEM)).toBe(true))).toEqual([PAGE_ORIGIN]);
     expect(docPage(doc)).toEqual({ size: 'a4' });
-    expect(writes(doc, () => choosePage(doc, 'a4', 'letter'))).toEqual([]);
+    expect(writes(doc, () => choosePage(doc, 'a4', LETTER_SYSTEM))).toEqual([]);
   });
 
   it('clears the document’s size when the one chosen is the system’s page, so the document follows its system again', () => {
     const doc = newDoc();
     setDocPage(doc, { size: 'a4', density: 'compact' });
-    expect(writes(doc, () => choosePage(doc, 'letter', 'letter'))).toEqual([PAGE_ORIGIN]);
+    expect(writes(doc, () => choosePage(doc, 'letter', LETTER_SYSTEM))).toEqual([PAGE_ORIGIN]);
     expect(docPage(doc)).toEqual({ density: 'compact' });
     setDocPage(doc, { size: 'letter' });
-    choosePage(doc, 'a4', 'a4');
+    choosePage(doc, 'a4', A4_SYSTEM);
     expect(docPage(doc)).toEqual({});
     expect(doc.get('meta').getAttr('page'), 'an empty page removes the attribute').toBeUndefined();
   });
@@ -69,7 +103,7 @@ describe('choosing a page item', () => {
   it('toggles Compact, keeping the size', () => {
     const doc = newDoc();
     setDocPage(doc, { size: 'a4' });
-    expect(writes(doc, () => choosePage(doc, 'compact', 'letter'))).toEqual([PAGE_ORIGIN]);
+    expect(writes(doc, () => choosePage(doc, 'compact', LETTER_SYSTEM))).toEqual([PAGE_ORIGIN]);
     expect(docPage(doc)).toEqual({ size: 'a4', density: 'compact' });
     choosePage(doc, 'compact', null); // the system's page plays no part in the density
     expect(docPage(doc)).toEqual({ size: 'a4' });
@@ -78,10 +112,10 @@ describe('choosing a page item', () => {
   it('removes the document’s overrides of the page’s width and height in the same transaction, keeping its others (L4)', () => {
     const doc = newDoc();
     setDsOverrides(doc, { '--ds-page-width': '6in', '--ds-page-height': '9in', '--ds-font-body': 'Georgia, serif' });
-    expect(writes(doc, () => choosePage(doc, 'a4', 'letter'))).toEqual([PAGE_ORIGIN]);
+    expect(writes(doc, () => choosePage(doc, 'a4', LETTER_SYSTEM))).toEqual([PAGE_ORIGIN]);
     expect([docPage(doc), dsOverrides(doc)]).toEqual([{ size: 'a4' }, { '--ds-font-body': 'Georgia, serif' }]);
     setDsOverrides(doc, { '--ds-page-height': '9in' });
-    expect(writes(doc, () => choosePage(doc, 'letter', 'letter')), 'the system’s size chosen: the size cleared and the override gone, in one').toEqual([PAGE_ORIGIN]);
+    expect(writes(doc, () => choosePage(doc, 'letter', LETTER_SYSTEM)), 'the system’s size chosen: the size cleared and the override gone, in one').toEqual([PAGE_ORIGIN]);
     expect([docPage(doc), doc.get('meta').getAttr('dsOverrides')]).toEqual([{}, undefined]);
   });
 

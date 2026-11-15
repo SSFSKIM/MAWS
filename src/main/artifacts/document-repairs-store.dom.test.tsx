@@ -29,6 +29,7 @@ import { ticks } from '@artifacts/document/editor/test-world';
 import { HUMAN, openDocumentWorld, sessionActor, type DocumentWorld } from '../../engine-host/documents/kinds/document-world.fixture';
 import { fromNodePort } from '../../engine-host/documents/ports';
 import { choosePage } from '../../renderer/src/tools/document/page'; // UX wave U10b M3: the Export menu's page item
+import { LETTER_SYSTEM } from '../../renderer/src/test-support/page-systems'; // UX wave U10b
 
 const TAB = 't1';
 const AGENT = sessionActor('app-agent');
@@ -272,7 +273,7 @@ describe('the editor’s repairs through the store', () => {
     const id = await made(para('p1', 'Quarterly sales.'), chart('c1'));
     const { mine, second } = await mounted(id);
     expect(await actors(id), 'the open').toEqual(['session:app-agent']);
-    expect(choosePage(mine.doc, 'a4', 'letter')).toBe(true);
+    expect(choosePage(mine.doc, 'a4', LETTER_SYSTEM)).toBe(true);
     await until(() => mine.state().unsaved === 0 && docPage(second.doc).size === 'a4', 'the page at the second replica');
     await ticks(30);
     expect([await actors(id), second.state().unsaved], 'one row of the person’s').toEqual([['session:app-agent', 'human'], 0]);

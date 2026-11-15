@@ -3,6 +3,7 @@
 // (title, the last view read before this showing, the suggestions setting), the rail the header toggles, an export's
 // progress, the close guard reading all of it, and the handle kept alive until a comment's sends settle.
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { LETTER_SYSTEM } from '../../test-support/page-systems'; // UX wave U10b
 import type { AppSessionId } from '@shared/graph/ids';
 import { MemoryDocumentHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
 import { addThread, getThread, reply } from '@artifacts/document/threads';
@@ -374,11 +375,11 @@ describe('a document tab’s state', () => {
     await Promise.all([ready(one), ready(two)]);
     const rows: unknown[] = [];
     w.memory.onLanded((row) => rows.push(row.actor));
-    one.choosePage('a4', 'letter');
+    one.choosePage('a4', LETTER_SYSTEM);
     const second = w.handles[1]!;
     await until(() => docPage(second.doc).size === 'a4' && w.handles[0]!.state().unsaved === 0, 'the page at the second replica');
     expect(rows).toEqual([{ kind: 'human' }]);
-    expect(pageInForce(docPage(second.doc), dsOverrides(second.doc), 'letter')).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(pageInForce(docPage(second.doc), dsOverrides(second.doc), LETTER_SYSTEM)).toEqual({ size: 'a4', compact: false, sizeKnown: true });
     expect(second.state().unsaved, 'the second window writes nothing back').toBe(0);
   });
 
@@ -387,7 +388,7 @@ describe('a document tab’s state', () => {
     const state = w.open();
     await ready(state);
     state.setPreviewing(true, { versionId: 3 });
-    state.choosePage('a4', 'letter');
+    state.choosePage('a4', LETTER_SYSTEM);
     expect([docPage(w.handles[0]!.doc), w.handles[0]!.state().unsaved]).toEqual([{}, 0]);
   });
 
@@ -398,7 +399,7 @@ describe('a document tab’s state', () => {
     const w = world({ 'artifacts.export': () => (printed.push(docPage(memory.doc)), { path: '/u/x', revision: 9 }), 'library.saveAs': { saved: false } }, memory);
     const state = w.open();
     await ready(state);
-    state.choosePage('a4', 'letter');
+    state.choosePage('a4', LETTER_SYSTEM);
     expect(w.handles[0]!.state().unsaved, 'the write is in flight as the export starts').toBe(1);
     await state.export('pdf');
     expect([printed, state.snapshot().exporting]).toEqual([[{ size: 'a4' }], null]);
@@ -410,7 +411,7 @@ describe('a document tab’s state', () => {
     await ready(state);
     w.memory.dropConnections();
     await until(() => w.handles[0]!.state().phase === 'off', 'the port to go');
-    state.choosePage('a4', 'letter');
+    state.choosePage('a4', LETTER_SYSTEM);
     expect(w.handles[0]!.state().unsaved).toBe(1);
     await state.export('pdf');
     expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: EXPORT_COPY.exportNotSaved });

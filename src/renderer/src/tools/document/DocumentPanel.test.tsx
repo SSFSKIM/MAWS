@@ -24,6 +24,7 @@ import { resetShellStores } from '../../test-support/shell-stores';
 import { requestArtifactOpen, resetOpenRequests, takeOpenRequest } from '../artifacts/viewers/requests';
 import { PageSystemProvider, provideDocumentDesignSystem, SystemPage, type DesignSystemScopeProps } from './design-system';
 import { registerDocumentEditor } from './index';
+import { LETTER_SYSTEM } from '../../test-support/page-systems'; // UX wave U10b
 import type { DocumentTabDeps, DocumentTabState } from './tab-state';
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
@@ -268,7 +269,7 @@ describe('the document editor in L’s registry', () => {
   // UX wave U10b (§B.5, M3 decision 1 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; the owner's
   // "Always show the page in force")
   it('checks the system’s page with nothing set and writes nothing until an item is chosen; A4 chosen is one row of the person’s, then checked', async () => {
-    const stop = provideDocumentDesignSystem({ Scope: ({ children }) => children, systemFor: () => ({ builtin: 'maws' }), pageSizeOf: () => 'letter' });
+    const stop = provideDocumentDesignSystem({ Scope: ({ children }) => children, systemFor: () => ({ builtin: 'maws' }), exportSystemOf: () => LETTER_SYSTEM });
     try {
       const rows: unknown[] = [];
       memory.onLanded((row) => rows.push(row.actor));
