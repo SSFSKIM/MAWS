@@ -24,7 +24,7 @@ How to see it working: in a terminal session on this Mac that MAWS drives, ask t
 - [x] (2026-11-15) Probes P1 and P3 recorded (`spikes/protocol-probe/findings-uxwave-u8d-resume-orphans.txt`, `findings-uxwave-u8d-process-end.txt`; merged at `0e4685860`) and ruled (Decision Log 6).
 - [x] (2026-11-15) Probes P2, P4 and P5 recorded (`findings-uxwave-u8d-bridge-stop-agent.txt`, `-waited-agent.txt`, `-nested-late-end.txt`; merged at `c892a431f`) and ruled (Decision Log 8). M4 is no longer held.
 - [ ] The owner's answer to card C1 (sent; option 1 is built until it comes; its word now shows only in N9's two cases).
-- [ ] M1 — the ledger's agents half and the derivation.
+- [x] (2026-11-15) M1 — the ledger's agents half and the derivation: `885fcdeb1`..`1cea6c170`, fix rounds `76a232b4a`..`1c1dc2fe5` (N1, the recorded vectors) and `563686989`..`ed908c05d` (the launch row, N7, N8); reviewed clean twice; `jobs.test.ts` 62/62, `src/services/lane-a` and `src/shared/lane-a` 236/236 on the build VM.
 - [ ] M2 — the driver: the three inputs, the body, what it costs.
 - [ ] M3 — the window: the statuses laid over the graph.
 - [ ] M4 — the e2e scenes, the record, and the acceptance run.
