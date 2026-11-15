@@ -416,6 +416,6 @@ describe('My items, All', () => {
     await drawn();
     fireEvent.click(await within(part('connectors')).findByRole('button', { name: 'Sign in to tides' }));
     await waitFor(() => expect(invoked('connectors.signIn')).toHaveLength(1));
-    expect(invoked('connectors.signIn')).toEqual([{ name: 'tides', scope: 'user', cwd: QUAY, path: TIDES.path, appSessionId: at('quay-live' as AppSessionId) }]);
+    expect(invoked('connectors.signIn')).toEqual([{ name: 'tides', scope: 'user', cwd: QUAY, path: TIDES.path, appSessionId: 'quay-live' }]); // the session's local id: the command is this Mac's
   });
 });
