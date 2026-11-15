@@ -93,7 +93,7 @@ export const hiddenTurnsOf = (state: Pick<TranscriptState, 'hidden'>): readonly 
 
 interface Approval { key: string; dropped: boolean; waits: boolean }
 const approvalOf = (row: Row): Approval | null =>
-  row.kind === 'user' && row.consent !== undefined ? { key: blockedKey(row.consent), dropped: row.dropped, waits: row.pending !== undefined || row.unread === true } : null;
+  row.kind === 'user' && row.consent !== undefined ? { key: blockedKey(row.consent), dropped: row.dropped, waits: row.started !== true || row.pending !== undefined || row.unread === true } : null;
 const blockedRowOf = (row: Row): (Cell & { blocked: BlockedCall }) | null => (row.kind === 'cell' && isBlockedCell(row) ? row : null);
 
 const memo = new WeakMap<readonly Row[], { hidden: readonly TurnId[]; states: ReadonlyMap<CellId, BlockedState> }>();
@@ -108,7 +108,8 @@ export function blockedStates(rows: readonly Row[], hidden: readonly TurnId[]): 
 }
 
 // One pass backward for what stands after each blocked row (its grant), one forward for what stands before it (again).
-// An approval row counts when it is not dropped; it was read when it carries no waiting mark.
+// An approval row counts when it is not dropped; it was read only when it says the engine started its message
+// (`started`, Decision Log 45) and carries no waiting mark: nothing the model cannot place reads as read.
 function deriveStates(rows: readonly Row[], hidden: ReadonlySet<TurnId>): ReadonlyMap<CellId, BlockedState> {
   const shown = rows.filter((row) => row.turnId === null || !hidden.has(row.turnId));
   const grants: BlockedState['grant'][] = [];

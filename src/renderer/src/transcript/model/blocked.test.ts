@@ -104,7 +104,7 @@ describe('the rule: whether a blocked row is approved, waits, or is blocked agai
   const person = (turn: string, text: string, extra: Partial<RowOf<'user'>> = {}): Row => ({
     kind: 'user', id: `user:m${(n += 1)}`, turnId: turn, at: AT, messageUuid: null, text, attachments: [], placeholders: [], lines: 1, editable: false, steer: false, dropped: false, ...extra,
   }) as unknown as Row;
-  const approval = (turn: string, subject: string, extra: Partial<RowOf<'user'>> = {}) => person(turn, consentMessage('command', subject), { consent: { kind: 'command', subject }, ...extra });
+  const approval = (turn: string, subject: string, extra: Partial<RowOf<'user'>> = {}) => person(turn, consentMessage('command', subject), { consent: { kind: 'command', subject }, started: true, ...extra });
   const read = (rows: Row[], hidden: readonly TurnId[] = []) => rows.flatMap((row) => {
     const state = blockedStates(rows, hidden).get(row.id as Cell['id']);
     return state === undefined ? [] : [`${row.id} ${state.call.subject}${state.again ? ' again' : ''} ${state.grant}${readsApproved(state) ? ' approved' : ''}`];
@@ -118,9 +118,14 @@ describe('the rule: whether a blocked row is approved, waits, or is blocked agai
     expect(read(rows)).toEqual([`${rows[0].id} make build none`]);
   });
 
-  it('an approval after it that carries no waiting mark: the grant was read, and the row reads approved', () => {
+  it('an approval after it whose message the engine started, with no waiting mark: the grant was read, and the row reads approved', () => {
     const rows = [block(T1, 'make build'), approval(T2, 'make build')];
     expect(read(rows)).toEqual([`${rows[0].id} make build read approved`]);
+  });
+
+  it('an approval that does not say its message started, with no other mark: it waits; nothing the model cannot place reads as read (Decision Log 45)', () => {
+    const rows = [block(T1, 'make build'), person(T2, consentMessage('command', 'make build'), { consent: { kind: 'command', subject: 'make build' } })];
+    expect(read(rows)).toEqual([`${rows[0].id} make build waiting`]);
   });
 
   it('a waiting approval (at the next step, held, unread): it waits, and the row does not read approved', () => {
@@ -421,6 +426,25 @@ describe('probe E: one block, its grant and its retry, as journal and as transcr
       return id;
     });
     expect(ids[0]).toBe(ids[1]);
+  });
+
+  // Decision Log 45: the row reads approved only once the engine has started the approval's message. u1c-e-1's grant is
+  // written at outbound seq 194 while the session is idle, queued at 197 and started at 198; nothing before 198 is read.
+  it('u1c-e-1, live: the grant written (seq 194) and queued (197) waits and keeps the control; started (198) it is read; cancelled before it started it is none', () => {
+    const journal = loadUxwaveJournal('u1c-e-1');
+    const to = (seq: number) => readings(stateOf(journalToEvents(journal.filter((row) => row.seq <= seq))));
+    expect(grantSeqOf(journal)).toBe(194);
+    expect([194, 197, 198].map((seq) => `${seq}: ${to(seq).join('; ')}`)).toEqual([
+      `194: ${BLOCKED} (waiting)`,
+      `197: ${BLOCKED} (waiting)`,
+      `198: ${BLOCKED} · approved (read)`,
+    ]);
+    const started = journal.find((row) => row.seq === 198)!;
+    const frame = started.frame as Record<string, unknown>;
+    const cancelled = { ...started, frame: { ...frame, state: 'cancelled' } } as JournalRow;
+    const state = stateOf(journalToEvents([...journal.filter((row) => row.seq <= 197), cancelled]));
+    expect(readings(state), 'cancelled at 198').toEqual([`${BLOCKED} (none)`]);
+    expect(drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined).map((row) => row.dropped), 'its approval row, dropped').toEqual([true]);
   });
 });
 

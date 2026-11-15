@@ -467,16 +467,19 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // prompt to edit); with no other words the first mark takes the message's own row. When the lines do not give exactly
   // the marks, the bubble keeps the whole text and every mark still gets its row, so no approval is lost to a text this
   // rule did not foresee. One mark on a text that is its sentence is the one row it always was.
+  // U1c (Decision Log 45): an approval row says the engine started its message only when its turn is accepted (the
+  // message's `turn.started`, or its `started` folding it into the running turn); in every other state it waits
+  const started = turn.accepted ? { started: true as const } : {};
   const messageRows = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'>[] => {
     const marks = consentMarks(event);
     if (marks.length === 0) return [userRow(event, id, editable, steer)];
     const beside = (from: number) => marks.slice(from).map((mark, n): RowOf<'user'> => ({
-      ...userRow(event, rowId.grant(event.messageUuid ?? event.id, from + n), false, steer, consentMessage(mark.kind, mark.subject)), messageUuid: null, consent: mark,
+      ...userRow(event, rowId.grant(event.messageUuid ?? event.id, from + n), false, steer, consentMessage(mark.kind, mark.subject)), messageUuid: null, consent: mark, ...started,
       ...(event.messageUuid !== null && { beside: event.messageUuid }),
     }));
     const words = wordsBesideGrants(event.content, marks);
     if (words === undefined) return [userRow(event, id, editable, steer), ...beside(0)];
-    if (words === null) return [{ ...userRow(event, id, editable, steer), consent: marks[0]! }, ...beside(1)];
+    if (words === null) return [{ ...userRow(event, id, editable, steer), consent: marks[0]!, ...started }, ...beside(1)];
     return [userRow(event, id, editable, steer, words), ...beside(0)];
   };
   const openingRows = ([first, ...beside]: RowOf<'user'>[]): [RowOf<'user'>, RowOf<'user'>[]] => [first!, beside];

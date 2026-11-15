@@ -79,6 +79,10 @@ export type Row = RowBase &
         // UX wave U1c (the U1c document, Design 2): on an approval row drawn beside a message (its own `messageUuid` is
         // null: no point to rewind to, no prompt to edit), the message it stands beside, so the rows go where it goes
         beside?: MessageUuid;
+        // UX wave U1c (Decision Log 45): on an approval row, the engine has started its message (its turn accepted); the
+        // one sign by which its blocked call reads approved, absent in every state before that and in any the model
+        // cannot place
+        started?: true;
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {
