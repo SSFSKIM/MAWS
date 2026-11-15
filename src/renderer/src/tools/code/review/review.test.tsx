@@ -23,7 +23,7 @@ import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
-import { useTranscriptStore, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
+import { useTranscriptStore, type Row, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
 import { journalToEvents } from '../../../transcript/dev/journal';
 import { api, builder, parent, task, tool, uuid } from '../../../transcript/model/test-events';
 import { codeTranscriptActions } from '../open-file';
@@ -49,6 +49,8 @@ import {
   tooLarge,
   totals,
   turnScopeFiles,
+  latestTurnWithFiles,
+  unmerged,
   type ChangedFile,
 } from './review-model';
 import { currentSet } from '../../../stores/layout-model';
@@ -271,7 +273,7 @@ describe('review model', () => {
         { path: '/p/new.ts', use: 'edited', at: '', edit: edit('/p/new.ts', ['+n']) },
       ],
     } as unknown as TurnActivity;
-    const rows = turnScopeFiles(changedFiles, activity);
+    const rows = turnScopeFiles(changedFiles, activity, null);
     expect(rows.map((r) => [r.path, r.kind, r.added, r.removed, r.openPath])).toEqual([
       ['/p/a.ts', 'modified', 3, 1, '/p/a.ts'],
       ['/p/new.ts', 'added', 1, 0, '/p/new.ts'],
@@ -290,6 +292,52 @@ describe('review model', () => {
     expect(indexDiffers(statusOf({ files: [entry('?', true)] }))).toBe(false);
     expect(indexDiffers(statusOf({ files: [entry('.'), entry('A')] }))).toBe(true);
     expect(indexDiffers(null)).toBe(false);
+  });
+
+  it('shows Last turn’s file relative to the repository when inside it and absolute outside it, its identity absolute in both', () => {
+    const changedFiles: ChangedFile[] = [
+      { path: '/work/berth/src/a.ts', change: 'update', added: 1, removed: 1, cellId: 'c1' as ChangedFile['cellId'] },
+      { path: '/work/notes/todo.md', change: 'create', added: 2, removed: 0, cellId: 'c2' as ChangedFile['cellId'] },
+      { path: '/work/berth-old/b.ts', change: 'update', added: 1, removed: 0, cellId: 'c3' as ChangedFile['cellId'] }, // a sibling sharing the prefix
+    ];
+    const rows = turnScopeFiles(changedFiles, null, '/work/berth/');
+    expect(rows.map((r) => [r.path, r.displayPath, r.openPath])).toEqual([
+      ['/work/berth/src/a.ts', 'src/a.ts', '/work/berth/src/a.ts'],
+      ['/work/notes/todo.md', '/work/notes/todo.md', '/work/notes/todo.md'],
+      ['/work/berth-old/b.ts', '/work/berth-old/b.ts', '/work/berth-old/b.ts'],
+    ]);
+    expect(turnScopeFiles(changedFiles, null, null).map((r) => r.displayPath)).toEqual(changedFiles.map((f) => f.path)); // no repository known
+  });
+
+  it('shows a git scope’s file by its repository-relative path, and an unmerged one as a conflict', () => {
+    const files = [
+      { path: 'src/both.ts', oldPath: null, insertions: 4, deletions: 1, binary: false },
+      { path: 'src/plain.ts', oldPath: null, insertions: 1, deletions: 0, binary: false },
+      { path: 'src/gone.ts', oldPath: null, insertions: 0, deletions: 3, binary: false },
+      { path: 'art/both.png', oldPath: null, insertions: 0, deletions: 0, binary: true },
+    ];
+    const entry = (path: string, index: string, worktree: string) => ({ path, oldPath: null, index, worktree, untracked: false });
+    const status = statusOf({ dirty: true, files: [entry('src/both.ts', 'U', 'U'), entry('src/plain.ts', '.', 'M'), entry('src/gone.ts', 'D', 'D'), entry('art/both.png', 'A', 'A')] });
+    const rows = gitScopeFiles({ scope: 'uncommitted', repoRoot: '/repo', files, patch: null, status });
+    expect(rows.map((r) => [r.path, r.displayPath, r.kind, r.openPath])).toEqual([
+      ['src/both.ts', 'src/both.ts', 'conflict', '/repo/src/both.ts'],
+      ['src/plain.ts', 'src/plain.ts', 'modified', '/repo/src/plain.ts'],
+      ['src/gone.ts', 'src/gone.ts', 'conflict', '/repo/src/gone.ts'],
+      ['art/both.png', 'art/both.png', 'binary', '/repo/art/both.png'], // a binary keeps its body's kind
+    ]);
+    expect(unmerged(entry('x', 'U', 'D'))).toBe(true);
+    expect(unmerged(entry('x', 'M', 'M'))).toBe(false);
+  });
+
+  it('finds the latest turn whose divider lists files, and none answers null', () => {
+    const T2 = 'turn:6f1c2e0a-0000-4000-8000-000000000002' as TurnId;
+    const T3 = 'turn:6f1c2e0a-0000-4000-8000-000000000003' as TurnId;
+    const file = { path: '/repo/a.ts', change: 'update', added: 1, removed: 0, cellId: 'c1' };
+    const divider = (turnId: TurnId, files?: unknown[]) => ({ kind: 'divider', turnId, files }) as unknown as Row;
+    const other = { kind: 'cell', turnId: T3 } as unknown as Row;
+    expect(latestTurnWithFiles([divider(T, [file]), divider(T2, [file]), divider(T3, []), other])).toBe(T2);
+    expect(latestTurnWithFiles([divider(T), divider(T2, []), other])).toBeNull();
+    expect(latestTurnWithFiles([])).toBeNull();
   });
 });
 

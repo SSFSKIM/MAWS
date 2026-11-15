@@ -7,6 +7,7 @@ import type { TurnId } from '../../../transcript';
 import type { ReviewParams, ReviewScope } from './review-model';
 
 export type ReviewMode = 'unified' | 'split';
+export interface StackPlace { path: string; row: { side: 'old' | 'new'; line: number } | null; offset: number }
 
 export interface ReviewUi {
   session: AppSessionId | null; // the session the scope was decided for (a pinned tool's changes under it)
