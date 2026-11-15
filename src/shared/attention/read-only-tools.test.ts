@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '../graph/events';
+import { webFetchCases } from '../../../test/support/web-fetch-recorded';
 import { isReadOnlyRequest } from './read-only-tools';
 
 const base = { id: 'e1', sessionId: 's1', at: '2026-09-28T10:00:00Z', seq: 1, agentId: null, parentToolUseId: null };
@@ -12,6 +13,13 @@ const permission = (toolName: string) =>
 describe('read-only tools', () => {
   it('lets a permission request for a read-only tool be answered outside the pane', () => {
     for (const tool of ['Read', 'Glob', 'Grep', 'WebFetch']) expect(isReadOnlyRequest(permission(tool)), tool).toBe(true);
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is read-only as WebFetch is, so a hover card or a
+  // notification can allow it in one click
+  it('lets the web plugin’s fetch be answered outside the pane, as WebFetch', () => {
+    for (const [label, call] of webFetchCases()) expect(isReadOnlyRequest(permission(call.toolName)), label).toBe(true);
+    for (const tool of ['mcp__web__search', 'mcp__docs__fetch']) expect(isReadOnlyRequest(permission(tool)), tool).toBe(false);
   });
 
   it('never treats writes, shells, agents, MCP tools or unknown names as read-only', () => {

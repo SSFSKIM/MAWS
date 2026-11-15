@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal, loadUxwaveJournal } from '../../../../../../test/support/fixtures';
+import { webFetchCases } from '../../../../../../test/support/web-fetch-recorded';
 import { reviewsOf } from '../../../tools/session-info/lane';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
@@ -329,6 +330,22 @@ describe('search and web detail', () => {
     expect(web.cell.textContent).toContain('TanStack Virtual docs');
     fireEvent.click(within(web.cell).getByRole('button', { name: 'https://tanstack.com/virtual' }));
     expect(web.actions.openExternal).toHaveBeenCalledWith('https://tanstack.com/virtual');
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch opens onto the same detail as WebFetch, its string result
+  // as the call's output and its URL linked
+  it('the web plugin’s fetch shows its recorded string result and links its URL, as WebFetch', async () => {
+    for (const [label, call] of webFetchCases()) {
+      const web = await expandedCell((b) => {
+        b.toolUse('t1', call.toolName, call.input);
+        b.result('t1', call.result);
+      }, 'cell:t1');
+      expect(web.line.textContent, label).toContain('Fetched example.com');
+      expect(web.cell.querySelector('pre')?.textContent, label).toBe(call.result);
+      fireEvent.click(within(web.cell).getByRole('button', { name: 'https://example.com' }));
+      expect(web.actions.openExternal, label).toHaveBeenCalledWith('https://example.com');
+      cleanup();
+    }
   });
 });
 

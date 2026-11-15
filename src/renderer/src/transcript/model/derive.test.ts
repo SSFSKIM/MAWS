@@ -3,7 +3,7 @@ import type { AgentId, MessageUuid, SessionId, TaskId, ToolUseId } from '@shared
 import { parseTranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../../engine-host/fs/backfill'; // P5 O9: a delivery read from disk
 import { afterEach, describe, expect, it } from 'vitest';
-import { heldRow, restingRows, rowsOf, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
+import { heldRow, restingRows, rowsOf, staysInView, turnDerivations, turnRows, turnSummary, withAllExpanded, withPlacedRows, withQueueTail } from './derive';
 import { dividerCopy, HANDOVER_REINIT_COPY } from './copy';
 import { journalToEvents } from '../dev/journal'; // UX wave U2: a recording read up to a seq
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
@@ -237,6 +237,55 @@ describe('group state machine', () => {
     expect(mixed).toMatchObject({ status: 'working', sentence: 'A and B started working' });
     b.emit('subagent.finished', { taskId: task('k2'), status: 'completed', summary: null, outputFile: null, reason: null });
     expect(find(rows(b.events), 'subagent')).toMatchObject({ status: 'finished_with_errors', sentence: 'A and B finished with errors' });
+  });
+
+  // UX wave U3b, M5 (decision 19, acceptance 13): an agents row whose agents all ended with the session's process says
+  // so, in U8's words; one an agent of which was stopped, or had finished, before the exit keeps today's sentence. The
+  // row is stopped either way, so it folds with its turn (staysInView), and keeps its class and its other words.
+  describe('an agent that ended with its session', () => {
+    const EXIT = { code: null, signal: null, reason: 'unknown', lostAttentionCount: 0, budget: null } as const;
+    const agents = (names: readonly string[], before: (b: Builder) => void = () => {}) => {
+      const b = builder();
+      b.turn('u1');
+      names.forEach((name, index) => {
+        b.toolUse(`a${index}`, 'Agent', { description: name, prompt: 'p', run_in_background: true }, 'm1', index);
+        b.emit('subagent.started', { taskId: task(`k${index}`), toolUseId: tool(`a${index}`), description: name, subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      });
+      b.end(['u1']);
+      before(b);
+      b.emit('process.exited', EXIT);
+      return find(rows(b.events), 'subagent');
+    };
+
+    it('reads `<names> ended with the session` where every agent it names ended so, and folds with its turn', () => {
+      expect(agents(['Survey'])).toMatchObject({ status: 'stopped', exited: true, sentence: 'Survey ended with the session' });
+      const two = agents(['Survey', 'Draft']);
+      expect(two).toMatchObject({ status: 'stopped', exited: true, sentence: 'Survey and Draft ended with the session' });
+      expect(staysInView(two)).toBe(false);
+    });
+
+    it('still reads `was stopped` for an agent stopped before the exit, and so does a row one of whose agents was', () => {
+      const stopped = agents(['Survey'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'stopped', summary: null, outputFile: null, reason: null }));
+      expect(stopped).toMatchObject({ status: 'stopped', sentence: 'Survey was stopped' });
+      expect(stopped).not.toHaveProperty('exited');
+      const mixed = agents(['Survey', 'Draft'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'stopped', summary: null, outputFile: null, reason: null }));
+      expect(mixed).toMatchObject({ status: 'stopped', sentence: 'Survey and Draft was stopped' });
+      expect(mixed).not.toHaveProperty('exited');
+    });
+
+    it('leaves a finished agent’s row as it was, and a row with no exit', () => {
+      const finished = agents(['Survey'], (b) => b.emit('subagent.finished', { taskId: task('k0'), status: 'completed', summary: null, outputFile: null, reason: null }));
+      expect(finished).toMatchObject({ status: 'finished', sentence: 'Survey finished' });
+      expect(finished).not.toHaveProperty('exited');
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('a0', 'Agent', { description: 'Survey', prompt: 'p', run_in_background: true }, 'm1', 0);
+      b.emit('subagent.started', { taskId: task('k0'), toolUseId: tool('a0'), description: 'Survey', subagentType: null, isBackground: true, spawnDepth: 1, prompt: null });
+      b.end(['u1']);
+      const running = find(rows(b.events), 'subagent');
+      expect(running).toMatchObject({ status: 'started', sentence: 'Survey started working' });
+      expect(running).not.toHaveProperty('exited');
+    });
   });
 
   it('two Agent calls of one message merge only when consecutive: a tool call between them makes two subagent rows', () => {

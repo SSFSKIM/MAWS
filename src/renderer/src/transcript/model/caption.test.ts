@@ -8,6 +8,7 @@ import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { BASH_RESULT, builder, task, tool, type Builder } from './test-events';
+import { webFetchCases } from '../../../../../test/support/web-fetch-recorded';
 
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
 const drawn = (events: SessionEvent[]): Row[] => rowsOf(withAllExpanded(applyEvents(createState(null, null), events)));
@@ -84,6 +85,21 @@ describe('a run’s caption (acceptance 2)', () => {
       fetch(t, 't5', 'https://example.test/a');
     });
     expect(runOf(one).summary).toBe('Read a file, edited a file, ran a command, and 2 more actions');
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is a page fetched, as WebFetch's is, in the run's caption
+  // and in the turn's line
+  it('the web plugin’s fetch is a `web_fetch` step, as WebFetch: "fetched a page"', () => {
+    for (const [label, call] of webFetchCases()) {
+      const b = turnOf((t) => {
+        read(t, 't1', '/w/a.ts');
+        t.toolUse('t2', call.toolName, call.input);
+        t.result('t2', call.result);
+      });
+      expect(runOf(b).summary, label).toBe('Read a file, fetched a page');
+      expect(stepsOfCells(runOf(b).cells).map((step) => step.kind), label).toEqual(['read', 'web_fetch']);
+      expect(lineOf(b).parts, label).toEqual(['read a file', 'fetched a page']);
+    }
   });
 
   it('a part of files counts paths and a part of commands counts calls', () => {

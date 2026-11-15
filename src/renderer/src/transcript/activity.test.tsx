@@ -5,6 +5,7 @@ import type { TaskId } from '@shared/graph/ids';
 import { render } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadJournal, loadSyntheticJournal } from '../../../../test/support/fixtures';
+import { webFetchCases } from '../../../../test/support/web-fetch-recorded';
 import { journalToEvents } from './dev/journal';
 import { glyphFor, SUBAGENT_GLYPHS, SubagentGlyph, turnActivity, useTranscriptStore } from './index';
 import { turnDerivations } from './model/derive';
@@ -84,6 +85,20 @@ describe('turn activity', () => {
       ['mcp__linear__get_issue', 'mcp', null, { server: 'linear', tool: 'get_issue' }],
     ]);
     expect(turn.subagents).toEqual([expect.objectContaining({ taskId: 'agent-1', name: 'Look around', status: 'started', glyph: glyphFor(task('agent-1')) })]);
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is a web tool with its URL, as WebFetch, and no MCP tool,
+  // so the summary's sources list its page once
+  it('lists the web plugin’s fetch as WebFetch: the web category, its URL, no MCP names', async () => {
+    for (const [label, call] of webFetchCases()) {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('w1', call.toolName, call.input);
+      b.result('w1', call.result);
+      b.end(['u1']);
+      const { activity } = await attached(b.events);
+      expect(activity()[0].tools.map(({ name, category, url, mcp }) => [name, category, url, mcp]), label).toEqual([[call.toolName, 'web', 'https://example.com', null]]);
+    }
   });
 
   // The projection's edited set equals the divider's changed-file metadata, including a child agent's completed edit
