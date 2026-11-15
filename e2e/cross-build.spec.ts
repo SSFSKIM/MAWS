@@ -1786,8 +1786,8 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
 //   | U6b-1: files beside the chat                  | (files beside the chat, both ways): F draws its one   | the return: the files beside the chat, the preview |
 //   | (`panel.<session>` with several Files tabs,   | Files surface with its tree, refuses no value, opens  | still the preview, the file F opened a main tab    |
-//   | their `panelTools.params`; `files.tree`       | a file as a main tab and keeps every tab; F's pin of  | only; F's pin the tree-only tab, holding no file   |
-//   | with M3)                                      | a file's tab                                          |                                                    |
+//   | their `panelTools.params`; `files.tree`)      | a file as a main tab and keeps every tab and          | only; F's pin the tree-only tab, holding no file;  |
+//   |                                               | `files.tree` whole; F's pin of a file's tab           | the tree's width and open folder as stored         |
 //   | a take-back's stage (U4a): the session's      | (stage, its message waiting), (stage, its message     | the return of each: the stage carried forward      |
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
@@ -3220,17 +3220,27 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
 // open for every session" pins the first Files ref of the session, which can hold a file. One scene, both ways, runs
 // only with a peer from before this landing (no src/renderer/src/tools/code/files/tabs.ts); a skipped scene is not
 // evidence, and the run of record is the one whose peer is F (`--peer-exact f1852de3a`), on M1's head before M2 starts.
+// M3 adds Files' tree at the left of every Files tab, its state the session's, stored under a key of its own,
+// `files.tree`, which F's renderer never names and its main keeps through its own writes.
 //   (files beside the chat, both ways)  this build opens three files beside the first session's chat from Files' tree
-//                                       (the first two kept by a double-click on their tab, the third the preview) and
-//                                       one beside the second session's, the only Files tab there; the peer draws its
-//                                       Files surface with its tree, refuses no layout value, pins Files from its
-//                                       icon's menu under the second session, and then opens the first file from its
-//                                       tree as a main tab; this build shows the two files left beside the first chat,
-//                                       the third still the preview, the first as a main tab only, and one pinned Files
-//                                       tab, the tree alone, under both sessions, holding no file in what it wrote back.
+//                                       (the first two kept by a double-click on their tab, the third the preview),
+//                                       opens a folder in the tree at the third's left and widens that tree, and opens
+//                                       one file beside the second session's chat, the only Files tab there; the peer
+//                                       draws its Files surface with its tree, refuses no layout value, pins Files from
+//                                       its icon's menu under the second session, and then opens the first file from
+//                                       its tree as a main tab, `files.tree` kept whole in what it wrote; this build
+//                                       shows the two files left beside the first chat, the third still the preview,
+//                                       the first as a main tab only, the tree at the file's left with the width and the
+//                                       open folder as stored, and one pinned Files tab, the tree alone, under both
+//                                       sessions, holding no file in what it wrote back; `files.tree` read back whole.
 const opensFilesBeside = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/code/files/tabs.ts'));
 const opensFilesBesideWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has src/renderer/src/tools/code/files/tabs.ts: it opens files beside the chat as this build does; UC-14's round trip is with build F, --peer-exact f1852de3a`;
 const FILE_TEXT = (name: string) => `An invented file, ${name}, for the cross-build scene.\n`;
+const TREE_WIDTH_DEFAULT = 220; // this build's width of Files' tree at a file's left, while none is stored (tools/code/files/tree-state.ts)
+type StoredTree = { version: number; sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> };
+// Files' tree beside the file in view, and its divider (this build's words, tools/code/copy.ts)
+const treeBeside = (page: Page) => sideColumn(page).locator('[data-files-tree][data-place="beside"]');
+const treeDivider = (page: Page) => sideColumn(page).getByRole('separator', { name: 'Resize files', exact: true });
 // layout.json as main last wrote it, whole
 function layoutJson(s: Scratch): Record<string, unknown> {
   const path = join(s.userData, 'layout.json');
@@ -3268,6 +3278,9 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
   await withScratch('xb-files-beside', async (s) => {
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) opens files beside the chat; ${peer.label} (wire ${wireOf(peer)}) reads them, opens one in its main area and pins Files`];
     for (const name of ['first.txt', 'second.txt', 'third.txt', 'other.txt']) writeFileSync(join(s.repo, name), FILE_TEXT(name));
+    const folder = 'folder'; // M3: a folder opened in the tree, as the tree's state stores it
+    mkdirSync(join(s.repo, folder));
+    writeFileSync(join(s.repo, folder, 'inside.txt'), FILE_TEXT('inside.txt'));
     const second = randomUUID();
     appendTurn(transcriptIn(s, s.repo, second), second, s.repo, 'main', 'A second invented session for the cross-build scene');
     const [first, other, third, alone] = ['first.txt', 'second.txt', 'third.txt', 'other.txt'];
@@ -3289,6 +3302,18 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     await expect
       .poll(() => filesBeside(s, address).map((tab) => [tab.file, tab.preview]), { timeout: 20_000, message: `${here.label} wrote three Files tabs beside the first chat` })
       .toEqual([[third, true], [other, false], [first, false]]);
+    // M3: the tree at the third file's left; a folder opened in it, and the tree widened from its divider
+    await expect(treeBeside(run.page), 'the tree at the file\u2019s left (a column wide enough for both)').toBeVisible({ timeout: 20_000 });
+    await treeRow(run.page, folder).click();
+    await expect(treeRow(run.page, folder), 'the folder open').toHaveAttribute('aria-expanded', 'true');
+    await treeDivider(run.page).focus();
+    await treeDivider(run.page).press('Shift+ArrowRight');
+    const width = TREE_WIDTH_DEFAULT + 32; // the divider's large step (app/Resizer.tsx)
+    await expect(treeDivider(run.page), 'the tree widened').toHaveAttribute('aria-valuenow', String(width));
+    const treeAt = () => (layoutJson(s)['files.tree'] as StoredTree | undefined)?.sessions[address] ?? null;
+    await expect
+      .poll(() => { const tree = treeAt(); return tree && [tree.width, tree.folded, tree.expanded.some((path) => basename(path) === folder)]; }, { timeout: 20_000, message: `${here.label} stored the first session's tree` })
+      .toEqual([width, false, true]);
     await showSession(run.page, id2, `session:${address2}`);
     await openSurface(run.page, 'Files');
     await openBeside(run.page, 'other.txt', false);
@@ -3297,7 +3322,8 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     expect(run.maws.consoleErrors()).toEqual([]);
     await s.quit(run);
     await endProfileProcesses(s.userData);
-    said.push(`  ${here.label}: beside the first chat ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')}; beside the second, ${alone}`);
+    const storedTree = layoutJson(s)['files.tree'];
+    said.push(`  ${here.label}: beside the first chat ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')}; beside the second, ${alone}; the first's tree ${width} px wide, ${folder} open`);
 
     // the peer: Files kept for every session from its icon's menu under the second session, which pins that session's
     // first Files ref; then, under the first, its one Files surface (the pin, which follows the session shown: both work in
@@ -3319,6 +3345,7 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     await expect.poll(async () => mainFileIds(await stripIds(old.page)).some((tabId) => tabId.endsWith(`/${first}`)), { timeout: 20_000, message: `${peer.label} opens the first file as a main tab` }).toBe(true);
     await expect.poll(() => JSON.stringify(layoutJson(s)['main.tabs'] ?? null).includes(`/${first}`), { timeout: 20_000, message: `${peer.label} writes its main tab` }).toBe(true);
     expect(filesBeside(s, address).map((tab) => tab.file), `${peer.label} kept the first session's three tabs`).toEqual([third, other, first]);
+    expect(layoutJson(s)['files.tree'], `${peer.label} kept files.tree whole through its write`).toEqual(storedTree);
     expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
     expect(old.maws.consoleErrors()).toEqual([]);
     await s.quit(old);
@@ -3336,6 +3363,10 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     await openSurface(back.page, 'Files');
     await expect.poll(() => titlesIn(back.page, 'upper'), { message: 'the pinned tree and the two files' }).toEqual(['Files', 'third.txt', 'second.txt']);
     await expect(sideColumn(back.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the third the preview').toHaveText(/^third\.txt/);
+    await sideTab(sideColumn(back.page), 'second.txt').click();
+    await expect(treeBeside(back.page), 'the tree at the file\u2019s left').toBeVisible({ timeout: 20_000 });
+    await expect(treeDivider(back.page), 'the tree\u2019s width as stored').toHaveAttribute('aria-valuenow', String(width));
+    await expect(treeRow(back.page, folder), 'the folder open as stored').toHaveAttribute('aria-expanded', 'true', { timeout: 20_000 });
     for (const [session, sessionAddress] of [[id, address], [id2, address2]] as const) {
       await showSession(back.page, session, `session:${sessionAddress}`);
       await openSurface(back.page, 'Files');
@@ -3345,7 +3376,8 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     }
     expect(back.maws.consoleErrors()).toEqual([]);
     await s.quit(back);
-    said.push(`  ${here.label} again: ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')} beside the first chat, ${first} a main tab; the pinned Files tab the tree under both sessions`);
+    expect(layoutJson(s)['files.tree'], 'files.tree read back whole').toEqual(storedTree);
+    said.push(`  ${here.label} again: ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')} beside the first chat, ${first} a main tab, the tree ${width} px wide with ${folder} open; the pinned Files tab the tree under both sessions`);
     record(said);
   });
 });

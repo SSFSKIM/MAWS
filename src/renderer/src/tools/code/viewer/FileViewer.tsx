@@ -55,9 +55,15 @@ function PathLead({ path }: { path: string }) {
   );
 }
 
-export function FileViewer({ tab }: { tab: FileTab }) {
+// UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button).
+export function FileViewer({ tab, start }: { tab: FileTab; start?: ReactNode }) {
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
-  const lead = <PathLead path={tab.path} />;
+  const lead = (
+    <>
+      {start}
+      <PathLead path={tab.path} />
+    </>
+  );
   return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} />;
 }
 
