@@ -92,9 +92,8 @@ describe("the ask mod's answer", () => {
     expect(rows.find((r) => r.kind !== 'time' && r.turnId === answered.turnId)).toMatchObject({ id: answered.id });
     expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: { 'Which color do you prefer?': 'Blue', 'Which season do you prefer?': 'Summer' } });
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
-    // The report (its own fold, U2b's once it lands) folds a marked turn's unmarked rows, the line with them, and keeps
-    // the question's row, which says the answer.
-    expect(lines(report)).toEqual([]);
+    // The report has no work of the answered turn to fold, so it keeps the line, and the question's row says the answer.
+    expect(lines(report)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     expect(report.filter((r) => r.kind === 'question')).toMatchObject([{ answers: { 'Which color do you prefer?': 'Blue', 'Which season do you prefer?': 'Summer' } }]);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
   });
