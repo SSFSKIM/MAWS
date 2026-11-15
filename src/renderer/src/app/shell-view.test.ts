@@ -48,7 +48,7 @@ describe('cardColumnNow across the panes of a split', () => {
   });
 
   it('two documents: no column', () => {
-    const other: TabRef = { id: 'diagnostics-2', kind: 'diagnostics', pinned: false };
+    const other: TabRef = { id: 'channel:p', kind: 'channel', project: 'p', pinned: false };
     expect(column(split(document, other, 0))).toMatchObject({ session: null, speaks: false, placed: false, shown: false });
   });
 
