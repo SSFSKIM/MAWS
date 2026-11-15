@@ -18,7 +18,7 @@ import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
-import { item } from '../../test/support/builders';
+import { item, status as engineStatus } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
 import { Index } from './index/index';
@@ -803,6 +803,60 @@ describe('the spine and the checkouts composed under plain Node', () => {
     compose(await openSpineData(profile, { build: BUILD, lock }), new FakeSpineHost(), again, { engineEnv });
     expect(await again.invoke('delivery.receipts', undefined)).toEqual({ ok: true, value: { receipts: [] } });
     lock.release();
+  });
+
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M2): the root hands the connector
+  // sign-in each session's plugin list (the whole `session.status`) and the engine host's `plugins.changed` and
+  // `plugins.operation`, so a press from a plugin's row that passed its first check is refused at its second after either
+  it('composes the connector sign-in with each session’s plugin list and the engine host’s plugin events', async () => {
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    const appSessionId = 'app-plugin-row' as AppSessionId;
+    const name = 'plugin:mani-tides:tides-http';
+    const url = 'https://tides.example.com/mcp';
+    host.answer('customization.serverEndpoints', () => ({ servers: [], pluginServers: [{ plugin: 'key-tides@harbour', pluginName: 'mani-tides', server: 'tides-http', name, version: '1.2.0', path: join(dir.path, 'tides', '.mcp.json'), transport: 'http', url, revision: 'rev-tides' }] }));
+    // each press reads the status at its first check, for its baseline and at its second check; the first two presses'
+    // baselines are held open (reads 2 and 5) while an event arrives
+    let reads = 0;
+    const held: (() => void)[] = [];
+    host.answer('session.mcpStatus', (() => {
+      reads += 1;
+      const answer = { mcpServers: [{ name, status: 'needs-auth', scope: 'dynamic', source: 'plugin', transport: 'http', config: { type: 'http', url } }] };
+      return reads === 2 || reads === 5 ? new Promise((resolve) => held.push(() => resolve(answer))) : answer;
+    }) as never);
+    host.emit('session.status', { appSessionId, status: { ...engineStatus(appSessionId), cwd: dir.path, plugins: [{ name: 'mani-tides', path: join(dir.path, 'marketplace', 'tides'), source: 'key-tides@harbour', version: '1.2.0' }], pluginsObservedAt: '2026-11-14T22:39:20.000Z' } });
+    const press = async () => {
+      const receipt = await bus.invoke('connectors.signInDynamicServer', { name, appSessionId, entry: { revision: 'rev-tides' } });
+      if (!receipt.ok) throw new Error(receipt.error.message);
+      return receipt.value.opId;
+    };
+    const endOf = async (opId: string) => {
+      await vi.waitFor(() => expect(['done', 'failed', 'cancelled']).toContain(bus.emittedOf('connectors.signInChanged').filter((e) => e.opId === opId).at(-1)?.state));
+      return bus.emittedOf('connectors.signInChanged').filter((e) => e.opId === opId).at(-1);
+    };
+    const changed = { state: 'failed', reason: 'other_entry', message: 'Plugins changed while this sign-in started. Try again.' };
+
+    const first = await press();
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    host.emit('plugins.changed', {});
+    held[0]!();
+    expect(await endOf(first)).toMatchObject(changed);
+
+    const second = await press();
+    await vi.waitFor(() => expect(held).toHaveLength(2));
+    host.emit('plugins.operation', { opId: 'op-reef', action: 'install', target: 'key-reef@harbour', phase: 'started' });
+    held[1]!();
+    expect(await endOf(second)).toMatchObject(changed);
+    expect(host.calls.filter((call) => call.name === 'session.mcpAuthenticate')).toEqual([]);
+
+    // that operation done, and nothing else heard: the press passes both checks and the engine is asked (this fake host
+    // does not answer the call)
+    host.emit('plugins.operation', { opId: 'op-reef', action: 'install', target: 'key-reef@harbour', phase: 'done', outcome: { ok: true, result: {} } });
+    const third = await press();
+    expect(await endOf(third)).toMatchObject({ state: 'failed', reason: 'engine' });
+    expect(host.calls.filter((call) => call.name === 'session.mcpAuthenticate')).toHaveLength(1);
   });
 
   // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 6 and 7): the library's reads of a stored
