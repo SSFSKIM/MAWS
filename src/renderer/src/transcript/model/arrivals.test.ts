@@ -690,6 +690,7 @@ describe('a person’s message that carries grants (U1c)', () => {
     b.emit('user.message', { messageUuid: uuid('p1'), content: 'Run the checks.', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     b.toolUse('t1', 'Bash', { command: 'make check' });
     b.emit('user.message', { messageUuid: uuid('s1'), content: `${OTHER}\n${consentMessage('command', 'make build')}`, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [consent('make build')] });
+    b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'started' }); // the engine takes it into the running turn
     b.result('t1', 'ok');
     b.end(['p1', 's1']);
     const rows = of(expanded(b.events), 'user');
