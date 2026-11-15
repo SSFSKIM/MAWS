@@ -129,8 +129,16 @@ const rowKey = (row: SkillRow): string => row.path ?? row.name;
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
 // selected row as `groups` has it now, so what it offers follows a new answer or a changed launch profile (the task
 // review of the branch panel's fix); a row a new answer no longer lists leaves the detail for the list.
-export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): on Customize's page, `onReset` clears
+// the page's search in place of the library store's, and each new `toList` (the page's view or a Show value pressed)
+// returns the detail to the list.
+export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void; onReset?(): void; toList?: number }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [listed, setListed] = useState(toList);
+  if (listed !== toList) {
+    setListed(toList);
+    setSelectedKey(null);
+  }
   const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
@@ -163,7 +171,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
     body = (
       <Centered role="status">
         <p className="m-0 text-ui text-fg-muted">{L.noMatch}</p>
-        <button type="button" className={SECONDARY} onClick={() => setSkills({ search: '', sort: 'name' })}>
+        <button type="button" className={SECONDARY} onClick={onReset ?? (() => setSkills({ search: '', sort: 'name' }))}>
           {L.resetFilters}
         </button>
       </Centered>

@@ -1,159 +1,63 @@
-// Customize › Connectors (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "My items", "Adding",
-// "Signing in", "Which session"; M4): My items and Discover, as Plugins and Skills have them.
-// - My items: the servers configured on disk for the page's directory, each with its scope and file, its sign-in state
-//   (presented by ./present.ts), Sign in (the engine's own flow, run in a ready session whose scope includes the server;
-//   with none, "Open a session in <place>, then sign in" and nothing else: Customize never starts a session), Cancel
-//   while one runs, and Remove; then what the attached session has live (the caller's `live`). UX wave U11a M8
-//   (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a row of MAWS's own list signs in
-//   through a ready session on this Mac whose status lists it, as a dynamic connector, sending the revision of the
-//   configuration the row was drawn with (main's `catalog.postures`); with no revision it offers no Sign in.
+// Customize's connectors (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "My items", "Adding",
+// "Signing in", "Which session"; M4): the body each view draws while Show is Connectors.
+// - My items: the servers configured on disk for the page's directory, each a `ConnectorRow` with its scope and file, its
+//   sign-in state (presented by ./present.ts), Sign in (the engine's own flow, run in a ready session whose scope
+//   includes the server; with none, "Open a session in <place>, then sign in" and nothing else: Customize never starts a
+//   session), Cancel while one runs, and Remove; then what the attached session has live (the caller's `live`). UX wave
+//   U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): a row of MAWS's own list
+//   signs in through a ready session on this Mac whose status lists it, as a dynamic connector, sending the revision of
+//   the configuration the row was drawn with (main's `catalog.postures`); with no revision it offers no Sign in.
 // - Discover: the catalog's connectors; + opens the connector sheet and runs `claude mcp add`. Without Anthropic's
 //   directory (no copy at all) the pane says so, with Retry.
-// The management state (the operations and the sheet) lives here, above both views, so an add or a removal runs on, and
-// its line stays, whichever view shows; Customize keeps the section mounted once visited.
-// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, "Where", "After Add", §D): My
-// items' head has "Add custom connector…", which opens the custom sheet with Remote (HTTP) and all projects; every
-// opening reads what is configured here again, and the sheet checks the name only against that read. Its add runs under
-// `connector:add:<scope>:<name>`, and its line stands at the head of the list while it works or after it failed; a
-// succeeded add draws nothing there, its row being the result.
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D, §E): the operations and the sheet are the
+// page's one place's (./manage.tsx, customize/place.tsx), so an add or a removal runs on, and its line stays, whichever
+// view and Show value are drawn and across a change of project; the head draws My items' tools, "Add custom connector…"
+// among them (U11g), and the page's search narrows the rows by their name. UX wave U11g
+// (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §D): a custom add's line stands at the head of the
+// list while it works or after it failed; a succeeded add draws nothing there, its row being the result.
+import { useEffect, useMemo, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
-import { isMcpEntryAdd, type PluginsScope } from '@shared/plugins/cli';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { SECONDARY } from '../../sessions/ui';
-import { LibrarySwitch, type LibraryTab } from '../../widgets/plugins/LibraryHeader';
-import { Gone, ManageProvider, OperationLine, useManage, type Manage } from '../../widgets/plugins/manage';
-import { usePluginOperations } from '../../widgets/plugins/operation';
-import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
-import { usePluginsEnv } from '../../widgets/plugins/read';
-import { resolutionOf } from '../../widgets/PluginsWidget';
-import { TextButton } from '../../widgets/parts';
-import type { EngineResolution } from '../../widgets/plugins/ConfirmSheet';
+import { LIBRARY as L } from '../../widgets/copy';
+import { Gone, useManage } from '../../widgets/plugins/manage';
+import { factsOf } from '../../widgets/plugins/operation';
 import { useEngineRead } from '../../widgets/read';
-import { DISCOVER } from '../discover/copy';
 import { DiscoverPane } from '../discover/DiscoverPane';
-import { DiscoverToolbar } from '../discover/DiscoverToolbar';
-import { ItemImage } from '../image/ItemImage';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
-import { useCustomizationInventory } from '../inventory';
-import { ConnectorSheet } from './ConnectorSheet';
+import { ConnectorRow } from './ConnectorRow';
 import { CONNECTORS as C } from './copy';
-import { addLineShown, configuredOf, customAddKey, ownSignInSessionOf, removalDirectoryOf, removeRequestOf, resultFor, serverKey, shadowedBy, shadowWords, signInSessionOf, signInViewOf, type AuthPosture, type ConfiguredServers, type HoldingSession, type SignInFacts, type SignInView } from './present';
-import { configuredSinceOpening } from './custom-form';
-import { cancelSignIn, forgetSignIn, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, useSignIns, type SignInServer } from './sign-in';
+import { CUSTOM_ADD_KEY, type AskIn } from './manage';
+import { addLineShown, ownSignInSessionOf, shadowedBy, signInSessionOf, type HoldingSession } from './present';
+import { connectorRows } from './rows';
+import { useSignIns } from './sign-in';
 
-const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
-const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
 const DIRECTORY_SERVERS = 'directory:servers';
 
-// runIn: a removal's own directory (sweep#2); read: for a custom add, whether this opening's read of what is configured
-// here has answered (null for every other sheet, which reads the page's answer)
-type Asking = { key: string; request: PluginsRequest; engine: EngineResolution; opening: number; runIn: string | null; read: 'out' | 'answered' | null };
-
-// What "Add custom connector…" opens (§D): Remote (HTTP), all projects, nothing typed.
-const CUSTOM_ADD_KEY = 'connector:add'; // the sheet's own key; its add runs under `customAddKey` once named
-const CUSTOM_ADD = requestFor('mcp-add', { name: '', scope: 'user', entry: { type: 'http', url: '', headers: [] } }, null);
-
-// The operations and the connector sheet: every opening reads `plugins.env` again, as the install sheet does.
-function useConnectorManage(cwd: string | null, place: string | null, configured: ConfiguredServers, retryServers: () => void): { manage: Manage; sheet: ReactNode; askIn: AskIn } {
-  const env = usePluginsEnv();
-  const { reread } = env;
-  const runCwd = cwd ?? env.data?.configHome ?? '';
-  const ops = usePluginOperations();
-  const [asking, setAsking] = useState<Asking | null>(null);
-  const openings = useRef(0);
-  // U11g: the page's inventory, read again at a custom sheet's opening (the same query as the page's, so they share it)
-  const inventory = useCustomizationInventory(cwd);
-  const { refetch } = inventory;
-  // A read begun after the opening: with an answer in hand a refetch cancels any read in flight and starts its own; with
-  // none yet, TanStack Query joins the read in flight, which began before the opening, so that one is let end and a read
-  // is begun after it (M2's review).
-  const unanswered = inventory.data === undefined;
-  const askIn = useCallback<AskIn>(
-    (key, request, runIn) => {
-      const opening = ++openings.current;
-      const custom = request.action === 'mcp-add' && isMcpEntryAdd(request.input);
-      setAsking({ key, request, engine: { state: 'loading' }, opening, runIn, read: custom ? 'out' : null });
-      void reread().then((read) => setAsking((current) => (current?.opening === opening ? { ...current, engine: resolutionOf(read) } : current)));
-      if (!custom) return;
-      const readAfterOpening = unanswered ? refetch().then(() => refetch()) : refetch();
-      void readAfterOpening.then(() => setAsking((current) => (current?.opening === opening ? { ...current, read: 'answered' } : current)));
-    },
-    [reread, refetch, unanswered],
-  );
-  const ask = useCallback((key: string, request: PluginsRequest) => askIn(key, request, null), [askIn]);
-  const manage = useMemo<Manage>(() => ({ cwd: runCwd, ops, ask, reloadMods: null }), [runCwd, ops, ask]);
-  const runIn = asking?.runIn ?? runCwd;
-  const sheetConfigured = asking?.read == null ? configured : configuredSinceOpening(asking.read === 'answered', { isFetching: inventory.isFetching, configured: configuredOf(inventory) });
-  const sheet = asking && (
-    <ConnectorSheet
-      key={`${asking.key}:${asking.opening}`}
-      request={asking.request}
-      env={{ cwd, runCwd: runIn, engine: asking.engine, configured: sheetConfigured, retryServers, place }}
-      onConfirm={(request, binary) => {
-        setAsking(null);
-        // a configuration MAWS removed or replaced: a sign-in's result for that name and scope says nothing about it now
-        const { name, scope } = request.input as { name: string; scope: PluginsScope };
-        const key = asking.read === null ? asking.key : customAddKey(scope, name);
-        void ops.run(key, request, runIn, binary).then((done) => done?.outcome?.ok && forgetSignIn({ name, scope, cwd }));
-      }}
-      onClose={() => setAsking(null)}
-    />
-  );
-  return { manage, sheet, askIn };
-}
-
-// A confirmation asked for, run in `runIn` when given (a removal from a parent directory's .mcp.json), else the page's.
-type AskIn = (key: string, request: PluginsRequest, runIn: string | null) => void;
-
-export function ConnectorsSection({ cwd, place, servers, readAt, configured, inventoryState, refresh, attached, live }: {
+/** My items' connectors: the inventory's state, an add's line, the configured rows, and what the attached session has live. */
+export function ConnectorsMine({ cwd, place, servers, readAt, inventoryState, attached, askIn, search, onResetSearch, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
   servers: readonly CustomizationServer[] | undefined; // the inventory's, once read
   readAt: number; // when the inventory last answered
-  configured: ConfiguredServers; // the same read as Add needs it: whole, or why not
   inventoryState: ReactNode; // reading, failed (with Retry), or the warnings
-  refresh(): void;
   attached: AppSessionId | null; // the page's attached session
+  askIn: AskIn;
+  search: string; // My items' text: the rows whose name holds it
+  onResetSearch(): void;
   live: ReactNode; // what the attached session has live
 }) {
-  const [view, setView] = useState<LibraryTab>('myItems');
-  const { manage, sheet, askIn } = useConnectorManage(cwd, place, configured, refresh);
-  const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
   return (
-    <ManageProvider value={manage}>
-      {view === 'discover' ? (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div data-customize-toolbar="mcp" className="mb-3 flex flex-wrap items-center gap-2 px-2">
-            {switcher}
-            <DiscoverToolbar tab="connectors" />
-          </div>
-          <ConnectorsDiscover cwd={cwd} onOpenInstalled={() => setView('myItems')} />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          <div data-customize-toolbar="mcp" className="mb-2 flex flex-wrap items-center gap-2">
-            {switcher}
-            <h2 className="m-0 text-ui font-medium">{C.configured}</h2>
-            <button type="button" data-connector-add-custom className={`${BUTTON} ml-auto`} onClick={() => askIn(CUSTOM_ADD_KEY, CUSTOM_ADD, null)}>
-              {C.addCustom}
-            </button>
-            <button type="button" className={BUTTON} onClick={refresh}>
-              {C.refresh}
-            </button>
-          </div>
-          {inventoryState}
-          <Adding />
-          {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} />}
-          {live}
-        </div>
-      )}
-      {sheet}
-    </ManageProvider>
+    <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+      {inventoryState}
+      <Adding />
+      {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} search={search} onResetSearch={onResetSearch} />}
+      {live}
+    </div>
   );
 }
 
@@ -161,11 +65,11 @@ export function ConnectorsSection({ cwd, place, servers, readAt, configured, inv
 function Adding() {
   const { ops } = useManage();
   const lines = [...ops.entries.entries()].filter(([key, entry]) => key.startsWith(`${CUSTOM_ADD_KEY}:`) && addLineShown(entry.state));
-  return lines.map(([key, entry]) => <Gone key={key} opKey={key} name={(entry.request.input as { name: string }).name} data={{ 'data-connector-adding': key }} />);
+  return lines.map(([key, entry]) => <Gone key={key} opKey={key} name={factsOf(entry).target} data={{ 'data-connector-adding': key }} />);
 }
 
-// Discover's connectors; with no copy of Anthropic's directory at all, its words and Retry in the list's place.
-function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
+/** Discover's connectors; with no copy of Anthropic's directory at all, its words and Retry in the list's place. */
+export function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
   const sources = useCatalogSources();
   const { refresh, running } = useCatalogRefresh();
   const directory = sources.data?.find((source) => source.key === DIRECTORY_SERVERS);
@@ -182,7 +86,7 @@ function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOp
 }
 
 // The configured servers, with a removal's result kept at the head once its row has left.
-function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn }) {
+function Configured({ servers, readAt, cwd, place, attached, askIn, search, onResetSearch }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn; search: string; onResetSearch(): void }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
@@ -212,101 +116,55 @@ function Configured({ servers, readAt, cwd, place, attached, askIn }: { servers:
   const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
   const postures = useCatalogPostures(cwd, servers, readAt).data?.servers;
   // by the file the entry is in too: two project files may configure one name with different endpoints
-  const postureOf = (server: CustomizationServer) => postures?.find((p) => p.name === server.name && p.scope === server.scope && p.path === server.path) ?? null;
+  const postureOf = (row: { name: string; scope: string; path: string }) => postures?.find((p) => p.name === row.name && p.scope === row.scope && p.path === row.path) ?? null;
   // a sign-in that ended: the attached session's servers read again
   const ended = useSignIns((s) => [...s.byServer.values()].filter(({ event }) => event.state === 'done' || event.state === 'failed').map(({ event }) => event.opId).join(','));
   const { refetch } = read;
   useEffect(() => {
     if (ended !== '') refetch();
   }, [ended, refetch]);
-  const present = new Set(servers.map(serverKey));
-  const gone = [...ops.entries.entries()].filter(([key, entry]) => key.startsWith('connector:') && entry.request.action === 'mcp-remove' && !present.has(key));
-  if (servers.length === 0 && gone.length === 0) return <p className="m-0 px-2 text-ui-sm text-fg-muted">{C.none}</p>;
+  const rows = connectorRows({ servers });
+  const present = new Set(rows.map((row) => row.key));
+  const gone = [...ops.entries.entries()].filter(([key, entry]) => key.startsWith('connector:') && factsOf(entry).action === 'mcp-remove' && !present.has(key));
+  const text = search.trim().toLowerCase();
+  const shown = text === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(text));
+  if (rows.length === 0 && gone.length === 0) return <p className="m-0 px-2 text-ui-sm text-fg-muted">{C.none}</p>;
   return (
     <>
       {gone.map(([key, entry]) => (
-        <Gone key={key} opKey={key} name={(entry.request.input as { name?: string }).name ?? ''} data={{ 'data-connector-gone': key }} />
+        <Gone key={key} opKey={key} name={factsOf(entry).target} data={{ 'data-connector-gone': key }} />
       ))}
-      <ul aria-label={C.configured} className="m-0 list-none p-0">
-        {servers.map((server) => (
-          <ServerRow key={serverKey(server)} server={server} askIn={askIn} shadow={shadowedBy(server, servers)} cwd={cwd} place={place} session={server.scope === 'app' ? ownSignInSessionOf(server.name, ready, attached, cwd) : signInSessionOf(server.scope, ready, attached, cwd)} live={liveOf(server.name)} liveRead={liveRead} posture={postureOf(server)?.authPosture ?? null} fingerprint={postureOf(server)?.fingerprint ?? null} revision={postureOf(server)?.revision ?? null} iconUrl={postureOf(server)?.iconUrl ?? null} />
-        ))}
-      </ul>
+      {rows.length > 0 && shown.length === 0 ? (
+        <div role="status" className="flex flex-col items-center justify-center gap-2 px-6 py-8 text-center">
+          <p className="m-0 text-ui text-fg-muted">{L.noMatch}</p>
+          <button type="button" className={SECONDARY} onClick={onResetSearch}>
+            {L.resetFilters}
+          </button>
+        </div>
+      ) : (
+        <ul aria-label={C.configured} className="m-0 list-none p-0">
+          {shown.map((row) => {
+            const posture = postureOf(row);
+            return (
+              <ConnectorRow
+                key={row.key}
+                row={row}
+                askIn={askIn}
+                shadow={shadowedBy(row, servers)}
+                cwd={cwd}
+                place={place}
+                session={row.scope === 'app' ? ownSignInSessionOf(row.name, ready, attached, cwd) : signInSessionOf(row.scope, ready, attached, cwd)}
+                live={liveOf(row.name)}
+                liveRead={liveRead}
+                posture={posture?.authPosture ?? null}
+                fingerprint={posture?.fingerprint ?? null}
+                revision={posture?.revision ?? null}
+                iconUrl={posture?.iconUrl ?? null}
+              />
+            );
+          })}
+        </ul>
+      )}
     </>
-  );
-}
-
-// A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
-// `shadowedBy`) says which entry
-// shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the row it uses.
-// U11a M8: a row of MAWS's own list is a dynamic connector to the sign-in, offered only with its configuration's revision.
-// UX wave U11c M1 (§C): its image, the icon of the one directory record its address matches (the posture's), else its tile.
-function ServerRow({ server, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision, iconUrl }: { server: CustomizationServer; askIn: AskIn; shadow: CustomizationServer['scope'] | null; cwd: string | null; place: string | null; session: string | null; live: SignInFacts['live']; liveRead: SignInFacts['liveRead']; posture: AuthPosture | null; fingerprint: string | null; revision: string | null; iconUrl: string | null }) {
-  const { ops } = useManage();
-  const own = server.scope === 'app';
-  const target = server.scope === 'app' ? null : { name: server.name, scope: server.scope, cwd, path: server.path };
-  const kept: Omit<SignInServer, 'machine'> | null = own ? (signsInDynamic(server.name) ? { name: server.name, scope: 'dynamic', cwd: null } : null) : target;
-  // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
-  const machine = signInMachineOf(session);
-  const record = resultFor(useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null))), fingerprint);
-  const last = record?.event ?? null;
-  const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, server.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: server.transport });
-  const key = serverKey(server);
-  const remove = removeRequestOf(server);
-  const busy = ops.entries.get(key)?.state.phase === 'working';
-  return (
-    <li data-connector={server.name} data-connector-scope={server.scope} className="flex min-w-0 items-start gap-3 border-b border-border px-2 py-2 last:border-b-0">
-      <ItemImage kind="connector" seed={server.name} iconUrl={iconUrl} size="row" />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-          <span className="font-medium [overflow-wrap:anywhere]">{server.name}</span>
-          <span className="text-ui-sm text-fg-muted">{[C.scopeOf(server.scope), server.transport].filter(Boolean).join(' · ')}</span>
-          {state?.text && (
-            <span data-sign-in-state className={`text-ui-sm ${TONE[state.tone]}`}>
-              {state.text}
-            </span>
-          )}
-          <span className="ml-auto flex shrink-0 items-baseline gap-1">
-            {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
-            {state?.signIn &&
-              (own ? (
-                // U11a M8: only with the revision the press must carry, so it signs in this configuration or nothing
-                kept !== null &&
-                revision !== null &&
-                (session === null ? (
-                  <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
-                    {C.openSession(null)}
-                  </span>
-                ) : (
-                  <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignInDynamic({ name: server.name, revision }, fingerprint, session as AppSessionId)}>
-                    {C.signIn}
-                  </button>
-                ))
-              ) : session === null ? (
-                <span data-sign-in-needs-session className="text-ui-sm text-fg-muted">
-                  {C.openSession(server.scope === 'user' ? null : place)}
-                </span>
-              ) : (
-                // offered once main has said which configuration this is, so the result can be tied to it
-                target !== null &&
-                fingerprint !== null && (
-                  <button type="button" aria-label={C.signInName(server.name)} className={SECONDARY} onClick={() => void startSignIn(target, fingerprint, session)}>
-                    {C.signIn}
-                  </button>
-                )
-              ))}
-            {remove && (
-              <button type="button" aria-label={C.removeName(server.name)} disabled={busy} className={BUTTON} onClick={() => askIn(key, remove, removalDirectoryOf(server))}>
-                {C.remove}
-              </button>
-            )}
-          </span>
-        </div>
-        <span className="font-mono text-ui-sm break-all text-fg-faint">{server.path}</span>
-        <div className="text-ui-sm empty:hidden">
-          <OperationLine opKey={key} />
-        </div>
-      </div>
-    </li>
   );
 }

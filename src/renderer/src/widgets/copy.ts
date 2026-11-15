@@ -491,7 +491,7 @@ export const RENAME = {
 // it has them, §10 Q9). The person's words; no provenance.
 export const LIBRARY = {
   searchPlugins: 'Search plugins',
-  show: 'Show',
+  show: 'Filter', // UX wave U11c (O-14): "Show" names Customize's row of kinds
   filter: { all: 'All plugins', enabled: 'Enabled', disabled: 'Disabled', loaded: 'Loaded in this session', otherProjects: 'Other projects' } as const,
   sortBy: 'Sort by',
   sort: { updated: 'Last updated', name: 'Name' } as const,

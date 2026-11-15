@@ -3,7 +3,7 @@
 // grid of results; and a card's detail in the list's place, the list kept mounted beneath it so Back returns to it with
 // its scroll and focus. Discover reads only `catalog.*`, with the Customize page's cwd (null: the user configuration).
 // Skills lists the plugins whose skills are known, with a note that the rest are under Plugins. A card installed here
-// opens the item in My items (`onOpenInstalled`). The install sheet and the operations are the library's (`useManage`).
+// opens the item in My items (`onOpenInstalled`). The install sheet and the operations are the page's (`useManage`).
 // `catalog.changed` is heard for the window's life (read.ts's connectCatalogEvents, mounted by App.tsx), not here.
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
@@ -16,6 +16,7 @@ import { FilterRow } from './DiscoverToolbar';
 import { useCatalogItem } from './read';
 import { filtering, NO_CHOICES, queryOf, setChoices, useDiscoverStore } from './store';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
+import { factsOf } from '../../widgets/plugins/operation';
 import { CATALOG_KEY } from './add';
 
 type Tab = CatalogTab; // P4-AGG M4: Connectors too
@@ -38,11 +39,11 @@ function LeftResult({ opKey, cwd }: { opKey: string; cwd: string | null }) {
   const { ops } = useManage();
   const id = opKey.slice(CATALOG_KEY.length);
   const read = useCatalogItem(id, cwd);
-  const request = ops.entries.get(opKey)?.request;
-  if (!read.isError || request === undefined) return null;
+  const entry = ops.entries.get(opKey);
+  if (!read.isError || entry === undefined) return null;
   return (
     <p data-catalog-result={id} className="m-0 flex min-w-0 flex-wrap items-baseline gap-x-2 text-ui-sm">
-      <span className="font-medium text-fg">{request.catalog?.name ?? id}</span>
+      <span className="font-medium text-fg">{factsOf(entry).catalogName ?? id}</span>
       <OperationLine opKey={opKey} />
     </p>
   );

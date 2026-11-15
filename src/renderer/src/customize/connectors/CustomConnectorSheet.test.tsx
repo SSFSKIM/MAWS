@@ -6,7 +6,8 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
-import { ConnectorSheet, type ConnectorSheetEnv } from './ConnectorSheet';
+import { ConnectorSheet } from './ConnectorSheet';
+import type { ConnectorSheetEnv } from './sheet-parts';
 
 afterEach(cleanup);
 

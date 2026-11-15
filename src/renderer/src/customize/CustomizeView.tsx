@@ -1,6 +1,11 @@
 // D6 / UX2-K: one app destination, with disk configuration independent of session lifetime.
-import { Tabs } from 'radix-ui';
-import { useMemo, useState, type ReactNode } from 'react';
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D; the child's O-14): My items | Discover
+// outside and the kind as a filter inside, "Show: All · Plugins · Skills · Connectors". Where the page is, its view and
+// its Show value, is U7b's `destination`, which `DestinationPage` passes here and which every press writes through
+// `openDestination`: a change of view keeps Show, a change of Show keeps the view. Under the head (./CustomizeHead.tsx)
+// each kind's body is drawn as its section drew it (./bodies.tsx), and what a person started is held by the page's one
+// place (./place.tsx) for the place the page is about.
+import { useEffect, useMemo, useState } from 'react';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { ipc } from '../ipc/client';
 import { useCurrentRow } from '../keymap/actions-runtime';
@@ -8,44 +13,19 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { projectLabels } from '../sidebar/project-labels';
 import { displayTitle } from '../sessions/title';
-import { PluginsLibrary } from '../widgets/PluginsWidget';
-import { usePluginsEnv } from '../widgets/plugins/read';
-import { SearchField, Choice, LibrarySwitch, type LibraryTab } from '../widgets/plugins/LibraryHeader';
-import { DISCOVER } from './discover/copy';
-import { DiscoverToolbar } from './discover/DiscoverToolbar';
-import { SkillsDiscover, SkillsManage } from './discover/SkillsDiscover';
-import { SortIcon } from '../app/IconButton';
-import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
-import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
-import { useLibraryStore } from '../widgets/plugins/library-store';
-import { McpBody, present } from '../widgets/McpWidget';
-import { useEngineRead } from '../widgets/read';
-import { LIBRARY, SKILLS_LIBRARY } from '../widgets/copy';
 import { homeAbbreviated } from '../tools/session-info/model';
-import { useCustomizeProject, type CustomizeSection } from './open';
-import { ConnectorsSection } from './connectors/ConnectorsSection';
-import { CONNECTORS } from './connectors/copy';
-import { configuredOf } from './connectors/present';
+import { focusSearch } from '../widgets/WidgetFrame';
+import { useCustomizeProject } from './open';
 import { machineOf } from '@shared/machine/address';
-import { useCustomizationInventory, type Inventory } from './inventory'; // UX wave U11a: shared with an unstarted tab's dialogs
 import { customizePlace } from '../destination/discover'; // UX wave U7b
-import { SHOW_OF_SECTION } from '../destination/customize'; // UX wave U7b
-import { InventoryState } from './InventoryState';
+import { CustomizeBody } from './bodies';
+import { CustomizeHead, type PageView } from './CustomizeHead';
+import { dropOpenRequest, useOpenRequest, type CustomizeShow } from './page';
+import { CustomizePlace } from './place';
 
 const DIRECTORY_PAGE = '\0directory'; // the selector's value for a directory page: no project id or '' can equal it
-const SECTIONS = { plugins: 'Plugins', skills: 'Skills', mcp: 'Connectors' } as const; // P4-AGG M4: the value `mcp` stays, so saved tabs keep working
-const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 
-export function CustomizeView({ section }: { section: CustomizeSection }) {
-  // Once visited, keep cwd-scoped plugin operations and their confirmation sheets alive across section switches.
-  const [visitedPlugins, setVisitedPlugins] = useState(section === 'plugins');
-  if (section === 'plugins' && !visitedPlugins) setVisitedPlugins(true);
-  // P4-AGG M3: Skills too, since its Discover runs changes (an add, then an install) that must outlive a section switch
-  const [visitedSkills, setVisitedSkills] = useState(section === 'skills');
-  if (section === 'skills' && !visitedSkills) setVisitedSkills(true);
-  // P4-AGG M4: Connectors too (an add or a removal runs on, its line kept, across a section switch)
-  const [visitedConnectors, setVisitedConnectors] = useState(section === 'mcp');
-  if (section === 'mcp' && !visitedConnectors) setVisitedConnectors(true);
+export function CustomizeView({ view, show }: { view: PageView; show: CustomizeShow }) {
   // P5 O6 M4: Customize reads and changes this machine's configuration until O4 spans machines, so its pages are this
   // machine's projects, directories and live sessions only: another machine's project at the same path is never read or
   // changed here as if it were this one's. (`useCustomizeProject.directory` comes from `openDiscover`, which takes only
@@ -58,7 +38,7 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
   const chosen = useCustomizeProject((s) => s.projectId);
   // a directory no project has as its own (Open Discover from a session there, Decision Log 10): the page is that directory
   const directory = useCustomizeProject((s) => s.directory);
-  // UX wave U7b: the one rule of Customize's place, which the page's Discover request reads too
+  // UX wave U7b: the one rule of Customize's place
   const { project, cwd } = customizePlace({ projectId: chosen, directory }, current, allProjects);
   const labels = useMemo(() => projectLabels([...projects.values()]), [projects]);
   // Attach only a ready process in exactly the chosen directory. Project membership alone would also match a worktree
@@ -67,140 +47,61 @@ export function CustomizeView({ section }: { section: CustomizeSection }) {
     .sort((a, b) => a.appSessionId.localeCompare(b.appSessionId));
   const [pickedSession, setPickedSession] = useState<AppSessionId | null>(null);
   const attached = live.find((status) => status.appSessionId === pickedSession) ?? live[0] ?? null;
-  const inventory = useCustomizationInventory(cwd);
-  // UX wave U7b (Interfaces §J): a section is the page's `show`, its view kept
-  const selectSection = (next: string) => {
-    const layout = useLayout.getState();
-    const view = layout.destination?.kind === 'customize' ? layout.destination.view : 'mine';
-    layout.openDestination({ kind: 'customize', view, show: SHOW_OF_SECTION[next as CustomizeSection] });
-  };
   const setProject = (value: string) => {
     if (value === DIRECTORY_PAGE) return;
     useCustomizeProject.setState({ projectId: value === '' ? null : value as ProjectId }, true);
     setPickedSession(null);
   };
-  const liveScope = attached && <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-ui-sm text-fg-muted">
+
+  // A plugin's or a skill's detail is open (no tools); pressing the view shown or a Show value returns it to its list.
+  const [inDetail, setInDetail] = useState(false);
+  const [toList, setToList] = useState(0);
+  const go = (next: { view?: PageView; show?: CustomizeShow }) => useLayout.getState().openDestination({ kind: 'customize', view: next.view ?? view, show: next.show ?? show });
+  const onView = (next: PageView) => {
+    if (next === view) setToList((n) => n + 1);
+    else go({ view: next });
+  };
+  const onShow = (next: CustomizeShow) => {
+    setToList((n) => n + 1);
+    go({ show: next });
+  };
+  // `openMine`'s request for a plugin's detail ends when the page is elsewhere: another view, Show value or place
+  useEffect(() => {
+    const request = useOpenRequest.getState().request;
+    if (request !== null && (view !== 'mine' || request.show !== show || request.place !== cwd)) dropOpenRequest();
+  }, [view, show, cwd]);
+
+  const projectSelect = (
+    <label className="flex min-w-0 max-w-full items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:w-full">
+      <span className="shrink-0">Showing</span>
+      <select aria-label="Project" value={directory !== undefined ? DIRECTORY_PAGE : (project?.id ?? '')} onChange={(event) => setProject(event.target.value)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
+        <option value="">User configuration</option>
+        {directory !== undefined && <option value={DIRECTORY_PAGE}>{homeAbbreviated(directory)}</option>}
+        {[...projects.values()].sort((a, b) => a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id}>{labels.get(item.id)}</option>)}
+      </select>
+    </label>
+  );
+  const liveScope = attached && <label className="flex min-w-0 max-w-full flex-wrap items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:w-full">
     <span className="shrink-0">Live session</span>
     <select aria-label="Live session" value={attached.appSessionId} onChange={(event) => setPickedSession(event.target.value as AppSessionId)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
       {live.map((status) => <option key={status.appSessionId} value={status.appSessionId}>{records.has(status.appSessionId) ? displayTitle(records.get(status.appSessionId)!) : status.appSessionId}</option>)}
     </select>
   </label>;
-  return <Tabs.Root value={section} onValueChange={selectSection} className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg">
-    <header data-customize-header className="flex min-h-11 shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-3 py-1.5">
-      <Tabs.List aria-label="Customize sections" className="flex flex-wrap gap-1">
-        {(Object.entries(SECTIONS) as [CustomizeSection, string][]).map(([value, label]) => <Tabs.Trigger key={value} value={value} className="rounded-sm px-3 py-1.5 text-ui text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2 data-[state=active]:bg-bg-active data-[state=active]:font-medium data-[state=active]:text-fg">{label}</Tabs.Trigger>)}
-      </Tabs.List>
-      <label className="ml-auto flex min-w-0 max-w-full items-center gap-2 text-ui-sm text-fg-muted @max-sm/customize:ml-0 @max-sm/customize:w-full">
-        <span className="shrink-0">Showing</span>
-        <select aria-label="Project" value={directory !== undefined ? DIRECTORY_PAGE : (project?.id ?? '')} onChange={(event) => setProject(event.target.value)} className="max-w-64 min-w-0 rounded-sm border border-border bg-bg-raised px-2 py-1 text-ui text-fg outline-accent focus-visible:outline-2 @max-sm/customize:max-w-full @max-sm/customize:flex-1">
-          <option value="">User configuration</option>
-          {directory !== undefined && <option value={DIRECTORY_PAGE}>{homeAbbreviated(directory)}</option>}
-          {[...projects.values()].sort((a, b) => a.name.localeCompare(b.name)).map((item) => <option key={item.id} value={item.id}>{labels.get(item.id)}</option>)}
-        </select>
-      </label>
-    </header>
-    <Tabs.Content value="plugins" forceMount={visitedPlugins ? true : undefined} className="flex min-h-0 flex-1 flex-col px-1 pt-2 outline-none data-[state=inactive]:hidden">
-      <DirectoryPlugins key={cwd ?? 'user'} cwd={cwd} appSessionId={attached?.appSessionId ?? null} scope={section === 'plugins' ? liveScope : null} />
-    </Tabs.Content>
-    <Tabs.Content value="skills" forceMount={visitedSkills ? true : undefined} className="flex min-h-0 flex-1 flex-col p-3 outline-none data-[state=inactive]:hidden">
-      <SkillsSection key={cwd ?? 'user'} cwd={cwd} inventory={inventory} scope={liveScope} />
-    </Tabs.Content>
-    <Tabs.Content value="mcp" forceMount={visitedConnectors ? true : undefined} className="flex min-h-0 flex-1 flex-col pt-3 outline-none data-[state=inactive]:hidden">
-      <ConnectorsSection
-        key={cwd ?? 'user'}
-        cwd={cwd}
-        place={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))}
-        servers={inventory.data?.servers}
-        readAt={inventory.dataUpdatedAt}
-        configured={configuredOf(inventory)}
-        inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
-        refresh={() => void inventory.refetch()}
-        attached={attached?.appSessionId ?? null}
-        live={attached ? <LiveConnectors appSessionId={attached.appSessionId} scope={section === 'mcp' ? liveScope : null} /> : <p className="mt-4 px-2 text-ui-sm text-fg-muted">{CONNECTORS.noLive}</p>}
-      />
-    </Tabs.Content>
-  </Tabs.Root>;
-}
-
-function DirectoryPlugins({ cwd, appSessionId, scope }: { cwd: string | null; appSessionId: AppSessionId | null; scope: ReactNode }) {
-  const env = usePluginsEnv();
-  const directory = cwd ?? env.data?.configHome;
-  if (!directory) return <InventoryState error={env.error ? new Error(env.error) : null} pending={env.state === 'loading'} refresh={() => void env.reread()} />;
-  return <PluginsLibrary cwd={directory} appSessionId={appSessionId} scope={scope} discover={{ cwd }} />;
-}
-
-// Skills' two views (P4-AGG M3): My items, the skills on disk; Discover, the plugins whose skills are known. An item
-// Discover shows installed here opens My items searched to its plugin.
-function SkillsSection({ cwd, inventory, scope }: { cwd: string | null; inventory: ReturnType<typeof useCustomizationInventory>; scope: ReactNode }) {
-  const [view, setView] = useState<LibraryTab>('myItems');
-  const switcher = <LibrarySwitch tab={view} onChange={setView} second={DISCOVER.discover} />;
-  const refresh = () => void inventory.refetch();
-  const toolbar = (
-    <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
-      {switcher}
-      <DiscoverToolbar tab="skills" />
-      {scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>}
-    </div>
-  );
-  // the management state outlives both views (SkillsManage): a change asked in Discover runs on while My items shows
   return (
-    <SkillsManage cwd={cwd}>
-      {view === 'discover' ? (
-        <>
-          {toolbar}
-          <SkillsDiscover
-            cwd={cwd}
-            onOpenInstalled={(item) => {
-              const plugin = item.install.kind === 'plugin' ? item.install.pluginName : item.name;
-              useLibraryStore.setState((state) => ({ skills: { ...state.skills, search: plugin } }));
-              setView('myItems');
-            }}
-          />
-        </>
-      ) : (
-        <>
-          <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={refresh} />
-          {inventory.data ? <DiskSkills inventory={inventory.data} refresh={refresh} scope={scope} switcher={switcher} /> : <div className="mb-3 px-2">{switcher}</div>}
-        </>
-      )}
-    </SkillsManage>
-  );
-}
-
-function DiskSkills({ inventory, refresh, scope, switcher }: { inventory: Inventory; refresh(): void; scope: ReactNode; switcher: ReactNode }) {
-  const groups = useMemo(() => diskSkillGroups(inventory.skills, { invocable: false }), [inventory]);
-  const view = useLibraryStore((s) => s.skills);
-  const plugins = hasPluginSkills(groups);
-  const shown = skillsView(groups, { ...view, sort: plugins ? view.sort : 'name' });
-  const [detail, setDetail] = useState(false);
-  return <>
-    {(!detail || scope) && <div data-customize-toolbar="skills" className="mb-3 flex flex-wrap items-center gap-2 px-2">
-      {!detail && <>
-        {switcher}
-        <SearchField label={SKILLS_LIBRARY.search} value={view.search} onChange={(search) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, search } }))} />
-        {plugins && <Choice label={LIBRARY.sortBy} icon={<SortIcon />} value={view.sort} values={['name', 'plugin'] as const} words={SKILLS_LIBRARY.sort} isDefault={view.sort === 'name'} onChange={(sort) => useLibraryStore.setState((state) => ({ skills: { ...state.skills, sort } }))} />}
-        <button type="button" className={BUTTON} onClick={refresh}>Refresh</button>
-      </>}
-      {scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>}
-    </div>}
-    <SkillsLibrary groups={groups} shown={shown} onDetail={setDetail} />
-  </>;
-}
-
-function LiveConnectors({ appSessionId, scope }: { appSessionId: AppSessionId; scope: ReactNode }) {
-  return <section aria-label="Live connectors" className="mt-5 border-t border-border pt-3">
-    <div data-customize-toolbar="mcp" className="mb-2 flex flex-wrap items-center gap-2">
-      <h2 className="m-0 text-ui font-medium">{CONNECTORS.live}</h2>
-      <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{scope}</div>
+    <div
+      data-customize-page
+      data-customize-view={view}
+      data-customize-show={show}
+      // `/` focuses the head's search field, as the libraries' frame did; not from a sheet drawn over the page
+      onKeyDown={(event) => {
+        if (event.currentTarget.contains(event.target as Node)) focusSearch(event);
+      }}
+      className="@container/customize flex h-full min-h-0 flex-col bg-bg text-ui text-fg"
+    >
+      <CustomizePlace cwd={cwd} name={project?.name ?? (cwd === null ? null : homeAbbreviated(cwd))} attached={attached?.appSessionId ?? null}>
+        <CustomizeHead view={view} show={show} inDetail={inDetail} onView={onView} onShow={onShow} project={projectSelect} live={liveScope} />
+        <CustomizeBody view={view} show={show} onDetail={setInDetail} toList={toList} />
+      </CustomizePlace>
     </div>
-    <LiveConnectorStatus key={appSessionId} appSessionId={appSessionId} />
-  </section>;
-}
-
-function LiveConnectorStatus({ appSessionId }: { appSessionId: AppSessionId }) {
-  const read = useEngineRead('session.mcpStatus', { appSessionId });
-  return <>
-    <InventoryState error={read.error ? new Error(read.error) : null} pending={read.state === 'loading'} refresh={read.refetch} />
-    {read.data && <McpBody view={{ servers: present(read.data).servers.map((server) => ({ ...server, transport: null, command: null })) }} />}
-  </>;
+  );
 }

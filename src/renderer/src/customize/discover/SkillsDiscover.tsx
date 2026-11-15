@@ -2,35 +2,13 @@
 // tab"): the plugins whose skills are known, one card per plugin with its skills named; + installs the plugin that
 // carries them through the same install sheet and operations as Plugins (the CLI in the page's directory, or the
 // engine's configuration directory for the user configuration).
-// `SkillsManage` owns the management state and draws the sheet. Customize keeps it mounted across Skills' two views and
-// across its sections (as the Plugins library keeps its own), so an add-then-install asked here finishes, and its line
-// is still on the card, whichever view the person moved to while it ran.
-import { useCallback, type ReactNode } from 'react';
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): the management state and the sheet are
+// the page's one place's (customize/place.tsx), so an add-then-install asked here finishes, and its line is still on the
+// card, whichever view and Show value the person moved to while it ran.
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
-import { useSessions } from '../../stores/sessions';
-import { ManageProvider, useManageState } from '../../widgets/plugins/manage';
-import { usePluginsEnv } from '../../widgets/plugins/read';
-import { resolutionOf } from '../../widgets/PluginsWidget';
 import { DiscoverPane } from './DiscoverPane';
-import { machineOf } from '@shared/machine/address';
-import { ipc } from '../../ipc/client';
 
-export function SkillsManage({ cwd, children }: { cwd: string | null; children?: ReactNode }) {
-  const env = usePluginsEnv();
-  const { reread } = env;
-  const readySessions = useSessions((s) => [...s.engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine).length); // P5 O6 M4: this machine's, which the change reloads
-  const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
-  const directory = cwd ?? env.data?.configHome ?? '';
-  const { manage, sheet } = useManageState({ cwd: directory, readySessions, keep: `customize:skills:${cwd ?? 'user'}` }, null, resolveEngine); // the page's own: they outlive its views
-  return (
-    <ManageProvider value={manage}>
-      {children}
-      {sheet}
-    </ManageProvider>
-  );
-}
-
-/** Skills' Discover view; inside `SkillsManage`. */
+/** Skills' Discover view; inside the page's `Manage`. */
 export function SkillsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
   return <DiscoverPane tab="skills" cwd={cwd} onOpenInstalled={onOpenInstalled} />;
 }

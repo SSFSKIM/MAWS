@@ -9,6 +9,8 @@
 // where it is managed. The whole row is one target, "View <name>", opening the detail (M4): a button under the row's
 // content, which sits above it so its tooltips show, a click on it still opening the detail; the row's own controls (the
 // overflow, an operation's Stop or Reload again, the menu's items) keep their clicks.
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, C2): on Customize's page, whose one book
+// holds what Discover started too, a row with no line of its own draws the line of a Discover install of its plugin.
 import { DropdownMenu } from 'radix-ui';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
@@ -17,7 +19,9 @@ import { pluginSeedOf } from '../../customize/image/tile';
 import { LIBRARY as L } from '../copy';
 import { MoreIcon } from './icons';
 import { basename, dateWords, displayNameOf, isNew, updatedOf, versionWords, type PluginIdentity } from './library';
+import { CATALOG_KEY } from '../../customize/discover/add';
 import { OperationLine, useManage } from './manage';
+import { factsOf } from './operation';
 import { requestFor } from './present';
 
 type Installation = Pick<InstalledPlugin, 'id' | 'scope' | 'projectPath'>;
@@ -97,6 +101,7 @@ export function PluginRow({ identity, now, iconUrl, onOpen }: { identity: Plugin
   const target = identity.representative;
   const key = installedKey(target);
   const busy = ops.entries.get(key)?.state.phase === 'working';
+  const discovered = ops.entries.has(key) ? undefined : [...ops.entries.entries()].find(([opKey, entry]) => opKey.startsWith(CATALOG_KEY) && factsOf(entry).action === 'install' && factsOf(entry).target === identity.id)?.[0];
   const name = displayNameOf(identity.name, identity.manifest);
   const manifest = identity.manifest;
   const skills = manifest?.state === 'read' ? manifest.components.skills.length : 0;
@@ -141,7 +146,7 @@ export function PluginRow({ identity, now, iconUrl, onOpen }: { identity: Plugin
           </span>
         ))}
         <div className="text-ui-sm empty:hidden">
-          <OperationLine opKey={key} />
+          <OperationLine opKey={discovered ?? key} />
         </div>
       </div>
       {(version !== null || date !== null) && (

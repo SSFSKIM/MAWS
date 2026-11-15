@@ -50,8 +50,8 @@ export function DiscoverToolbar({ tab, add }: { tab: Tab; add?: React.ReactNode 
   const age = ageOf(fetched[0] ?? null, now);
   const troubled = statuses.some((s) => s.state === 'offline' || s.state === 'unavailable' || s.dropped > 0);
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-1">
-      <SearchField label={D.search} value={text} onChange={(next) => setChoices(tab, { text: next })} />
+    <span className="flex min-w-0 flex-wrap items-center gap-1 @max-sm/customize:w-full">
+      <SearchField label={D.search} value={text} onChange={(next) => setChoices(tab, { text: next })} className="@max-sm/customize:w-full" />
       <button type="button" data-catalog-refresh disabled={running} onClick={refresh} className={QUIET}>
         {running ? D.refreshing : D.refresh}
       </button>
