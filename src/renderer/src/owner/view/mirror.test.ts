@@ -275,3 +275,70 @@ describe('over a derived session', () => {
     expect(opened(rows)).toEqual(['time', 'user', 'divider', 'assistant_text', 'cell', 'assistant_text', '‹ fold', 'user', 'divider', 'cell', '‹ fold', 'assistant_text']);
   });
 });
+
+// The whole-branch review's finding 4 (2026-11-15): a stretch the reader opened stays open while it holds a row its key
+// names, whatever row now heads it. The key a press writes is the closed record line's (decision 9's key of the stretch
+// as drawn then); MAWS's own derivation can then fold that row into another (a thought into the run its first call
+// starts), unwrap it again (a run of one call, completed), or page older rows in above it. The session: an earlier turn
+// with its own stretch, then a turn that streams an unmarked commentary, a thought, then one call, then its completion.
+// The window first holds the rows from the thought on; paging up adds the turn's prompt, its commentary and all before.
+describe('a stretch stays the one the reader opened', () => {
+  const STEPS = ['the thought', 'the call', 'the completion'] as const;
+  const COMMENTARY = rowId.text('m1' as never, 0);
+  function rowsAt(step: number): Row[] {
+    const b = builder();
+    b.turn('u0', 'Set it up');
+    b.toolUse('t0', 'Bash', { command: 'ls' });
+    b.result('t0', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m0', 0, '<message>Ready.</message>');
+    b.end(['u0']);
+    b.turn('u1', 'Read the second file');
+    b.text('m1', 0, 'Looking at the second file first.');
+    b.thinking('m2', 0, 'Which of the two holds the answer?');
+    if (step >= 1) b.toolUse('t1', 'Bash', { command: 'cat second.txt' }, 'm2', 1);
+    if (step >= 2) {
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.end(['u1']);
+    }
+    const state = applyEvents(createState(null, null), b.events);
+    return rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+  }
+  const windowAt = (step: number, paged: boolean): Row[] => {
+    const rows = rowsAt(step);
+    return paged ? rows : rows.slice(rows.findIndex((r) => r.id === COMMENTARY) + 1);
+  };
+  const lines = (rows: readonly Row[]) => rows.filter((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold');
+
+  it('the derivation’s own shapes: the thought alone, then inside its call’s run, then beside its one call', () => {
+    expect(windowAt(0, false).map((r) => r.kind)).toEqual(['thinking']);
+    expect(windowAt(1, false).map((r) => r.kind)).toEqual(['group']);
+    expect(windowAt(2, false).map((r) => r.kind)).toEqual(['thinking', 'cell']);
+    expect(stretchesOf(windowAt(0, false))[0].key).not.toBe(stretchesOf(windowAt(1, false))[0].key); // the key as drawn moves
+    expect(stretchesOf(windowAt(2, true)).at(-1)!.key).toBe(COMMENTARY);
+  });
+
+  // Each row: the step the reader opens the stretch at, and the step from which the window is paged up (at or before
+  // the opening: it opened in the paged window; never: it never pages).
+  const timelines = STEPS.flatMap((_, opensAt) => [0, 1, 2, 3].map((pagedFrom) => [opensAt, pagedFrom] as const));
+  it.each(timelines.map(([opensAt, pagedFrom]) => [`opened at ${STEPS[opensAt]}, ${pagedFrom > 2 ? 'never paged up' : `paged up from ${STEPS[pagedFrom]} on`}`, opensAt, pagedFrom] as const))(
+    '%s: open at every step after, and one press folds it', (_name, opensAt, pagedFrom) => {
+      const pressed = lines(mirrorRows(windowAt(opensAt, pagedFrom <= opensAt), {})).at(-1)!;
+      expect(pressed.open).toBe(false);
+      const openStretches = new Set([pressed.stretch]);
+      for (let step = opensAt; step < STEPS.length; step += 1) {
+        const window = windowAt(step, pagedFrom <= step);
+        const drawn = mirrorRows(window, { openStretches });
+        const at = `at ${STEPS[step]}`;
+        expect(lines(drawn).map((line) => line.open), at).toEqual(pagedFrom <= step ? [false, true] : [true]); // the earlier turn's stays closed
+        expect(drawn.at(-1)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+        expect(drawn.some((r) => r.kind === 'thinking' || r.kind === 'group'), at).toBe(true); // its rows in sight
+      }
+      // the press on `‹ fold to report` takes the key the line carries, and the stretch folds
+      const last = windowAt(2, pagedFrom <= 2);
+      const folding = lines(mirrorRows(last, { openStretches })).at(-1)!;
+      expect(folding.open).toBe(true);
+      const after = new Set(openStretches);
+      after.delete(folding.stretch);
+      expect(lines(mirrorRows(last, { openStretches: after })).every((line) => !line.open)).toBe(true);
+    });
+});

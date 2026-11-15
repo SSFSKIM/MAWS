@@ -18,11 +18,13 @@ import type { Row } from '../../transcript/model/rows';
 import { tool, uuid } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Disclosures, NO_ACTIONS, TranscriptProvider, type TranscriptContextValue } from '../../transcript/view/context';
-import { AssistantTextRow } from '../../transcript/view/rows/AssistantText';
+import { AssistantTextRow, CUT_NOTE } from '../../transcript/view/rows/AssistantText';
+import { renderRow } from '../../transcript/view/rows/test-support';
 import { Transcript } from '../../transcript/view/Transcript';
 import { assistantPresentation } from '../to-human/Presenter';
 import { ToHumanMessageRow } from '../to-human/MessageRow';
 import { ReportOnly } from './Message';
+import { mirrorRows } from './mirror';
 import { MARKED_CASES } from '@shared/owner/marked-cases';
 
 afterEach(() => {
@@ -207,6 +209,65 @@ describe('the label follows `spanRows`', () => {
     const view = draw('Checked. <message>First.</message> <message>Second.</message> Done.');
     expect(view.container.querySelectorAll('p')).toHaveLength(1);
     expect(view.container.textContent).toBe('● messageChecked. First. Second. Done.');
+  });
+});
+
+// The whole-branch review's findings on the drawing (2026-11-15): a cut reply that heads a closed stretch, an opening
+// fence glued to its tag, and a question's option whose tags stand on either side of a message's closer.
+describe('the drawing agrees with the one reading at a row’s and a fence’s edges', () => {
+  const cutRow = (markdown: string): Extract<Row, { kind: 'assistant_text' }> => ({
+    id: 'cut:e1' as never, turnId: turnId.ofMessage(uuid('u1')), at: '2026-11-15T10:00:00.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown, live: false, phase: 'commentary', model: null, cut: true,
+  });
+  const work = { id: 'cell:toolu_w1', turnId: turnId.ofMessage(uuid('u1')), at: '2026-11-15T10:00:00.000Z', kind: 'cell', toolUseId: tool('toolu_w1'), toolName: 'Bash' } as unknown as Row;
+  const prompt: Row = { id: 'user:u1' as never, turnId: turnId.ofMessage(uuid('u1')), at: '2026-11-15T10:00:00.000Z', kind: 'user', text: 'Go on.', steer: false } as unknown as Row;
+  const CUT = '<message>The first half is done.</message>\n\nNow looking at the second ha';
+  const cutAsDrawn = (open: boolean) => {
+    const rows = mirrorRows([prompt, cutRow(CUT), work], { openStretches: new Set(open ? ['cut:e1'] : []) });
+    return rows.find((row) => row.kind === 'assistant_text')!;
+  };
+
+  it('a cut reply heading a closed stretch draws its note and only its message', () => {
+    const head = cutAsDrawn(false);
+    expect(head.kind === 'assistant_text' && head.reportOnly).toBe(true);
+    const view = renderRow(head);
+    expect(view.container.querySelector('[data-cut] .transcript-cut-note')?.textContent).toBe(CUT_NOTE);
+    expect(labels(view.container)).toEqual(['● message']);
+    expect(bodies(view.container)).toEqual(['The first half is done.']);
+    expect(view.container.textContent).not.toContain('second ha');
+    expect(view.container.textContent).not.toContain('<message>');
+  });
+
+  it('a cut reply heading an open stretch draws its note, its message as a message and its own words', () => {
+    const head = cutAsDrawn(true);
+    expect(head.kind === 'assistant_text' && head.reportOnly).toBeFalsy();
+    const view = renderRow(head);
+    expect(view.container.querySelector('[data-cut] .transcript-cut-note')?.textContent).toBe(CUT_NOTE);
+    expect(labels(view.container)).toEqual(['● message']);
+    expect(bodies(view.container)).toEqual(['The first half is done.']);
+    expect(view.container.textContent).toContain('Now looking at the second ha');
+    expect(view.container.textContent).not.toContain('<message>');
+    expect(view.container.querySelector('.transcript-answer'), 'never drawn as the reply').toBeNull();
+  });
+
+  it('an opening fence glued to its tag, then the closing fence glued to the closer, then the record: the code inside the message, the record outside it', () => {
+    const text = '<message>```sh\nls -la\n```</message>\nThe record goes on here.';
+    const view = draw(text);
+    expect(labels(view.container)).toEqual(['● message']);
+    const ink = view.container.querySelector('.owner-message-ink')!;
+    expect(ink.querySelector('pre')?.textContent).toContain('ls -la');
+    expect(view.container.querySelector('pre')?.textContent).not.toContain('The record');
+    expect(view.container.textContent).not.toMatch(/<\/?message>|```/);
+    expect(ink.textContent).not.toContain('The record');
+    expect([...view.container.querySelectorAll('p')].map((p) => p.textContent)).toContain('The record goes on here.');
+  });
+
+  it('a question’s option whose tags stand on either side of a message’s closer is no option: the record after it is outside the message', () => {
+    const text = '<message>Pick <choice>one</message>\n\nThe record goes on </choice> here.';
+    const view = draw(text);
+    expect(labels(view.container)).toEqual(['● message']);
+    const ink = view.container.querySelector('.owner-message-ink')!;
+    expect(ink.textContent).not.toContain('The record goes on');
+    expect([...view.container.querySelectorAll('p')].map((p) => p.textContent)).toContain('The record goes on </choice> here.');
   });
 });
 

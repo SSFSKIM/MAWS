@@ -645,6 +645,23 @@ describe('transcript store: the to-human view', () => {
     expect(ui(store).openStretches).toEqual(new Set());
   });
 
+  // The whole-branch review's finding 4: an open key names a row, so a stretch can hold two (two opened stretches that
+  // since met, or one opened as its run stood and once more by a jump): its `‹ fold to report` folds it in one press.
+  it('folding an open stretch takes every open key it holds, and leaves another stretch’s', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const stretch = rowId.text(api('m1'), 0); // the marked commentary heads the stretch; its call is inside it
+    store.getState().toggleStretch(KEY, 't1');
+    store.getState().toggleStretch(KEY, 'elsewhere');
+    store.getState().jumpTo(KEY, rowId.text(api('m2'), 0)); // already open by its call's key: nothing more opens
+    expect(ui(store).openStretches).toEqual(new Set(['t1', 'elsewhere']));
+    store.getState().toggleStretch(KEY, stretch); // a second key of the same stretch, as a press on its closed line writes one
+    expect(ui(store).openStretches).toEqual(new Set(['t1', 'elsewhere', stretch]));
+    store.getState().toggleStretch(KEY, stretch); // its open line carries the first open key it holds, its head's
+    expect(ui(store).openStretches).toEqual(new Set(['elsewhere']));
+  });
+
   it('a jump in the view to a row a closed record holds opens the stretch that holds it, and only there', async () => {
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);

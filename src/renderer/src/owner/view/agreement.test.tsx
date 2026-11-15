@@ -19,6 +19,7 @@ import { FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { messageInk } from '../to-human/message-ink';
 import { assistantPresentation } from '../to-human/Presenter';
 import { holdsMessage, liveMarksOf } from './mirror';
+import { renderRow } from '../../transcript/view/rows/test-support';
 import { ReportOnly } from './Message';
 
 afterEach(cleanup);
@@ -119,5 +120,64 @@ describe('one reading of the marks for every reader', () => {
   it.each(INVENTED.map((text) => [text.slice(0, 60), text]))('agrees on the invented text %j', (_name, text) => agreeOn(text));
   it('agrees on every recorded to-human text', () => {
     for (const text of FIXTURES) agreeOn(text);
+  });
+});
+
+// The whole-branch review (2026-11-15): the drawing and the reading cannot disagree. Each text drawn as its row draws it
+// (whole, as a closed stretch's head, and as a reply an interrupt cut) against `readMarked`: the same message texts, each
+// in a message's wrapper, and the same record texts outside every wrapper. A mark left open in a completed text, a
+// stray closer and crossing marks are text in the one reading (option 3), so they draw no message there.
+describe('the drawn row says what the one reading says', () => {
+  const TABLE: readonly (readonly [string, string])[] = [
+    ['an opening fence glued to its tag, the closing fence to its closer, then the record', '<message>```sh\nls -la\n```</message>\nThe record goes on here.'],
+    ['an option whose tags stand on either side of a message’s closer', '<message>Pick <choice>one</message>\n\nThe record goes on </choice> here.'],
+    ['a closing fence glued to its closer, then the record', '<message>\n```sh\nls\n```</message>\nNarration after the fence.'],
+    ['a mark left open in a completed text', 'Narration first.\n\n<message>Still open at the end'],
+    ['a stray closer', 'Narration first. </message>\n\n<message>Kept.</message>'],
+    ['crossing marks', '<message>One <insight>two</message> three</insight>\n\nNarration.'],
+  ];
+  // The reading's record: the text outside every mark it takes, its tags out, as one Markdown.
+  const recordOf = (text: string): string => {
+    let depth = 0;
+    let last = 0;
+    let record = '';
+    for (const at of readMarked(text).tags) {
+      const tag = /^<\/?[a-z-]+>/.exec(text.slice(at))![0];
+      if (depth === 0) record += text.slice(last, at);
+      depth += tag.startsWith('</') ? -1 : 1;
+      last = at + tag.length;
+    }
+    return record + text.slice(last);
+  };
+  const drawnAlone = (markdown: string) => {
+    const view = render(<Markdown markdown={markdown} live={false} decorate={messageInk} />);
+    const drawn = stripped(view.container.textContent);
+    view.unmount();
+    return drawn;
+  };
+  const read = (root: HTMLElement) => {
+    const inks = [...root.querySelectorAll('.owner-message-ink')];
+    const messages = inks.map((ink) => stripped([...ink.children].filter((child) => !child.classList.contains('owner-message-label')).map((child) => child.textContent).join('')));
+    const outside = root.cloneNode(true) as HTMLElement;
+    for (const ink of outside.querySelectorAll('.owner-message-ink, .transcript-cut-note')) ink.remove();
+    return { messages, record: stripped(outside.textContent) };
+  };
+
+  it.each(TABLE)('%s', (_name, text) => {
+    const row = textRow(text, false);
+    const messages = readMarked(text).spans.map((span) => drawnAlone(span.text));
+    const record = drawnAlone(recordOf(text));
+    const whole = renderRow(row);
+    expect(read(whole.container), 'the row drawn whole').toEqual({ messages, record });
+    whole.unmount();
+    const cut = renderRow({ ...row, cut: true });
+    expect(read(cut.container), 'the row as a reply an interrupt cut').toEqual({ messages, record });
+    cut.unmount();
+    if (messages.length === 0) return; // a text with no message never heads a stretch
+    for (const head of [{ ...row, reportOnly: true as const }, { ...row, cut: true, reportOnly: true as const }]) {
+      const view = renderRow(head);
+      expect(read(view.container), `a closed stretch’s head${head.cut ? ', cut' : ''}`).toEqual({ messages, record: '' });
+      view.unmount();
+    }
   });
 });
