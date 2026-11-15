@@ -5,9 +5,10 @@
 // chips, the toolbar and the headers draw at once. Review reads no file bytes (K4): an untracked file is read as
 // Source control reads it, its diff against /dev/null.
 //
-// UX wave U5b, M5 (§B, §G; decision 4): the surface's comment card host is mounted once, in the toolbar, where its chip
-// ("N unsent comments") and its place line belong; the card is drawn through a portal into the row the stack opens
-// under the commented line. `hostId` is the surface's own (the tool's tab id, a diff tab's id).
+// UX wave U5b, M5 (§B, §G; decision 4): the surface's comment card host is mounted once, for as long as the surface is,
+// and shown in the toolbar, where its chip ("N unsent comments") and its place line belong, or in a line where the
+// toolbar stands while the scope draws no stack; the card is drawn through a portal into the row the stack opens under
+// the commented line. `hostId` is the surface's own (the tool's tab id, a diff tab's id).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
