@@ -30,7 +30,7 @@ const thinking = (of: string): Row => ({ ...base(`thinking:${of}`, of), kind: 't
 const compaction = (of: string | null): Row => ({ ...base(`boundary:${of ?? 'loose'}`, of), kind: 'boundary', boundaryKind: 'compaction', text: 'Conversation compacted', detail: null, hiddenRows: 0, revealed: false });
 // U1c's approval row drawn beside a message (in flight, read at its head; not imported): no message id of its own, the
 // person's consent, and the message it stands beside
-const besideRow = (of: string, n: number, message: string): Row => ({ ...prompt(of, { messageUuid: null, editable: false, consent: { kind: 'call', subject: 'rm -rf build' } }), id: `grant:${message}:${n}` as RowId, beside: uuid(message) }) as Row;
+const besideRow = (of: string, n: number, message: string): Row => ({ ...prompt(of, { messageUuid: null, editable: false, consent: { kind: 'call', subject: 'rm -rf build' } }), id: `grant:${message}:${n}` as RowId, beside: uuid(message) }) as unknown as Row;
 
 /** Each entry as `[answer id, rewindTo, fork]`, in the list's order. */
 const entries = (rows: Row[]) => [...answerActionsOf(rows)].map(([id, entry]) => [id, entry.rewindTo, entry.fork]);

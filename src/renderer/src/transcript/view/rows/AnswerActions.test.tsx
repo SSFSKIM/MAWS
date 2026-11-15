@@ -11,7 +11,6 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { act, cleanup, fireEvent, renderHook, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { OFFERS } from '../../../../../endpoint/offers';
 import { remoteRow } from '../../../../../../test/support/builders';
 import { fakeClient } from '../../../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
@@ -214,8 +213,8 @@ describe('Fork from here for a session on another machine', () => {
     fireEvent.click(fork()!);
     await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
     const [input] = client.invoked('session.fork');
+    // what the machine's offer of session.fork accepts: test/lane-b/answer-fork.test.ts reads this input against it
     expect(input).toEqual({ appSessionId: 'app-far', target: { kind: 'inPlace' }, message: null, rewindTo: 'u-next' });
-    expect(OFFERS.commands['session.fork']!.accepts!(input)).toBe(true);
     await act(() => client.fail('session.fork', 'The session is working; try again when it’s done.'));
     expect(useNotices.getState().notices.map((notice) => notice.text)).toContain('The session is working; try again when it’s done.'); // a refusal is the act's toast
     expect(fork()!.disabled).toBe(false);
