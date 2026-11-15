@@ -18,7 +18,7 @@ fixed and row e's controls were added), its verdict was the same.
 
 | row | verdict | what decides it |
 |---|---|---|
-| a | **PASS** | the 5 MiB, 5-page PDF is drawn from `maws-artifact://<token>/large.pdf`, streamed in 1 MiB pages, both when the answer offers ranges and when it answers whole; one request each time, with no `Range` |
+| a | **PASS** | the 5 MiB, 5-page PDF is drawn from `maws-artifact://<token>/large.pdf`, streamed in 1 MiB pages, both when the answer offers ranges and when it answers whole; one request each time, with no `Range`. Addendum: a linearized 8 MiB PDF, with default features and with partial loading, is also one request, passed for the owner, with no `Range` |
 | b | **PASS** | for each of the four kinds, no handler entry without a passed decision before it, and every passed decision carries the window's id: PDF 1/1, page 1/1, video 1/1, sound 2/2 (entries/passes) |
 | c | **PASS** | a second window, a web contents with its own filter, a request with no web contents and a second partition: 0 handler entries for the four URLs; 22 decisions, all `cancel` by the owner's check |
 | d | RECORD | a host of 32 digits does not load: Chromium blocks the frame (`about:blank#blocked`) before any request; 0 decisions, 0 entries. Decision 10 stands |
@@ -87,6 +87,25 @@ downloads, permissions, console lines, web contents made) shares the counter.
 | control, `--enable-features=PdfPartialLoading`, 400 ms between pages | yes | 1, no `Range` | 1 pass |
 
 The plugin is 499 px wide in an 800 px frame because the thumbnail sidebar opened by itself (row i).
+
+**Addendum: a linearized PDF** (asked by the architect before M3, 2026-11-15). The harness's PDF of 8 pages
+(8,302,530 bytes once linearized) is linearized by `qpdf --linearize` and checked by `qpdf --check-linearization` (no
+linearization errors). qpdf is not a dependency of the repository: the run used qpdf 12.4.2's static Linux build,
+unpacked on the VM outside the repository, given as `--qpdf=<path>`; without it the two suites report that they did not
+run. Ranges offered; the viewer scrolled to its last page after it drew, then 4 s; both ends recorded as row b records
+them. Run at head `807aa749a`:
+
+    vmcheck 'cd spikes/file-frame && timeout 800 node run.mjs --setuid-sandbox --qpdf=<qpdf> --only=a,a-partial,a-linear,a-linear-partial'
+
+| launch | pause between pages | drawn | entries | passed | cancelled | entries without a pass before them | passes with another id | `Range` at the handler |
+|---|---|---|---|---|---|---|---|---|
+| default features | 20 ms | yes, 8 pages | 1 | 1 | 0 | 0 | 0 | none |
+| default features | 400 ms | yes, 8 pages | 1 | 1 | 0 | 0 | 0 | none |
+| `--enable-features=PdfPartialLoading` | 20 ms | yes, 8 pages | 1 | 1 | 0 | 0 | 0 | none |
+| `--enable-features=PdfPartialLoading` | 400 ms | yes, 8 pages | 1 | 1 | 0 | 0 | 0 | none |
+
+Every decision carried the window's id (1); no request asked another path of the token. A linearized PDF is again one
+request, the frame's navigation.
 
 ### b. Both ends, for each kind, from the owning window — PASS
 
@@ -241,9 +260,9 @@ expected to agree, but it was not run there. The pictures (`hi/*.png`, `hi-rever
 1. **The PDF viewer asks the route for nothing of its own.** In every configuration (ranges offered or not, partial
    loading forced on, slow pages) a PDF costs exactly one request: the frame's navigation, from the owning window. The
    viewer's plugin frame (a second frame with the token's URL, beneath the extension's) is handed the bytes without a
-   request. So the owner's check sees the PDF's only request; "the viewer's own range requests" did not occur. Not
-   tried: a linearized PDF (the VM has no tool to linearize, and the harness builds its PDFs from text); Chromium's
-   partial loading may only start for one. The scene of record on a Mac counts whatever occurs there.
+   request. So the owner's check sees the PDF's only request; "the viewer's own range requests" did not occur, for a
+   linearized PDF either (row a's addendum: default features and partial loading, 20 ms and 400 ms between pages). The
+   scene of record on a Mac counts whatever occurs there.
 2. **PDFium runs no document script in Electron 44.4.5.** None of four scripts (the open action, the document-level
    name tree, a page's open action, each setting the page) ran, and nothing an `app.alert`, `this.print`,
    `submitForm`, `launchURL` or `exportDataObject` asks happened, while a page's non-script open action did run. Row e
