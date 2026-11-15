@@ -655,6 +655,13 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     });
     // A scroll event with no input before it, as the browser sends for a scroll it makes itself.
     const scrollWithoutInput = (top: number) => act(() => void (scroller().scrollTop = top));
+    // The live place, as Review saves it when hidden and stands it again when shown: the row then at the top.
+    async function placeSaved() {
+      hide();
+      show();
+      await page.settle();
+      return page.rowAtTop();
+    }
 
     // Five files of 40 lines; the person reads the third by hand at `clock`, and the offset one step further on.
     async function reading() {
@@ -739,6 +746,76 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     // The branch's task review (finding 5): a card opened from the chip on a line drawn wholly in view near the
     // viewport's bottom; its field takes the keyboard as it is drawn, and the browser scrolls the field into view, a
     // scroll with no input before it. The stack stands the card wholly in view, and that scroll is not undone.
+    // The architect's review (its first finding): a card opened from the chip while its file's own read is out waits on
+    // that read; the person's scroll in the scroller meanwhile is theirs, and the card, placed when the read answers,
+    // opens under its line where that is, moving neither the scroller nor the place the person reads.
+    it('opens a card that waited on its file’s read under its line where the person scrolled away meanwhile: no reveal and no exposure', async () => {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      offs.push(registerCommentComposer(openComment));
+      const main = await mount(files, { pastCap: true });
+      fireEvent.click(screen.getByRole('button', { name: 'Expand all' }));
+      await page.settle();
+      addOn(files[0].path, files[0].added[0]); // in view at the top
+      await page.settle();
+      const field = within(card()!).getByRole('textbox', { name: 'Comment' });
+      fireEvent.change(field, { target: { value: 'Say what this counts.' } });
+      fireEvent.keyDown(field, { key: 'Escape' }); // a draft: the card goes, the chip stands for it
+      await page.settle();
+      hide();
+      main.state.hold = files[0].path; // shown again, the scope reads afresh and the first file's own read stays out
+      show();
+      await page.settle();
+      expect(sectionOf(files[0].path).querySelector('[data-review-body]')?.textContent).toBe('Loading');
+      fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
+      await page.settle();
+      expect(card()).toBeNull(); // waiting on the read
+      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER + 5 * ROW); // by hand, into the second file
+      await page.settle();
+      expect(drawnBodies().map((section) => section.dataset.reviewFile)).toContain(files[0].path); // the first still in the band
+      const reading = page.rowAtTop();
+      expect(reading).toEqual(expect.objectContaining({ path: files[1].path }));
+      let scrolls = 0;
+      scroller().addEventListener('scroll', () => scrolls++);
+      main.release(files[0].path);
+      await page.settle();
+      expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[0].path)); // opened under its line
+      expect(page.rowAtTop()).toEqual(reading);
+      expect(scrolls).toBeLessThanOrEqual(1); // the first file's grown body held above the place, and nothing more
+      main.state.hold = null;
+      expect(await placeSaved()).toEqual(reading); // the live place: saved when Review is hidden, restored when shown
+    });
+
+    // The architect's review (its second finding): a card's exposure waiting for its row to draw is a request the
+    // person's later navigation replaces, as it replaces the card's reveal; the hunks they jump to stand at the top once
+    // the card draws near them.
+    it('stands the hunk the person jumped to at the top when a card opened before it draws nearby: its exposure was replaced', async () => {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      offs.push(registerCommentComposer(openComment));
+      await mount(files);
+      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER); // by hand, to the second file
+      await page.settle();
+      addOn(files[1].path, files[1].added[0]);
+      await page.settle();
+      const field = within(card()!).getByRole('textbox', { name: 'Comment' });
+      fireEvent.change(field, { target: { value: 'Say what this counts.' } });
+      fireEvent.keyDown(field, { key: 'Escape' }); // a draft: the card goes, the chip stands for it
+      await page.settle();
+      page.scrollTo(page.topOf(sectionOf(files[4].path)) + HEADER + 2 * ROW); // by hand, to the last file
+      await page.settle();
+      expect(drawnBodies().map((section) => section.dataset.reviewFile)).not.toContain(files[1].path); // the card's file out of the band
+      expect(hunkLabel()).toBe('Showing hunk 5 of 5');
+      clock += 1_000;
+      // the chip's card on the second file's line, revealed there; at once (its body not drawn yet) the person presses ↑
+      // three times, to the second file's hunk
+      fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
+      for (let n = 0; n < 3; n++) fireEvent.click(screen.getByLabelText('Previous hunk'));
+      await page.settle();
+      expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[1].path)); // drawn, under its line
+      const jumped = { path: files[1].path, side: 'new', line: files[1].starts[0] };
+      expect({ hunk: hunkLabel(), top: page.rowAtTop() }).toEqual({ hunk: 'Showing hunk 2 of 5', top: jumped });
+      expect(await placeSaved()).toEqual(jumped); // the live place: saved when Review is hidden, restored when shown
+    });
+
     it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
       const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
       offs.push(registerCommentComposer(openComment));
