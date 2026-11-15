@@ -11,35 +11,47 @@ import { useLayout } from '../../stores/layout';
 import { useTranscriptStore } from '../../stores/transcript';
 import { mainShowing } from '../../test-support/panel';
 import { resetShellStores } from '../../test-support/shell-stores';
+import { builder } from '../../transcript/model/test-events';
 import { toggleView, ViewSwitch } from './Switch';
 
 const APP = 'app-switch' as AppSessionId;
-type Ui = { ownerLane?: boolean; noTurnFold?: boolean; view?: 'report' | 'transcript'; modDraws?: boolean };
-const withUi = (ui: Ui) => useTranscriptStore.setState({ entries: { [APP]: { state: { ui } } } as never });
+type Scene = { lane: boolean; message: boolean; modDraws?: boolean };
+// The session's transcript in the store, as its slot leaves it: one turn whose answer holds a message or not, the lane
+// as the slot tells it, and the mod drawing or not.
+async function withSession({ lane, message, modDraws }: Scene) {
+  const b = builder();
+  b.turn('u1', 'Count the files');
+  b.text('m1', 0, message ? '<message>Three files.</message>' : 'Three files.');
+  b.end(['u1']);
+  const events = b.events;
+  await act(() => useTranscriptStore.getState().attach(APP, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+  act(() => useTranscriptStore.getState().setToHumanView(APP, { lane, tailMessage: false, ...(modDraws !== undefined && { modDraws }) }));
+}
 const viewOf = () => useTranscriptStore.getState().entries[APP]?.state.ui.view;
 
 afterEach(() => {
   cleanup();
-  useTranscriptStore.setState({ entries: {} });
+  for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   resetShellStores();
 });
 
 describe('the switch', () => {
-  it.each<[string, Ui | null]>([
+  it.each<[string, Scene | null]>([
     ['no transcript of the session', null],
-    ['the lane off', { ownerLane: false }],
-    ['the lane on, no message yet', { ownerLane: true }],
-    ['the lane off, a message held', { ownerLane: false, noTurnFold: false }],
-    ['the mod drawing the view', { ownerLane: true, noTurnFold: true, modDraws: true }],
-  ])('is absent, not disabled, with %s', (_name, ui) => {
-    if (ui !== null) withUi(ui);
+    ['the lane off, no message', { lane: false, message: false }],
+    ['the lane off, a message held', { lane: false, message: true }],
+    ['the lane on, no message yet', { lane: true, message: false }],
+    ['the mod drawing the view', { lane: true, message: true, modDraws: true }],
+  ])('is absent, not disabled, with %s', async (_name, scene) => {
+    if (scene !== null) await withSession(scene);
     const view = render(<ViewSwitch appSessionId={APP} />);
     expect(view.container.innerHTML).toBe('');
     expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('reads its two words for the two views, and a press switches the tab’s view', () => {
-    withUi({ ownerLane: true, noTurnFold: true });
+  it('reads its two words for the two views, and a press switches the tab’s view', async () => {
+    await withSession({ lane: true, message: true });
+    expect(useTranscriptStore.getState().entries[APP]?.state.ui.noTurnFold).toBe(true);
     const view = render(<ViewSwitch appSessionId={APP} />);
     expect(view.container.textContent).toBe('to-human view · full transcript ›');
     fireEvent.click(screen.getByRole('button', { name: 'full transcript ›' }));
@@ -50,8 +62,8 @@ describe('the switch', () => {
     expect(view.container.textContent).toBe('to-human view · full transcript ›');
   });
 
-  it('stands in the band’s bordered frame, its caption and its button one size, with no row above it', () => {
-    withUi({ ownerLane: true, noTurnFold: true });
+  it('stands in the band’s bordered frame, its caption and its button one size, with no row above it', async () => {
+    await withSession({ lane: true, message: true });
     const view = render(<ViewSwitch appSessionId={APP} />);
     const frame = view.container.querySelector('[data-view-switch]')!;
     for (const name of ['rounded-lg', 'border', 'border-border', 'bg-bg-raised', 'px-3', 'py-2']) expect(frame.classList.contains(name), name).toBe(true);
@@ -64,15 +76,15 @@ describe('the switch', () => {
 });
 
 describe('the action "Toggle report and transcript"', () => {
-  it('switches the focused pane’s session between its two views while its lane is on, and does nothing otherwise', () => {
+  it('switches the focused pane’s session between its two views while its lane is on, and does nothing otherwise', async () => {
     act(() => useLayout.setState({ main: mainShowing(APP) }));
-    withUi({ ownerLane: true, noTurnFold: true });
-    toggleView();
+    await withSession({ lane: true, message: true });
+    act(() => toggleView());
     expect(viewOf()).toBe('transcript');
-    toggleView();
+    act(() => toggleView());
     expect(viewOf()).toBe('report');
-    withUi({ ownerLane: false });
-    toggleView();
-    expect(viewOf()).toBeUndefined();
+    act(() => useTranscriptStore.getState().setToHumanView(APP, { lane: false, tailMessage: false }));
+    act(() => toggleView());
+    expect(viewOf()).toBe('report');
   });
 });

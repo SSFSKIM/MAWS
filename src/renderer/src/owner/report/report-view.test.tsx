@@ -189,7 +189,8 @@ describe('the report view', () => {
     b.end(['u1']);
     await mounted(b.events);
     await waitFor(() => expect(records()).toHaveLength(1));
-    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('The README plan. The branch is master. Unverified. Which tone? Concise Friendly');
+    // UX wave U2b (M2): each run of text under one mark is a message of its own, the first with the bullet
+    expect([...document.querySelectorAll('[data-kind="assistant_text"] .owner-message-ink')].map((node) => node.textContent?.replace(/\s+/g, ' ').trim())).toEqual(['● messageThe README plan.', 'messageThe branch is master.', 'messageUnverified.', 'messageWhich tone? Concise Friendly']);
     expect(document.querySelector('[data-owner-card], .owner-card-label')).toBeNull();
   });
 
@@ -205,11 +206,11 @@ describe('the report view', () => {
     const kinds = [...document.querySelectorAll('[data-kind]')].map((element) => element.getAttribute('data-kind'));
     expect(kinds.indexOf('divider')).toBe(kinds.indexOf('record_fold') + 1); // ruling 5: the running turn's line, after the closed record
     expect(turnLines()[0].textContent).toMatch(/^Working/);
-    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway');
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('● message …Halfway'); // UX wave U2b (M2): an open message streams under its label
     push([delta(' there.')]);
-    await waitFor(() => expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway there.'));
+    await waitFor(() => expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('● message …Halfway there.'));
     push([delta('</to-human>')]);
-    await waitFor(() => expect(document.querySelector('.owner-message-ink')?.textContent).toBe('Halfway there.'));
+    await waitFor(() => expect(document.querySelector('.owner-message-ink')?.textContent).toBe('● messageHalfway there.'));
   });
 
   it('with the lane off, a marked turn is P1’s drawing: R4’s presenter, the turn folded by its divider', async () => {

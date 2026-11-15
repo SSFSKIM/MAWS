@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { storedMain } from '@shared/ipc/schema/layout';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'; // C7: vi; UX wave U2b: onTestFinished
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
@@ -50,6 +50,16 @@ afterEach(() => {
   useUsage.setState({ windows: null });
   // C7 end
 });
+
+// UX wave U2b: a session's transcript in the store holding one turn whose answer is a message, as its slot loads it.
+async function withMessage(id: AppSessionId) {
+  const b = builder();
+  b.turn('u1', 'Count the files');
+  b.text('m1', 0, '<message>Three files.</message>');
+  b.end(['u1']);
+  const events = b.events;
+  await act(() => useTranscriptStore.getState().attach(id, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+}
 
 describe('session pane', () => {
   // UX wave U12a: the computer-use strip is mounted in the full pane only, directly above the transcript's wrapper
@@ -139,10 +149,11 @@ describe('session pane', () => {
   // UX wave U2b (M2; A14, decision 16): no bar above the transcript, whatever the lane; where the holder notice stands in
   // the composer's place (a terminal session nobody drives), the view's switch stands above it while MAWS draws the view
   // in force there, and is absent otherwise.
-  it('draws no bar above the transcript, and the view’s switch above the holder notice while the view is in force', () => {
+  it('draws no bar above the transcript, and the view’s switch above the holder notice while the view is in force', async () => {
     const id = idOf('Somersault terminal run');
-    const inForce = (on: boolean) => useTranscriptStore.setState({ entries: { [id]: { state: { ui: { ownerLane: on, noTurnFold: on } } } } as never });
-    inForce(false);
+    onTestFinished(() => useTranscriptStore.getState().drop(id));
+    await withMessage(id);
+    const inForce = (on: boolean) => useTranscriptStore.getState().setToHumanView(id, { lane: on, tailMessage: false });
     const view = render(<SessionPane appSessionId={id} paneIndex={0} />);
     expect(document.querySelector('[data-owner-bar]')).toBeNull();
     expect(document.querySelector('[data-view-switch]')).toBeNull();
@@ -153,16 +164,16 @@ describe('session pane', () => {
     expect(switchLine.textContent).toBe('to-human view · full transcript ›');
     expect(switchLine.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // directly above the notice
     view.unmount();
-    useTranscriptStore.setState({ entries: {} });
   });
 
-  it('draws no bar above the transcript of a session whose lane is on', () => {
+  it('draws no bar above the transcript of a session whose lane is on', async () => {
     const id = idOf('Charter + research');
-    useTranscriptStore.setState({ entries: { [id]: { state: { ui: { ownerLane: true, noTurnFold: true } } } } as never });
+    onTestFinished(() => useTranscriptStore.getState().drop(id));
+    await withMessage(id);
+    act(() => useTranscriptStore.getState().setToHumanView(id, { lane: true, tailMessage: false }));
     render(<SessionPane appSessionId={id} paneIndex={0} />);
     expect(document.querySelector('[data-owner-bar]')).toBeNull();
     expect(screen.queryByRole('group', { name: 'Session view' })).toBeNull();
-    useTranscriptStore.setState({ entries: {} });
   });
 
   // UX wave U4a (M7; decision 26 a): the `/btw` card is a layer of the pane over the transcript's bottom right corner,

@@ -1,6 +1,9 @@
 // An assistant text block, answer or commentary. While its block streams the row is `live` and its text is the
 // store's live buffer for the block identity (a delta re-renders this component and nothing else); at completion the
-// re-derived row carries the final markdown under the same id, and Markdown switches to static mode once.
+// re-derived row carries the final markdown under the same id, and Markdown switches to static mode once. UX wave U2b
+// (M2; §D): a streaming block whose message is still open is drawn as that message, its label reading ` …`, by the
+// owner's presenter, which draws a completed text only for a mark that closes.
+import { assistantPresentation } from '../../../owner/to-human/Presenter';
 import { liveBuffer, useTranscriptStore } from '../../../stores/transcript';
 import type { Row } from '../../model/rows';
 import { useTranscriptContext } from '../context';
@@ -11,6 +14,8 @@ export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'ass
   const buffer = useTranscriptStore((state) => liveBuffer(state.entries[storeKey], row));
   const markdown = text ?? buffer ?? row.markdown;
   if (!row.live && markdown.trim() === '') return null;
+  const streaming = row.live ? assistantPresentation(markdown, true) : null;
+  if (streaming) return streaming.render({ live: true });
   return (
     <div className={row.phase === 'answer' || row.forHuman ? 'transcript-answer' : 'transcript-commentary'}>
       <Markdown markdown={markdown} live={row.live} />

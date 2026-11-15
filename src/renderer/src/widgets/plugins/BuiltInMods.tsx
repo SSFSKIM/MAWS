@@ -7,7 +7,7 @@
 // main cannot read says so, in main's words.
 import type { AppSessionId } from '@shared/graph/ids';
 import { Segment } from '../../settings-tab/parts';
-import { REPORT } from '../../owner/report/copy';
+import { REPORT } from '../../owner/view/copy'; // UX wave U2b: the view's words
 import { LIBRARY as L } from '../copy';
 import { useBuiltInMods } from './builtin-mods';
 import { Switch } from './manage';

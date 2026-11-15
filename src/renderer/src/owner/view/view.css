@@ -7,3 +7,34 @@
 .owner-record-fold[data-open] { padding-inline-start: 2ch; }
 .owner-record-fold > button { padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); text-align: left; }
 .owner-record-fold > button:hover { color: var(--fg); }
+
+/* A message (`Message.tsx`; the mod's `spanRows`): its wrapper indents the body two columns in the text colour, and its
+   label stands back in those two columns, bold in the accent colour: the bullet's slot is two columns wide whether it
+   holds the bullet or not (ruling 3, item i), so a later message's `message` stands where the first one's word does.
+   The body keeps the transcript's line spacing (item vi): the prose's own line height and its blocks' own spacing, the
+   label taking none of it. One wrapper per message: the div that groups its blocks in its text's tree, or the message
+   tool's row. */
+.owner-message-ink { padding-inline-start: 2ch; color: var(--fg); }
+.owner-message-label { margin-inline-start: -2ch; color: var(--accent); font-weight: 600; }
+.owner-message-bullet { display: inline-block; width: 2ch; white-space: pre; }
+/* A grouping div is a block of the answer; the blocks inside space themselves as the answer's own do (Streamdown's
+   space-y-4 on a completed answer), the first under the label and the last flush with the wrapper. */
+.transcript-prose:not(.transcript-prose-live) .owner-message-ink > :not(:last-child, .owner-message-label) { margin-bottom: calc(var(--space) * 4); }
+.transcript-prose .owner-message-ink > :is(:first-child, .owner-message-label + *) { margin-top: 0; }
+.transcript-prose .owner-message-ink > :last-child { margin-bottom: 0; }
+
+/* The view's switch above the composer (`Switch.tsx`; the mod's band): inside the band's frame, with no row above it
+   (ruling 3, item iv); its muted caption and its button one text size (item v), the button at full contrast on hover. */
+.owner-view-switch { display: flex; flex-wrap: wrap; align-items: baseline; color: var(--fg-muted); font-size: var(--text-ui); }
+.owner-view-switch > button { color: var(--fg-muted); font-size: inherit; text-align: left; }
+.owner-view-switch > button:hover { color: var(--fg); }
+.owner-view-switch > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Kept for the desk web app's own bar alone (`apps/desk-web/src/views/project/ReportToggle.tsx`; the execution
+   document, §L), as MAWS's bar drew it: notes at the leading end, the view toggle at the trailing end. */
+.owner-bar { display: flex; align-items: center; gap: calc(var(--space) * 3); min-height: 32px; padding: 4px 12px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); }
+.owner-bar-notes { display: flex; flex: 1; min-width: 0; align-items: center; gap: calc(var(--space) * 3); }
+.owner-view-toggle { display: inline-flex; flex: none; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-active); }
+.owner-view-toggle > button { padding: 2px 10px; border-radius: calc(var(--radius-sm) - 2px); color: var(--fg-muted); }
+.owner-view-toggle > button[aria-pressed="true"] { background: var(--bg-raised); color: var(--fg); box-shadow: 0 0 0 1px var(--border); }
+.owner-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

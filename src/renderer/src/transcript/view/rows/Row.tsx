@@ -18,6 +18,7 @@ import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
 import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
+import { ReportOnly } from '../../../owner/view/Message'; // UX wave U2b
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
@@ -37,7 +38,7 @@ function body(row: Row) {
   switch (row.kind) {
     case 'time': return <TimeRow row={row} />;
     case 'user': return <SurfaceUserRow row={row} />;
-    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />; // P5 O9: a cut reply is no answer a surface draws
+    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <ReportOnly value={row.reportOnly === true}><SurfaceAssistantRow row={row} /></ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages
     case 'thinking': return <ThinkingRow row={row} />;
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;

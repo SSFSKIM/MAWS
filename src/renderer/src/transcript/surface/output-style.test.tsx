@@ -38,11 +38,11 @@ it('the owner lane never preempts an attached mod drawing or rewrites the stored
   expect(rowOf(store.rows(), 'assistant_text').markdown).toBe(source);
 });
 
-it.each([false, true])('a mod that passes through the native body gets unboxed message ink (hooked=%s)', async (hooked) => {
+it.each([false, true])('a mod that passes through the native body gets MAWS’s drawing of the message (hooked=%s)', async (hooked) => {
   const { store, view } = await mounted('Before <message>for **you**</message> after.');
   expect(asks()).toHaveLength(1);
   await act(() => fake.reply('session.ui.render', { hooked, rewritten: false, props: asks()[0].props, tree: { type: 'engine', ref: 0 } }));
-  expect(view.container.textContent).toBe('Before for you after.');
+  expect(view.container.textContent).toBe('● messageBefore for you after.'); // UX wave U2b: its label, then its body
   expect(view.container.querySelector('.owner-message-ink')?.textContent).toContain('for ');
   expect(view.container.querySelectorAll('p')).toHaveLength(1);
   expect(view.container.querySelector('[data-owner-card], [data-owner-report]')).toBeNull();

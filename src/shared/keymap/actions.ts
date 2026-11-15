@@ -155,9 +155,14 @@ export const ACTIONS = {
   'file.commentLine':        { title: 'Comment on this line',     chord: null,           sink: 'menu', menu: 'file', scope: 'app' },
   // E11 end
   // P2-C start (2026-10-09; the parent's Decision Log 19): the focused pane's session tab between its report and its
-  // full transcript while the owner channel's lane is on, as the pane header's toggle does; unbound by default
+  // full transcript while the owner channel's lane is on, as the view's switch above the composer does (UX wave U2b; it
+  // was the pane header's toggle); unbound by default
   'transcript.toggleReport': { title: 'Toggle report and transcript', chord: null,         sink: 'renderer', menu: null, scope: 'app' },
   // P2-C end
+  // UX wave U2b (ruling R9; the U2b execution document, §K): with the bar above the transcript gone, the focused pane's
+  // session's unread legacy items marked read, as the bar's Mark all read did; a command of the palette, unbound, and
+  // build F knows it not, so it takes no rebinding (`isRebindable`)
+  'transcript.markAllRead':  { title: 'Mark all read',            chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // P3-G (§D4.4): Mark up over the selected panel tab's surface, as the panel header's button does; unbound by default
   'markup.start':            { title: 'Mark up',                  chord: null,           sink: 'renderer', menu: null, scope: 'app' },
 } as const satisfies Record<string, ActionSpec>;
