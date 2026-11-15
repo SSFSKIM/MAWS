@@ -18,7 +18,7 @@ import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchOutcome, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { repairLaunch } from './repair'; // P5 O15 M2: the launch `mawsd` cannot start
 import { readMachineIdentity } from './machine/identity'; // P5 O15 M2: the profile's MachineRef, with no services' module
-import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
+import { beforeCommand, dispatchLocal, guardCommand, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand; UX wave U6e: guardCommand
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: mawsd's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: mawsd's spine, through main's mirror
@@ -85,6 +85,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
+import { appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -552,6 +553,8 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
+  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
+  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly);
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -755,6 +758,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));
   // C10: the port's pick answers through the e2e seam under MAWS_E2E=1 (MAWS_E2E_PICK_PATHS or cancelled), else the panel
   registerMainHandler('layout.pickFiles', (input, { client }) => pickFiles(input, client, { port: clientPort }));
+  // UX wave U6e (decision 3): Open File…, the chooser through the same port, then the grant as main's own call
+  registerMainHandler('layout.openFile', (input, ctx) =>
+    openChosenFile(input, ctx, { port: clientPort, isAppPage, grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
+  );
   shutdown.add('usage', () => usage.stop());
   // C7 end
   // C11 start: the plumbing of settings v3 (C11 execution document, M1): ClaudeUsage's hand-off and status; the reveal

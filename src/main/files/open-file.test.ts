@@ -59,6 +59,7 @@ describe('layout.openFile: the chooser, then the grant', () => {
   });
 
   it('answers refused unavailable for a pick that throws, granting nothing, and the asker may ask again', async () => {
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     let fail = true;
     const { deps, grant, pick } = depsOf({
       pick: async () => {
@@ -72,6 +73,8 @@ describe('layout.openFile: the chooser, then the grant', () => {
     fail = false;
     await expect(openChosenFile({ appSessionId: SESSION }, ctx, deps)).resolves.toEqual({ status: 'opened', path: REAL });
     expect(pick).toHaveBeenCalledTimes(2);
+    expect(logged).toHaveBeenCalledOnce();
+    logged.mockRestore();
   });
 
   // C1
@@ -136,10 +139,13 @@ describe('layout.openFile: the chooser, then the grant', () => {
         throw new Error('the transport broke');
       },
     ];
+    const logged = vi.spyOn(console, 'error').mockImplementation(() => {});
     for (const grant of failures) {
       const { deps } = depsOf({ grant });
       await expect(openChosenFile({ appSessionId: SESSION }, asker(), deps)).resolves.toEqual({ status: 'refused', reason: 'unavailable' });
     }
+    expect(logged).toHaveBeenCalledOnce(); // the throw alone is a fault; an answered refusal is the daemon's
+    logged.mockRestore();
   });
 
   // C4
