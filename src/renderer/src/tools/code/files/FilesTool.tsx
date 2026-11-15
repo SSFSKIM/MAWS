@@ -377,14 +377,30 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
   // A menu that closes hands the keyboard back to where it was a task later (Radix's focus scope, in a timer). Opened
   // again before that task runs, the menu holds the keyboard, and the late hand-back would land outside it and close it
   // (a menu that is not modal closes when the keyboard leaves it): so while the menu is open again, nothing is handed back.
+  // The menu opened again so (a second right-click while it is open closes and opens it in one gesture) has recorded the
+  // page as where the keyboard was: so the element that held the keyboard when the menu first opened is kept, and a
+  // close with no reopen hands the keyboard back to it while it is in the page. A close by a press elsewhere leaves the
+  // keyboard where that press put it, as Radix does.
   const open = useRef(false);
+  const owed = useRef(false); // a close whose hand-back has not run yet
+  const opener = useRef<HTMLElement | null>(null);
+  const outside = useRef(false);
   const opened = (now: boolean) => {
+    if (now && !owed.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!now) owed.current = true;
     open.current = now;
     const box = list.current;
     if (now && box) setColumn({ box, width: box.getBoundingClientRect().width });
   };
   const handBack = (event: Event) => {
+    const pressedElsewhere = outside.current;
+    owed.current = false;
+    outside.current = false;
     if (open.current) event.preventDefault();
+    else if (!pressedElsewhere && opener.current?.isConnected) {
+      event.preventDefault();
+      opener.current.focus({ preventScroll: true });
+    }
   };
   const machine = machineFor(appSessionId);
   const elsewhere = useMachines((s) => (machine === ipc.localMachine ? null : machineName(s.machines, machine, ipc.localMachine)));
@@ -409,6 +425,7 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
           collisionBoundary={column?.box}
           collisionPadding={8}
           onCloseAutoFocus={handBack}
+          onInteractOutside={() => void (outside.current = true)}
           style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
         >
           {whole === null ? (
