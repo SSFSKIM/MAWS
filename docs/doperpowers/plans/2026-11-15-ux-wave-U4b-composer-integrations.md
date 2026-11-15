@@ -23,7 +23,7 @@ How to see it working: the unit tests named under each milestone; in a running b
 
 - [x] (2026-11-15 11:20Z) Document written against master `63c97b5c0`: the code read, the in-flight branches' diffs read, the two binding builds read with `git show`.
 - [x] (2026-11-15 11:52Z) The adversarial review's three findings and the architect's rulings on them and on the thirteen reported points folded in, in one revision.
-- [ ] The probe for M3's conditional step on master, or M3 started without it (decision 15); which, recorded here.
+- [ ] The probe for M3's conditional step merged from `ux-wave/U4b-probes` at the architect's naming, or M3 ticked without it (decision 15; the Decision Log's line of 2026-11-15 (UTC) on the probe); which, recorded here.
 - [ ] M1 — a waiting answer reads as an answer.
 - [ ] M2 — the `/btw` card at the column's foot.
 - [ ] M3 — Send now and taking back on another machine (and its conditional step: built, or not, with the reason).
@@ -711,6 +711,7 @@ One is being run, arranged by the architect, for M3's conditional step (decision
 
 Found while reading the code for this document, and by its adversarial review; each is where a later reader would otherwise look twice.
 
+- (At the build edge, 2026-11-15.) Concrete Steps 1's fifth check prints one line, not two: `transcript/model/serialize.ts` writes the capsule's expression with the variable `q` (`q.header ?? q.question`, the `ask` case), so the literal `question.header ?? question.question` matches `AskCapsule.tsx` alone. The expression is the same; Interfaces A's export replaces both. Evidence: `git grep -n "header ?? q" -- src/renderer/src/transcript/model/serialize.ts`.
 - The reader's class `answer` holds the structured answers and the whole envelope and neither a title nor words. Evidence: `readAnswerEnvelope` in `src/shared/engine/arrival.ts`; `AskAnswerSchema` in `src/shared/maws/tools.ts`. Hence decision 2.
 - The foot slot stands under the last card, not at the column's bottom. Evidence: `SessionCards` in `panel/summary/Summary.tsx`. Hence decision 5.
 - Taking back a next-step row on another machine has worked since pull request 650 with no code of this child's; what was missing is words, labels and a scene. Evidence: `OFFERS`, `REMOTE_NEEDS`, `take-back.ts`'s `setDraft` and `withdraw`.
@@ -728,6 +729,10 @@ Found while reading the code for this document, and by its adversarial review; e
 - The desk's web app reaches the stack's files through its import closure and mounts none of them. Evidence: its direct imports under `apps/desk-web/src`, which are the transcript's and lane A's.
 
 ## Decision Log
+
+- **2026-11-15 (UTC) · At the build edge: owner card 1 is built at its default.** Card 1 ("Failed act") is out and unanswered. Its recommended option is built, at the one place the document names: the two rows of `ACT_WORDS` in `src/shared/ipc/remote-unavailable.ts`, `'session.steer.cancel': { act: 'take back', done: 'taken back' }` and `'session.steer.sendNow': { act: 'send now', done: 'sent now' }`. An answer may change those two rows and nothing else; the architect sends it when it comes. Ruled by the architect at dispatch.
+- **2026-11-15 (UTC) · At the build edge: M3's conditional step and its probe.** The engine probe for decision 15 is run by another agent; its findings land on branch `ux-wave/U4b-probes`, and the architect sends the commit to merge and the architect's reading of it. M3 does not wait for it. If the findings have not come when M3's other work is reviewed, M3 is ticked without the step and Progress says so, and M4 goes on; whether the step is then built, as a small task of its own, is the architect's ruling when the findings come. Nobody builds the step from the engine bundle's reading alone. This replaces "on master" in M3's "The conditional step" and in Progress: the findings arrive by a merge the architect names.
+- **2026-11-15 (UTC) · At the build edge: merges of master are named by the architect.** Concrete Steps 1 and 4 say the executor merges `origin/master` first; on this run nothing is merged on the branch until the architect names the head to merge (the wave's chain-merge brief describes such a merge). Master stood at `63c97b5c0`, the document's pin, at dispatch, so M1 builds on the pin. The gate (`scripts/ci-gate.sh`) is the architect's, as "Proof that an executor does not run" already says.
 
 - **2026-11-15 (UTC) · The sentence for an earlier engine host.** The sentence for a Send now that a machine’s endpoint accepted and its earlier engine host refused is "Not sent now: the engine host on `<machine>` is finishing an update; this works once it has handed the session over". The first ruling gave it the "needs a newer MAWS on `<machine>`" family; the author showed at the revision’s hand-back that the state arises only on a machine whose app is already this build (its endpoint lists `rl2.send-now`) while an earlier engine host still serves the session, so "needs a newer MAWS" would send a person to update a machine that is up to date. This Mac already says the true thing of the same state (`HOST_UPDATING`); the machine is named because the reader is elsewhere. One place: the `host-older` case of `reasonOf`. Ruled by the wave’s lead.
 
