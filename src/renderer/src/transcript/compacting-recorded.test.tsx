@@ -104,8 +104,8 @@ async function play(name: string, from: number, drawnFrom = 0) {
     last: () => rows().at(-1)!,
     compaction: () => document.querySelector<HTMLElement>('[data-row-id="activity:compacting"]'),
     line: () => within(document.querySelector<HTMLElement>('[data-row-id="activity:compacting"]')!).getByRole('status').textContent,
-    kinds: () => rows().map((row) => row.dataset.kind),
-    texts: (kind: string) => rows().filter((row) => row.dataset.kind === kind).map((row) => row.textContent),
+    /** The drawn text of each mounted row of a kind (its frame carries the kind), in the list's order. */
+    texts: (kind: string) => [...document.querySelectorAll<HTMLElement>(`[data-row-id] > [data-kind="${kind}"]`)].map((row) => row.textContent),
   };
 }
 
