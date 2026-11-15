@@ -10,6 +10,7 @@
 // drawn as (a Skills shelf's card as a Skills card).
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { CatalogItem, CatalogKindTab, CatalogTab } from '@shared/ipc/schema/catalog';
+import { isMcpAction } from '@shared/plugins/cli';
 import { SECONDARY } from '../../sessions/ui';
 import { CatalogDetail } from './CatalogDetail';
 import { DISCOVER as D } from './copy';
@@ -18,7 +19,6 @@ import { DiscoverHome, SortControl } from './DiscoverHome';
 import { FilterRow } from './DiscoverToolbar';
 import { useCatalogItem } from './read';
 import { filtering, NO_CHOICES, queryOf, setChoices, useDiscoverStore } from './store';
-import { isMcpAction } from '@shared/plugins/cli';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { factsOf } from '../../widgets/plugins/operation';
 import { CATALOG_KEY } from './add';
