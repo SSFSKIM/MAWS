@@ -204,15 +204,17 @@ function noteBlock(note: TaskNote): string {
 }
 
 // In the main transcript, after `parentUuid`: the engine's queue record that enqueues the block (no uuid), its dequeue,
-// then the user row of origin task-notification (u8d-p1-one-r1 lines 55 to 57; u8d-p2-bg-r1 lines 42, 43 and 45).
-export function queuedNotificationRecords(sessionId: string, cwd: string, parentUuid: string, note: TaskNote): Record<string, unknown>[] {
+// then the user row of origin task-notification (u8d-p1-one-r1 lines 55 to 57; u8d-p2-bg-r1 lines 42, 43 and 45). A
+// resume's notification of its orphans marks that row `queueTranscriptOnly` (P1: it opens no model turn); a stop's
+// does not (P2).
+export function queuedNotificationRecords(sessionId: string, cwd: string, parentUuid: string, note: TaskNote, { resume = false }: { resume?: boolean } = {}): Record<string, unknown>[] {
   const block = noteBlock(note);
   return [
     { type: 'queue-operation', operation: 'enqueue', timestamp: note.at, sessionId, content: block },
     { type: 'queue-operation', operation: 'dequeue', timestamp: note.at, sessionId },
     {
       type: 'user', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: note.at, isSidechain: false, userType: 'external', version: '2.1.322',
-      promptSource: 'system', origin: { kind: 'task-notification' }, message: { role: 'user', content: block },
+      promptSource: 'system', origin: { kind: 'task-notification' }, ...(resume && { queueTranscriptOnly: true }), message: { role: 'user', content: block },
     },
   ];
 }

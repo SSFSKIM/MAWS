@@ -660,14 +660,16 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await under.click();
     await expect(subagents.locator(`[data-agent-row="${nested.agentId}"]`), 'the nested agent beneath its parent').toHaveAttribute('data-depth', '1');
 
-    // the nested agent ends (its notification in its parent's file), then the agent (in the main transcript)
+    // the nested agent ends (its notification in its parent's file), then the agent (in the main transcript). The bridge
+    // still holds the nested agent running, so only the parent's file, read by its follower, can end it here; the bridge's
+    // stop comes after (P2 recorded either order).
     await c.store.appendLines(parentFile.transcript, [JSON.stringify(agentNotificationRecord(c.sid, c.repo.root, agent.agentId, nestedCall.at(-1)!.uuid as string, {
       taskIds: [nested.agentId], toolUseId: `toolu_${nested.agentId}`, outputFile: `/tmp/claude/tasks/${nested.agentId}.output`, status: 'completed', summary: `Agent "${nested.description}" finished`, at: '2026-10-28T10:00:08.000Z',
     }))]);
-    bridge.agentStopped(nested.agentId);
-    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the nested agent ended').toBeVisible({ timeout: 15_000 });
+    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the nested agent ended, from its parent’s file alone').toBeVisible({ timeout: 15_000 });
     await expect(subagents.locator(`[data-agent-row="${nested.agentId}"]`)).toHaveCount(0);
     await expect(under, 'no agent runs under it: neither count nor arrow').toHaveCount(0);
+    bridge.agentStopped(nested.agentId);
     const agentEnd = taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, toolUseId: `toolu_${agent.agentId}`, status: 'completed', summary: 'Indexed.', at: '2026-10-28T10:00:09.000Z' });
     await c.store.appendLines(c.transcript, [JSON.stringify(agentEnd)]);
     await expect(subagents, 'its last running agent ended: the card leaves').toHaveCount(0, { timeout: 15_000 });
@@ -733,7 +735,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await drive(c, { open: false });
     const orphan = queuedNotificationRecords(c.sid, c.repo.root, last, {
       taskIds: [first.agentId], outputFile: `/tmp/claude/tasks/${first.agentId}.output`, status: 'stopped', summary: `Background agent "${first.description}" didn't finish before the previous session ended`, at: '2026-10-28T10:01:01.000Z',
-    });
+    }, { resume: true });
     await c.store.appendLines(c.transcript, orphan.map((r) => JSON.stringify(r)));
     const ask = randomUUID();
     const turn = backgroundAgentRecords(c.sid, c.repo.root, ask, second);
