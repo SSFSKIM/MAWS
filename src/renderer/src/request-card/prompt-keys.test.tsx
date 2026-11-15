@@ -10,7 +10,7 @@ import type { ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { PreloadBridge } from '@shared/ipc/schema';
@@ -40,7 +40,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
-import { itemFor, type RequestEvent } from './test-requests';
+import { itemFor, permission, type RequestEvent } from './test-requests';
 
 const APP = at('app-keys' as AppSessionId);
 const addressing = addressingOf(REGISTRY);
@@ -364,6 +364,50 @@ describe('a prompt’s keys do not reach it', () => {
     focusOn(editor()!);
     await press(editor()!, CMD_ENTER);
     await waitFor(() => expect(answered()).toEqual([{ requestId: 'rp', answer: ALLOW_ONCE }]));
+  });
+});
+
+// The architect's ruling of 2026-11-15 (UTC) on M4's first concern: in one pane at most one end claims a press from the
+// composer or from no focus. A child transcript's end keeps its prompt's keys to its own row, under its guard.
+describe('the session’s end and a child transcript’s end in one pane', () => {
+  const CHILD = 'agent-child' as AgentId;
+  async function both() {
+    const { prompt } = scene();
+    const asked = permission({ requestId: request('rc'), toolUseId: tool('cb1'), agentId: CHILD, input: { command: 'make docs' }, at: '2026-09-29T09:00:00.000Z' });
+    requests.set(asked.requestId, asked);
+    const child = itemFor(asked, APP, { summary: 'Bash: make docs' });
+    await mount(
+      [prompt, child],
+      <div data-testid="child">
+        <TranscriptSlot appSessionId={APP} agentId={CHILD} />
+      </div>,
+    );
+    const childEnd = () => screen.getByTestId('child').querySelector<HTMLElement>('[data-request-end]');
+    await waitFor(() => expect(childEnd() && within(childEnd()!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
+    expect(within(end()!).getByRole('group', { name: 'Approval needed' }).textContent).toContain('make check'); // the session's end: its own prompt open
+    return { childRow: () => childEnd()!.closest<HTMLElement>('.transcript-row')! };
+  }
+
+  it('a press from the session’s composer, or from nothing with the pane active, answers the session’s own prompt only', async () => {
+    await both();
+    arm();
+    focusOn(editor()!);
+    await press(editor()!, CMD_ENTER);
+    await waitFor(() => expect(answered()).toEqual([{ requestId: 'rp', answer: ALLOW_ONCE }]));
+    focusNothing();
+    await pressAll(document.body); // the session's prompt is sent; the child's is not the pane's to take
+    expect(answered()).toEqual([{ requestId: 'rp', answer: ALLOW_ONCE }]);
+  });
+
+  it('the child’s prompt answers only with the keyboard on its own row, and only once its grace has passed', async () => {
+    const { childRow } = await both();
+    focusOn(childRow());
+    expect((await press(childRow(), CMD_ENTER)).defaultPrevented).toBe(true); // taken inside its grace
+    await flush();
+    expect(answered()).toEqual([]);
+    arm();
+    await press(childRow(), CMD_ENTER);
+    await waitFor(() => expect(answered()).toEqual([{ requestId: 'rc', answer: ALLOW_ONCE }]));
   });
 });
 

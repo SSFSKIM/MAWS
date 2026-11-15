@@ -1,7 +1,7 @@
 // UX wave U1b M4 (the U1b document, Interfaces §F "The guard"; decision 18): the guard of one prompt at a transcript's end,
-// transition by transition. The test drives the clock (performance's, and the animation frames the guard re-tests on)
-// and the geometry (each element's rectangle, what is topmost at a point, the intersection observer's callbacks) and
-// asserts the guard's answers at given moments, never wall time.
+// transition by transition. The test drives the clock (performance's) and the geometry (each element's rectangle, what is
+// topmost at a point, the intersection observer's entries) and asserts the guard's answers at given moments, never wall
+// time; and it counts the geometry the guard reads while rows stream under an open prompt.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { watchPrompt } from './prompt-guard';
 
@@ -13,11 +13,20 @@ const rect = (left: number, top: number, width: number, height: number) => new D
 const contains = (r: DOMRect | undefined, x: number, y: number) => r !== undefined && x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
 let topmost: HTMLElement[] = []; // what elementFromPoint finds first, front to back
 
-// An intersection observer the test fires: the guard's own re-test on the next frame is what reads the geometry.
+// An intersection observer the test fires, its entries computed from the rectangles the test set (clipped by the scroller
+// and the window, as the browser reports them), so the guard reads none of the page's geometry to learn them.
 const observers = new Set<FakeObserver>();
+const WINDOW = () => rect(0, 0, window.innerWidth, window.innerHeight);
+function clip(r: DOMRect, by: DOMRect): DOMRect {
+  const left = Math.max(r.left, by.left);
+  const top = Math.max(r.top, by.top);
+  const right = Math.min(r.right, by.right);
+  const bottom = Math.min(r.bottom, by.bottom);
+  return right > left && bottom > top ? rect(left, top, right - left, bottom - top) : rect(0, 0, 0, 0);
+}
 class FakeObserver {
   observed: Element[] = [];
-  constructor(private readonly callback: (entries: unknown[], observer: unknown) => void) {
+  constructor(private readonly callback: (entries: IntersectionObserverEntry[], observer: unknown) => void) {
     observers.add(this);
   }
   observe(target: Element) {
@@ -29,12 +38,19 @@ class FakeObserver {
     observers.delete(this);
   }
   fire() {
-    this.callback([], this);
+    const entries = this.observed.map((target) => {
+      const r = rects.get(target) ?? rect(0, 0, 0, 0);
+      const seen = clip(clip(r, scrollerRect()), WINDOW());
+      const area = (x: DOMRect) => x.width * x.height;
+      return { target, boundingClientRect: r, intersectionRect: seen, isIntersecting: area(seen) > 0, intersectionRatio: area(r) > 0 ? area(seen) / area(r) : 0, rootBounds: WINDOW(), time: performance.now() } as unknown as IntersectionObserverEntry;
+    });
+    this.callback(entries, this);
   }
 }
 const intersect = () => [...observers].forEach((observer) => observer.fire());
 
 let scroller: HTMLElement;
+const scrollerRect = () => rects.get(scroller) ?? rect(0, 0, 0, 0);
 let card: HTMLElement;
 let buttons: HTMLElement;
 const place = (cardRect: DOMRect, buttonsRect: DOMRect) => {
@@ -49,13 +65,23 @@ const PARTLY = () => place(rect(10, 500, 600, 200), rect(10, 650, 600, 40));
 const AWAY = () => place(rect(10, 2000, 600, 200), rect(10, 2150, 600, 40));
 
 const now = () => performance.now();
-const frame = () => vi.advanceTimersToNextFrame(); // the guard re-tests on the next animation frame
+// the geometry the guard reads: rectangles, computed styles, hit tests
+let rectReads: { mock: { calls: unknown[] }; mockClear(): void };
+let styleReads: { mock: { calls: unknown[] }; mockClear(): void };
+let hits = 0;
+const reads = () => ({ rects: rectReads.mock.calls.length, styles: styleReads.mock.calls.length, hits });
+const unread = () => {
+  rectReads.mockClear();
+  styleReads.mockClear();
+  hits = 0;
+};
+// a scroll: the browser's intersection entries say what it changed
 const scrolled = () => {
   scroller.dispatchEvent(new Event('scroll'));
-  frame();
+  intersect();
 };
 // a change to the page (an overlay opening or closing, an element laid over the buttons): the guard hears it through the
-// page's mutations, then re-tests on the next frame
+// page's mutations
 const mutated = async () => {
   for (let i = 0; i < 3; i++) await Promise.resolve();
   vi.advanceTimersByTime(0);
@@ -76,10 +102,15 @@ beforeEach(() => {
   rects.set(scroller, rect(0, 0, 800, 600));
   IN_VIEW();
   topmost = [];
-  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+  hits = 0;
+  rectReads = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     return rects.get(this) ?? rect(0, 0, 0, 0);
   });
-  document.elementFromPoint = (x: number, y: number) => topmost.find((element) => contains(rects.get(element), x, y)) ?? ([buttons, card].find((element) => contains(rects.get(element), x, y)) ?? document.body);
+  styleReads = vi.spyOn(window, 'getComputedStyle');
+  document.elementFromPoint = (x: number, y: number) => {
+    hits += 1;
+    return topmost.find((element) => contains(rects.get(element), x, y)) ?? ([buttons, card].find((element) => contains(rects.get(element), x, y)) ?? document.body);
+  };
 });
 afterEach(() => {
   document.body.replaceChildren();
@@ -143,13 +174,11 @@ describe('the guard of a prompt at a transcript’s end', () => {
     vi.advanceTimersByTime(2 * GRACE);
     AWAY();
     intersect();
-    frame();
     expect(guard.mayDeny(now())).toBe(false);
     expect(guard.mayAllow(now())).toBe(false);
     vi.advanceTimersByTime(5000);
     IN_VIEW();
     intersect();
-    frame();
     const shownAt = now();
     expect(guard.mayDeny(shownAt + GRACE - 1)).toBe(false);
     expect(guard.mayAllow(shownAt + GRACE - 1)).toBe(false);
@@ -165,14 +194,12 @@ describe('the guard of a prompt at a transcript’s end', () => {
     topmost = [toast];
     document.body.append(toast);
     await mutated();
-    frame();
     expect(guard.mayAllow(now())).toBe(false);
     expect(guard.mayDeny(now())).toBe(true); // the card is still in view
     vi.advanceTimersByTime(2000);
     toast.remove();
     topmost = [];
     await mutated();
-    frame();
     const uncoveredAt = now();
     expect(guard.mayAllow(uncoveredAt + GRACE - 1)).toBe(false);
     expect(guard.mayAllow(uncoveredAt + GRACE)).toBe(true);
@@ -195,6 +222,26 @@ describe('the guard of a prompt at a transcript’s end', () => {
     vi.advanceTimersByTime(2 * GRACE);
     expect(guard.mayDeny(now())).toBe(false);
     expect(guard.mayAllow(now())).toBe(false);
+  });
+
+  it('reads no geometry while rows stream under an open prompt and the list follows them, but at a press', async () => {
+    const { guard } = watch();
+    intersect();
+    await mutated(); // the observers settle
+    unread();
+    for (let i = 0; i < 40; i++) {
+      const row = document.createElement('div');
+      row.dataset.index = String(i);
+      row.textContent = `streamed row ${i}`;
+      scroller.insertBefore(row, card);
+      row.textContent += ' and more of it';
+      scroller.dispatchEvent(new Event('scroll')); // the list following its end
+      await mutated();
+      vi.advanceTimersToNextFrame();
+    }
+    expect(reads()).toEqual({ rects: 0, styles: 0, hits: 0 });
+    expect(guard.mayAllow(now())).toBe(true); // the bounded reads: one press's
+    expect(reads().hits).toBe(4);
   });
 
   it('stops watching once disposed', () => {
