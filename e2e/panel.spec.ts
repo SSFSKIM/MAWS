@@ -1357,7 +1357,8 @@ test.describe('the floating session card (P3-G)', () => {
   // which would also move the clipping frame), so every control of the request and the composer can be brought into the
   // card's visible rect; the header stays in place. UX wave U1b: the request no longer takes the composer's place; it is
   // the card at the end of the card's transcript, which follows its end, so its buttons stand at the transcript's foot
-  // above the composer.
+  // above the composer. The controls are reached by the body's scroll in two positions, not at once: the composer at
+  // its foot, the request's buttons at its top.
   test('at its minimum size the card’s body scrolls to its request’s controls at the transcript’s end and the composer', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
@@ -1391,10 +1392,18 @@ test.describe('the floating session card (P3-G)', () => {
             });
         }, selector);
       await expect(card.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }), 'at the transcript’s end').toHaveCount(1);
+      const composerBottom = async () => {
+        const composer = (await card.locator('section[data-composer]').boundingBox())!;
+        return composer.y + composer.height;
+      };
+      await expect.poll(composerBottom, { message: 'the composer’s bottom inside the card' }).toBeLessThanOrEqual(box.y + box.height + 1);
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight), 'the body scrolls').toBe(true);
+      // Back to the body's top with the wheel over the composer's toolbar, which is no scroller of its own.
+      const toolbar = (await card.getByRole('toolbar', { name: 'Composer tools' }).boundingBox())!;
+      await page.mouse.move(toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2);
+      await page.mouse.wheel(0, -2000);
       await expect.poll(() => reachable('[data-request-card] button')).not.toContainEqual(expect.stringMatching(/: false$/));
       expect(await reachable('[data-request-card] button'), 'the request has buttons').not.toEqual([]);
-      const composer = await card.locator('section[data-composer]').boundingBox();
-      expect(composer!.y + composer!.height, 'the composer’s bottom inside the card').toBeLessThanOrEqual(box.y + box.height + 1);
       expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
       await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
