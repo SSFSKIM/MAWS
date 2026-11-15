@@ -6,6 +6,9 @@ export const grades = {
   'git.branches': 'view',
   'git.diff': 'view',
   'git.log': 'view',
+  'git.branchCommits': 'view', // UX wave U5b-2: the three reads
+  'git.commitDiff': 'view',
+  'git.changesSince': 'view',
   'git.watch': 'view',
   'git.unwatch': 'view',
   'git.lsFiles': 'view',

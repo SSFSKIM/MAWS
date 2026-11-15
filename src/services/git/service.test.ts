@@ -1,10 +1,10 @@
 import { execFile } from 'node:child_process';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitStatusSchema, type GitChanged } from '@shared/ipc/schema/git';
-import { GitFixture } from '../../../test/support/git-fixture';
+import { GitFixture, runGit } from '../../../test/support/git-fixture';
 import { GitTimeoutError, NotARepositoryError, type ExecFileFn } from './runner';
 import { GitService, withoutUserInfo } from './service';
 
@@ -464,5 +464,316 @@ describe('git service refreshes a watched root on demand', () => {
     } finally {
       other.dispose();
     }
+  });
+});
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §C): the branch
+// read, the commit read and the working-tree read over scratch repositories. Remote refs are written with `update-ref`,
+// as a fetch leaves them; nothing reaches a network.
+describe('the three reads', () => {
+  let repo: GitFixture;
+  let service: GitService;
+  let initial: string;
+  let outside: string;
+  beforeEach(async () => {
+    repo = await GitFixture.create();
+    service = new GitService({ env: repo.serviceEnv() });
+    initial = await rev('HEAD');
+    outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-git-outside-')));
+    writeFileSync(join(outside, 'secret.txt'), 'one\ntwo\nthree\nfour\nfive\nsix\nseven\n'); // seven lines, never counted
+  });
+  afterEach(() => {
+    service.dispose();
+    repo.dispose();
+    rmSync(outside, { recursive: true, force: true });
+  });
+
+  async function rev(name: string): Promise<string> {
+    return (await repo.git('rev-parse', name)).trim();
+  }
+  async function commit(path: string, content: string, message = path): Promise<string> {
+    await repo.write(path, content);
+    await repo.git('add', path);
+    await repo.git('commit', '-q', '-m', message);
+    return rev('HEAD');
+  }
+  // `count` empty commits on top of HEAD, oldest first, without touching the work tree; HEAD's branch moves to the last
+  async function emptyCommits(count: number, label: string): Promise<string[]> {
+    const tree = await rev('HEAD^{tree}');
+    const made: string[] = [];
+    for (let i = 1; i <= count; i++) made.push((await repo.git('commit-tree', tree, '-p', made.at(-1) ?? (await rev('HEAD')), '-m', `${label} ${i}`)).trim());
+    await repo.git('reset', '-q', '--soft', made.at(-1)!);
+    return made;
+  }
+  const originAt = async (branch: string, sha: string) => {
+    if (!(await repo.git('remote')).includes('origin')) await repo.git('remote', 'add', 'origin', 'https://example.invalid/origin.git');
+    await repo.git('update-ref', `refs/remotes/origin/${branch}`, sha);
+  };
+  const track = async (branch: string) => {
+    await repo.git('config', `branch.${branch}.remote`, 'origin');
+    await repo.git('config', `branch.${branch}.merge`, `refs/heads/${branch}`);
+  };
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => `line ${i + 1}`).join('\n') + '\n';
+
+  describe('git.branchCommits', () => {
+    it('reads 60 commits since the base, 55 of them not pushed: 50 rows at limit 50, counts of the whole range, pushed by the upstream', async () => {
+      await originAt('main', initial);
+      await repo.git('checkout', '-q', '-b', 'feature');
+      const made = await emptyCommits(60, 'step');
+      await originAt('feature', made[4]); // the first five are pushed
+      await track('feature');
+
+      const cut = await service.branchCommits({ directory: repo.root, limit: 50 });
+      expect(cut.base).toEqual({ ref: 'origin/main', mergeBase: initial });
+      expect(cut.upstream).toBe('origin/feature');
+      expect(cut.commits).toHaveLength(50);
+      expect(cut.commits.map((c) => c.sha)).toEqual(made.slice(10).reverse()); // newest first
+      expect(cut.counts).toEqual({ all: 60, notPushed: 55, pushed: 5 });
+      expect(cut.behind).toBe(0);
+      expect(cut.commits.every((c) => c.pushed === false)).toBe(true);
+
+      const whole = await service.branchCommits({ directory: repo.root, limit: 200 });
+      expect(whole.commits).toHaveLength(60);
+      for (const row of whole.commits) expect(row.pushed, row.subject).toBe(made.indexOf(row.sha) < 5);
+      expect(whole.commits.at(-1)).toMatchObject({ subject: 'step 1', parents: [initial], pushed: true });
+    });
+
+    it('names the upstream as git.status names it', async () => {
+      await originAt('main', initial);
+      await track('main');
+      expect((await service.branchCommits({ directory: repo.root, limit: 5 })).upstream).toBe((await service.status(repo.root)).upstream);
+    });
+
+    it('marks every row not pushed with no upstream, and pushed unknown with an upstream whose ref was deleted', async () => {
+      await originAt('main', initial);
+      await repo.git('checkout', '-q', '-b', 'feature');
+      await emptyCommits(3, 'local');
+      const untracked = await service.branchCommits({ directory: repo.root, limit: 10 });
+      expect(untracked).toMatchObject({ upstream: null, counts: { all: 3, notPushed: 3, pushed: 0 } });
+      expect(untracked.commits.map((c) => c.pushed)).toEqual([false, false, false]);
+
+      await originAt('feature', await rev('HEAD~1'));
+      await track('feature');
+      await repo.git('update-ref', '-d', 'refs/remotes/origin/feature'); // as a pruning fetch leaves a deleted branch
+      const gone = await service.branchCommits({ directory: repo.root, limit: 10 });
+      expect((await service.status(repo.root)).upstream).toBe('origin/feature');
+      expect(gone).toMatchObject({ upstream: 'origin/feature', counts: { all: 3, notPushed: null, pushed: null } });
+      expect(gone.commits.map((c) => c.pushed)).toEqual([null, null, null]);
+    });
+
+    it('with no base, answers the newest commits of HEAD with no counts and no behind', async () => {
+      await emptyCommits(4, 'on main'); // HEAD on main, no remote copy: no base
+      const read = await service.branchCommits({ directory: repo.root, limit: 3 });
+      expect(read).toMatchObject({ base: null, upstream: null, counts: null, behind: null });
+      expect(read.commits.map((c) => c.subject)).toEqual(['on main 4', 'on main 3', 'on main 2']);
+    });
+
+    it('answers no commits and no base in a repository with no commit', async () => {
+      await repo.git('checkout', '-q', '--orphan', 'empty');
+      expect(await service.branchCommits({ directory: repo.root, limit: 5 })).toEqual({ base: null, upstream: null, commits: [], counts: null, behind: null });
+    });
+
+    // S21's services half: a fetch moves only the base's remote-tracking ref (a pull request of the branch merged there),
+    // with HEAD and the upstream standing still; the read asked again answers the new merge base and behind
+    it('answers the moved merge base and behind once only refs/remotes/origin/main advances', async () => {
+      await originAt('main', initial);
+      await repo.git('checkout', '-q', '-b', 'feature/x');
+      const made = await emptyCommits(4, 'feature');
+      await originAt('feature/x', made[3]);
+      await track('feature/x');
+      expect(await service.branchCommits({ directory: repo.root, limit: 10 })).toMatchObject({ base: { mergeBase: initial }, counts: { all: 4 }, behind: 0 });
+
+      const tree = await rev('HEAD^{tree}');
+      const merged = (await repo.git('commit-tree', tree, '-p', initial, '-p', made[1], '-m', 'merge the first two')).trim();
+      await repo.git('update-ref', 'refs/remotes/origin/main', merged);
+      const after = await service.branchCommits({ directory: repo.root, limit: 10 });
+      expect(after).toMatchObject({ base: { ref: 'origin/main', mergeBase: made[1] }, counts: { all: 2, notPushed: 0, pushed: 2 }, behind: 1 });
+      expect(after.commits.map((c) => c.sha)).toEqual([made[3], made[2]]);
+    });
+  });
+
+  describe('git.commitDiff', () => {
+    it('reads a commit against its first parent, one file of it alone, and whether HEAD holds it', async () => {
+      await commit('a.txt', 'one\n');
+      const both = await commit('b.txt', 'two\n', 'two files');
+      await repo.write('a.txt', 'one\nmore\n');
+      await repo.git('add', 'a.txt');
+      await repo.git('commit', '-q', '-m', 'edit a');
+      const read = await service.commitDiff({ directory: repo.root, commit: both });
+      expect(read.commit).toMatchObject({ sha: both, subject: 'two files' });
+      expect(read.onHead).toBe(true);
+      expect(read.files).toEqual([{ path: 'b.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+      expect(read.patch).toContain('diff --git a/b.txt b/b.txt');
+      expect((await service.commitDiff({ directory: repo.root, commit: both, path: 'a.txt' })).files).toEqual([]);
+
+      await repo.git('checkout', '-q', '-b', 'side', initial);
+      expect((await service.commitDiff({ directory: repo.root, commit: both, patch: false })).onHead).toBe(false);
+    });
+
+    it('reads a merge commit against its first parent, never a combined diff', async () => {
+      await repo.git('checkout', '-q', '-b', 'side');
+      await commit('side.txt', 'side\n');
+      await repo.git('checkout', '-q', 'main');
+      await commit('main.txt', 'main\n');
+      await repo.git('merge', '-q', '--no-edit', 'side');
+      const merge = await rev('HEAD');
+      const read = await service.commitDiff({ directory: repo.root, commit: merge });
+      expect(read.commit.parents).toHaveLength(2);
+      expect(read.files.map((f) => f.path)).toEqual(['side.txt']); // what the merge brought onto main
+      expect(read.patch).not.toContain('diff --cc');
+    });
+
+    it('reads a commit with no parent with every line added', async () => {
+      const read = await service.commitDiff({ directory: repo.root, commit: initial, context: 0 });
+      expect(read.commit.parents).toEqual([]);
+      expect(read.files).toEqual([{ path: 'README.md', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+      expect(read.patch.startsWith('diff --git a/README.md b/README.md\nnew file mode')).toBe(true);
+      expect((await service.commitDiff({ directory: repo.root, commit: initial, path: 'other.txt' })).files).toEqual([]);
+    });
+
+    it('answers patch: false with the commit and onHead alone, running no diff', async () => {
+      const spawn = vi.fn(execFile as unknown as ExecFileFn);
+      const spied = new GitService({ execFile: spawn, env: repo.serviceEnv() });
+      try {
+        expect(await spied.commitDiff({ directory: repo.root, commit: initial, patch: false })).toMatchObject({ onHead: true, patch: '', files: [] });
+        const ran = spawn.mock.calls.map(([, args]) => args.slice(2));
+        expect(ran.some((args) => args.includes('diff') || args.includes('-p') || args.includes('--numstat'))).toBe(false);
+      } finally {
+        spied.dispose();
+      }
+    });
+
+    it('refuses a hash that names no commit, and one that names a tree, with a message that says so', async () => {
+      const missing = 'f'.repeat(40);
+      await expect(service.commitDiff({ directory: repo.root, commit: missing })).rejects.toThrow(`no commit ${missing} in this repository`);
+      const tree = await rev('HEAD^{tree}');
+      await expect(service.commitDiff({ directory: repo.root, commit: tree })).rejects.toThrow(`no commit ${tree} in this repository`);
+    });
+
+    it('reads a SHA-256 repository\'s root commit and the commit after it', async () => {
+      const sha256 = realpathSync(mkdtempSync(join(tmpdir(), 'maws-git-sha256-')));
+      try {
+        const git = (...args: string[]) => runGit(sha256, args);
+        await git('init', '-q', '--object-format=sha256', '-b', 'main');
+        writeFileSync(join(sha256, 'first.txt'), 'one\ntwo\n');
+        await git('add', 'first.txt');
+        await git('commit', '-q', '-m', 'root');
+        writeFileSync(join(sha256, 'first.txt'), 'one\ntwo\nthree\n');
+        await git('commit', '-q', '-am', 'next');
+        const [root, next] = [(await git('rev-parse', 'HEAD~1')).trim(), (await git('rev-parse', 'HEAD')).trim()];
+        expect(root).toMatch(/^[0-9a-f]{64}$/);
+        expect((await service.commitDiff({ directory: sha256, commit: root })).files).toEqual([{ path: 'first.txt', oldPath: null, insertions: 2, deletions: 0, binary: false }]);
+        expect((await service.commitDiff({ directory: sha256, commit: next })).files).toEqual([{ path: 'first.txt', oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+      } finally {
+        rmSync(sha256, { recursive: true, force: true });
+      }
+    });
+  });
+
+  describe('git.changesSince', () => {
+    it('against HEAD answers what git.diff\'s all scope answers for the same tree', async () => {
+      await commit('kept.txt', 'kept\n');
+      await repo.write('README.md', 'hello\nedited\n');
+      await repo.write('kept.txt', 'kept\nand staged\n');
+      await repo.git('add', 'kept.txt');
+      const since = await service.changesSince({ directory: repo.root, against: 'HEAD' });
+      const all = await service.diff({ directory: repo.root, scope: 'all' });
+      expect({ patch: since.patch, files: since.files }).toEqual(all);
+      expect(since.untracked).toEqual([]);
+    });
+
+    it('against a merge base lists a committed change, an uncommitted edit and a new file of twelve lines counted 12', async () => {
+      await repo.git('checkout', '-q', '-b', 'feature');
+      await commit('committed.txt', 'committed\n');
+      await repo.write('README.md', 'hello\nuncommitted\n');
+      await repo.write('notes/new.md', lines(12));
+      const since = await service.changesSince({ directory: repo.path('notes'), against: initial });
+      expect(since.files.map((f) => f.path).sort()).toEqual(['README.md', 'committed.txt']);
+      expect(since.patch).toContain('+uncommitted');
+      expect(since.untracked).toEqual([]); // the status lists the new folder as `notes/`, which is not a file
+      await repo.write('top.md', lines(12));
+      expect((await service.changesSince({ directory: repo.root, against: initial })).untracked).toEqual([{ path: 'top.md', insertions: 12, binary: false }]);
+    });
+
+    it('counts a binary new file as binary with no count, and a symbolic link to a file outside the repository 1 without opening it', async () => {
+      await repo.write('image.bin', 'GIF89a\0\u0001\n');
+      symlinkSync(join(outside, 'secret.txt'), repo.path('link.txt'));
+      const { untracked } = await service.changesSince({ directory: repo.root, against: 'HEAD' });
+      expect(untracked).toEqual([
+        { path: 'image.bin', insertions: null, binary: true },
+        { path: 'link.txt', insertions: 1, binary: false },
+      ]);
+    });
+
+    it('reads nothing outside when a file, or an ancestor directory, is replaced by a link between the listing and the read', async () => {
+      await repo.write('swapped.txt', lines(12));
+      await repo.write('dir/inner.txt', lines(12));
+      await repo.git('add', 'dir/inner.txt');
+      await repo.git('commit', '-q', '-m', 'a tracked folder');
+      await repo.write('dir/fresh.txt', lines(12)); // listed as itself: its folder is tracked
+      const hooked = new GitService({
+        env: repo.serviceEnv(),
+        countHooks: {
+          beforeOpen: (path) => {
+            if (path === repo.path('swapped.txt')) {
+              rmSync(path);
+              symlinkSync(join(outside, 'secret.txt'), path);
+            }
+            if (path === repo.path('dir/fresh.txt')) {
+              renameSync(repo.path('dir'), repo.path('moved-away'));
+              writeFileSync(join(outside, 'fresh.txt'), 'outside\n'.repeat(7));
+              symlinkSync(outside, repo.path('dir'));
+            }
+          },
+        },
+      });
+      try {
+        const { untracked } = await hooked.changesSince({ directory: repo.root, against: 'HEAD' });
+        expect(untracked).toEqual([
+          { path: 'dir/fresh.txt', insertions: null, binary: false }, // through the linked folder: no count
+          { path: 'swapped.txt', insertions: 1, binary: false }, // a link now, counted as its one line; the target unread
+        ]);
+      } finally {
+        hooked.dispose();
+      }
+    });
+
+    it('gives a new file that grows past the cap during the read no count', async () => {
+      await repo.write('growing.log', lines(3));
+      const hooked = new GitService({ env: repo.serviceEnv(), countHooks: { afterOpen: (path) => appendFileSync(path, 'x'.repeat(2 * 1024 * 1024)) } });
+      try {
+        expect((await hooked.changesSince({ directory: repo.root, against: 'HEAD' })).untracked).toEqual([{ path: 'growing.log', insertions: null, binary: false }]);
+      } finally {
+        hooked.dispose();
+      }
+    });
+
+    it('counts the first 200 new files the status lists, so file 201 has no entry, and none with a path', async () => {
+      for (let i = 0; i < 201; i++) writeFileSync(repo.path(`new-${String(i).padStart(3, '0')}.txt`), lines(1));
+      const { untracked } = await service.changesSince({ directory: repo.root, against: 'HEAD' });
+      expect(untracked).toHaveLength(200);
+      expect(untracked.at(-1)).toEqual({ path: 'new-199.txt', insertions: 1, binary: false });
+      expect(untracked.some((entry) => entry.path === 'new-200.txt')).toBe(false);
+      expect((await service.changesSince({ directory: repo.root, against: 'HEAD', path: 'new-000.txt' })).untracked).toEqual([]);
+    });
+  });
+
+  it('runs only reads: config, for-each-ref, symbolic-ref, rev-parse, merge-base, rev-list, log, status and diff', async () => {
+    await originAt('main', initial);
+    await repo.git('checkout', '-q', '-b', 'feature');
+    await commit('f.txt', 'f\n');
+    await repo.write('new.txt', 'new\n');
+    const spawn = vi.fn(execFile as unknown as ExecFileFn);
+    const spied = new GitService({ execFile: spawn, env: repo.serviceEnv() });
+    try {
+      await spied.branchCommits({ directory: repo.root, limit: 5 });
+      await spied.commitDiff({ directory: repo.root, commit: await rev('HEAD') });
+      await spied.commitDiff({ directory: repo.root, commit: initial });
+      await spied.changesSince({ directory: repo.root, against: initial });
+    } finally {
+      spied.dispose();
+    }
+    const subcommands = new Set(spawn.mock.calls.map(([, args]) => (args[2] === '-c' ? args[4] : args[2])));
+    expect([...subcommands].sort()).toEqual(['config', 'diff', 'for-each-ref', 'log', 'merge-base', 'rev-list', 'rev-parse', 'status', 'symbolic-ref']);
   });
 });

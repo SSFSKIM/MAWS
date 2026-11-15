@@ -86,6 +86,52 @@ export type GitChanged = z.infer<typeof GitChangedSchema>;
 
 const DirectorySchema = z.strictObject({ directory: z.string() });
 
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §C): the three reads.
+// `git.branchCommits` answers the default-branch base and the branch's commits since its merge base, `git.commitDiff`
+// one commit against its first parent, `git.changesSince` the working tree against a commit with the new files' added
+// lines counted. All three only read; a machine that serves them lists `GIT_READS_CAPABILITY`.
+export const GIT_READS_CAPABILITY = 'rl2.git-reads';
+export const UNTRACKED_COUNT_FILES = 200; // P5 sets it; the starting value
+export const UNTRACKED_COUNT_BYTES = 1024 * 1024; // the per-file cap Review draws by
+// A whole object id, SHA-1 or SHA-256: never an abbreviation, a ref name or anything git could read as an option
+const FullHashSchema = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
+
+export const GitBranchCommitsInputSchema = z.strictObject({ directory: z.string(), limit: z.number().int().min(1).max(200) });
+export type GitBranchCommitsInput = z.infer<typeof GitBranchCommitsInputSchema>;
+export const GitBranchCommitSchema = z.strictObject({ ...GitCommitSchema.shape, pushed: z.boolean().nullable() });
+export type GitBranchCommit = z.infer<typeof GitBranchCommitSchema>;
+export const GitBranchCommitsSchema = z.strictObject({
+  base: z.strictObject({ ref: z.string(), mergeBase: z.string() }).nullable(), // the default-branch rule; null when none is found
+  upstream: z.string().nullable(), // as git.status names it
+  commits: z.array(GitBranchCommitSchema), // <mergeBase>..HEAD, newest first, at most `limit`; with no base, the newest of HEAD
+  counts: z.strictObject({ all: z.number().int(), notPushed: z.number().int().nullable(), pushed: z.number().int().nullable() }).nullable(), // of the whole range, whatever `limit` cut
+  behind: z.number().int().nullable(), // commits the base ref holds that HEAD does not
+});
+export type GitBranchCommits = z.infer<typeof GitBranchCommitsSchema>;
+
+export const GitCommitDiffInputSchema = z.strictObject({
+  directory: z.string(),
+  commit: FullHashSchema,
+  path: z.string().optional(),
+  context: z.number().int().min(0).max(20).optional(),
+  patch: z.boolean().optional(), // false: the commit and onHead alone, no diff read
+});
+export type GitCommitDiffInput = z.infer<typeof GitCommitDiffInputSchema>;
+export const GitCommitDiffSchema = z.strictObject({ commit: GitCommitSchema, onHead: z.boolean(), patch: z.string(), files: z.array(GitDiffFileSchema) });
+export type GitCommitDiff = z.infer<typeof GitCommitDiffSchema>;
+
+export const GitChangesSinceInputSchema = z.strictObject({
+  directory: z.string(),
+  against: z.union([z.literal('HEAD'), FullHashSchema]),
+  path: z.string().optional(),
+  context: z.number().int().min(0).max(20).optional(),
+});
+export type GitChangesSinceInput = z.infer<typeof GitChangesSinceInputSchema>;
+export const GitUntrackedCountSchema = z.strictObject({ path: z.string(), insertions: z.number().int().nullable(), binary: z.boolean() });
+export type GitUntrackedCount = z.infer<typeof GitUntrackedCountSchema>;
+export const GitChangesSinceSchema = z.strictObject({ patch: z.string(), files: z.array(GitDiffFileSchema), untracked: z.array(GitUntrackedCountSchema) });
+export type GitChangesSince = z.infer<typeof GitChangesSinceSchema>;
+
 // C7 start: the composer's `@` file source (C7 execution document, Interfaces "X2 additions"): the files under
 // `directory` (`git ls-files --cached --others --exclude-standard`, or a bounded walk outside a repository), fuzzy-
 // filtered by `query` and ranked, relative to `directory`; refused for a directory no session or project names.
@@ -146,6 +192,10 @@ export const commands = {
   'git.branches': { input: DirectorySchema, output: GitBranchesSchema, owner: 'machine' },
   'git.diff': { input: GitDiffInputSchema, output: GitDiffSchema, owner: 'machine' },
   'git.log': { input: GitLogInputSchema, output: GitLogSchema, owner: 'machine' },
+  // UX wave U5b-2 (Interfaces §C): the branch read, the commit read and the working-tree read
+  'git.branchCommits': { input: GitBranchCommitsInputSchema, output: GitBranchCommitsSchema, owner: 'machine' },
+  'git.commitDiff': { input: GitCommitDiffInputSchema, output: GitCommitDiffSchema, owner: 'machine' },
+  'git.changesSince': { input: GitChangesSinceInputSchema, output: GitChangesSinceSchema, owner: 'machine' },
   'git.watch': { input: DirectorySchema, output: GitStatusSchema, owner: 'machine' }, // idempotent; ref-counted per repoRoot
   'git.unwatch': { input: DirectorySchema, output: z.void(), owner: 'machine' },
   ...c7Commands, // C7
