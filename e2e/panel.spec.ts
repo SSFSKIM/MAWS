@@ -1632,7 +1632,13 @@ test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
     await (await sidebarRow(page, 'Harness A')).click();
     const { body } = await programmeInMain(page, 40);
     await menu(app, 'pane.split'); // the document into a right pane
+    const rightTab = mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).getByRole('tab', { name: /^Spring programme/ });
+    await expect(rightTab).toBeVisible();
     await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click();
+    // The document's pane takes the focus before Expand is pressed. With the session's pane focused, the session's card
+    // column is placed beside main (no surface is open), and the press that focuses the document's pane takes it away and
+    // widens the pane, so Expand moves out from under the pointer before the click (a finding of its own, outside U10b).
+    await rightTab.click();
     const header = body.locator('xpath=ancestor::*[@role="tabpanel"][1]');
     const card = main.getByRole('region', { name: 'Session card' });
     const bar = main.getByRole('region', { name: 'Chat' });
