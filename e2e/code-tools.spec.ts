@@ -1320,8 +1320,8 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
       const uncommitted = review.locator('[data-chip="uncommitted"]');
       await expect(uncommitted).toBeVisible({ timeout: 20_000 });
       if ((await uncommitted.getAttribute('aria-pressed')) !== 'true') await uncommitted.click();
-      await selectReviewFile(review, 'README.md');
-      await review.locator('[data-open-file]').click();
+      const readme = await selectReviewFile(review, 'README.md'); // UX wave U5b: each section of the stack has its Open file
+      await readme.locator('[data-open-file]').click();
       await besideTheChat('README.md', 'Review’s Open');
       await expect(preview, 'the preview tab reused').toHaveAttribute('data-tab-id', previewId!);
       await expect(sideFileTab(page, 'alpha.txt'), 'the file it showed is no longer beside the chat').toHaveCount(0);
