@@ -1533,12 +1533,15 @@ describe('plugins widget: the detail', () => {
 
 // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C; C6, C7): every row's image. The list
 // asks main once for the directory's icon of the plugins it draws (`catalog.pluginIcons`, from the copy main holds); a
-// row with an icon draws it in its tile's box, every other row its letter tile, and only a named icon is asked for.
+// row with an icon draws it in its tile's box, every other row its letter tile, and only a named icon is asked for. Each
+// plugin is asked with its marketplace's source as the engine lists it, so that main hands a seed's icon only to a
+// plugin of the seed's own repository (the branch panel's finding, P2, confirmed on 2026-11-15).
 describe('plugins widget: the images', () => {
   const ICON = `https://api.anthropic.com/api/directory/plugin-icons/${'0a'.repeat(32)}/256.png`;
   const DATA = 'data:image/png;base64,iVBORw0KGgo=';
   const BERTH = 'e8-berth@e8-scratch';
-  const iconsOf = (input: unknown) => ({ icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: id === BERTH ? ICON : null })) });
+  const SCRATCH = '/tmp/e8-scratch/market';
+  const iconsOf = (input: unknown) => ({ icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: id === BERTH ? ICON : null })) });
   const imageOf = (id: string) => row(id).querySelector<HTMLElement>('[data-item-image]')!;
   const rowOrder = () => [...section('my-items').querySelectorAll('[data-plugin-row]')].map((r) => r.getAttribute('data-plugin-row'));
 
@@ -1550,7 +1553,7 @@ describe('plugins widget: the images', () => {
     await waitFor(() => expect(imageOf(BERTH).getAttribute('data-item-image')).toBe('icon'));
     expect(imageOf(BERTH).querySelector('img')!.getAttribute('src')).toBe(DATA);
     expect([imageOf('e8-probe@e8-scratch').getAttribute('data-item-image'), imageOf('e8-probe@e8-scratch').getAttribute('data-item-kind'), imageOf('e8-probe@e8-scratch').textContent]).toEqual(['tile', 'plugin', 'E']);
-    expect(invoked('catalog.pluginIcons')).toEqual([{ ids: [BERTH, 'e8-probe@e8-scratch'] }]); // one read for the list
+    expect(invoked('catalog.pluginIcons')).toEqual([{ plugins: [{ id: BERTH, marketplaceLocator: SCRATCH }, { id: 'e8-probe@e8-scratch', marketplaceLocator: SCRATCH }] }]); // one read for the list
     expect(invoked('catalog.icon')).toEqual([{ url: ICON }]);
     expect(invoked('catalog.home')).toEqual([]); // no catalog of the engine is built for it
     fireEvent.click(within(row(BERTH)).getByRole('button', { name: /^View / }));
@@ -1580,6 +1583,31 @@ describe('plugins widget: the images', () => {
     expect(row(BERTH).firstElementChild!.nextElementSibling).toBe(imageOf(BERTH)); // in the tile's place, after the row's own target
     expect(imageOf(BERTH).className).toContain('size-9');
     expect(order.filter((id) => id !== BERTH).map((id) => imageOf(id!).getAttribute('data-item-image'))).toEqual(['tile', 'tile']);
+  });
+
+  it('asks for each plugin with its own marketplace’s source: one named like a seed from another repository with that repository, one the list does not name with none', async () => {
+    const reused = 'harbour-chart@claude-plugins-official';
+    installed = [plugin(BERTH), plugin(reused), plugin('e8-quay@harbour-annex')];
+    backend.script('marketplaces.list', () => ({
+      marketplaces: [
+        { name: 'e8-scratch', source: 'directory', locator: SCRATCH, installLocation: SCRATCH },
+        { name: 'claude-plugins-official', source: 'github', locator: 'harbour-works/claude-plugins-official', installLocation: `${HOME}/plugins/marketplaces/claude-plugins-official` },
+      ],
+    }));
+    backend.script('catalog.pluginIcons', iconsOf);
+    backend.script('catalog.icon', () => ({ dataUrl: DATA }));
+    await ready();
+    await waitFor(() => expect(imageOf(BERTH).getAttribute('data-item-image')).toBe('icon'));
+    expect(invoked('catalog.pluginIcons')).toEqual([
+      {
+        plugins: [
+          { id: BERTH, marketplaceLocator: SCRATCH },
+          { id: 'e8-quay@harbour-annex', marketplaceLocator: null },
+          { id: reused, marketplaceLocator: 'harbour-works/claude-plugins-official' },
+        ],
+      },
+    ]);
+    expect(imageOf(reused).getAttribute('data-item-image')).toBe('tile'); // main answered it none
   });
 
   it('a failed read of the icons leaves every row its tile', async () => {

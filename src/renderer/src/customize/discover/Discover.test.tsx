@@ -108,7 +108,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'catalog.icon':
       return { dataUrl: iconAnswer((input as { url: string }).url) };
     case 'catalog.pluginIcons':
-      return { icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: null })) };
+      return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.refresh':
       return answer('catalog.sources', {});
     case 'plugins.env':

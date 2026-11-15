@@ -80,7 +80,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'catalog.icon':
       return { dataUrl: null };
     case 'catalog.pluginIcons':
-      return { icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: null })) };
+      return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.postures':
       return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })) };
     case 'session.mcpStatus':

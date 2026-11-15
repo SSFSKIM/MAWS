@@ -305,6 +305,8 @@ describe('the icons of installed plugins and configured connectors', () => {
   const TIDE = 'tide-tables@claude-plugins-official'; // its record's icon is on its vendor's site
   const QUAY = 'quay-ledger@claude-plugins-official'; // the directory has no record of it
   const ELSEWHERE = 'berth-notes@harbour-market'; // a marketplace no seed is
+  const OFFICIAL = 'anthropics/claude-plugins-official'; // the seed's own repository, as the engine lists its marketplace
+  const asked = (...plugins: [id: string, marketplaceLocator: string | null][]) => ({ plugins: plugins.map(([id, marketplaceLocator]) => ({ id, marketplaceLocator })) });
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
   const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
 
@@ -352,7 +354,7 @@ describe('the icons of installed plugins and configured connectors', () => {
     hold();
     const engine = host(() => recordedEngine(PROJECT_A));
     const { invoke, emitted } = service(engine.call);
-    expect(await invoke('catalog.pluginIcons', { ids: [BERTH, TIDE, QUAY, ELSEWHERE] })).toEqual({
+    expect(await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL], [TIDE, OFFICIAL], [QUAY, OFFICIAL], [ELSEWHERE, 'harbour/market']))).toEqual({
       icons: [
         { id: BERTH, iconUrl: PLUGIN_ICON },
         { id: TIDE, iconUrl: null }, // off the directory's icon routes
@@ -366,12 +368,27 @@ describe('the icons of installed plugins and configured connectors', () => {
     expect(held).toEqual({ 'seed:claude-plugins-official': [new Date(0).toISOString(), 'stale'], 'directory:plugins': [new Date(0).toISOString(), 'stale'], 'directory:servers': [new Date(0).toISOString(), 'stale'] }); // not refreshed
   });
 
-  it('answers no icon while no copy is held, and refuses more than 512 ids', async () => {
+  // The branch panel's finding (P2), confirmed by the architect on 2026-11-15: a marketplace that reuses a seed's name
+  // from another repository is one the person added (normalize.ts, scalpel-1#2), so its same-named plugin is not the
+  // seed's and draws no seed's icon; nor does one whose marketplace is a folder, or one the window knows no source of.
+  it('hands a seed’s icon only to the plugin of the seed’s own repository: none to one from a marketplace that reuses its name', async () => {
+    hold();
     const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
-    expect(await invoke('catalog.pluginIcons', { ids: [BERTH] })).toEqual({ icons: [{ id: BERTH, iconUrl: null }] });
-    const ids = (n: number) => Array.from({ length: n }, (_, i) => `plugin-${i}@harbour-market`);
-    expect(commands['catalog.pluginIcons'].input.safeParse({ ids: ids(512) }).success).toBe(true);
-    expect(commands['catalog.pluginIcons'].input.safeParse({ ids: ids(513) }).success).toBe(false);
+    const one = async (marketplaceLocator: string | null) => (await invoke('catalog.pluginIcons', asked([BERTH, marketplaceLocator]))).icons[0]!.iconUrl;
+    expect(await one(OFFICIAL)).toBe(PLUGIN_ICON);
+    expect(await one('https://github.com/Anthropics/claude-plugins-official.git')).toBe(PLUGIN_ICON); // the same repository, spelled otherwise
+    expect(await one('harbour-works/claude-plugins-official')).toBeNull();
+    expect(await one('https://github.com/harbour-works/claude-plugins-official')).toBeNull();
+    expect(await one('/tmp/harbour/claude-plugins-official')).toBeNull();
+    expect(await one(null)).toBeNull();
+  });
+
+  it('answers no icon while no copy is held, and refuses more than 512 plugins', async () => {
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
+    expect(await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL]))).toEqual({ icons: [{ id: BERTH, iconUrl: null }] });
+    const many = (n: number) => asked(...Array.from({ length: n }, (_, i): [string, string] => [`plugin-${i}@harbour-market`, 'harbour/market']));
+    expect(commands['catalog.pluginIcons'].input.safeParse(many(512)).success).toBe(true);
+    expect(commands['catalog.pluginIcons'].input.safeParse(many(513)).success).toBe(false);
   });
 
   it('gives a configured connector the icon of the one record its address matches: none for two, none for none, none off the routes', async () => {
@@ -392,7 +409,7 @@ describe('the icons of installed plugins and configured connectors', () => {
     let now = 1_000_000;
     const { net, get } = network();
     const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call, {}, { icons: get, now: () => now });
-    const plugin = (await invoke('catalog.pluginIcons', { ids: [BERTH] })).icons[0]!.iconUrl!;
+    const plugin = (await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL]))).icons[0]!.iconUrl!;
     const connector = (await invoke('catalog.postures', { cwd: PROJECT_A })).servers[0]!.iconUrl!;
     expect([plugin, connector]).toEqual([PLUGIN_ICON, `${BUCKET}/tides.svg`]);
     const draw = (url: string) => invoke('catalog.icon', { url });

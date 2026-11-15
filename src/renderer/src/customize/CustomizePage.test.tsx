@@ -3,7 +3,8 @@
 // and Show; a change of view keeps Show and a change of Show keeps the view, each written as the page's two fields; what
 // a person started is held by the page for its place, so an install, a removal and a sign-in outlive a change of view,
 // of Show and of project; the ways in; U11g's action in the head. Every name here is invented.
-import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
 import type { CatalogHome, CatalogItem, CatalogQueryInput } from '@shared/ipc/schema/catalog';
@@ -16,6 +17,7 @@ import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { mountCustomize } from '../test-support/customize-page';
 import { useLibraryStore } from '../widgets/plugins/library-store';
+import { CustomizeView } from './CustomizeView';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
 import { resetCatalogStore } from '../stores/catalog';
 import { heard, resetSignIns } from './connectors/sign-in';
@@ -82,7 +84,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'catalog.icon':
       return { dataUrl: null };
     case 'catalog.pluginIcons':
-      return { icons: (input as { ids: string[] }).ids.map((id) => ({ id, iconUrl: null })) };
+      return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.postures':
       return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })) };
     case 'session.mcpStatus':
@@ -533,4 +535,54 @@ describe('ways in', () => {
     await pluginRow('quay-ledger@harbour-market');
     expect(document.querySelector('[data-plugin-detail]')).toBeNull();
   });
+
+  // The branch panel's finding (P2), confirmed by the architect on 2026-11-15: the request is the page's, so it ends with
+  // the page. Here the page is drawn only while the layout has it, as `DestinationPage` draws it.
+  it('held open: an Installed card’s request left when the person closes Customize is not opened by the composer’s “Manage plugins…”', async () => {
+    shelf = [{ ...ledger, installed: 'here' }, berth];
+    let release!: () => void;
+    listAnswer = new Promise((resolve) => (release = () => resolve({ plugins: [buoyLog, installedLedger] })));
+    function WhileOpen() {
+      const destination = useLayout((s) => s.destination);
+      return destination?.kind === 'customize' ? <CustomizeView view={destination.view} show={destination.show} /> : null;
+    }
+    useLayout.getState().openDestination({ kind: 'customize', view: 'discover', show: 'plugins' });
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <WhileOpen />
+      </QueryClientProvider>,
+    );
+    fireEvent.click(within(await shelfCard(ledger)).getByRole('button', { name: 'View quay-ledger' }));
+    expect(where()).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' });
+    await waitFor(() => expect(invoked('plugins.list').length).toBeGreaterThan(0));
+    act(() => useLayout.getState().closeDestination()); // before the list holds the plugin
+    expect(document.querySelector('[data-customize-page]')).toBeNull();
+    await act(async () => release());
+    listAnswer = null;
+    installed = [buoyLog, installedLedger];
+    act(() => openCustomize('plugins')); // the composer's "Manage plugins…"
+    await pluginRow('quay-ledger@harbour-market');
+    await act(async () => {});
+    expect(document.querySelector('[data-plugin-detail]')).toBeNull();
+  });
+});
+
+// The branch panel's finding (P2), confirmed by the architect on 2026-11-15: when the plugin whose detail is open leaves
+// the list (its last installation removed), the keyboard stays in the page, where `/` reaches the head's search field.
+describe('the keyboard when the detailed plugin leaves the list', () => {
+  for (const [show, search] of [['plugins', 'Search plugins'], ['all', 'Search my items']] as const)
+    it(`stays in the page under Show: ${show}, and / still reaches the search field`, async () => {
+      installed = [buoyLog, installedLedger];
+      mountCustomize({ view: 'mine', show });
+      fireEvent.click(within(await pluginRow('quay-ledger@harbour-market')).getByRole('button', { name: 'View Quay ledger' }));
+      await found('[data-plugin-detail="quay-ledger@harbour-market"]');
+      installed = [buoyLog]; // its last installation removed
+      emit('plugins.changed', {});
+      await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
+      await pluginRow('buoy-log@harbour-market');
+      const page = document.querySelector<HTMLElement>('[data-customize-page]')!;
+      expect(page.contains(document.activeElement), `the keyboard is on ${document.activeElement?.tagName}`).toBe(true);
+      fireEvent.keyDown(document.activeElement!, { key: '/' });
+      expect(document.activeElement).toBe(within(tools()!).getByRole('searchbox', { name: search }));
+    });
 });
