@@ -156,56 +156,76 @@ describe('layout.openFile: the chooser, then the grant', () => {
   });
 });
 
-// Fake web contents and windows, shaped as `clientOf` and `registerAppWindow` read them.
+// Fake web contents and windows, shaped as `clientOf`, `registerAppWindow` and the origin test read them: a navigation
+// starts (`did-start-navigation`) and the main frame is then at the new URL.
+const APP_URL = 'http://localhost:5173/'; // the dev server's; the built app's is a file: URL
 let contentsIds = 0;
 const windowsOpen: EventEmitter[] = [];
-function windowWithPage() {
-  const webContents = Object.assign(new EventEmitter(), { id: ++contentsIds, isDestroyed: () => false });
+function windowWithPage(url = APP_URL) {
+  const mainFrame = { url };
+  const webContents = Object.assign(new EventEmitter(), { id: ++contentsIds, mainFrame, isDestroyed: () => false });
   const win = Object.assign(new EventEmitter(), { webContents, isDestroyed: () => false });
   windowsOpen.push(win);
-  return { webContents, win };
+  const navigate = (to: string) => {
+    webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    mainFrame.url = to;
+  };
+  return { webContents, win, navigate };
 }
-function appWindowWithPage() {
-  const made = windowWithPage();
+function appWindowWithPage(url = APP_URL) {
+  const made = windowWithPage(url);
   registerAppWindow(made.win as never);
   return made;
 }
 afterEach(() => {
   for (const win of windowsOpen.splice(0)) win.emit('closed');
 });
+const appPage = (client: ClientRef) => isAppPage(client, APP_URL);
 
-describe('the guard’s predicate: a live page of an app window', () => {
+describe('the guard’s predicate: a live page of an app window, at the app’s origin', () => {
   it('holds for the page of an app window, and for no page of a window the registry does not hold (a presentation, the repair window)', () => {
     const app = appWindowWithPage();
     const presentation = windowWithPage();
-    expect(isAppPage(clientOf(app.webContents as never))).toBe(true);
-    expect(isAppPage(clientOf(presentation.webContents as never))).toBe(false);
+    expect(appPage(clientOf(app.webContents as never))).toBe(true);
+    expect(appPage(clientOf(presentation.webContents as never))).toBe(false);
   });
 
   it('holds for no client that is not a page: main itself, another machine’s asker', () => {
-    expect(isAppPage(mainClient)).toBe(false);
-    expect(isAppPage(endableClientRef('remote:1/page:3.1'))).toBe(false);
+    expect(appPage(mainClient)).toBe(false);
+    expect(appPage(endableClientRef('remote:1/page:3.1'))).toBe(false);
   });
 
-  it('stops holding for a page instance once it navigated away, and for every page of a closed window', () => {
+  it('holds for the new instance of a reload at the app’s own URL, not for the old one, and for no page of a closed window', () => {
     const app = appWindowWithPage();
     const before = clientOf(app.webContents as never);
-    app.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    app.navigate(APP_URL);
     const after = clientOf(app.webContents as never);
-    expect([isAppPage(before), isAppPage(after)]).toEqual([false, true]);
+    expect([appPage(before), appPage(after)]).toEqual([false, true]);
     app.win.emit('closed');
-    expect(isAppPage(after)).toBe(false);
+    expect(appPage(after)).toBe(false);
+  });
+
+  it('holds for no page an app window navigated to at another origin', () => {
+    const app = appWindowWithPage();
+    app.navigate('https://example.com/landing');
+    expect(appPage(clientOf(app.webContents as never))).toBe(false);
+    const built = appWindowWithPage('file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html');
+    expect(isAppPage(clientOf(built.webContents as never), 'file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html')).toBe(true);
+    expect(isAppPage(clientOf(built.webContents as never), APP_URL)).toBe(false); // the dev origin is not the built app's
   });
 
   it('refuses every other asker forbidden_sender, naming the command, and lets an app page through', () => {
+    const guard = appPageOnly(APP_URL);
     const app = appWindowWithPage();
     const presentation = windowWithPage();
-    expect(appPageOnly('files.writeOutside', {}, { client: clientOf(app.webContents as never), target: LOCAL })).toBeUndefined();
-    expect(appPageOnly('files.writeOutside', {}, { client: clientOf(presentation.webContents as never), target: LOCAL })).toEqual({
+    expect(guard('files.writeOutside', {}, { client: clientOf(app.webContents as never), target: LOCAL })).toBeUndefined();
+    expect(guard('files.writeOutside', {}, { client: clientOf(presentation.webContents as never), target: LOCAL })).toEqual({
       code: 'forbidden_sender',
       message: 'files.writeOutside may only be invoked by the app window',
     });
-    expect(appPageOnly('layout.openFile', {}, { client: mainClient, target: LOCAL })).toEqual({ code: 'forbidden_sender', message: 'layout.openFile may only be invoked by the app window' });
+    expect(guard('layout.openFile', {}, { client: mainClient, target: LOCAL })).toEqual({ code: 'forbidden_sender', message: 'layout.openFile may only be invoked by the app window' });
+    app.navigate('https://example.com/');
+    expect(guard('files.writeOutside', {}, { client: clientOf(app.webContents as never), target: LOCAL })).toMatchObject({ code: 'forbidden_sender' });
   });
 
   it('C1 over the real predicate: the page reloads while the chooser is open, so no grant is sent', async () => {
@@ -213,11 +233,74 @@ describe('the guard’s predicate: a live page of an app window', () => {
     const choice = held<PickAnswer>();
     const { deps, grant } = depsOf({ pick: () => choice.promise });
     const ctx = { client: clientOf(app.webContents as never), target: LOCAL };
-    const answering = openChosenFile({ appSessionId: SESSION }, ctx, { ...deps, isAppPage });
+    const answering = openChosenFile({ appSessionId: SESSION }, ctx, { ...deps, isAppPage: appPage });
     await tick();
-    app.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    app.navigate(APP_URL);
     choice.settle({ paths: [CHOSEN] });
     await expect(answering).resolves.toEqual({ status: 'cancelled' });
     expect(grant).not.toHaveBeenCalled();
+  });
+});
+
+// The review's finding 2: a page's ask is released when the page ends, not only when its chooser or grant settles
+describe('layout.openFile: an ask ends with its page', () => {
+  it('subscribes to the asker’s end while its ask runs, and unsubscribes when the ask completes', async () => {
+    const choice = held<PickAnswer>();
+    const { deps } = depsOf({ pick: () => choice.promise });
+    const listeners = new Set<() => void>();
+    const unsubscribed = vi.fn();
+    const client: ClientRef = {
+      ...endableClientRef(`page:${++clients}.1`),
+      onGone: (listener) => {
+        listeners.add(listener);
+        return () => {
+          unsubscribed();
+          listeners.delete(listener);
+        };
+      },
+    };
+    const answering = openChosenFile({ appSessionId: SESSION }, { client, target: LOCAL }, deps);
+    await tick();
+    expect(listeners.size).toBe(1);
+    choice.settle({ paths: [CHOSEN] });
+    await expect(answering).resolves.toEqual({ status: 'opened', path: REAL });
+    expect(unsubscribed).toHaveBeenCalledOnce();
+    expect(listeners.size).toBe(0);
+  });
+
+  it('releases the ask of a page that ended while its chooser was open: the ref asks again at once, and the old chooser grants nothing', async () => {
+    const first = held<PickAnswer>();
+    const second = held<PickAnswer>();
+    const answers = [first, second];
+    const { deps, pick, grant } = depsOf({ pick: () => answers.shift()!.promise, page: () => false });
+    const client = endableClientRef(`page:${++clients}.1`);
+    const old = openChosenFile({ appSessionId: SESSION }, { client, target: LOCAL }, deps);
+    await tick();
+    client.end(); // the page was destroyed, reloaded or navigated
+    const again = openChosenFile({ appSessionId: SESSION }, { client, target: LOCAL }, deps);
+    await tick();
+    expect(pick).toHaveBeenCalledTimes(2); // not answered cancelled at once: the ended ask no longer holds the page
+    first.settle({ paths: [CHOSEN] });
+    second.settle({ cancelled: true });
+    await expect(old).resolves.toEqual({ status: 'cancelled' });
+    await expect(again).resolves.toEqual({ status: 'cancelled' });
+    expect(grant).not.toHaveBeenCalled();
+  });
+
+  it('the window’s next page instance asks at once after its page was destroyed with the chooser still open; the old chooser grants nothing', async () => {
+    const app = appWindowWithPage();
+    const first = held<PickAnswer>();
+    const answers = [first];
+    const { deps, pick, grant } = depsOf({ pick: () => (answers.length > 0 ? answers.shift()!.promise : Promise.resolve({ paths: [CHOSEN] })) });
+    const oldClient = clientOf(app.webContents as never);
+    const old = openChosenFile({ appSessionId: SESSION }, { client: oldClient, target: LOCAL }, { ...deps, isAppPage: appPage });
+    await tick();
+    app.webContents.emit('destroyed');
+    const fresh = clientOf(app.webContents as never); // the window's next page instance
+    await expect(openChosenFile({ appSessionId: SESSION }, { client: fresh, target: LOCAL }, { ...deps, isAppPage: appPage })).resolves.toEqual({ status: 'opened', path: REAL });
+    expect(pick.mock.calls.map(([client]) => client)).toEqual([oldClient, fresh]);
+    first.settle({ paths: [CHOSEN] });
+    await expect(old).resolves.toEqual({ status: 'cancelled' });
+    expect(grant).toHaveBeenCalledOnce(); // the fresh page's alone
   });
 });

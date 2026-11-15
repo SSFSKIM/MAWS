@@ -100,12 +100,12 @@ beforeEach(async () => {
   const { router, openFile, clients } = m;
   router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, remote, machine: { kind: 'host' } });
   // as src/main/app.ts registers them
-  router.guardCommand(['files.writeOutside', 'layout.openFile'], openFile.appPageOnly);
+  router.guardCommand(['files.writeOutside', 'layout.openFile'], openFile.appPageOnly(DEV_URL));
   router.registerMainHandler('layout.openFile', (input, ctx) => {
     opened.push({ input, target: ctx.target });
     return openFile.openChosenFile(input, ctx, {
       port: { pick },
-      isAppPage: openFile.isAppPage,
+      isAppPage: (client) => openFile.isAppPage(client, DEV_URL),
       grant: (grant) => router.invokeOwn('files.grant', grant, { client: clients.mainClient, target: LOCAL }) as Promise<CommandResult<'files.grant'>>,
     });
   });
@@ -170,6 +170,27 @@ describe('the sender’s guard: files.writeOutside and layout.openFile only for 
     await expect(invoke(appWindow().event, 'files.writeOutside', save(file), SECOND_PROFILE)).resolves.toMatchObject({ ok: true });
     expect(remote).toHaveBeenCalledOnce();
     expect(readFileSync(file, 'utf8')).toBe('written by a sender the guard refuses');
+  });
+
+  // the review's finding 1: dispatchLocal and invokeOwn have no sender check, so the guard reads the page's origin itself
+  it('refuses, through dispatchLocal and invokeOwn, the page an app window navigated to at another origin: no host, link or chooser call', async () => {
+    const { event } = appWindow();
+    event.sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    event.senderFrame.url = 'https://example.com/landing';
+    const foreign = { client: m.clients.clientOf(event.sender as never), target: LOCAL };
+    for (const send of [m.router.dispatchLocal, m.router.invokeOwn]) {
+      await expect(send('files.writeOutside', save('/work/notes/roadmap.md'), foreign)).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+      await expect(send('layout.openFile', { appSessionId: 'app-1' }, foreign)).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    }
+    expect(dispatchToHost).not.toHaveBeenCalled();
+    expect(remote).not.toHaveBeenCalled();
+    expect(pick).not.toHaveBeenCalled();
+    expect(opened).toEqual([]);
+    // a reload at the app's own URL is a new instance of an app page, which passes
+    event.sender.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    event.senderFrame.url = DEV_URL;
+    await expect(m.router.dispatchLocal('files.writeOutside', save('/work/notes/roadmap.md'), { client: m.clients.clientOf(event.sender as never), target: LOCAL })).resolves.toMatchObject({ ok: true });
+    expect(dispatchToHost).toHaveBeenCalledOnce();
   });
 
   it('leaves files.write as it was: forwarded from a window that is no app window', async () => {

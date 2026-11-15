@@ -839,16 +839,25 @@ describe('main ipc router', () => {
       expect([first, second, third].map((guard) => guard.mock.calls.length)).toEqual([2, 1, 2]);
     });
 
-    it('answers a guard that throws as internal, forwarding nothing', async () => {
+    it('answers any throw of a guard as internal, logged, forwarding nothing: a plain error and both typed failures alike', async () => {
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { HostCommandError } = await import('@shared/host/runtime');
       const open = vi.fn(() => ({ leaseId: LEASE }));
       router.registerMachineHandler('connectors.open', open);
-      router.guardCommand(['connectors.open'], () => {
-        throw new Error('the guard broke');
-      });
-      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: false, error: { code: 'internal', message: 'the guard broke' } });
+      const throws: unknown[] = [
+        new Error('the guard broke'),
+        new router.CommandFailure({ code: 'host_unavailable', message: 'the guard broke' }),
+        new HostCommandError({ code: 'timeout', message: 'the guard broke' }),
+      ];
+      for (const thrown of throws) {
+        const dispose = router.guardCommand(['connectors.open'], () => {
+          throw thrown;
+        });
+        await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART }), String(thrown)).resolves.toEqual({ ok: false, error: { code: 'internal', message: 'the guard broke' } });
+        dispose();
+      }
       expect(open).not.toHaveBeenCalled();
-      expect(error).toHaveBeenCalledOnce();
+      expect(error).toHaveBeenCalledTimes(3);
     });
   });
 });
