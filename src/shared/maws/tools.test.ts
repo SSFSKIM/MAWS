@@ -296,6 +296,11 @@ describe('X9 records: parseRecordedToolArguments', () => {
     ];
     for (const [name, args] of calls) expect(parseRecordedToolArguments(name, args), `${name} ${JSON.stringify(args)}`).toEqual(parseToolArguments(name, args));
   });
+
+  // UX wave U6b-1 (Decision 10): the window had not read its layout when its wait ran out; the agent may call again
+  it('carries the exact text of a window still loading its layout', () => {
+    expect(TOOL_ERRORS.paneNotReady).toBe('show_pane: the MAWS window was still loading its layout; try again');
+  });
 });
 
 describe('X9 results', () => {

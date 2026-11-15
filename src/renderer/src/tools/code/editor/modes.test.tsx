@@ -55,7 +55,7 @@ describe('editor modes', () => {
   beforeEach(() => {
     useViewer.getState().reset();
     useFiles.getState().reset();
-    useLayout.setState({ main: LAYOUT_DEFAULTS.main });
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
     useEditorDialog.setState({ open: null });
   });
   afterEach(() => {
@@ -66,7 +66,7 @@ describe('editor modes', () => {
   async function open(files: Record<string, DiskFile>, path = APP, { editable = true } = {}) {
     const disk = installDisk(files);
     offs.push(connectCodeEvents());
-    openFile(A, path);
+    openFile(A, path, null, { main: true });
     const shown = render(
       <>
         <FileViewer tab={fileTab(path)} />
@@ -297,7 +297,7 @@ describe('editor modes', () => {
       act(() => view().dispatch({ selection: { anchor: view().state.doc.line(9).to } }));
       runAction('file.commentLine');
       expect(composer).toHaveBeenLastCalledWith(expect.objectContaining({ line: 9 }), { appSessionId: A });
-      useLayout.setState({ main: LAYOUT_DEFAULTS.main }); // no file tab in front
+      useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true }); // no file tab in front
       runAction('file.commentLine');
       expect(composer).toHaveBeenCalledTimes(2);
     });

@@ -6,6 +6,7 @@ import { ContextMenu, DropdownMenu } from 'radix-ui';
 import type { ActionId } from '@shared/keymap/actions';
 import { Icon, IconButton } from '../app/IconButton';
 import { pageOpen, useLayout } from '../stores/layout';
+import { paramsHoldFile } from '../stores/layout-model'; // UX wave U6b-1
 import { usePanes, openPaneTab } from '../engine-surface/panes';
 import { lastInViewOf, panelHost, usePanelHost } from './host';
 import { COPY } from './copy';
@@ -119,7 +120,9 @@ function SurfaceContext({ toolId, children }: { toolId: string; children: ReactE
   const session = surfaceSession(state);
   const tool = usePanelHost((s) => s.tools.get(toolId));
   const pinned = state.panelSurfaces.pinnedTools.includes(toolId);
-  const tab = state.effectivePanelTabs(session).find((tab) => tab.toolId === toolId);
+  // UX wave U6b-1 (Decision 16): the tab "Keep open for every session" acts on is the tool's first that holds no file (for
+  // Files, the tree-only tab), and the item is absent when the scope has none
+  const tab = state.effectivePanelTabs(session).find((tab) => tab.toolId === toolId && !paramsHoldFile(state.panelParams[tab.id]));
   const opened = !state.regions.panel.collapsed && surfaceTabs(state, session).some((tab) => tab.toolId === toolId);
   return <ContextMenu.Root modal={false}>
     <ContextMenu.Trigger asChild onKeyDown={(event) => {

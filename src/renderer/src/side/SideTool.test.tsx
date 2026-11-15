@@ -35,6 +35,7 @@ import { sideThreadsOf, sideTool } from './SideTool';
 import { promotionQuestionOf, ThreadView } from './ThreadView';
 // E4d start
 import { registerPanelTool } from '../panel/host';
+import { filesTool } from '../tools/code/files/FilesTool'; // UX wave U6b-1
 import { installFakeMain, ok } from '../test-support/code';
 import { browserTab, T1 } from '../test-support/browser';
 import { browserTool } from '../tools/browser/BrowserTool';
@@ -150,8 +151,12 @@ describe('the Side pane', () => {
     withThreads(thread(ONE, '2026-10-06T01:00:00.000Z'));
     act(() => openSideThread(A, ONE));
     mount();
+    // UX wave U6b-1: beside the parent's chat, as a tab of Files, as every open
+    registerPanelTool(filesTool);
     await userEvent.click(screen.getByRole('button', { name: 'Open x.ts:42' }));
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'file', path: '/work/app-a/x.ts', line: 42, appSessionId: A });
+    const files = (panelOf(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+    expect(files.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/work/app-a/x.ts', line: 42, preview: true }]);
+    expect(activeTab(useLayout.getState().main)?.kind).not.toBe('file');
   });
 
   // E4d start: a page element thread's header opens the page in the parent's browser (E4d execution document, Design §10)

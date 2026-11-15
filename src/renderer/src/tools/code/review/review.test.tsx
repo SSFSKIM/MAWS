@@ -17,6 +17,7 @@ import { createClient } from '../../../ipc/client';
 import { checkoutKey } from '../../../ipc/machine';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
+import { filesTool } from '../files/FilesTool'; // UX wave U6b-1
 import { FloatingSummary } from '../../../panel/summary/Summary';
 import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
@@ -585,6 +586,14 @@ function layOut(body: Element, { rowHeight, clientHeight }: { rowHeight: number;
   return () => void (Element.prototype.getBoundingClientRect = original);
 }
 const openReview = (params?: ReviewParams) => act(() => void panelHost.addTool('review', { appSessionId: A, params }));
+// UX wave U6b-1: what the session's Files tabs hold, and the main strip's file tabs (none: a file opens beside the chat)
+const sideFiles = () => (panelOf(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
+const mainFileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).filter((t) => t.kind === 'file');
+// Review's tab brought back into view: its body is drawn again, and counts its hunks once it has its diff
+async function showReview() {
+  act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+  await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toMatch(/^Showing hunk \d+ of \d+$/));
+}
 // UX wave U8c-2: the agent in a worktree of /repo reached by `cd` (a fact on the record), or back at /repo (null)
 const WT = '/repo/.claude/worktrees/w1';
 const moveTo = (checkout: string | null) =>
@@ -615,7 +624,7 @@ describe('review tool', () => {
     useViewer.getState().reset();
     main = reviewMain();
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo' })) }));
-    offs.push(connectPanelEvents(), registerPanelTool(reviewTool));
+    offs.push(connectPanelEvents(), registerPanelTool(reviewTool), registerPanelTool(filesTool)); // UX wave U6b-1: Open opens beside the chat
   });
   afterEach(() => {
     cleanup();
@@ -705,7 +714,8 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-too-large]')?.textContent).toBe('Diff too large to display. Open the file'));
     expect(document.querySelector('[data-review-body]')).toBeNull();
     fireEvent.click(screen.getByText('Open the file'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/big.ts', line: 4 }));
+    expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/big.ts', line: 4 })]);
+    expect(mainFileTabs()).toEqual([]);
   });
 
   // P5 O7 M8 ("Untracked files"): an untracked file is read as Source control reads it, `git.diff`'s `untracked` scope
@@ -734,13 +744,15 @@ describe('review tool', () => {
     await waitFor(() => expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 1 of 2'));
     expect(screen.getByLabelText('Previous hunk')).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByText('Open file ↗'));
-    const fileTabs = () => currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs).filter((t) => t.kind === 'file');
-    expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/app.ts', line: 5, appSessionId: A })]);
+    expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 5 })]);
+    expect(mainFileTabs()).toEqual([]);
+    await showReview(); // the file is in view in Review's place, Review's tab still in the strip
     fireEvent.click(screen.getByLabelText('Next hunk'));
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 2 of 2');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
     fireEvent.click(screen.getByText('Open file ↗'));
-    expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/app.ts', line: 14 })]);
+    expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 14 })]); // the same tab, at the new line
+    await showReview();
     fireEvent.click(screen.getByLabelText('Next file'));
     expect(selectedPath()).toBe('src/staged.ts');
     expect(document.querySelector('[data-review-hunk]')?.textContent).toBe('Showing hunk 1 of 1');
@@ -780,10 +792,14 @@ describe('review tool', () => {
       expect(el.scrollTop).toBe(el.scrollHeight - el.clientHeight); // clamped short of the second hunk's row
       expect(hunkLabel()).toBe('Showing hunk 2 of 2');
       expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
-      fireEvent.click(screen.getByText('Open file ↗'));
-      expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/src/app.ts', line: 14 }));
       act(() => void ((body as HTMLElement).scrollTop = 0)); // scrolling by hand still moves the counter
       expect(hunkLabel()).toBe('Showing hunk 1 of 2');
+      // UX wave U6b-1: Open, last, since the file then shows beside the chat in Review's place
+      fireEvent.click(screen.getByLabelText('Next hunk'));
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(hunkLabel()).toBe('Showing hunk 2 of 2');
+      fireEvent.click(screen.getByText('Open file ↗'));
+      expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/src/app.ts', line: 14 })]);
     } finally {
       restore();
     }
@@ -1016,7 +1032,7 @@ describe('review tool', () => {
     expect(rows()).toEqual([['/repo/child.ts', 'modified', 'child.ts/repo+1 −1']]);
     expect(bodyText()).toContain('alpha');
     fireEvent.click(screen.getByText('Open file ↗'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/child.ts', line: 3 }));
+    expect(sideFiles()).toEqual([expect.objectContaining({ file: '/repo/child.ts', line: 3 })]);
   });
 
   it('draws each edit of a file as its own block: a Write, an overlapping Edit, and a later edit above', async () => {
@@ -1046,7 +1062,7 @@ describe('review tool', () => {
     fireEvent.click(screen.getByLabelText('Next hunk'));
     expect(hunkLabel()).toBe('Showing hunk 3 of 3');
     fireEvent.click(screen.getByText('Open file ↗'));
-    expect(currentSet(useLayout.getState().main).panes.flatMap((p) => p.tabs)).toContainEqual(expect.objectContaining({ kind: 'file', path: file, line: 4 })); // the third block's own numbers
+    expect(sideFiles()).toEqual([expect.objectContaining({ file, line: 4 })]); // the third block's own numbers
     // No warning from the diff view, save the store library's own timing note, which a loaded machine triggers.
     const warned = warn.mock.calls.filter(([first]) => !(typeof first === 'string' && first.startsWith('[reactivity-store]')));
     expect(warned).toEqual([]);
