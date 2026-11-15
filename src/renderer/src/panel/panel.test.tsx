@@ -10,6 +10,7 @@ import { connectPanelHost, panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
 import { SurfaceRow } from './SurfaceRow';
 import { PANEL_TAB_DRAG_TYPE } from '../shell/transfer';
+import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { drag, transfer } from '../test-support/drag';
 import type { PanelTool } from './tool';
 
@@ -530,6 +531,16 @@ describe('a side tab dragged between the groups', () => {
     fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
     expect(groupsOf()[1]).toBeNull();
     expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
+  // The Mac run's first failure: a tree-only Files tab given a file by its params (the preview's reuse) is a tab that
+  // moves to the main area from then on, its menu offering it (the compiled project: no read memoized on the tab alone).
+  it('a tree-only Files tab given a file through its params offers Move to main area in its menu', async () => {
+    renderHost();
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain })).toBeTruthy();
   });
 
   it('onto the lower part of a one-group column it makes the second group; the target shows only while a side tab drags', () => {
