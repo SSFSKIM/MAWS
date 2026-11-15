@@ -36,14 +36,17 @@ interface Made {
   path: string;
   patch: string;
   added: number[]; // each hunk's added line, in the new file
+  starts: number[]; // each hunk's first row, in the new file: where a jump to it opens (`hunkAnchor`)
 }
 function made(index: number, hunks: number, lines: number): Made {
   const path = `src/part-${String(index).padStart(3, '0')}.ts`;
   const out = [`diff --git a/${path} b/${path}`, 'index 1..2 100644', `--- a/${path}`, `+++ b/${path}`];
   const added: number[] = [];
+  const starts: number[] = [];
   for (let h = 0; h < hunks; h++) {
     const start = 1 + h * 40;
     const half = Math.floor(lines / 2);
+    starts.push(start + h);
     out.push(`@@ -${start},${lines} +${start + h},${lines + 1} @@`);
     for (let i = 0; i < lines; i++) {
       if (i === half) {
@@ -53,7 +56,7 @@ function made(index: number, hunks: number, lines: number): Made {
       out.push(` const line${h}x${i} = ${i};`);
     }
   }
-  return { path, patch: `${out.join('\n')}\n`, added };
+  return { path, patch: `${out.join('\n')}\n`, added, starts };
 }
 
 function statusOf(files: readonly Made[]): GitStatus {
@@ -256,10 +259,10 @@ describe('the stack laid out', () => {
     await mount(files);
     page.scrollTo(page.topOf(sectionOf(files[0].path)) + HEADER + 3 * ROW); // reading the first file
     await page.settle();
-    for (let n = 0; n < 4; n++) fireEvent.click(screen.getByLabelText('Next hunk')); // to the third file's first hunk
+    for (let n = 0; n < 5; n++) fireEvent.click(screen.getByLabelText('Next hunk')); // to the third file's second hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 5 of 10');
-    const jumped = { path: files[2].path, side: 'new', line: files[2].added[0] };
+    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
+    const jumped = { path: files[2].path, side: 'new', line: files[2].starts[1] };
     expect(page.rowAtTop()).toEqual(jumped);
     hide();
     show();
@@ -333,12 +336,11 @@ describe('the stack laid out', () => {
     fireEvent.click(sectionOf(files[1].path).querySelector('[data-review-fold]')!);
     await page.settle();
     expect(hunkLabel()).toBe('Showing hunk 1 of 10'); // the folded file's hunks are counted
-    fireEvent.click(screen.getByLabelText('Next hunk'));
-    fireEvent.click(screen.getByLabelText('Next hunk'));
+    for (let n = 0; n < 3; n++) fireEvent.click(screen.getByLabelText('Next hunk')); // into the folded file's second hunk
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 3 of 10');
+    expect(hunkLabel()).toBe('Showing hunk 4 of 10');
     expect(sectionOf(files[1].path).hasAttribute('data-folded')).toBe(false); // unfolded where it landed
-    expect(page.rowAtTop()).toEqual({ path: files[1].path, side: 'new', line: files[1].added[0] });
+    expect(page.rowAtTop()).toEqual({ path: files[1].path, side: 'new', line: files[1].starts[1] });
 
     page.scrollTo(page.topOf(sectionOf(files[3].path)) + HEADER + 8 * ROW); // by hand, past the fourth file's first hunk
     await page.settle();

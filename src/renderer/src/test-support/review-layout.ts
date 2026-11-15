@@ -178,14 +178,18 @@ export function fakeStackLayout(options: StackLayoutOptions) {
       rowOf = next;
     },
     header: () => header * zoom,
-    // The diff row the person reads at the top: the first under the sticky header.
+    // The diff row the person reads at the top: the first under the sticky header (a hunk's header row reads as the
+    // hunk's first row, under it).
     rowAtTop(): StackPageRow | null {
       const el = scroller();
       if (!el) return null;
       const edge = el.scrollTop + header * zoom;
-      for (const tr of el.querySelectorAll('[data-review-body] tr')) {
-        const top = topOf(tr);
-        if (edge < top || edge >= top + rowHeight(tr)) continue;
+      const trs = [...el.querySelectorAll<HTMLElement>('[data-review-body] tr')];
+      for (let index = 0; index < trs.length; index++) {
+        const top = topOf(trs[index]);
+        if (edge < top || edge >= top + rowHeight(trs[index])) continue;
+        const tr = trs[index].dataset.state === 'hunk' ? trs[index + 1] : trs[index];
+        if (!tr) return null;
         const neu = tr.querySelector<HTMLElement>('[data-line-new-num]')?.dataset.lineNewNum;
         const old = tr.querySelector<HTMLElement>('[data-line-old-num]')?.dataset.lineOldNum;
         if (!neu && !old) return null;
