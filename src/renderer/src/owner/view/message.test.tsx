@@ -23,6 +23,7 @@ import { Transcript } from '../../transcript/view/Transcript';
 import { assistantPresentation } from '../to-human/Presenter';
 import { ToHumanMessageRow } from '../to-human/MessageRow';
 import { ReportOnly } from './Message';
+import { MARKED_CASES } from './marked-cases';
 
 afterEach(() => {
   cleanup();
@@ -133,6 +134,41 @@ describe('the label follows `spanRows`', () => {
     expect(bodies(view.container).map((body) => body.trim())).toEqual(expected);
     expect(labels(view.container)).toEqual(expected.map((_, i) => (i === 0 ? '● message' : 'message')));
     expect(view.container.querySelectorAll('.owner-message-ink').length).toBe(expected.length);
+  });
+
+  // The reviewer's cases: a mark inside a container, the container's narration around it.
+  it.each<[string, string, string[]]>([
+    ['a mark inside an emphasis with narration', '**Before <message>For you</message> after.**', ['For you']],
+    ['a mark inside a list item beside another item', '- Before <message>For you</message> after.\n- Outside row.', ['For you']],
+    ['a mark inside a quote with narration', '> Before <message>For you</message> after.', ['For you']],
+    ['a mark inside a table cell with narration', '| A | B |\n| --- | --- |\n| x | Before <message>For you</message> after |', ['For you']],
+  ])('a closed stretch’s head draws %s as the mark alone', (_name, text, expected) => {
+    const view = head(text);
+    expect(bodies(view.container).map((body) => body.trim())).toEqual(expected);
+    expect(view.container.textContent).not.toMatch(/Before|after|Outside/);
+  });
+
+  it('a closed stretch’s head draws a mark across two list items as one message, the record’s words left out', () => {
+    const view = head('- Narration <message>Across\n- rows</message> narration.');
+    expect(labels(view.container)).toEqual(['● message']);
+    expect(view.container.textContent).toContain('Across');
+    expect(view.container.textContent).toContain('rows');
+    expect(view.container.textContent).not.toMatch(/arration/);
+  });
+
+  // Property-style: over invented texts in every container, a closed head draws exactly `parseMarked`'s message spans,
+  // each under its own label, and none of the record's words.
+  it.each(MARKED_CASES)('a closed stretch’s head draws exactly the mod’s message spans of %s', (_name, text, spans) => {
+    const view = head(text);
+    expect(bodies(view.container).map((body) => body.replace(/\s+/g, ' ').trim())).toEqual(spans);
+    expect(labels(view.container)).toEqual(spans.map((_, i) => (i === 0 ? '● message' : 'message')));
+    expect(view.container.textContent).not.toMatch(/arration/);
+  });
+
+  it('a closed stretch’s head draws a mark left open to its end as the mod does, its label reading ` …`', () => {
+    const view = head('<message>Done.</message> narration <message>Still open');
+    expect(labels(view.container)).toEqual(['● message', 'message …']);
+    expect(bodies(view.container).map((body) => body.trim())).toEqual(['Done.', 'Still open']);
   });
 
   it('the full drawing keeps a mark inside a line in its authored paragraph, under one label', () => {
