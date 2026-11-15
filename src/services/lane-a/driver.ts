@@ -19,9 +19,11 @@
 //   (./jobs.ts) only when one of those changed, go to each watch in its snapshot and as a `subagents` message each time
 //   they change (UX wave U8d M2). When the session's holder ends or its bridge goes, its process is taken as gone: each
 //   watch hears its running jobs and agents `exited` before it ends. A stop is refused for a job the transcript holds
-//   ended. The body names its origin (the fence review's ruling): the holder a probe asked under when the bridge child
-//   whose agents it holds answered. A holder that moves to another process reprobes in place, so the body goes on naming
-//   the last child's holder, its final body included, until the next child's snapshot replaces that child's agents.
+//   ended. The body names its origin (the fence review's ruling): the holder of the bridge child whose agents it holds,
+//   as the probe that opened that child's stream saw it. A holder that moves to another process reprobes in place, so
+//   the body goes on naming the last child's holder, its final body included, until the next child's snapshot replaces
+//   that child's agents. A child's process is the launch it answers with, tied one to one to the holder a probe asked
+//   under, so a child that answers before the index names its process's holder reads as that holder once it does.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
@@ -161,7 +163,8 @@ interface Session {
   appId: AppSessionId;
   engine: string;
   holder: string; // the holder, as an origin (`holderOrigin`): a new process holding the same session is probed again
-  origin: string | null; // U8d: the holder whose bridge child its agents are of, which the body names (the header)
+  child: { holder: string; launch: string | null } | null; // U8d: whose agents are held: their stream's probe (the header)
+  launches: Map<string, string>; // U8d: the holder each launch of the session is, tied one to one (the header)
   socket: { path: string; fits: boolean };
   status: Record<string, unknown> | null;
   bridge: BridgeState | null; // null: no bridge answered; the session is not lane A
@@ -184,6 +187,13 @@ const NO_BRIDGE = 'this session has no bridge MAWS can drive';
 const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 const refused = (code: string, message: string): ControlResult => ({ state: 'refused', code, message });
+
+// U8d: the origin the session's body names (the header): the holder its held agents' launch is tied to, else the holder
+// their stream's probe asked under; null before any stream.
+function originOf(s: Session): string | null {
+  if (s.child === null) return null;
+  return (s.child.launch === null ? undefined : s.launches.get(s.child.launch)) ?? s.child.holder;
+}
 
 export interface LaneADriver {
   observe(hold: SessionHold): void;
@@ -325,20 +335,24 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
   }
 
-  // `holder`: the holder the probe asked under, the origin of the bridge child that answered it.
+  // `holder`: the holder the probe asked under. The launch that answered is tied to it when neither is tied to another.
   function apply(s: Session, status: Record<string, unknown> | null, holder: string): void {
     if (status === null) {
       unbridge(s, 'the session’s bridge went away');
       return;
     }
+    const launch = typeof status.launch === 'string' ? status.launch : null;
+    const origin = originOf(s);
+    if (launch !== null && !s.launches.has(launch) && ![...s.launches.values()].includes(holder)) s.launches.set(launch, holder);
     s.status = status;
     s.bridge = classify(status);
-    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder);
+    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder, launch);
     else {
       closeState(s);
       endWatches(s, s.bridge.reason ?? NO_BRIDGE);
       s.agents.clear(); // nothing drives it: what its bridge held is read again from a stream's snapshot
     }
+    if (originOf(s) !== origin) s.follow?.bridgeChanged(); // the held agents' launch was just tied to its holder
     changed(s);
   }
 
@@ -355,25 +369,25 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- the state stream -----------------------------------------------------------------------------------------------
-  // `origin`: the holder of the bridge child this stream is opened on. Its agents are that child's from its snapshot on;
-  // until then the last child's, kept while the stream reconnects, are still held, and so is their origin.
-  function openState(s: Session, origin: string): void {
+  // `holder` and `launch`: the probe that opened this stream, and the child that answered it. The held agents are that
+  // child's from its snapshot on; until then the last child's, kept while the stream reconnects, are still held.
+  function openState(s: Session, holder: string, launch: string | null): void {
     if (s.stream !== null || s.reconnect !== null) return;
     s.snapshotted = false;
-    if (s.agents.list() === null) s.origin = origin; // no child's agents are held: what follows is this child's
+    if (s.agents.list() === null) s.child = { holder, launch }; // no child's agents are held: what follows is this one's
     const stream: EventStream = subscribe(s.socket.path, {
       onLines: (lines) => {
         if (s.stream !== stream) return;
         let dirty = false;
         const toolBefore = JSON.stringify(s.fold.mainTool());
         const agentsBefore = s.agents.version;
-        const originBefore = s.origin;
+        const originBefore = originOf(s);
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
             s.snapshotted = true;
             s.fold.snapshot(line);
-            s.origin = origin; // its agents replace the last child's
+            s.child = { holder, launch }; // its agents replace the last child's
             s.agents.snapshot(line.agents);
             s.lane.snapshotArrived();
             s.backoff.holding();
@@ -387,7 +401,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           } else if (line.type === 'agent') s.agents.event(line);
           else if (s.fold.event(line)) dirty = true;
         }
-        if (s.agents.version !== agentsBefore || s.origin !== originBefore) s.follow?.bridgeChanged();
+        if (s.agents.version !== agentsBefore || originOf(s) !== originBefore) s.follow?.bridgeChanged();
         if (dirty) changed(s);
         else if (JSON.stringify(s.fold.mainTool()) !== toolBefore) tell(s);
       },
@@ -497,7 +511,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       session: s.engine,
       locate: locate(s),
       bridge: s.agents,
-      origin: () => s.origin,
+      origin: () => originOf(s),
       ...(listing !== undefined && { listing: () => listing(s.appId) }),
       pollMs: timing.jobsPollMs,
       backoff: () => new Backoff(timing.backoff),
@@ -580,7 +594,8 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       appId: hold.appId,
       engine: hold.engineSessionId,
       holder,
-      origin: null,
+      child: null,
+      launches: new Map(),
       socket: home === null ? { path: '', fits: false } : bridgeSocket(home, hold.engineSessionId),
       status: null,
       bridge: null,
