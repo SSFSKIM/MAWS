@@ -346,7 +346,7 @@ describe('the canon’s components and the aliases on the page', () => {
     expect(chip).toContain(`padding: ${1280 / 15}px;`);
   });
 
-  it('draws each component of a bundled system on the canvas the table names, and one changed from the bundled file on the largest', () => {
+  it('draws each component of a bundled system on the canvas the table names, and one changed from the bundled file, or drawn in tokens changed from the bundle’s, on the largest', () => {
     vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
       return this.classList.contains('dsp-slide') ? 346 : 0;
     });
@@ -383,6 +383,14 @@ describe('the canon’s components and the aliases on the page', () => {
     expect(canvasOf(edited, 'components/tip.html')).toMatchObject({ width: 1280, height: 720 });
     expect(canvasOf(edited, 'components/status.html').width).toBe(960);
     edited.unmount();
+
+    // the branch review of U10b-4: the frame draws the system's tokens as they are now, and the table holds only for the
+    // bundle's: one spacing token changed, every component is on the largest canvas
+    const tokens = JSON.parse(classroom.files['tokens.tokens.json']!) as { space: Record<string, { $value: { value: number } }> };
+    tokens.space['4']!.$value.value += 8;
+    const spaced = render(<DesignSystemPage artifactId="ds5" handle={{ doc: seeded({ 'tokens.tokens.json': JSON.stringify(tokens) }, { route: 'default', key: 'classroom', at: AT }) }} host={host} />);
+    for (const path of components) expect(canvasOf(spaced, path), path).toMatchObject({ width: 1280, height: 720 });
+    spaced.unmount();
 
     // the same files under another route are a system the table does not name
     const derived = render(<DesignSystemPage artifactId="ds4" handle={{ doc: seeded({}, { route: 'derived', at: AT }) }} host={host} />);

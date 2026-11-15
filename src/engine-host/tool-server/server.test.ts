@@ -3,7 +3,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { mawsToolList, TOOL_ERRORS } from '@shared/maws/tools';
 import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions';
 import type { ControlRequestFrame } from '@shared/wire/frames';
-import { defineMawsTool, MawsToolServer, toolText, type McpToolContext, type McpToolDefinition } from './server';
+import { defineMawsTool, MawsToolServer, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -207,6 +207,38 @@ describe('the maws server speaks MCP over mcp_message (E0a Q1)', () => {
     expect(sent).toHaveLength(1);
     expect(server.inFlight).toBe(0);
     await expect(server.reply('r9' as RequestId, result)).rejects.toThrow('no call r9 waits for an answer');
+  });
+
+  // the branch review of U10b-4: what a tool counts as done only once the engine has its answer (a Space's instructions
+  // given, UX wave U10b M10) rides with the answer as `delivered`, which the server runs as it hands the answer over
+  it("runs a result's delivered once, as it hands the answer over, and writes the answer without it", async () => {
+    let runs = 0;
+    const tool = defineMawsTool('artifact_read', async () => ({ ...toolText({ status: 'read' }), delivered: () => void runs++ }));
+    const { send, rpcOf } = harness([tool]);
+    const id = send({ method: 'tools/call', params: { name: 'artifact_read', arguments: {} }, jsonrpc: '2.0', id: 5 });
+    await flush();
+    expect(runs).toBe(1);
+    expect(rpcOf(id)).toEqual({ jsonrpc: '2.0', id: 5, result: toolText({ status: 'read' }) });
+  });
+
+  it('never runs delivered for a call withdrawn, abandoned, or answered from outside before its tool settled', async () => {
+    const settles: ((result: McpToolResult) => void)[] = [];
+    let runs = 0;
+    const held = defineMawsTool('artifact_read', () => new Promise((resolve) => settles.push(resolve)));
+    const { server, send, rpcOf } = harness([held]);
+    const call = (id: number) => send({ method: 'tools/call', params: { name: 'artifact_read', arguments: {} }, jsonrpc: '2.0', id });
+    const withdrawn = call(1);
+    const abandoned = call(2);
+    const replied = call(3);
+    await flush();
+    server.cancel(withdrawn);
+    send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 2, reason: 'interrupted' } });
+    await server.reply(replied, toolText({ status: 'answered' }));
+    for (const settle of settles) settle({ ...toolText({ status: 'read' }), delivered: () => void runs++ });
+    await flush();
+    expect(runs).toBe(0);
+    expect([rpcOf(withdrawn), rpcOf(abandoned)]).toEqual([undefined, undefined]);
+    expect(rpcOf(replied)).toEqual({ jsonrpc: '2.0', id: 3, result: toolText({ status: 'answered' }) });
   });
 
   it('logs an answer the pipe refused', async () => {

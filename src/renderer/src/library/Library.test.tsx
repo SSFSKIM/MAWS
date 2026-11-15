@@ -1164,6 +1164,54 @@ describe('a Space’s instructions', () => {
     expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }]);
   });
 
+  // the branch review of U10b-4: text the person never saw is never overwritten. Until the stored text is read the field
+  // is held (it takes no typing), and a read that failed offers no Save; once shown, a later answer does not replace
+  // what the person typed.
+  it('hold the field until the read answers, and a late answer never replaces what the person typed after the text was shown', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    const first = deferred<ReturnType<typeof ok>>();
+    answers['spaces.instructions'] = () => first.promise;
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), 'Use feet.');
+    expect(field(sheet).value).toBe('');
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    await act(async () => first.resolve(ok({ instructions: held })));
+    await waitFor(() => expect(field(sheet).value).toBe('Use metres.'));
+    expect(field(sheet).readOnly).toBe(false);
+    await user.type(field(sheet), ' And Celsius.');
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+    await store([{ spaceId: WORK, text: 'Use kilometres.', at: 6 }], WORK); // a later answer
+    await waitFor(() => expect(main.callsOf('spaces.instructions').length).toBeGreaterThan(1));
+    expect(field(sheet).value).toBe('Use metres. And Celsius.');
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: WORK, text: 'Use metres. And Celsius.' }]));
+  });
+
+  it('a failed read shows the failure, holds the field and offers no Save', async () => {
+    answers['spaces.instructions'] = () => ({ ok: false, error: { code: 'internal', message: 'the engine host is unavailable' } });
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await within(sheet).findByText(/the engine host is unavailable/);
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), 'Use feet.{Enter}');
+    expect(field(sheet).value).toBe('');
+    expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
+    fireEvent.submit(field(sheet).closest('form')!);
+    await user.click(button(sheet, 'Cancel'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+  });
+
   it('ride in a chat a card starts from the Space as one chip after the opening words, its body sent with the first message; a Space without them adds no chip', async () => {
     held = [{ spaceId: WORK, text: 'Use metres.\nCite the field log.', at: 5 }];
     const creator = vi.fn(async () => at(S(8)));

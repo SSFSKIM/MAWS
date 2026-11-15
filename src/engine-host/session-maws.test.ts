@@ -987,6 +987,34 @@ describe('a Space’s instructions in the artifact tools’ answers on an Engine
     await finish(run);
   });
 
+  // the branch review of U10b-4: what an answer carries counts as given only once the server hands that answer to the
+  // engine. A call the engine withdrew while it ran still does its store work, but its answer is dropped, so the next
+  // answer about the Space carries the instructions; an answer the engine has marks them given once.
+  it('a call withdrawn after its store work marks nothing: the next answer carries them, and that answer marks them once', async () => {
+    const notes = await space('Field notes', NOTES);
+    const brand = await documents.store.create({ kind: 'design_system', title: 'Brand' }, { kind: 'human' });
+    await documents.store.setDefaults({ owner: brand.id, spaces: {} });
+    const held: (() => void)[] = []; // the governing system's guide, held open per ask
+    documents.store.registerDesignSystemContext(() => new Promise((resolve) => held.push(() => resolve('# DESIGN of Brand'))));
+    const run = await withStore();
+    const withdraw = async (id: RequestId) => {
+      await until(() => held.length === 1, `${id} holding on its design system`);
+      run.transport.push({ type: 'control_cancel_request', request_id: id });
+      await run.answered(run.mcp({ method: 'notifications/initialized' })); // read after the withdrawal, so that was read too
+      expect(run.session.status().pendingRequests).toBe(1); // still running: its tool reads no signal
+      held.shift()!();
+      await until(() => run.session.status().pendingRequests === 0, `${id} settled`);
+      expect(run.answerOf(id)).toBeUndefined();
+    };
+    await withdraw(run.call('artifact_create', { kind: 'document', title: 'Memo', content: '# Memo', space: 'Field notes' }));
+    const [memo] = documents.store.list({ kind: 'document' });
+    expect(memo).toMatchObject({ title: 'Memo', spaceId: notes.id }); // the store work was done
+    await withdraw(run.call('artifact_describe_type', { kind: 'document', space: 'Field notes' }));
+    expect((await ask(run, 'artifact_read', { artifact: memo!.id })).spaceInstructions).toEqual(given(notes, NOTES));
+    expect(await ask(run, 'artifact_read', { artifact: memo!.id })).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
   it('a held legacy dashboard’s raw read neither carries them nor marks them given', async () => {
     const notes = await space('Field notes', NOTES);
     const run = await withStore();

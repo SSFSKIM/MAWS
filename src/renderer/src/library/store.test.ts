@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import {
-  connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, spaceInstructionsOf, UNWATCHED_KEPT, watchLibraryList,
+  connectLibrary, library, libraryList, libraryRow, librarySpaces, listKey, refreshLibrary, resetLibrary, spaceInstructionsOf, spaceInstructionsReadOf, UNWATCHED_KEPT, watchLibraryList,
   watchLibraryRow, watchLibrarySpaces, watchSpaceInstructions,
 } from './store';
 import { OTHER_MACHINE } from '../../../../test/support/machine';
@@ -187,5 +187,24 @@ describe('the Spaces’ instructions', () => {
     fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
     await fake.fail('spaces.instructions', 'unknown command');
     expect([...spaceInstructionsOf(state())]).toEqual([[id(101), 'Use metres.']]);
+  });
+
+  // the branch review of U10b-4: the sheet holds its field until the text is known, and offers no Save when it cannot be
+  it('tell “not read yet”, “failed” and “read” apart: a failure before any answer is failed, one after an answer keeps it read', async () => {
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
+    watch(watchSpaceInstructions());
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'unread' });
+    await fake.fail('spaces.instructions', 'unknown command');
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'unknown command' });
+    expect(spaceInstructionsReadOf(state())).toBe(spaceInstructionsReadOf(state())); // stable, for a hook's selector
+    expect(spaceInstructionsOf(state()).size).toBe(0);
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    expect(spaceInstructionsReadOf(state())).toEqual({ status: 'failed', error: 'unknown command' }); // read again, still unknown
+    await fake.reply('spaces.instructions', { instructions: [{ spaceId: id(101), text: 'Use metres.', at: 3 }] });
+    const read = spaceInstructionsReadOf(state());
+    expect(read.status === 'read' && [...read.instructions]).toEqual([[id(101), 'Use metres.']]);
+    fake.event('spaces.changed', { spaceId: id(101), change: 'updated' });
+    await fake.fail('spaces.instructions', 'the engine host is unavailable');
+    expect(spaceInstructionsReadOf(state()).status).toBe('read'); // the last good answer is what the person sees
   });
 });
