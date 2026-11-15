@@ -26,7 +26,7 @@ How to see it working: the unit suites named in each milestone draw recorded ses
 - [x] (2026-11-15) The owner's look at the drawn example and the answers to the cards ("Questions for the owner", the answer column; the architect's rulings of 2026-11-15 in the Decision Log).
 - [x] (2026-11-15T08:22Z) M1 — The mirror: the fold by stretch on every route MAWS draws. Commits `e970b7df8`..`24bb61b67`; reviewed at its frontier (three Important and two Minor findings fixed at `9ff483b8f`..`24bb61b67`, re-review clean).
 - [x] (2026-11-15T11:21Z) M2 — What a message looks like, the switch above the composer, and what goes. Commits `70af75b39`..`939e7440a`: built `70af75b39`..`ee4955ab3`, then three fix waves on the messages-only drawing and the one reading of the marks (`be23d1fd5`..`b587b279f`, `5acc43381`..`6339d91f6`, `f92ed3f94`..`939e7440a`); the last re-review was clean, and its three Minor items are deferred to the ledger.
-- [ ] M3 — The first pull request's scenes, the record's first line, and its acceptance run.
+- [x] (2026-11-15T15:16Z) M3 — The first pull request's scenes, the record's first line, and its acceptance run. Commits `4fe027e16`..`0482b013e`, and `7eb1f373f` for the review's three tightened scene assertions; reviewed clean. The scenes are typechecked and not run: they belong to the architect's proof list.
 - [ ] Its proof an executor does not run ("Proof", the first list).
 
 **The second pull request** (the cutover; waits for check 1 and for the first to be on master).
@@ -901,4 +901,32 @@ Each body names: its class 1a run (`scripts/ci-gate.sh "$PWD" --gates static,uni
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**The first pull request (M1 to M3), at the controller's hand-back, 2026-11-15.** The mirror folds by stretch on every route MAWS draws. A message is drawn as `● message` over an indented body. The bar is gone, and the switch is one line above the composer, or above the holder notice. Every launch still advertises 8, and nothing is stored or sent. The proof by unit tests:
+- the M1 and M2 folders, with the guards;
+- the agreement test over 108 recorded marked strings;
+- the full typecheck, eslint and the gate's script tests;
+- the desk web app's typecheck, build and test project;
+- the whole unit suite at `0482b013e`: ten files failed, six of them the VM's known list, four that pass alone (Decision Log).
+Still open:
+- the architect's Electron and desk e2e runs;
+- the measured anchoring scene;
+- the look on the built window;
+- the owner's sitting;
+- the branch's xhigh panel;
+- class 1a.
+
+What went as planned and what did not:
+- M1's frontier review found three integration faults, each reproduced on the VM: a flag one mount could clear for another, a jump over rows other than those drawn, and an old fold animation hiding the record line. One fix wave closed them.
+- M2 took three fix waves, all on one question: what is a message and what is record.
+  - The first drew the closed head by cutting the authored Markdown tree. That held for paragraphs and broke inside containers.
+  - The second drew `parseMarked`'s spans. That left four readers deciding the same partition apart.
+  - The third put one reading in `src/shared/owner/marked.ts`, which every reader in the renderer derives from. For an open mark, a stray closer and crossing marks it keeps the shared grammar's literal reading (option 3), because the shared grammar's consumers reach stored marks and the wire. The difference from the mod is left to the second pull request.
+- Lesson: when a drawing depends on a partition that other code already computes, the first version should derive from that computation. A second parser beside it gets review rounds instead.
+- The desk web app's imports of the renderer were outside the milestones' proof until a sibling landing's class 1a run found the hole. From M2's third wave on, its typecheck, build and test project are part of every milestone's proof.
+
+For the second pull request:
+- the surface adapter's `isFirstOfReply` differs from the engine's (M5);
+- §E's known differences, the backslash reading and option 3's cases;
+- the record line's summary (card 1);
+- the agreement test's comparison, which should become ordered runs;
+- `ownerChannel.answered` and `ownerChannel.cancel`, which have no renderer caller left.
