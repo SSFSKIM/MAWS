@@ -136,7 +136,8 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
 // presenter draws and so keeps with the lane off), a task's end that reports an outcome and a scheduled fire (UX wave
 // U3: one short fact each, which a failed task would otherwise show nowhere; every message between agents and sessions
-// folds, O-12; UX wave U1b: an answer's notice folds too, its question's row saying the answer), and a plan whose request
+// folds, O-12; UX wave U1b: an answer's notice folds too where its turn did other work, its question's row saying the
+// answer), and a plan whose request
 // waits (UX wave U1b: its form is in the row). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
@@ -966,7 +967,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P4-R7: a message tool's message needs no such flag: it is addressed to the human whatever the lane, as a span the
   // presenter draws with the lane off is (inked, so kept), and `isPersistentRow` keeps every one
   const allRows = groupItems(ordered, turn, ui).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
-  const workRows = allRows.filter((row) => !isPersistentRow(row));
+  // UX wave U1b (the architect's ruling of 2026-11-15 on M1's D-7): an answer's line that is the turn's only work is no
+  // work: it stays in view and the turn has no line (U2a's O-15), where with other work it folds with it (decision 9)
+  const folding = allRows.filter((row) => !isPersistentRow(row));
+  const answerAlone = folding.length > 0 && folding.every(isAnswerNotice);
+  const workRows = answerAlone ? [] : folding;
   const cells = collectCells(workRows);
   // The architect's ruling (2026-11-13, "A refused sent message and the turn's denied count"): a fold never hides a
   // denial. A refused send is drawn as its message row, no cell, and that row folds with its turn (O-12, `staysInView`),
@@ -1021,7 +1026,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     });
   }
-  rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
+  rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
@@ -1426,7 +1431,10 @@ export function artifactTitlesIn(state: TranscriptState | null, turn: TurnState)
 // UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
 // scheduled fire stay in view when their turn folds; a notice with no outcome and the wake's fold with it. UX wave U1b
 // (decision 9, U3a's hand-over): an answer's notice folds with the turn it reached the agent in, now that its question's
-// row carries the answer; it is still derived there, the head row a turn's `opener` is read from.
+// row carries the answer; it is still derived there, the head row a turn's `opener` is read from. As the turn's only
+// work it stays in view (deriveTurn, `answerAlone`).
+const isAnswerNotice = (row: Row): boolean => row.kind === 'notice' && row.class === 'answer';
+
 function isPersistentNotice(row: Row): boolean {
   return row.kind === 'notice' && (row.class === 'schedule' || (row.class === 'task' && row.outcome !== null));
 }
