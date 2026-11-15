@@ -640,10 +640,13 @@ describe('rowClaim: a user row the person did not write', () => {
   const ownByBridge = () => recorded('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`);
   const peerByBridge = () => JSON.parse(JSON.stringify(ownByBridge()).replace('from human id=5aa95008', 'from session:7ef6ac00 id=5aa95008')) as unknown;
 
-  it('names the path for the person’s typed prompt and for the person’s words sminos delivered', () => {
+  // Decision Log 22 (amending 8): the person's typed prompt names the path; the person's words sminos delivered come in a
+  // row of the plugin's origin, which is never the person's own text, whatever the reader reads off it: a read only.
+  it('names the path for the person’s typed prompt; the person’s words sminos delivered name it for a read only', () => {
     const typed = recorded('u3-sminos-r1-maws', 3, 'Without using any tool, reply with only the word READY.', `Open ${LINK}`);
     expect([classes(typed), classes(ownByBridge())]).toEqual([[], ['own']]);
-    for (const row of [typed, ownByBridge()]) expect(rowClaim(row, P), JSON.stringify(row)).toEqual({ names: true });
+    expect(rowClaim(typed, P)).toEqual({ names: true });
+    expect(rowClaim(ownByBridge(), P)).toEqual(OTHER);
   });
 
   // The inbox's deliveries are meta rows, which the window draws no bubble for: they name nothing, as on master
@@ -672,6 +675,57 @@ describe('rowClaim: a user row the person did not write', () => {
     const peer = JSON.parse(JSON.stringify(peerByBridge()).replace(`Open ${LINK}`, 'Nothing linked here.')) as unknown;
     expect(classes(peer)).toEqual(['peer']);
     expect(rowClaim(peer, P)).toEqual({ names: false, pending: [] });
+  });
+});
+
+// UX wave U6e, Decision Log 22 (amending 8): the person's own text fails closed. Only a row positively the person's
+// counts for a save: a `user` row, or a queued prompt, whose origin is the person's (`human`, what the pinned engine
+// writes on every typed prompt: the recorded rows of 2.1.322 under spikes/protocol-probe/fixtures/uxwave/ carry
+// `origin: { kind: 'human' }`, and the only non-meta rows of plain text with no origin there are a subagent's prompt in
+// its sidecar and a teammate's) and that the reader reads no other arrival off. Every other origin, a plugin's with
+// `asUser` or without, and a row with none, names the path for a read only on the idle row and nothing on the queued
+// one, as before.
+describe('rowClaim: only a row positively the person’s counts (Decision Log 22)', () => {
+  const OTHER = { names: false, pending: [], other: true };
+  const NOTHING = { names: false, pending: [] };
+  const words = `Open ${LINK}`;
+  // Every origin kind the schema, the engine (2.1.322's bundle) and the recorded fixtures know, and none at all
+  const origins: [string, object | undefined][] = [
+    ['the sminos plugin, as the user', { kind: 'plugin', name: 'sminos', asUser: true }],
+    ['the sminos plugin', { kind: 'plugin', name: 'sminos' }],
+    ['another plugin', { kind: 'plugin', name: 'notes' }],
+    ['a peer', { kind: 'peer' }],
+    ['a coordinator', { kind: 'coordinator' }],
+    ['a task notification', { kind: 'task-notification' }],
+    ['the SDK', { kind: 'sdk' }],
+    ['a channel', { kind: 'channel', server: 'news' }],
+    ['the composer', { kind: 'composer' }],
+    ['an auto-continuation', { kind: 'auto-continuation' }],
+    ['an observer’s activity', { kind: 'observer-activity' }],
+    ['an unclassified intent', { kind: 'unclassified' }],
+    ['a voice call', { kind: 'voice-call' }],
+    ['a remote call', { kind: 'remote' }],
+    ['a suggestion', { kind: 'suggestion' }],
+    ['a person’s focus (no prompt’s kind)', { kind: 'person' }],
+    ['no origin at all', undefined],
+  ];
+  const queuedOf = (origin: object | undefined) => {
+    const row = queuedPrompt(words) as { attachment: Record<string, unknown> };
+    const attachment = { ...row.attachment };
+    if (origin === undefined) delete attachment.origin;
+    else attachment.origin = origin;
+    return { ...row, attachment };
+  };
+
+  it('names the path for the person’s typed prompt and queued message (origin human)', () => {
+    expect(rowClaim(user(words, { origin: { kind: 'human' } }), P)).toEqual({ names: true });
+    expect(rowClaim(queuedOf({ kind: 'human' }), P)).toEqual({ names: true });
+  });
+
+  it.each(origins)('a user row of %s names it for a read only; queued, it names nothing', (_, origin) => {
+    const row = user(words, origin === undefined ? {} : { origin });
+    expect(rowClaim(row, P)).toEqual(OTHER);
+    expect(rowClaim(queuedOf(origin), P)).toEqual(NOTHING);
   });
 });
 

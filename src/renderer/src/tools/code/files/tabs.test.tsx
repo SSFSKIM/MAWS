@@ -6,6 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { storedMain, type PanelTabRef, type Strip } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
@@ -624,6 +625,64 @@ describe('an open the agent asked for (U6e)', () => {
     await settle();
     expect(document.querySelector('[data-file-viewer]')).not.toBeNull(); // drawn again
     expect(readsOf(OUT)).toHaveLength(reads);
+  });
+
+  // The panel's finding 1 (decision 19): where the agent's show makes a view read fresh bytes (a tab with no entry, a
+  // restored one or one whose entry was evicted; a main tab it retargets to its own session), the read carries `agent`, so
+  // a grant alone admits nothing. Each asserts the request the daemon receives.
+  const MAIN_FILE = () => {
+    const tab = useLayout((s) => activeTab(s.main));
+    return tab?.kind === 'file' ? <FileViewer tab={tab} /> : null;
+  };
+  const agentsRead = (appSessionId: AppSessionId) => ({ appSessionId: bareOf(appSessionId), path: OUT, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, agent: true });
+
+  it('W9: the agent’s show of a restored main tab with no entry reads with agent', async () => {
+    resetPanelStores({ hydrated: false });
+    unregisterFiles = registerPanelTool(filesTool);
+    const strip = openTab(openTab(mainShowing(A), { kind: 'file', path: OUT, line: null, appSessionId: A, machine: TEST_MACHINE }), { kind: 'session', appSessionId: A });
+    const bridge = heldBridge(persisted({ 'main.tabs': storedMain(strip) }));
+    offs.push(connectPanelHost());
+    await hydrateHeld(bridge);
+    await settle();
+    granted.add(OUT);
+    main = mainFor({ [OUT]: 'chosen\n' }, { outside: { granted, named } });
+    render(<MAIN_FILE />);
+    expect(entry()).toBeUndefined();
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(OUT));
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(1));
+    expect(readsOf(OUT)[0]).toEqual(agentsRead(A));
+    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull()); // a grant alone admits nothing
+  });
+
+  it('W9: the agent’s show of a side tab whose entry was evicted reads with agent', async () => {
+    granted.add(OUT);
+    render(<TestHost />);
+    act(() => void openFile(A, OUT, null, { keep: true })); // the person's tab
+    const [tab] = filesOf(A);
+    await waitFor(() => expect(entry()?.status).toBe('ready'));
+    act(() => void openFile(A, '/r/a.ts')); // another tab in view
+    await settle();
+    // the cap's eviction: the tab stays, its entry goes
+    act(() => useViewer.setState((s) => ({ entries: new Map([...s.entries].filter(([key]) => key !== KEY(OUT))) })));
+    expect(entry()).toBeUndefined();
+    const reads = readsOf(OUT).length;
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    expect(inView(A)).toEqual([tab.id]);
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+    expect(readsOf(OUT).at(-1)).toEqual(agentsRead(A));
+  });
+
+  it('W9: the agent’s show that retargets a main tab to its own session reads with agent', async () => {
+    granted.add(OUT);
+    render(<MAIN_FILE />);
+    act(() => void openFile(A, OUT, null, { main: true })); // the person's main tab, under session A
+    await waitFor(() => expect(entry()?.status).toBe('ready'));
+    const reads = readsOf(OUT).length;
+    act(() => void openFile(B, OUT, null, { asked: 'agent' })); // session B's agent shows the same file
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ id: KEY(OUT), appSessionId: B });
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+    expect(readsOf(OUT).at(-1)).toEqual(agentsRead(B));
   });
 
   // Review finding 2 (b): the mark removed while the marked first read is out: that read lands nowhere, and the file is read

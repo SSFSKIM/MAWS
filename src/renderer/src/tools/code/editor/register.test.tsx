@@ -307,6 +307,76 @@ describe('editor registrations', () => {
     });
   });
 
+  // The panel's finding 3: a dirty tab in the merge view whose latest admission locks the file (a save's conflict read
+  // that answers only a tool's result, or the edits moved to a session whose transcript names the file only by one) keeps
+  // the ways out that write nothing: Reload takes theirs, and the close question's Don't save closes it, the bytes as they
+  // are. Save stays locked: none of the routes writes.
+  describe('a locked, dirty tab in the merge view keeps its ways out (U6e)', () => {
+    const OUT = '/elsewhere/notes.txt';
+    const OUT_ID = `file:${TEST_MACHINE}:${OUT}`;
+    const B = at('app-b' as AppSessionId);
+    const outsideEntry = () => useViewer.getState().entries.get(OUT_ID)!;
+    const outTab = (appSessionId: AppSessionId): Extract<TabRef, { kind: 'file' }> => ({ id: OUT_ID, kind: 'file', path: OUT, line: null, appSessionId, machine: TEST_MACHINE, pinned: false });
+
+    async function lockedInMerge(route: 'conflict read' | 'session move') {
+      const names = new Set(['app-a']); // the sessions whose transcript links the file by a counted form
+      const results = new Set<string>(); // … by a tool's result only
+      const disk = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], names: (session) => names.has(session), results: (session) => results.has(session) });
+      offs.push(connectCodeEvents());
+      openFile(A, OUT, null, { main: true });
+      const viewer = (appSessionId: AppSessionId) => (
+        <>
+          <FileViewer tab={outTab(appSessionId)} />
+          <EditorDialogs />
+        </>
+      );
+      const shown = render(viewer(A));
+      await waitFor(() => expect(view()?.state.facet(EditorView.editable)).toBe(true));
+      type('mine ');
+      await waitFor(() => expect(outsideEntry().dirty).toBe(true));
+      disk.files[OUT] = 'theirs\n'; // changed on disk: the save finds it
+      if (route === 'conflict read') {
+        const write = disk.hold('files.writeOutside');
+        const saving = useViewer.getState().save(OUT_ID);
+        await waitFor(() => expect(disk.callsOf('files.writeOutside')).toHaveLength(1));
+        names.delete('app-a'); // the conflict's read answers: named only by a tool's result
+        results.add('app-a');
+        write.release();
+        expect(await act(() => saving)).toBe('conflict');
+      } else {
+        expect(await act(() => useViewer.getState().save(OUT_ID))).toBe('conflict');
+        expect(outsideEntry()).toMatchObject({ locked: null, theirs: { view: 'merge' } });
+        results.add('app-b'); // the edits move to a session whose transcript names the file only by a tool's result
+        shown.rerender(viewer(B));
+      }
+      await waitFor(() => expect(outsideEntry()).toMatchObject({ dirty: true, locked: 'result', editable: false, theirs: { view: 'merge', text: 'theirs\n' } }));
+      await waitFor(() => expect(outsideEntry().pending).toBe(0));
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull(); // Save stays locked
+      expect(await act(() => useViewer.getState().save(OUT_ID))).toBe('noop');
+      return { disk, writes: () => disk.callsOf('files.writeOutside').length + disk.callsOf('files.write').length };
+    }
+
+    it.each(['conflict read', 'session move'] as const)('Reload takes theirs (%s), and nothing is written', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      await waitFor(() => expect(outsideEntry()).toMatchObject({ dirty: false, theirs: null, text: 'theirs\n' }));
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
+    });
+
+    it.each(['conflict read', 'session move'] as const)('the close question’s Don’t save closes it (%s), the bytes unchanged', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      const closing = requestCloseTab(OUT_ID);
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Don’t save' }));
+      await act(() => closing);
+      expect(allTabs(useLayout.getState().main).some((tab) => tab.id === OUT_ID)).toBe(false);
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
+    });
+  });
+
   describe('tab mark', () => {
     const strip = (tab: TabRef) => render(<Tab tab={tab} pane={0} domId={`tab-${tab.id}`} active stop onKeyDown={() => {}} />);
 
