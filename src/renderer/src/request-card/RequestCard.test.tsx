@@ -23,6 +23,7 @@ import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-sess
 import { remoteSessionState } from '../lane-b/test-support/remote-session';
 import { hostStatus, supervisorStatus } from '../test-support/host-status';
 import { resetShellStores } from '../test-support/shell-stores';
+import { layOutPrompts } from '../test-support/prompt-layout'; // UX wave U1b M4
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { currentSet } from '../stores/layout-model';
@@ -38,6 +39,7 @@ let fake: FakeClient;
 let outcome: 'delivered' | 'not_pending' | 'write_failed' = 'delivered';
 let sessionEvents: SessionEvent[] = []; // what `session.events` answers for APP (the transcript's IPC source)
 let disconnect: () => void;
+let layout: ReturnType<typeof layOutPrompts>; // UX wave U1b M4: the end's prompt in the window, for its guard
 
 beforeEach(() => {
   resetShellStores();
@@ -48,10 +50,12 @@ beforeEach(() => {
   fake = fakeClient({ 'session.answer': () => ({ outcome }), 'session.events': () => ({ events: sessionEvents, lastSeq: sessionEvents.length, complete: true }) });
   window.maws = fake.client as unknown as PreloadBridge;
   disconnect = connectKeys();
+  layout = layOutPrompts();
 });
 afterEach(() => {
   disconnect();
   cleanup();
+  layout.restore();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   delete (window as { maws?: PreloadBridge }).maws;
   vi.useRealTimers();
@@ -70,7 +74,8 @@ function Pane({ index = 0, children }: { index?: 0 | 1; children: ReactNode }) {
   );
 }
 
-// UX wave U1b (M3): the end row's open card, in a row that takes focus as a transcript's row does (the row owns its keys)
+// UX wave U1b (M3): the end row's open card, in a row that takes focus as a transcript's row does (the row owns its keys;
+// M4: a prompt's chords are the pane's, under its guard, as `EndRegion` draws it)
 function EndRow({ children }: { children: ReactNode }) {
   return (
     <div tabIndex={-1} data-end-row="">
@@ -86,7 +91,7 @@ function Card({ event, placement, item }: { event: SessionEvent; placement: Wher
   if (placement === 'end')
     return (
       <EndRow>
-        <RequestCard item={item} request={event} placement="inline" region="end" askInPlace paneIndex={0} />
+        <RequestCard item={item} request={event} placement="inline" region="end" keys="pane" askInPlace paneIndex={0} />
       </EndRow>
     );
   const card = <RequestCard item={item} request={event} placement={placement} paneIndex={0} />;
@@ -596,7 +601,7 @@ describe('request card placements and delivery states', () => {
     render(
       <Pane>
         <EndRow>
-          <RequestCard item={item} request={null} placement="inline" region="end" askInPlace paneIndex={0} />
+          <RequestCard item={item} request={null} placement="inline" region="end" keys="pane" askInPlace paneIndex={0} />
         </EndRow>
       </Pane>,
     );
