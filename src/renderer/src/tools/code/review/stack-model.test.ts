@@ -91,7 +91,7 @@ describe('the place', () => {
     const after = five([1250, 980, 400, 400, 400]);
     const rows = (i: number) => (i === 2 ? rowsOfThird(26) : null);
     const restored = topOfPlace(after, place, rows);
-    expect(restored).toEqual({ top: after.bodyTops[2] + 5 * 26 + 7, exact: true });
+    expect(restored).toEqual({ top: after.bodyTops[2] + 5 * 26 + 7, exact: true, edge: true });
     expect(placeAt(after, restored!.top, rows)).toEqual(place);
   });
 
@@ -99,14 +99,14 @@ describe('the place', () => {
     const layout = five([400, 400, 400, 400, 400]);
     const place = { path: 'src/f2.ts', row: { block: 0, side: 'new' as const, line: 45 }, offset: 7 };
     const without45 = (i: number) => (i === 2 ? rowsOfThird().filter((row) => row.line !== 45) : null);
-    expect(topOfPlace(layout, place, without45)).toEqual({ top: layout.tops[2], exact: true });
+    expect(topOfPlace(layout, place, without45)).toEqual({ top: layout.tops[2], exact: true, edge: false });
   });
 
   it('is scrolled to by its section until the section draws, and then exactly', () => {
     const layout = five([400, 400, null, 400, 400]);
     const place = { path: 'src/f2.ts', row: { block: 0, side: 'new' as const, line: 45 }, offset: 7 };
-    expect(topOfPlace(layout, place, noRows)).toEqual({ top: layout.tops[2], exact: false });
-    expect(topOfPlace(layout, place, (i) => (i === 2 ? rowsOfThird() : null))).toEqual({ top: layout.bodyTops[2] + 5 * 20 + 7, exact: true });
+    expect(topOfPlace(layout, place, noRows)).toEqual({ top: layout.tops[2], exact: false, edge: false });
+    expect(topOfPlace(layout, place, (i) => (i === 2 ? rowsOfThird() : null))).toEqual({ top: layout.bodyTops[2] + 5 * 20 + 7, exact: true, edge: true });
   });
 
   it('is an offset from the section’s top where no row is drawn there: a folded or undrawn section, or its header', () => {
@@ -114,9 +114,9 @@ describe('the place', () => {
     expect(placeAt(layout, layout.tops[1] + 12, noRows)).toEqual({ path: 'b.ts', row: null, offset: 12 });
     expect(placeAt(layout, layout.bodyTops[2] + 150, noRows)).toEqual({ path: 'c.ts', row: null, offset: HEADER + 150 });
     expect(placeAt(layout, layout.tops[2] + 10, () => rowsOfThird())).toEqual({ path: 'c.ts', row: null, offset: 10 }); // in the header
-    expect(topOfPlace(layout, { path: 'b.ts', row: null, offset: 12 }, noRows)).toEqual({ top: layout.tops[1] + 12, exact: true });
+    expect(topOfPlace(layout, { path: 'b.ts', row: null, offset: 12 }, noRows)).toEqual({ top: layout.tops[1] + 12, exact: true, edge: true });
     // a row place in a section folded since is reached at the section's top: its body will not draw
-    expect(topOfPlace(layout, { path: 'b.ts', row: { block: 0, side: 'old', line: 3 }, offset: 4 }, noRows)).toEqual({ top: layout.tops[1], exact: true });
+    expect(topOfPlace(layout, { path: 'b.ts', row: { block: 0, side: 'old', line: 3 }, offset: 4 }, noRows)).toEqual({ top: layout.tops[1], exact: true, edge: false });
   });
 
   it('keeps the edit block a row is in: the same side and line in two blocks of Last turn come back in the later one', () => {
@@ -126,7 +126,7 @@ describe('the place', () => {
     const rowsOf = () => rows;
     const place = placeAt(layout, layout.bodyTops[0] + 220 + 4 * 20 + 6, rowsOf)!;
     expect(place).toEqual({ path: '/p/a.ts', row: { block: 1, side: 'new', line: 5 }, offset: 6 });
-    expect(topOfPlace(layout, place, rowsOf)).toEqual({ top: layout.bodyTops[0] + 220 + 4 * 20 + 6, exact: true });
+    expect(topOfPlace(layout, place, rowsOf)).toEqual({ top: layout.bodyTops[0] + 220 + 4 * 20 + 6, exact: true, edge: true });
     // a hunk's reveal targets its own block's row
     expect(hunkPlace({ path: '/p/a.ts', index: 2, block: 1, anchor: { side: 'new', line: 5 } })).toEqual({ path: '/p/a.ts', row: { block: 1, side: 'new', line: 5 }, offset: 0 });
     expect(topOfPlace(layout, hunkPlace({ path: '/p/a.ts', index: 2, block: 1, anchor: { side: 'new', line: 5 } }), rowsOf)!.top).toBe(layout.bodyTops[0] + 220 + 4 * 20);

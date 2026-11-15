@@ -127,12 +127,17 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     });
     placed.attach(el, ui.getState().places.get(key) ?? null);
     placer.current = placed;
+    const release = () => placed.release();
+    window.addEventListener('pointerup', release);
+    window.addEventListener('pointercancel', release);
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => placed.relayout());
       ro.observe(el);
       observer.current = { ro, watched: new Set([el]) };
     }
     return () => {
+      window.removeEventListener('pointerup', release);
+      window.removeEventListener('pointercancel', release);
       observer.current?.ro.disconnect();
       observer.current = null;
       placer.current = null;
@@ -150,6 +155,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     placed.update({ sections: sections.map((section) => ({ path: section.file.path, folded: section.folded, lines: section.lines })), order, current });
     placed.drawn(band);
     const seen = handled.current;
+    if (reveal === null) seen.reveal = null; // the request handled was cleared: the next one, even for the same file, is new
     if (reveal !== null && (seen.reveal?.path !== reveal.path || seen.reveal.n !== reveal.n)) {
       seen.reveal = reveal;
       if (sections.find((section) => section.file.path === reveal.path)?.folded) ui.setState((s) => setFold(s, key, reveal.path, 'open'));
@@ -186,10 +192,11 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
       ref={scroller}
       data-review-stack
       onScroll={() => placer.current?.scrolled()}
-      onWheel={() => placer.current?.cancel()}
-      onTouchStart={() => placer.current?.cancel()}
-      onKeyDown={() => placer.current?.cancel()}
-      onPointerDown={() => placer.current?.cancel()}
+      onWheel={() => placer.current?.interact()}
+      onTouchStart={() => placer.current?.interact()}
+      onTouchMove={() => placer.current?.interact()}
+      onKeyDown={() => placer.current?.interact()}
+      onPointerDown={() => placer.current?.press()}
       className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
       style={NO_SCROLL_ANCHORING}
     >

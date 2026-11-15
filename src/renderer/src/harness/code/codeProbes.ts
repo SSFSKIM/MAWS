@@ -182,11 +182,13 @@ function review(surface?: ReviewSurface): CodeHarnessReview | null {
   };
 }
 
-// A reader brings a file into view by scrolling its section to the top of the stack.
+// A reader brings a file into view by scrolling its section to the top of the stack: a wheel, then the scroll, so the
+// stack reads it as the person's (a scroll with no input before it is a layout change to the stack).
 function bringIntoView(root: HTMLElement, path: string): HTMLElement {
   const scroller = stackOf(root);
   const section = sectionOf(root, path);
   if (!scroller || !section) throw new Error(`harness.code: no section for ${path}`);
+  scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
   scroller.scrollTop = offsetIn(scroller, section);
   return section;
 }

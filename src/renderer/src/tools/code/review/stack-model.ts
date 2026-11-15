@@ -116,25 +116,26 @@ export function placeAt(layout: StackLayout, scrollTop: number, rowsOf: RowsOf):
   return { path, row: { block: row.block, side: row.side, line: row.line }, offset: inBody - row.top };
 }
 
-// The scroller's top that puts a place at the top edge again, under whatever heights the layout now has. `exact` is
-// false while the place's row cannot be found yet because its body is not drawn: the stack then stands at the
-// section's top and applies the place again once the body draws (a reveal not reached yet). A row gone from a drawn
-// body, or a section folded since, falls back to the section's top. The offset into the row is bounded by the row's
-// current height, so a row that shrank (a zoom out, a wider wrapped diff) keeps the place in it. Null when the stack
-// no longer lists the file.
-export function topOfPlace(layout: StackLayout, place: StackPlace, rowsOf: RowsOf): { top: number; exact: boolean } | null {
+// Where a place stands again under whatever heights the layout now has. `edge` tells what `top` is: where the reading
+// edge goes (a row's top and the offset into it, or an offset into the section), or else the section's top, a fallback
+// that stands at the scroller's top. `exact` is false while the place's row cannot be found yet because its body is not
+// drawn: the stack then stands at the section's top and applies the place again once the body draws (a reveal not
+// reached yet). A row gone from a drawn body (a failed read draws none), or a section folded since, falls back to the
+// section's top. The offset into the row is bounded by the row's current height, so a row that shrank (a zoom out, a
+// wider wrapped diff) keeps the place in it. Null when the stack no longer lists the file.
+export function topOfPlace(layout: StackLayout, place: StackPlace, rowsOf: RowsOf): { top: number; exact: boolean; edge: boolean } | null {
   const index = layout.paths.indexOf(place.path);
   if (index === -1) return null;
   const top = layout.tops[index];
   const body = layout.bodies[index];
-  if (place.row === null) return { top: top + Math.min(place.offset, layout.bodyTops[index] - top + (body ?? 0)), exact: true };
-  if (body === null) return { top, exact: true };
+  if (place.row === null) return { top: top + Math.min(place.offset, layout.bodyTops[index] - top + (body ?? 0)), exact: true, edge: true };
+  if (body === null) return { top, exact: true, edge: false };
   const rows = rowsOf(index);
-  if (rows === null) return { top, exact: false };
+  if (rows === null) return { top, exact: false, edge: false };
   const { block, side, line } = place.row;
   const row = rows.find((candidate) => candidate.block === block && candidate.side === side && candidate.line === line);
-  if (!row) return { top, exact: true };
-  return { top: layout.bodyTops[index] + row.top + Math.min(place.offset, Math.max(0, row.height - 1)), exact: true };
+  if (!row) return { top, exact: true, edge: false };
+  return { top: layout.bodyTops[index] + row.top + Math.min(place.offset, Math.max(0, row.height - 1)), exact: true, edge: true };
 }
 
 // ---- folding -----------------------------------------------------------------------------------------------------------

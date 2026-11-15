@@ -4,7 +4,12 @@
 // scroller stands. The place has two parts and no third: the live place, always kept, read after every scroll the person
 // makes and applied again at every layout change; and at most one outstanding reveal (the saved place after a mount, a
 // requested file's top, a hunk jump's row), applied instead of the live place until it is reached or the person's input
-// cancels it. Positions are the model's (`stack-model.ts`) over the measures of the page (`stack-dom.ts`), so the band
+// cancels it. The live place changes in three ways only: the person's scroll, read where it lands; a reveal cancelled by
+// the person's input, read where the reveal left the scroller; a reveal reached, the place it reached. A reveal still
+// out never moves it, so the place saved at an unmount is the one in force (a saved place restored at a mount is the
+// live place from the start). A scroll event is the person's only during their gesture (a wheel, touch, key or pointer
+// press in the scroller, and a moment after); any other the stack did not make is a layout change (the browser's clamp
+// of a page that shrank under it). Positions are the model's (`stack-model.ts`) over the measures of the page (`stack-dom.ts`), so the band
 // and the place read the same offsets. No React here.
 //
 // The reading edge is the scroller's top under the sticky header: what the person reads is the row just below the
@@ -59,6 +64,11 @@ const sameMap = (a: ReadonlyMap<string, number>, b: ReadonlyMap<string, number>)
 const sameBand = (a: Band, b: Band) => sameSet(a.drawn, b.drawn) && sameSet(a.near, b.near) && sameMap(a.spacers, b.spacers);
 const atEnd = (el: HTMLElement) => el.scrollTop >= el.scrollHeight - el.clientHeight - 1;
 
+// How long after the person's last input a scroll event is still theirs: the browser's animation of a key's or a
+// wheel's scroll, or the scroll that follows a pointer released over the scroll bar. Momentum on a trackpad keeps sending
+// wheel events, and a pointer held down keeps the gesture until it is released.
+export const GESTURE_MS = 500;
+
 export class StackPlacer {
   private scroller: HTMLElement | null = null;
   private input: PlacerInput = { sections: [], order: [], current: 0 };
@@ -71,16 +81,20 @@ export class StackPlacer {
   // measures when it is applied.
   private reveal: { place: StackPlace; top?: true } | null = null;
   private own: number | null = null; // the offset the stack last put its scroller at: a scroll event there is its own
+  private gesture = -Infinity; // when the person's last input in the scroller came
+  private pressed = false; // a pointer held down in the scroller (a drag of its scroll bar)
+  private recount = false; // the counter was last read where a file's rows were not drawn yet
 
   constructor(private readonly host: PlacerHost) {}
 
-  // Mounted: a saved place for this key is the first reveal.
+  // Mounted: a saved place for this key is the live place and the first reveal.
   attach(scroller: HTMLElement, saved: StackPlace | null): void {
     this.scroller = scroller;
-    this.reveal = saved ? { place: saved } : null;
+    this.live = saved;
+    this.begin(saved ? { place: saved } : null);
   }
 
-  // Unmounted: the place then in force (a reveal reached became the live place).
+  // Unmounted: the place then in force (a reveal reached became the live place; one still out never moved it).
   detach(): StackPlace | null {
     this.scroller = null;
     return this.live;
@@ -97,29 +111,52 @@ export class StackPlacer {
 
   // A request that named a file: that section's top at the scroller's top.
   revealSection(path: string): void {
-    this.reveal = { place: { path, row: null, offset: 0 }, top: true };
+    this.begin({ place: { path, row: null, offset: 0 }, top: true });
     this.relayout();
   }
 
   // ↑ or ↓: the hunk's first row at the reading edge.
   revealHunk(hunk: StackHunk): void {
-    this.reveal = { place: hunkPlace(hunk) };
+    this.begin({ place: hunkPlace(hunk) });
     this.relayout();
   }
 
-  // The person's wheel, touch, key or pointer inside the scroller: an outstanding reveal ends; the live place stands
-  // until the scroll that follows.
-  cancel(): void {
+  // The person's wheel, touch, key or pointer press inside the scroller: their gesture begins, and an outstanding reveal
+  // ends where it left the scroller, which becomes the live place (so its file's late answer moves nothing).
+  interact(): void {
+    this.gesture = performance.now();
+    if (!this.reveal) return;
     this.reveal = null;
+    const m = this.measure();
+    if (!m?.laidOut) return;
+    this.live = placeAt(m.layout, m.el.scrollTop + m.sticky, m.rows);
+    if (this.live) this.host.saved(this.live);
   }
 
-  // A scroll event: the stack's own is ignored; the person's is read as the live place, and moves the counter.
+  press(): void {
+    this.pressed = true;
+    this.interact();
+  }
+
+  // A pointer released anywhere: a drag of the scroll bar ends, its last scroll still the person's.
+  release(): void {
+    if (!this.pressed) return;
+    this.pressed = false;
+    this.gesture = performance.now();
+  }
+
+  // A scroll event: the stack's own is ignored; the person's is read as the live place, and moves the counter; any other
+  // is a layout change.
   scrolled(): void {
     const el = this.scroller;
     if (!el) return;
     if (this.own !== null && Math.abs(el.scrollTop - this.own) < 1) return;
     this.own = null;
-    this.reveal = null; // a scroll the stack did not make is the person's, with or without an input event before it
+    if (!this.pressed && performance.now() - this.gesture > GESTURE_MS) {
+      this.relayout();
+      return;
+    }
+    this.reveal = null;
     const m = this.measure();
     if (!m) return;
     this.live = placeAt(m.layout, el.scrollTop + m.sticky, m.rows);
@@ -141,15 +178,16 @@ export class StackPlacer {
     const at = reveal ? topOfPlace(layout, reveal.place, rows) : null;
     if (reveal && at === null) this.reveal = null; // its file left the stack: the live place stands
     if (reveal && at !== null) {
-      // A section folded is not reached yet: the jump that unfolds it draws it next.
+      // A section folded is not reached yet: the jump that unfolds it draws it next. A section's top (a request, or a
+      // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top.
       const exact = at.exact && !this.input.sections.find((section) => section.path === reveal.place.path)?.folded;
-      const want = Math.max(0, reveal.top || !exact ? at.top : at.top - sticky);
+      const want = Math.max(0, reveal.top || !at.edge ? at.top : at.top - sticky);
       this.write(el, want);
-      this.live = placeAt(layout, el.scrollTop + sticky, rows);
       const band = this.bandFor(m, el.scrollTop);
       const lags = this.pending || !sameBand(band, this.band);
       if (exact && !lags && (Math.abs(el.scrollTop - want) < 1 || (want > el.scrollTop && atEnd(el)))) {
         this.reveal = null; // reached: the place reached is the live place
+        this.live = placeAt(layout, el.scrollTop + sticky, rows);
         if (this.live) this.host.saved(this.live);
       }
       this.setBand(band);
@@ -158,15 +196,23 @@ export class StackPlacer {
     if (this.live === null) this.live = placeAt(layout, el.scrollTop + sticky, rows);
     else {
       const target = topOfPlace(layout, this.live, rows);
-      if (target !== null) this.write(el, Math.max(0, target.top - sticky));
+      if (target !== null) this.write(el, Math.max(0, target.edge ? target.top - sticky : target.top));
       // A place read where its file was not drawn yet names no row; once the file draws, the row at the same spot is
       // read, so the place survives what moves inside the file from then on.
       if (target !== null && this.live.row === null && !this.pending && this.drawsRows(layout, this.live.path, rows)) {
         this.live = placeAt(layout, el.scrollTop + sticky, rows);
         if (this.live) this.host.saved(this.live);
       }
+      if (this.recount && !this.pending) this.count(m);
     }
     this.setBand(this.bandFor(m, el.scrollTop));
+  }
+
+  // A reveal begins: the person's gesture before it is over, and the counter is the jump's.
+  private begin(reveal: { place: StackPlace; top?: true } | null): void {
+    this.reveal = reveal;
+    this.gesture = -Infinity;
+    this.recount = false;
   }
 
   // ---- the page --------------------------------------------------------------------------------------------------------
@@ -250,14 +296,26 @@ export class StackPlacer {
   }
 
   // The hunk at the reading edge (the first before any has scrolled past); at the end of the scroller a later hunk
-  // jumped to stands.
+  // jumped to stands. A hunk of a file whose rows are not drawn has no stop yet: the file above the edge is passed, the
+  // file below it not reached, and the file at the edge is counted again once its rows draw.
   private count({ el, layout, rows, sticky }: Measured): void {
     const { order, current } = this.input;
+    const edge = el.scrollTop + sticky + 4;
+    const indexOf = new Map(layout.paths.map((path, index) => [path, index]));
     let at = 0;
-    order.forEach((hunk, index) => {
+    let unsure = false;
+    order.forEach((hunk, n) => {
       const stop = topOfPlace(layout, hunkPlace(hunk), rows);
-      if (stop !== null && stop.top - sticky <= el.scrollTop + 4) at = index;
+      if (stop === null) return;
+      if (stop.exact) {
+        if (stop.top <= edge) at = n;
+        return;
+      }
+      const index = indexOf.get(hunk.path)!;
+      if (layout.bodyTops[index] + (layout.bodies[index] ?? 0) <= edge) at = n;
+      else if (layout.bodyTops[index] <= edge) unsure = true;
     });
+    this.recount = unsure;
     if (at < current && atEnd(el)) return;
     if (at !== current) this.host.counted(at);
   }
