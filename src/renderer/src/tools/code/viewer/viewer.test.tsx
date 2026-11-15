@@ -949,6 +949,8 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(shown()).toMatchObject({ named: true, locked: null, pin: REAL });
     expect(readOnlyReason(shown())).toBeNull();
     expect(label()).toBeNull();
+    expect(document.querySelector('[data-file-viewer] [data-read-only-chevron]')).toBeNull(); // the chevron is the label's alone
+    expect(lead().querySelector('svg')).toBeNull();
     expect(lead().textContent).toBe(OUT); // the bar shows the path as any file's
     expect(lead().getAttribute('data-outside')).toBe('writable');
     expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL}`);
@@ -1031,7 +1033,17 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(at.textContent).toBe('Read-only');
     expect(at.getAttribute('aria-description')).toBe(SENTENCES[reason]);
     expect(at.className.split(/\s+/)).toContain('text-fg');
+    // Decision Log 18: a small chevron after the words, inside the same button, muted and hidden from assistive
+    // technology, so the button's one accessible name stays "Read-only"
+    const chevron = at.querySelector('[data-read-only-chevron]');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('aria-hidden')).toBe('true');
+    expect(chevron!.className.split(/\s+/)).toContain('text-fg-muted');
+    expect(at.lastElementChild).toBe(chevron);
+    expect(screen.getByRole('button', { name: 'Read-only' })).toBe(at);
     const bar = at.parentElement!;
+    expect(bar.querySelectorAll('[data-read-only-chevron]')).toHaveLength(1);
+    expect(lead().querySelector('svg')).toBeNull();
     const order = [...bar.children];
     expect(order.indexOf(bar.querySelector('[data-start]')!)).toBe(order.indexOf(at) - 1);
     expect(order.indexOf(lead())).toBe(order.indexOf(at) + 1);
@@ -1049,6 +1061,11 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     const open = within(panel).queryByRole('button', { name: 'Open File…' });
     expect(open !== null).toBe(button);
     if (open) {
+      // Decision Log 18: under the sentence, at the left
+      const sentence = within(panel).getByText(SENTENCES[reason]);
+      expect(sentence.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(open.className.split(/\s+/)).toContain('self-start');
+      expect(open.className.split(/\s+/)).not.toContain('self-end');
       fireEvent.click(open);
       await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: MAIN_A }]));
     }
