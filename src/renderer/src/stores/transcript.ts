@@ -45,6 +45,9 @@ export interface TranscriptEntry {
   cronHistory?: readonly SessionEvent[];
 }
 
+// What a mounted view draws the key's rows as before the mirror runs over them (`mountView`).
+export type ComposeView = (entry: TranscriptEntry) => { rows: readonly Row[]; liveMarked: string };
+
 export interface MessageAnchor {
   messageUuid: MessageUuid;
   blockIndex: number;
@@ -108,6 +111,10 @@ export interface TranscriptStore {
   // outside the store hold a message, with `noTurnFold` recomputed in the same update; and a stretch of the to-human
   // view opened or closed again
   setToHumanView(key: string, view: { lane: boolean; tailMessage: boolean; modDraws?: boolean }): void;
+  // UX wave U2b (M1's fix wave): a mounted view of the key and the rows it composes from the key's before the mirror
+  // runs over them (its placed rows, browser activity and tail), with the live marks it reads, so a jump opens the
+  // stretch each mounted view draws its target in; the returned function releases it (the view unmounts)
+  mountView(key: string, compose: ComposeView): () => void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleStretch(key: string, stretch: string): void;
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
@@ -292,6 +299,7 @@ export function createTranscriptStore() {
   };
   let nonce = 0;
   const reaching = new Map<string, number>(); // each key's jump into history in progress, by its run
+  const views = new Map<string, Set<ComposeView>>(); // UX wave U2b: each key's mounted views (`mountView`)
   let reachRun = 0;
   return create<TranscriptStore>()((set, get, api) => {
     const entry = (key: string) => get().entries[key] as TranscriptEntry | undefined;
@@ -387,8 +395,8 @@ export function createTranscriptStore() {
       const touched = (turn: TurnId | null): TurnId[] => [...new Set([...(turn === null ? [] : [turn]), ...left])];
       // UX wave U2b (Interfaces §C): in the to-human view MAWS draws, a row inside a closed stretch is out of sight: the
       // jump opens the stretch that holds it
-      const closed = closedStretchHolding(current, id);
-      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && closed === null) {
+      const closed = closedStretchesHolding(key, current, id);
+      if (visible && (!visible.group || (visible.group.kind === 'group' && visible.group.expanded)) && closed.length === 0) {
         const ui = copyUi(current.state.ui, touched(visible.row.turnId));
         ui.revealed = id;
         put(key, { state: withUi(current.state, ui), jump: request(visible.row.id) });
@@ -398,17 +406,22 @@ export function createTranscriptStore() {
       if (!found) return;
       const ui = copyUi(current.state.ui, found.row.turnId === null ? 'all' : touched(found.row.turnId));
       ui.revealed = id; // UX wave U3
-      if (closed !== null) ui.openStretches!.add(closed); // UX wave U2b
+      for (const stretch of closed) ui.openStretches!.add(stretch); // UX wave U2b
       if (found.row.turnId !== null && !isExpanded(current.state, found.row.turnId)) expandTurn(ui, found.row.turnId);
       if (found.group) ui.expandedGroups.add(found.group.id);
       put(key, { state: withUi(current.state, ui), jump: request(found.row.id) });
     };
-    // The key of the closed stretch whose record holds the row or cell out of sight, while the view is the report, is in
-    // force and MAWS draws it; null otherwise.
-    const closedStretchHolding = (current: TranscriptEntry, id: RowId | CellId): string | null => {
-      if (!mirrorsView(current.state.ui)) return null;
-      const stretch = stretchHolding(current.rows, id, liveMarkedRowIds(current.state));
-      return stretch !== null && !(current.state.ui.openStretches?.has(stretch) ?? false) ? stretch : null;
+    // The keys of the closed stretches whose records hold the row or cell out of sight, while the view is the report, is
+    // in force and MAWS draws it; none otherwise. Read over the rows each mounted view composes, since what a view places
+    // among the key's rows (a standalone browser activity, which stays in sight) can split a stretch; over the key's own
+    // rows when no view is mounted. Mounted views that compose alike name one stretch.
+    const closedStretchesHolding = (key: string, current: TranscriptEntry, id: RowId | CellId): string[] => {
+      if (!mirrorsView(current.state.ui)) return [];
+      const mounted = views.get(key);
+      const drawn = mounted?.size ? [...mounted].map((compose) => compose(current)) : [{ rows: current.rows, liveMarked: liveMarkedRowIds(current.state) }];
+      const open = current.state.ui.openStretches;
+      const holding = drawn.map(({ rows, liveMarked }) => stretchHolding(rows, id, liveMarked));
+      return [...new Set(holding.filter((stretch): stretch is string => stretch !== null && !(open?.has(stretch) ?? false)))];
     };
     const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
     // A jump to a cell wherever its turn has it (`jumpTo`'s search); false when the key holds no such cell.
@@ -608,6 +621,15 @@ export function createTranscriptStore() {
         changeUi(key, () => [], (ui) => void (ui.view = view));
       },
       toggleStretch: (key, stretch) => changeUi(key, () => [], (ui) => toggle(ui.openStretches!, stretch)), // UX wave U2b
+      mountView(key, compose) {
+        let mounted = views.get(key);
+        if (!mounted) views.set(key, (mounted = new Set()));
+        mounted.add(compose);
+        return () => {
+          mounted.delete(compose);
+          if (mounted.size === 0 && views.get(key) === mounted) views.delete(key);
+        };
+      },
       attached: (key) => attachments.has(key),
 
       async reachMessage(key, target) {

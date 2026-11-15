@@ -4,7 +4,8 @@
 // rows the mount hands the transcript from outside the store (lane A's streamed reply here; the desk's in its own
 // `TranscriptPane.test.tsx`). Each route stages the same scene: the only mark is in the stream, an earlier turn is
 // closed, and opening that turn's record at once shows its work, so no pass drew rows a closed turn withheld; then the
-// stream resets, or an interrupt cuts the reply, and the turn fold is back. Every text is invented.
+// stream resets, or an interrupt cuts the reply, and the turn fold is back. Then a fold the reader started as the first
+// mark arrives, and two mounts of one key, each with its own part of the outside rows' term. Every text is invented.
 import type { SessionEvent } from '@shared/graph/events';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
