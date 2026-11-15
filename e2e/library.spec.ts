@@ -666,3 +666,42 @@ test('a replayed session’s transcript keeps its scroll offset across a page an
   expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
   expect(c.maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
+
+// UX wave U10b (A5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M1 and M3; l6-artifacts-18): an HTML
+// page's Export offers "Save a copy…", its stored page, in place of an `html` format, in the library row's menu and in
+// the viewer's header; each saves the stored bytes where the owner chooses (the e2e's folder, MAWS_E2E_SAVE_PATH).
+test('UX wave U10b (A5): an HTML page’s “Save a copy…” in its row’s Export and in its viewer’s Export saves the stored page byte for byte, and neither menu offers HTML', async () => {
+  test.setTimeout(120_000);
+  scratch = mkdtempSync(join(tmpdir(), 'maws-e2e-library-copy-'));
+  const saved = join(scratch, 'saved');
+  mkdirSync(saved);
+  launch = await launchMaws({ env: { MAWS_E2E_SAVE_PATH: saved } });
+  const { page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  const html = HEADING_PAGE('SAVED_COPY');
+  const { id } = await createHtml(page, 'Opening hours', html);
+  const file = join(saved, 'Opening hours.html');
+  const copied = () => (existsSync(file) ? readFileSync(file, 'utf8') : null);
+
+  // the row's Export: the formats with no HTML, then Save a copy…
+  await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+  const row = page.locator('[data-library]').getByRole('article', { name: 'Opening hours', exact: true });
+  await row.getByRole('button', { name: 'Actions for Opening hours' }).click();
+  await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'Save a copy…', exact: true })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: 'HTML', exact: true })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Save a copy…', exact: true }).click();
+  await expect.poll(copied, { timeout: 30_000, message: 'the row’s copy saved' }).toBe(html);
+  await expect(page.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${file}`)).toBeVisible();
+  rmSync(file);
+
+  // the viewer's Export in the page's main tab: the same entry, the same bytes
+  await row.click();
+  const tab = page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+  await expect(tab.frameLocator('[data-artifact-frame="html"]').locator('#version')).toHaveText('SAVED_COPY');
+  await page.locator('[data-region="main"] [data-editor-header]').getByRole('button', { name: 'Export', exact: true }).click();
+  await expect(page.getByRole('menuitem', { name: 'HTML', exact: true })).toHaveCount(0);
+  await page.getByRole('menuitem', { name: 'Save a copy…', exact: true }).click();
+  await expect.poll(copied, { timeout: 30_000, message: 'the viewer’s copy saved' }).toBe(html);
+  expect(launch.consoleErrors()).toEqual([]);
+});

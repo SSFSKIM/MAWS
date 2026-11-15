@@ -3,7 +3,7 @@
 // /tmp whose config home the engine and its plugin CLI write (support/plugins-live.ts). A session is created through
 // "+" on a scratch repository and runs one turn so `system/init` reports its plugins; then, in `/plugins` (P2-B's
 // library: My items and the Add menu's Add marketplace and Manage marketplaces), Discover (P4-AGG Decision Log 10:
-// `/plugins`' Open Discover, Customize › Plugins › Discover for the session's directory, where a plugin is found and +
+// `/plugins`' Open Discover, Customize › Discover with Show: Plugins for the session's directory, where a plugin is found and +
 // installs it through the same sheet) and the panel, every management
 // action runs through its confirm sheet: the scratch folder marketplace added, one repository-source
 // marketplace added from GitHub and removed (network-dependent: a refusal is recorded, the folder case stays the gate),
@@ -32,7 +32,8 @@ import { pluginsLiveSkipReason, pluginsScratch, trackPluginReads, type PluginRea
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { newChatIn } from './support/sidebar';
-import { backToTabs, pageRegion, unfoldSessionCard } from './support/shell';
+import { backToTabs, unfoldSessionCard } from './support/shell';
+import { customizePage } from './support/customize';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the E8 live run runs only under MAWS_E8_LIVE=1');
 const skip = process.env.MAWS_E8_LIVE === '1' ? pluginsLiveSkipReason() : null;
@@ -155,7 +156,8 @@ async function marketplaceAction(row: Locator, item: 'Check for updates' | 'Remo
   await row.page().getByRole('menuitem', { name: item, exact: true }).click();
 }
 async function toMyItems(w: Locator): Promise<void> {
-  const view = w.getByRole('radio', { name: 'My items' }); // Customize's switch; `/plugins` is My items alone (Decision Log 10)
+  // Customize's view switch, in its head (UX wave U11c; Show kept); `/plugins` is My items alone (Decision Log 10)
+  const view = w.locator('[data-customize-header]').getByRole('radiogroup', { name: 'Library', exact: true }).getByRole('radio', { name: 'My items', exact: true });
   if ((await view.count()) > 0) await view.click();
   await expect(w.locator('[data-plugins-section="my-items"]')).toBeVisible();
 }
@@ -180,10 +182,10 @@ async function backToList(w: Locator): Promise<void> {
 const opLineOf = (detail: Locator, scope = 'user') => detail.locator(`[data-plugin-op="${scope}"]`);
 const enableSwitch = (detail: Locator) => detail.getByRole('switch', { name: 'Enable plugin' });
 async function show(w: Locator, filter: 'All plugins' | 'Loaded in this session'): Promise<void> {
-  await w.getByRole('button', { name: 'Show' }).click();
+  await w.getByRole('button', { name: 'Filter' }).click(); // "Show" until UX wave U11c
   await w.page().getByRole('menuitemradio', { name: filter }).click();
 }
-// The ids (or, for a plugin the CLI does not list, the names) of what Show › "Loaded in this session" lists; the
+// The ids (or, for a plugin the CLI does not list, the names) of what Filter › "Loaded in this session" lists; the
 // filter is set back to All plugins after.
 async function loadedIds(w: Locator): Promise<string[]> {
   await backToList(w);
@@ -195,8 +197,9 @@ async function loadedIds(w: Locator): Promise<string[]> {
 }
 // P4-AGG Decision Log 10: Customize's library, Discover beside My items; a card's line is on its card, or at Discover's
 // head once the catalog no longer lists it (the marketplace withdrew it and nothing installed it). UX wave U7b (O-40):
-// Customize is a page beside the sidebar, not a main tab, so the library is found in the page's region.
-const discoverLibrary = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
+// Customize is a page beside the sidebar, not a main tab. UX wave U11c: Open Discover lands on Discover with Show: Plugins
+// in the page's head, and the page holds the head's tools and the pane (support/customize.ts).
+const discoverLibrary = (page: Page) => customizePage(page);
 const discoverLine = (page: Page, id: string) => {
   const [name, marketplace] = id.split('@');
   const d = discoverLibrary(page);

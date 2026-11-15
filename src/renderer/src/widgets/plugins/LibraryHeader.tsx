@@ -1,10 +1,10 @@
 // The plugin library's head controls (P2-B execution document §5.2, §5.4, §5.8; Claude Desktop's in-dialog header, title
 // and switch at the left and its actions at the right, readable/app-2.16120.0/web/app/v1/ccefd43d9-CoNZ8js5.js:18-57):
-// Customize's My items | Discover switch in `WidgetFrame`'s heading slot (the session's `/plugins` has Open Discover
-// there, P4-AGG Decision Log 10); in its toolbar slot, My items' search field ("Search plugins", at most 200 characters;
-// Escape clears it first, `/` focuses it), Show ("All plugins / Enabled / Disabled" and MAWS's "Loaded in this session"
-// and "Other projects") and Sort by ("Last updated", "Name"), and the Add menu. The choices live in the library store
-// for the app run.
+// the My items | Discover switch, which Customize's page head draws (UX wave U11c; the session's `/plugins` has Open
+// Discover in its place, P4-AGG Decision Log 10); My items' search field ("Search plugins", at most 200 characters;
+// Escape clears it first, `/` focuses it), Filter ("All plugins / Enabled / Disabled" and MAWS's "Loaded in this session"
+// and "Other projects"; UX wave U11c: "Filter", since "Show" names Customize's row of kinds) and Sort by ("Last updated",
+// "Name"), and the Add menu. The choices live in the library store for the app run; Customize's search is its page's.
 import { DropdownMenu, ToggleGroup } from 'radix-ui';
 import type { ReactNode } from 'react';
 import { IconButton, SearchIcon, SortIcon } from '../../app/IconButton';
@@ -20,6 +20,7 @@ const SORTS: readonly LibrarySort[] = ['updated', 'name'];
 const MENU = 'z-50 min-w-48 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg shadow-float';
 const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline-none select-none data-highlighted:bg-bg-hover';
 const LABEL = 'px-2 py-1 text-ui-sm text-fg-muted';
+const NARROW = '@max-sm/customize:w-full'; // inside Customize's page only (its container)
 const set = (patch: Partial<ReturnType<typeof useLibraryStore.getState>['plugins']>) => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, ...patch } }));
 
 // Desktop's segmented switch beside the title: My items and, second, Discover (P4-AGG M3), named by the caller.
@@ -44,10 +45,11 @@ export function LibrarySwitch({ tab, onChange, second }: { tab: LibraryTab; onCh
   );
 }
 
-// The libraries' search field (`/plugins`' two views and `/skills`): Escape clears it first, `/` focuses it.
-export function SearchField({ label = L.searchPlugins, value, onChange }: { label?: string; value: string; onChange(value: string): void }) {
+// The libraries' search field (`/plugins`' two views and `/skills`): Escape clears it first, `/` focuses it. `className`:
+// Customize's head widens it under its narrow breakpoint (UX wave U11c).
+export function SearchField({ label = L.searchPlugins, value, onChange, className = '' }: { label?: string; value: string; onChange(value: string): void; className?: string }) {
   return (
-    <label className="flex h-7 w-56 min-w-0 items-center gap-1.5 rounded-md border border-border bg-bg px-2 text-fg-muted focus-within:border-border-strong focus-within:text-fg">
+    <label className={`flex h-7 w-56 min-w-0 items-center gap-1.5 rounded-md border border-border bg-bg px-2 text-fg-muted focus-within:border-border-strong focus-within:text-fg ${className}`}>
       <SearchIcon className="size-3.5" />
       <input
         type="search"
@@ -116,15 +118,25 @@ export function Choice<T extends string>({ label, icon, value, values, words, is
   );
 }
 
-export function PluginsToolbar({ add }: { add: ReactNode }) {
-  const { search, filter, sort } = useLibraryStore((s) => s.plugins);
+export function PluginsToolbar({ add, search: page }: { add: ReactNode; search?: { value: string; onChange(value: string): void } }) {
+  const search = useLibraryStore((s) => s.plugins.search);
   return (
-    <span className="flex min-w-0 items-center gap-1">
-      <SearchField value={search} onChange={(next) => set({ search: next })} />
-      <Choice label={L.show} icon={<FilterIcon />} value={filter} values={FILTERS} words={L.filter} isDefault={filter === 'all'} onChange={(next) => set({ filter: next })} />
-      <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={L.sort} isDefault={sort === 'updated'} onChange={(next) => set({ sort: next })} />
+    <span className="flex min-w-0 items-center gap-1 @max-sm/customize:w-full @max-sm/customize:flex-wrap">
+      <SearchField value={page ? page.value : search} onChange={page ? page.onChange : (next) => set({ search: next })} className={NARROW} />
+      <PluginsChoices />
       {add}
     </span>
+  );
+}
+
+// The plugin list's Filter and Sort by, the library store's (UX wave U11c: Customize's head draws them among its own tools).
+export function PluginsChoices() {
+  const { filter, sort } = useLibraryStore((s) => s.plugins);
+  return (
+    <>
+      <Choice label={L.show} icon={<FilterIcon />} value={filter} values={FILTERS} words={L.filter} isDefault={filter === 'all'} onChange={(next) => set({ filter: next })} />
+      <Choice label={L.sortBy} icon={<SortIcon />} value={sort} values={SORTS} words={L.sort} isDefault={sort === 'updated'} onChange={(next) => set({ sort: next })} />
+    </>
   );
 }
 

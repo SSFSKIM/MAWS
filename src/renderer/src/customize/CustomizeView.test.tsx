@@ -16,8 +16,9 @@ import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
-import { CustomizeView } from './CustomizeView';
 import { useCustomizeProject } from './open';
+import { useCustomizePage } from './page';
+import { mountCustomize } from '../test-support/customize-page';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
 import userEvent from '@testing-library/user-event';
 import { SkillsWidget } from '../widgets/SkillsWidget';
@@ -59,9 +60,13 @@ afterEach(() => {
   useMachines.setState({ loaded: new Set() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useCustomizeProject.setState({ projectId: undefined });
+  useCustomizePage.setState({ search: '' });
   delete (window as { maws?: PreloadBridge }).maws;
 });
-const mount = (section: 'plugins' | 'skills' | 'mcp') => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section={section} /></QueryClientProvider>);
+// UX wave U11c: a kind is the page's Show value, in My items
+const SHOW = { plugins: 'plugins', skills: 'skills', mcp: 'connectors' } as const;
+const mount = (section: 'plugins' | 'skills' | 'mcp') => mountCustomize({ view: 'mine', show: SHOW[section] });
+const pageHead = () => document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
 
 it('keeps the plugin session picker with its library controls and reloads the selected session without resetting disk choices', async () => {
   const first = { ...pageStatus('live-a'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
@@ -77,16 +82,16 @@ it('keeps the plugin session picker with its library controls and reloads the se
   backend.script('session.reloadSkills', () => ({ opId: 'chrome-skills' }));
   mount('plugins');
 
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).getByRole('tablist', { name: 'Customize sections' })).toBeTruthy();
-  expect(within(pageHead).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  // UX wave U11c: the head holds the view switch, Showing and, in My items, the live session; Show and the tools under them
+  const head = pageHead();
+  expect(within(head).getByRole('radiogroup', { name: 'Show' })).toBeTruthy();
+  expect(within(head).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
   expect(screen.queryByRole('heading', { name: 'Plugins' })).toBeNull();
-  const picker = screen.getByRole('combobox', { name: 'Live session' });
-  const libraryHead = picker.closest('header')!;
+  const picker = within(head).getByRole('combobox', { name: 'Live session' });
+  const libraryHead = head;
   expect(within(libraryHead).getByRole('radio', { name: 'My items' })).toBeTruthy();
   expect(within(libraryHead).getByRole('searchbox', { name: 'Search plugins' })).toBeTruthy();
-  for (const name of ['Show', 'Sort by', 'Add']) expect(within(libraryHead).getByRole('button', { name })).toBeTruthy();
+  for (const name of ['Filter', 'Sort by', 'Add']) expect(within(libraryHead).getByRole('button', { name })).toBeTruthy();
   expect(screen.getByText('Loaded now')).toBeTruthy();
 
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'notes' } });
@@ -107,7 +112,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   fireEvent.click(within(libraryHead).getByRole('radio', { name: 'Discover' }));
   await waitFor(() => expect(backend.calls.filter((call) => call.command === 'catalog.home').map((call) => call.input)).toEqual([{ tab: 'plugins', cwd: '/one' }]));
   expect(backend.calls.filter((call) => call.command === 'plugins.available')).toEqual([]);
-  expect(within(libraryHead).getByRole('combobox', { name: 'Live session' })).toBe(picker);
+  expect(within(libraryHead).queryByRole('combobox', { name: 'Live session' })).toBeNull(); // in My items only (ruled point 7)
   expect(within(libraryHead).getByRole('searchbox', { name: 'Search all sources' })).toBeTruthy();
   expect(within(libraryHead).getByRole('button', { name: 'Sources' })).toBeTruthy();
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
@@ -118,11 +123,8 @@ it('keeps the Skills scopes visible through search and detail without treating t
   useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
   mount('skills');
   await screen.findByRole('button', { name: 'View review' });
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
-  const picker = screen.getByRole('combobox', { name: 'Live session' });
-  const toolbar = picker.closest('[data-customize-toolbar]') as HTMLElement;
-  expect(within(toolbar).getByRole('searchbox', { name: 'Search skills' })).toBeTruthy();
+  const picker = within(pageHead()).getByRole('combobox', { name: 'Live session' }); // UX wave U11c: the head's, in My items
+  expect(within(pageHead()).getByRole('searchbox', { name: 'Search skills' })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: 'absent' } });
   expect(screen.queryByRole('button', { name: 'View review' })).toBeNull();
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: '' } });
@@ -144,9 +146,8 @@ it('keeps the MCP session picker beside live connectors and switches only the li
   mount('mcp');
   const live = await screen.findByRole('region', { name: 'Live connectors' });
   await within(live).findByText(bareOf(first.appSessionId));
-  const picker = within(live).getByRole('combobox', { name: 'Live session' });
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  const picker = within(pageHead()).getByRole('combobox', { name: 'Live session' }); // UX wave U11c: the head's, in My items
+  expect(within(live).queryByRole('combobox', { name: 'Live session' })).toBeNull();
   const inventoryReads = backend.calls.filter((call) => call.command === 'customization.inventory').length;
   picker.focus();
   fireEvent.change(picker, { target: { value: second.appSessionId } });
@@ -169,22 +170,24 @@ it('reads the focused project without a session and switches the disk inventory 
   expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
 });
 
-it('keeps the visited plugin library mounted when another Customize section is selected', async () => {
+// UX wave U11c: the view is the page's, so Discover chosen with one kind is Discover with every kind
+it('keeps Discover when another kind is chosen, and My items when it is chosen again', async () => {
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
-  backend.script('plugins.available', () => ({ plugins: [] }));
   backend.script('mods.list', () => []);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = (section: 'plugins' | 'skills') => <QueryClientProvider client={client}><CustomizeView section={section} /></QueryClientProvider>;
-  const mounted = render(view('plugins'));
-  const browse = await screen.findByRole('radio', { name: 'Discover' });
+  backend.script('catalog.home', () => ({ featured: null, shelves: [], categories: [], total: 0 }));
+  backend.script('catalog.query', () => ({ items: [], nextCursor: null, total: 0, restarted: false }));
+  backend.script('catalog.sources', () => []);
+  mount('plugins');
+  const browse = within(pageHead()).getByRole('radio', { name: 'Discover' });
   fireEvent.click(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
-  mounted.rerender(view('skills'));
-  await screen.findByRole('button', { name: 'View review' });
-  mounted.rerender(view('plugins'));
-  expect(within(screen.getByRole('tabpanel', { name: 'Plugins' })).getByRole('radio', { name: 'Discover' })).toBe(browse); // P4-AGG M3: Skills, once visited, stays mounted too
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Skills' }));
+  await waitFor(() => expect(document.querySelector('[data-discover="skills"]')).not.toBeNull());
+  expect(within(pageHead()).getByRole('radio', { name: 'Discover' })).toBe(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'My items' }));
+  await screen.findByRole('button', { name: 'View review' });
 });
 
 it('keeps disk skill names as display metadata without inventing user or plugin invocations', async () => {
@@ -198,15 +201,14 @@ it('keeps disk skill names as display metadata without inventing user or plugin 
     const label = open.closest('li')!.querySelector('[data-skill-name]')!;
     expect(label.textContent).toBe(name);
     expect(label.getAttribute('title')).toBeNull();
-    const tile = open.closest('li')!.querySelector('span[aria-hidden]')!;
-    expect(tile.textContent?.trim()).not.toBe('/');
-    expect(tile.querySelector('svg')).not.toBeNull();
+    // UX wave U11c M1: a skill's image is its letter tile, whether or not it is invocable (the "/" tile went)
+    const tile = open.closest('li')!.querySelector('[data-item-image]')!;
+    expect([tile.getAttribute('data-item-image'), tile.getAttribute('data-item-kind'), tile.textContent]).toEqual(['tile', 'skill', name.startsWith('Plugin') ? 'P' : 'Q']);
     fireEvent.click(open);
     const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
     expect(within(detail).getByRole('heading', { name })).toBeTruthy();
-    const detailTile = detail.querySelector('span[aria-hidden]')!;
-    expect(detailTile.textContent?.trim()).not.toBe('/');
-    expect(detailTile.querySelector('svg')).not.toBeNull();
+    const detailTile = detail.querySelector('[data-item-image]')!;
+    expect([detailTile.textContent, detailTile.getAttribute('data-tile-colour')]).toEqual([tile.textContent, tile.getAttribute('data-tile-colour')]); // the same tile in its detail
     expect(within(detail).queryByText('Type')).toBeNull();
     expect(within(detail).queryByText(`/${name}`)).toBeNull();
     expect(within(detail).queryByRole('button', { name: 'Use in chat' })).toBeNull();
@@ -226,10 +228,10 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={page.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
   expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
-  expect(open.closest('li')!.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(open.closest('li')!.querySelector('[data-item-image]')!.textContent).toBe('R'); // UX wave U11c: the tile, "Use in chat" saying it is invocable
   fireEvent.click(open);
   const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
-  expect(detail.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(detail.querySelector('[data-item-image]')!.textContent).toBe('R');
   expect(within(detail).getByText('Type')).toBeTruthy();
   expect(within(detail).getByText('/reports:review')).toBeTruthy();
   expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();
@@ -256,18 +258,18 @@ it('shows a session directory no project has as its directory as itself, its pat
   expect([...select.options].map((option) => option.textContent)).not.toContain(worktree);
 });
 
-// UX wave U7b (O-40; Interfaces §J, "Every way in"): a section tab is the page's `show`, the page's view kept, and the
-// strip is not touched.
-it('switches its section as the page’s show, keeping its view', async () => {
+// UX wave U7b (O-40; Interfaces §J, "Every way in"); UX wave U11c: a Show value is the page's `show`, the page's view kept,
+// and the strip is not touched.
+it('switches its kind as the page’s show, keeping its view', async () => {
   useLayout.getState().openDestination({ kind: 'customize', view: 'discover', show: 'skills' });
   const strip = useLayout.getState().main;
-  mount('skills');
-  await screen.findByRole('button', { name: 'View review' });
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Connectors' }));
+  mountCustomize({ view: 'discover', show: 'skills' });
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Connectors' }));
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'connectors' });
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Plugins' }));
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Plugins' }));
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
   expect(useLayout.getState().main).toBe(strip);
+  expect(screen.queryByRole('tab', { name: 'Connectors' })).toBeNull();
 });
 
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
@@ -334,15 +336,32 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null }] }));
-  const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }] }));
+  const mountWith = (client: QueryClient) => mountCustomize({ view: 'mine', show: 'connectors' }, client);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
     resetSignIns();
     print = 'print-1';
   });
 
-  it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
+  // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): a configured row's image is the
+  // icon of the one directory record its address matches (main's posture names it), else the connector's letter tile
+  it('draws a configured connector’s directory icon where its posture names one and its tile where none, the rows in place', async () => {
+    const ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/tides.svg';
+    const at = (name: string, iconUrl: string | null) => ({ name, scope: 'user', path: '/config/.claude.json', authPosture: null, fingerprint: null, revision: null, iconUrl });
+    backend.script('customization.inventory', () => ({ skills: [], servers: ['tides', 'buoy'].map((name) => ({ name, scope: 'user', path: '/config/.claude.json', transport: 'http' })), warnings: [], serversRead: true }));
+    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)] }));
+    backend.script('catalog.icon', () => ({ dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }));
+    mountWith(fresh());
+    const imageOf = (name: string) => document.querySelector<HTMLElement>(`[data-connector="${name}"] [data-item-image]`)!;
+    await screen.findByText('buoy');
+    await waitFor(() => expect(imageOf('tides').getAttribute('data-item-image')).toBe('icon'));
+    expect([imageOf('buoy').getAttribute('data-item-image'), imageOf('buoy').getAttribute('data-item-kind'), imageOf('buoy').textContent]).toEqual(['tile', 'connector', 'B']);
+    expect(backend.calls.filter((call) => call.command === 'catalog.icon').map((call) => call.input)).toEqual([{ url: ICON }]);
+    expect([...document.querySelectorAll('[data-connector]')].map((row) => row.getAttribute('data-connector'))).toEqual(['tides', 'buoy']);
+  });
+
+  it('is Show’s Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
     const elsewhere = { ...pageStatus('signer'), cwd: '/two' };
     useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
     backend.script('connectors.signIn', () => ({ opId: 'op-1' }));
@@ -350,7 +369,7 @@ describe('Connectors', () => {
     const client = fresh();
     posture(client, 'notion', 'auth_required');
     mountWith(client);
-    expect(screen.getByRole('tab', { name: 'Connectors' })).toBeTruthy();
+    expect(within(pageHead()).getByRole('radio', { name: 'Connectors' }).getAttribute('aria-checked')).toBe('true');
     const row = (await screen.findByText('notion')).closest('li')!;
     expect(await within(row).findByText('Sign in needed')).toBeTruthy(); // main's posture, read after the list
     fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
@@ -409,7 +428,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -439,8 +458,8 @@ describe('Connectors', () => {
     const innerFile = '/one/.mcp.json';
     let innerPrint = 'print-inner';
     backend.script('catalog.postures', () => ({ servers: [
-      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null },
-      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null },
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null, iconUrl: null },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null, iconUrl: null },
     ] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
@@ -469,7 +488,7 @@ describe('Connectors', () => {
   // host of an earlier build) it offers nothing, and with no such session it says to open one.
   describe('a row of MAWS’s own list', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
-    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
     // the disk row, not the live list's line of the same name below it
     const ownRow = () => waitFor(() => {
@@ -636,7 +655,7 @@ describe('Connectors › Add custom connector', () => {
     };
     emit = (name, payload) => act(() => listeners.get(name)?.forEach((listener) => listener(payload)));
   });
-  const mountFresh = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section="mcp" /></QueryClientProvider>);
+  const mountFresh = () => mountCustomize({ view: 'mine', show: 'connectors' });
   const inventoryReads = () => backend.calls.filter((call) => call.command === 'customization.inventory').length;
   const openSheet = async () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Add custom connector…' }));
@@ -659,7 +678,7 @@ describe('Connectors › Add custom connector', () => {
   it('stands at the head of My items before Refresh, on a project’s page and on the user configuration’s, not in Discover; it opens with Remote (HTTP), all projects and Details closed', async () => {
     mountFresh();
     const action = await screen.findByRole('button', { name: 'Add custom connector…' });
-    expect(action.closest('[data-customize-toolbar="mcp"]')).not.toBeNull();
+    expect(action.closest('[data-customize-header]')).not.toBeNull(); // UX wave U11c: the page's head
     expect(action.nextElementSibling!.textContent).toBe('Refresh');
     let sheet = await openSheet();
     expect((within(sheet).getByRole('radio', { name: 'Remote (HTTP)' }) as HTMLInputElement).checked).toBe(true);

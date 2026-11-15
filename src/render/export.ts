@@ -2,7 +2,7 @@
 // agent's `artifact_export` (the engine host asks over `maws.artifact.export` and is answered through
 // `maws.artifact.exported`, as `artifact_screenshot`'s capture is) and by the library's Export (`artifacts.export`).
 // An `ExporterRegistry` keyed by kind and format says what can be exported: this milestone registers an `html`
-// artifact's PDF and PNG (`registerHtmlExporters`); P3-B and P3-C register their kinds' exporters from outside A
+// artifact's PDF, PNG and, since UX wave U10b, the page itself as HTML (`registerHtmlExporters`); P3-B and P3-C register their kinds' exporters from outside A
 // (`ExporterRegistry.register`, B through its `registerDocumentExporters`). An exporter runs over an `ExportRequest`
 // and the service's `ExportContext` (the artifact's title, its state, its assets, the PDF printer, a file writer, a
 // cancellation signal) and writes the file the request names: under the directory the host named for the tool, under
@@ -624,6 +624,16 @@ export function registerHtmlExporters(registry: ExporterRegistry, { content, env
       await context.writeFile(request.path, bytes);
     },
   };
-  const undo = [registry.register(pdf), registry.register(png)];
+  // UX wave U10b (l6-artifacts-18, §A.3): the page as itself, the stored file copied unchanged; nothing is rendered
+  const html: Exporter = {
+    kind: 'html',
+    format: 'html',
+    run: async (request, context) => {
+      const found = await content({ artifactId: request.artifactId, revision: request.revision });
+      if (!found.ok) throw new Error(`the artifact has no page at revision ${request.revision}: ${found.error.message}`);
+      await context.writeFile(request.path, new Uint8Array(await readFile(found.value.path)));
+    },
+  };
+  const undo = [registry.register(pdf), registry.register(png), registry.register(html)];
   return () => undo.forEach((off) => off());
 }

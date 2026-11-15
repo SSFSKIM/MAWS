@@ -13,7 +13,7 @@ import { CHOICE, FIELD, PRIMARY, SECONDARY } from '../../sessions/ui';
 import { PLUGIN_MANAGEMENT as W } from '../../widgets/copy';
 import { argvOf, commandWords, type PluginsRequest } from '../../widgets/plugins/present';
 import { SheetDetails } from '../../widgets/plugins/SheetDetails';
-import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './ConnectorSheet';
+import { Configured, Problem, Unresolved, type ConnectorSheetEnv } from './sheet-parts';
 import { CONNECTORS as C } from './copy';
 import { addToScopes, addToWords, checkCustom, customFieldsOf, customInputOf, customDetailsInputOf, type CustomCheck, type CustomFields, type CustomType, type RowsField } from './custom-form';
 import { writesFor } from './present';

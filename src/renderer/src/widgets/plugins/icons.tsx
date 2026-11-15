@@ -1,13 +1,6 @@
-// The plugin library's glyphs, in the app's 16 px stroke set (`Icon`, mockups/01-shell.html): a neutral plugin glyph for
-// the icon tile (the engine's manifest has no icon field, U3 F2; Desktop falls back to a glyph too), Show's funnel and
-// the row's overflow.
+// The plugin library's glyphs, in the app's 16 px stroke set (`Icon`, mockups/01-shell.html): Filter's funnel and the
+// row's overflow. (UX wave U11c: an item's tile is the shared image component's, so the neutral plugin glyph is gone.)
 import { Icon } from '../../app/IconButton';
-
-export const PluginGlyph = ({ className }: { className?: string }) => (
-  <Icon className={className}>
-    <path d="M3 5.5h2.5a1.5 1.5 0 1 1 3 0H11v2.5a1.5 1.5 0 1 1 0 3V13.5H3z" />
-  </Icon>
-);
 
 export const FilterIcon = ({ className }: { className?: string }) => (
   <Icon className={className}>
