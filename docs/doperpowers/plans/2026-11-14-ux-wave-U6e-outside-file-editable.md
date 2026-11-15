@@ -896,6 +896,8 @@ The decisions as they stand are in "Decisions settled at authoring, as the rulin
    - K15 (2026-11-15T09:58Z). In a bar that shows a save's failure, the Save/Wrap group stays on the path's line where it fits; the sentence takes the line below (two lines in a wide bar).
    Not changed by them: tall bars at 320 px for a failure are accepted; the disabled other-machine row keeps the app's disabled look. The drawing itself stays outside the repository.
 
+16. **2026-11-15 (UTC) · The architect confirms entry 14's four readings, and M3 builds on the file-beside-chat branch.** Confirmed as written (10:09Z): a file of MAWS's own inside the folders also reads "Read-only" with its panel; the panel's "Open File…" appears only where choosing the file makes it editable (`added`, `result`), not for MAWS's own files and not for a file a daemon of `2c7044231` named; the full-path tooltip is on every file tab in both strips; for a savable outside file "Save writes to <path>" replaces the path's plain tooltip. Also ruled: M3 does not wait for U6b-1 on master; the branch merged master `63c97b5c0` and U6b's branch `74aad04a6` (two merge commits), and takes U6b's branch again only at a head the architect names. The wire minor is re-taken as 49 in a commit of its own (`496911d17`), provisional again (another branch holds 49 too). M3's proof adds the desk's web app (`apps/desk-web`: its typecheck, build and test project, as the static gate runs them), which imports files of `src/renderer/src` by relative path, `tools/code/copy.ts` among them; it must draw as it did, and an edit there comes to the architect first.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
