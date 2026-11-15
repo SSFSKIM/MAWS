@@ -24,6 +24,8 @@
 //   the body goes on naming the last child's holder, its final body included, until the next child's snapshot replaces
 //   that child's agents. A child's process is the launch it answers with, tied one to one to the holder a probe asked
 //   under, so a child that answers before the index names its process's holder reads as that holder once it does.
+//   `/status` and the stream are two connections: a stream whose snapshot names another child (its `pid`, the child's
+//   own, as `/status` names it) than the probe found is ended unread and the session probed again.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
@@ -346,7 +348,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     if (launch !== null && !s.launches.has(launch) && ![...s.launches.values()].includes(holder)) s.launches.set(launch, holder);
     s.status = status;
     s.bridge = classify(status);
-    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder, launch);
+    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder, launch, typeof status.pid === 'number' ? status.pid : null);
     else {
       closeState(s);
       endWatches(s, s.bridge.reason ?? NO_BRIDGE);
@@ -369,9 +371,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- the state stream -----------------------------------------------------------------------------------------------
-  // `holder` and `launch`: the probe that opened this stream, and the child that answered it. The held agents are that
-  // child's from its snapshot on; until then the last child's, kept while the stream reconnects, are still held.
-  function openState(s: Session, holder: string, launch: string | null): void {
+  // `holder` and `launch`: the probe that opened this stream, and the child that answered it (`pid`, its own). The held
+  // agents are that child's from its snapshot on; until then the last child's, kept while the stream reconnects, are
+  // still held. A snapshot of another child (a replacement took the socket after the probe) is not read.
+  function openState(s: Session, holder: string, launch: string | null, pid: number | null): void {
     if (s.stream !== null || s.reconnect !== null) return;
     s.snapshotted = false;
     if (s.agents.list() === null) s.child = { holder, launch }; // no child's agents are held: what follows is this one's
@@ -385,6 +388,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
+            if (pid !== null && typeof line.pid === 'number' && line.pid !== pid) return stateEnded(s, stream, 'the stream opened on another bridge child than its probe found');
             s.snapshotted = true;
             s.fold.snapshot(line);
             s.child = { holder, launch }; // its agents replace the last child's

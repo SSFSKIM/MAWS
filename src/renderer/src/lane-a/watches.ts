@@ -223,6 +223,7 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
     entry.overflowed = false;
+    if (agentId === null) laneAAgentsWatchEnded(appSessionId); // UX wave U8d: the watch has ended, as at its other two ends
     tell(entry, { kind: 'reset' });
   }
   entry.watchers.add(watcher);
