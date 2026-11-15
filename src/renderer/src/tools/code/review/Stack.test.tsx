@@ -539,6 +539,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 2, 10));
     offs.push(registerCommentComposer(openComment));
     const main = await mount(files);
+    offs.push(connectPanelEvents()); // on this main's bridge, which the suite's own connection predates
     const held = files[1];
     page.scrollTo(page.topOf(sectionOf(held.path)) + HEADER); // by hand, to the second file, its first added line in view
     await page.settle();
@@ -688,7 +689,7 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       const row = page.rowAtTop();
       expect(row).toEqual(expect.objectContaining({ path: files[1].path }));
       clock += 100; // inside the wheel's window
-      page.setZoom(0.2); // the page shrinks under the scroller: the browser clamps it before the observers report
+      page.setZoom(0.125); // the page shrinks under the scroller: the browser clamps it before the observers report
       await page.settle();
       expect(page.clamped()).toBeGreaterThan(0);
       expect(page.rowAtTop()).toEqual(row);

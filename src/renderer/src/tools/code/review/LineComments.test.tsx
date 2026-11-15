@@ -931,19 +931,6 @@ describe('comments on lines in Review', () => {
       fireEvent.mouseDown(button!);
     }
 
-    // The branch panel's sixth finding: Last turn names its files absolutely, which needs no repository's root.
-    it('takes a comment on a line of Last turn when Git cannot be read: the add button opens the card, and its draft is drawn under its line', async () => {
-      main.state.status = null;
-      await lastTurn('/scratch/two.ts');
-      addIn('/scratch/two.ts', 0, 8);
-      await painted(() => card() !== null);
-      expect(pass()!.comments.map((c) => [c.anchor, c.quote])).toEqual([[expect.objectContaining({ kind: 'file-line', path: '/scratch/two.ts', line: 8 }), 'EIGHT']]);
-      type('Name the eighth line.');
-      leave();
-      await painted(() => card() === null && unsentRows('/scratch/two.ts').length === 1);
-      expect(lineRow('/scratch/two.ts', 'new', 8)!.nextElementSibling?.contains(unsentRows('/scratch/two.ts')[0])).toBe(true);
-    });
-
     // The branch panel's fourth finding: a full pass adds nothing, and the comment it opens keeps the block it was made in.
     it('keeps the newest comment in the block it was made in when a full pass refuses an add on the same text in another block', async () => {
       const path = '/repo/two.ts';
@@ -970,6 +957,19 @@ describe('comments on lines in Review', () => {
       expect(pass()!.comments).toHaveLength(MESSAGE_COMMENTS_MAX);
       expect(field().value).toBe('The ninth line, as the first edit left it.');
       expect(cardRow()!.closest('[data-review-block]')?.getAttribute('data-review-block')).toBe('0');
+    });
+
+    // The branch panel's sixth finding: Last turn names its files absolutely, which needs no repository's root.
+    it('takes a comment on a line of Last turn when Git cannot be read: the add button opens the card, and its draft is drawn under its line', async () => {
+      main.state.status = null;
+      await lastTurn('/scratch/two.ts');
+      addIn('/scratch/two.ts', 0, 8);
+      await painted(() => card() !== null);
+      expect(pass()!.comments.map((c) => [c.anchor, c.quote])).toEqual([[expect.objectContaining({ kind: 'file-line', path: '/scratch/two.ts', line: 8 }), 'EIGHT']]);
+      type('Name the eighth line.');
+      leave();
+      await painted(() => card() === null && unsentRows('/scratch/two.ts').length === 1);
+      expect(lineRow('/scratch/two.ts', 'new', 8)!.nextElementSibling?.contains(unsentRows('/scratch/two.ts')[0])).toBe(true);
     });
   });
 });
