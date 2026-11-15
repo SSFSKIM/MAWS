@@ -82,3 +82,57 @@ describe('every other request', () => {
     expect(result.current.entries.get('c')!.request).toBe(install);
   });
 });
+
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D "What the book keeps of an ended
+// operation", C12): a kept book lives for the run of the app, so once an operation has ended (its `done`, or a refused
+// send) the book holds its outcome and the five fields a line and its controls read, and no longer the request.
+describe('an ended operation', () => {
+  const done = (opId: string, outcome: unknown) => act(() => fake.event('plugins.operation', { opId, action: 'install', target: 'x', phase: 'done', outcome }));
+  const FIVE = ['action', 'afterAdd', 'catalogName', 'scope', 'target'];
+
+  it('holds the whole request while it runs, and at a success, a failure and a refused send only the five fields', async () => {
+    const { result } = renderHook(() => usePluginOperations('customize:/work/quay'));
+    const install = requestFor('install', { plugin: 'berth-notes@harbour-market', scope: 'project' }, null, {
+      catalog: { name: 'Berth notes', marketplace: { name: 'harbour-market', source: 'harbour/market', present: true }, skills: null, contents: null, runsCode: null, alsoListedBy: [] },
+      afterAdd: { marketplace: 'harbour-market', scope: 'project' },
+    });
+    const removal = requestFor('mcp-remove', { name: 'tides', scope: 'user' }, null);
+    const update = requestFor('update', { plugin: 'quay-ledger@harbour-market', scope: 'user' }, null);
+    act(() => {
+      void result.current.run('catalog:berth', install, '/work/quay', '/engine/claude');
+      void result.current.run('connector:user:tides:/cfg/.claude.json', removal, '/work/quay', '/engine/claude');
+      void result.current.run('installed:quay-ledger', update, '/work/quay', '/engine/claude');
+    });
+    expect(result.current.entries.get('catalog:berth')!.request).toBe(install); // working: the request as asked
+    await act(() => fake.reply('plugins.install', { opId: 'op-install' }));
+    await act(() => fake.reply('connectors.remove', { opId: 'op-remove' }));
+    await act(() => fake.fail('plugins.update', 'the engine host is not running', 'internal'));
+    expect(result.current.entries.get('catalog:berth')!.request).toBe(install);
+    done('op-install', { ok: true, result: { message: 'Installed berth-notes' } });
+    done('op-remove', { ok: false, error: { code: 'cli_failed', message: 'No MCP server named tides', failureCode: null, shownCommand: null } });
+    const entry = (key: string) => result.current.entries.get(key)!;
+    expect(entry('catalog:berth').request).toEqual({ action: 'install', scope: 'project', target: 'berth-notes@harbour-market', afterAdd: { marketplace: 'harbour-market', scope: 'project' }, catalogName: 'Berth notes' });
+    expect(entry('connector:user:tides:/cfg/.claude.json').request).toEqual({ action: 'mcp-remove', scope: 'user', target: 'tides' });
+    expect(entry('installed:quay-ledger').state.phase).toBe('unsent');
+    expect(entry('installed:quay-ledger').request).toEqual({ action: 'update', scope: 'user', target: 'quay-ledger@harbour-market' });
+    for (const key of result.current.entries.keys()) for (const field of Object.keys(entry(key).request)) expect(FIVE).toContain(field);
+  });
+
+  it('a custom add typed with a marked URL, command and argument: once ended, nothing the book holds contains a mark', async () => {
+    const { result } = renderHook(() => usePluginOperations('customize:/work/quay'));
+    const remote = requestFor('mcp-add', { name: 'tide-feed', scope: 'user', entry: { type: 'http', url: 'https://mark-url.example.test/mcp', headers: [] } }, null);
+    const local = requestFor('mcp-add', { name: 'tide-local', scope: 'user', entry: { type: 'stdio', command: '/opt/mark-command/bin/tides', args: ['--mark-argument'], env: [] } }, null);
+    const marked = () => JSON.stringify([...result.current.entries]).includes('mark-');
+    act(() => {
+      void result.current.run('connector:add:user:tide-feed', { ...remote, folder: null }, '/cfg', '/engine/claude');
+      void result.current.run('connector:add:user:tide-local', { ...local, folder: null }, '/cfg', '/engine/claude');
+    });
+    await act(() => fake.reply('connectors.addJson', { opId: 'op-feed' }));
+    await act(() => fake.fail('connectors.addJson', 'connectors.addJson is not a command here', 'unknown_command'));
+    expect(marked()).toBe(true); // while one runs, its request is the book's (as shown: only value slots masked)
+    done('op-feed', { ok: false, error: { code: 'cli_failed', message: 'MCP server tide-feed already exists in user config', failureCode: null, shownCommand: null } });
+    expect(marked()).toBe(false);
+    expect(result.current.entries.get('connector:add:user:tide-feed')!.request).toEqual({ action: 'mcp-add', scope: 'user', target: 'tide-feed' });
+    expect(result.current.entries.get('connector:add:user:tide-local')!.request).toEqual({ action: 'mcp-add', scope: 'user', target: 'tide-local' });
+  });
+});
