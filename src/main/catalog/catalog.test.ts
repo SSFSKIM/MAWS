@@ -358,6 +358,17 @@ describe('All', () => {
     expect(home.total).toBe(87);
   });
 
+  it('on a small catalog keeps a kind’s shelf whose cards are all on Plugins’, by its total, and gives a kind with nothing a total of 0', async () => {
+    const items = await catalog();
+    const withSkills = items.find((i) => i.kind === 'plugin' && !isCommunity(i) && (i.components?.skills.length ?? 0) > 0)!;
+    const home = homeOf([withSkills], 'all');
+    expect(home.shelves.map((s) => [s.key, s.items.map((i) => i.id), s.total])).toEqual([
+      ['kind:plugins', [withSkills.id], 1],
+      ['kind:skills', [], 1],
+      ['kind:connectors', [], 0],
+    ]);
+  });
+
   it('its query holds both kinds in one order whatever the sort sent: a name match first, then by name, ties by id, across a page boundary', async () => {
     const items = await catalog();
     const all = queryOf(items, { tab: 'all', cwd: null, limit: 200 }, 'r');
@@ -381,8 +392,10 @@ describe('All', () => {
     // paged, with a different sort sent for each page and in both directions: the same walk, never restarted
     for (const reverse of [false, true]) {
       const seen: string[] = [];
+      const cursors = new Set<string>();
       let cursor: string | null = null;
       let page = 0;
+      // bounded: a cursor that repeats, or more pages than the results could fill, ends the walk and fails below
       do {
         const sort = (['installs', 'updated', 'name'] as const)[page % 3];
         const answer = queryOf(items, { tab: 'all', cwd: null, text, sort, reverse, cursor, limit: 7 }, 'r1');
@@ -390,7 +403,10 @@ describe('All', () => {
         seen.push(...ids(answer.items));
         cursor = answer.nextCursor;
         page += 1;
-      } while (cursor !== null);
+        if (cursor !== null && cursors.has(cursor)) break;
+        if (cursor !== null) cursors.add(cursor);
+      } while (cursor !== null && page <= Math.ceil(found.length / 7));
+      expect(cursor).toBeNull();
       expect(seen).toEqual(reverse ? ids(found).reverse() : ids(found));
     }
   });

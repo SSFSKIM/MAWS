@@ -45,6 +45,7 @@ let listeners: Map<string, Set<(payload: unknown) => void>>;
 let held: Map<string, (outcome?: unknown, reload?: unknown) => void>; // a held command's done (with its reload), released by the test
 let holdDone: Set<CommandName>;
 let opSeq: number;
+let allHome: CatalogHome | null; // a test's own answer for All's home
 
 const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
 const emit = (name: EventName, payload: unknown) => {
@@ -59,6 +60,7 @@ const inTab = (entry: CatalogItem, tab: CatalogTab) => tab === 'all' || (tab ===
 // main's home for All (§F): the Plugins home's Featured, then a shelf per kind; a kind's own home, one shelf of its items
 function home(tab: CatalogTab): CatalogHome {
   const kind = (key: 'plugins' | 'skills' | 'connectors', title: string, items: CatalogItem[], total: number) => ({ key: `kind:${key}`, kind: 'kind' as const, title, items, total });
+  if (tab === 'all' && allHome !== null) return allHome;
   if (tab === 'all')
     return { featured: chart, shelves: [kind('plugins', 'Plugins', [chart, pilot], 5), kind('skills', 'Skills', [tides], 2), kind('connectors', 'Connectors', [harbour, ferry], 3)], categories: [], total: catalog.length };
   const items = catalog.filter((entry) => inTab(entry, tab));
@@ -119,6 +121,7 @@ beforeEach(() => {
   held = new Map();
   holdDone = new Set();
   opSeq = 0;
+  allHome = null;
   const bridge: PreloadBridge = {
     localMachine: TEST_MACHINE,
     invoke: (async (name: CommandName, input: unknown) => {
@@ -216,6 +219,27 @@ describe('Customize › Discover › All', () => {
     expect(shown.querySelector('[data-shelf] [data-kind-word]')).toBeNull();
     expect((await shelfCard(tides)).querySelector('[data-catalog-components]')!.textContent).toBe('tide-read, tide-plot');
     expect((await shelf('plugins')).querySelector('[data-see-all]')!.textContent).toBe('See all5');
+  });
+
+  it('a kind whose cards are all on the Plugins shelf keeps its shelf, its heading and See all; a kind with nothing draws none', async () => {
+    allHome = {
+      featured: null,
+      shelves: [
+        { key: 'kind:plugins', kind: 'kind', title: 'Plugins', items: [tides], total: 1 },
+        { key: 'kind:skills', kind: 'kind', title: 'Skills', items: [], total: 1 },
+        { key: 'kind:connectors', kind: 'kind', title: 'Connectors', items: [], total: 0 },
+      ],
+      categories: [],
+      total: 1,
+    };
+    mountCustomize({ view: 'discover', show: 'all' });
+    const shown = await home$();
+    expect([...shown.querySelectorAll('[data-shelf]')].map((s) => s.getAttribute('aria-label'))).toEqual(['Plugins', 'Skills']);
+    const skills = await shelf('skills');
+    expect(skills.querySelector('[data-catalog-card]')).toBeNull();
+    expect(within(skills).getByRole('heading', { name: 'Skills' })).toBeTruthy();
+    fireEvent.click(within(skills).getByRole('button', { name: 'See all of Skills' }));
+    expect(where()).toEqual({ kind: 'customize', view: 'discover', show: 'skills' });
   });
 
   it('a shelf’s See all chooses its kind in Show, in Discover', async () => {
