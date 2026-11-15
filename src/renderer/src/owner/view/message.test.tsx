@@ -141,7 +141,7 @@ describe('which message carries the bullet, on recorded replies', () => {
   let keys = 0;
   async function mounted(events: SessionEvent[]) {
     const source: TranscriptSource = { key: `message-fixture-${++keys}`, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
-    render(<Transcript source={source} variant="session" ownerLane />);
+    render(<Transcript source={source} variant="session" ownerLane browserActivity={false} /* no browser of its own to list */ />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
     await act(() => Promise.resolve());
   }
