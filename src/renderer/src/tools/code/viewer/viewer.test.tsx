@@ -1279,6 +1279,98 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(within(group as HTMLElement).getByRole('button', { name: 'Wrap' })).toBeTruthy();
   });
 
+  // Review finding 5 (K1, K14): an unbroken run (a long path component) wraps anywhere within the failure's own line.
+  it('a failure that holds a long unbroken path wraps anywhere within its own line', async () => {
+    const LONG = `/r/${'unbroken-component-'.repeat(12)}end.txt`;
+    const main = disk({ [LONG]: 'one\n' });
+    show(LONG);
+    await editable(LONG);
+    typed('mine ');
+    await waitFor(() => expect(shown(LONG).dirty).toBe(true));
+    delete main.files[LONG];
+    fireEvent.click(saveButton()!);
+    const failure = await screen.findByRole('alert');
+    expect(failure.textContent).toContain(LONG);
+    const classes = failure.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['basis-full', 'min-w-0', 'wrap-anywhere']));
+    expect(classes).not.toContain('truncate');
+  });
+
+  // Review finding 1 (decision 6): every answer that comes back sets the latest admission from itself alone, a later
+  // chunk's included, whether or not its content is taken; the pin moves by the document and dirty rule. Driven through
+  // the store with continuations held (a file of two chunks).
+  const BIG = 'a line of the notes\n'.repeat(80_000);
+  const mountOut = () => offs.push(useViewer.getState().mount(FILE(OUT), { appSessionId: A, path: OUT, line: null }));
+  const readsSoFar = (main: { callsOf: (name: 'files.read') => unknown[] }) => main.callsOf('files.read').length;
+
+  it('decision 6: a lock the head said and a later chunk’s answer no longer says goes', async () => {
+    const main = disk({ [OUT]: BIG }, { names: [OUT], own: ['/elsewhere'] });
+    const head = main.hold('files.read');
+    mountOut();
+    await waitFor(() => expect(readsSoFar(main)).toBe(1));
+    main.own.delete('/elsewhere');
+    head.release();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true }));
+    expect(readsSoFar(main)).toBe(2);
+    expect(shown()).toMatchObject({ locked: null, named: true, pin: OUT, editable: true });
+  });
+
+  it('decision 6: a clean read whose later chunk answers no outside clears the pin', async () => {
+    const main = disk({ [OUT]: BIG }, { names: [OUT] });
+    main.reals[OUT] = REAL;
+    const head = main.hold('files.read');
+    mountOut();
+    await waitFor(() => expect(readsSoFar(main)).toBe(1));
+    main.outside.delete('/elsewhere'); // the folder is the session's now
+    head.release();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', complete: true }));
+    expect(shown()).toMatchObject({ named: false, locked: null, pin: null, editable: true });
+  });
+
+  it('decision 6: a downgrade to MAWS’s own in a chunk whose hash differs stops a dirty entry’s save, its content not taken', async () => {
+    const main = disk({ [OUT]: BIG }, { names: [OUT] });
+    offs.push(connectCodeEvents());
+    mountOut();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true, pin: OUT }));
+    act(() => useViewer.getState().setDirty(FILE(OUT), true));
+    const before = readsSoFar(main);
+    const head = main.hold('files.read');
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(readsSoFar(main)).toBe(before + 1));
+    main.files[OUT] = `${BIG}one more line\n`; // changed between the head and the next chunk
+    main.own.add('/elsewhere');
+    head.release();
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true, pin: OUT }));
+    expect(shown().text).toBe(BIG);
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.saves()).toEqual([]);
+  });
+
+  // Review finding 3 (decision 18, the panel's promise): choosing the very file a dirty tab holds, after W4 left its edits
+  // standing locked, reads its admission once more (the document and the pin standing), and the tab saves again.
+  it('W4 then Open File…: choosing the file the dirty tab holds makes it editable again; Save writes it with the pin', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    offs.push(connectCodeEvents());
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.names.delete(OUT);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'added', editable: false, dirty: true, pin: OUT }));
+    main.picks(() => ({ status: 'opened', path: OUT }));
+    await userEvent.setup().click(label()!);
+    const panel = await screen.findByRole('dialog');
+    fireEvent.click(within(panel).getByRole('button', { name: 'Open File…' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: null, editable: true, dirty: true, pin: OUT }));
+    await waitFor(() => expect(editorEditable()).toBe(true));
+    expect(view().state.doc.toString()).toBe('mine one\n');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('mine one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'mine one\n', expectedHash: fakeHash('one\n'), real: OUT }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+  });
+
   it('W2: a save in flight when its tab closes lands nowhere, and the file is what the save wrote', async () => {
     const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
     const { unmount } = show();

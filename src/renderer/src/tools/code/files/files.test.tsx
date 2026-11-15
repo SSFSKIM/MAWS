@@ -752,6 +752,9 @@ describe('the Files list’s menu (U6e)', () => {
     offs.splice(0).forEach((off) => off());
     useMachines.setState({ machines: new Map() });
   });
+  // Review finding 4 (K6, K12): at most the menus' width and never wider than the column less 1rem, the column measured
+  // as the menu opens (and its edges the menu's collision boundary); M4's scene measures the boxes.
+  const COLUMN_BOUND = 'max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))]';
   const openTree = async (appSessionId: AppSessionId) => {
     render(<TestHost />);
     act(() => void panelHost.addTool('files', { appSessionId }));
@@ -764,7 +767,7 @@ describe('the Files list’s menu (U6e)', () => {
     fireEvent.contextMenu(item('src'));
     const menu = await screen.findByRole('menu');
     expect(menu.hasAttribute('data-files-menu')).toBe(true);
-    expect(menu.className.split(/\s+/)).toEqual(expect.arrayContaining(['max-w-96', 'shadow-float']));
+    expect(menu.className.split(/\s+/)).toEqual(expect.arrayContaining([COLUMN_BOUND, 'shadow-float']));
     const rows = within(menu).getAllByRole('menuitem');
     expect(rows.map((row) => row.textContent)).toEqual(['Open File…']);
     expect(rows[0].hasAttribute('data-open-file')).toBe(true);
@@ -782,8 +785,14 @@ describe('the Files list’s menu (U6e)', () => {
 
   it('for a session on another machine the row is disabled, names the machine in the muted colour, cut, with its whole text as its title', async () => {
     const tree = await openTree(R);
+    const column = document.querySelector('[data-tool="files"]')!;
+    vi.spyOn(column, 'getBoundingClientRect').mockReturnValue({ width: 320, height: 600, top: 0, left: 0, right: 320, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
     fireEvent.contextMenu(tree);
-    const row = within(await screen.findByRole('menu')).getByRole('menuitem');
+    const menu = await screen.findByRole('menu');
+    expect(menu.className.split(/\s+/)).toContain(COLUMN_BOUND);
+    expect(menu.className.split(/\s+/)).not.toContain('max-w-96');
+    expect(menu.style.getPropertyValue('--files-menu-column')).toBe('320px');
+    const row = within(menu).getByRole('menuitem');
     const whole = `Open File… (this session runs on ${STUDIO})`;
     expect(row.textContent).toBe(whole);
     expect(row.getAttribute('title')).toBe(whole);

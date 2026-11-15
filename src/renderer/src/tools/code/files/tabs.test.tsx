@@ -20,6 +20,7 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { sideFilesViewer } from '../editor/register';
 import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
+import { FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
 import { useFiles } from './store';
@@ -580,6 +581,69 @@ describe('an open the agent asked for (U6e)', () => {
     await settle();
     expect(readsOf(OUT)).toHaveLength(reads);
     expect(filesOf(A)).toEqual([]);
+  });
+
+  // Review finding 2 (a): the agent's show of a tab drawn again at the line it had sends no read either, for a tab beside
+  // the chat and a main tab alike; a person's open of it afterwards reads it again, as today.
+  it('W9: the agent’s show of a hidden side tab at its own line reads nothing when the tab is drawn again; the person’s open then reads', async () => {
+    granted.add(OUT);
+    render(<TestHost />);
+    act(() => void openFile(A, OUT, null, { keep: true }));
+    const [tab] = filesOf(A);
+    await waitFor(() => expect(entry()?.status).toBe('ready'));
+    act(() => void openFile(A, '/r/a.ts')); // another tab in view
+    expect(inView(A)).not.toContain(tab.id);
+    await settle();
+    const reads = readsOf(OUT).length;
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    expect(inView(A)).toEqual([tab.id]);
+    await settle();
+    expect(document.querySelector(`[data-file-viewer][data-path="${OUT}"]`)).not.toBeNull(); // drawn again
+    expect(readsOf(OUT)).toHaveLength(reads);
+    act(() => void openFile(A, '/r/a.ts'));
+    await settle();
+    act(() => void openFile(A, OUT)); // the person's open
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+  });
+
+  it('W9: the agent’s show of a main tab drawn again reads nothing', async () => {
+    granted.add(OUT);
+    function MainFile() {
+      const tab = useLayout((s) => activeTab(s.main));
+      return tab?.kind === 'file' ? <FileViewer tab={tab} /> : null;
+    }
+    render(<MainFile />);
+    act(() => void openFile(A, OUT, null, { main: true }));
+    await waitFor(() => expect(entry()?.status).toBe('ready'));
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: A }));
+    await settle();
+    expect(document.querySelector('[data-file-viewer]')).toBeNull();
+    const reads = readsOf(OUT).length;
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(OUT));
+    await settle();
+    expect(document.querySelector('[data-file-viewer]')).not.toBeNull(); // drawn again
+    expect(readsOf(OUT)).toHaveLength(reads);
+  });
+
+  // Review finding 2 (b): the mark removed while the marked first read is out: that read lands nowhere, and the file is read
+  // again without the mark.
+  it('W9: the person’s open while the marked first read is in flight reads again without the mark and shows the file', async () => {
+    granted.add(OUT);
+    const gate = deferred<void>();
+    main = mainFor({ [OUT]: 'chosen\n' }, { outside: { granted, named }, held: new Map([[OUT, gate.promise]]) });
+    render(<TestHost />);
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(1));
+    expect(readsOf(OUT)[0].agent).toBe(true);
+    act(() => void openFile(A, OUT)); // the person's click, the marked read still out
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(2));
+    expect(readsOf(OUT)[1]).not.toHaveProperty('agent');
+    gate.resolve();
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', text: 'chosen\n', agent: false }));
+    await settle();
+    expect(entry()?.status).toBe('ready');
+    expect(document.querySelector('[data-refusal]')).toBeNull();
   });
 
   it('the mark goes with keep, with a person’s open that reuses the tab, and is never written on a person’s open', () => {
