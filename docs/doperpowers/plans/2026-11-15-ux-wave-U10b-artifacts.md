@@ -37,7 +37,7 @@ After the four pull requests of this landing:
 - [ ] M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content.
 - [ ] M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2.
 - [x] (2026-11-15 UTC) M6 — The float has three presentations. Commits `5c4421d12`..`6420af05d` (red, green, fix round), reviewed clean after one fix round; every row of §F.1's table is a case in `shell/floating.test.ts` (306 cases green on the VM, the folder set 3,275).
-- [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3.
+- [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3. Built up to its combined scene (2026-11-15 UTC): commits `e9bb7bdfe`..`f05930ca3`, the task review approved after two fix rounds; the combined scene is written and skipped until a master that holds U1b is merged, and M7 is ticked then.
 - [ ] M8 — "Make something new": four cards, More, and a design-system choice that binds.
 - [ ] M9 — A Space carries instructions: the store, the sheet, the mark and the chip.
 - [ ] M10 — The artifact tools give a Space's instructions.
@@ -1137,6 +1137,7 @@ The execution of U10b-3 (M6, M7), on branch `ux-wave/U10b-3` from `015c2a727`. T
 - M7, 2026-11-15: the layer reads the header's registration again in its effect (`showChatHeaderHeld`, from `editorHostOf`) before it calls `showChatHeaderGone`, so a switch to a newly opened artifact keeps a hidden chat hidden (M6's observation).
 - M7, 2026-11-15: the combined scene with U1b is written in `e2e/panel.spec.ts` as far as this tree's names allow and skipped with its reason ("waits for U1b on master"); its request steps, an assertion of "Waiting for you · N" in the bar and the unit case for U1b's line in the bar are written at the merge.
 - M7, 2026-11-15: the observer behind `drawsBesideTheBox` watches the bar's surface (`[data-bar-surface]`: subtree, children, text, and the `hidden` and `class` attributes) and disconnects when the bar goes. The compact pane draws no transcript, so a streamed answer runs it no time and redraws the bar no time (50 deltas: 0 and 0, pinned in `shell/bar-observer.test.tsx`); typing in the box runs it about once per keystroke, a walk that redraws nothing.
+- M7, 2026-11-15 (UTC), the architect's ruling: "Show chat" carries the hidden chat's state as its accessible description (`aria-description`), in words the app already has: waiting reads `needs.other` ("Waiting for you", `side/copy.ts`), the words the bar shows once U1b's line is in; unread reads "Unread", held in the shell beside the mark (`SESSION_MARK_WORDS` in `shell/SessionMark.tsx`, which the old pill's dot now reads too). Waiting takes precedence; with neither there is no description. The sidebar's per-kind labels (`attention/glyph.ts`) were not taken, because the description names the state, not the request's kind; nothing is exported from the sidebar's file. Typing in the box runs the surface's observer at most once per keystroke, twice for the first (the empty box becoming a draft redraws the box once more; 20 keystrokes measured 21 runs), and redraws the bar no time; the pin is those counts (at most 2 for the first keystroke, at most 1 for each later one, 0 renders of the bar), so the cost cannot grow unseen (accepted by the architect).
 
 ## Outcomes & Retrospective
 
