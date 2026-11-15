@@ -300,6 +300,7 @@ export function createViewerStore(client: MawsBridge) {
   const mounted = new Map<string, number>();
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const quiet = new Set<string>(); // U6e (decision 19): views the agent's show brought forward, whose next mount reads nothing new
+  const answered = new Map<string, number>(); // U6e (decision 6): the answers a load or Load more of the tab has had, counted
   const used = new Map<string, number>();
   const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
   let clock = 0;
@@ -329,6 +330,7 @@ export function createViewerStore(client: MawsBridge) {
 
     const remove = (tabId: string) => {
       quiet.delete(tabId);
+      answered.delete(tabId);
       holds.get(tabId)?.release();
       holds.delete(tabId);
       generations.delete(tabId);
@@ -370,6 +372,14 @@ export function createViewerStore(client: MawsBridge) {
     const pinAfter = (entry: ViewerEntry, real: string | null): string | null => (unsaved(entry) ? (entry.pin ?? real) : real);
     // U6e (decision 6): an answer whose content is not taken (a chunk of another version, a read for the admission alone)
     // still sets the latest admission; the pin stands, since the document it names does.
+    // U6e (decision 6): counts an answer of a read the tab still waits for, so an admission-only answer asked before it
+    // knows a newer answer has spoken.
+    const heard =
+      (tabId: string, live: () => boolean) =>
+      <T>(answer: T): T => {
+        if (live()) answered.set(tabId, (answered.get(tabId) ?? 0) + 1);
+        return answer;
+      };
     const admitOnly = (tabId: string, admission: Admission) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
@@ -452,7 +462,7 @@ export function createViewerStore(client: MawsBridge) {
       // A re-read of a head covers what Load more had reached, not only the first chunk.
       const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
       const { path } = entry;
-      const read = (offset: number, length: number, hash: boolean) => readChunk(entry, offset, length, hash);
+      const read = (offset: number, length: number, hash: boolean) => readChunk(entry, offset, length, hash).then(heard(tabId, live));
 
       // The hash is asked for only where it can be used: the kind still undecided (an open load, an entry with none) or
       // one the editor takes. A change load of a head, an image or an external kind asks none (each would cost main a
@@ -468,6 +478,9 @@ export function createViewerStore(client: MawsBridge) {
         if (!first.ok) return fail(tabId, first.error.message, reason);
       }
       const head = first.value;
+      // U6e (decision 6): an answer's admission is the latest from the moment it lands, before the load's content commits
+      // (an open load's first patch carries the head's)
+      if (reason === 'change') admitOnly(tabId, admissionOf(head));
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       // U6e: the head's admission is on the entry from the first frame that shows the file (K11), the label with it
       const admitted = admissionOf(head);
@@ -514,11 +527,13 @@ export function createViewerStore(client: MawsBridge) {
         // Changed mid-load, whatever the chunk's length (a shrunk file answers zero bytes with its new hash): the load ends
         // here, an open one read-only with `hash: null`; its files.changed re-reads it. Checked before the shrink exit,
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
-        // U6e (decision 6): the answer's admission is the latest even so, its content not taken and the pin standing.
-        if (hash !== null && next.value.hash !== hash) return admitOnly(tabId, admissionOf(next.value));
+        // U6e (decision 6): each answer's admission is the latest from the moment it lands, from itself alone, also where its
+        // content is not taken (a chunk of another version, or none at all), the pin standing until the content commits.
+        const latest = admissionOf(next.value);
+        admitOnly(tabId, latest);
+        if (hash !== null && next.value.hash !== hash) return;
+        ({ named, locked, real } = latest);
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
-        // U6e (decision 6): each answer's admission is the latest, from itself alone
-        ({ named, locked, real } = admissionOf(next.value));
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
@@ -703,7 +718,7 @@ export function createViewerStore(client: MawsBridge) {
         const generation = generations.get(tabId);
         patch(tabId, { loadingMore: true });
         const length = Math.min(FILES_READ_DEFAULT_LENGTH, CODE_CAP - entry.loaded);
-        void readChunk(entry, entry.loaded, length, false).then((next) => {
+        void readChunk(entry, entry.loaded, length, false).then(heard(tabId, () => generations.get(tabId) === generation)).then((next) => {
           // A newer load, or one that replaced the text this read continues, superseded it and cleared `loadingMore`.
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
@@ -853,10 +868,17 @@ export function createViewerStore(client: MawsBridge) {
       readAdmission(appSessionId, real) {
         for (const entry of get().entries.values()) {
           if (entry.appSessionId !== appSessionId || entry.pin !== real || entry.artifact) continue;
-          const { tabId } = entry;
-          const incarnation = incarnations.get(tabId);
+          const { tabId, path, pin, agent } = entry;
+          // It lands only on the entry it was asked for, and only while nothing newer has spoken: no load or Reload since
+          // (`supersede`, a move to another session among them), no answer of an earlier one since, and the entry's
+          // session, path, pin and mark as they were.
+          const asked = { incarnation: incarnations.get(tabId), generation: generations.get(tabId), answers: answered.get(tabId) ?? 0 };
           void readChunk(entry, 0, 1, false).then((answer) => {
-            if (incarnations.get(tabId) !== incarnation || !answer.ok) return; // a refusal moves neither lock nor pin
+            const now = get().entries.get(tabId);
+            const same =
+              now !== undefined && incarnations.get(tabId) === asked.incarnation && generations.get(tabId) === asked.generation && (answered.get(tabId) ?? 0) === asked.answers &&
+              now.appSessionId === appSessionId && now.path === path && now.pin === pin && now.agent === agent;
+            if (!same || !answer.ok) return; // a refusal moves neither lock nor pin
             admitOnly(tabId, admissionOf(answer.value));
           });
         }
@@ -870,6 +892,7 @@ export function createViewerStore(client: MawsBridge) {
 
       reset() {
         quiet.clear();
+        answered.clear();
         for (const hold of holds.values()) hold.release();
         holds.clear();
         generations.clear();
