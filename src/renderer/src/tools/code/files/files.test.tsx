@@ -7,7 +7,7 @@ import type { FilesEntry } from '@shared/ipc/schema/files';
 import type { SessionRecord } from '@shared/graph/session';
 import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { at } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { instanceOf, panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
