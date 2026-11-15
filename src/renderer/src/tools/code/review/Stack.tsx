@@ -217,7 +217,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
 
   // Every commit is a layout change: the placer takes the sections as drawn, the requests made since (a file, a hunk
   // jump), and applies the place again.
-  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null; waiting: number | null }>({ reveal: null, navigate, card: null, waiting: null });
+  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null; waiting: { serial: number; inputs: number } | null }>({ reveal: null, navigate, card: null, waiting: null });
   useLayoutEffect(() => {
     const placed = placer.current;
     if (!placed) return;
@@ -244,22 +244,27 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     // (their pointer held in the scroller) or on a line wholly in view stays where it is.
     // M5 fix 5: one whose file is folded in a scope past the cap waits on a read the fold holds back: the file unfolds, as
     // a request's reveal unfolds its file (§F), is read, and the card is revealed at its line above once it is placed.
-    if (waiting !== null && seen.waiting !== waiting.serial) {
-      seen.waiting = waiting.serial;
+    // The architect's review: the person's input in the scroller while the card waited on its read is theirs; the card
+    // then opens under its line where that is, neither revealed nor shown.
+    if (waiting !== null && seen.waiting?.serial !== waiting.serial) {
+      seen.waiting = { serial: waiting.serial, inputs: placed.inputCount() };
       if (sections.find((each) => each.file.path === waiting.path)?.folded) ui.setState((s) => setFold(s, key, waiting.path, 'open'));
     }
     if (card !== null && seen.card !== card.serial) {
       seen.card = card.serial;
       const section = sections.find((each) => each.file.path === card.path);
       const place = { path: card.path, row: { block: card.block, side: card.side, line: card.line }, offset: 0 };
-      if (section && (section.folded || (!placed.pointing() && !placed.inView(place)))) {
-        if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
-        placed.revealPlace(place);
+      const movedOn = seen.waiting?.serial === card.serial && placed.inputCount() !== seen.waiting.inputs;
+      if (!movedOn) {
+        if (section && (section.folded || (!placed.pointing() && !placed.inView(place)))) {
+          if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
+          placed.revealPlace(place);
+        }
+        // the branch's task review: once drawn under its line, the card is shown down to its bottom (one opened where the
+        // person points too: the field's scroll as it takes the keyboard can come after their gesture, or be overtaken by
+        // a layout change); installed after its own reveal, which would replace it
+        placed.showCard(place);
       }
-      // the branch's task review: once drawn under its line, the card is shown down to its bottom (one opened where the
-      // person points too: the field's scroll as it takes the keyboard can come after their gesture, or be overtaken by a
-      // layout change)
-      placed.showCard(place);
     }
     if (card === null) placed.showCard(null);
     const watching = observer.current;

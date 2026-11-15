@@ -104,6 +104,7 @@ export class StackPlacer {
   private pressed = false; // a pointer held down in the scroller (a drag of its scroll bar)
   private recount = false; // the counter was last read where a file's rows were not drawn yet
   private card: StackPlace | null = null; // the line of a card opened and not drawn under it yet
+  private inputs = 0; // the person's inputs in the scroller so far
 
   constructor(private readonly host: PlacerHost) {}
 
@@ -160,6 +161,7 @@ export class StackPlacer {
   // ends where it left the scroller, which becomes the live place (so its file's late answer moves nothing).
   interact(): void {
     this.gesture = performance.now();
+    this.inputs += 1;
     this.card = null;
     if (!this.reveal) return;
     this.reveal = null;
@@ -205,6 +207,12 @@ export class StackPlacer {
     this.read(m);
     this.at = el.scrollTop;
     this.setBand(this.bandFor(m, el.scrollTop));
+  }
+
+  // How many inputs the person has made in the scroller (a wheel, touch, key or pointer press): one made since a moment
+  // tells that they moved on from it.
+  inputCount(): number {
+    return this.inputs;
   }
 
   // A pointer held down in the scroller: what opens now opens where the person points.
@@ -272,11 +280,13 @@ export class StackPlacer {
     this.at = el.scrollTop;
   }
 
-  // A reveal begins: the person's gesture before it is over, and the counter is the jump's.
+  // A reveal begins: the person's gesture before it is over, the counter is the jump's, and a card's exposure still
+  // waiting is replaced by it (a card opening installs its own after its reveal).
   private begin(reveal: { place: StackPlace; top?: true } | null): void {
     this.reveal = reveal;
     this.gesture = -Infinity;
     this.recount = false;
+    this.card = null;
   }
 
   // The live place read where the scroller stands, saved, and the counter read there with it: whichever of its three
