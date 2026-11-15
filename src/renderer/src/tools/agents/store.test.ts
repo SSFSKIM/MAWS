@@ -458,8 +458,9 @@ describe('a terminal session this Mac drives', () => {
   const running = (agentId: string, over: Partial<LaneAAgent> = {}): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: T1 }, startedAt: T1, ...over });
   const completed = (agentId: string): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: T2, summary: 'all green' }, startedAt: T1 });
   const gone = (agentId: string): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'exited', evidence: 'session', startedAt: T1 });
-  const plane = (id: AppSessionId, kind: 'snapshot' | 'subagents', subagents: LaneAAgent[]) =>
-    bridge.event('laneA.plane', { appSessionId: bareOf(id), watch: 'w1', messages: [{ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs: [], subagents } : { subagents, jobs: [], mcp: [] } }] });
+  // the driver's body, naming the terminal its facts came from (the session's holder in these cases, pid 4242)
+  const plane = (id: AppSessionId, kind: 'snapshot' | 'subagents', subagents: LaneAAgent[], origin = 'terminal:4242') =>
+    bridge.event('laneA.plane', { appSessionId: bareOf(id), watch: 'w1', messages: [{ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs: [], subagents, origin } : { subagents, jobs: [], mcp: [], origin } }] });
   const watchEnded = (id: AppSessionId) => bridge.event('laneA.plane', { appSessionId: bareOf(id), watch: 'w1', ended: 'the session’s bridge went away' });
   const entryOf = (id: AppSessionId) => store.getState().entries.get(id)!;
   const statusesOf = (id: AppSessionId) => Object.fromEntries([...entryOf(id).graph.tasks.values()].map((n) => [n.taskId, n.status]));
@@ -553,6 +554,31 @@ describe('a terminal session this Mac drives', () => {
     await fake.answer('workflows', []);
     expect(statusesOf(D)).toEqual({ a1: 'unknown' });
     expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    off();
+  });
+
+  // The fence review's third finding: a first bind to another machine's feed, with no binding to this machine's reads
+  // before it on this watch, discards this Mac's statuses all the same (ruling point 5).
+  it('discards this Mac’s kept statuses at a first bind to another machine’s feed, so that coming back to this machine’s reads lays none', async () => {
+    let remote = false;
+    const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'a1' }, { seq: 1 })]);
+    const off = registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null));
+    const release = await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [gone('a1')]);
+    watchEnded(D);
+    holderOf(D, { kind: 'none' });
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    release(); // nothing watches the graph: no binding follows the listing
+    remote = true;
+    store.getState().watch(D); // bound to that machine's feed from the start
+    expect(entryOf(D).graph).toBe(fed);
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    remote = false;
+    useSessions.setState({ listed: new Map() }); // back to this machine's reads, with no new body
+    await fake.answer('subagents', [sidecar('a1')]);
+    await fake.answer('workflows', []);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown' });
     off();
   });
 

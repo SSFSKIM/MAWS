@@ -2,6 +2,7 @@
 // messages sminos's own plane makes of them, tracking each loop's open steps from the snapshot on.
 import { describe, expect, it } from 'vitest';
 import type { PlaneMessage } from '@shared/ipc/schema/lane-a';
+import { validateEventPayload } from '@shared/ipc/validate';
 import { Reshaper } from './reshape';
 
 const ctx = { machine: 'machine-ref-0123456789', session: 'sess-1', sub: 'watch-1' };
@@ -55,6 +56,21 @@ describe('the reshaper', () => {
     const done = { ...agent, status: 'completed' as const, outcome: { status: 'completed' as const, raw: 'completed', at: 'T2' } };
     expect(r.subagents({ jobs: [ended], subagents: [done] })).toEqual({ project: '', machine: ctx.machine, session: 'sess-1', kind: 'subagents', sub: 'watch-1', n: 2, body: { subagents: [done], jobs: [ended], mcp: [] } });
     expect(bodies(new Reshaper(ctx).snapshot(snap()))).toEqual([{ streaming: [], usage: null, jobs: [], subagents: [] }]); // nothing followed yet
+  });
+
+  // The fence review's ruling (point 1): the origin rides inside the body, beside the agents list, a key the registered
+  // event types as unknown. A reader that does not know it, the event's own schema first (every build's window applies
+  // it), reads past it and keeps it; the older builds' windows read `jobs` of the body and nothing else.
+  it('carries the body’s origin beside the agents list, in its snapshot and its subagents messages, which the registered event keeps as it is', () => {
+    const r = new Reshaper(ctx);
+    const agent = { agentId: 'a0b1c2d3e4f500001', meta: { agentType: 'general-purpose' }, status: 'running' as const, evidence: 'rows' as const, startedAt: 'T1' };
+    const [snapshot] = r.snapshot(snap(), { jobs: [], subagents: [agent], origin: 'terminal:4242' });
+    expect(snapshot!.body).toEqual({ streaming: [], usage: null, jobs: [], subagents: [agent], origin: 'terminal:4242' });
+    const message = r.subagents({ jobs: [], subagents: [agent], origin: 'background_job:4242:job-1' });
+    expect(message.body).toEqual({ subagents: [agent], jobs: [], mcp: [], origin: 'background_job:4242:job-1' });
+    const checked = validateEventPayload('laneA.plane', { appSessionId: 'app-1', watch: 'watch-1', messages: [snapshot!, message] });
+    expect(checked.ok).toBe(true);
+    expect((checked as { value: { messages: PlaneMessage[] } }).value.messages.map((m) => (m.body as { origin?: unknown }).origin)).toEqual(['terminal:4242', 'background_job:4242:job-1']);
   });
 
   it('closes a step at its end, and every step of a turn still open at its completion', () => {

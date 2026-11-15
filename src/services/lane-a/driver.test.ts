@@ -664,6 +664,9 @@ describe('subagents', () => {
     const found = agentsOf(planes, watch).find((a) => a.agentId === agentId);
     return found === undefined ? 'no entry' : `${found.status}/${found.evidence}`;
   };
+  // the origin the last body names: the holder whose bridge child its facts came from (the fence review's ruling)
+  const originOf = (planes: Plane[], watch: string) =>
+    (messagesOf(planes, watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').at(-1)?.body as { origin?: unknown } | undefined)?.origin;
   const messageCount = (planes: Plane[], watch: string) => messagesOf(planes, watch).filter((m) => m.kind === 'subagents').length;
   // the timeline's index of the plane payload that first carried this status
   const whenSaid = (watch: string, h: { planes: Plane[] }, agentId: string, status: string) => {
@@ -688,7 +691,7 @@ describe('subagents', () => {
     expect(first.find((a) => a.agentId === A1)).toMatchObject({ meta: { toolUseId: tool(A1), requestShape: 'background' }, outcome: { status: 'running', raw: 'async_launched' }, startedAt: at(1) });
     expect(first.find((a) => a.agentId === N)?.startedAt).toBe(at(3)); // its call is in its parent's transcript
     expect(first.every((a) => !('file' in a))).toBe(true);
-    expect(messagesOf(s.h.planes, s.watch).at(-1)).toMatchObject({ kind: 'subagents', body: { jobs: [], mcp: [] } });
+    expect(messagesOf(s.h.planes, s.watch).at(-1)).toMatchObject({ kind: 'subagents', body: { jobs: [], mcp: [], origin: 'terminal:4242' } });
 
     // a second watch of the session gets them in its own snapshot
     const second = s.h.driver.watch(APP, client()).watch;
@@ -696,6 +699,7 @@ describe('subagents', () => {
     const snapshot = messagesOf(s.h.planes, second)[0]!;
     expect(snapshot).toMatchObject({ kind: 'snapshot', n: 0, body: { jobs: [] } });
     expect((snapshot.body as { subagents: LaneAAgent[] }).subagents).toEqual(first);
+    expect(snapshot.body).toMatchObject({ origin: 'terminal:4242' }); // beside the list, the terminal the facts came from
 
     appendFileSync(s.path, queued(A1, 'completed', 4));
     await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('completed/rows');
@@ -716,6 +720,34 @@ describe('subagents', () => {
     expect(agentsOf(s.h.planes, s.watch).map((a) => [a.agentId, a.status, a.evidence])).toEqual([[A1, 'exited', 'session'], [A2, 'failed', 'rows']]);
     expect(agentsOf(s.h.planes, s.watch).some((a) => a.status === 'running' || a.running !== undefined)).toBe(false);
     expect(agentsOf(s.h.planes, s.watch)[0]?.spawn).toMatchObject({ toolUseId: tool(A1) }); // the bridge's spawn, kept
+    expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+  });
+
+  // The fence review's first finding, through the driver (its ruling's point 2): the origin is fixed by the probe whose
+  // bridge child the body's facts came from, never read from the session's holder when the body is sent. A holder change
+  // from one terminal to another reprobes in place, the follow and the watches kept.
+  it('names the terminal whose bridge child its facts came from in its final body, heard after the holder moved to another terminal', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)]).toEqual(['running/bridge', 'terminal:4242']);
+    s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'terminal', pid: 5151 } }); // reprobed in place
+    void s.b.close(); // terminal 4242's bridge child goes, and no other answers
+    await expect.poll(() => s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    expect(statusOf(s.h.planes, s.watch, A1)).toBe('exited/session');
+    expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+  });
+
+  it('names the next terminal once its bridge child’s snapshot replaces the last one’s, sending that body though nothing else changed', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)]).toEqual(['running/rows', 'terminal:4242']);
+    const before = agentsOf(s.h.planes, s.watch);
+    await bridge({ pid: 5151 }); // the next terminal's bridge child takes the socket; the last one's streams go on
+    s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'terminal', pid: 5151 } });
+    await s.settledStream(); // the state stream is still the last child's
+    expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+    s.b.reset(); // the last child's streams end: the state stream opens on the next child, whose snapshot follows
+    await expect.poll(() => originOf(s.h.planes, s.watch), { timeout: 3000 }).toBe('terminal:5151');
+    expect(agentsOf(s.h.planes, s.watch)).toEqual(before);
+    expect(s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined)).toBe(false);
   });
 
   it('derives once, after it, for a bridge event that arrives while a read is in flight', async () => {
