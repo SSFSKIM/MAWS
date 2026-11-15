@@ -63,7 +63,8 @@ export const isBlockedCell = (cell: Cell): cell is Cell & { blocked: BlockedCall
 // instructions after it) is the call's result, which the detail would draw as the call's output; a call auto mode
 // blocked never ran, so its detail draws what it would have run and no output, as a refused file change draws no diff.
 // The label carries the classifier's own reason where it gave one. The cell itself, its result and the copy keep the
-// text; every other call is returned as it is.
+// text, and so does the output a mod's tool-result component is handed (its rewrite, where it makes one, stands); every
+// other call is returned as it is.
 export function withoutRefusalText(cell: Cell): Cell {
   if (cell.status !== 'denied' || cell.classification.denial?.kind !== 'automode-blocked') return cell;
   const { detail } = cell;

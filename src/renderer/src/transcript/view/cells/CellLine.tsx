@@ -84,6 +84,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
   const { storeKey } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
+  const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
   const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
@@ -102,7 +103,7 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
         <Chevron />
       </button>
       <DisclosureBody open={cell.expanded}>
-        {renderDetail ? renderDetail(model) : <CellDetailView cell={withoutRefusalText(model)} turnId={turnId} />}
+        {renderDetail ? renderDetail(opened) : <CellDetailView cell={opened} turnId={turnId} />}
       </DisclosureBody>
     </div>
   );
