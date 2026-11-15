@@ -1152,12 +1152,13 @@ describe('a grant a sminos bridge carried to a terminal session, from the file (
     busy: [['u1c-t-busy-1', 52, 1], ['u1c-t-busy-2', 53, 2], ['u1c-t-busy-4', 49, 4]],
     esc: [['u1c-t-esc-1', 56, 1], ['u1c-t-esc-2', 51, 2], ['u1c-t-esc-3', 52, 3]],
   };
-  /** The run's file mapped whole, the uuid of its grant's row, and the messages that carry a mark. */
+  /** The run's file mapped whole, the uuid of its grant's row, and the messages that carry a consent mark. */
   const mapped = (name: string, line: number) => {
     const records = loadUxwaveTranscript(name);
     const events = mapAll(records);
     const uuid = records[line - 1]!.uuid as MessageUuid;
-    return { events, uuid, marked: only(events, 'user.message').filter((event) => event.arrival !== undefined) };
+    const marks = (event: Extract<SessionEvent, { kind: 'user.message' }>) => (event.arrival ?? []).some((entry) => (entry as { class?: unknown }).class === 'consent');
+    return { events, uuid, marked: only(events, 'user.message').filter(marks) };
   };
   const delivered = (events: SessionEvent[]) => only(events, 'notice.posted').filter((event) => event.text.startsWith('sminos: delivered: '));
 
