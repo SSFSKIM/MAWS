@@ -34,6 +34,8 @@ import {join} from 'node:path';
 import {hostname} from 'node:os';
 const DEBUG=ROOT+'/engine-debug.log';
 const CASE=process.env.UXW_CASE,RUN=process.env.UXW_RUN||'1',MODEL=process.env.PROBE_MODEL||'haiku';
+// UX wave U1c (Decision Log 47): the run's label goes into a shell command and file names, so it is checked first.
+if(!/^[A-Za-z0-9._-]+$/.test(RUN)){console.error(`UXW_RUN must hold only letters, digits, ".", "_" and "-"; it is ${JSON.stringify(RUN)}.`);process.exit(2);}
 const CASES=['e','b','b-wait','b-join-grant-first','b-join-other-first','b-two','b-joinend-grant-first','b-joinend-other-first','b-twoend','c-mcp','c-write','d-during','d-after'];
 if(!CASES.includes(CASE))throw new Error('UXW_CASE='+CASES.join(' | '));
 const FIXTURES=(process.env.PROBE_FIXTURE_ROOT?process.env.PROBE_FIXTURE_ROOT.replace(/\/?$/,'/'):new URL('../../',import.meta.url).pathname)+'fixtures/uxwave/';

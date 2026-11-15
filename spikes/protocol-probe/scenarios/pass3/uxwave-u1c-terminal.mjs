@@ -28,6 +28,8 @@ import {redact as harnessRedact} from '../../harness.mjs';
 import {BIN,ENGINE_VERSION,FIXTURES,slug,delay} from './uxwave-common-arrivals.mjs';
 
 const CASE=process.env.UXW_CASE??'',RUN=process.env.UXW_RUN||'1';
+// UX wave U1c (Decision Log 47): the run's label goes into a shell command and file names, so it is checked first.
+if(!/^[A-Za-z0-9._-]+$/.test(RUN)){console.error(`UXW_RUN must hold only letters, digits, ".", "_" and "-"; it is ${JSON.stringify(RUN)}.`);process.exit(2);}
 const TAG=`u1c-t-${CASE}-${RUN}`;
 const MODEL=process.env.UXW_MODEL||'haiku';
 const NAME='u1c-'+process.pid;
