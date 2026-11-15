@@ -244,17 +244,19 @@ describe('probe U1’s recordings (Acceptance 1 to 5, at the model’s level)', 
   });
 
   it('Acceptance 2: blocked again (u1-hard-seeded-1 to -3): the first row approved, the retry’s row “again”, with no grant', () => {
-    for (const name of ['u1-hard-seeded-1', 'u1-hard-seeded-2', 'u1-hard-seeded-3']) {
-      expect(readings(stateOf(journalToEvents(loadUxwaveJournal(name)))), name).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`, `Auto mode blocked again: \`${MARKER('1')}\` (none)`]);
+    for (const n of ['1', '2', '3']) {
+      const name = `u1-hard-seeded-${n}`;
+      expect(readings(stateOf(journalToEvents(loadUxwaveJournal(name)))), name).toEqual([`Auto mode blocked: \`${MARKER(n)}\` · approved (read)`, `Auto mode blocked again: \`${MARKER(n)}\` (none)`]);
     }
   });
 
   it('Acceptance 3: two blocks in a row, then the engine asks (u1-streak-seeded-1, -2): two blocked rows, neither again; the third and fourth calls ran', () => {
-    for (const name of ['u1-streak-seeded-1', 'u1-streak-seeded-2']) {
+    for (const n of ['1', '2']) {
+      const name = `u1-streak-seeded-${n}`;
       const state = stateOf(journalToEvents(loadUxwaveJournal(name)));
-      expect(readings(state), name).toEqual([`Auto mode blocked: \`${MARKER('1a')}\` (none)`, `Auto mode blocked: \`${MARKER('1b')}\` (none)`]);
-      const others = drawn(state).filter((row): row is RowOf<'cell'> => row.kind === 'cell' && row.toolName === 'Bash' && !isBlockedRow(row));
-      expect(others.map((cell) => [cell.status, cell.classification.denial]), name).toEqual([['done', null], ['done', null]]);
+      expect(readings(state), name).toEqual([`Auto mode blocked: \`${MARKER(`${n}a`)}\` (none)`, `Auto mode blocked: \`${MARKER(`${n}b`)}\` (none)`]);
+      const others = drawn(state).flatMap((row) => (row.kind === 'group' ? row.cells : row.kind === 'cell' && !isBlockedRow(row) ? [row] : [])).filter((cell) => cell.toolName === 'Bash');
+      expect(others.map((cell) => [cell.detail.kind === 'shell' && cell.detail.command, cell.status, cell.classification.denial]), name).toEqual([[MARKER(`${n}c`), 'done', null], [MARKER(`${n}d`), 'done', null]]);
     }
   });
 

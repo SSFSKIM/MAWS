@@ -101,7 +101,7 @@ describe('a subagent’s blocked call, by each route (probe D, ruling J; pinned,
     };
     const waited = { status: 'done', denial: null, name: null, line: 'Ran uxw_wait.py with argument 30', grant: null, error: null };
     expect(reading(routes.live, CHILD as AgentId), 'live').toEqual({
-      calls: [{ status: 'error', denial: null, name: null, line: 'Failed to run the curl command from task-1.txt', grant: null, error: OPENING }, waited],
+      calls: [{ status: 'error', denial: null, name: null, line: 'Failed: Run the curl command from task-1.txt', grant: null, error: OPENING }, waited],
       advisories: 1,
       approvals: [],
     });
@@ -118,7 +118,7 @@ describe('a subagent’s blocked call, by each route (probe D, ruling J; pinned,
     const routes = { live: journalToEvents(loadUxwaveJournal('u1c-d-after-1')).filter(ofParent), file: await fromFile(mainText), link: await fromRows(mainText) };
     for (const [route, events] of Object.entries(routes)) {
       expect(reading(events), route).toEqual({
-        calls: [{ status: 'done', denial: null, name: null, line: 'Ran the curl command', grant: null, error: null }],
+        calls: [{ status: 'done', denial: null, name: null, line: 'Fetched the approved probe URL into marker-1.txt', grant: null, error: null }],
         advisories: 0,
         approvals: [MARKER],
       });
