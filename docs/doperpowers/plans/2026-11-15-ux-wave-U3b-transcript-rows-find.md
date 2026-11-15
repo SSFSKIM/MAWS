@@ -46,16 +46,16 @@ How to see it working: the acceptance section's checks, each a unit run on the b
 
 ## The cut: two landings
 
-Counted from the code (the table under "Size and review"), the whole of U3b is about a hundred and ten files and eight thousand changed lines. That is more than three times the size from which a branch gets the review panel, and the two halves share no state:
+Counted from the code (the table under "Size and review"), the whole of U3b is about a hundred and fifteen files and nine thousand changed lines. That is more than three times the size from which a branch gets the review panel, and the two halves share no state:
 
-- **Rows and message actions** (M1 to M6) change what five row kinds draw and what two of them offer. Their state is the row model, one optional entry on an event, the session's status and one act on a session.
-- **Find and keyboard navigation** (M7 to M11) add no row and change no row's drawing. Their state is a find controller per mounted transcript, the list's handle, a jump's options and five rows of the action table.
+- **Rows and message actions** (M1 to M6) change what four row kinds draw and what two of them offer, and add one view-placed row. Their state is the row model, one optional entry on an event, the session's status and one act on a session.
+- **Find and keyboard navigation** (M7 to M11) add no row and change no row's drawing: they move the words of two lines into functions the rows and find share. Their state is a find controller per mounted transcript, the list's handle, a jump's options and five rows of the action table.
 
 What the second reads of the first is three things, all fixed in this document: how a command's output is drawn and the disclosure `line:<row id>` that opens it (Interfaces §B), the rows' kinds, and where an answer's action row sits. So the cut is two landings, each a pull request, each read by the panel in one pass.
 
 **The first landing is rows and message actions.** Find searches the rows as they are drawn and opens what they fold, so it is designed against their final shape; the first closes three board tickets and carries both reversed rulings; and it is the half the branches in flight meet (a restyled row conflicts by lines, a find bar by nothing), so it should be on master early. The second landing's milestones are written so that a second executor can be handed M7 to M11 with this document and a master that holds the first.
 
-Kept as one was the alternative. It lost on review quality: a panel that reads eight thousand lines of two unrelated concerns reads neither well, and a finding in find would hold back three tickets' worth of finished rows.
+Kept as one was the alternative. It lost on review quality: a panel that reads nine thousand lines of two unrelated concerns reads neither well, and a finding in find would hold back three tickets' worth of finished rows.
 
 ## What this document assumes of landings in flight
 
@@ -64,7 +64,7 @@ One list, read at the head of each branch on 2026-11-15, checked again by the ex
 | landing (branch read) | files it changes that these landings read or edit | what this document assumes | if it does not hold |
 |---|---|---|---|
 | U1b, requests drawn in the transcript (`origin/ux-wave/U1b` at `5c7e17dcc`; its merge-base is 81 commits behind master) | `transcript/view/Transcript.tsx`, `view/rows/Row.tsx`, `view/cells/CellLine.tsx` (24 lines), `view/transcript.css`, `model/derive.ts` (`isPersistentRow`), `model/rows.ts`, `schema.ts`, `reduce.ts`, `keys.ts`, `stores/transcript.ts`, `session/SessionPane.tsx`, `keymap/dispatcher.ts`, `keymap/useKeyChord.ts`; new `view/waiting-view.tsx` | No new row kind. The list is given the store's rows plus one synthetic last row (`END_ROW`, kind `request_slot`, `turnId` null) that is never in the store's rows. `RowFrame` stays focusable (`tabIndex={-1}`). The "Jump to latest" button gains a second state at the same place; nothing is added at the pane's top. `jumpTo`, `revealed` and the scroller are unchanged. A key binding can `claim` a key from inside a text field | Landing 1 places its rows before the end row. Landing 2's prompt and message steps skip `END_ROW`, and its find never counts it (it is not in the store). If U1b's `claims` is on master, nothing of landing 2 uses it: its keys are menu rows and the field's own handlers. Landing 2 moves the words of a call's line into one pure function in `view/cells/CellLine.tsx` (decision 27); whichever lands second keeps the other's lines |
-| U2b, the to-human view (`origin/ux-wave/U2b` at `105d08c66`; a second pull request is planned) | `model/rows.ts` (a new row kind `record_fold` replaces `owner_record`; `assistant_text.reportOnly`), `keys.ts`, `serialize.ts`, `reduce.ts` (`ui.openStretches`, `noTurnFold`, `modDraws`; `reportOpenTurns` gone), `stores/transcript.ts` (`jumpTo` opens the closed stretches that hold its target; `toggleStretch`, `mountView`), `view/Transcript.tsx` (the row composition rewritten), `view/rows/Divider.tsx` (`TurnLine` beside the folding divider, both through `useDividerSummary`), `view/rows/AssistantText.tsx`, `view/rows/Row.tsx`, `transcript/shell.tsx`, `shared/keymap/actions.ts` (`transcript.markAllRead`, pinned directly after `transcript.toggleReport`), `settings-tab/keymap.test.ts`; new `owner/view/mirror.ts` with an exhaustive `classOf(row)` | The message's DOM gains a level (`.transcript-answer > .owner-message-ink > .transcript-prose`). `jumpTo` to a row inside a closed stretch opens the stretch; `jumpTo` to a stretch's head text does not show that text's unmarked words. Under `noTurnFold` no turn folds. `useDividerSummary` and `dividerHead` still make the turn line's words | Landing 1's width rule is written against any depth under `.transcript-prose` (decision 9). Its compaction line is a row of its own, appended after the mirror's composition, and no turn line's words change (decision 16). Its new row kind `activity` is classed in `classOf` as a row that stays, at whichever of the two lands second (re-check 6). What Copy takes for an answer, and where its action row stands in a closed stretch, is statement 13. Landing 2's find opens a head's stretch itself (decision 28) and its five action rows stand before `transcript.toggleReport` in the table, so the pinned pair stays adjacent |
+| U2b, the to-human view (`origin/ux-wave/U2b` at `105d08c66`; a second pull request is planned) | `model/rows.ts` (a new row kind `record_fold` replaces `owner_record`; `assistant_text.reportOnly`), `keys.ts`, `serialize.ts`, `reduce.ts` (`ui.openStretches`, `noTurnFold`, `modDraws`; `reportOpenTurns` gone), `stores/transcript.ts` (`jumpTo` opens the closed stretches that hold its target; `toggleStretch`, `mountView`), `view/Transcript.tsx` (the row composition rewritten), `view/rows/Divider.tsx` (`TurnLine` beside the folding divider, both through `useDividerSummary`), `view/rows/AssistantText.tsx`, `view/rows/Row.tsx`, `transcript/shell.tsx`, `shared/keymap/actions.ts` (`transcript.markAllRead`, pinned directly after `transcript.toggleReport`), `settings-tab/keymap.test.ts`; new `owner/view/mirror.ts` with an exhaustive `classOf(row)` | The message's DOM gains a level (`.transcript-answer > .owner-message-ink > .transcript-prose`). `jumpTo` to a row inside a closed stretch opens the stretch; `jumpTo` to a stretch's head text does not show that text's unmarked words. Under `noTurnFold` no turn folds. The view's row composition ends in one list that `Transcript.tsx` hands its `TranscriptList` | Landing 1's width rule is written against any depth under `.transcript-prose` (decision 9). Its compaction line is a row of its own, appended after the mirror's composition, and no turn line's words change (decision 16). Its new row kind `activity` is classed in `classOf` as a row that stays, at whichever of the two lands second (re-check 6). What Copy takes for an answer, and where its action row stands in a closed stretch, is statement 13. Landing 2's find opens a head's stretch itself (decision 28) and its five action rows stand before `transcript.toggleReport` in the table, so the pinned pair stays adjacent |
 | U1c, "Approve and retry" (`origin/ux-wave/U1c` at `4c684cd4e`; a document only) | planned: `src/shared/engine/arrival.ts` (the `consent` class), `view/context.tsx`, `cells/CellLine.tsx`, `model/cells.ts`, `copy.ts`, `derive.ts`, `keys.ts`, `transcript.css` | It relies on `User.tsx` drawing `ConsentLine` in the bubble's place for a row with `consent`, and on `arrival.ts` keeping the `consent` class | Landing 1 keeps both. A consent line gets no action row under it (decision 11) |
 | U4b, the composer's integrations (`origin/ux-wave/U4b` at `bc4e5e2dc`) | `model/copy.ts` (a new export `askQuestionTitle(question)`, placed after `askStateCopy`), `model/serialize.ts` (the import line that names the `ask` copy, and the `ask` case), `view/rows/AskCapsule.tsx` | Nothing of landing 1 or 2 reads `askQuestionTitle` | Landing 1 edits the import line above U4b's in `serialize.ts` (it stops importing `LOCAL_COMMAND_HEADER`); the second to land keeps both lines |
 | U5b, Review as one scroll (`origin/ux-wave/U5b` at `dcd368046`) | none of these landings' files; its second pull request plans one condition in `AnchorChip` of `view/rows/User.tsx` | `AnchorChip` and its `path` handling stand as they are | Landing 1 does not edit `AnchorChip` |
@@ -133,7 +133,7 @@ Each statement was read in the code; the ones the child's text has differently a
 - **The breakout.** One rule of four selectors in `transcript.css` lets a completed answer's or commentary's table or code block grow to `--measure-wide` less two pads, centred. The selectors name direct children of `.transcript-prose` at fixed depths.
 - **The owner's message.** `.transcript-user-actions` (time, Copy, Edit) is absolutely positioned to the left of the bubble's foot inside `.transcript-user-body`, shown on hover or focus within. `.transcript-user-meta` is a line in flow under the bubble that exists only with a caption or "Not sent". Edit is drawn when `row.editable && !row.pending`. `editable` is set in `userRow` (`model/derive.ts`): true for a turn's opening message that has a message id, and for a steer; false for an opener with no id, for a held message and for a message of several comments. Edit calls `editAndResubmit`, which the composer registers (`composer/index.tsx`): the bubble becomes an editor in place, and Send rewinds this session to that message and sends the edit; the editor's own Fork forks from before the message. A mount that registers nothing gets a no-op: in the desk the button is drawn and does nothing (a defect that is there today; Surprises, 6).
 - **An answer.** `AssistantTextRow` draws markdown and nothing else. A turn's text blocks after its last work are its answer (`phase: 'answer'`, set in `deriveTurn`); there can be more than one row of them. `serializeRows` (`model/serialize.ts`) is exported and called by nothing.
-- **The turn line.** The child says the line that reads "Working for …" is at the transcript's end. In the code it is the turn's `divider` row, which stands at the head of the turn's work, directly under the prompt: it is the last row only while the turn has no work under it, and, once U2b is on master, in the folded to-human view (Reported, 2).
+- **The turn line.** The child says the line that reads "Working for …" is at the transcript's end. In the code it is the turn's `divider` row, which stands at the head of the turn's work, directly under the prompt: it is the last row only while the turn has no work under it, and, once U2b is on master, in the folded to-human view. Ruled on that ground: the compaction's words stand at the transcript's end (decision 16).
 - **A compaction.** `EngineSessionStatus.activity` is `'compacting'` from the engine's status frame until the next status or the turn's `result` (`src/engine-host/session-status.ts`); the renderer's sessions store holds the status (`engine`, `stores/sessions.ts`) and no component reads `activity`. The sidebar's hover card draws the digest's activity line, another field. A terminal session's plane carries the bridge's `compact` messages with their phase, kept by operation id (`lane-a/watches.ts`, `keepOps`); nothing draws them.
 - **A web fetch.** Nine places name `WebFetch` alone. The child lists seven; the two it does not list are U2a's `model/caption.ts` (the `web_fetch` step of a caption) and the second place in `model/cells.ts` that words the row. `cellLabel` (`model/copy.ts`) tests for an MCP name before it reaches its `WebFetch` case, so a `mcp__web__fetch` call reads "Used web · fetch".
 - **A call's line** computes its words in the view, not in the model. `CellLabel` (`view/cells/CellLine.tsx`) draws a shell call through `shellLabel` (the call's description in place of its command, or a short form of the command), a file call as its verb and the shortest suffix of its path that tells it from the run's other paths (`shortestFileSuffix` over `FilePathsContext`, which the run gives as `row.cells.flatMap((cell) => cell.paths)` and a standalone call as none), and removes code marks through `CodeText`; a failed call's reason follows. So `cell.label` is not what is drawn. The label is one line cut with an ellipsis (`.transcript-cell-label`), and what a call opens onto does not repeat it.
@@ -191,7 +191,7 @@ Each is a means the section or a ruling left open, with its reason and what lost
     - *Every clipping ancestor between the match and the list, innermost first:* a fold that cuts it is opened (a bubble past nineteen lines, a command's line past two, and a call's label, which is drawn whole while it holds the current match through a disclosure of the view's own, `label:<cell id>`, that only find opens); a nested scroller is scrolled so that the match is inside it (a tall code block's own viewport, a table's sideways and downward scroll, a pasted block); then the list is positioned.
     Find remembers what it opened for the current match. Moving to another match closes those again, except what the next match needs and what the reader has toggled since; closing the bar closes nothing. This is Desktop's hold. A match is never counted twice for one drawn text and never left behind an ellipsis or outside a viewport.
 29. **What is recomputed, and what bounds it** (ruled, F5). The claim that every slice is at most 8 ms is withdrawn: two units cannot be split, and a design can only promise to yield between units and be measured.
-    - *The first pass is resumable.* It goes turn by turn through `expandedTurnRows(state, id)`, the entry point that already derives one turn alone (so `rowsOf` is not driven, and nothing is added to `derive.ts`), keeping each turn's rows by that turn's version; then part by part, reading each markdown-drawn part's words once (decision 27) and keeping them by the row's content; the per-query scan runs over the kept words part by part. Between units the pass reads the clock and, past 8 ms, yields to the event loop. After a yield it reads the store again and goes on with the turns its cache does not hold at their current version; it never holds a row across a yield. The count reads nothing until the pass ends.
+    - *The first pass is resumable.* It goes turn by turn through `expandedTurnRows(state, id)`, the entry point that already derives one turn alone (so `rowsOf` is not driven, and nothing is added to `derive.ts`), keeping each turn's rows by that turn's version; then part by part, reading each markdown-drawn part's words once (decision 27) and keeping them by the row's content; the per-query scan runs over the kept words part by part. Between units the pass reads the clock and, past 8 ms, yields to the event loop. After a yield it reads the store again and goes on with the turns its cache does not hold at their current version; it never holds a row across a yield. Until the pass ends the count's place reads `Searching…`, and no partial count is shown (a count that climbs while a person reads it is a number they cannot use). The pass starts when the bar opens, before a query is typed, and its kept words outlive the query and the bar, so only a session's first open pays it whole.
     - *The units that cannot be split:* one turn's derivation, and one part's drawing. A session with one enormous turn or one enormous answer pays that unit in one task, as the transcript itself does when it derives that turn or mounts that row.
     - *On a new row:* the changed turn is derived once more than the store derives it, and its new parts are read; nothing else. While rows arrive the recount runs at most every 250 ms. *On a keystroke*, after 250 ms of quiet: the kept words are scanned, in slices; nothing is derived or drawn. Nothing runs per frame, per token or per tick, and nothing at all while the bar is closed.
     - *The budgets*, measured on a Mac by scenes the architect runs (Acceptance 26; Proof, 14), each the longest single task: at the first open of the bar on the harness's 500-turn session, 50 ms; with one very large turn, that turn's own derivation as the same scene measures it in the store, plus 16 ms; with one very large markdown part, that row's own first mount as the same scene measures it, plus 16 ms; a keystroke's scan, 16 ms; an update while the bar is open, 16 ms beyond the store's own task for that batch. 50 ms is the line a browser calls a long task; 16 ms is one frame; the two relative budgets say that find may not cost more than the transcript already pays for the same unit. With the bar closed the transcript's own frame bound is untouched, which the anchoring scene shows base against landing.
@@ -700,17 +700,23 @@ What these landings expose and consume is defined here once. Signatures bind; fi
 In `src/shared/engine/arrival-schema.ts`, beside `carriedOf`:
 
 ```ts
-/** The command the engine ran for an output, as the entry of `arrival` that carries it; absent where the carrier named none. */
-export function commandEntry(run: { command: string; args: string } | null): ArrivalEntry[];   // [] for null
+/** What travels with a command's output: the command the engine ran, and that its text was a terminal's. */
+export interface CommandFacts { run: { command: string; args: string } | null; plain: boolean }
 
-/** The run a `user.message` of origin `local-command` carries, or null: its first entry of class `command` whose `run`
- *  is exactly `{ command: string; args: string }`. An entry that does not fit is ignored, never an error. */
-export function commandRunOf(arrival: readonly ArrivalEntry[] | undefined): { command: string; args: string } | null;
+/** The entry of `arrival` that carries them; none when there is nothing to say (no run, not plain). */
+export function commandEntry(facts: CommandFacts): ArrivalEntry[];
+
+/** What a `user.message` of origin `local-command` carries: its first entry of class `command`, held to
+ *  `{ class: 'command', run?: { command: string; args: string }, plain?: true }` strictly. An entry that does not fit,
+ *  or none, reads as `{ run: null, plain: false }`; never an error. */
+export function commandOf(arrival: readonly ArrivalEntry[] | undefined): CommandFacts;
 ```
 
-`CarriedArrivalSchema`, `CARRIED_CLASSES`, `ArrivalEntrySchema` and `carriedOf` are not changed. The comment over the loose member is corrected: a class outside the closed set passes as sent, and `command` is read by `commandRunOf`.
+`CarriedArrivalSchema`, `CARRIED_CLASSES`, `ArrivalEntrySchema` and `carriedOf` are not changed. The comment over the loose member is corrected: a class outside the closed set passes as sent, and `command` is read by `commandOf`.
 
-The producers attach `arrival: commandEntry(run)` only when it is not empty, to the `user.message` of origin `local-command` that carries the output (never to a synthetic message): `Normalizer.commandOutput`, and the backfill's two places. In `src/shared/engine/arrival.ts`, the reading of a file's `system` row of subtype `local_command` that holds an output gives `run` from the row's `commandRun` (`{ command: string; args?: string }`, read as `local_command_run` is read on the frame); every other carrier keeps `run: null`.
+The reader (`src/shared/engine/arrival.ts`) gives the `command` class one more field, `plain: boolean`: true where `stripAnsi` (`@shared/wire/ansi`) changed the carrier's text, that is, where it held an escape sequence. And the reading of a file's `system` row of subtype `local_command` that holds an output gives `run` from the row's `commandRun` (`{ command: string; args?: string }`, read as `local_command_run` is read on the frame); every other carrier keeps `run: null`. The child's `Arrival` type gains that one field; it is U3's own contract, and the architect writes it into the child's file with the next batch.
+
+The producers attach `arrival: commandEntry(facts)` only when it is not empty, to the `user.message` of origin `local-command` that carries the output (never to a synthetic message): `Normalizer.commandOutput`, and the backfill's two places.
 
 ### §B. The command's row and its line (M1)
 
@@ -718,13 +724,14 @@ The producers attach `arrival: commandEntry(run)` only when it is not empty, to 
 // model/rows.ts
 | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string;
     error?: true;                               // all of it came in <local-command-stderr>
-    run?: { command: string; args: string };    // commandRunOf(event.arrival)
+    run?: { command: string; args: string };    // commandOf(event.arrival).run
+    plain?: true;                               // commandOf(event.arrival).plain: a terminal's text, not markdown
     lone?: true }                               // its turn holds no bubble of a command, or it has no turn
 ```
 
-`RowSchema`'s arm gains the three optional fields. `lone` is set in `deriveTurn` when the turn's user row is absent or its text is not a slash command line (`slashCommandLine`, the function that already says so), and for every loose row.
+`RowSchema`'s arm gains the four optional fields. `lone` is set in `deriveTurn` when the turn's user row is absent or its text is not a slash command line (`slashCommandLine`, the function that already says so), and for every loose row.
 
-The view's contract: the row's root is `.transcript-command` with `data-error` when `error`; the lead `⎿` is `aria-hidden`; the closed text is plain; the disclosure is **`line:<row.id>`**; the buttons read "Show more" and "Show less" and carry `aria-expanded`. `partOf` gives `⎿ <text>`, or `⎿ /<run.command> · <text>` for a `lone` row with a run.
+The view's contract. The row's root is `.transcript-command` with `data-error` when `error`. The lead `⎿` is `aria-hidden`. The output is drawn once, in `.transcript-command-output`: `<Markdown markdown={row.text} live={false} />`, or for a `plain` row a `<pre>` of `row.text`. That element is the fold that cuts: while the disclosure **`line:<row.id>`** is closed its height is bound to two lines of the row's type and what overflows is hidden under a fade; open, it has no bound. "Show more" is drawn while the closed element is measured as overflowing, and "Show less" while open; both carry `aria-expanded`. A `lone` row with a run draws `/<run.command> · ` before the output, outside that element. `partOf` gives `⎿ <text>`, or `⎿ /<run.command> · <text>` for a `lone` row with a run.
 
 `commandInput(row, state, revealed)` keeps its signature and gives `{ command, args, text: row.text, isErrored: row.error === true }` by decision 5.
 
@@ -732,16 +739,24 @@ The view's contract: the row's root is `.transcript-command` with `data-error` w
 
 ```ts
 // model/answer-actions.ts
-/** For each answer row that gets the action row, the message to fork from: the id of the owner's next turn-opening
- *  prompt, or null under the list's last answer. Rows not in the map get no action row. */
-export function answerActionsOf(rows: readonly Row[]): Map<RowId, { rewindTo: MessageUuid | null; fork: boolean; copy: RowId[] }>;
+/** Placement only: for each drawn answer row that gets the action row, its turn and the message to fork from (the id
+ *  of the owner's next turn-opening prompt, or null under the list's last answer). Rows not in the map get none. */
+export function answerActionsOf(rows: readonly Row[]): Map<RowId, { turnId: TurnId; rewindTo: MessageUuid | null; fork: boolean }>;
+
+/** What Copy takes: the markdown of every answer block of the turn, from the turn's complete projection. Never reads
+ *  what is drawn, folded or mounted. '' when the store holds no such turn. */
+export function answerMarkdownOf(state: TranscriptState, turnId: TurnId): string;
 ```
 
-A *turn-opening prompt of the owner's* is a `user` row with `steer: false`, no `pending`, no `unread` and `dropped: false`; the consent line counts (it is the owner's prompt). The answer is the last `assistant_text` row with `phase: 'answer'`, `live: false` and no `cut`, after the prompt before and before this one. A turn is running when its `divider` row reads `state: 'working'` or one of its rows is `live`; there is no entry when a running turn has a row between that answer and the next prompt (or the list's end). `fork` is false where the next prompt has `messageUuid: null`. `copy` is the ids of the `answer` rows of that answer's turn, in order.
+A *turn-opening prompt of the owner's* is a `user` row with `steer: false`, no `pending`, no `unread` and `dropped: false`; the consent line counts (it is the owner's prompt). The placed row is the last drawn `assistant_text` row with `phase: 'answer'`, `live: false` and no `cut`, after the prompt before and before this one. A turn is running when its `divider` row reads `state: 'working'` or one of its rows is `live`; there is no entry when a running turn has a row between that answer and the next prompt (or the list's end). `fork` is false where the next prompt has `messageUuid: null`.
 
-`Transcript.tsx` computes it from the list it draws in a `useMemo` on the rows, and publishes it through a store created per mount and carried in the context (`answerActions?: { subscribe(listener): () => void; get(id: RowId): … | undefined }`); `get` returns the same object until its value changes. `RowView` renders `<AnswerActions row={row} />` after the body of an `assistant_text` row; the component reads the store and renders nothing without an entry.
+`answerMarkdownOf` derives the one turn with its work open (`expandedTurnRows(state, turnId)`), keeps its `assistant_text` rows with `phase: 'answer'` and no `cut`, and joins them with `serializeRows`. It runs at the press of Copy, on the store's state of that moment.
+
+`Transcript.tsx` computes the placement from the list it draws in a `useMemo` on the rows, and publishes it through a store created per mount and carried in the context (`answerActions?: { subscribe(listener): () => void; get(id: RowId): … | undefined }`); `get` returns the same object until its value changes. `RowView` renders `<AnswerActions row={row} />` after the body of an `assistant_text` row; the component reads the store and renders nothing without an entry.
 
 The row's contract: `.transcript-answer-actions`, always laid out, opacity 0 until `.transcript-row:hover` or `:focus-within`; in order Copy, Fork from here, the time.
+
+On a master that holds U2b, "The statements to read again", 13, says which drawn row carries it in the to-human view; the function's rule is extended there to the stretch's head text and nowhere else.
 
 ### §D. Fork from here (M3)
 
@@ -753,11 +768,18 @@ forkFrom?: {
   /** Forks in place from before `rewindTo` (null: the whole conversation). Opens the fork's tab or says why not; never throws. */
   run(appSessionId: AppSessionId, rewindTo: MessageUuid | null): Promise<void>;
 };
+
+// src/shared/engine/arrival.ts
+/** A prompt's text as the person's own words: where it opens with a whole sminos frame line that names `human`, the
+ *  words after it (the reader's `own` class, with its guard for words that read as the interrupt marker); else the text. */
+export function ownWordsOf(text: string): string;
 ```
 
 The app's adapter, registered in `connectTranscript()` (`transcript/shell.tsx`): `{ useUnavailable: useForkUnavailable, run: forkInPlace }`, where `forkInPlace(appSessionId: AppSessionId, rewindTo: MessageUuid | null = null): Promise<void>` in `sessions/record-ops.ts` passes `{ message: null, rewindTo }` to `forkSession`. `RemoteTranscriptSlot` (another machine's terminal session) gives its `Transcript` actions without `forkFrom`. A child's transcript (`variant: 'child'`) draws no Fork whatever the actions hold: a subagent's rows are not the session's prompts.
 
 The button: with a sentence from `useUnavailable`, `disabled` with the sentence as its `title` and `aria-description`; while `run` is out, `disabled` and `aria-busy`.
+
+The rewind boundary's row (`looseRows`, the `boundary.rewind` case in `model/derive.ts`) takes `detail: event.prefillText === null ? null : ownWordsOf(event.prefillText)`: the one place the rewind's text reaches a fork's window (Probes, 5).
 
 ### §E. A compaction (M4)
 
@@ -769,10 +791,11 @@ export function useCompactingSince(appSessionId: AppSessionId | null): number | 
 export function connectCompacting(): () => void;                                    // follows the sessions store's engine statuses
 
 // view/compacting.ts (the transcript's; no app import)
-export function compactingPlace(turnOpen: boolean): 'line' | 'end';                 // 'line' while a turn is open, else 'end' (Reported, 2)
+/** The drawn list with the compaction's row at its end, before a row that must stay last (U1b's end row); the list itself when `since` is null. */
+export function compactingRow(rows: readonly Row[], since: number | null): readonly Row[];
 ```
 
-`Transcript` gains the prop `compacting?: number | null`, which `TranscriptSlot` and `RemoteTranscriptSlot` give from `useCompactingSince`, and carries it in the context. `dividerHead` gains an optional `compactingMs?: number | null`: with a number and `state: 'working'` it returns the compaction words of §L. The row kind: `{ kind: 'activity'; activity: 'compacting'; since: string }`, id `activity:compacting`, `turnId: null`; `ESTIMATES.activity` is the divider's; `partOf` returns null; it is in no fold and asks no mod's site. The transitions are M4's table.
+`Transcript` gains the prop `compacting?: number | null`, which `TranscriptSlot` and `RemoteTranscriptSlot` give from `useCompactingSince`; it applies `compactingRow` last among its row projections. The row kind: `{ kind: 'activity'; activity: 'compacting'; since: string }`, id `activity:compacting`, `turnId: null`; `ESTIMATES.activity` is the divider's; `partOf` returns null; it is in no fold, asks no mod's site, is no prompt and no message stop, and holds no searched part. Its view (`view/rows/Activity.tsx`) is a `TickingStatus` line in the turn line's type. The transitions are M4's table. No turn line's words change and `dividerHead` is not touched.
 
 ### §F. The web fetch helper (M5)
 
@@ -786,7 +809,7 @@ export function webFetchUrl(input: unknown): string | null;
 
 The nine places that ask it: `model/classify.ts` (the web group), `model/caption.ts` (`web_fetch`), `model/cells.ts` (the `web` detail; the label's host), `model/copy.ts` (`cellLabel`, before its MCP test: "Fetched `<host>`"), `model/derive.ts` (the URL of the turn's used tools), `request-card/tools.ts` (`toolClass` gives `fetch`), `src/services/sessions/digest.ts` ("Fetching `<host>`"), `src/shared/attention/read-only-tools.ts` (`READ_ONLY_TOOLS` gains `mcp__web__fetch`).
 
-### §G. A jump's options and the list's handle (M7)
+### §G. A jump's options and the list's handle (M7; `reveal` in M10)
 
 ```ts
 // stores/transcript.ts
@@ -801,14 +824,17 @@ export interface TranscriptListHandle {
   scrollToIndex(index: number, align: 'start' | 'center' | 'end', gap?: number): void;   // with 'start', the row's top lands `gap` px under the top inset
   /** The index in the drawn list of the first row whose box reaches below the pane's top inset; -1 for an empty list. */
   firstVisibleIndex(): number;
-  /** Scrolls so that the rectangle lies a third down the visible band when it is not wholly inside it; releases follow as scrollToIndex does. */
-  reveal(target: Range | Element): void;
+  /** The list's own step of a reveal: scrolls the list so that the rectangle lies a third down the visible band when
+   *  it is not wholly inside it; releases follow as scrollToIndex does. It opens nothing and scrolls nothing nested. */
+  reveal(rect: DOMRect): void;
+  /** The visible band in viewport coordinates: under the top inset, above the list's bottom edge. */
+  band(): { top: number; bottom: number; left: number; right: number };
   /** Pixels at the pane's top that an overlay covers: a jump to `start` lands under them. */
   setTopInset(px: number): void;
 }
 ```
 
-With no gap and no inset `scrollToIndex` does what it does today, so the desk's landings do not move. The prompt chords jump with `align: 'start', gap: 20`. These are additions: the desk's uses of `TranscriptListHandle` compile unchanged.
+With no gap and no inset `scrollToIndex` does what it does today, so the desk's landings do not move. The prompt chords jump with `align: 'start', gap: 20`. These are additions: the desk's uses of `TranscriptListHandle` compile unchanged. The whole reveal of a match, through what clips it, is §K's.
 
 ### §H. What is stored or sent, against both builds (UC-14)
 
@@ -816,15 +842,15 @@ Neither landing stores anything, and one thing is newly sent.
 
 | value | these landings | build F (`f1852de3a`) | build G (`2c7044231`) |
 |---|---|---|---|
-| on a `user.message` of origin `local-command`, the entry `{ class: 'command', run }` in `arrival`, from a host of this build to an app of another, and over the machine link | sent by landing 1 where the carrier named a run | its event schema has no `arrival`; its tolerant reader (`readTolerant`, `src/shared/ipc/tolerant.ts`) drops the key and keeps the event; the output draws as F draws it | its schema passes the entry through the loose member; `carriedOf` ignores it; the output draws as G draws it |
-| the same event from a host of F or G to an app of this build | no entry | — | — |
+| on a `user.message` of origin `local-command`, the entry `{ class: 'command', run?, plain? }` in `arrival`, from a host of this build to an app of another, and over the machine link | sent by landing 1 where the carrier named a run or its text was a terminal's | its event schema has no `arrival`; its tolerant reader (`readTolerant`, `src/shared/ipc/tolerant.ts`) drops the key and keeps the event; the output draws as F draws it | its schema passes the entry through the loose member; `carriedOf` ignores it; the output draws as G draws it |
+| the same output from a host of F or G to an app of this build | — | F's host sends a command's output as an assistant block, which this build draws as an answer paragraph, as F's sessions draw today | an output event with no entry: drawn as the light line, the name from its turn, through markdown |
 | X1 events on disk | none are stored: the journal holds engine frames (`src/engine-host/journal.ts`) and the reading build's normaliser makes its own events. This build, then F or G, then this build on one profile leaves nothing different | reads the same frames and makes its own events | the same |
 | `session.fork` with a `rewindTo`, over the link | sent by "Fork from here" only to a peer that lists `rl2.session-acts`; the command and its offer are U9's and on master | lists no such capability: nothing is sent, the button is disabled with U9's sentence | takes it: its row is master's |
 | the session's status, the bridge's `compact` messages | read, as they are sent today; nothing added | — | — |
 | the five action ids | rows of the table; never stored (no rebinding is offered for an id F does not know) | — | — |
 | find's query, what it opened, a pane's last query; the compaction clock | the window's memory | — | — |
 
-So the cross-build coverage table (`e2e/cross-build.spec.ts`, the comment table "A later landing that stores something new adds its row here") gains no row, and no cross-build run is owed ("Reported, 4"). The wire's manifest and `WIRE_MINOR` are untouched (Concrete Steps, 3).
+**What is owed for the newly sent entry** (ruled, F6: a changed message owes a run against each build, and a manifest that did not change does not lift it): the unit cases of acceptance 14 for exactly this entry, and the scene *(a command's output, both ways)* in `e2e/cross-build.spec.ts` (M6), run once against each older build as the exact peer in the ordinary mode (Proof, 13). The cross-build coverage table in that spec is for stored keys and gains no row. The wire's manifest and `WIRE_MINOR` are untouched (Concrete Steps, 3); the two runs do not depend on a minor, they name their peers.
 
 ### §I. The five rows, and which pane a key acts on (M7)
 
@@ -862,42 +888,70 @@ export function stepFrom(rows: readonly Row[], is: (row: Row) => boolean, from: 
 
 `RowFrame` sets `data-message=""` on a row for which `isMessageStop` holds; the arrows' handler reads that attribute and nothing else to know a message's wrapper.
 
-### §J. Find's model (M8)
+### §J. Find's model: one reading of what a row draws (M8)
 
 ```ts
 // model/find.ts (pure; imported only by the find chunk)
 export function searchable(query: string): boolean;                 // longer than two characters, or holds Han, Hiragana, Katakana or Hangul
 export function fold(text: string): { folded: string; at: Uint32Array };   // case and NFC folded; `at[i]` is the offset in `text` of folded character i
-export function textOfMarkdown(markdown: string): string;           // the text the markdown draws, blocks and table cells parted by '\n'
+export function matchesIn(words: string, foldedQuery: string): { start: number; end: number }[];   // offsets in `words`, left to right, not overlapping
 
 export interface FindPart {
   target: RowId | CellId;       // what jumpTo is given
-  text: string;                 // already the drawn text
-  opens: string | null;         // a disclosure this part is wholly under, opened before the jump: 'line:<row id>', 'pasted:<row id>:<n>'
-  clip: string | null;          // a disclosure that cuts this part while closed, opened only when the current match is cut off
-                                // or not drawn: 'bubble:<row id>' for a bubble's text, 'line:<row id>' for a command's output
+  scope: string;                // the part's name within its row: the value of `data-find-part` on the element that draws it
+  words: string | null;         // the drawn words, where a pure function gives them; null where they are read from the row's drawing
+  opens: string | null;         // a disclosure this part is wholly under, opened before the jump
 }
-export function findPartsOf(row: Row): FindPart[];                   // a case for every Row kind, no default
-export function matchesIn(part: FindPart, foldedQuery: string): { start: number; end: number }[];   // offsets in part.text, left to right, not overlapping
+/** The searched parts of a row, in the order the row draws them. A case for every Row kind, no default. A group's
+ *  calls are worded with the run's file paths, the value the view gives them. */
+export function findPartsOf(row: Row): FindPart[];
+
+// view/cells/CellLine.tsx
+/** What a call's line draws: its words whole, and their pieces as the label draws them. The one computation: `CellLabel`
+ *  renders `pieces`, and find searches `text`. */
+export function cellLineWords(cell: Cell, peers: readonly string[]): { text: string; pieces: readonly { text: string; as: 'plain' | 'code' | 'verb' | 'target' | 'reason' }[] };
+
+// model/rows.ts
+/** What a message's line opens onto: a hand-back's report, else the whole message. `AgentMessageRow` draws it. */
+export function messageWhole(row: Extract<Row, { kind: 'agent_message' }>): string;
+
+// view/find/scope.ts
+export const FIND_PART = 'data-find-part';   // a searched part's scope
+export const FIND_SKIP = 'data-find-skip';   // chrome inside a scope
+export const FIND_CLIP = 'data-find-clip';   // a fold that cuts what is inside it; its value is the disclosure that opens it
+/** The words a scope draws: its text nodes in order, with the skipped subtrees left out and a line break between blocks. */
+export function wordsOfScope(scope: Element): string;
+/** The ranges of a folded query in a scope, by the same walk: one per match of `matchesIn(wordsOfScope(scope), query)`. */
+export function rangesIn(scope: Element, foldedQuery: string): Range[];
+
+// view/find/words.ts
+/** The words of the parts of a row that are read from its drawing, by scope: from the mounted row when one is given,
+ *  else from the row's own body drawn once outside the document. */
+export function drawnWordsOf(row: Row, mounted: Element | null): Map<string, string>;
 ```
 
-`findPartsOf`, kind by kind:
+`findPartsOf`, kind by kind. "Read" means `words: null`: the words are `drawnWordsOf`'s for that scope.
 
-| kind | parts |
-|---|---|
-| `user` (a bubble) | one per text segment, through `textOfMarkdown`, with `clip: 'bubble:<row id>'`; one per pasted block, its text as it is, `opens: 'pasted:<row id>:<n>'`; a message of several comments, one per comment's text. The consent line: its sentence and subject |
-| `assistant_text` | `textOfMarkdown(row.markdown)`; none while `live` |
-| `to_human` | `textOfMarkdown(row.text)`; none while `pending` |
-| `agent_message` | the line's words (`row.text`); then what the line opens onto (`messageMore(row)`), `opens: 'line:<row id>'` |
-| `notice` | `noticeLine(row)`; then `row.detail`, `opens: 'line:<row id>'` |
-| `local_command` | `row.text` as it is (the closed line draws it plain), with `clip: 'line:<row id>'` |
-| `cell` (standalone) | `row.label`, `target` the cell's id; none for a cell whose detail is `thinking` |
-| `group` | one per cell as for `cell`; nothing for the run's own caption |
-| every other kind (`time`, `divider`, `thinking`, `plan`, `question`, `request_slot`, `ask`, `error`, `gap`, `boundary`, `bash`, `receipt`, `subagent`, `delivery`, `side_thread`, `agent_list`, `artifact`, `browser_action`, `browser_activity`, `owner_record`, `activity`, and U2b's `record_fold`) | none |
+| kind | parts (scope; words; opens) | the element that carries the scope |
+|---|---|---|
+| `user` (a bubble) | one per text segment (`text:<n>`; read; none); one per pasted block (`pasted:<n>`; the attachment's text; `pasted:<row id>:<n>`); a message of several comments, one per comment's text (`comment:<n>`; read; none) | each segment's markdown root; the pasted block's `<pre>` |
+| `user` (the consent line) | none: it is cut with an ellipsis and opens onto nothing | — |
+| `assistant_text` | `text`; read; none. None while `live` | the row's prose root (the presenter's ink root where it draws the text) |
+| `to_human` | `text`; read; none. None while `pending` | the message's prose root |
+| `agent_message` | `body`; `messageWhole(row)`; `line:<row id>`. The line's own words are not a part | the opened `<p>` |
+| `notice` | `sentence`; `noticeLine(row)`; `line:<row id>`. Then, when `detail` is not null, `detail`; `row.detail`; `line:<row id>`. The line's own words are not a part | the two opened `<p>`s |
+| `local_command` | `output`; read for a markdown row, `row.text` for a `plain` row; none (its fold cuts it and is a clip, §K) | `.transcript-command-output` |
+| `cell` (standalone) | `line`; `cellLineWords(row, []).text`; none; `target` the cell's id. None for a cell whose detail is `thinking` | `.transcript-cell-label`, set by `CellLine` |
+| `group` | one per cell as for `cell`, with `peers` the run's paths (`row.cells.flatMap((cell) => cell.paths)`, the value `GroupRow` gives its context). Nothing for the run's own line or caption | the same, in the opened run |
+| every other kind (`time`, `divider`, `thinking`, `plan`, `question`, `request_slot`, `ask`, `error`, `gap`, `boundary`, `bash`, `receipt`, `subagent`, `delivery`, `side_thread`, `agent_list`, `artifact`, `browser_action`, `browser_activity`, `owner_record`, `activity`, and U2b's `record_fold`) | none | — |
 
-In `model/derive.ts`: `export function rowsWithEveryTurnOpen(state: TranscriptState, memo: TranscriptState['memo']): Row[]`, which is `rowsOf` over the given memo with every turn of `state.order` and of the hidden branches expanded; the store's `allExpandedRows` becomes a call of it with a fresh memo. Find keeps one memo per controller and searches the turns of `state.order` and the loose rows only: a row of a rewound branch is searched when its boundary is revealed, since `jumpTo` cannot show it otherwise.
+**The skip list**, whole. Inside a scope the walker leaves out exactly these, and nothing else: an element with `data-find-skip`, which this work sets on the owner's action line (the time, Copy, Edit, the caption), on an answer's action row, on a message's send state and its Reply, on "Show more" and "Show less", on a pasted block's chip, and on a line's lead mark; and, of the markdown library's own markup, `[data-streamdown="code-block-header"]`, `[data-streamdown="code-block-actions"]`, a table wrapper's controls (its `button`s), an `output` that only a screen reader reads, a mermaid fence's container (`.transcript-mermaid`) and a formula (`.katex`). A disclosure button that holds content (a call's line, a message's line) is never skipped; a message's and a notice's line is simply no scope. An opened call's detail is outside the label's scope, so it is neither counted nor marked.
 
-### §K. Find's controller, bar and marks (M8, M10)
+**The contract** (`view/find/contract.test.tsx`), for every kind in the table and for each drawing of it: the row is mounted; `findPartsOf` and `drawnWordsOf` give its words; for a set of queries, `matchesIn` over each part's words and `rangesIn` over that part's scope give the same number of matches, each range's text folding to the query. And `drawnWordsOf(row, null)` equals `drawnWordsOf(row, mounted)`. A kind that cannot meet it is taken out of the table, and this document is told.
+
+The detached drawing: `drawnWordsOf(row, null)` renders `body(row)` (exported from `view/rows/Row.tsx`, the function `RowView` draws) with `react-dom`'s root and `flushSync` into an element that is never attached, under a `TranscriptProvider` whose store key is empty, whose `presentation` is `'local'`, whose actions are the no-op set and whose disclosures are all open; reads each scope with `wordsOfScope`; and unmounts. An image is not loaded by a detached element.
+
+### §K. Find's controller, pass, marks, reveal and bar (M9, M10)
 
 ```ts
 // view/find/controller.ts
@@ -905,7 +959,7 @@ export interface FindState {
   open: boolean;
   query: string;
   phase: 'idle' | 'indexing' | 'ready' | 'walking';
-  total: number;             // matches in what is loaded
+  total: number;             // matches in what is loaded; every one has a range when its row is drawn by MAWS
   current: number;           // 1-based; 0 when total is 0
   earlier: boolean;          // the source says older pages remain
 }
@@ -916,7 +970,7 @@ export interface FindController {
   setQuery(query: string): void;                   // debounced 250 ms inside
   step(direction: -1 | 1): void;                   // wraps; on a closed bar, opens it on the last query first
   searchEarlier(): void;  stopEarlier(): void;
-  matchesOf(row: RowId): readonly { part: number; start: number; end: number; current: boolean }[];   // the same array until it changes
+  matchesOf(row: RowId): readonly { scope: string; start: number; end: number; current: boolean }[];   // the same array until it changes
 }
 export function createFindController(deps: {
   storeKey: string;
@@ -924,17 +978,36 @@ export function createFindController(deps: {
   disclosures: Disclosures;
   list: () => TranscriptListHandle | null;
   drawn: () => readonly Row[];                     // the mount's drawn list, for the first row in view
+  mounted: (row: RowId) => Element | null;         // the row's element when the virtualiser has it and MAWS draws it
   pages: () => OlderPagesController | null;
+  clock: { now(): number; yield(): Promise<void> };   // performance.now and a macrotask in the app; stepped by hand in tests
 }): FindController;
+
+// view/find/pass.ts
+/** One resumable unit of work: derive one turn (`expandedTurnRows`), or read one part's words, or scan a slice of kept
+ *  words. `run` does units until `clock.now()` is 8 ms past the task's start, then awaits `clock.yield()`, re-reads the
+ *  store, and goes on; it stops when `stale()` says the generation moved. */
+export function runPass(units: () => Iterable<() => void>, clock: { now(): number; yield(): Promise<void> }, stale: () => boolean): Promise<'done' | 'stale'>;
+
+// view/find/reveal.ts
+/** Brings the range into view through everything that clips it (decision 28). Resolves when it is inside every
+ *  clipping ancestor and the list's band, or after three passes. */
+export function revealMatch(range: Range, deps: { list: TranscriptListHandle; disclosures: Disclosures; frame(): Promise<void> }): Promise<void>;
 ```
 
-`Disclosures` gains `open(id)` and `close(id)`, each a no-op when already so. What the controller holds open for the current match is its own set: turns it expanded (through `toggleTurn`, only when the turn was closed), runs (`toggleGroup`), disclosures, and on a master with U2b stretches (`toggleStretch`). It drops an entry from the set when it sees that fold closed by someone else. `releaseHeld(next)` closes the entries the next match does not need.
+**The cache.** Per controller: each turn's rows with its work open, by the turn's `version`; each read part's words, by the row object (a row that did not change is the same object, by the store's memo and the turn cache). Find searches the turns of `state.order` and the loose rows; a row of a rewound branch is searched while its boundary is revealed, since `jumpTo` cannot show it otherwise. `Disclosures` gains `open(id)` and `close(id)`, each a no-op when already so.
 
-Going to a match, in order: release what the last one held; open this one's disclosures; `jumpTo(key, target, { align: 'center', turnId, focus: false })`; when the row is mounted and its marks are registered, `list.reveal(currentRange)`; for a part with a `clip` whose current range is cut off by the closed fold or is not in the drawn row, open that disclosure and reveal again. A match that still has no range in the drawn row leaves the row centred.
+**The hold.** What the controller holds open for the current match is its own set: turns it expanded (`toggleTurn`, only when the turn was closed), runs (`toggleGroup`), disclosures (a part's `opens`, and each clip `revealMatch` opened), and on a master with U2b stretches (`toggleStretch`). It drops an entry when it sees that fold closed or opened by someone else. `releaseHeld(next)` closes the entries the next match does not need.
 
-`marks.ts`: `registerRowMarks(element, matches, parts, registry)` walks the row's text nodes, skipping any subtree marked `data-find-skip` (the action rows, the time, buttons), folds the drawn text with `fold`, finds the query, and adds `Range`s to the two highlights `transcript-find` and `transcript-find-current`; it returns a disposer and re-runs from a `MutationObserver` on that row only. The rules: `::highlight(transcript-find) { background-color: var(--accent-soft); }` and `::highlight(transcript-find-current) { background-color: var(--accent); color: var(--bg-raised); }`.
+**Going to a match**, in order: release what the last one held; open this part's `opens`; `jumpTo(key, target, { align: 'center', turnId, focus: false })`; in the next frame, when the row is mounted, register its marks and take the current range; `revealMatch(range)`.
 
-The bar's contract: `role="search"`, `aria-label` and placeholder from §L, `data-transcript-find`; the count is `role="status"`; it sets the list's top inset to its height while open. The lazy host in `Transcript.tsx` imports `view/find/index.ts` on the first `open()` or `step()` and not before.
+**`revealMatch`**, each pass: from the range's start, walk up to the list's scroller. For each ancestor, innermost first: if it carries `data-find-clip` and the range's rectangle is not wholly inside its box (or the range has no rectangle), open that disclosure, wait a frame, and start the pass again; else if it scrolls on an axis and the rectangle is not inside its client box on that axis, set its scroll offset so the rectangle is centred on that axis. Then `list.reveal(rect)`. A range with no rectangle and no clip above it (a block the browser has not rendered) reveals its nearest ancestor that has one, waits a frame, and starts again. The folds that carry `data-find-clip`: a bubble's content (`bubble:<row id>`), a command's output (`line:<row id>`), a call's label (`label:<cell id>`, a disclosure only find opens: while open the label wraps and is drawn whole). The nested scrollers it meets today: a code block's body (its 480 px bound), a table's inner frame (sideways, and its 320 px bound), a pasted block's `<pre>`.
+
+**The marks** (`marks.ts`): `registerRowMarks(row: Element, matches, registry)` finds each matched part's scope under the row, takes `rangesIn(scope, query)`, and adds them to the two highlights `transcript-find` and `transcript-find-current`; it returns a disposer and re-runs from a `MutationObserver` on that row's scopes only. A row with no scope for a matched part (a mod draws it) registers nothing until the jump reveals it. The rules: `::highlight(transcript-find) { background-color: var(--accent-soft); }` and `::highlight(transcript-find-current) { background-color: var(--accent); color: var(--bg-raised); }`.
+
+**The bar's contract:** `role="search"`, `aria-label` and placeholder from §L, `data-transcript-find`; the count is `role="status"`; it sets the list's top inset to its height while open. The lazy host in `Transcript.tsx` imports `view/find/index.ts` on the first `open()` or `step()` and not before.
+
+**The fallback of decision 29**, named and not built: `model/find.ts`'s `fold` and `matchesIn` and the kept words move into a worker, the controller posting words as it reads them and queries as they come; the drawing of a part stays on the main thread, where the DOM is.
 
 ### §L. The words
 
@@ -942,16 +1015,16 @@ Every sentence a person reads that these landings add, as written. All live in `
 
 | where | words |
 |---|---|
-| a command's line | `⎿` then the output; `Show more`; `Show less`; alone: `⎿ /<command> · <output>` |
+| a command's line | `⎿` then the output, drawn once and clipped at two lines until opened; `Show more`; `Show less`; alone: `⎿ /<command> · ` then the output |
 | the owner's message | the time (`formatClock`); `Copy`; `Edit`, with today's title "Edit here · Send rewinds this session to this message" |
 | an answer | `Copy`; `Fork from here`, title "Starts a new session from this point. This one stays as it is."; the time |
 | Fork disabled | U9's sentence, unchanged, from `useForkUnavailable` |
-| a compaction | `Compacting session…`; with a figure, `Compacting session… <duration>` in the turn line's duration format |
+| a compaction's row, at the transcript's end | `Compacting session…`; with a figure, `Compacting session… <duration>` in the turn line's duration format |
 | the hover card | `Compacting session…` |
 | an agent ended with its session | `<names> ended with the session` |
 | a web fetch by the plugin | `Fetched <host>`; in the digest `Fetching <host>` |
 | the menu, the palette, the sheet | `Find in session…`, `Find next`, `Find previous`, `Jump to previous prompt`, `Jump to next prompt`; the submenu `Find` |
-| the find bar | placeholder and label `Find in session…`; `<n> / <total> results`; `0 results`; tooltips `Previous match (⇧⌘G)`, `Next match (⌘G)`, `Close (Esc)`; `Search earlier messages`; `Searching earlier messages…` |
+| the find bar | placeholder and label `Find in session…`; `<n> / <total> results`; `0 results`; `Searching…` while the first pass runs; tooltips `Previous match (⇧⌘G)`, `Next match (⌘G)`, `Close (Esc)`; `Search earlier messages`; `Searching earlier messages…` |
 
 ### §M. Insertions in files other children own (UC-8)
 
@@ -961,77 +1034,84 @@ Every sentence a person reads that these landings add, as written. All live in `
 | `src/shared/attention/read-only-tools.ts` | U1 | one name in `READ_ONLY_TOOLS`; with it `mcp__web__fetch` can be allowed in one click from a hover card or a notification, which U1 is told at landing | M5 |
 | `model/classify.ts` | U2 | the web group's entry reads `WEB_FETCH_TOOLS` | M5 |
 | `model/caption.ts` | U2 | the `web_fetch` case asks `isWebFetch` | M5 |
+| `view/cells/CellLine.tsx` | U2 (the call's line, as U2a built it; U1b edits it too) | `cellLineWords` holds what `shellLabel`, `FileLabel`, the counts' removal and `CodeText` compute, and `CellLabel` draws from it, with the same result; the scope on the label; the `label:<cell id>` disclosure that draws the label whole | M8, M10 |
+| `owner/to-human/MessageRow.tsx` | U2 | one attribute: the scope on the message's prose root | M8 |
 | `sidebar/HoverCard.tsx` | U7 | one line: the activity line reads the compaction words while `useCompactingSince` gives a number | M4 |
 | `sessions/record-ops.ts` | U9 (the fork act) | `forkInPlace` gains an optional second parameter, passed through | M3 |
 | `src/shared/keymap/actions.ts` | U6 | five rows | M7 |
 | `src/main/menu.test.ts`, `settings-tab/keymap.test.ts` | U6 | expectations only: the real table's Edit menu now ends with Find ▸; the labels' order and the list of rows that take no rebinding gain the five | M7 |
 | `keymap/shell-navigation.ts` | U6 | `modalOwnsFocus` is exported | M7 |
+| `e2e/cross-build.spec.ts` | U13 began its table; the spec is the gate's | one scene and its line in the list of scenes; no row in the coverage table | M6 |
 | `lane-a/watches.ts`, `lane-a/view/RemoteTranscriptSlot.tsx` | P5 O9's, no wave child | one call where `compact` messages are kept; the prop, the pager and the actions it hands its `Transcript` | M3, M4, M10 |
 
-Not edited: `src/main/menu.ts`, `src/shared/keymap/build-f.ts`, `src/endpoint/offers.ts`, `src/shared/ipc/remote-unavailable.ts`, `lane-b/remote-unavailable.ts`, `src/main/browser/keys.ts`, `src/renderer/src/app/slots.ts`, `owner/`, `model/groups.ts`, `apps/desk-web`.
+Not edited: `src/main/menu.ts`, `src/shared/keymap/build-f.ts`, `src/endpoint/offers.ts`, `src/shared/ipc/remote-unavailable.ts`, `lane-b/remote-unavailable.ts`, `src/main/browser/keys.ts`, `src/renderer/src/app/slots.ts`, `widgets/RewindWidget.tsx`, `view/rows/Divider.tsx`, `model/groups.ts`, the rest of `owner/`, `apps/desk-web`.
 
 ### §N. One reading of each fact
 
 | the fact | the one function that decides it | who reads it today | what these landings do |
 |---|---|---|---|
-| what a row's text is for a copy | `partOf`, through `serializeRows` (`model/serialize.ts`) | nothing calls `serializeRows`; `copiedUserText` is the owner's bubble's | the answer's Copy calls `serializeRows`; the bubble's Copy is unchanged |
-| what a row's text is for find | `findPartsOf` (`model/find.ts`), built from the readers copy already uses: `placeholdersOf` (the bubble's segments), `row.markdown`, `cell.label`, `noticeLine`, `messageMore` | none: new | one function; the marks search the DOM with the same `fold` |
-| whether a command's output is one, and its run | `readArrivals` (`src/shared/engine/arrival.ts`) on the carrier; `commandRunOf` on the event | the three callers; `localCommandOutput` and `isLocalCommand` (`model/user-text.ts`) on the event's text | the reader gains `commandRun`; no second parser of the tags |
+| what a row's text is for a copy | `partOf`, through `serializeRows` (`model/serialize.ts`) | nothing calls `serializeRows`; `copiedUserText` is the owner's bubble's | the answer's Copy calls `serializeRows` over the turn's complete projection (`answerMarkdownOf`); the bubble's Copy is unchanged |
+| what a row draws, for find | the row's own drawing: for a line of words, the pure function its component draws from (`cellLineWords`, `messageWhole`, `noticeLine`); for a part drawn through markdown, `body(row)` itself, read by `wordsOfScope` | the components, each inline today (`shellLabel`, `FileLabel`, `CodeText`, `wholeOf`) | one function per line, called by the component and by `findPartsOf`; `drawnWordsOf` for the rest; the marks use the same `wordsOfScope` and `fold`, and the contract test holds count and marks equal |
+| whether a command's output is one, its run, and whether it is a terminal's text | `readArrivals` (`src/shared/engine/arrival.ts`) on the carrier; `commandOf` on the event | the three callers; `localCommandOutput` and `isLocalCommand` (`model/user-text.ts`) on the event's text | the reader gains `commandRun` and `plain`; no second parser of the tags or of escape sequences |
 | whether a user row is a slash command | `slashCommandLine` (`@shared/wire/local-command`) | the backfill, `userTextOf`, `localCommandRow` | `lone` asks it |
+| whose words a delivered prompt's text holds | the reader's `own` class (`src/shared/engine/arrival.ts`), through `sminosParts` | the three callers | `ownWordsOf` exports that reading for a text alone; the rewind boundary's `detail` asks it |
 | what a prompt of the owner's is | `isPromptStop` (`model/navigation.ts`) for the chords; `answerActionsOf` uses the narrower "turn-opening" test of §C | none: new | two named tests, stated side by side in §C and §I; no third |
-| whether a message can be rewound to or edited | `userRow`'s `editable` (`model/derive.ts`) | `User.tsx` | unchanged; Fork reads `messageUuid` only |
+| which rows are an answer | `phase: 'answer'`, set in `deriveTurn` (`model/derive.ts`) | `AssistantTextRow`'s class; the mods' asks | `answerActionsOf` (placement) and `answerMarkdownOf` (Copy) read it; neither decides it |
+| whether a message can be rewound to or edited | `userRow`'s `editable` (`model/derive.ts`) | `User.tsx`; the `/rewind` widget | unchanged; Fork reads `messageUuid` only |
 | whether a fork can run now | `useForkUnavailable` (`lane-b/remote-unavailable.ts`) | the inline editor, the session menus, the fork widget, the slash palette | the answer's button, through `forkFrom` |
 | which session the focused pane shows | `focusedSession()` (`composer/ComposerAppKeys.tsx`) | Stop, Focus, the three composer menus, the report toggle, the resubmit seam | `sessionPaneForKeys` |
 | whether a dialog owns the focus | `modalOwnsFocus` (`keymap/shell-navigation.ts`) | region stepping | exported and asked by `sessionPaneForKeys` |
 | whether a session compacts | `EngineSessionStatus.activity`, set in `src/engine-host/session-status.ts`; for a terminal session, the bridge's `compact` phases | nothing | `stores/compacting.ts`, the one place both are read |
 | whether a call is a web fetch | `isWebFetch` | nine comparisons with `'WebFetch'` | each asks it |
-| the rows with every turn open | `rowsWithEveryTurnOpen` (`model/derive.ts`) | the store's `allExpandedRows`, privately | both call it |
-| how a turn line words itself | `dividerHead` (`model/copy.ts`) | the divider, and U2b's turn line | gains the compaction words |
+| one turn's rows with its work open | `expandedTurnRows` (`model/derive.ts`) | the store's jump, the mods' probes | find's pass and `answerMarkdownOf` call it; nothing is added beside it |
 | a duration's and a clock's format | `duration` (`model/time.ts`), `formatClock` (`@shared/app/date-format`) | the turn line; the owner's bubble | reused |
 
 ### §O. What a sibling reads from these landings, and what they consume
 
-- **Exposed.** For U2b: the row kind `activity` (class it as a row that stays); `data-message` on a message's wrapper; `forkFrom` and `answerActions` in the context; that find opens a stretch through `jumpTo` and a head's through `toggleStretch`. For U1b: the `activity` row stands before the end row; find's bar is no dialog and is not portalled; a message row focused by a jump is not the end row, so the prompt's keys do not claim. For U1c: `User.tsx` keeps `ConsentLine`. For U8d: the agents row keeps its class and "started working". For U6b and U12: ⌘F, ⌘G, ⇧⌘G, ⌥⌘↑ and ⌥⌘↓ are taken as menu rows; a region that wants one handles the key itself (focus first).
-- **Consumed.** From U3a: the reader's `command` class, the loose member of `ArrivalEntrySchema`, `jumpTo` and `ui.revealed`, the key `line:<row id>`. From U6a: the table's shape (`menu: 'edit'`, `submenu`), and that a new id takes no rebinding. From U9: `forkSession`, `forkInPlace`, `useForkUnavailable`, the offer of `session.fork` and its sentences. From U2a: `dividerHead` and the turn line's counts. From the long-transcript window and lane A: `OlderPagesController`. From U13a: nothing; the coverage table gains no row.
+- **Exposed.** For U2b: the row kind `activity` (class it as a row that stays, at whichever lands second); `data-message` on a message's wrapper; `forkFrom` and `answerActions` in the context; that find opens a stretch through `jumpTo` and a head's through `toggleStretch`; statement 13 for the answer's Copy and action row in its view; the scopes on the rows it draws. For U1b: the `activity` row stands before the end row; find's bar is no dialog and is not portalled; a message row focused by a jump is not the end row, so the prompt's keys do not claim; `cellLineWords` in the file it also edits. For U1c: `User.tsx` keeps `ConsentLine`. For U8d: the agents row keeps its class and "started working". For U6b and U12: ⌘F, ⌘G, ⇧⌘G, ⌥⌘↑ and ⌥⌘↓ are taken as menu rows; a region that wants one handles the key itself (focus first). For whoever owns the `/rewind` widget: `ownWordsOf`.
+- **Consumed.** From U3a: the reader's `command` and `own` classes, the loose member of `ArrivalEntrySchema`, `jumpTo` and `ui.revealed`, the key `line:<row id>`. From U6a: the table's shape (`menu: 'edit'`, `submenu`), and that a new id takes no rebinding. From U9: `forkSession`, `forkInPlace`, `useForkUnavailable`, the offer of `session.fork` and its sentences. From U2a: `shellLabel`'s rules and the call's line. From the long-transcript window and lane A: `OlderPagesController`. From U13a: the cross-build spec's crossing helpers; the coverage table gains no row.
 
 ## Size, and the review each landing gets
 
-Counted from the code at `63c97b5c0`: the files are the ones each milestone names, and the lines are estimates from the functions and the test blocks read, not from a diff.
+Counted from the code at `63c97b5c0`: the files are the ones each milestone names, and the lines are estimates from the functions and the test blocks read, not from a diff. The revision for the rulings added about 1,700 lines, most of them to landing 2's tests and scenes.
 
 | milestone | source | tests | scenes, fixtures and documents | files |
 |---|---|---|---|---|
-| M1 | about 230 lines in 12 files | about 430 in 11 | 8 row snapshots rewritten | 31 |
+| M1 | about 260 lines in 12 files | about 470 in 11 | 8 row snapshots rewritten | 31 |
 | M2 | about 180 in 2 | about 210 in 4 (one new) | — | 6 |
-| M3 | about 310 in 10 (two new) | about 480 in 6 (two new) | — | 16 |
-| M4 | about 300 in 17 (three new) | about 470 in 8 (two new) | — | 25 |
+| M3 | about 330 in 12 (two new) | about 520 in 7 (two new) | — | 19 |
+| M4 | about 260 in 14 (three new) | about 420 in 7 (two new) | — | 21 |
 | M5 | about 110 in 13 (one new) | about 260 in 12 (one new) | — | 25 |
-| M6 | — | — | about 500 in 3 specs and their fixtures; about 40 in 3 documents | 8 |
-| **landing 1** | about 1,130 | about 1,850 | about 540 | about 70 distinct files, about 3,500 changed lines |
+| M6 | — | — | about 640 in 4 specs and their fixtures; about 40 in 3 documents | 9 |
+| **landing 1** | about 1,140 | about 1,880 | about 680 | about 70 distinct files, about 3,700 changed lines; and the probes' merge, 39 files of recordings that are not this landing's to review |
 | M7 | about 330 in 11 (three new) | about 560 in 9 (three new) | — | 20 |
-| M8 | about 520 in 5 (two new) | about 750 in 3 (two new) | — | 8 |
-| M10 | about 430 in 9 (three new) | about 420 in 4 (three new) | — | 13 |
-| M11 | — | — | about 530 in 3 specs and their fixtures; about 15 in 1 document | 6 |
-| **landing 2** | about 1,280 | about 1,730 | about 625 | about 40 distinct files, about 3,600 changed lines |
+| M8 | about 520 in 12 (three new) | about 800 in 6 (four new) | — | 18 |
+| M9 | about 480 in 3 (two new) | about 700 in 2 (two new) | — | 5 |
+| M10 | about 520 in 12 (four new) | about 480 in 4 (four new) | — | 16 |
+| M11 | — | — | about 750 in 3 specs, the synthesiser and their fixtures; about 15 in 1 document | 7 |
+| **landing 2** | about 1,850 | about 2,540 | about 765 | about 50 distinct files, about 5,150 changed lines |
 
 **The e2e groups whose scenes cross this work** (the group's name in `package.json`; every one is a Mac run but `e2e:desk-web`):
 
 | group | scenes that change, or are new | scenes crossed and expected unchanged |
 |---|---|---|
-| `e2e:transcript` | changed in M6: "a completed answer’s wide table and code break out to the wide measure, centred, and a narrow table keeps the text" becomes acceptance 5. New in M6: acceptance 1, 4, 6 and 7. New in M11: acceptance 16, 17, 18, 23 and 24 | the anchoring and follow scenes; "the streaming caret follows the last word of a one-paragraph answer"; "theme switch re-themes highlighted code without reload"; "a long token in prose wraps in a narrow transcript"; "M2 commentary uses answer typography…"; the R3 scene that reads the one `[data-kind="local_command"]` row; U2b's scenes that expect a jump's target focused |
+| `e2e:transcript` | changed in M6: "a completed answer’s wide table and code break out to the wide measure, centred, and a narrow table keeps the text" becomes acceptance 5. New in M6: acceptance 1, 4, 6 and 7. New in M11: acceptance 16, 17, 18 (with its clipping scenes), 23 and 24, and the measured scenes of acceptance 26 behind the file's switch | the anchoring and follow scenes; "the streaming caret follows the last word of a one-paragraph answer"; "theme switch re-themes highlighted code without reload"; "a long token in prose wraps in a narrow transcript"; "M2 commentary uses answer typography…"; the R3 scene that reads the one `[data-kind="local_command"]` row; U2b's scenes that expect a jump's target focused |
 | `e2e:c7` | changed in M6: "W2: the shared column, the 14px prose, Codex's bubble and Codex's composer box" (where the actions sit; the 16 px under the bubble stays) | "edit in place: Cancel and Esc put the bubble back…" and the U4a Stop scene (they hover and click Edit); "board 505…"; "sending while reading old work follows the new turn…" |
 | `e2e:side` | changed in M6: scene 9, the comment row's actions inside the narrow card | the rest |
 | `e2e:panel`, `e2e:agents`, `e2e:to-human`, `e2e:lane-a`, `e2e:remote` | none | every scene that scrolls a transcript or reads its rows (`e2e:lane-a`: the cut text is not an answer) |
 | `e2e:desk-web` | none | `session-view.spec.ts`, "the jump to the latest row sits in a gutter clear of every row, wide tables and code included…"; `stream-scroll.spec.ts`; `acceptance.spec.ts` (its working line still reads "Working": the desk gives no compaction) |
 | `e2e:code`, `e2e:browser`, `e2e:settings`, `e2e:document` (landing 2) | new in M11: acceptance 22's cases beside the file viewer, the browser's find bar and the Settings search | their own ⌘F and ⌘G scenes: the file viewer's search, "Find in page", the Settings search, the document's find |
-| the default group | none | `e2e/shell.spec.ts` and `e2e/smoke.spec.ts` (menu items by id), `e2e/cross-build.spec.ts` |
+| `e2e:agents`, `e2e:tools` (landing 2) | none | every scene that reads a call's line (M8 moves its computation and must not move its words) |
+| `e2e:cross-build` (landing 1) | new in M6: *(a command's output, both ways)*; run twice, each older build as the exact peer (Proof, 13) | every other scene of the spec |
+| the default group | none | `e2e/shell.spec.ts` and `e2e/smoke.spec.ts` (menu items by id) |
 
-**Measured bounds.** One is crossed: the anchoring scene's frame bound in `e2e/transcript.spec.ts` (p95 of the frame interval at most 17 ms, asserted only under `MAWS_TRANSCRIPT_PERF=1`), by landing 1's answer-row pass and by landing 2's changes to `RowFrame` and the list's handle. Both landings owe the measured run, base against landing (Proof, 5 and 11). No new time bound is asserted by any scene of this work.
+**Measured bounds.** One existing bound is crossed: the anchoring scene's frame bound in `e2e/transcript.spec.ts` (p95 of the frame interval at most 17 ms, asserted only under `MAWS_TRANSCRIPT_PERF=1`), by landing 1's answer-row pass and by landing 2's changes to `RowFrame`, the rows' scopes and the list's handle. Both landings owe the measured run, base against landing (Proof, 5 and 11). Landing 2 adds five measured bounds of its own, find's budgets (acceptance 26; Proof, 14), behind the same switch, in the form the gate's guard allows.
 
 **Each landing gets the xhigh panel** of `doperpowers:review-code`, on size: both are past twenty files and two thousand changed lines. Neither is named delicate by the root or the child.
 
-*Landing 1's lenses.* (1) One reading: the `command` entry from each of the three callers to the row and to each older build, with no second parser of the tags and the wire untouched (§A, §H, §N). (2) Drawing with no layout test: the rules over Streamdown's markup, that they hold at the depth U2b adds, that the streaming caret's rules and the copy control still find their elements, and the desk's own bubble (decisions 7 to 10). (3) The answer-row rule against every shape of a list: engine turns, steers, the consent line, waiting and dropped messages, cut and live text, a list that ends in a running turn; and what it costs per change (§C). (4) The fork button: the sequence with its test held open, each of UC-7's states, what is sent against `isInPlaceFork`, and that authorisation is where the act runs (§D; "Routes"). (5) The compaction's table, transition by transition, the one that never ends included, and the clock (M4). (6) The insertions of §M, and the guards that read source text.
+*Landing 1's lenses.* (1) One reading: the `command` entry from each of the three callers to the row and to each older build, with no second parser of the tags and the wire untouched, and the cross-build scene's two directions (§A, §H, §N). (2) Drawing with no layout test: the rules over Streamdown's markup, that they hold at the depth U2b adds, that the streaming caret's rules and the copy control still find their elements, and the desk's own bubble (decisions 7 to 10). (3) The answer-row rule against every shape of a list: engine turns, steers, the consent line, waiting and dropped messages, cut and live text, a list that ends in a running turn; what it costs per change; and that Copy reads the store and never the drawn list (§C). (4) The fork button: the sequence with its test held open, each of UC-7's states, what is sent against `isInPlaceFork`, and that authorisation is where the act runs (§D; "Routes"). (5) The compaction's table, transition by transition, the one that never ends included, the clock, and the row's place at the end under a follower and beside U1b's end row (M4). (6) The insertions of §M, and the guards that read source text.
 
-*Landing 2's lenses.* (1) The keys: the pane rule against focus-first, the spike's evidence, nothing stored (§I). (2) Find's bounds: what runs on a new row and on a keystroke, the memo against a rebuild and a staged restart, a generation that drops a stale pass (decision 29; M8's states). (3) Folds: each kind opens, what is held is released rightly, a reader's toggle is respected, U2b's stretches; what `revealed` does to a mod-drawn row (decision 28). (4) The marks: offsets where folding changes a string's length, ranges disposed when the virtualiser unmounts a row, no observer that feeds itself (§K). (5) The scroller: the handle's three additions change nothing of follow or anchoring; the measured scene (Proof, 11). (6) Focus: where it is after every key, how the arrows arm, a composing input method.
+*Landing 2's lenses.* (1) The keys: the pane rule against focus-first, the spike's evidence, nothing stored (§I). (2) A counted match is a markable match: every searched kind against its drawing, the moved computations against what they drew before, the skip list against chrome and against content, the detached drawing against the mounted one (§J; the contract test read as a contract, not as a snapshot). (3) Folds and clipping: each kind opens, what is held is released rightly, a reader's toggle is respected, U2b's stretches; every clipping ancestor, innermost first; what `revealed` does to a mod-drawn row (decision 28; §K). (4) The pass: that it yields between units and resumes on the store's state of the moment, the generation that drops a stale result, the cache against a rebuild and a staged restart, and the measured budgets (decision 29; M9's states; acceptance 26). (5) The marks: offsets where folding changes a string's length, ranges disposed when the virtualiser unmounts a row, no observer that feeds itself (§K). (6) The scroller and the focus: the handle's additions change nothing of follow or anchoring (the measured scene, Proof, 11); where focus is after every key, how the arrows arm, a composing input method.
 
 Each milestone's own review, at its boundary, reads that milestone's diff against its entry above.
 
@@ -1040,29 +1120,57 @@ Each milestone's own review, at its boundary, reads that milestone's diff agains
 - Observation (authoring, 1): the wire's own rule refuses the member U3a's decision 20 planned for `arrival`.
   Evidence: `src/shared/ipc/wire-manifest.json`, `…arrival.items.anyOf[0].oneOf` has five members; `classifyWireChange` in `src/shared/ipc/wire.ts` pushes a `SUBSCHEMA_LISTS` key whose arrays differ in length to `breaking`; `wire.test.ts`: "it takes a major … no minor can carry it". Decision 2; Reported, 1.
 - Observation (authoring, 2): the turn line the child places "at the transcript's end" is at the head of the turn's work.
-  Evidence: `deriveTurn` builds `[...above, user, divider, ...rows]` (`model/derive.ts`). Reported, 2; card 2.
+  Evidence: `deriveTurn` builds `[...above, user, divider, ...rows]` (`model/derive.ts`). Ruled, point 2: the compaction's row stands at the end (decision 16).
 - Observation (authoring, 3): the transcript file carries the command the engine ran, which the child's text and U3a's document did not know.
   Evidence: `fixtures/uxwave/u3-commands-r1.transcript.jsonl` line 55, `"commandRun":{"command":"usage","args":""}`; the bundle maps `local_command_run` to `commandRun` (`cli.pretty.js:237738`). Decision 2.
 - Observation (authoring, 4): two places name `WebFetch` that the child's list does not: `model/caption.ts` (built by U2a after the child was written) and the label's host in `model/cells.ts`.
   Evidence: `git grep -n "WebFetch" -- src apps`. §F.
 - Observation (authoring, 5): Claude Desktop's find counts on the text its markdown draws, holds a fold open only for the current match, and its code block's toolbar can hold a language label and reserves room on two lines only.
-  Evidence: "The reference". Decisions 27 and 28; Reported, 6, 7 and 10.
+  Evidence: "The reference". Decisions 27 and 28; ruled, points 6, 7 and 10.
 - Observation (authoring, 6): in the desk, the owner's message draws an Edit button that does nothing, today: its mount registers no `editAndResubmit`, the default is a no-op, and `editable` is true for a turn's opening message.
   Evidence: `apps/desk-web/src/depth/view/actions.ts` (`DESK_ACTIONS`); `NO_ACTIONS` in `view/context.tsx`. Not fixed here (the desk is outside the wave); one tracker row (M6).
 - Observation (authoring, 7): the code's comments say two things about whether a page keeps a key from the menu, and no scene can settle it.
   Evidence: the header of `src/shared/keymap/actions.ts` and `src/main/menu.ts` ("A page that cancels ⌘Z … keeps the key from the menu") against `src/main/settings/capture-chords.ts` ("the application menu takes its key equivalents … before the page sees them") and the `file.save` row's comment; `e2e/support/menu.ts` (a scene's keys never reach the menu). Decision 22; Probes, 1; Reported, 11.
 - Observation (authoring, 8): X1 events are not stored anywhere; master's wire is two minors past build G's.
-  Evidence: `src/engine-host/journal.ts` (rows of engine frames); `WIRE_MINOR` 48 at the pin, 46 at `2c7044231`, 33 at `f1852de3a`. §H; Reported, 4.
+  Evidence: `src/engine-host/journal.ts` (rows of engine frames); `WIRE_MINOR` 48 at the pin, 46 at `2c7044231`, 33 at `f1852de3a`. §H. The first version concluded that no cross-build run was owed; overruled (F6): a changed message owes a run against each build.
 - Observation (authoring, 9): the desk's chat bubble copies the owner's row's markup by hand and is styled by the transcript's stylesheet, so a rule moved there moves the desk with no type error.
   Evidence: `apps/desk-web/src/views/conversation/Bubble.tsx`; `apps/desk-web/src/styles/app.css` (the rule for `.transcript-user-actions` of the other side). Decision 10.
 - Observation (authoring, 10): the engine repeats the `compacting` status every thirty seconds, and a status with a null `status` also arrives for a mode change.
-  Evidence: Engine facts, 2 and 5. Decision 16 (the clock is not restarted); a mode change in the middle of a compaction would clear the words until the next repeat, at most thirty seconds, and restart the clock: left as it is, one tracker row (M6).
+  Evidence: Engine facts, 2 and 5. Decision 16 (the clock is not restarted); a mode change in the middle of a compaction would remove the row until the next repeat, at most thirty seconds, and restart the clock: left as it is, one tracker row (M6).
+- Observation (the review, F1 to F3): a row's words are computed in its view, cut by its own CSS and wrapped in its own buttons, so the model's `label` and `text` are not what is drawn, a counted match could have no range, a revealed row could still hide its match, and a rule that skipped buttons skipped a call's line.
+  Evidence: `view/cells/CellLine.tsx` (`shellLabel`, `FileLabel`, `CodeText`; `.transcript-cell-label` is one line with an ellipsis); `view/rows/Line.tsx` (the line's words inside its button); `.transcript-line-text`; the recorded `/context` output (`uxwave/u3-commands-r1.transcript.jsonl` line 60, `### MCP Tools`). Decisions 4, 27, 28; §J, §K.
+- Observation (revision): for markdown no pure function gives a row's drawing, and an answer's own drawing is the to-human presenter's, which never draws the `<message>` tags its source holds; so the first version's lexer would have counted "message" in every message to the person.
+  Evidence: the unattached branch of `SurfaceAssistantRow` (`surface/Rows.tsx`): `presentation ? presentation.render(…) : <AssistantTextRow …/>`. Decision 27 (the row's own drawing, read once).
+- Observation (revision): a call's label is cut with an ellipsis as a message's line is, and nothing it opens onto repeats it.
+  Evidence: `transcript.css`, `.transcript-cell-label { overflow: hidden; white-space: nowrap; text-overflow: ellipsis }`; `CellLine` draws the detail under the line. Decision 28 (`label:<cell id>`); told to the architect.
+- Observation (the probes of 2026-11-15): an automatic compaction sends a typed one's statuses inside a running turn; the web plugin's fetch returns a string; a command the bridge ran carries a typed command's run and is marked only on its own rows; the engine's rewind accepts a delivered prompt, and its `prefillText` holds sminos's frame line.
+  Evidence: Engine facts, 9, 11, 6 and 15, 13 and 14, with their fixtures on `origin/ux-wave/U3b-probes` at `1048cdf89`. Probes, 2 to 5.
+- Observation (revision): the `/rewind` widget fills the composer from the rewind's `prefillText` for an editable target, so a rewind to a prompt the bridge delivered puts the frame line in the person's draft, on master today.
+  Evidence: `widgets/RewindWidget.tsx` (`prefillComposer(appSessionId, { text: result.value.prefillText })`); Engine facts, 14. Not this work's; one tracker row (M6), with `ownWordsOf` as its fix.
 
 ## Decision Log
 
-- Decision: the verification this work gets. This document gets an adversarial review before an executor starts, arranged by the architect, and a re-check of "The statements to read again" against master as the branches in flight land. Each milestone is reviewed at its boundary. Each landing's branch gets the xhigh panel of `doperpowers:review-code` with the lenses of "Size, and the review each landing gets", on size. Class 1a on GitHub Actions (`static`, `unit`, `probes`) is the gate of record for each. The Electron scenes, the measured anchoring scene, the keys' routing spike and the owner's look are "Proof that an executor does not run". Each pull request's body names its class 1a run, its review verdict and its residue; landing 1's carries the dated amendments of O-08, O-02 and X1.
+- Decision: the verification this work gets. This document gets an adversarial review before an executor starts, arranged by the architect, and a re-check of "The statements to read again" against master as the branches in flight land. Each milestone is reviewed at its boundary. Each landing's branch gets the xhigh panel of `doperpowers:review-code` with the lenses of "Size, and the review each landing gets", on size. Class 1a on GitHub Actions (`static`, `unit`, `probes`) is the gate of record for each. The Electron scenes, the measured anchoring scene, the cross-build runs, find's measured budgets, the keys' routing spike and the owner's look are "Proof that an executor does not run". Each pull request's body names its class 1a run, its review verdict and its residue; landing 1's carries the dated amendments of O-08, O-02 and X1.
   Rationale: the common brief's record; the sizes counted above.
   Date/Author: 2026-11-15, the author of this document.
+- Decision (2026-11-15, the architect, on the review's F1): a counted match is a markable match. One reading of what a row draws, shared by the row's component and find; a command's output has one text, that of the state find brings the person to; the fallback that kept a counted match with no range is removed, with a contract test per searched kind.
+  Rationale: the review showed counts for text the target does not draw (a call's label, a command's opened output). Rejected: the first version's lexer and its "count stays the model's" fallback.
+- Decision (2026-11-15, the architect, on F2): the reveal handles every clipping ancestor between the match and the list, innermost first; a line's words are searched once and never left behind an ellipsis; scenes assert the rectangle, not the mount.
+  Rationale: a revealed row could still hide its match in a table, a tall block or a cut line.
+- Decision (2026-11-15, the architect, on F3): `data-find-skip` only on chrome named one by one; each searched part has a DOM scope.
+  Rationale: skipping buttons skipped a call's line; marking a whole row marked an opened call's output.
+- Decision (2026-11-15, the architect, on F4): what Copy takes is computed from the turn's complete projection; only the action row's placement reads the drawn list; the to-human view's case is a statement to re-read when U2b is on master.
+  Rationale: U2b's closed stretch removes answer blocks from the drawn list.
+- Decision (2026-11-15, the architect, on F5): the 8 ms claim is withdrawn for a resumable pass, measured budgets and a named fallback off the main thread.
+  Rationale: one turn's derivation and one part's drawing cannot be split, so no slice bound can be promised, only measured. The budgets' numbers are this document's (decision 29).
+- Decision (2026-11-15, the architect, on F6, overruling point 4): the newly sent entry owes a run against each older build; the scene is part of landing 1 (M6) and its gate set holds `e2e:cross-build` twice.
+  Rationale: the wave's rule for a changed message; a manifest that did not change does not lift it.
+- Decision (2026-11-15, the architect, on points 1, 3, 5 to 11 and the smaller decisions): accepted as "Reported to the architect, and ruled" records them; on point 2, the compaction's words show at the transcript's end, without a card.
+  Rationale: the section's place for the words rests on a premise the code does not hold.
+- Decision (2026-11-15, the architect): two landings as proposed, landing 2 on `ux-wave/U3b-2` with a ticket of its own; card 1 goes to the owner with landing 2's frames before M10; the drawn example is dispatched after this revision; the probes' branch is merged as its own commit before M4; M7 does not go past its spike until the architect reports the hands-on check.
+- Decision (2026-11-15, the author, where a ruling left the means): a command's output is one drawing clipped at two lines, markdown unless the reader marked it a terminal's (decisions 2 to 4); a markdown part's words are read from the row's own drawing, rendered once outside the document (decision 27); the first pass goes turn by turn through `expandedTurnRows` and part by part, yielding past 8 ms, with budgets of 50 ms, 16 ms and two relative ones (decision 29); a call's label is drawn whole while it holds the current match (decision 28); the frame line of a delivered prompt is cut from the rewind boundary's tooltip by `ownWordsOf` (Probes, 5); the count's place reads "Searching…" during the first pass (decision 29).
+  Rationale: each in the decision named. Three of them go beyond a ruling's letter and were told to the architect with the revision ("Three things the code added to the rulings").
+- Revision (2026-11-15): the document revised once for the above and for the probes' results; milestones renumbered (landing 2 has five: M7 to M11); read against master `3678e3c00`, not merged.
 
 ## Outcomes & Retrospective
 
