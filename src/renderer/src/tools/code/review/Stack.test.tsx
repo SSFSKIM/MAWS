@@ -774,13 +774,16 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect(drawnBodies().map((section) => section.dataset.reviewFile)).toContain(files[0].path); // the first still in the band
       const reading = page.rowAtTop();
       expect(reading).toEqual(expect.objectContaining({ path: files[1].path }));
-      let scrolls = 0;
-      scroller().addEventListener('scroll', () => scrolls++);
+      const atEachScroll: unknown[] = []; // the row at the top as each scroll the stack writes lands
+      scroller().addEventListener('scroll', () => atEachScroll.push(page.rowAtTop()));
       main.release(files[0].path);
       await page.settle();
       expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[0].path)); // opened under its line
       expect(page.rowAtTop()).toEqual(reading);
-      expect(scrolls).toBeLessThanOrEqual(1); // the first file's grown body held above the place, and nothing more
+      // each write the first file's growth above the place made (its rows, then the card's row) held the place; none
+      // went back to the comment
+      expect(atEachScroll.length).toBeLessThanOrEqual(2);
+      expect(atEachScroll.filter((row) => JSON.stringify(row) !== JSON.stringify(reading))).toEqual([]);
       main.state.hold = null;
       expect(await placeSaved()).toEqual(reading); // the live place: saved when Review is hidden, restored when shown
     });
