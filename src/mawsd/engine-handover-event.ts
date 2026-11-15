@@ -5,7 +5,9 @@
 // supervisor's handover state (host-supervisor.ts `EngineHandoverState`) as `daemon.engineHandover` at each change, again
 // every ENGINE_HANDOVER_RESEND_MS while one is under way (a client that attached meanwhile learns it, and a client bounds
 // its freshness by it), and `none` once at its end. It reads the host supervisor alone, so it never wakes a parked host.
-import type { EngineHandoverState, HostSupervisor } from '@shared/host/host-supervisor';
+// #473: a drain's `none` carries the verdict on the old host's exit (`ended`), and `retell` says the state under way to a
+// client that has just said ready, which would otherwise wait up to a resend while a quick drain runs its course.
+import type { EngineHandoverState, HandoverEnded, HostSupervisor } from '@shared/host/host-supervisor';
 import type { EngineHandover } from '@shared/ipc/schema/daemon';
 
 export const ENGINE_HANDOVER_RESEND_MS = 5_000; // the deferral's own retry (WAIT_RETRY_MS); main's freshness bound is three of these
@@ -15,22 +17,26 @@ export interface EngineHandoverTellDeps {
   emit(payload: EngineHandover): boolean; // the front's bus, to every ready machine.sock client
 }
 
-export function tellEngineHandover(deps: EngineHandoverTellDeps): { stop(): void } {
+export function tellEngineHandover(deps: EngineHandoverTellDeps): { retell(): void; stop(): void } {
   let resend: ReturnType<typeof setInterval> | null = null;
-  const post = (state: EngineHandoverState | null) => {
+  const post = (state: EngineHandoverState | null, ended?: HandoverEnded) => {
     const at = new Date().toISOString();
-    deps.emit(state === null ? { state: 'none', inFlight: 0, at } : { state: state.state, inFlight: state.inFlight, ...(state.tool !== undefined && { tool: state.tool }), at });
+    deps.emit(state === null ? { state: 'none', inFlight: 0, at, ...(ended !== undefined && { ended }) } : { state: state.state, inFlight: state.inFlight, ...(state.tool !== undefined && { tool: state.tool }), at });
   };
-  const changed = (state: EngineHandoverState | null) => {
+  const changed = (state: EngineHandoverState | null, ended?: HandoverEnded) => {
     if (resend !== null) clearInterval(resend);
     resend = null;
-    post(state);
+    post(state, ended);
     if (state === null) return;
     resend = setInterval(() => post(deps.hosts.handoverState('engine-host')), ENGINE_HANDOVER_RESEND_MS);
     (resend as { unref?: () => void }).unref?.();
   };
   const off = deps.hosts.onHandover('engine-host', changed);
   return {
+    retell() {
+      const state = deps.hosts.handoverState('engine-host');
+      if (state !== null) post(state);
+    },
     stop() {
       off();
       if (resend !== null) clearInterval(resend);
