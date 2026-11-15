@@ -93,12 +93,13 @@ describe('a run’s caption (acceptance 2)', () => {
     for (const [label, call] of webFetchCases()) {
       const b = turnOf((t) => {
         read(t, 't1', '/w/a.ts');
-        t.toolUse('t2', call.toolName, call.input);
-        t.result('t2', call.result);
+        read(t, 't2', '/w/b.ts');
+        t.toolUse('t3', call.toolName, call.input);
+        t.result('t3', call.result);
       });
-      expect(runOf(b).summary, label).toBe('Read a file, fetched a page');
-      expect(stepsOfCells(runOf(b).cells).map((step) => step.kind), label).toEqual(['read', 'web_fetch']);
-      expect(lineOf(b).parts, label).toEqual(['read a file', 'fetched a page']);
+      expect(runOf(b).summary, label).toBe('Read 2 files, fetched a page');
+      expect(stepsOfCells(runOf(b).cells).map((step) => step.kind), label).toEqual(['read', 'read', 'web_fetch']);
+      expect(lineOf(b).parts, label).toEqual(['read 2 files', 'fetched a page']);
     }
   });
 

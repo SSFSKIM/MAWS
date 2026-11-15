@@ -4,6 +4,7 @@ import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import type { Cell, SubagentStatus, ToolCategory } from './rows';
 import { isCuaJsTool, MCP_TOOL } from './classify';
+import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U2
@@ -146,14 +147,14 @@ export function cellLabel(input: CellLabelInput): string {
       return `Moved \`${input.name}\` to the background after ${duration(input.durationMs)}`;
     case 'generic': {
       if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
+      const detail = input.detail ?? null;
+      if (isWebFetch(input.toolName)) return `Fetched ${detail ?? ''}`; // UX wave U3b (M5): the web plugin's fetch too, before the MCP form
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
-      const detail = input.detail ?? null;
       switch (input.toolName) {
         case 'Skill': return detail === null ? 'Ran a skill' : `Ran /${detail.replace(/^\//, '')}`; // UX wave U2 (decision 5): the row's words, once the view's
         case 'ToolSearch': return `Loaded ${plural(Number(detail ?? 0), 'tool')}`;
         case 'Grep': case 'Glob': return `Searched for \`${detail ?? ''}\`${input.scope ? ` in ${input.scope}` : ''}`;
-        case 'WebFetch': return `Fetched ${detail ?? ''}`;
         case 'WebSearch': return `Searched the web for ${detail ?? ''}`;
         case 'EnterPlanMode': return 'Entered plan mode';
         case 'EnterWorktree': return `Entered worktree ${detail ?? ''}`;
@@ -219,13 +220,16 @@ export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flag
 // ---------------------------------------------------------------------------------------------------------------------
 // Subagents, agent messages, plans, questions, slots, boundaries, errors
 
-export function subagentSentence(names: string[], status: SubagentStatus): string {
+// `exited` (UX wave U3b, M5, decision 19): a row whose agents all ended with the session's process, a stopped row
+// whose sentence is U8's words for the same fact
+export function subagentSentence(names: string[], status: SubagentStatus | 'exited'): string {
   const subject = names.length <= 3 ? list(names) : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
   switch (status) {
     case 'started': case 'working': return `${subject} started working`;
     case 'finished': return `${subject} finished`;
     case 'finished_with_errors': return `${subject} finished with errors`;
     case 'stopped': return `${subject} was stopped`;
+    case 'exited': return `${subject} ended with the session`;
   }
 }
 

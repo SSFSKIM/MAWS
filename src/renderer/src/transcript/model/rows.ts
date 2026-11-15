@@ -93,7 +93,7 @@ export type Row = RowBase &
     | { kind: 'group'; state: 'active' | 'completed'; cells: Cell[]; summary: string; counts: ChangedLines; icon: ToolCategory; expanded: boolean }
     | ({ kind: 'cell' } & Cell) // a standalone cell
     | { kind: 'receipt'; files: ChangedFile[]; added: number; removed: number; state: 'applied' | 'undoing' | 'undone' | 'reapplying'; canUndo: boolean; canReapply: boolean }
-    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; overflow: number } // overflow: agents beyond the four glyphs
+    | { kind: 'subagent'; agents: SubagentRef[]; sentence: string; status: SubagentStatus; exited?: true; overflow: number } // overflow: agents beyond the four glyphs; exited (UX wave U3b, decision 19): every agent it names ended with the session's process, the row stopped
     | {
         kind: 'agent_message'; direction: 'to_child' | 'from_child' | 'between'; from: SubagentRef | null; to: SubagentRef | null; text: string;
         peer?: PeerMessage; report?: string; // E7: a message between sessions (`between`); an in-process agent's hand-back report

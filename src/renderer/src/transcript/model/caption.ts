@@ -4,6 +4,7 @@
 // marks at :161-217 and :624-641, the calls of no kind at :1103-1123 and :1313-1334, the one-file part at :1227-1282,
 // the cap at :137-138 and :247-302), with MAWS's three additions to its kinds (the shell's output, kill and monitor calls with the
 // commands, LS with the file searches, the Task tools with the todos) and the turn's own steps (agents, sent messages).
+import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
 import { stoppedMember } from './classify';
 import { baseName } from './copy';
 import type { Cell, ChangedLines, Row, SubagentRef, SubagentStatus } from './rows';
@@ -66,6 +67,7 @@ const conjunction = (items: readonly string[]) =>
   items.length <= 2 ? items.join(' and ') : `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
 
 function kindOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionKind | null {
+  if (isWebFetch(cell.toolName)) return 'web_fetch'; // UX wave U3b (M5): the web plugin's fetch too
   switch (cell.toolName) {
     case 'Read': case 'NotebookRead': return 'read';
     // Desktop's `wrote`: the first Write of a file that finished decides whether its Writes created it or edited it;
@@ -83,7 +85,6 @@ function kindOf(cell: Cell, writes: ReadonlyMap<string, string>): CaptionKind | 
     case 'Grep': return 'grep';
     case 'Glob': case 'LS': return 'glob';
     case 'WebSearch': return 'web_search';
-    case 'WebFetch': return 'web_fetch';
     case 'TodoWrite': case 'TaskCreate': case 'TaskUpdate': case 'TaskList': case 'TaskGet': return 'todos';
     // Desktop's `J`: a worktree call that failed has no kind
     case 'EnterWorktree': return cell.status === 'error' ? null : 'worktree_enter';

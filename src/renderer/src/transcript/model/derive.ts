@@ -35,6 +35,7 @@ import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOu
 import { carriedOf, commandOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
 import { ownWordsOf } from '@shared/engine/arrival'; // UX wave U3b
 import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3b
+import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -918,8 +919,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'subagents': {
         if (item.group.refs.length === 0) break;
         for (const ref of item.group.refs) if (ref.toolUseId && agentIds.has(ref.toolUseId)) ref.agentId = agentIds.get(ref.toolUseId)!;
-        if (item.group.ended) endedByExit(item.group);
-        resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id) });
+        const exited = item.group.ended && endedByExit(item.group);
+        resolved.push({ kind: 'row', row: subagentRow(item.group, turn.id, exited) });
         break;
       }
       case 'row':
@@ -1081,8 +1082,10 @@ function workOf(turn: TurnState, tools: Map<ToolUseId, ToolRecord>, cells: Cell[
   for (const { use, result } of tools.values()) {
     const input = record(use.input);
     const { category } = tableRowOf(use.toolName);
-    const mcp = MCP_TOOL.exec(use.toolName);
-    used.push({ name: use.toolName, category, at: use.at, url: use.toolName === 'WebFetch' && typeof input.url === 'string' ? input.url : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
+    // UX wave U3b (M5): a web fetch is a page fetched, the web plugin's as WebFetch, and no MCP tool of its own
+    const webFetch = isWebFetch(use.toolName);
+    const mcp = webFetch ? null : MCP_TOOL.exec(use.toolName);
+    used.push({ name: use.toolName, category, at: use.at, url: webFetch ? webFetchUrl(input) : null, mcp: mcp ? { server: mcp[1], tool: mcp[2] } : null });
     const completed = result !== null && !result.isError && result.denial === null;
     const grepFile = use.toolName === 'Grep' && completed ? grepFileScope(input, result.structured, cwd) : null;
     const path = grepFile ?? filePathOf(input);
@@ -1219,15 +1222,21 @@ function summaryOf(turn: TurnState, cells: Cell[], subagents: SubagentGroup[], m
 // come (a crash, a kill, E10's idle stop, C4's exit synthesised for a transcript nobody holds): an agents row made
 // before the exit (`ended`, by arrival order) reads its agents still running stopped, so it folds with its turn rather
 // than staying in view (`staysInView`). An ordinary end of the turn that made the call is no exit: background agents
-// outlive it.
-function endedByExit(group: SubagentGroup): void {
+// outlive it. UX wave U3b (M5, decision 19): whether every agent the row names ended so, none having finished or been
+// stopped before the exit.
+function endedByExit(group: SubagentGroup): boolean {
+  let every = true;
   for (const ref of group.refs) {
     const status = group.statuses.get(ref.taskId) ?? 'started';
-    if (!AGENTS_ENDED.has(status)) group.statuses.set(ref.taskId, 'stopped');
+    if (AGENTS_ENDED.has(status)) every = false;
+    else group.statuses.set(ref.taskId, 'stopped');
   }
+  return every;
 }
 
-function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
+// `exited`: every agent the row names ended with the session's process (endedByExit); the row is stopped, and its
+// sentence says how
+function subagentRow(group: SubagentGroup, turnId: TurnId, exited: boolean): RowOf<'subagent'> {
   // Each child's own state; the row is terminal only when every child is (with errors when any failed, stopped when
   // any was stopped), and working while any child has progressed or ended and another still runs.
   const statuses = group.refs.map((ref) => group.statuses.get(ref.taskId) ?? 'started');
@@ -1236,8 +1245,8 @@ function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
   const status: SubagentStatus = done
     ? statuses.includes('finished_with_errors') ? 'finished_with_errors' : statuses.includes('stopped') ? 'stopped' : 'finished'
     : statuses.every((s) => s === 'started') ? 'started' : 'working';
-  const sentence = subagentSentence(group.refs.map((ref) => ref.name), status) + (group.phase && !done ? ` · ${group.phase}` : '');
-  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, overflow: Math.max(0, group.refs.length - 4) };
+  const sentence = subagentSentence(group.refs.map((ref) => ref.name), exited ? 'exited' : status) + (group.phase && !done ? ` · ${group.phase}` : '');
+  return { id: group.id, turnId, at: group.at, kind: 'subagent', agents: group.refs, sentence, status, ...(exited && { exited: true as const }), overflow: Math.max(0, group.refs.length - 4) };
 }
 
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {
