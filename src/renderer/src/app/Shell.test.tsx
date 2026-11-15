@@ -1123,7 +1123,8 @@ describe('the /btw card’s place', () => {
   const B = at('app-b' as AppSessionId);
   let fake: FakeClient;
   const column = () => screen.queryByRole('complementary', { name: 'Session cards' });
-  const cardsButton = () => within(screen.getByRole('banner')).getByRole('button', { name: 'Session cards' });
+  // the title bar by its mark: the card's own header is a banner to the role query too
+  const cardsButton = () => within(document.querySelector<HTMLElement>('[data-toolbar]')!).getByRole('button', { name: 'Session cards' });
   const btwCards = () => [...document.querySelectorAll<HTMLElement>('[data-btw-card]')];
   const btwChips = () => [...document.querySelectorAll<HTMLElement>('[data-btw-chip]')];
   // Each card drawn, in the document's order: its place and the question its field holds (which says whose it is).
@@ -1269,9 +1270,9 @@ describe('the /btw card’s place', () => {
     await userEvent.click(cardsButton()); // and on: back at the column's foot
     expect(drawn()).toEqual([['foot', 'More?']]);
     await userEvent.type(field(), '{Enter}');
-    expect(fake.invoked('session.acquire')).toHaveLength(1);
     while (fake.pending('session.acquire') > 0) await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: bareOf(A), launched: true, joined: false }));
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: bareOf(A), question: 'More?' }]);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
 
   it('a refused start still says why after a move to the corner, back to the foot, and after a fold', async () => {

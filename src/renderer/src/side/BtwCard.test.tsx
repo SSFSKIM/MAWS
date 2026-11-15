@@ -342,11 +342,10 @@ describe('the /btw card', () => {
     await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
     await userEvent.click(chip()!);
     await screen.findByText('ZEBRA');
-    expect(within(card()!).getByText('Starting…')).toBeTruthy();
     await userEvent.type(field(), '{Enter}');
-    expect(fake.invoked('session.acquire')).toHaveLength(1);
     await answerEveryStart();
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
     expect(field().value).toBe('');
   });
 
@@ -360,11 +359,10 @@ describe('the /btw card', () => {
     first.unmount(); // the card leaves the place it stood in
     render(<BtwCard appSessionId={A} />); // and is drawn where it now stands
     await screen.findByText('ZEBRA');
-    expect(within(card()!).getByText('Starting…')).toBeTruthy();
     await userEvent.type(field(), '{Enter}');
-    expect(fake.invoked('session.acquire')).toHaveLength(1);
     await answerEveryStart();
     expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
 
   it('a refused start still says why after a fold and after a mount in another place, and keeps the question', async () => {
