@@ -7,10 +7,11 @@
 // that rests on, from the rows, the metas, the bridge's agents, the parents' rows and whether the process runs. Pure:
 // rows in, in file order, in any batches; the body out. Not ported: `mcp` (answered empty: the MCP widget reads its own
 // source), an entry's `file` (the agent file's facts, which nothing here reads), `jobs_body`'s `also`, `view`, `copy` and
-// the `output` answer. Beside the rules stand `callAt`, `calledInBackground` and `facts`, which change nothing derived.
-// Two rules are ahead of sminos's, by ruling (doperpowers issue 504 asks sminos to follow): every <task-id> of a
-// notification block is read (R9), and the parent rule spares a background agent (N1). Keep it in step with sminos
-// otherwise (the PROVENANCE note).
+// the `output` answer. Beside the rules stand `callAt`, `calledInBackground`, `launched` and `facts`, which change
+// nothing derived on their own. Three rules are ahead of sminos's, by ruling (doperpowers issue 504 asks sminos to
+// follow): every <task-id> of a notification block is read (R9), the parent rule spares a background agent (N1), and a
+// nested agent's end is also read from the main transcript (N7). Keep it in step with sminos otherwise (the PROVENANCE
+// note).
 import type { Job, JobStatus, SubagentOutcome, SubagentSpawn, SubagentStatus } from 'desk-hub/protocol';
 import type { AgentMeta, BridgeAgent, DerivedAgent } from '@shared/lane-a/agents';
 
@@ -251,6 +252,12 @@ export class Ledger {
     return this.backgroundCalls.has(toolUseId);
   }
 
+  // Whether the rows hold an Agent or Task call's result that launched it in the background (`async_launched`): the
+  // engine's own word that nobody waits for the agent, which the parent rule reads (Decision Log 8).
+  launched(toolUseId: string): boolean {
+    return this.saidOf(this.byTool.get(toolUseId)).some((ev) => ev.result && ev.raw === LAUNCHED);
+  }
+
   private read(value: unknown): void {
     const row = record(value);
     if (row === null) return;
@@ -386,6 +393,14 @@ function index(by: Map<string, number[]>, key: string, i: number): void {
   else if (held.at(-1) !== i) held.push(i); // a block that names one task twice says one word of it
 }
 
+const terminal = (outcome: Outcome | null): outcome is Outcome => outcome !== null && outcome.status !== 'running';
+
+// N7: a nested agent's rows' outcome is its loop's (the parent's ledger's) word when that is terminal, else the main
+// ledger's terminal word for its id, else its loop's (its launch). For an agent of the main loop, `main` is null.
+function nestedOutcome(own: Outcome | null, main: Outcome | null): Outcome | null {
+  return terminal(own) ? own : terminal(main) ? main : own;
+}
+
 export interface DeriveInput {
   metas: readonly AgentMeta[]; // one entry out per meta, in this order
   bridge: readonly BridgeAgent[] | null; // null: no bridge state is held
@@ -397,10 +412,12 @@ export interface DeriveInput {
 // `mcp` is empty: a local session's MCP servers are read from MAWS's own source. The status and its evidence, the first
 // that holds (DX4, "Precedence"): the rows' outcome is terminal; the session's process is gone; the parent has ended,
 // for an agent that is not a background one; the bridge holds the agent as not running; the bridge holds it as running;
-// the rows say it runs (a launch); none. The bridge counts only while the process runs. The parent rule is narrower
-// than sminos's (U8d's Decision Log 6, N1; doperpowers issue 504): a background agent can outlive its parent, so the
-// parent's end is no evidence of its own. A background agent is one its meta (`requestShape`), the bridge's spawn or
-// its call's input says runs in the background.
+// the rows say it runs (a launch); none. The bridge counts only while the process runs. Two rules are ahead of
+// sminos's (doperpowers issue 504). The parent rule spares a background agent (U8d's Decision Log 6, N1): one can
+// outlive its parent, so the parent's end is no evidence of its own. A background agent is one its meta
+// (`requestShape`), the bridge's spawn or its call's input says runs in the background, and, for this rule alone, one
+// its loop's rows launched (Decision Log 8). And a nested agent's end is read from the main transcript too (N7): when
+// its parent was stopped, its end is written there and not in the parent's file.
 export function derive(ledger: Ledger, { metas, bridge, parents, sessionRunning }: DeriveInput): { subagents: DerivedAgent[]; jobs: Job[]; mcp: [] } {
   const held = new Map<string, BridgeAgent>();
   for (const agent of bridge ?? []) if (record(agent) !== null) held.set(agent.agentId, agent);
@@ -419,11 +436,11 @@ export function derive(ledger: Ledger, { metas, bridge, parents, sessionRunning 
     const parent = str(meta.parentAgentId) ?? str(spawn?.parentAgentId);
     const tool = str(meta.toolUseId) ?? str(spawn?.toolUseId);
     const loop = parent !== null ? (parents.get(parent) ?? null) : ledger;
-    const outcome = loop?.agentOutcome(agentId, tool, background) ?? null;
-    const backgroundAgent = background || (tool !== null && loop?.calledInBackground(tool) === true);
+    const outcome = nestedOutcome(loop?.agentOutcome(agentId, tool, background) ?? null, parent !== null ? ledger.agentOutcome(agentId, null, background) : null);
+    const backgroundAgent = background || (tool !== null && loop !== null && (loop.calledInBackground(tool) || loop.launched(tool)));
     const running = live !== null && typeof live.running === 'boolean' ? live.running : null;
     const decided = ((): Pick<DerivedAgent, 'status' | 'evidence'> => {
-      if (outcome !== null && outcome.status !== 'running') return { status: outcome.status, evidence: 'rows' };
+      if (terminal(outcome)) return { status: outcome.status, evidence: 'rows' };
       if (!sessionRunning) return { status: 'exited', evidence: 'session' };
       if (!backgroundAgent && parent !== null && metaOf.has(parent) && !busy.has(parent) && ENDED.includes(entry(parent).status)) return { status: 'exited', evidence: 'parent' };
       if (running === false) return { status: 'exited', evidence: 'bridge' };
