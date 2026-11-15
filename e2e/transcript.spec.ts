@@ -1688,6 +1688,42 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 });
 
 
+// UX wave U2b (the architect's ruling of 2026-11-15, digest 4): the pane's rows when a count over them fails, attached to
+// the test: as the DOM holds them (the list's mounted window, `OVERSCAN` past the viewport) and as the list holds them
+// (read by stepping its scroller from the top to the end, then put back), each with its index, id, kind and turn, and
+// whether it is mounted now. The recording's invented content only.
+async function attachPaneRows(pane: Locator, name: string): Promise<void> {
+  const rows = await pane.locator('[data-transcript-scroller]').first().evaluate(async (scroller) => {
+    const read = () => [...scroller.querySelectorAll<HTMLElement>('[data-index]')].map((item) => {
+      const frame = item.querySelector<HTMLElement>('[data-kind]');
+      return { index: Number(item.dataset.index), id: item.dataset.rowId ?? null, kind: frame?.dataset.kind ?? null, turn: frame?.dataset.turnId ?? null };
+    });
+    const mounted = read();
+    const back = scroller.scrollTop;
+    const list = new Map<number, ReturnType<typeof read>[number]>();
+    for (let top = 0, step = 0; step < 200; top += Math.max(40, scroller.clientHeight / 2), step += 1) {
+      scroller.scrollTop = top;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      for (const row of read()) list.set(row.index, row);
+      if (top >= scroller.scrollHeight - scroller.clientHeight) break;
+    }
+    scroller.scrollTop = back;
+    const shown = new Set(mounted.map((row) => row.index));
+    return { mounted, list: [...list.values()].sort((a, b) => a.index - b.index).map((row) => ({ ...row, mounted: shown.has(row.index) })) };
+  });
+  await test.info().attach(name, { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
+}
+
+/** An expectation over the pane's rows that, failing, attaches them first (`attachPaneRows`). */
+async function withPaneRows(pane: Locator, name: string, expectation: () => Promise<void>): Promise<void> {
+  try {
+    await expectation();
+  } catch (error) {
+    await attachPaneRows(pane, name);
+    throw error;
+  }
+}
+
 // UX wave U2b (A12, A13, A14): the session's lane on and messages in it, the report is the to-human view where MAWS
 // draws it. Each stretch of work between the rows the person reads is one `› working record` line (a mixed text's own
 // words a stretch of their own, after its messages), a message is the mod's drawing (`● message` bold in the accent over
@@ -1771,8 +1807,11 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(opened).toHaveText('‹ fold to report');
     await expect(opened).toHaveAttribute('aria-expanded', 'true');
     await expect(opened).toBeFocused();
+    // The list mounts a window of rows past the viewport and, following its end, keeps the end in view as the record's
+    // rows go in, so its turn's line, above them, can fall outside the window: the record's rows are brought into view.
+    await opened.scrollIntoViewIfNeeded();
     const turnLine = pane.locator('[data-kind="divider"]');
-    await expect(turnLine).toHaveCount(1);
+    await withPaneRows(pane, 'the pane’s rows with the first record open', () => expect(turnLine).toHaveCount(1));
     await expect(turnLine).toContainText('Worked for');
     await expect(turnLine).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
     await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);

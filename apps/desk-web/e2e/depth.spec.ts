@@ -135,7 +135,15 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   await midAnswer(player, depth, 'Both sub');
   player.holdRows = true;
   // A fresh load: a snapshot of the newest rows only. (A reconnect would not do: it keeps every row drawn before it.)
+  // UX wave U2b (the architect's ruling of 2026-11-15): the scene measures the list's geometry, so it reads the full
+  // transcript, where nothing folds, chosen before the fresh snapshot lands; the folded view's paging has its own scene
+  // (`session-view.spec.ts`, "in the to-human view, older rows page in…").
+  player.holdSubscriptions = true;
   await page.reload();
+  await page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' }).click();
+  await expect(page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => player.releaseSubscriptions()).toBe(1);
+  player.holdSubscriptions = false;
   await expect.poll(() => player.subscriptions()).toBe(2);
   await expect(streamingRows(depth).last()).toContainText('Both sub');
   await expect(depth).not.toContainText('Think briefly first');

@@ -301,13 +301,25 @@ test('a marked response is drawn as its message while it streams, before its row
 });
 
 /** The recorded session's plane with its snapshots cut to the newest `limit` rows, the browser on its channel. */
+// UX wave U2b (the architect's ruling of 2026-11-15): the paging scenes measure the list's geometry, so they read the
+// full transcript, where nothing folds, chosen before the snapshot lands: the folded view, which draws each copy of the
+// recorded session in a handful of rows, is paged by its own scene below ("in the to-human view, older rows page in…").
+async function inFullTranscript(page: Page, played: DepthPlayer): Promise<void> {
+  await toggle(page, 'Transcript').click();
+  await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => played.releaseSubscriptions()).toBe(1);
+  played.holdSubscriptions = false;
+}
+
 async function openPaged(page: Page, hub: HubDouble, limit: number): Promise<{ player: DepthPlayer; view: Locator }> {
   await page.setViewportSize({ width: 1280, height: 480 });
   await stageProject(hub);
   const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, limit }));
   played.skip(played.script.length); // the session has run: the snapshot holds its newest rows
+  played.holdSubscriptions = true;
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  await inFullTranscript(page, played);
   const view = page.getByTestId('session-view');
   await expect(view).toContainText('Both subagents reported back.');
   await expect.poll(() => played.subscriptions()).toBe(1);
@@ -394,8 +406,10 @@ for (const delay of [0, 300, 1500]) {
     const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 40 }));
     played.skip(played.script.length);
     played.holdRows = true;
+    played.holdSubscriptions = true;
     await seedKey(page, hub);
     await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+    await inFullTranscript(page, played);
     const view = page.getByTestId('session-view');
     await expect(view).toContainText('Both subagents reported back.');
     const scroller = view.locator('[data-transcript-scroller]');
@@ -423,19 +437,65 @@ for (const delay of [0, 300, 1500]) {
   });
 }
 
+// UX wave U2b (the architect's ruling of 2026-11-15): the view a person gets by default, the to-human view, where each
+// copy of the long history folds to a handful of rows. A snapshot that draws too little to fill the pane pages on by
+// itself until the pane is filled or the first row is reached; then, the reader at the top, a page lands above them and
+// their row stays where it was.
+test('in the to-human view, older rows page in until the pane is filled, and a page the reader asks for leaves their row where it was', async ({ page, hub }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await stageProject(hub);
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 40 }));
+  played.skip(played.script.length);
+  await seedKey(page, hub);
+  await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  const view = page.getByTestId('session-view');
+  await expect(view).toContainText('Both subagents reported back.');
+  await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
+  await expect(view.locator('[data-row-id^="record-fold:closed:"]').first()).toBeAttached(); // folded
+  const scroller = view.locator('[data-transcript-scroller]');
+  const asked = () => hub.up.filter((u) => u.frame.t === 'rows').length;
+  const filled = () => scroller.evaluate((el) => el.scrollHeight - el.clientHeight > 160); // `older-pages.ts`'s TOP
+  const atFirstRow = () => view.getByText('Think briefly first', { exact: false }).count().then((n) => n > 0);
+  // Paged by itself, the reader not scrolling: at least one page, until the pane is filled or the start is in.
+  await expect.poll(async () => (await filled()) || (await atFirstRow())).toBe(true);
+  expect(asked(), 'pages asked with no scroll').toBeGreaterThanOrEqual(1);
+  const settledPages = asked();
+  await page.waitForTimeout(500);
+  expect(asked(), 'none asked once the pane is filled').toBe(settledPages);
+  expect(await filled(), 'twelve copies of the session fill the pane before its first row').toBe(true);
+  // The reader scrolls to the top, which asks for the next page; what they look at then is their place.
+  played.holdRows = true;
+  await expect
+    .poll(async () => {
+      await scroller.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
+      return asked();
+    })
+    .toBeGreaterThan(settledPages);
+  await page.waitForTimeout(150); // the list has drawn the top
+  const reader = (await readerRow(view))!;
+  expect(reader, 'a row in view').not.toBeNull();
+  expect(played.releaseRows()).toBe(1);
+  await expect(page.getByTestId('session-status')).toHaveText(''); // the page is in
+  await page.waitForTimeout(600); // the page drawn and measured
+  const y = await rowY(view, reader.id);
+  expect(y, `${reader.id} drawn`).not.toBeNull();
+  expect(Math.abs(y! - reader.y), `${reader.id} from ${reader.y} to ${y}`).toBeLessThan(4);
+});
+
 // The snapshot must be tall enough that its top is far from the card at its tail: since the UX wave's arrival rows fold
-// a hand-back's report with its turn, forty rows of the long history draw too little, and sixty drew what forty did;
-// U2b's fold by stretch draws each copy of the session shorter again (its prompt, its subagents, its message and two
-// record lines), so the snapshot is twice that, to keep its top well clear of the card.
+// a hand-back's report with its turn, forty rows of the long history draw too little, and sixty draw what forty did.
+// UX wave U2b: the scene reads the full transcript (`inFullTranscript`), where nothing folds, so sixty still do.
 test("a notification's landing on a request reaches its card from far up in the history: the list brings it in, focused and marked", async ({ page, hub }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await stageProject(hub);
-  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 120 }));
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 60 }));
   played.skip(played.script.length);
   played.holdRows = true; // the reader stays where they went: no older page lands under them
+  played.holdSubscriptions = true;
   await hub.raise(PROJECT, 'mini', { request: 'toolu_far', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e' } });
   await seedKey(page, hub);
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
+  await inFullTranscript(page, played);
   const view = page.getByTestId('session-view');
   const card = view.locator('[data-tail-request="toolu_far"]');
   await expect(view).toContainText('Both subagents reported back.');

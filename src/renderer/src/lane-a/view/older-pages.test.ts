@@ -155,6 +155,43 @@ describe('paging older rows in', () => {
     expect(plane.current.asked).toHaveLength(4);
   });
 
+  // UX wave U2b (the architect's ruling of 2026-11-15): the property the fold puts at risk. In the to-human view a page
+  // of rows folds to fewer rows than the pane holds, so one answer does not fill it, though the list grew: the pager asks
+  // again, and again, until the pane is filled, and then no more while older rows remain.
+  it('in the to-human view, a page that folds to fewer rows than the pane holds is followed by the next until the pane is filled', async () => {
+    // Four marked turns, each its prompt, three unmarked responses and a marked answer: folded, three rows a turn.
+    const turns = Array.from({ length: 4 }, (_, t) => {
+      const asked = { ...prompt, uuid: `prompt-${t}`, message: { role: 'user', content: `Question ${t}.` } };
+      const work = Array.from({ length: 3 }, (_, i) => said(`turn-${t}-work-${i}`, i === 0 ? `prompt-${t}` : `turn-${t}-work-${i - 1}`, `Turn ${t}, step ${i}.`));
+      return [asked, ...work, said(`turn-${t}-answer`, `turn-${t}-work-2`, `<message>Turn ${t} is done.</message>`)];
+    }).flat();
+    let key = '';
+    const drawnCount = () => drawnRows(key, []).length;
+    // A pane of 100 px whose rows are 40 px each: filled (past `TOP`, 160 px) from seven drawn rows on.
+    const geometry = { get scrollHeight() { return drawnCount() * 40; }, clientHeight: 100, scrollTop: 0 };
+    const { plane, controller, script, answer } = open(turns, 3, geometry, { report: true });
+    key = controller.key;
+    await act(async () => {
+      plane.snapshot(script, script.length, 3); // the last turn's last two responses and its answer: a record line and the answer
+      await settle();
+      await settle();
+    });
+    expect(drawnCount()).toBeLessThan(7);
+    expect(plane.current.asked).toHaveLength(1); // not filled: asked at once
+    const drawnBefore = drawnCount();
+    await answer(); // the turn's first response and its prompt, and the turn before's answer: the list grows, not filled
+    expect(drawnCount()).toBeGreaterThan(drawnBefore);
+    expect(drawnCount()).toBeLessThan(7);
+    expect(plane.current.asked).toHaveLength(2); // one answer did not fill the pane: the next is asked for
+    for (let pages = 0; pages < 10 && drawnCount() < 7; pages += 1) await answer();
+    expect(drawnCount()).toBeGreaterThanOrEqual(7); // filled before the first row
+    expect(drawnRows(key, []).some((row) => row.id.includes('prompt-0'))).toBe(false);
+    const asked = plane.current.asked.length;
+    await act(async () => { await settle(); await settle(); });
+    expect(plane.current.asked).toHaveLength(asked); // filled: no more, though older rows remain
+    expect(controller.state.getState().more).toBe(true);
+  });
+
   it('in the to-human view, a page whose rows all fold into a closed record draws nothing new, and the next is asked for', async () => {
     const geometry = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
     const { plane, controller, list, script, answer } = open(markedTurn, 3, geometry, { report: true });
