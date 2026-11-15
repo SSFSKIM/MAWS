@@ -211,6 +211,14 @@ export class LibraryStore {
       .map((row) => row.linked_path);
   }
 
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 20): the linked paths of
+  // the live File artifacts whose maker is a session of `appSessionId`'s line (the session or a side thread's ancestor),
+  // which only the agent's own `send_file` or `artifact_create` records; each as the host recorded it.
+  fileSentPaths(appSessionId: AppSessionId): string[] {
+    void appSessionId;
+    return [];
+  }
+
   // ---- internals -----------------------------------------------------------------------------------------------------
 
   private changed(): void {

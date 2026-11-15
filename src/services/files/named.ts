@@ -37,8 +37,12 @@ export interface NamedPathsOptions {
   bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number }; // tests
   hooks?: { at?(point: 'opened' | 'searched', appSessionId: AppSessionId): Promise<void> }; // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered
 }
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 22): which kind of form
+// names the path: a counted one (the person's message, the agent's own text, a tool call's input), only a result one
+// (what a tool returned, or a `user` row someone other than the person wrote), or none.
+export type Naming = 'counted' | 'result' | false;
 export interface NamedPaths {
-  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<boolean>;
+  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming>;
 }
 
 const NEWLINE = 0x0a;
@@ -359,14 +363,14 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     return created;
   }
 
-  return {
+  const search = {
     // A request's patience and its client's signal run from the moment it is made, the locator's wait included (fix
     // round 1, item 3): it finds its session's transcript itself, before it looks for a job (decision 13; the branch
     // review's finding 5: `/clear` keeps the app session id and binds it to a new transcript, and a request never joins
     // a job that reads another transcript than the one its session is bound to when it is made), and then waits in the
     // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
     // transcript, a locator that throws, a full queue, a waiter that leaves: not named.
-    names(appSessionId, path, signal) {
+    names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<boolean> {
       if (signal?.aborted) return Promise.resolve(false);
       // `files.read` asks for a missing file's path too, which no `realpath` has bounded: past the bound, not named at
       // once, and no transcript looked for (the work meter's fix pass, item 2; the needles' pattern runs on the path)
@@ -407,4 +411,5 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       });
     },
   };
+  return { names: async (appSessionId, path, signal) => ((await search.names(appSessionId, path, signal)) ? 'counted' : false) };
 }

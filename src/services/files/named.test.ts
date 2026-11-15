@@ -7,9 +7,11 @@ import { open as fsOpen, readFile, rename, writeFile, mkdir, stat, type FileHand
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { readArrivals } from '@shared/engine/arrival';
 import { callClass, rowClaim } from '@shared/files/named';
+import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { StoreFixture } from '../../../test/support/store-fixture';
-import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, type NamedPathsOptions } from './named';
+import { createNamedPaths, NAMED_CHUNK_BYTES, NAMED_FINGERPRINT_BYTES, NAMED_ROW_BYTES, NAMED_SCAN_BYTES, NAMED_WAIT_MS, NAMED_WAITING_MAX, NAMED_CACHE_ENTRIES, NAMED_PENDING_MAX, NAMED_CLAIM_STEPS, NAMED_PATH_MAX, type Naming, type NamedPathsOptions } from './named';
 
 const S = 'app-named' as AppSessionId;
 const P = '/work/out/report.md';
@@ -25,6 +27,12 @@ const result = (id: string, content: string | object[], extra: object = {}) => u
 const filler = (n: number, size = 200) => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? user(`note ${i} ${'x'.repeat(size)}`) : assistant(text(`reply ${i} ${'y'.repeat(size)}`))));
 const linkTo = (path: string) => assistant(text(`Wrote [the report](${path}).`));
 const lineOf = (record: object) => JSON.stringify(record);
+// A row the probes recorded (spikes/protocol-probe/fixtures/uxwave/), its marks as recorded and one run of its words replaced
+const recordedRow = (name: string, line: number, words: string, by: string): object => {
+  const json = JSON.stringify(loadUxwaveTranscript(name)[line - 1]);
+  if (!json.includes(words)) throw new Error(`${name}:${line} does not hold ${words}`);
+  return JSON.parse(json.replace(words, JSON.stringify(by).slice(1, -1))) as object;
+};
 const bytesOf = (records: object[]) => records.reduce((sum, record) => sum + Buffer.byteLength(lineOf(record)) + 1, 0);
 
 let fixture: StoreFixture;
@@ -156,7 +164,7 @@ describe('names: what the transcript names', () => {
   it('a link in the newest rows names the path; one nowhere names nothing', async () => {
     await writeTranscript([...filler(10), linkTo(P), ...filler(2)]);
     const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(await named.names(S, '/work/out/other.md')).toBe(false);
   });
 
@@ -168,13 +176,56 @@ describe('names: what the transcript names', () => {
       [call('t1', 'ExitPlanMode', { plan: `Then [r](${P})` })],
       [call('t1', 'Read', { file_path: P })],
       [call('t1', 'Edit', { file_path: P, old_string: 'a', new_string: 'b' })],
+    ];
+    for (const records of cases) {
+      await writeTranscript([...filler(4), ...records, ...filler(4)]);
+      expect(await paths().names(S, P), JSON.stringify(records)).toBe('counted');
+    }
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 22): what a tool returned
+  // names the path for a read and never for a save; the search says which kind it found
+  it('a result form names the path as a result: an MCP call’s text, and an edit’s filePath where it differs from the call’s input', async () => {
+    const cases: object[][] = [
       [call('t1', 'mcp__docs__save', { title: 'r' }), ...filler(3), result('t1', `Saved to [r](${P})`)],
       [call('t1', 'Write', { file_path: '/work/out/elsewhere.md', content: 'x' }), ...filler(3), result('t1', 'File created', { toolUseResult: { type: 'create', filePath: P } })],
     ];
     for (const records of cases) {
       await writeTranscript([...filler(4), ...records, ...filler(4)]);
-      expect(await paths().names(S, P), JSON.stringify(records)).toBe(true);
+      expect(await paths().names(S, P), JSON.stringify(records)).toBe('result');
     }
+  });
+
+  it('an edit’s result names its file as the call’s input does: counted', async () => {
+    await writeTranscript([...filler(4), call('t1', 'Write', { file_path: P, content: 'x' }), result('t1', 'File created', { toolUseResult: { type: 'create', filePath: P } }), ...filler(4)]);
+    expect(await paths().names(S, P)).toBe('counted');
+  });
+
+  it('a result form in the newest rows does not stop the search: an older counted form makes the answer counted', async () => {
+    await writeTranscript([...filler(20), linkTo(P), ...filler(20), call('t1', 'mcp__docs__save', {}), result('t1', `Saved to [r](${P})`), ...filler(3)]);
+    expect(await paths({ bounds: { chunk: 1024 } }).names(S, P)).toBe('counted');
+    await writeTranscript([...filler(20), user(`Open [r](${P})`, { origin: { kind: 'human' } }), ...filler(20), call('t1', 'mcp__docs__save', {}), result('t1', `Saved to [r](${P})`)]);
+    expect(await paths({ bounds: { chunk: 1024 } }).names(S, P)).toBe('counted');
+  });
+
+  it('a path only a result names is searched to the bound and answered as a result', async () => {
+    const records = [...filler(200), call('t1', 'mcp__docs__save', {}), result('t1', `Saved to [r](${P})`), ...filler(10)];
+    await writeTranscript(records);
+    expect(await paths({ bounds: { chunk: 4096 } }).names(S, P)).toBe('result');
+    expect(stats.bytes).toBeGreaterThanOrEqual(bytesOf(records)); // the whole window: no counted form is older
+  });
+
+  // Decision Log 8: a `user` row someone other than the person wrote is a result form already resolved
+  it('a link in a peer session’s message or a notification names the path as a result; the person’s own message counts', async () => {
+    const peer = recordedRow('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Open [r](${P})`);
+    const notification = recordedRow('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote [r](${P})`);
+    expect([peer, notification].map((row) => readArrivals(row).map((arrival) => arrival.class))).toEqual([['peer'], ['task']]);
+    for (const row of [peer, notification]) {
+      await writeTranscript([...filler(4), row, ...filler(4)]);
+      expect(await paths().names(S, P), JSON.stringify(row)).toBe('result');
+    }
+    await writeTranscript([...filler(4), user(`Open [r](${P})`, { origin: { kind: 'human' } }), ...filler(4), peer, notification]);
+    expect(await paths().names(S, P)).toBe('counted');
   });
 
   it('a result form names nothing without its call, or with a call of another tool', async () => {
@@ -209,18 +260,18 @@ describe('names: what the transcript names', () => {
     await writeTranscript([...filler(4), assistant(text('[r](</vault/[x](/secret).txt>)')), assistant(text('[r](/work/out/a.md "see [x](/secret)")')), ...filler(4)]);
     const named = paths();
     expect(await named.names(S, '/secret')).toBe(false);
-    expect(await named.names(S, outer)).toBe(true);
+    expect(await named.names(S, outer)).toBe('counted');
   });
 
   it('a hit before a compaction boundary still names the path', async () => {
     await writeTranscript([linkTo(P), ...filler(4), { type: 'system', subtype: 'compact_boundary', content: 'Conversation compacted' }, user('Summary of the conversation so far', { isCompactSummary: true }), ...filler(4)]);
-    expect(await paths().names(S, P)).toBe(true);
+    expect(await paths().names(S, P)).toBe('counted');
   });
 
   it('a name with a quote, a backslash, a space and non-ASCII letters is found', async () => {
     const odd = '/work/out/say "hi" \\x 보고서.md';
     await writeTranscript([...filler(4), assistant(text(`See [it](<${odd}>).`)), ...filler(4)]);
-    expect(await paths().names(S, odd)).toBe(true);
+    expect(await paths().names(S, odd)).toBe('counted');
   });
 
   it('a record older than the bound is not named; one wholly inside it is', async () => {
@@ -228,14 +279,14 @@ describe('names: what the transcript names', () => {
     await writeTranscript(records);
     const after = bytesOf(records.slice(1));
     expect(await paths({ bounds: { scan: after } }).names(S, P)).toBe(false);
-    expect(await paths({ bounds: { scan: after + Buffer.byteLength(lineOf(records[0]!)) + 1 } }).names(S, P)).toBe(true);
+    expect(await paths({ bounds: { scan: after + Buffer.byteLength(lineOf(records[0]!)) + 1 } }).names(S, P)).toBe('counted');
   });
 
   it('a line longer than the row bound is passed over', async () => {
     const long = assistant(text(`[r](${P}) ${'z'.repeat(9_000)}`));
     await writeTranscript([...filler(2), long, ...filler(2)]);
     expect(await paths({ bounds: { row: 8_000, chunk: 1_000 } }).names(S, P)).toBe(false);
-    expect(await paths({ bounds: { row: 10_000, chunk: 1_000 } }).names(S, P)).toBe(true);
+    expect(await paths({ bounds: { row: 10_000, chunk: 1_000 } }).names(S, P)).toBe('counted');
   });
 
   it('a last line with no end is not read, and is searched once it is whole', async () => {
@@ -244,7 +295,7 @@ describe('names: what the transcript names', () => {
     const named = paths();
     expect(await named.names(S, P)).toBe(false);
     await fixture.appendBytes(file!, Buffer.from('\n'));
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('no transcript, no file, a directory or a locator that throws: not named, and nothing thrown', async () => {
@@ -269,7 +320,7 @@ describe('names: what the transcript names', () => {
       const started = performance.now();
       expect(await named.names(piped, P)).toBe(false);
       expect(performance.now() - started).toBeLessThan(1_000); // answered, not given up on
-      expect(await named.names(S, P)).toBe(true);
+      expect(await named.names(S, P)).toBe('counted');
     } finally {
       closeSync(openSync(fifo, constants.O_RDWR | constants.O_NONBLOCK)); // releases an open still waiting for a writer
     }
@@ -286,7 +337,7 @@ describe('what a remembered answer costs, and what it rests on (A8)', () => {
   it('a path found in the newest rows is found without reading the older ones', async () => {
     const records = [...filler(300), linkTo(P)];
     await writeTranscript(records);
-    expect(await paths({ bounds: { chunk: 4096 } }).names(S, P)).toBe(true);
+    expect(await paths({ bounds: { chunk: 4096 } }).names(S, P)).toBe('counted');
     expect(bytesOf(records)).toBeGreaterThan(50_000);
     expect(stats.bytes).toBeLessThan(5 * 4096); // a chunk, two fingerprints' worth at most, and the proof
   });
@@ -295,20 +346,44 @@ describe('what a remembered answer costs, and what it rests on (A8)', () => {
     const naming = linkTo(P);
     await writeTranscript([...filler(50), naming, ...filler(5)]);
     const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(stats.bytes).toBe(Buffer.byteLength(lineOf(naming)) + 2); // the line, the byte before and the byte after
   });
 
-  it('after a hit that rests on a result, a later ask reads the two records again and no more', async () => {
+  // U6e (S14): a result-only answer is remembered as that record's place, with a miss's checkpoint beside it
+  it('after a result-only answer, a later ask reads the two records again and what was written since, and no more', async () => {
     const records = [call('t1', 'mcp__docs__save', { title: 'r' }), ...filler(10), result('t1', `Saved to [r](${P})`), ...filler(3)];
-    await writeTranscript([...filler(5), ...records]);
-    const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    await writeTranscript([...filler(300), ...records]);
+    const named = paths({ bounds: { chunk: 4096 } });
+    expect(await named.names(S, P)).toBe('result');
     reset();
-    expect(await named.names(S, P)).toBe(true);
-    expect(stats.bytes).toBe(Buffer.byteLength(lineOf(records[0]!)) + 2 + Buffer.byteLength(lineOf(records[11]!)) + 2);
+    expect(await named.names(S, P)).toBe('result');
+    const proof = Buffer.byteLength(lineOf(records[11]!)) + 2 + Buffer.byteLength(lineOf(records[0]!)) + 2;
+    expect(stats.bytes).toBe(proof + 2 * FP); // the record and its call, and the checkpoint's fingerprint proven again
+    const added = [...filler(5), result('t1', `Saved to [r](${P})`), ...filler(5)];
+    await append(added);
+    reset();
+    expect(await named.names(S, P)).toBe('result');
+    expect(stats.bytes).toBeLessThanOrEqual(proof + bytesOf(added) + 3 * 2 * FP + 2 * 4096);
+  });
+
+  it('after a result-only answer, a counted form written since makes the answer counted, and a record that no longer names drops the memory (S14)', async () => {
+    const records = [...filler(50), call('t1', 'mcp__docs__save', {}), result('t1', `Saved to [r](${P})`), ...filler(3)];
+    await writeTranscript(records);
+    const named = paths();
+    expect(await named.names(S, P)).toBe('result');
+    await append([linkTo(P)]);
+    expect(await named.names(S, P)).toBe('counted');
+    await writeTranscript(records);
+    const fresh = paths();
+    expect(await fresh.names(S, P)).toBe('result');
+    const unnamed = { ...result('t1', `Saved to [r](/work/out/rePort.md)`), uuid: (records[51] as { uuid: string }).uuid };
+    await rewriteInPlace([...records.slice(0, 51), unnamed, ...records.slice(52)]);
+    reset();
+    expect(await fresh.names(S, P)).toBe(false);
+    expect(stats.bytes).toBeGreaterThan(bytesOf(filler(50))); // the memory dropped: the whole window again
   });
 
   it('after a miss, only what was written since is searched', async () => {
@@ -319,7 +394,7 @@ describe('what a remembered answer costs, and what it rests on (A8)', () => {
     const added = [...filler(5), linkTo(P), ...filler(5)];
     await append(added);
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(before).toBeGreaterThan(100_000);
     // what was added, and three fingerprints (the miss's, and the new checkpoint's twice)
     expect(stats.bytes).toBeLessThanOrEqual(bytesOf(added) + 3 * 2 * FP + 2 * 4096);
@@ -338,10 +413,10 @@ describe('what a remembered answer costs, and what it rests on (A8)', () => {
     const other = '/work/out/other.md';
     await writeTranscript([linkTo(P), linkTo(other), ...filler(100)]);
     const named = paths({ bounds: { entries: 1 } });
-    expect(await named.names(S, P)).toBe(true);
-    expect(await named.names(S, other)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
+    expect(await named.names(S, other)).toBe('counted');
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(stats.bytes).toBeGreaterThan(bytesOf(filler(100))); // P's entry was dropped: searched again
   });
 });
@@ -355,7 +430,7 @@ describe('the sequences (S4 to S13)', () => {
     await held.reached;
     held.release();
     expect(await asked).toBe(false);
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('S4: growth seen only after the search does not change its answer', async () => {
@@ -366,20 +441,20 @@ describe('the sequences (S4 to S13)', () => {
     await held.reached;
     held.release();
     expect(await asked).toBe(false);
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('S5: a transcript renamed into another folder between two asks: the hit is proven at the new place and stands', async () => {
     const naming = linkTo(P);
     await writeTranscript([...filler(20), naming, ...filler(2)]);
     const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     const moved = join(fixture.configHome, 'projects', 'another-folder', 'engine-session-1.jsonl');
     await mkdir(dirname(moved), { recursive: true });
     await rename(file!, moved);
     file = moved;
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(stats.bytes).toBe(Buffer.byteLength(lineOf(naming)) + 2);
   });
 
@@ -389,14 +464,14 @@ describe('the sequences (S4 to S13)', () => {
     file = `${path}.moving`;
     expect(await named.names(S, P)).toBe(false);
     file = path;
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('S7: two asks for one session and path at once share one job', async () => {
     await writeTranscript([...filler(20), linkTo(P)]);
     const locate = vi.fn(async () => file);
     const named = paths({ transcript: locate });
-    expect(await Promise.all([named.names(S, P), named.names(S, P)])).toEqual([true, true]);
+    expect(await Promise.all([named.names(S, P), named.names(S, P)])).toEqual(['counted', 'counted']);
     expect(locate).toHaveBeenCalledTimes(2); // each request finds its session's transcript before it joins a job
     expect(stats.opens).toBe(1);
   });
@@ -413,7 +488,7 @@ describe('the sequences (S4 to S13)', () => {
     file = rebound; // the session's transcript is now another file, which does not link the path
     const after = named.names(S, P);
     held.release();
-    expect(await before).toBe(true); // asked while the session was bound to the old transcript
+    expect(await before).toBe('counted'); // asked while the session was bound to the old transcript
     expect(await after).toBe(false); // answered as a fresh request is
     expect(await paths({ transcript: async () => rebound }).names(S, P)).toBe(false);
     expect(old).not.toBe(rebound);
@@ -426,7 +501,7 @@ describe('the sequences (S4 to S13)', () => {
     expect(await named.names(S, P)).toBe(false);
     failRead = null;
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(stats.bytes).toBeGreaterThan(bytesOf(filler(100))); // the whole transcript searched again
   });
 
@@ -434,7 +509,7 @@ describe('the sequences (S4 to S13)', () => {
     const records = [...filler(10), linkTo(P), ...filler(10)];
     await writeTranscript(records);
     const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     const unnamed = linkTo('/work/out/rePort.md');
     unnamed.uuid = (records[10] as { uuid: string }).uuid;
     const rewritten = [...records.slice(0, 10), unnamed, ...records.slice(11)];
@@ -447,7 +522,7 @@ describe('the sequences (S4 to S13)', () => {
     const records = [...filler(10), linkTo(P), ...filler(10)];
     await writeTranscript(records);
     const named = paths();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     await rewriteInPlace([...filler(40), assistant(text('nothing linked'))]);
     expect(await named.names(S, P)).toBe(false);
   });
@@ -474,7 +549,7 @@ describe('the sequences (S4 to S13)', () => {
     await held.reached;
     held.release();
     expect(await asked).toBe(false);
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('S12: after a miss, a rewrite that puts the link before the checkpoint fails the fingerprint, and the whole window is searched', async () => {
@@ -483,7 +558,7 @@ describe('the sequences (S4 to S13)', () => {
     const named = paths();
     expect(await named.names(S, P)).toBe(false);
     await rewriteInPlace([...records.slice(0, 3), { ...linkTo(P), uuid: (records[3] as { uuid: string }).uuid }, ...records.slice(4)]);
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('S13: a result added since a miss, whose call is older than the checkpoint, is named once its call is found', async () => {
@@ -492,8 +567,8 @@ describe('the sequences (S4 to S13)', () => {
     expect(await named.names(S, P)).toBe(false);
     expect(await named.names(S, '/work/out/edited.md')).toBe(false);
     await append([result('t1', `Saved to [r](${P})`), result('t2', 'ok', { toolUseResult: { filePath: '/work/out/edited.md' } })]);
-    expect(await named.names(S, P)).toBe(true);
-    expect(await named.names(S, '/work/out/edited.md')).toBe(true);
+    expect(await named.names(S, P)).toBe('result');
+    expect(await named.names(S, '/work/out/edited.md')).toBe('result');
   });
 });
 
@@ -510,9 +585,9 @@ describe('the queue (S14, S15)', () => {
     expect(await named.names(S, '/work/out/ninth.md')).toBe(false);
     expect(await named.names('app-other' as AppSessionId, P)).toBe(false); // another session's ask is a distinct job too
     held.release();
-    expect(await running).toBe(true);
-    expect(await Promise.all(waiting)).toEqual(others.map(() => true));
-    expect(await sameAsWaiting).toBe(true);
+    expect(await running).toBe('counted');
+    expect(await Promise.all(waiting)).toEqual(others.map(() => 'counted'));
+    expect(await sameAsWaiting).toBe('counted');
   });
 
   it('S15: every waiter of the running search leaves; it stops at its next read and remembers nothing', async () => {
@@ -528,7 +603,7 @@ describe('the queue (S14, S15)', () => {
     held.release();
     await turns();
     reset();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
     expect(stats.bytes).toBeGreaterThan(bytesOf(filler(200))); // nothing was remembered: the whole window again
   });
 
@@ -555,7 +630,7 @@ describe('the queue (S14, S15)', () => {
     await held.reached;
     expect(await impatient).toBe(false);
     held.release();
-    expect(await named.names(S, P)).toBe(true);
+    expect(await named.names(S, P)).toBe('counted');
   });
 
   it('a waiting job whose waiters all leave never runs', async () => {
@@ -571,7 +646,7 @@ describe('the queue (S14, S15)', () => {
     controller.abort();
     expect(await second).toBe(false);
     held.release();
-    expect(await first).toBe(true);
+    expect(await first).toBe('counted');
     await turns();
     expect(locate).toHaveBeenCalledTimes(2);
     expect(stats.opens).toBe(1); // the second job never opened its transcript
@@ -584,7 +659,7 @@ describe('the queue (S14, S15)', () => {
     const loop = ticker();
     const at: number[] = []; // the loop's turns at each read
     try {
-      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).names(S, P)).toBe(true);
+      expect(await paths({ open: instant(() => at.push(loop.ticks())), bounds: { chunk: 2048 } }).names(S, P)).toBe('counted');
     } finally {
       loop.stop();
     }
@@ -633,7 +708,7 @@ describe('the queue (S14, S15)', () => {
     const locate = vi.fn(async () => file);
     expect(await paths({ transcript: locate }).names(S, over)).toBe(false);
     expect(locate).not.toHaveBeenCalled();
-    expect(await paths().names(S, under)).toBe(true); // under the bound, a long path is read as any
+    expect(await paths().names(S, under)).toBe('counted'); // under the bound, a long path is read as any
   });
 
   // fix round 1, item 3: a request's patience and its signal run from the moment it is made, the locator's wait
@@ -676,7 +751,7 @@ describe('the queue (S14, S15)', () => {
     const candidates = 20_000;
     let ticks = 0;
     let built: number[] = [];
-    async function searched(row: object): Promise<boolean> {
+    async function searched(row: object): Promise<Naming> {
       await writeTranscript([...filler(2), row]);
       ticks = 0;
       built = [];
@@ -710,7 +785,7 @@ describe('the queue (S14, S15)', () => {
     });
 
     it('stops at the first link that names the path', async () => {
-      expect(await searched(assistant(text(`[r](${P}) ${`[r](${P}.bak) `.repeat(candidates)}`)))).toBe(true);
+      expect(await searched(assistant(text(`[r](${P}) ${`[r](${P}.bak) `.repeat(candidates)}`)))).toBe('counted');
       expect(built.length).toBeLessThan(candidates / 2); // the search's proof reads the row again, and stops at its first link too
     });
   });
@@ -758,14 +833,14 @@ describe('the results waiting for their calls', () => {
   it('at the cap: the 256 newest waiting results still resolve, the 257th-newest is not waited for', async () => {
     const resolved = result('toolu_resolved', `Saved to [r](${P})`);
     await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), resolved, ...unresolved(NAMED_PENDING_MAX - 1, 'a')]);
-    expect(await paths().names(S, P)).toBe(true);
+    expect(await paths().names(S, P)).toBe('result');
     await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), resolved, ...unresolved(NAMED_PENDING_MAX, 'b')]);
     expect(await paths().names(S, P)).toBe(false);
   });
 
   it('the cap is a bound the suite can set', async () => {
     await writeTranscript([call('toolu_resolved', 'mcp__docs__save', {}), result('toolu_resolved', `Saved to [r](${P})`), ...unresolved(3, 'c')]);
-    expect(await paths({ bounds: { pending: 4 } }).names(S, P)).toBe(true);
+    expect(await paths({ bounds: { pending: 4 } }).names(S, P)).toBe('result');
     expect(await paths({ bounds: { pending: 3 } }).names(S, P)).toBe(false);
   });
 });
@@ -799,7 +874,7 @@ describe('the search and the rule agree', () => {
           const target = random() < 0.85 ? pick(ids) : `toolu_none_${i}`;
           records.push(pick([result(target, `[r](${P})`), result(target, [text(`[r](${pick([P, other])})`)]), result(target, 'ok', { toolUseResult: { filePath: pick([P, other]) } }), result(target, P)]));
         } else if (roll < 0.45) {
-          records.push(pick([linkTo(pick([P, other])), assistant(text(`see ${P}`)), user(`[r](${P})`, { isMeta: true }), user(`open [r](${pick([P, other])})`)]));
+          records.push(pick([linkTo(pick([P, other])), assistant(text(`see ${P}`)), user(`[r](${P})`, { isMeta: true }), user(`open [r](${pick([P, other])})`), user(`<task-notification>\n<summary>[r](${P})</summary>\n</task-notification>`, { origin: { kind: 'task-notification' } })]));
         } else if (roll < 0.55) {
           records.push(pick([{ type: 'api-request', messages: [{ content: `[r](${P})` }] }, { type: 'queue-operation', content: `[r](${P})` }, { type: 'summary', summary: `[r](${P})` }]));
         } else {
@@ -815,10 +890,12 @@ describe('the search and the rule agree', () => {
         offset += Buffer.byteLength(lineOf(record)) + 1;
         return start >= size - scan;
       });
-      const expected = records.some((record, index) => {
-        if (!within[index]) return false;
-        const claim = rowClaim(record, P);
-        if (claim.names) return true;
+      // U6e: counted when a record names it by a counted form, else a result when one names it by a result form
+      const claims = records.map((record, index) => (within[index] ? rowClaim(record, P) : null));
+      const resolved = records.some((_, index) => {
+        const claim = claims[index];
+        if (!claim || claim.names) return false;
+        if (claim.other) return true;
         return claim.pending.some(({ toolUseId, when }) => {
           for (let earlier = index - 1; earlier >= 0 && within[earlier]; earlier -= 1) {
             const found = callClass(records[earlier], toolUseId);
@@ -827,6 +904,7 @@ describe('the search and the rule agree', () => {
           return false;
         });
       });
+      const expected = claims.some((claim) => claim?.names === true) ? 'counted' : resolved ? 'result' : false;
       await writeTranscript(records);
       const chunk = 64 + Math.floor(random() * 2048);
       expect(await paths({ bounds: { chunk, scan } }).names(S, P), `round ${round}, chunk ${chunk}, scan ${scan}: ${records.map(lineOf).join('\n')}`).toBe(expected);

@@ -60,12 +60,16 @@ import {
   type FilesWriteInput,
   type FilesWriteOutput,
   type FilesRevealOutput, // E1
+  type FilesGrantOutput, // U6e
+  type FilesWriteOutsideInput, // U6e
 } from '@shared/ipc/schema/files';
 import { confirmOpened, NO_LINK, walk, WALKED } from '../fs/no-link';
 import { ReleaseFences } from '../release-fences';
 import { machineHomes } from '@shared/machine/machine-home';
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
+import type { FileGrants } from './grants';
 import { fileMime, isTextMime } from './mime';
+import type { Naming } from './named';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
 export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */;
@@ -89,7 +93,13 @@ export interface FilesServiceOptions {
   // UX wave U6c: whether the session's transcript names this path, as the request gave it (`createNamedPaths(...).names`).
   // Asked by `read` and `openExternal` alone, for a request that carries `named`, from this machine, for a path outside the
   // roots that no delivered file admits. Absent: nothing is admitted by name.
-  named?: (appSessionId: AppSessionId, path: string, signal?: AbortSignal) => Promise<boolean>;
+  named?: (appSessionId: AppSessionId, path: string, signal?: AbortSignal) => Promise<Naming>;
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B): the grants of chosen files
+  // (absent: nothing is chosen, and `grant` is refused); whether the session's agent delivered the file at this real path
+  // (absent: nothing is sent); MAWS's own folders, as real paths, which no write reaches (absent: none)
+  grants?: Pick<FileGrants, 'add' | 'has'>;
+  sent?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
+  own?: () => readonly string[];
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
@@ -123,9 +133,11 @@ export interface FilesService {
   // that resolved a path inside a directory it owns reads that file and nothing a link leads to (`library.read`'s export).
   readResolved(input: FilesReadResolvedInput, options?: { linkFree?: boolean }): Promise<FilesReadOutput>;
   write(input: FilesWriteInput, remote?: boolean): Promise<FilesWriteOutput>; // E5
+  writeOutside(input: FilesWriteOutsideInput, remote?: boolean, signal?: AbortSignal): Promise<FilesWriteOutput>; // U6e
+  grant(appSessionId: AppSessionId, path: string, remote?: boolean): Promise<FilesGrantOutput>; // U6e
   watch(appSessionId: AppSessionId, path: string, owner: string, remote?: boolean): Promise<void>;
   unwatch(appSessionId: AppSessionId, path: string, owner: string): Promise<void>;
-  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c
+  openExternal(appSessionId: AppSessionId, path: string, client: ClientRef | null, asked?: { named?: boolean; agent?: boolean; remote?: boolean; signal?: AbortSignal }): Promise<FilesOpenExternalOutput>; // U6c; U6e: `agent`
   reveal(appSessionId: AppSessionId, path: string, client: ClientRef | null): Promise<FilesRevealOutput>; // E1
   release(owner: string): void; // everything a client holds, when it ends
   watching(): string[];
@@ -197,7 +209,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     const nameAdmits = purpose.admitNamed && asked.named === true && named !== undefined && !remote;
     const namesIt = async () => {
       await at('before-named', path);
-      return (await named?.(appSessionId, path, asked.signal)) === true;
+      return named !== undefined && (await named(appSessionId, path, asked.signal)) !== false;
     };
     if (roots.length === 0 && !admits && !nameAdmits) throw new Refusal();
     let real0: string;
@@ -497,6 +509,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     read,
     readResolved, // P3-L (M6b fix wave 2)
     write,
+    writeOutside: async () => {
+      throw new Error('files.writeOutside is not built yet');
+    },
+    grant: async () => {
+      throw new Error('files.grant is not built yet');
+    },
     watch,
     // the hold on the directory the path names now (the realpath a watch of it would be keyed by), else the first found;
     // a release of the window meanwhile (a navigation) took the page's holds, and a hold under the same key is the new

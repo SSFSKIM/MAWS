@@ -548,6 +548,9 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       const known = index.sessions.summaryOf(appId)?.transcriptPath;
       return known?.endsWith(`/${record.engineSessionId}.jsonl`) ? known : transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
     },
+    grants: null,
+    sent: async () => false,
+    own: () => [],
   });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);
