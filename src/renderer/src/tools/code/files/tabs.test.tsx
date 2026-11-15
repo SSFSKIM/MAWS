@@ -22,6 +22,7 @@ import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds,
 import { sideFilesViewer } from '../editor/register';
 import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
+import { Tab as MainTab } from '../../../main/Tab';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
 import { useFiles } from './store';
@@ -752,6 +753,39 @@ describe('an open the agent asked for (U6e)', () => {
     await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
     expect(readsOf(OUT).at(-1)).not.toHaveProperty('agent');
     await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', agent: false }));
+  });
+
+  // The task review's fix wave 2 (decision 19: "the first open of that file by the person (a click, Open File…, a move of
+  // the tab) removes the mark and reads again"): a person's click on the file's tab, in either strip, is that open.
+  it('W9: the person’s click on a main file tab the agent’s show marked, its entry kept, reads as the person’s and admits it', async () => {
+    await restoredMain();
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull());
+    expect(readsOf(OUT).every((input) => input.agent === true)).toBe(true);
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: A })); // the person goes to the chat
+    await settle();
+    expect(document.querySelector('[data-file-viewer]')).toBeNull();
+    expect(entry()).toMatchObject({ status: 'error', agent: true }); // kept
+    const fileTab = allTabs(useLayout.getState().main).find((tab) => tab.id === KEY(OUT))!;
+    render(<MainTab tab={fileTab} pane={0} domId="tab-out" active={false} stop onKeyDown={() => {}} />);
+    await personsOpenTakesItBack(() => fireEvent.click(screen.getByRole('tab', { name: /chosen\.txt/ })));
+  });
+
+  it('W9: the person’s click on a side tab the agent’s open marked, its entry kept, removes the mark, reads as the person’s and admits it', async () => {
+    granted.add(OUT);
+    render(<TestHost />);
+    act(() => void openFile(A, '/r/a.ts', null, { keep: true })); // the person's own tab
+    const [mine] = filesOf(A);
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    const marked = filesOf(A).find((tab) => tab.id !== mine.id)!;
+    expect(paramsOf(marked.id)).toMatchObject({ agent: true });
+    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull());
+    act(() => panelHost.selectTab(mine.id)); // the person's own tab in view; the marked one's entry is kept
+    await settle();
+    expect(entry()).toMatchObject({ status: 'error', agent: true });
+    const strip = document.querySelector('[data-side-strip]') as HTMLElement;
+    await personsOpenTakesItBack(() => fireEvent.click(within(strip.querySelector(`[data-tab-id="${marked.id}"]`) as HTMLElement).getByRole('tab')));
+    expect(paramsOf(marked.id)).not.toHaveProperty('agent');
   });
 
   it('W9: the agent’s show that retargets a main tab to its own session reads with agent', async () => {
