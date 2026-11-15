@@ -93,6 +93,7 @@ export interface Router<R extends WireRegistry> {
   registerMachine<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `machine`
   intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
   before(names: readonly NameOf<R>[], hook: BeforeHook): () => void; // P5 O4 M2: the hook's disposer
+  guard(names: readonly NameOf<R>[], guard: (name: CommandName, input: unknown, ctx: MainContext) => IpcError | undefined): () => void; // UX wave U6e M2: the tests first
   // P5 O6 M3: the route minus the sender check, for the client and machine `ctx` names; `internal` before `install`
   dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main's own in-process call, the
@@ -308,6 +309,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
         }
       };
     },
+    guard: () => () => {}, // UX wave U6e M2: the tests first; built after them
     async dispatchLocal(name, input, ctx) {
       if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
       if (mainOnly.has(name)) return mainOnlyRefusal(name);
@@ -341,6 +343,7 @@ export const registerMachineHandler: <N extends CommandName>(name: N, handler: M
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
 // P5 O4 M2 (Interfaces §F, D24): the seam before the owner switch (above).
 export const beforeCommand: (names: readonly CommandName[], hook: BeforeHook) => () => void = production.before;
+export const guardCommand: (names: readonly CommandName[], guard: (name: CommandName, input: unknown, ctx: MainContext) => IpcError | undefined) => () => void = production.guard; // UX wave U6e M2: the tests first
 // P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
 // P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`; P5 O4: the catalog's `catalog.engine`).
