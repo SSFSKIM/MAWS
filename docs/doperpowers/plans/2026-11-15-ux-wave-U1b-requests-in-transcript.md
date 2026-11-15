@@ -24,7 +24,7 @@ How to see it working: the unit suites named per milestone, and the Electron e2e
 - [x] (2026-11-15) The child's file checked against the code at `3f2c4fca1`; this document written (`4ad08b13e`); six points reported to the architect.
 - [x] (2026-11-15) The adversarial review's six findings and four traces, and the architect's rulings on them and on the six points, folded in (Decision Log; "Reported to the architect, and ruled"): the guard re-arms, a prompt's chords have one focus test, one operation shows a request, receipts carry the session, the settling receipt outlives the end row, the cutover is cut in two. The document is final for the executor.
 - [ ] The owner's look at the drawn example and the four cards ("The look"). No milestone waits for it: each default is built at one named place.
-- [ ] M1 — The rows a transcript has today know what waits and what was answered.
+- [x] (2026-11-15) M1 — The rows a transcript has today know what waits and what was answered. Commits `c53a19f15`..`fc64c8d3c`, fix (D-7, option b) `18146ec77`..`d9cc6c8f8`; reviewed clean at the boundary.
 - [ ] M2 — A card's delivery is held by the request.
 - [ ] M3 — The cutover: forms in their rows, the card at the end, the dock gone.
 - [ ] M4 — A prompt's keys from the composer and from no focus, under the guard.
@@ -747,6 +747,10 @@ At landing the architect updates the register's rows and closes ticket 586 throu
 - Decision: the owner's answers to the five cards, 2026-11-15, verbatim: "Prompt width" = "Column width, bordered (Recommended)"; "Dismissed row" = "Each line → Dismissed (Recommended)"; "Terminal answer" = "Answered in the terminal (Recommended)"; "Jump button" = "Waiting glyph ◐ (Recommended)"; "Form header" = "Two lines (Recommended)". The first four keep the built default. The fifth changes ruling A5's default: the form in its row has two lines above the first option: the kind line carries the count ("? Question waiting · 2 questions"); who asks is named only when an agent other than the session itself asked; the terminal note ("Also asked in the terminal: the first answer wins") stays for a terminal session. M3 builds it at the one place A5 named; M7's scene asserts it. The cards are closed ("The look").
   Rationale: the owner's answers, relayed by the architect.
   Date/Author: 2026-11-15, the owner through the architect; recorded by the controller.
+
+- Decision: (M1's fix, on the ruling on D-7) `deriveTurn` computes `answerAlone`: when every row that would fold is an answer's notice, the turn has no work, gets no line, and keeps every row in view; a turn still running or stopped keeps the line U2a gives it, the notice in view beside it. The to-human report then keeps the line too, there being nothing to fold (what it keeps once U2b's mirror lands is U2b's rule).
+  Rationale: the ruling of 2026-11-15 (option b); built in `467ac371d`, pinned in `18146ec77` and `d9cc6c8f8`.
+  Date/Author: 2026-11-15 (UTC), M1's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
