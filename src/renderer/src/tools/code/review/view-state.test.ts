@@ -14,8 +14,10 @@ const SHA = '0123456789abcdef0123456789abcdef01234567';
 const KEY = placeKey(DIR, 'uncommitted', null, null);
 
 const ui = (over: Partial<ReviewUi> = {}): ReviewUi => ({ ...createReviewUi({ session: A, directory: DIR }).getState(), ...over });
-const folded = (state: ReviewUi, path: string, signature: string) =>
-  isFolded({ choice: state.folds.get(KEY)?.get(path), viewed: isViewed(state.viewed, KEY, path, signature), pastCap: false });
+const folded = (state: ReviewUi, path: string, signature: string) => {
+  const mark = state.viewed.get(KEY)?.get(path);
+  return isFolded({ choice: state.folds.get(KEY)?.get(path), viewed: isViewed(state.viewed, KEY, path, signature), dropped: mark !== undefined && mark !== signature, pastCap: false });
+};
 
 describe('the key of a scope’s marks, folds and place', () => {
   it('is the folder and the scope, with the turn for Last turn and the commit’s hash for a commit', () => {
