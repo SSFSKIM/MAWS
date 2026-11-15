@@ -256,8 +256,9 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
         if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
         placed.revealPlace(place);
       }
-      // the branch's task review: once drawn under its line, the card itself stands wholly in view
-      placed.showCard(place);
+      // the branch's task review: once drawn under its line, the card itself stands wholly in view; one opened where the
+      // person points stays where it is drawn (their pointer is held, so the field's scroll as it takes the keyboard is theirs)
+      placed.showCard(placed.pointing() ? null : place);
     }
     if (card === null) placed.showCard(null);
     const watching = observer.current;
