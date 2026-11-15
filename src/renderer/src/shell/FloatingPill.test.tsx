@@ -209,10 +209,10 @@ it('draws attached files and a waiting message above the box, on the raised surf
   window.maws = { ...(fake.client as unknown as PreloadBridge), pathForFile: () => '' } as PreloadBridge; // a dropped file's path, as the preload gives it
   mount();
   await waitFor(() => expect(message()).toBeTruthy());
-  queueComposerAttachment(A, { files: [new File(['invented'], 'seating-plan.txt', { type: 'text/plain' })], text: '' });
+  queueComposerAttachment(A, { files: [new File(['%PDF-1.4'], 'hall-booking.pdf', { type: 'application/pdf' })], text: '' });
   const bar = compact();
   const files = await within(bar).findByRole('list', { name: 'attachments' });
-  expect(files.textContent).toContain('seating-plan.txt');
+  expect(files.textContent).toContain('hall-booking.pdf');
   const waiting = await within(bar).findByText('Then tidy the summary');
   await waitFor(() => expect(surfaceOf(bar).hasAttribute('data-raised')).toBe(true));
   for (const above of [files, waiting]) {
