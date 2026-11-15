@@ -133,6 +133,7 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
 
   // A closed stretch's head (`only`) keeps exactly the marked ranges: a block with tags among its own children is cut
   // at every tag into the runs `parseMarked` reads, each run under its message, the words outside any mark dropped.
+  const holdsTag = (node: RootContent): boolean => byNode.has(node) || (node.type === 'element' && node.tagName !== 'code' && node.children.some(holdsTag));
   const inMessage = () => open.findLast((entry) => entry.message)?.message ?? null;
   const runs = (block: Element): Unit[] => {
     const units: Unit[] = [];
@@ -171,7 +172,7 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
   for (const child of tree.children) {
     touched = null;
     const tagged = child.type === 'element' && child.children.some((kid) => byNode.has(kid));
-    if (only && tagged) units.push(...runs(child));
+    if (only && child.type === 'element' && holdsTag(child) && child.tagName !== 'pre') units.push(...runs(child));
     else if (tagged && child.tagName === 'p') units.push(...cut(child));
     else for (const node of transform(child)) units.push({ node, message: touched });
   }
