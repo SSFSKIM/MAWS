@@ -111,6 +111,16 @@ describe('a waiting answer’s words', () => {
     expect(answerWords(text, () => [LAYOUT, blank, SIZE])).toBe('Answers to 3 questions: Layout: Grid, List; Skipped; How large should the tiles be?: Decide for me · Note: whatever fits');
   });
 
+  it('follows the asked order where the window holds the ask, whatever the answers’ order; an answer no question holds comes after', () => {
+    const theme: AskAnswer = { id: 'q2', question: THEME.question, status: 'answered', value: 'Dark' };
+    const reversed = askSteerText('ask-4', [LAYOUT, THEME], [theme, GRID]);
+    expect(answerWords(reversed, () => [LAYOUT, THEME])).toBe('Answers to 2 questions: Layout: Grid; Theme: Dark');
+    // where the window holds no such row, the array's own order is the only one it has
+    expect(answerWords(reversed, noAsks)).toBe('Answers to 2 questions: Which theme?: Dark; Which layout should the gallery use?: Grid');
+    const stray: AskAnswer = { id: 'q9', question: 'Anything else?', status: 'answered', value: 'No' };
+    expect(answerWords(askSteerText('ask-4', [LAYOUT, THEME], [stray, theme, GRID]), () => [LAYOUT, THEME])).toBe('Answers to 3 questions: Layout: Grid; Theme: Dark; Anything else?: No');
+  });
+
   it('a text that is no envelope is no answer, one changed character in the tag included', () => {
     expect(answerWords('Use the grid', noAsks)).toBeNull();
     expect(answerWords(ANSWER.replace('[MAWS ask', '[MAWS asc'), noAsks)).toBeNull();
