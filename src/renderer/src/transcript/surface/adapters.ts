@@ -10,7 +10,7 @@ import { artifactTitlesIn } from '../model/derive'; // UX wave U2
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
-import { userTextOf } from '../model/user-text';
+import { commandLineOf, userTextOf } from '../model/user-text';
 
 export interface RowInput<C extends TranscriptSite> { instanceId: string; props: TranscriptProps[C] }
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -190,19 +190,17 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
+// UX wave U3b (decision 5): the command is the run the output's event carries, else the command line of the opening
+// message of the row's own turn, else none; `isErrored` is the row's error. Nothing outside the row's turn is read.
 export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {
   if (!row.text.trim() || row.id === revealed) return null;
-  let command = ''; let args = '';
-  if (state) {
-    const events = [...state.turns.values()].flatMap((t) => t.events).concat(state.loose).sort((a, b) => a.at.localeCompare(b.at));
-    for (const e of events) {
-      if (e.at > row.at || (e.kind === 'user.message' && (row.messageUuid !== null ? e.messageUuid === row.messageUuid : `local:${e.id}` === row.id))) break;
-      if (e.kind !== 'user.message' || e.isSynthetic || e.origin === 'local-command') continue;
-      const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(userTextOf(e.content).text);
-      command = match?.[1] ?? ''; args = match?.[2] ?? '';
-    }
-  }
-  return { instanceId: row.messageUuid ?? row.id, props: { command, args, text: row.text, isErrored: false } };
+  const { command, args } = row.run ?? turnCommandOf(row.turnId === null ? undefined : state?.turns.get(row.turnId)) ?? { command: '', args: '' };
+  return { instanceId: row.messageUuid ?? row.id, props: { command, args, text: row.text, isErrored: row.error === true } };
+}
+
+function turnCommandOf(turn: TurnState | undefined): { command: string; args: string } | null {
+  const opener = turn?.events.find((e): e is UserMessageEvent => e.kind === 'user.message' && !e.isSynthetic && e.origin !== 'local-command');
+  return opener === undefined ? null : commandLineOf(userTextOf(opener.content).text);
 }
 
 export function resultInput(input: ToolInput): RowInput<'ToolResult'> | null {

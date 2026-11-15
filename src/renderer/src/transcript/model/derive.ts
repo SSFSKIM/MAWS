@@ -30,9 +30,10 @@ import { closedByUnseenExit } from './reduce'; // DC9
 import { TOOL_CATEGORIES, type Cell, type ChangedFile, type Row, type RowId, type SubagentRef, type SubagentStatus, type ToolCategory, type TurnId, type TurnSummary } from './rows';
 import { firstLineOf, previewHidesBody, previewOf } from './rows'; // E7; UX wave U3
 import { needsSeparator, separatorLabel } from './time';
-import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
+import { commandLineOf, confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
-import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { carriedOf, commandOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -540,7 +541,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
           const row = localCommandRow(event, turn.id);
-          if (row) items.push({ kind: 'row', row });
+          // UX wave U3b (Interfaces B): it stands alone unless the turn's prompt, known once every event is seen, is a command's
+          if (row) items.push({ kind: 'later', row: () => (user !== null && commandLineOf(user.text) !== null ? row : { ...row, lone: true }) });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (originOf(event.origin) === 'engine') {
@@ -1690,12 +1692,20 @@ function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'a
   return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
 }
 
+// UX wave U3b (decision 3, Interfaces B): the row says all of the output was an error where only the error tag held
+// text (an output that mixes the two is drawn muted), and carries the run and the plain mark of its event's entry.
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
   const content = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => str(block.text)).join('\n');
   if (slashCommandLine(content) !== null) return null; // the system echo, not the human's command
   const text = stripAnsi(localCommandOutput(content) ?? content).trim();
   if (!text || confirmsSettingChange(text)) return null;
-  return { id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text };
+  const parts = localCommandParts(content);
+  const error = parts !== null && parts.stdout.trim() === '' && parts.stderr.trim() !== '';
+  const { run, plain } = commandOf(event.arrival);
+  return {
+    id: event.messageUuid === null ? rowId.localOfEvent(event.id) : rowId.local(event.messageUuid), turnId, at: event.at, kind: 'local_command', messageUuid: event.messageUuid, text,
+    ...(error && { error: true as const }), ...(run !== null && { run }), ...(plain && { plain: true as const }),
+  };
 }
 
 // The engine's own words for a hook that got in the way, written for the terminal, which the hook's notice row says
@@ -1758,7 +1768,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
           const row = localCommandRow(event, null);
-          if (row) rows.push(row);
+          if (row) rows.push({ ...row, lone: true }); // UX wave U3b: no turn, so no bubble of its command
         }
         break;
       }

@@ -122,7 +122,13 @@ export type Row = RowBase &
         kind: 'notice'; class: 'task' | 'schedule' | 'answer' | 'wake'; outcome: 'completed' | 'failed' | 'stopped' | null;
         text: string; durationMs: number | null; detail: string | null; taskId: TaskId | null; toolUseId: ToolUseId | null; outputFile: string | null;
       }
-    | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string } // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; a replayed row, never a bubble
+    // the engine's `<local-command-stdout>` echo after a slash command (C3's `origin: 'local-command'`), tags stripped; never
+    // a bubble. UX wave U3b (Interfaces B): drawn as a light line, with four marks, each present only where it says something
+    | { kind: 'local_command'; messageUuid: MessageUuid | null; text: string;
+        error?: true;                               // all of it came in <local-command-stderr>
+        run?: { command: string; args: string };    // commandOf(event.arrival).run: the command the engine ran
+        plain?: true;                               // commandOf(event.arrival).plain: a terminal's text, not markdown
+        lone?: true }                               // its turn holds no bubble of a command, or it has no turn
     // E1 start: the `maws` server's rows (E1 execution document, Interfaces "The renderer"): an `ask` call's capsule and
     // a `send_file` call's delivery row, derived from the calls themselves and refined by the `maws.*` events
     | { kind: 'ask'; toolUseId: ToolUseId; askId: string; title: string | null; context: string | null; blocking: boolean; questions: AskQuestion[]; state: 'pending' | 'asked' | 'answered' | 'cancelled' | 'error'; answers: AskAnswer[] | null; error: string | null; cancelReason: AskCancelReason | null /* why a cancelled ask was cancelled, when an event said; else null */ }

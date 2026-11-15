@@ -114,7 +114,10 @@ export const RowSchema = z.discriminatedUnion('kind', [
     text: z.string(), durationMs: nullable(z.number()), detail: nullable(z.string()), taskId: nullable(z.string()), toolUseId: nullable(z.string()), outputFile: nullable(z.string()),
   }),
   // U3 end
-  z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
+  z.strictObject({
+    ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string(),
+    error: z.literal(true).optional(), run: z.strictObject({ command: z.string(), args: z.string() }).optional(), plain: z.literal(true).optional(), lone: z.literal(true).optional(), // UX wave U3b
+  }),
   // E1 start
   z.strictObject({
     ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),

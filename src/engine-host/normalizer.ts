@@ -46,7 +46,7 @@ import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
 import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
-import { carriedOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { carriedOf, commandEntry, commandFactsOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
 import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
 import {
@@ -554,13 +554,15 @@ export class Normalizer {
 
   // A slash command's output (class `command`): the engine's own tag around it, its escapes removed, in the turn that
   // runs, which is its command's. The engine sends one output again under the same uuid (u3-commands-r1, seq 406 and
-  // 422): a uuid already mapped in this launch emits nothing.
+  // 422): a uuid already mapped in this launch emits nothing. UX wave U3b (Interfaces A): the event carries the command
+  // the engine ran, where the frame named it, in a `command` entry.
   private commandOutput(uuid: MessageUuid | null, arrivals: Arrival[], isReplay: boolean, out: Emitter, attribution: Attribution): void {
     const outputs = this.state.arrivals.commandOutputs;
     if (uuid !== null && outputs.has(uuid)) return;
     if (uuid !== null) outputs.add(uuid);
     const content = localCommandText(arrivals.flatMap((arrival) => (arrival.class === 'command' ? [arrival] : [])));
-    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: false, origin: 'local-command', bash: null }, attribution);
+    const entry = commandEntry(commandFactsOf(arrivals));
+    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: false, origin: 'local-command', bash: null, ...(entry.length > 0 && { arrival: entry }) }, attribution);
   }
   // UX wave U3 end
 

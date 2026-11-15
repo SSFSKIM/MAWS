@@ -1,7 +1,7 @@
 // rows → markdown, for "Copy turn as markdown" and the copy actions (C6 execution document, residue *Copy and export*).
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
-import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
+import { bashFooter, bashHeader, COMMAND_LINE, commandLead, dividerCopy, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
 import { ASK, askAnswerCopy, askStateCopy, deliveryHeading } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { messageMore } from './rows'; // E7; UX wave U3
@@ -53,7 +53,7 @@ function partOf(row: Row): string | null {
     case 'gap': return `---\n*${row.text}*`; // P5 O7 M2
     case 'bash': return `\`\`\`\n${[bashHeader(row.command), row.stdout, row.stderr, bashFooter(row.exitCode)].filter((part) => part.length > 0).join('\n')}\n\`\`\``;
     case 'notice': return row.detail === null ? `*${noticeLine(row)}*` : `*${noticeLine(row)}*\n${indent(row.detail, '> ')}`; // UX wave U3: its line, then what opens under it
-    case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
+    case 'local_command': return `${COMMAND_LINE.mark} ${row.lone && row.run ? commandLead(row.run) : ''}${row.text}`; // UX wave U3b: its line
     // E1 start
     case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
     case 'delivery': return [`**${deliveryHeading(row)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');

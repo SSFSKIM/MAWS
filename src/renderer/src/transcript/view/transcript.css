@@ -238,7 +238,26 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   z-index: 20;
 }
 
-/* Replayed rows: local-command echoes */
+/* UX wave U3b (O-18): a slash command's output is a light line under its command's bubble, on the bubble's side, with
+   no frame and no heading: a dim ⎿, then the output in muted small text. Closed, the one drawing of the output is bound
+   to two lines of the row's type (2 × 1.5em), its overflow hidden under a fade; open, it has no bound. Markdown's
+   headings take the row's type, so the output reads as one muted block, as the CLI draws it. */
+.transcript-command { display: flex; flex-direction: column; align-items: flex-end; padding: 0 0 10px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.5; }
+.transcript-command-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 70%; }
+.transcript-command-mark { flex: none; color: var(--fg-faint); }
+.transcript-command-name { flex: none; font-family: var(--font-mono); white-space: nowrap; }
+.transcript-command-output { min-width: 0; overflow-wrap: anywhere; }
+.transcript-command-output:not([data-open]) { max-height: 3em; overflow: hidden; }
+.transcript-command-output[data-collapsed] { mask-image: linear-gradient(to bottom, var(--fg) 40%, transparent); }
+.transcript-command[data-error] .transcript-command-output { color: var(--danger); }
+.transcript-command-output > pre { margin: 0; font-family: var(--font-mono); font-size: inherit; line-height: inherit; white-space: pre-wrap; }
+.transcript-command-output > .transcript-prose { color: inherit; font-size: inherit; line-height: inherit; }
+.transcript-command-output .transcript-prose :is(h1, h2, h3, h4, h5, h6) { margin: 0; font-size: inherit; line-height: inherit; font-weight: 600; }
+.transcript-command-output .transcript-prose :is(p, ul, ol, table):first-child,
+.transcript-command-output .transcript-prose > [dir] > :first-child { margin-top: 0; }
+.transcript-command > .transcript-quiet-button { margin-top: 2px; }
+
+/* Replayed rows: the `!` shell row (rows/Bash.tsx) */
 .transcript-replayed { margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-raised); }
 .transcript-replayed-header { padding: 4px 10px; border-bottom: 1px solid var(--border); color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-replayed-output { max-height: 144px; margin: 0; padding: 6px 10px; overflow: auto; font-family: var(--font-mono); font-size: var(--text-code); white-space: pre-wrap; }

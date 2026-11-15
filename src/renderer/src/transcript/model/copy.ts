@@ -317,7 +317,10 @@ const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
 export const processExitCopy = (reason: string, lostAttentionCount: number, lostAskCount = 0) =>
   reason === 'budget' ? RELEASED_COPY /* C12 */ : reason === 'idle' ? IDLE_RELEASED_COPY /* E10 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
-export const LOCAL_COMMAND_HEADER = 'Command output';
+// UX wave U3b (O-18; Interfaces B and L): a slash command's output is a light line, `⎿` then the output, clipped at two
+// lines until opened; one that stands with no bubble of its command names the command the engine ran first
+export const COMMAND_LINE = { mark: '⎿', showMore: 'Show more', showLess: 'Show less' } as const;
+export const commandLead = (run: { command: string }) => `/${run.command} · `;
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 // W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
 // and a steer the engine took, inside the turn at the step where it arrived.

@@ -16,20 +16,21 @@
 // carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { parseAskSteer } from '../maws/ask';
 import { stripAnsi } from '../wire/ansi';
-import type { Arrival } from './arrival-schema';
+import type { Arrival, CommandFacts } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
 import { notificationText, taskNotificationBlocks } from './task-notification';
 
-export { ArrivalEntrySchema, CarriedArrivalSchema, carriedOf, type Arrival, type ArrivalEntry, type CarriedArrival } from './arrival-schema';
+export { ArrivalEntrySchema, CarriedArrivalSchema, carriedOf, commandEntry, commandOf, type Arrival, type ArrivalEntry, type CarriedArrival, type CommandFacts } from './arrival-schema';
 
 type Json = Record<string, unknown>;
 type Answer = Extract<Arrival, { class: 'answer' }>;
 type Task = Extract<Arrival, { class: 'task' }>;
 type Own = Extract<Arrival, { class: 'own' }>;
 type Peer = Extract<Arrival, { class: 'peer' }>;
+type Command = Extract<Arrival, { class: 'command' }>;
 
 /**
  * What earlier frames or rows of a session left open, for the frames and rows after them (rule 5, and the frame of a
@@ -338,7 +339,8 @@ function systemRecord(row: Json, open: OpenArrivals): Read {
     }
     case 'local_command':
     case 'local_command_output':
-      return { arrivals: typeof row.content === 'string' ? commandOfText(row.content, undefined) : [], open };
+      // UX wave U3b (Interfaces A): a `local_command` row names the command the engine ran as the frame does (`commandRun`)
+      return { arrivals: typeof row.content === 'string' ? commandOfText(row.content, undefined, row.subtype === 'local_command' ? runOf(row.commandRun) : null) : [], open };
     default:
       return none(open);
   }
@@ -379,17 +381,37 @@ function taskFrame(row: Json, open: OpenArrivals): Read {
 function commandOfFrame(row: Json): Arrival[] {
   if (typeof row.local_command_source !== 'string') return [];
   const parts = localCommandParts(row.local_command_source);
-  if (parts === null) return [];
-  const run = object(row.local_command_run);
-  const command = string(run?.command);
-  return [{ class: 'command', run: command === null ? null : { command, args: string(run?.args) ?? '' }, stdout: stripAnsi(parts.stdout), stderr: stripAnsi(parts.stderr) }];
+  return parts === null ? [] : [commandOutput(parts, runOf(row.local_command_run))];
 }
 
 /** A `user` frame or row, or a terminal's `system` row, whose whole text is a command's output tags; never the person's own text. */
-function commandOfText(text: string, originKind: unknown): Arrival[] {
+function commandOfText(text: string, originKind: unknown, run: Command['run'] = null): Arrival[] {
   if (originKind === 'human') return [];
   const parts = localCommandParts(text);
-  return parts === null ? [] : [{ class: 'command', run: null, stdout: stripAnsi(parts.stdout), stderr: stripAnsi(parts.stderr) }];
+  return parts === null ? [] : [commandOutput(parts, run)];
+}
+
+/** The command the engine ran, as the frame's `local_command_run` and the file row's `commandRun` name it. */
+function runOf(value: unknown): Command['run'] {
+  const run = object(value);
+  const command = string(run?.command);
+  return command === null ? null : { command, args: string(run?.args) ?? '' };
+}
+
+/** An output's two tags, a terminal's escapes removed; `plain` where there were any (UX wave U3b, decision 2). */
+function commandOutput(parts: { stdout: string; stderr: string }, run: Command['run']): Command {
+  const [stdout, stderr] = [stripAnsi(parts.stdout), stripAnsi(parts.stderr)];
+  return { class: 'command', run, stdout, stderr, plain: stdout !== parts.stdout || stderr !== parts.stderr };
+}
+
+/**
+ * What a `user.message` of origin `local-command` says of the outputs it carries (UX wave U3b, Interfaces A): the first
+ * run any of them names, and whether any was a terminal's text. The two producers ask it, so `commandEntry` is given the
+ * same facts on every route.
+ */
+export function commandFactsOf(arrivals: readonly Arrival[]): CommandFacts {
+  const outputs = arrivals.filter((arrival): arrival is Command => arrival.class === 'command');
+  return { run: outputs.find((output) => output.run !== null)?.run ?? null, plain: outputs.some((output) => output.plain) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
