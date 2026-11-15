@@ -64,7 +64,9 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     await page.keyboard.press('Enter');
     const must = pane.locator('[data-kind="assistant_text"]').filter({ hasText: TO_HUMAN.essential });
     await expect(must).toContainText(TO_HUMAN.essential, { timeout: 20_000 });
-    await expect(pane.getByRole('button', { name: 'Mark read', exact: true })).toBeVisible();
+    // UX wave U2b (decisions 20 and 21): the bar went with its unread count and its Mark read; "Mark all read" is a
+    // command of the palette, and a must-read's own Mark read is its card's in Needs you
+    await expect(pane.getByRole('button', { name: 'Mark read', exact: true })).toHaveCount(0);
     await expect(pane.locator('[data-owner-card]')).toHaveCount(0);
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();
     // Turn 2: a question, and its tool goes on running.

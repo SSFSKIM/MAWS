@@ -344,6 +344,9 @@ for (const ended of [false, true]) {
 
 test("G1: a send stays at the tail until its own framed row: delivered before its row, two identical sends each taking their own, an earlier typed prompt never taken, one refused after a delay, one whose row never comes before the session ends; a framed row draws without its frame line, a peer's as a message line naming who sent it", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
+  // UX wave U2b: the scene reads every row the session draws, in the full transcript, where nothing is folded; in the
+  // report a message between agents folds with the work around it (the execution document, §B, `agent_message`).
+  await toggle(page, 'Transcript').click();
   const idle = fm.recording.steps.findIndex((s, i) => i > 0 && s.k === 'presence' && s.at > 18_000 && (s.record as { status?: string } | null)?.status === 'idle');
   fm.step(idle + 1);
   const last = fm.recording.rows.main.at(-1)!;

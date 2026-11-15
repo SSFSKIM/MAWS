@@ -254,9 +254,10 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
   const list = page.locator('[data-transcript-scroller]');
   await play(page, 1);
   await page.waitForTimeout(1500);
-  // In force: the work between the messages is folded to record lines, and no turn's line offers a fold of its own.
+  // In force: the work between the messages is folded to record lines, and no turn's line offers a fold of its own (its
+  // disclosure; the line keeps its summary's trigger, `Turn summary`, as `TurnLine` in `Divider.tsx` draws it).
   await expect(list.locator('[data-row-id^="record-fold:closed:"]').first()).toBeAttached();
-  await expect(list.locator('.transcript-divider button[aria-expanded]')).toHaveCount(0);
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
 
   // Far up, one stretch opened onto its rows.
   await page.evaluate((turn) => (window as unknown as HarnessWindow).__maws_harness.scrollToTurn(turn), TURN);
@@ -319,7 +320,7 @@ test('the to-human view folds by stretch, opens, folds again, and a jump opens t
   await expect(list.locator('.owner-message-ink > .owner-message-label').first()).toHaveText('● message');
   await expect(list.locator(WORK)).toHaveCount(0);
   await expect(list.locator('[data-kind="divider"]')).toHaveCount(0);
-  await expect(list.locator('.transcript-divider button[aria-expanded]')).toHaveCount(0);
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
 
   // Opened: the stretch's rows as the plain transcript draws them, its turn's line with no chevron, the other line under
   // its last row, focused.
@@ -333,7 +334,7 @@ test('the to-human view folds by stretch, opens, folds again, and a jump opens t
   await expect(list.locator(rowSelector(first))).toHaveCount(0);
   await expect.poll(() => list.locator(WORK).count(), { message: 'the stretch’s work is drawn' }).toBeGreaterThan(0);
   await expect.poll(() => list.locator('[data-kind="divider"]').count(), { message: 'its turn’s line is drawn' }).toBeGreaterThan(0);
-  await expect(list.locator('.transcript-divider button[aria-expanded]')).toHaveCount(0);
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
 
   // Folded again: the closed line back in its place, focused, the work gone.
   await openLine.click();
@@ -1774,7 +1775,7 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(turnLine).toHaveCount(1);
     await expect(turnLine).toContainText('Worked for');
     await expect(turnLine).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
-    await expect(pane.locator('.transcript-divider button[aria-expanded]')).toHaveCount(0);
+    await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
     // The tool summary appears immediately; the command remains on demand inside its own detail.
     const detailToggle = tool.getByRole('button', { name: 'Checked the tree', exact: true });
     await expect(detailToggle).toBeVisible();
@@ -1809,7 +1810,7 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
     await expect(report.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
     await expect.poll(() => pane.locator('[data-kind="divider"]').count()).toBeGreaterThan(0);
-    await expect(pane.locator('.transcript-divider button[aria-expanded]')).toHaveCount(0);
+    await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
     await viewSwitch.getByRole('button', { name: 'report only ›', exact: true }).click();
     await expect(viewSwitch).toHaveText('to-human view · full transcript ›');
     await expect(closedLines).toHaveCount(3);
