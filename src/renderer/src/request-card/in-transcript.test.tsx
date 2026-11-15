@@ -241,6 +241,33 @@ describe('the end row', () => {
   });
 });
 
+// §G, "that row's receipt says it" (the review of M3): a plan's row reads its own settling receipt, which the end leaves out
+describe('a waiting plan its terminal settled before its result arrived', () => {
+  it('reads the settlement’s words in its own row with no control while the receipt is held, then its own badge again', async () => {
+    const b = builder();
+    b.turn('u1', 'Plan it');
+    b.toolUse('p1', 'ExitPlanMode', { plan: '1. Read the notes.' });
+    const plan = b.emit('plan.requested', { requestId: request('rplan'), toolUseId: tool('p1'), plan: '1. Read the notes.', input: {} });
+    events = b.events;
+    requests.set('rplan', plan);
+    act(() => useAttention.getState().applySnapshot([itemFor(plan as RequestEvent, APP, { summary: 'Plan' })], TEST_MACHINE));
+    render(<section data-pane={0}><TranscriptSlot appSessionId={APP} /></section>);
+    const planRow = () => document.querySelector<HTMLElement>('.transcript-row[data-kind="plan"]');
+    await waitFor(() => expect(planRow()?.querySelector('[data-request-card]')).not.toBeNull());
+    vi.useFakeTimers();
+    const settled: LaneAState['settled'][number] = { request: 'rplan', session: 'eng', winner: 'terminal', outcome: 'answered', by: 'terminal' };
+    act(() => applyLaneAState(APP, laneAState(APP, { engineSessionId: 'eng', settled: [settled] })));
+    list([]);
+    expect(planRow()!.querySelector('[data-request-card]')).toBeNull();
+    expect(planRow()!.querySelector('[role="status"]')?.textContent).toBe('Plan · Answered in the terminal');
+    expect(planRow()!.querySelectorAll('button')).toHaveLength(0);
+    expect(endRow()).toBeNull(); // the row says it, not the end
+    act(() => void vi.advanceTimersByTime(SETTLED_MS));
+    expect(planRow()!.querySelector('[role="status"]')).toBeNull();
+    expect(planRow()!.querySelector('.transcript-badge')?.textContent).toBe('Pending'); // no result yet: the row's own
+  });
+});
+
 describe('show, the transcript’s one way to a waiting request', () => {
   it('with two prompts and the older open, selects the younger before the keyboard lands on its row, so an answer then is the younger’s; a request gone answers gone and moves nothing', async () => {
     const { prompt, second } = scene();
