@@ -433,6 +433,9 @@ export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; err
   return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
 }
 
+/** A question's title as its ask's capsule shows it: the header, else the question. */
+export const askQuestionTitle = (question: { header?: string; question: string }): string => question.header ?? question.question;
+
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
 // `<name> (<directory>)` for a repository, a design system by its name or the build request (P3-D), or the two
 // non-answers; then the user's note (P2-C3), whatever the status.

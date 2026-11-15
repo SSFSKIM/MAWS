@@ -19,7 +19,7 @@ import { storeRefusesStage, useStoreRefusesStage } from './take-back';
 
 // ---- what the transcript says (Interfaces G: the store the editor's recall reads) -----------------------------------
 
-const NOTHING_READ: Read = { unread: [], started: () => false };
+const NOTHING_READ: Read = { unread: [], started: () => false, questions: () => null };
 
 function readOfEntry(entry: TranscriptEntry | undefined): Read {
   if (entry === undefined) return NOTHING_READ;
@@ -33,6 +33,11 @@ function readOfEntry(entry: TranscriptEntry | undefined): Read {
       const turnId = state.index.messages.get(messageUuid);
       const turn = turnId === undefined ? undefined : state.turns.get(turnId);
       return turn !== undefined && (turn.accepted || turn.state === 'closed');
+    },
+    // the ask's capsule stays in view when its turn folds, so its row is among the entry's rows (UX wave U4b, decision 2)
+    questions: (call: string) => {
+      for (const row of entry.rows) if (row.kind === 'ask' && row.askId === call) return row.questions;
+      return null;
     },
   };
 }

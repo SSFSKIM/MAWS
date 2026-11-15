@@ -23,7 +23,7 @@ const read = (unread: Read['unread'] = [], started: readonly MessageUuid[] = [],
 });
 const NONE = new Set<string>();
 const kinds = (rows: StackRow[]) => rows.map((row) => row.kind);
-// an async ask's answer, as `parseAskSteer` reads it (invented questions)
+// an async ask's answer envelope, as `askSteerText` writes it (invented questions)
 const LAYOUT: AskQuestion = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }], multi: true };
 const THEME: AskQuestion = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice', options: [{ label: 'Dark' }, { label: 'Light' }] };
 const SIZE: AskQuestion = { id: 'q3', question: 'How large should the tiles be?', modality: 'text' };

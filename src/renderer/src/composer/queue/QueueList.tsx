@@ -277,7 +277,7 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
       <button type="button" aria-label="Send now" title={sendTitle} className={ICON_BUTTON} disabled={inFlight || sendRefused !== null} onClick={() => void run(row.key, () => acts.sendNow(row, nextKeys))}>
         <SendNowGlyph />
       </button>
-      {!row.answer && (
+      {row.answer === null && (
         <>
           <button type="button" aria-label="Delete" title={deleteRefused ?? undefined} className={ICON_BUTTON} disabled={inFlight || deleteRefused !== null} onClick={() => void run(row.key, () => acts.remove(row))}>
             <BinGlyph />

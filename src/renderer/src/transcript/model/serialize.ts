@@ -2,7 +2,7 @@
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, dividerCopy, LOCAL_COMMAND_HEADER, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
-import { ASK, askAnswerCopy, askStateCopy, deliveryHeading } from './copy'; // E1
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, deliveryHeading } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { messageMore } from './rows'; // E7; UX wave U3
 import { artifactHeading } from './copy'; // E2
@@ -55,7 +55,7 @@ function partOf(row: Row): string | null {
     case 'notice': return row.detail === null ? `*${noticeLine(row)}*` : `*${noticeLine(row)}*\n${indent(row.detail, '> ')}`; // UX wave U3: its line, then what opens under it
     case 'local_command': return `*${LOCAL_COMMAND_HEADER}*\n${row.text}`;
     // E1 start
-    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
+    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${askQuestionTitle(q)}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
     case 'delivery': return [`**${deliveryHeading(row)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
