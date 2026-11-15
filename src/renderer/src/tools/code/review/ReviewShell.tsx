@@ -166,6 +166,7 @@ function StackView({ appSessionId, ui, data, files, placeKey: key, width, reveal
       />
       {refused !== null ? <RefusedPath path={refused} /> : null}
       <Stack
+        key={key}
         appSessionId={appSessionId}
         ui={ui}
         sections={sections}

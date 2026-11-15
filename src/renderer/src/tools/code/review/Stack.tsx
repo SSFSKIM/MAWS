@@ -1,21 +1,24 @@
-// The stack (UX wave U5b, M3; the execution document's §F): Review's one scroller, every file of the scope a section in
-// the list's order. `useStack` resolves each file against its own read and the view state (its hunks, its mark, its
-// fold) and orders the hunks the counter counts; `Stack` draws the sections, scrolls to the counter's hunk when ↑ or ↓
-// moves it, reports the hunk at the top when the person scrolls, and brings a requested file's section into view once.
+// The stack (UX wave U5b, M3 and M4; the execution document's §F): Review's one scroller, every file of the scope a
+// section in the list's order. `useStack` resolves each file against its own read and the view state (its hunks, its
+// mark, its fold) and orders the hunks the counter counts; `Stack` draws the sections and wires its scroller to the
+// placer (`stack-place.ts`), which keeps the band, the live place and an outstanding reveal: a requested file, ↑ and
+// ↓ (which unfold a folded file they land in), the place saved when the stack was last unmounted.
 //
-// Every unfolded body is drawn here; the band, the place kept through a layout change and a jump into a folded file are
-// M4's. A file's own read is asked while its section is unfolded, and while it holds a Viewed mark, which cannot be
-// known to hold until the read answers.
-import { useLayoutEffect, useMemo, useRef } from 'react';
+// Only the bodies in the band are drawn; every other unfolded section is a spacer of its last height, and a folded one
+// is its header alone. A file's own read is asked only near the scroll position: while its section is unfolded and in
+// the band, or while it holds a Viewed mark and its header is in the band (the read tells whether the mark still holds;
+// M3 decision 13h, kept within the band).
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openFile } from '../open-file';
 import { FileSection } from './FileSection';
-import { blocksOf, firstChangedLine, viewedSignature, type ReviewFile } from './review-model';
+import { blocksOf, firstChangedLine, REVIEW_FILE_LINES_CAP, tooLarge, viewedSignature, type ReviewFile } from './review-model';
 import { fileDiffOf, useReview, type DiffTarget, type ScopeDiff } from './review-store';
-import { hunkOrder, isFolded, type StackHunk } from './stack-model';
-import { setFold, toggleViewed, type ReviewMode, type ReviewUi } from './view-state';
+import { bodyLines, hunkOrder, isFolded, type StackHunk } from './stack-model';
+import { EMPTY_BAND, StackPlacer, type Band } from './stack-place';
+import { savePlace, setFold, toggleViewed, type ReviewMode, type ReviewUi } from './view-state';
 
 export interface StackSection {
   file: ReviewFile;
@@ -27,10 +30,11 @@ export interface StackSection {
   folded: boolean; // the fold rule's answer
   fetch: boolean; // its own read is wanted now
   failed: string | null; // its own read failed, with the message
+  lines: number; // its body's rows for an estimate before it is measured: 0 when it draws no body, 1 for a line of words
 }
 
-// The sections of a scope and the hunks the counter counts: those of every unfolded section, loaded, not marked Viewed
-// and not past the per-file cap, in stack order (M4 counts a folded file's too, and unfolds it at a jump).
+// The sections of a scope and the hunks the counter counts (§F): those of every loaded file, folded or not, that is not
+// marked Viewed and not past the per-file cap, in stack order.
 export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarget | null; placeKey: string; pastCap: boolean; ui: StoreApi<ReviewUi> }): { sections: StackSection[]; order: StackHunk[] } {
   const { files, target, placeKey: key, pastCap, ui } = input;
   const marks = useStore(ui, (s) => s.viewed);
@@ -55,6 +59,7 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
       const viewed = mark !== undefined && (signature === null ? ownRead : mark === signature);
       const dropped = mark !== undefined && signature !== null && mark !== signature;
       const folded = isFolded({ choice: folds.get(key)?.get(file.path), viewed, dropped, pastCap });
+      const failed = load?.status === 'error' ? load.message : null;
       return {
         file,
         hunks,
@@ -64,40 +69,23 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
         viewed,
         folded,
         fetch: ownRead && (!folded || mark !== undefined),
-        failed: load?.status === 'error' ? load.message : null,
+        failed,
+        lines: estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
       };
     });
-    const order = hunkOrder(sections.filter((section) => !section.folded).map((section) => ({ path: section.file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed })));
+    const order = hunkOrder(sections.map((section) => ({ path: section.file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed })));
     return { sections, order };
   }, [files, target, key, pastCap, marks, folds, fetched]);
 }
 
-// ---- where a hunk is in the scroller ---------------------------------------------------------------------------------
-
-// A hunk's row inside its block: the one showing its first line's number (unified rows carry `data-line-{new,old}-num`,
-// split rows `data-line-num` on their side), or the header row the library drew above it when a gap precedes it.
-function rowOf(block: Element, { side, line }: StackHunk['anchor']): HTMLElement | null {
-  const cell = block.querySelector(`tr[data-state="diff"]:not([data-side]) [data-line-${side}-num="${line}"]`) ?? block.querySelector(`tr[data-state="diff"][data-side="${side}"] [data-line-num="${line}"]`);
-  const row = cell?.closest<HTMLElement>('tr') ?? null;
-  const header = row ? block.querySelector<HTMLElement>(`tr[data-state="hunk"][data-line="${row.dataset.line}-hunk"]:not([data-side="new"])`) : null;
-  return header ?? row;
-}
-
-const offsetIn = (scroller: HTMLElement, el: Element) => el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
-const atEnd = (scroller: HTMLElement) => scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1;
-
-const sectionsIn = (scroller: HTMLElement) => new Map([...scroller.querySelectorAll<HTMLElement>('[data-review-file]')].map((section) => [section.dataset.reviewFile!, section]));
-
-// The scroller's top at which each hunk's first row stands just under its section's sticky header; null while undrawn.
-function stopsOf(scroller: HTMLElement, order: readonly StackHunk[]): (number | null)[] {
-  const sections = sectionsIn(scroller);
-  return order.map((hunk) => {
-    const section = sections.get(hunk.path);
-    const block = section?.querySelectorAll('[data-review-block]')[hunk.block];
-    const row = block ? rowOf(block, hunk.anchor) : null;
-    if (!section || !row) return null;
-    return offsetIn(scroller, row) - (section.querySelector('[data-review-file-header]')?.getBoundingClientRect().height ?? 0);
-  });
+// What a body is estimated from before it is measured: nothing for a section that draws no body (a rename with no
+// change), one row for a line of words (a binary, an untracked folder, a failed read, a file too large to draw), else
+// its diff's lines, or its counts' while it is not read.
+function estimateLines(file: ReviewFile, hunks: readonly string[] | null, words: boolean): number {
+  if (words) return 1;
+  if (hunks === null) return file.added + file.removed > REVIEW_FILE_LINES_CAP ? 1 : Math.max(1, file.added + file.removed);
+  if (hunks.length === 0) return 0;
+  return tooLarge({ hunks }) ? 1 : bodyLines({ hunks, added: file.added, removed: file.removed });
 }
 
 export interface StackProps {
@@ -105,7 +93,7 @@ export interface StackProps {
   ui: StoreApi<ReviewUi>;
   sections: readonly StackSection[];
   order: readonly StackHunk[];
-  placeKey: string;
+  placeKey: string; // the stack is mounted once per key: its place is saved under it
   target: DiffTarget | null;
   scopeDiff: ScopeDiff | undefined;
   width: number; // the stack's, 0 before a layout
@@ -117,64 +105,100 @@ export interface StackProps {
 
 export function Stack({ appSessionId, ui, sections, order, placeKey: key, target, scopeDiff, width, mode, wrap, reveal, onRevealed }: StackProps) {
   const scroller = useRef<HTMLDivElement>(null);
+  const placer = useRef<StackPlacer | null>(null);
+  const [band, setBand] = useState<Band>(EMPTY_BAND);
   const hunk = useStore(ui, (s) => s.hunk);
   const navigate = useStore(ui, (s) => s.navigate);
   const current = Math.min(hunk, Math.max(0, order.length - 1));
 
-  // ↑ and ↓: the counter's hunk to the top, under its section's header (a hunk in the last screenful cannot reach it).
-  const navigated = useRef(navigate);
-  const jumping = useRef(false); // a jump moved the scroller: its own scroll event is not the person's
+  // Mounted: the placer, the observers of every box that can move the page, and the saved place as the first reveal;
+  // unmounted, the place in force is saved.
+  const observer = useRef<{ ro: ResizeObserver; watched: Set<Element> } | null>(null);
   useLayoutEffect(() => {
-    if (navigated.current === navigate) return;
-    navigated.current = navigate;
-    const el = scroller.current;
-    const stop = el && order[current] ? stopsOf(el, [order[current]])[0] : null;
-    if (!el || stop === null) return;
-    const top = Math.max(0, Math.min(stop, el.scrollHeight - el.clientHeight));
-    if (Math.abs(top - el.scrollTop) < 1) return; // no move, so no scroll event to ignore
-    jumping.current = true;
-    el.scrollTop = top;
-  }, [navigate, current, order]);
-
-  // A request that named a file: its section unfolded and brought to the top, once.
-  const revealPath = reveal?.path ?? null;
-  const revealN = reveal?.n ?? 0;
-  useLayoutEffect(() => {
-    const el = scroller.current;
-    if (revealPath === null || !el) return;
-    if (sections.find((section) => section.file.path === revealPath)?.folded) ui.setState((s) => setFold(s, key, revealPath, 'open'));
-    const section = sectionsIn(el).get(revealPath);
-    if (section) el.scrollTop = offsetIn(el, section);
-    onRevealed();
-  }, [revealPath, revealN, sections, ui, key, onRevealed]);
-
-  // Scrolling by hand moves the counter to the hunk at the top (the first before any has scrolled past); at the end of
-  // the scroller a later hunk jumped to stands.
-  const scrolled = () => {
-    if (jumping.current) {
-      jumping.current = false;
-      return;
-    }
-    const el = scroller.current;
-    if (!el) return;
-    let at = 0;
-    stopsOf(el, order).forEach((stop, index) => {
-      if (stop !== null && stop <= el.scrollTop + 4) at = index;
+    const el = scroller.current!;
+    const placed = new StackPlacer({
+      band: setBand,
+      saved: (place) => ui.setState((s) => savePlace(s, key, place)),
+      counted: (index) => ui.setState({ hunk: index }),
     });
-    if (at < current && atEnd(el)) return;
-    if (at !== current) ui.setState({ hunk: at });
-  };
+    placed.attach(el, ui.getState().places.get(key) ?? null);
+    placer.current = placed;
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(() => placed.relayout());
+      ro.observe(el);
+      observer.current = { ro, watched: new Set([el]) };
+    }
+    return () => {
+      observer.current?.ro.disconnect();
+      observer.current = null;
+      placer.current = null;
+      const place = placed.detach();
+      if (place) ui.setState((s) => savePlace(s, key, place));
+    };
+  }, [ui, key]);
+
+  // Every commit is a layout change: the placer takes the sections as drawn, the requests made since (a file, a hunk
+  // jump), and applies the place again.
+  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number }>({ reveal: null, navigate });
+  useLayoutEffect(() => {
+    const placed = placer.current;
+    if (!placed) return;
+    placed.update({ sections: sections.map((section) => ({ path: section.file.path, folded: section.folded, lines: section.lines })), order, current });
+    placed.drawn();
+    const seen = handled.current;
+    if (reveal !== null && (seen.reveal?.path !== reveal.path || seen.reveal.n !== reveal.n)) {
+      seen.reveal = reveal;
+      if (sections.find((section) => section.file.path === reveal.path)?.folded) ui.setState((s) => setFold(s, key, reveal.path, 'open'));
+      placed.revealSection(reveal.path);
+      onRevealed();
+    }
+    if (seen.navigate !== navigate) {
+      seen.navigate = navigate;
+      const jump = order[current];
+      if (jump) {
+        if (sections.find((section) => section.file.path === jump.path)?.folded) ui.setState((s) => setFold(s, key, jump.path, 'open'));
+        placed.revealHunk(jump);
+      }
+    }
+    const watching = observer.current;
+    if (watching) {
+      for (const element of watching.watched) {
+        if (element.isConnected) continue;
+        watching.ro.unobserve(element);
+        watching.watched.delete(element);
+      }
+      for (const section of scroller.current!.querySelectorAll(':scope > [data-review-file]')) {
+        if (watching.watched.has(section)) continue;
+        watching.ro.observe(section);
+        watching.watched.add(section);
+      }
+    }
+    placed.relayout();
+  });
 
   const counted = order[current];
   return (
-    <div ref={scroller} data-review-stack onScroll={scrolled} className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+    <div
+      ref={scroller}
+      data-review-stack
+      onScroll={() => placer.current?.scrolled()}
+      onWheel={() => placer.current?.cancel()}
+      onTouchStart={() => placer.current?.cancel()}
+      onKeyDown={() => placer.current?.cancel()}
+      onPointerDown={() => placer.current?.cancel()}
+      className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+    >
       {sections.map((section) => {
         const { file, hunks } = section;
         const lineAt = (index: number) => (file.kind === 'untracked' ? 1 : hunks && hunks.length > 0 ? firstChangedLine(hunks[Math.min(index, hunks.length - 1)]) : null);
+        const drawn = band.drawn.has(file.path);
         return (
           <FileSection
             key={file.path}
             section={section}
+            drawn={drawn}
+            near={drawn || band.near.has(file.path)}
+            spacer={band.spacers.get(file.path) ?? 0}
             width={width}
             mode={mode}
             wrap={wrap}

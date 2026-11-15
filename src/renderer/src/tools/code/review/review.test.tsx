@@ -24,6 +24,7 @@ import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { installResizeObserver } from '../../../test-support/resize';
+import { fakeStackLayout } from '../../../test-support/review-layout';
 import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { useTranscriptStore, type Row, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
 import { journalToEvents } from '../../../transcript/dev/journal';
@@ -640,49 +641,6 @@ async function painted(check: () => boolean): Promise<void> {
   expect(check()).toBe(true);
 }
 
-// happy-dom lays nothing out: the stack's scroller gets a clamped height whose diff rows stand `rowHeight` apart, and a
-// scroll event on every change of its offset, as a browser gives.
-function layOut(scroller: Element, { rowHeight, clientHeight }: { rowHeight: number; clientHeight: number }): () => void {
-  const el = scroller as HTMLElement;
-  const rowsOf = () => [...el.querySelectorAll('tr')];
-  let top = 0;
-  Object.defineProperty(el, 'clientHeight', { configurable: true, get: () => clientHeight });
-  Object.defineProperty(el, 'scrollHeight', { configurable: true, get: () => rowsOf().length * rowHeight });
-  Object.defineProperty(el, 'scrollTop', {
-    configurable: true,
-    get: () => top,
-    set: (value: number) => {
-      const next = Math.max(0, Math.min(value, el.scrollHeight - clientHeight));
-      if (next === top) return;
-      top = next;
-      el.dispatchEvent(new Event('scroll'));
-    },
-  });
-  const original = Element.prototype.getBoundingClientRect;
-  const box = (y: number) => ({ top: y, bottom: y + rowHeight, left: 0, right: 0, width: 0, height: rowHeight, x: 0, y, toJSON: () => ({}) }) as DOMRect;
-  Element.prototype.getBoundingClientRect = function (this: Element) {
-    if (this === el) return box(0);
-    const index = this.tagName === 'TR' ? rowsOf().indexOf(this as HTMLTableRowElement) : -1;
-    return index >= 0 ? box(index * rowHeight - top) : original.call(this);
-  };
-  return () => void (Element.prototype.getBoundingClientRect = original);
-}
-
-// The sections at given tops in a scroller that scrolls freely (a reveal's scroll target).
-function placeSections(scroller: Element, tops: Record<string, number>): () => void {
-  const el = scroller as HTMLElement;
-  let top = 0;
-  Object.defineProperty(el, 'scrollTop', { configurable: true, get: () => top, set: (value: number) => void (top = value) });
-  const original = Element.prototype.getBoundingClientRect;
-  const box = (y: number) => ({ top: y, bottom: y, left: 0, right: 0, width: 0, height: 0, x: 0, y, toJSON: () => ({}) }) as DOMRect;
-  Element.prototype.getBoundingClientRect = function (this: Element) {
-    if (this === el) return box(0);
-    const path = this instanceof HTMLElement ? this.dataset.reviewFile : undefined;
-    return path !== undefined && path in tops ? box(tops[path] - top) : original.call(this);
-  };
-  return () => void (Element.prototype.getBoundingClientRect = original);
-}
-
 const openReview = (params?: ReviewParams) => act(() => void panelHost.addTool('review', { appSessionId: A, params }));
 // UX wave U8c-2: the agent in a worktree of /repo reached by `cd` (a fact on the record), or back at /repo (null)
 const WT = '/repo/.claude/worktrees/w1';
@@ -1016,22 +974,23 @@ describe('review tool', () => {
   it('keeps a hunk it jumped to when the hunk cannot reach the top of the scroller; scrolling by hand moves the count', async () => {
     main().state.status = statusOf({ dirty: true, files: [DIRTY.files[0]] });
     main().state.uncommitted = { patch: APP_PATCH, files: APP_FILES };
-    openReview();
-    render(<TestHost />);
-    await painted(() => stackText()?.includes('@@ -12,3 +13,4 @@') ?? false);
-    const scroller = stack()!;
-    const restore = layOut(scroller, { rowHeight: 20, clientHeight: 150 }); // the second hunk's row lies below the last offset
+    const page = fakeStackLayout({ viewport: 150, row: 20 }); // the second hunk's row lies below the last offset
     try {
+      openReview();
+      render(<TestHost />);
+      await painted(() => stackText()?.includes('@@ -12,3 +13,4 @@') ?? false);
+      await page.settle();
+      const scroller = stack()!;
       fireEvent.click(screen.getByLabelText('Next hunk'));
-      await act(tick);
+      await page.settle();
       expect(scroller.scrollTop).toBeGreaterThan(0);
       expect(scroller.scrollTop).toBe(scroller.scrollHeight - scroller.clientHeight); // clamped short of the second hunk's row
       expect(hunkLabel()).toBe('Showing hunk 2 of 2');
       expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
-      act(() => void (scroller.scrollTop = 0)); // scrolling by hand still moves the counter
+      page.scrollTo(0); // scrolling by hand still moves the counter
       expect(hunkLabel()).toBe('Showing hunk 1 of 2');
     } finally {
-      restore();
+      page.restore();
     }
   });
 
@@ -1481,18 +1440,23 @@ describe('review tool', () => {
     await waitFor(() => expect(paths()).toHaveLength(3));
     fold('src/staged.ts');
     const shell = document.querySelector('[data-review]');
-    const restore = placeSections(stack()!, { 'src/app.ts': 0, 'src/staged.ts': 300, 'scratch.txt': 340 });
+    const page = fakeStackLayout({ viewport: 60 });
     try {
+      await page.settle();
       openReview({ scope: 'uncommitted', path: 'src/staged.ts' });
-      await waitFor(() => expect(stack()!.scrollTop).toBe(300));
+      await page.settle();
       expect(folded('src/staged.ts')).toBe(false);
+      const top = page.topOf(sectionOf('src/staged.ts')!);
+      expect(top).toBeGreaterThan(0);
+      expect(stack()!.scrollTop).toBe(top);
       openReview(); // an open with no params decides nothing new: the scope and the place stand
       await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true'));
-      expect(stack()!.scrollTop).toBe(300);
+      await page.settle();
+      expect(stack()!.scrollTop).toBe(top);
       expect(document.querySelector('[data-review]')).toBe(shell); // re-targeted in place, never unmounted
       expect(panelOf(A)?.tabs).toHaveLength(1);
     } finally {
-      restore();
+      page.restore();
     }
     act(() => codeTranscriptActions.reviewChanges(divider.turnId!, divider.files[2].path));
     await waitFor(() => expect(chipOf('turn')?.getAttribute('aria-pressed')).toBe('true'));

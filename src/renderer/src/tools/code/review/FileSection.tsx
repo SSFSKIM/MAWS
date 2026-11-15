@@ -7,7 +7,8 @@
 //
 // The body: the file's diff (FileBody, loaded on first use); "Binary file"; "Diff too large to display. Open the file";
 // nothing for a rename without a change; the note for an untracked folder; "Diff unavailable: …" with Retry for a file
-// whose own read failed. A folded section has no body.
+// whose own read failed. A folded section has no body; an unfolded one outside the stack's band (M4) is a spacer of the
+// height the stack gives it.
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { REVIEW_COPY } from '../copy';
 import type { DiffBlockData } from './FileBody';
@@ -27,7 +28,12 @@ const quiet = 'inline-flex h-6 shrink-0 items-center whitespace-nowrap rounded-s
 const glyph = 'inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2';
 const BADGE = 'shrink-0 whitespace-nowrap rounded-sm bg-bg-active px-1.5 text-ui-sm';
 
-const Loading = () => <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.loading}</p>;
+// Marked, so the stack does not take a Loading line's height for the body's, nor its rows for the diff's.
+const Loading = () => (
+  <p data-review-loading className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
+    {REVIEW_COPY.loading}
+  </p>
+);
 
 // The library's `data` for each block of a file, made from the blocks' text: a section keeps the objects while the text
 // is equal (P2), whatever arrays a re-read hands it.
@@ -37,6 +43,9 @@ function blockData(path: string, oldPath: string | null, text: string): DiffBloc
 
 export interface FileSectionProps {
   section: StackSection;
+  drawn: boolean; // inside the stack's band: its body is drawn, else a spacer stands for it
+  near: boolean; // its body or its header inside the band: its own read may be asked
+  spacer: number; // the spacer's height outside the band
   width: number; // the stack's, 0 before a layout
   mode: ReviewMode; // as drawn
   wrap: boolean;
@@ -49,22 +58,24 @@ export interface FileSectionProps {
   onOpen(line: number | null): void;
 }
 
-export function FileSection({ section, width, mode, wrap, target, scopeDiff, openLine, firstLine, onFold, onViewed, onOpen }: FileSectionProps) {
+export function FileSection({ section, drawn, near, spacer, width, mode, wrap, target, scopeDiff, openLine, firstLine, onFold, onViewed, onOpen }: FileSectionProps) {
   const { file, hunks, blocks, binary, signature, viewed, folded, fetch, failed } = section;
   const narrow = width > 0 && width < NARROW_HEADER_WIDTH;
   const untracked = file.kind === 'untracked';
   const untrackedDirectory = untracked && file.path.endsWith('/');
 
-  // The file's own read (a scope past its cap, an untracked file, a binary's header), asked again after the scope re-read.
+  // The file's own read (a scope past its cap, an untracked file, a binary's header), asked near the scroll position
+  // only, and again after the scope re-read.
+  const wanted = fetch && near;
   useEffect(() => {
-    if (fetch && target) useReview.getState().loadFile(target, file.path, untracked);
-  }, [fetch, target, file.path, untracked, scopeDiff]);
+    if (wanted && target) useReview.getState().loadFile(target, file.path, untracked);
+  }, [wanted, target, file.path, untracked, scopeDiff]);
 
   const text = useMemo(() => JSON.stringify(blocks), [blocks]);
   const data = useMemo(() => blockData(file.path, file.oldPath, text), [file.path, file.oldPath, text]);
 
   const body = (() => {
-    if (folded) return null;
+    if (folded || !drawn) return null;
     if (untrackedDirectory)
       return (
         <p data-review-note className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
@@ -131,7 +142,7 @@ export function FileSection({ section, width, mode, wrap, target, scopeDiff, ope
           </span>
         )}
       </div>
-      {body !== null && <div data-review-body>{body}</div>}
+      {folded ? null : drawn ? body !== null && <div data-review-body>{body}</div> : <div aria-hidden data-review-spacer style={{ height: spacer }} />}
     </section>
   );
 }
