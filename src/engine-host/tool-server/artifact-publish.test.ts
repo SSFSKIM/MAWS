@@ -12,11 +12,32 @@ import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 
+// U10b (Constraint 9, §I "publish from path"): a hold on the source file's read, so a case can keep it pending and then
+// end it. A read of `hold.path` signals `hold.started` and waits for `hold.release` (a rejection fails the read).
+const hold = vi.hoisted(() => ({ path: null as string | null, started: null as (() => void) | null, release: null as Promise<void> | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const readFile = (async (...args: Parameters<typeof actual.readFile>) => {
+    if (hold.path !== null && String(args[0]) === hold.path && hold.release !== null) {
+      const release = hold.release;
+      hold.path = null;
+      hold.started?.();
+      await release;
+    }
+    return actual.readFile(...args);
+  }) as typeof actual.readFile;
+  return { ...actual, readFile, default: { ...actual, readFile } };
+});
+
 let w: World;
 beforeEach(() => {
   w = openWorld();
 });
-afterEach(() => w.close());
+afterEach(() => {
+  hold.path = hold.started = hold.release = null;
+  vi.restoreAllMocks();
+  w.close();
+});
 
 type Ctx = Parameters<World['ctx']>[0];
 const create = async (args: Record<string, unknown>, over: Ctx = {}) => jsonOf<{ artifactId: string; revision: number }>(await artifactCreateTool(w.deps()).call(args, w.ctx(over)));
@@ -214,6 +235,32 @@ describe('artifact_publish of an html page from a path', () => {
     expect(stored(created.artifactId).toString('utf8')).toBe('<p>user</p>');
     expect(jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'mine.html', force: true }))).toMatchObject({ changed: ['index.html'], version: 3 });
     expect(stored(created.artifactId).toString('utf8')).toBe('<p>mine</p>');
+  });
+
+  // Constraint 9 and §I: the awaited read held open. Nothing that writes (the migration, the op's record, the content)
+  // starts while it is pending, and a read that fails leaves nothing written.
+  it('begins no write while the file is read, and writes nothing when the read fails', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    writeFileSync(join(w.cwd, 'slow.html'), '<p>slow</p>');
+    const writes = [vi.spyOn(w.store, 'ensureMigrated'), vi.spyOn(w.store, 'withOp'), vi.spyOn(w.store, 'writeContent'), vi.spyOn(w.store, 'writeCommitted')];
+    let fail!: (error: Error) => void;
+    const started = new Promise<void>((resolve) => {
+      hold.started = resolve;
+    });
+    hold.release = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    hold.path = join(w.cwd, 'slow.html');
+    const answer = publish({ artifact: 'dash', baseRevision: created.revision, path: 'slow.html' });
+    await started;
+    for (const spy of writes) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
+    fail(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }));
+    const result = await answer.then((r) => r, (error: unknown) => error);
+    expect((result as { isError?: boolean }).isError ?? result instanceof Error).toBe(true);
+    for (const spy of writes) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
+    expect(w.store.revision(created.artifactId)).toBe(created.revision);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(1);
+    expect(stored(created.artifactId).toString('utf8')).toBe('<p>v1</p>');
   });
 
   it('a replayed tool-use id answers the first result and reads no file: the file gone since changes nothing', async () => {
