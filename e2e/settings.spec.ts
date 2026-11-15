@@ -7,6 +7,7 @@
 // one; under a plain build it skips): a terminal of the product registry drawing Nerd Font private-use glyphs once
 // `appearance.monoFont` names an installed Nerd Font, and boxes again when it is cleared.
 import { mountedTab, mountedTabs, openAppDestination, pageRegion, pageTitle, settingsDialog } from './support/shell';
+import { chooseCustomize, customizeHead, customizePage } from './support/customize';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { tmpdir } from 'node:os';
@@ -749,7 +750,7 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       };
       await opened('Customize');
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'harbor-quarterly-review' });
-      await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
+      await expect(customizePage(page).locator('[data-customize-all]')).toBeVisible(); // UX wave U11c: the sidebar opens My items, All
       const shot = async (name: string) => {
         const destination = pageRegion(page);
         await expect(page.locator('[data-region="panel"]')).toHaveJSProperty('inert', true);
@@ -762,15 +763,21 @@ test('Customize and Projects are reachable without a chat, at desktop and narrow
       for (const [width, height] of [[1280, 820], [1512, 982], [900, 820], [620, 820]] as const) {
         await app.evaluate(({ BrowserWindow }, [width, height]) => { const win = BrowserWindow.getAllWindows()[0]; win.setMinimumSize(600, 600); win.setContentSize(width, height); }, [width, height]);
         await page.waitForFunction(([width, height]) => innerWidth === width && innerHeight === height, [width, height]);
-        await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
+        // UX wave U11c: the kinds are Show's values in the page's head (support/customize.ts)
+        await chooseCustomize(page, { view: 'My items', show: 'Plugins' });
         await expect(page.locator('[data-plugins-section="my-items"]')).toBeVisible();
+        // C11: the four Show choices stay on one line at every width; the head at 620 px beside the drawn narrow frame
+        const tops = await customizeHead(page).getByRole('radiogroup', { name: 'Show', exact: true }).getByRole('radio').evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().top)));
+        expect(tops, `the Show choices at ${width} px`).toHaveLength(4);
+        expect(new Set(tops).size, `the Show choices on one line at ${width} px: ${tops.join(', ')}`).toBe(1);
+        if (width === 620) await testInfo.attach(`ux2k-customize-head-${width}x${height}`, { body: await customizeHead(page).screenshot(), contentType: 'image/png' });
         await shot(`ux2k-plugins-${width}x${height}`);
-        await page.getByRole('tab', { name: 'Skills', exact: true }).click();
+        await chooseCustomize(page, { show: 'Skills' });
         await expect(page.getByRole('button', { name: 'View review-quarterly' })).toBeVisible();
-        await expect(page.getByRole('tabpanel', { name: 'Skills' }).getByText('Inventory coverage', { exact: true })).toBeVisible(); // P4-AGG M4: Connectors stays mounted once visited, with its own
+        await expect(customizePage(page).locator('[data-customize-body="skills"]').getByText('Inventory coverage', { exact: true })).toBeVisible(); // the skills' own, under the head
         await expect(page.getByText('Some configuration could not be read', { exact: true })).toHaveCount(0);
         await shot(`ux2k-skills-${width}x${height}`);
-        await page.getByRole('tab', { name: 'Connectors', exact: true }).click(); // P4-AGG M4: the tab's new name
+        await chooseCustomize(page, { show: 'Connectors' });
         await expect(page.getByText('documents', { exact: true })).toBeVisible();
         await expect(page.getByText(/Connection state and tools are unavailable/)).toBeVisible();
         await expect(page.locator('body')).not.toContainText('must-not-reach-renderer');

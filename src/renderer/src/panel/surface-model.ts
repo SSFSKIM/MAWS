@@ -2,7 +2,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import { NO_PROJECT, NO_SESSION_SCOPE, type LowerGroup, type PanelSurfaces, type PanelTabRef, type Strip } from '@shared/ipc/schema/layout';
 import type { LayoutState } from '../stores/layout';
-import { activeTab, currentSet, sessionOfTab } from '../stores/layout-model';
+import { activeTab, currentSet, sessionOfTab, sessionsInView } from '../stores/layout-model';
 
 type SurfaceState = Pick<LayoutState, 'panelPinned' | 'panelBySession' | 'panelActiveNoSession' | 'panelSurfaces'>;
 export const surfaceScope = (session: AppSessionId | null): string => session ?? NO_SESSION_SCOPE;
@@ -10,8 +10,8 @@ export const surfaceScope = (session: AppSessionId | null): string => session ??
 type ContextState = Pick<LayoutState, 'main' | 'panelSurfaces' | 'knownSession'>;
 
 export function surfaceSession(state: ContextState): AppSessionId | null {
-  const active = sessionOfTab(activeTab(state.main));
-  if (active !== null && state.knownSession(active)) return active;
+  const inView = sessionsInView(state.main).find((session) => state.knownSession(session)); // the focused pane's, else the other pane's
+  if (inView !== undefined) return inView;
   const sessions = currentSet(state.main).panes.flatMap((pane) => pane.tabs.flatMap((tab) => {
     const session = sessionOfTab(tab);
     return session !== null && state.knownSession(session) ? [session] : [];

@@ -137,3 +137,7 @@ export function skillsView(groups: readonly SkillGroup[], view: { search: string
   }
   return groups.map((g) => ({ group: g.group, rows: g.rows.filter(matches) })).filter((g) => g.rows.length > 0);
 }
+
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): Customize's My items, All lists every
+// skill in one part with no group heading, through `skillsView`'s search, by the label its row shows.
+export const skillsOfAll = (groups: readonly SkillGroup[], search: string): SkillRow[] => skillsView(groups, { search, sort: 'name' }).flatMap((g) => g.rows).sort(byLabel);

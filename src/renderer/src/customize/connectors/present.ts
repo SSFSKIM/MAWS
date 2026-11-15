@@ -21,7 +21,7 @@ import { isMcpName, isMcpUrl, PLUGINS_SCOPES, type PluginsScope } from '@shared/
 import { patternCheck } from '@shared/plugins/connector-url';
 import { CONNECTOR_ALREADY_CONNECTED } from '@shared/ipc/schema/connectors';
 import { usedEntry } from '@shared/plugins/connector-precedence';
-import { requestFor, type PluginsRequest } from '../../widgets/plugins/present';
+import { requestFor, type PluginOpState, type PluginsRequest } from '../../widgets/plugins/present';
 import { trustOf } from '../discover/present';
 import { CONNECTORS as C } from './copy';
 import type { SignInRecord } from './sign-in';
@@ -81,19 +81,19 @@ const ENGINE_SCOPES: ReadonlySet<string> = new Set(PLUGINS_SCOPES);
 /** Where `mcp remove` must run for this entry, or null for the page's directory: a project entry lives in the `.mcp.json`
  * it was read from, which may be a parent directory's (the inventory reads every ancestor's), and the CLI removes from
  * the `.mcp.json` of the directory it runs in. A local entry is the page's project's; a user one is anywhere's. */
-export function removalDirectoryOf(server: CustomizationServer): string | null {
+export function removalDirectoryOf(server: Pick<CustomizationServer, 'scope' | 'path'>): string | null {
   if (server.scope !== 'project') return null;
   const parent = server.path.slice(0, server.path.lastIndexOf('/'));
   return parent === '' ? '/' : parent;
 }
-export function removeRequestOf(server: CustomizationServer): PluginsRequest | null {
+export function removeRequestOf(server: Pick<CustomizationServer, 'name' | 'scope'>): PluginsRequest | null {
   if (!ENGINE_SCOPES.has(server.scope)) return null;
   return requestFor('mcp-remove', { name: server.name, scope: server.scope as PluginsScope }, null);
 }
 
 /** The scope of the entry the engine uses instead of this one (`app`: MAWS's own server of the name), or null when this
  * is the one it uses; MAWS's own rows are never shadowed (@shared/plugins/connector-precedence). */
-export function shadowedBy(server: CustomizationServer, servers: readonly CustomizationServer[]): CustomizationServer['scope'] | null {
+export function shadowedBy(server: Pick<CustomizationServer, 'name' | 'scope' | 'path'>, servers: readonly CustomizationServer[]): CustomizationServer['scope'] | null {
   if (server.scope === 'app') return null;
   const used = usedEntry(server.name, servers);
   return used === null || (used.scope === server.scope && used.path === server.path) ? null : used.scope;
@@ -114,6 +114,14 @@ export const shadowWords = (scope: CustomizationServer['scope'], name: string): 
 /** The key a configured server's operations run under (Remove): its scope, name and file, since two project files may
  * configure one name. */
 export const serverKey = (server: Pick<CustomizationServer, 'name' | 'scope' | 'path'>): string => `connector:${server.scope}:${server.name}:${server.path}`;
+
+/** UX wave U11g (§D): the key a custom add runs under, by the scope and the name it adds; a later add of the same name
+ * and scope takes it, and its line with it. */
+export const customAddKey = (scope: PluginsScope, name: string): string => `connector:add:${scope}:${name}`;
+
+/** Whether an add's line stands at the head of the list: while it works, or after it failed or could not be sent; a
+ * succeeded add's row is its result. */
+export const addLineShown = (state: PluginOpState): boolean => state.phase === 'working' || state.phase === 'unsent' || (state.phase === 'done' && state.event.outcome?.ok !== true);
 
 // ---- signing in ------------------------------------------------------------------------------------------------------
 

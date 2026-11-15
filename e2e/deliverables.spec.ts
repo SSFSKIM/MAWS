@@ -16,7 +16,7 @@
 // M7's seven cases drive the product as the owner does, over a scratch project the sidebar shows (support/
 // maws-tools.ts): (1) the `p1-maws-artifacts` replay, its rows and cells, the screenshot main captured for it and
 // the console chip; (2) the Deliverables tool's list, viewer, versions and main tab; (3) a delivered file of every kind
-// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not; (5) comment mode into the
+// and the frame policies on the real session; (4) `show_pane 'deliverable'`, found and not (U6d: refused, opening nothing); (5) comment mode into the
 // comment card beside the element (P2-E1; E3's composer before it); (6) a relaunch over the same profile and the All scope; (7) a capture beside the attention relay; P2-F added (8) the media viewers' fit, zoom and actual size (L95). Records
 // are written straight into the store's layout (`<userData>/deliverables/<appSessionId>/<id>.json`, the reader's format)
 // where no replay writes them; main's reader has no cache. MAWS_E2_SHOTS=1 also writes the evidence shots in both themes
@@ -210,6 +210,83 @@ test('the capture renders a scheme-served artifact offscreen at the asked size; 
       .toEqual([expect.objectContaining({ artifactId: id, revision, level: 'error', message: 'E2_CONSOLE_ERROR' } satisfies Partial<ArtifactConsole>)]);
   } finally {
     await maws.cleanup();
+  }
+});
+
+// Ticket 662: a page in a store frame cannot send data out through DNS. A `<link rel="dns-prefetch">` connected to the
+// document makes Chromium resolve the name it holds, past the frame's policy, its sandbox and main's request filter;
+// main's `blink-settings` switch (src/main/chromium-features.ts) turns Blink's DNS prefetching off. An HTML artifact,
+// framed as the viewer frames it (the handler's policy, a scripts-only sandbox), connects a prefetch link made by script
+// and one written as markup into the live document, each for a name of the run's own under example.com. Chromium's net
+// log of the window's session records the resolver's jobs; the positive control is a name main resolves on purpose
+// through the same resolver after the page's links, so an absent name means no job was asked for, not a log that
+// records none. Whether the control resolves does not matter: its job is logged when it starts.
+const prefetchPage = (names: { script: string; markup: string }) =>
+  `<!doctype html><html><head><meta charset="utf-8"><title>Travel notes</title></head><body style="margin:0;padding:24px;font:16px system-ui">
+<h1>Travel notes</h1><div id="hints"></div>
+<script>
+const link = document.createElement('link');
+link.rel = 'dns-prefetch';
+link.href = '//${names.script}';
+document.head.append(link);
+document.getElementById('hints').innerHTML = '<link rel="dns-prefetch" href="//${names.markup}">';
+parent.postMessage('e2-prefetch-attached', '*');
+</script></body></html>`;
+
+test('ticket 662: an HTML artifact’s dns-prefetch links ask the resolver for nothing; a name main resolves on purpose is in the same net log', async () => {
+  const maws = await launchMaws({ env: { MAWS_HARNESS: '0' } });
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2-dns-')));
+  try {
+    const label = randomUUID().slice(0, 8);
+    const names = { script: `maws-e2e-${label}-script.example.com`, markup: `maws-e2e-${label}-markup.example.com`, control: `maws-e2e-${label}-control.example.com` };
+    const id = randomUUID();
+    const copy = join(maws.userData, 'deliverables', APP, id, 'v1.html');
+    mkdirSync(join(copy, '..'), { recursive: true });
+    writeFileSync(copy, prefetchPage(names));
+    const at = new Date().toISOString();
+    seed(maws.userData, { id, appSessionId: APP, kind: 'artifact', artifactId: 'notes', title: 'Travel notes', path: copy, versions: [{ path: copy, at }], createdAt: at, updatedAt: at });
+    await importSeeded(maws.page);
+    const url = await pageUrlOf(maws.page, id);
+
+    // the net log of the window's session, the frame's (its default capture mode keeps a request's host)
+    const log = join(scratch, 'net-log.json');
+    await maws.app.evaluate(({ BrowserWindow }, path) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.startLogging(path), log);
+    const attached = maws.page.evaluate(
+      () =>
+        new Promise<boolean>((resolve) => {
+          const timer = setTimeout(() => resolve(false), 10_000);
+          window.addEventListener('message', (event) => {
+            if (event.data === 'e2-prefetch-attached') {
+              clearTimeout(timer);
+              resolve(true);
+            }
+          });
+        }),
+    );
+    await mountFrame(maws, url, 'allow-scripts');
+    expect(await attached, 'the page’s script ran and connected both links').toBe(true);
+    // a prefetch goes from the frame's renderer to the browser process and on to the resolver after the insertion
+    await maws.page.waitForTimeout(2_000);
+    await maws.app.evaluate(async ({ BrowserWindow }, host) => {
+      const { session } = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents;
+      await Promise.race([session.resolveHost(host).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    }, names.control);
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.stopLogging()); // flushed to disk when it resolves
+
+    const { constants, events } = JSON.parse(readFileSync(log, 'utf8')) as { constants: { logEventTypes: Record<string, number> }; events: { type: number; params?: unknown }[] };
+    const typeNames = new Map(Object.entries(constants.logEventTypes).map(([name, type]) => [type, name]));
+    // each event that names one of the run's names, by its type alone: its other params hold the machine's resolver
+    // settings (search domains among them), which a report keeps out
+    const mentions = (name: string) => events.filter((event) => JSON.stringify(event.params ?? {}).includes(name)).map((event) => typeNames.get(event.type) ?? String(event.type));
+    const found = { control: mentions(names.control), script: mentions(names.script), markup: mentions(names.markup) };
+    const report = `net log: ${events.length} events\n${Object.entries(found).map(([which, types]) => `${which} ${names[which as keyof typeof names]}: ${types.length} events ${JSON.stringify(types)}`).join('\n')}`;
+    console.log(`[dns-prefetch] ${report}`);
+    expect(found.control.length, `the control's resolver job is in the log\n${report}`).toBeGreaterThan(0);
+    expect(found.script, `the script-made link asked for no name\n${report}`).toEqual([]);
+    expect(found.markup, `the markup link asked for no name\n${report}`).toEqual([]);
+  } finally {
+    await maws.cleanup();
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 
@@ -890,13 +967,17 @@ test('a 64 px image and a short video fill the pane, in the panel and in a main 
 });
 
 // ---- (4) show_pane 'artifact' (E2's 'deliverable'; over the recording's derived copy, its pane renamed) --------------
+// UX wave U6d (O-44; decision 22): the agent opens no artifact by itself. The pane is retired, so the host refuses the
+// call with the sentence that teaches the link, asks no window, and nothing opens, whether or not an artifact answers to
+// the target; the event carries the sentence. The cell draws the fixture's tool_result, which the replay plays as
+// recorded, so the refusal's words in a row are the model's unit test's and the paid live group's.
 
-test('show_pane: a target no record answers to is the model’s error; an artifact the target names opens in the Artifacts viewer and answers panel-tool', async () => {
+test('show_pane: a call for the retired artifact pane is answered with the sentence and opens nothing, also when an artifact the target names exists', async () => {
   test.setTimeout(180_000);
   await scene({ titles: ['E2: show_pane, nothing delivered', 'E2: show_pane, an artifact'] }, async (s) => {
     const [bare, seeded] = s.ids;
-    // the recording's target is `none`: an artifact may carry that id (Decision Log 34: the model names what it holds)
-    const none = seedArtifact(s.maws.userData, seeded, 'none', 'Release notes', [pageOf('RELEASE_NOTES', '#37474f')]);
+    // the recording's target is `none`: in the second session an artifact carries that id, which the call opened before
+    seedArtifact(s.maws.userData, seeded, 'none', 'Release notes', [pageOf('RELEASE_NOTES', '#37474f')]);
     await importSeeded(s.page);
     const answers = (id: string) => {
       const rows = s.journal(id);
@@ -904,37 +985,24 @@ test('show_pane: a target no record answers to is the model’s error; an artifa
     };
     const panesShown = async (id: string) => ofKind(await s.events(id), 'maws.pane.shown').map((e) => [e.pane, e.opened?.kind ?? null, e.error]);
 
-    await show(s, bare);
-    await replay(s, bare, SHOW_PANE_ARTIFACT);
-    for (let k = 0; k < 3; k++) await allowNext(s, bare); // terminal, artifact, nope (seqs 68, 85, 100)
-    await idle(s, bare);
-    expect(answers(bare)[1]).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactNotFound('none') }], isError: true });
-    expect(await panesShown(bare)).toEqual([
-      ['terminal', 'panel-tool', null],
-      ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
-    ]);
-    // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no bodies.
-    // Read on the cell's own label: the turn's line says what the turn did in its rows' words (UX wave U2, O-15)
-    await unfoldWork(s.pane);
-    await expect(s.pane.locator('.transcript-cell-label').filter({ hasText: /^Could not open pane: the artifact pane is not available in this build of MAWS$/ })).toBeVisible();
-
-    await show(s, seeded);
-    await replay(s, seeded, SHOW_PANE_ARTIFACT);
-    await allowNext(s, seeded); // terminal
-    await allowNext(s, seeded); // artifact "none": the viewer opens on the artifact
-    const viewer = viewerOf(s.panel);
-    await expect(viewer).toHaveAttribute('data-artifact-viewer', none.id);
-    await expect(surface(s.page, 'artifacts')).toBeVisible();
-    await expect((await frameAt(s.page, await pageUrlOf(s.page, none.id))).locator('#heading')).toHaveText('RELEASE_NOTES');
-    await allowNext(s, seeded); // nope
-    await idle(s, seeded);
-    const shown = answers(seeded)[1]!;
-    expect(shown.isError).toBeUndefined();
-    expect(JSON.parse((shown.content[0] as { text: string }).text)).toMatchObject({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', title: 'Artifacts' } });
-    expect(await panesShown(seeded)).toEqual([
-      ['terminal', 'panel-tool', null],
-      ['artifact', 'panel-tool', null],
-    ]);
+    for (const id of [bare, seeded]) {
+      await show(s, id);
+      await replay(s, id, SHOW_PANE_ARTIFACT);
+      for (let k = 0; k < 3; k++) await allowNext(s, id); // terminal, artifact, nope (seqs 68, 85, 100)
+      await idle(s, id);
+      expect(answers(id)[1], id).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactPaneRetired }], isError: true });
+      expect(await panesShown(id), id).toEqual([
+        ['terminal', 'panel-tool', null],
+        ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
+      ]);
+      // nothing opened beside the chat: no Artifacts viewer, no Artifacts surface
+      await expect(viewerOf(s.panel)).toHaveCount(0);
+      await expect(surface(s.page, 'artifacts')).toHaveCount(0);
+      // the cell draws the fixture's tool_result, E1's words with the pane renamed (Surprises, M4); the replay compares no
+      // bodies. Read on the cell's own label: the turn's line says what the turn did in its rows' words (UX wave U2, O-15)
+      await unfoldWork(s.pane);
+      await expect(s.pane.locator('.transcript-cell-label').filter({ hasText: /^Could not open pane: the artifact pane is not available in this build of MAWS$/ })).toBeVisible();
+    }
   });
 });
 

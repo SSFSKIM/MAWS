@@ -67,7 +67,7 @@ import { legacyRouteOf } from '@shared/engine/route'; // P5 O7 M9
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { ReloadPluginsResponse } from '@shared/wire/control';
-import { availableOf, installedOf, listing, marketplacesOf } from './plugins/cli-result';
+import { availableOf, installedOf, listing, marketplacesOf, nameCheckOutcome /* UX wave U11g */ } from './plugins/cli-result';
 import { PluginsRunner, SHUTDOWN_KILL_GRACE_MS, type Timers } from './plugins/runner';
 import { READ_LINES } from '@shared/plugins/cli';
 // E8 end
@@ -87,7 +87,7 @@ import type { ArtifactStore } from './documents/store'; // P3-A (M6)
 import type { DatasetRefreshRequests } from './connectors/dataset-requests'; // E3
 // P2-A end
 import { rendererMcpStatus } from './mcp-status'; // P3-H
-import { registerCustomizationInventory } from './customization/inventory'; // UX2-K
+import { readCustomizationInventory, registerCustomizationInventory } from './customization/inventory'; // UX2-K; UX wave U11g: the name check's read
 
 export type DeadlineShape = 'immediate' | 'bounded' | 'operation';
 type C3Command = (typeof C3_SESSION_COMMANDS)[number] | (typeof C3_ENGINE_COMMANDS)[number];
@@ -892,7 +892,8 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // session.reloadSkills"). A read is one CLI run (about a second; the bridge's 10 s deadline is accepted) reduced to the
   // fields the widget shows; every mutation is an operation completing on `plugins.operation`; `session.reloadSkills` is
   // an operation beside `session.reloadPlugins`.
-  registerCustomizationInventory(on, { userData: deps.userData, captureEnv });
+  const inventoryDeps = { userData: deps.userData, captureEnv };
+  registerCustomizationInventory(on, inventoryDeps);
   on('plugins.env', async () => {
     const [check, env] = await Promise.all([binaryProbe(), captureEnv()]);
     const home = env.HOME || homedir();
@@ -915,6 +916,11 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
   // runner (completing on `plugins.operation`; `plugins.cancel` stops them)
   on('connectors.add', async ({ cwd, binary, name, url, transport, scope }) => plugins.start('mcp-add', { name, url, transport, scope }, cwd, binary));
   on('connectors.remove', async ({ cwd, binary, name, scope }) => plugins.start('mcp-remove', { name, scope }, cwd, binary));
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §B, R3): a custom connector's
+  // `claude mcp add-json`, the same action; immediately before its CLI starts, inside the runner's queue, the name is
+  // checked against the page's folder's configuration with the reader the sheet's answer came from
+  on('connectors.addJson', async ({ cwd, binary, name, scope, entry, folder }) =>
+    plugins.start('mcp-add', { name, scope, entry }, cwd, binary, async () => nameCheckOutcome(await readCustomizationInventory(folder, inventoryDeps), name)));
   on('marketplaces.add', async ({ cwd, binary, source, scope }) => plugins.start('marketplace-add', { source, scope }, cwd, binary));
   on('marketplaces.update', async ({ cwd, binary, name }) => plugins.start('marketplace-update', { name }, cwd, binary));
   on('marketplaces.remove', async ({ cwd, binary, name, scope }) => plugins.start('marketplace-remove', { name, scope }, cwd, binary));

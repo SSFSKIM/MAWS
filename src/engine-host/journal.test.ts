@@ -204,7 +204,10 @@ describe('transport frames and journals', () => {
         }
       }
       expect(lines).toBeGreaterThan(10_000);
-    });
+      // The case reads every line of every recorded journal, so its time grows with the fixture set (each engine probe
+      // adds journals): builders saw it run past the 5 s default under load. Its own bound, as the two other fixture
+      // walks have, so the file's other cases keep the default and a real hang there still fails fast.
+    }, 60_000);
   });
 
   // P5 O16 (Interfaces §C): an adopter continues the launch's journal where the last writer left it

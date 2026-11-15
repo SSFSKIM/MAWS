@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin, PluginManifestView } from '@shared/ipc/schema/plugins';
-import { dateWords, displayNameOf, groupOfMarketplace, identitiesOf, isNew, loadedOnly, manifestKeyOf, myItems, representativeOf, versionWords, type PluginIdentity } from './library';
+import { dateWords, displayNameOf, groupOfMarketplace, identitiesOf, isNew, loadedOnly, manifestKeyOf, myItems, pluginsOfAll, representativeOf, versionWords, type PluginIdentity } from './library';
 import { REL } from '../../test-support/relative-time';
 
 const HERE = '/work/maws';
@@ -273,6 +273,31 @@ describe('the library model: the view', () => {
     expect(shown('loaded', new Set(['code-review@claude-plugins-official', 'agents-md@builtin']))).toEqual([['anthropic', ['code-review@claude-plugins-official']]]);
     expect(shown('loaded', null)).toEqual([]);
     expect(shown('otherProjects')).toEqual([['otherProjects', ['supabase@claude-plugins-official']]]);
+  });
+});
+
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): Customize's My items, All.
+describe('the library model: All’s plugins', () => {
+  const ids = identitiesOf(
+    [
+      inst('buoy-log@harbour', { lastUpdated: ago(1) }),
+      inst('anchor-chart@harbour', { lastUpdated: ago(30), enabled: false }),
+      project('keel-notes@harbour', '/work/elsewhere', { enabled: false }),
+      project('quay-ledger@harbour', HERE, { lastUpdated: ago(2) }),
+    ],
+    [],
+    new Map(),
+    null,
+  );
+
+  it('lists every identity with an installation here or at user scope, by the name its row shows, whatever its group or date', () => {
+    expect(pluginsOfAll(ids, '').map((identity) => identity.id)).toEqual(['anchor-chart@harbour', 'buoy-log@harbour', 'quay-ledger@harbour']);
+  });
+
+  it('searches as My items does: the name, the id, the author and the description', () => {
+    expect(pluginsOfAll(ids, 'QUAY').map((identity) => identity.id)).toEqual(['quay-ledger@harbour']);
+    expect(pluginsOfAll(ids, '@harbour').map((identity) => identity.id)).toEqual(['anchor-chart@harbour', 'buoy-log@harbour', 'quay-ledger@harbour']);
+    expect(pluginsOfAll(ids, 'keel')).toEqual([]); // installed only for another project
   });
 });
 

@@ -48,6 +48,10 @@ export interface TranscriptActions {
   // P5 O7 M5a: `machine`, the machine the link's source is on (its session's, the Markdown artifact's), so an artifact the
   // page has not listed yet opens there
   openArtifactTab?(artifactId: string, location?: ArtifactLocation, machine?: MachineRef): void; // P4-B4: location, as openArtifact's
+  // UX wave U6d: the main tab that already shows this artifact, brought forward at `location`; false, and nothing done, when the strip holds none.
+  // An artifact mention's click asks it first (card C5, "Show that tab"; Link.tsx's openArtifactMention); when omitted,
+  // the click opens beside the chat as before
+  showOpenArtifactTab?(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean;
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end
