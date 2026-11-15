@@ -196,6 +196,13 @@ export function fakeStackLayout(options: StackLayoutOptions) {
         el.scrollTop = top;
       });
     },
+    // A scroll the browser makes whose event is still queued: the offset moves now, its event comes at `fire()`, so a
+    // layout change can be applied in between.
+    scrollQueued(top: number): () => void {
+      const el = scroller()!;
+      tops.set(el, Math.max(0, Math.min(top, maxTop())));
+      return () => act(() => void el.dispatchEvent(new Event('scroll')));
+    },
     setWidth(next: number) {
       width = next;
     },

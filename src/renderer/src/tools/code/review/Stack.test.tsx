@@ -775,6 +775,46 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect({ cardTop: page.topOf(row) >= top + HEADER, cardBottom: page.topOf(row) + page.height(row) <= top + VIEWPORT, line: page.topOf(line()) >= top + HEADER }).toEqual({ cardTop: true, cardBottom: true, line: true });
     });
 
+    // The branch's re-review (finding 5): a card opened by the person's press on a line drawn wholly in view near the
+    // viewport's bottom. The field's focus scroll (the card's bottom to the viewport's bottom) reaches the stack in one of
+    // two orders; either way the stack stands the card wholly in view itself, its line kept in view.
+    async function pressNearTheBottom() {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      offs.push(registerCommentComposer(openComment));
+      await mount(files);
+      const line = () => lineRow(files[0].path, files[0].added[0]);
+      page.scrollTo(page.topOf(line()) + ROW + 10 - VIEWPORT); // by hand: the line wholly in view, ten pixels above the bottom
+      await page.settle();
+      addOn(files[0].path, files[0].added[0]); // pressed and released
+      await page.settle();
+      const row = () => card()!.closest('tr')!;
+      const focusTop = () => page.topOf(row()) + page.height(row()) - VIEWPORT; // where the field's focus scroll goes
+      const inView = () => {
+        const top = scroller().scrollTop;
+        return { cardTop: page.topOf(row()) >= top + HEADER, cardBottom: page.topOf(row()) + page.height(row()) <= top + VIEWPORT, line: page.topOf(line()) >= top + HEADER };
+      };
+      return { focusTop, inView };
+    }
+    const shown = { cardTop: true, cardBottom: true, line: true };
+
+    it('stands wholly in view the card a press opened near the bottom when the field’s focus scroll comes 501 ms after the release', async () => {
+      const { focusTop, inView } = await pressNearTheBottom();
+      clock += 501;
+      if (focusTop() > scroller().scrollTop) scrollWithoutInput(focusTop());
+      await page.settle();
+      expect(inView()).toEqual(shown);
+    });
+
+    it('stands wholly in view the card a press opened near the bottom when a layout change comes between the field’s focus scroll and its event', async () => {
+      const { focusTop, inView } = await pressNearTheBottom();
+      clock += 100; // inside the release's window
+      const fire = focusTop() > scroller().scrollTop ? page.scrollQueued(focusTop()) : () => {};
+      await page.settle(1); // the observers report before the scroll's event
+      fire();
+      await page.settle();
+      expect(inView()).toEqual(shown);
+    });
+
     it('ends an earlier wheel’s window when a reveal starts: a scroll 100 ms into the reveal is a layout change, and the requested file stays at the top', async () => {
       const { files, further } = await reading();
       clock += 100;
