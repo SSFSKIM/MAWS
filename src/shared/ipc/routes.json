@@ -421,6 +421,7 @@
   "artifacts.state",
   "artifacts.status",
   "artifacts.testLoopDelay",
+  "artifacts.undelete",
   "artifacts.update",
   "artifacts.uploadAsset",
   "artifacts.versionState",
@@ -552,6 +553,8 @@
   "settings.usageControls",
   "settings.userEngineDefaults",
   "spaces.delete",
-  "spaces.list"
+  "spaces.instructions",
+  "spaces.list",
+  "spaces.setInstructions"
  ]
 }

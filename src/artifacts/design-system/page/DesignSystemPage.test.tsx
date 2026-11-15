@@ -5,11 +5,13 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { applyV1, diffV1, newDoc, stateVector, type Doc } from '../../yjs';
-import { validateCanon, type HtmlParser } from '../canon';
+import { canonKind, validateCanon, type HtmlParser } from '../canon';
 import complete from '../fixtures/complete.tokens.json';
-import { readSystem, setToken, writeSystem } from '../model';
+import { readSystem, setToken, writeSystem, type SystemOrigin } from '../model';
 import { byIdentity } from '../roles';
 import { parseTokens, serializeTokens } from '../tokens';
+import { defaultSystem } from '../../types/design_system/defaults';
+import { componentCanvas } from './component-canvas';
 import { DesignSystemPage } from './DesignSystemPage';
 import { CommitField } from './fields';
 import { rewriteHtmlAssets } from './frame';
@@ -323,17 +325,83 @@ describe('whole-branch review: edits of what the page shows', () => {
 describe('the canon’s components and the aliases on the page', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  it('draws each component on the slide canvas, scaled to its box as a layout is', () => {
+  it('draws a layout on the slide canvas and a component the table does not name on the largest, each scaled by its box’s client width', () => {
+    // the box's 1 px border: its bounding width is 2 px wider than the room the frame is drawn in (L7)
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      return this.classList.contains('dsp-slide') ? new DOMRect(0, 0, 384, 216) : new DOMRect();
+      return this.classList.contains('dsp-slide') ? new DOMRect(0, 0, 386, 218) : new DOMRect();
+    });
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('dsp-slide') ? 384 : 0;
     });
     const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc: systemDoc() }} host={host} />);
-    for (const title of ['layouts/title.html', 'components/chip.html']) {
+    const drawn = (title: string) => {
       const frame = view.getByTitle(title);
       expect(frame.parentElement!.classList.contains('dsp-slide')).toBe(true);
-      expect(frame.parentElement!.style.aspectRatio).toBe('1920 / 1080');
-      expect([frame.getAttribute('width'), frame.getAttribute('height'), frame.style.transform]).toEqual(['1920', '1080', 'scale(0.2)']);
+      return [frame.parentElement!.style.aspectRatio, frame.getAttribute('width'), frame.getAttribute('height'), frame.style.transform];
+    };
+    expect(drawn('layouts/title.html')).toEqual(['1920 / 1080', '1920', '1080', `scale(${384 / 1920})`]);
+    expect(drawn('components/chip.html')).toEqual(['1280 / 720', '1280', '720', `scale(${384 / 1280})`]); // Harbor is no bundled system
+    const chip = view.getByTitle('components/chip.html').getAttribute('srcdoc')!;
+    expect(chip).toContain('width: 1280px; height: 720px;');
+    expect(chip).toContain(`padding: ${1280 / 15}px;`);
+  });
+
+  // Classroom on the page, its frames' drawn sizes read back
+  const classroomCanvases = () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.classList.contains('dsp-slide') ? 346 : 0;
+    });
+    const classroom = defaultSystem('classroom')!;
+    // the system's files as seeded, but its stylesheet: this project reads a `.css?raw` import as empty
+    const files = Object.fromEntries(Object.entries(classroom.files).filter(([path]) => canonKind(path) !== 'stylesheet'));
+    const seeded = (over: Record<string, string>, origin: SystemOrigin) => {
+      const doc = newDoc();
+      writeSystem(doc, { ...files, ...over }, origin, { name: classroom.name });
+      return doc;
+    };
+    const canvasOf = (shown: ReturnType<typeof render>, title: string) => {
+      const frame = shown.getByTitle(title);
+      return { width: Number(frame.getAttribute('width')), height: Number(frame.getAttribute('height')), scale: frame.style.transform };
+    };
+    const components = Object.keys(classroom.files).filter((path) => canonKind(path) === 'component');
+    expect(components.length).toBeGreaterThan(1);
+    return { classroom, seeded, canvasOf, components };
+  };
+
+  it('draws each component of a bundled system on the canvas the table names, and one changed from the bundled file on the largest', () => {
+    const { classroom, seeded, canvasOf, components } = classroomCanvases();
+    const view = render(<DesignSystemPage artifactId="ds1" handle={{ doc: seeded({}, { route: 'default', key: 'classroom', at: AT }) }} host={host} />);
+    for (const path of components) {
+      const { width, height } = componentCanvas('classroom', path);
+      expect(canvasOf(view, path), path).toEqual({ width, height, scale: `scale(${346 / width})` });
     }
+    expect(canvasOf(view, 'components/data-table.html').width).toBe(1280); // the drawn page: 960 and 1,120 cut it
+    expect(canvasOf(view, 'components/tip.html').width).toBe(960);
+    view.unmount();
+
+    // a duplicate keeps the default's key and its files: the same canvases; the tip rewritten, on the largest
+    const copy = render(<DesignSystemPage artifactId="ds2" handle={{ doc: seeded({}, { route: 'default', key: 'classroom', copiedFrom: 'Classroom', at: AT }) }} host={host} />);
+    expect(canvasOf(copy, 'components/tip.html').width).toBe(960);
+    copy.unmount();
+    const tip = classroom.files['components/tip.html']!.replace('three seconds', 'five seconds');
+    const edited = render(<DesignSystemPage artifactId="ds3" handle={{ doc: seeded({ 'components/tip.html': tip }, { route: 'default', key: 'classroom', at: AT }) }} host={host} />);
+    expect(canvasOf(edited, 'components/tip.html')).toMatchObject({ width: 1280, height: 720 });
+    expect(canvasOf(edited, 'components/status.html').width).toBe(960);
+    edited.unmount();
+
+    // the same files under another route are a system the table does not name
+    const derived = render(<DesignSystemPage artifactId="ds4" handle={{ doc: seeded({}, { route: 'derived', at: AT }) }} host={host} />);
+    for (const path of components) expect(canvasOf(derived, path), path).toMatchObject({ width: 1280, height: 720 });
+  });
+
+  // the branch review of U10b-4: the frame draws the system's tokens as they are now, and the table holds only for the
+  // bundle's (seeded-canvas.test.ts pins that a seeded default, unedited, matches it)
+  it('draws every component of a bundled system whose tokens changed from the bundle’s on the largest canvas', () => {
+    const { classroom, seeded, canvasOf, components } = classroomCanvases();
+    const tokens = JSON.parse(classroom.files['tokens.tokens.json']!) as { space: Record<string, { $value: { value: number } }> };
+    tokens.space['4']!.$value.value += 8; // one spacing token
+    const spaced = render(<DesignSystemPage artifactId="ds5" handle={{ doc: seeded({ 'tokens.tokens.json': JSON.stringify(tokens) }, { route: 'default', key: 'classroom', at: AT }) }} host={host} />);
+    for (const path of components) expect(canvasOf(spaced, path), path).toMatchObject({ width: 1280, height: 720 });
   });
 
   it('shows an alias as the name the page gives the token it refers to, with the reference on hover', () => {

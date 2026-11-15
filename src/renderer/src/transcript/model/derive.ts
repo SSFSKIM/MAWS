@@ -9,7 +9,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
-import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
+import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
@@ -331,7 +331,7 @@ interface DeliveryRecord {
 // it; the disk path has the call and its result alone.
 interface ArtifactRecord {
   use: Event<'tool.use'>;
-  action: 'create' | 'update';
+  action: 'create' | 'update' | 'delete'; // UX wave U10b (M5, §C.4): an agent's delete
   artifactId: string;
   htmlPath: string;
   title: string | null; // the call's (an update may carry none), replaced by the result's or the event's
@@ -342,6 +342,7 @@ interface ArtifactRecord {
   answered: boolean; // the call's result is in
   ownerAppSessionId: AppSessionId | null; // P2-E1: the ancestor whose record the version belongs to, as the result or the event names it
   revision: number | null; // P3-L (M6b fix wave 2): the revision written, as the result or the event names it
+  why: string | null; // UX wave U10b: a refused delete's reason key (`why` in the refusal's JSON)
 }
 // E2 end
 // E4c start: what a turn's events say about one browser tool call (its row): the call opens it, its result fills it,
@@ -1556,9 +1557,9 @@ function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | und
 function artifactOfCall(use: Event<'tool.use'>): ArtifactRecord {
   const input = record(use.input);
   return {
-    use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : 'update', artifactId: str(input.id ?? input.handle ?? input.artifact), htmlPath: str(input.html_path ?? input.path),
+    use, action: use.toolName === MAWS_TOOL_USE.artifact_create ? 'create' : use.toolName === MAWS_TOOL_USE.artifact_delete ? 'delete' : 'update', artifactId: str(input.id ?? input.handle ?? input.artifact), htmlPath: str(input.html_path ?? input.path),
     title: typeof input.title === 'string' ? input.title : null, deliverableId: null, version: null, announced: false, error: null, answered: false, ownerAppSessionId: null,
-    revision: null,
+    revision: null, why: null,
   };
 }
 
@@ -1566,6 +1567,13 @@ function resultOfArtifact(artifact: ArtifactRecord, result: Event<'tool.result'>
   artifact.answered = true;
   if (result.isError) {
     artifact.error = toolErrorText(resultText(result.content));
+    if (artifact.action === 'delete') artifact.why = refusalWhyOf(artifact.error);
+    return;
+  }
+  // UX wave U10b (M5, §C.4): a delete's answer names the artifact by its id and title; it registers no version
+  if (artifact.action === 'delete') {
+    const deleted = ArtifactDeleteResultSchema.safeParse(firstJsonBlock(result.content));
+    if (deleted.success) Object.assign(artifact, { artifactId: deleted.data.artifactId, title: deleted.data.title });
     return;
   }
   if (artifact.announced) return;
@@ -1585,7 +1593,21 @@ function artifactRow(artifact: ArtifactRecord, turnId: TurnId, context: TurnCont
     ...(context.closed && !artifact.answered && !artifact.announced && { neverAnswered: true as const }), // E11: as the delivery row's
     ...(artifact.ownerAppSessionId !== null && { ownerAppSessionId: artifact.ownerAppSessionId }), // P2-E1
     ...(artifact.revision !== null && { revision: artifact.revision }), // P3-L (M6b fix wave 2)
+    ...(artifact.why !== null && { why: artifact.why }), // UX wave U10b
   };
+}
+
+// UX wave U10b (M5, §C.4): the `why` of an artifact refusal's JSON, which every artifact refusal carries last; null when
+// the refusal has none (a newer machine's, or one that is not the store's).
+function refusalWhyOf(error: string): string | null {
+  const at = error.lastIndexOf(' {"reason":');
+  if (at < 0) return null;
+  try {
+    const why = (JSON.parse(error.slice(at + 1)) as { why?: unknown }).why;
+    return typeof why === 'string' ? why : null;
+  } catch {
+    return null;
+  }
 }
 // E2 end
 

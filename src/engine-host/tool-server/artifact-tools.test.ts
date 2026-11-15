@@ -265,6 +265,70 @@ describe('artifact_create', () => {
     expect(rows('SELECT id FROM artifacts')).toEqual([]);
   });
 
+  // UX wave U10b (l6-artifacts-08): the person's design-system choice reaches the agent's create
+  it('binds a presentation or design to the design system it names, by id, by title, or by title in another case and spacing; the guide is that system’s', async () => {
+    const house = await w.store.create({ kind: 'design_system', title: 'House' }, HUMAN);
+    const harbor = await w.store.create({ kind: 'design_system', title: 'Harbor Light' }, HUMAN);
+    const sitting = await w.store.createSpace({ name: 'P3 sitting' });
+    await w.store.setDefaults({ owner: house.id, spaces: { [sitting.id]: house.id } });
+    w.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+
+    const byId = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck', designSystem: harbor.id })));
+    expect(byId.designSystem).toBe('# DESIGN of Harbor Light');
+    expect(w.store.get(byId.artifactId)!.designSystemId).toBe(harbor.id); // its own system, ahead of the defaults
+    const byTitle = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'design', title: 'Site', designSystem: 'Harbor Light', space: 'P3 sitting' })));
+    expect(byTitle).toMatchObject({ spaceId: sitting.id, designSystem: '# DESIGN of Harbor Light' }); // over the Space's default
+    expect(w.store.get(byTitle.artifactId)!.designSystemId).toBe(harbor.id);
+    const loosely = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck 2', designSystem: ' harborlight ' })));
+    expect(w.store.get(loosely.artifactId)!.designSystemId).toBe(harbor.id);
+    const unbound = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck 3' })));
+    expect(w.store.get(unbound.artifactId)!.designSystemId).toBeUndefined(); // without it, none is set, as before
+    expect(unbound.designSystem).toBe('# DESIGN of House');
+  });
+
+  it('answers a repeated create that named a design system from its ledger, the system renamed meanwhile', async () => {
+    const harbor = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    w.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+    const ctx = w.ctx({ toolUseId: 'toolu_bound' as ToolUseId });
+    const first = await artifactCreateTool(w.deps()).call({ kind: 'presentation', title: 'Deck', designSystem: 'Harbor' }, ctx);
+    expect(jsonOf(first)).toMatchObject({ designSystem: '# DESIGN of Harbor' });
+    await w.store.update(harbor.id, { title: 'Harbor 2' }); // the name no longer resolves
+    expect(await artifactCreateTool(w.deps()).call({ kind: 'presentation', title: 'Deck', designSystem: 'Harbor' }, ctx)).toEqual(first);
+  });
+
+  it('refuses a design system on an HTML page, a file or a design system, writing nothing', async () => {
+    const harbor = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    writeFileSync(join(w.cwd, 'report.pdf'), '%PDF-1.4');
+    const before = rows('SELECT id FROM artifacts').length;
+    expect(textOf(await create({ content: '<p/>', title: 'Page', designSystem: harbor.id }))).toBe('artifact_create: kind "html" takes no design system; designSystem is for document, presentation, design, dashboard');
+    expect(textOf(await create({ kind: 'file', path: 'report.pdf', title: 'Report', designSystem: 'Harbor' }))).toBe(TOOL_ERRORS.designSystemNotForKind('file'));
+    expect(textOf(await create({ kind: 'design_system', title: 'Brand', designSystem: 'Harbor' }))).toBe(TOOL_ERRORS.designSystemNotForKind('design_system'));
+    expect(rows('SELECT id FROM artifacts').length).toBe(before);
+  });
+
+  it('refuses a design system it cannot find, naming the live ones, and a title two systems share, naming their ids, writing nothing', async () => {
+    const harbor = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    const gone = await w.store.create({ kind: 'design_system', title: 'Retired' }, HUMAN);
+    await w.store.delete(gone.id);
+    const page = await w.store.create({ kind: 'document', title: 'Harbour' }, HUMAN); // not a design system, though named so
+    const before = rows('SELECT id FROM artifacts').length;
+    expect(textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: 'Harbour' }))).toBe(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor']));
+    expect(textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: page.id }))).toBe(TOOL_ERRORS.noDesignSystem(page.id, ['Harbor']));
+    expect(textOf(await create({ kind: 'design', title: 'Site', designSystem: 'Retired' }))).toBe(TOOL_ERRORS.noDesignSystem('Retired', ['Harbor']));
+    const twin = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    const shared = textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: 'harbor' }));
+    expect(shared).toBe(TOOL_ERRORS.designSystemAmbiguous('harbor', [harbor.id, twin.id].sort()));
+    expect(rows('SELECT id FROM artifacts').length).toBe(before + 1); // the twin alone
+  });
+
+  // the architect's ruling (2026-11-15): reachable, since the bundled systems are not seeded again into a store that once held one
+  it('refuses a design system in a library that has none, saying there are none', async () => {
+    const gone = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    await w.store.delete(gone.id);
+    expect(textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: 'Harbor' }))).toBe('artifact_create: no design system "Harbor"; there are no design systems');
+    expect(w.store.list({ kind: 'presentation' })).toEqual([]);
+  });
+
   it('refuses a document’s markdown content, which P3-B’s document create serves, writing nothing', async () => {
     const result = await create({ kind: 'document', title: 'Notes', content: '# Notes' });
     expect(artifactRefusalOf(textOf(result))).toMatchObject({ reason: 'invalid', kind: 'document' });
@@ -340,6 +404,27 @@ describe('artifact_describe_type', () => {
     const wrong = await artifactDescribeTypeTool(w.deps()).call({ kind: 'document', artifact: deck.artifactId }, w.ctx());
     expect(wrong.isError).toBe(true);
     expect(textOf(wrong)).toContain('presentation');
+  });
+
+  // UX wave U10b (M10, §E.4): `space` describes a new artifact in that Space
+  it('describes a new artifact in the Space it names, by id or name: its home and the Space’s default; an unknown Space is refused; an artifact named too governs', async () => {
+    const owner = await w.store.create({ kind: 'design_system', title: 'Owner' }, HUMAN);
+    const brand = await w.store.create({ kind: 'design_system', title: 'Space brand' }, HUMAN);
+    const launch = await w.store.createSpace({ name: 'Launch' });
+    await w.store.createSpace({ name: 'Plain' });
+    await w.store.setDefaults({ owner: owner.id, spaces: { [launch.id]: brand.id } });
+    w.store.registerDesignSystemContext(async (system) => `LAW:${system.title}`);
+    const describe = (args: Record<string, unknown>) => artifactDescribeTypeTool(w.deps()).call(args, w.ctx());
+    expect(ArtifactDescribeTypeResultSchema.parse(jsonOf(await describe({ kind: 'presentation', space: 'Launch' })))).toEqual({ status: 'described', kind: 'presentation', ...KIND_GUIDES.presentation, home: 'Launch', designSystem: 'LAW:Space brand' });
+    expect(jsonOf(await describe({ kind: 'document', space: launch.id }))).toMatchObject({ home: 'Launch', designSystem: 'LAW:Space brand' });
+    expect(jsonOf(await describe({ kind: 'design', space: 'plain' }))).toMatchObject({ home: 'Plain', designSystem: 'LAW:Owner' }); // a Space with no default: the owner's
+    expect(jsonOf(await describe({ kind: 'html', space: 'Launch' }))).toEqual({ status: 'described', kind: 'html', ...KIND_GUIDES.html, home: 'Launch' });
+    const unknown = await describe({ kind: 'document', space: 'Nowhere' });
+    expect(unknown.isError).toBe(true);
+    expect(artifactRefusalOf(textOf(unknown))).toMatchObject({ reason: 'notFound', space: 'Nowhere' });
+    expect(textOf(unknown)).toContain('no Space "Nowhere"; the Spaces are "Launch", "Plain"');
+    const deck = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck', handle: 'deck' })));
+    expect(jsonOf(await describe({ kind: 'presentation', artifact: 'deck', space: 'Launch' }))).toMatchObject({ artifactId: deck.artifactId, home: 'General', designSystem: 'LAW:Owner' });
   });
 
   it('returns the kind’s guide and format reference, placeholders included', async () => {

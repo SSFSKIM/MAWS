@@ -28,6 +28,9 @@ export interface McpToolContext {
   // P2-C3 (the P2 spec's Decision Log 35): the call is a subagent's, told by its tool use having arrived in an assistant
   // frame whose `parent_tool_use_id` is set (MawsToolServerDeps.fromSubagent); false when nothing tells
   fromSubagent: boolean;
+  // UX wave U10b (M10): the read MAWS makes for an artifact a human message links (P4-A3, SessionMaws.readLinked), not a
+  // call of the agent's; absent for every call the engine makes
+  linkedRead?: boolean;
 }
 
 // E2: an image block (`artifact_screenshot`'s PNG) reaches the model unchanged; the engine inserts its own text block
@@ -37,6 +40,11 @@ export type McpContentBlock = { type: 'text'; text: string } | { type: 'image'; 
 export interface McpToolResult {
   content: McpContentBlock[];
   isError?: true;
+  // UX wave U10b (the branch review of U10b-4): what the tool counts as done only once the engine has this answer (a
+  // Space's instructions given, artifact-context.ts's `instructedOnDelivery`). The server passes it to the answer's write
+  // as `flushed`, which the outbound writer runs once the frame is written and journaled, before any inbound frame held
+  // meanwhile; never for a write refused, a call withdrawn or one answered from outside. The answer is written without it.
+  delivered?: () => void;
 }
 
 export interface McpToolDefinition {
@@ -235,7 +243,8 @@ export class MawsToolServer {
       this.deps.onChange?.();
     }
     if (controller.signal.aborted || call.answered) return this.retire(requestId);
-    await this.result(requestId, id, result);
+    const { delivered, ...answer } = result;
+    await this.result(requestId, id, answer, delivered && { flushed: delivered }); // run once the write succeeded
     this.retire(requestId);
   }
 
@@ -244,8 +253,8 @@ export class MawsToolServer {
     if (this.delivering.delete(requestId)) this.deps.onChange?.();
   }
 
-  private result(requestId: RequestId, id: RpcId, result: unknown): Promise<void> {
-    return this.write(requestId, { jsonrpc: '2.0', id, result }); // the key order the engine echoes back (E0a seqs 6 and 9)
+  private result(requestId: RequestId, id: RpcId, result: unknown, opts?: WriteOptions): Promise<void> {
+    return this.write(requestId, { jsonrpc: '2.0', id, result }, opts); // the key order the engine echoes back (E0a seqs 6 and 9)
   }
 
   private error(requestId: RequestId, id: RpcId | null, code: number, message: string): void {
@@ -253,7 +262,7 @@ export class MawsToolServer {
   }
 
   // Settles once the write did, either way: a refused write is logged, never thrown.
-  private write(requestId: RequestId, rpc: Record<string, unknown>): Promise<void> {
-    return this.deps.respond(requestId, { mcp_response: rpc }).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
+  private write(requestId: RequestId, rpc: Record<string, unknown>, opts?: WriteOptions): Promise<void> {
+    return this.deps.respond(requestId, { mcp_response: rpc }, opts).catch((error: unknown) => this.deps.log(`mcp_message ${requestId} not answered: ${error instanceof Error ? error.message : String(error)}`));
   }
 }

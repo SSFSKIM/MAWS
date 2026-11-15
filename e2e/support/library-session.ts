@@ -103,3 +103,52 @@ export async function sideThreadOf(page: Page, parent: string): Promise<string> 
     .not.toBe('');
   return child;
 }
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4): a session case whose parent's
+// journal is written once the app runs and the parent's New chat exists, since what the journal answers names an
+// artifact made then (the replay seam reads a fixture at its session's launch, not at the app's). The engine host runs
+// the agent's seam (MAWS_DASHBOARD_E2E, `support/dashboards.ts`'s AgentSeam over `<userData>/dashboard-e2e`), through
+// which the parent's own tools make its draft before its turn. `start` writes the journal and sends `prompt`.
+export const DRAFTER = 'e3e50000-0000-4000-8000-0000000000d1';
+export interface DraftCase {
+  maws: MawsLaunch;
+  page: Page;
+  repo: ScratchRepo;
+  parent: string; // the parent's app session id, as the host's tools credit it
+  start(journal: SideJournal, prompt: string): Promise<void>;
+  cleanup(): Promise<void>;
+}
+
+export async function openDraftCase(): Promise<DraftCase> {
+  const repo = await ScratchRepo.create({ sentinels: false });
+  const store = await StoreFixture.create();
+  const journals = realpathSync(mkdtempSync(join(tmpdir(), 'maws-e2e-library-journals-')));
+  const disposers: (() => Promise<void> | void)[] = [() => rmSync(journals, { recursive: true, force: true }), () => store.dispose(), () => repo.dispose()];
+  const cleanup = async () => {
+    for (const dispose of disposers.splice(0).reverse()) await dispose();
+  };
+  try {
+    writeFileSync(join(store.configHome, '.claude.json'), `${JSON.stringify({ projects: { [repo.root]: { hasTrustDialogAccepted: true } } }, null, 2)}\n`);
+    writeFileSync(join(store.configHome, 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`);
+    const fixture = join(journals, 'journal-0.jsonl'); // written by `start`, before the parent's launch reads it
+    const maws = await launchMaws({ env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, CLAUDE_CONFIG_DIR: store.configHome, MAWS_DASHBOARD_E2E: '1' } });
+    disposers.push(() => maws.cleanup());
+    await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+    const { page } = maws;
+    await expect(page.locator('[data-region="main"]')).toBeVisible();
+    const project = value(await invoke(page, 'session.projects.add', { directory: repo.root }));
+    await openProject(page, project.name);
+    await newChatIn(page, project.name);
+    await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible();
+    const parent = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+    value(await invoke(page, 'session.intent.patch', { appSessionId: parent, patch: { gateway: 'direct' } }));
+    const start = async (journal: SideJournal, prompt: string) => {
+      expect(journal.write(journals, 'journal-0')).toBe(fixture);
+      value(await invoke(page, 'session.start', { appSessionId: parent, message: { content: prompt, display: prompt }, options: {} }));
+    };
+    return { maws, page, repo, parent, start, cleanup };
+  } catch (error) {
+    await cleanup();
+    throw error;
+  }
+}
