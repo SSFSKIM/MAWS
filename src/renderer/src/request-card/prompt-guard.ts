@@ -196,11 +196,17 @@ const isButtonOrLink = (element: Element) =>
 const COMPOSER_POPUP = '[data-key-sink="composer"] [role="listbox"], [data-key-sink="composer"][role="listbox"]';
 const HISTORY_LINE = '[aria-label="Prompt history"]';
 
+// The main pane a pane boundary stands for: its own index, or for the floating card's (`data-pane="card"`) the pane the
+// card stands for, which it names (`data-card-pane`: the panel's card the focused pane, the split's its floating pane).
+// So the shell's focused pane says which surface holds the keyboard, and at most one prompt takes a press from nothing:
+// the main pane the card stands for draws no session of its own while the card draws it (`main/Pane.tsx`).
+const paneOf = (pane: HTMLElement): string | undefined => (pane.dataset.pane === 'card' ? pane.dataset.cardPane : pane.dataset.pane);
+
 /**
  * Whether the keyboard is where a press may answer the prompt drawn in `row` (§F, "Whose focus"): on `row` itself, or
  * inside it on what is not a text field, a button or a link; in the session's own composer in `row`'s pane, while none of
  * the composer's lists or its history line shows and no dictation is live in it; or on nothing, with `row`'s pane the one
- * the shell says holds the keyboard. Anything else is refused: another request's row, any other row, a child transcript,
+ * the shell says holds the keyboard (for the floating card, the main pane it stands for). Anything else is refused: another request's row, any other row, a child transcript,
  * another field, another pane. A transcript outside a pane, and a child transcript's end (`from: 'row'`, the architect's
  * ruling of 2026-11-15 UTC: in one pane at most one end takes the composer's and no focus's presses), has the first case
  * only.
@@ -208,7 +214,7 @@ const HISTORY_LINE = '[aria-label="Prompt history"]';
 export function promptFocused(row: HTMLElement, appSessionId: AppSessionId, from: 'pane' | 'row' = 'pane'): boolean {
   const focused = document.activeElement;
   const pane = from === 'pane' ? row.closest<HTMLElement>('[data-pane]') : null;
-  if (focused === null || focused === document.body) return pane !== null && pane.dataset.pane === String(currentSet(useLayout.getState().main).focusedPane);
+  if (focused === null || focused === document.body) return pane !== null && paneOf(pane) === String(currentSet(useLayout.getState().main).focusedPane);
   if (row.contains(focused)) return focused === row || !(isTextEntry(focused) || isButtonOrLink(focused));
   if (pane === null) return false;
   const box = focused.closest<HTMLElement>('[data-key-sink="composer"]');
