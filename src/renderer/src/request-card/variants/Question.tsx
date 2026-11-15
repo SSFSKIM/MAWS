@@ -145,10 +145,9 @@ function MultiSelect({ question, draft, disabled, onToggle, onOther, onEnter }: 
   );
 }
 
-// The element that owns the card's keys for the placement (RequestCard's rule): the docked frame, C5's article around an
-// Overview card, or (U1b) the transcript row an inline form stands in. Hover owns none.
+// The element that owns the card's keys for the placement (RequestCard's rule): C5's article around an Overview card, or
+// (U1b) the transcript row an inline form stands in. Hover and a docked notice own none.
 function keyOwner(body: HTMLElement, placement: VariantProps<'question.requested'>['placement']): HTMLElement | null {
-  if (placement === 'docked') return body.closest<HTMLElement>('[data-docked-frame]');
   if (placement === 'card' || placement === 'inline') return body.closest<HTMLElement>('[data-request-card]')?.parentElement?.closest<HTMLElement>('[tabindex]') ?? null;
   return null;
 }

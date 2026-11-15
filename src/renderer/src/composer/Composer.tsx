@@ -1,10 +1,11 @@
 // The composer (C7 execution document, "Composer public surface", "Submit control and queue", "Composer frame",
 // "Unstarted sessions and the docked host"; M4): what C7 renders in C5's `composer` slot for a live, exited or
 // unstarted session. The queued list, then the frame over the live or the intent binding: the attachment strip, the
-// box with M3's editor and the submit control, the toolbar (W2: the location with it). When a request or a
-// docked card needs the human, it takes the place of the box and the toolbar (they stay mounted and hidden, so the editor
-// keeps its document, history and undo) and the docked frame takes focus when the pane held it; when it retires, focus
-// goes back to the editor.
+// box with M3's editor and the submit control, the toolbar (W2: the location with it). When a card another child docks
+// (C10's trust, relay-down and failed-start cards) needs the human, it takes the place of the box and the toolbar (they
+// stay mounted and hidden, so the editor keeps its document, history and undo) and the docked frame takes focus when the
+// pane held it; when it retires, focus goes back to the editor. UX wave U1b: a request never does; it is drawn in the
+// session's transcript, and above the frame the composer shows only the oldest notice that names no request.
 //
 // Every submission ends in the editor's `onSubmit`, decided here through `submitState`: an unstarted session's first
 // send goes to C10's `start` under the synchronous `starting` gate; a live one sends (C3 decides sent or queued), and
@@ -45,9 +46,8 @@ import { holderWords } from '../sessions/holder-words'; // P2-A
 import { DictationNotice } from './dictation/MicControl'; // E9
 import { PendingSends } from './PendingSends'; // P5 O9 M5
 import { PendingUploads } from './PendingUploads'; // P5 O9 M7
-import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useDockedCards } from './docked/registry';
-import { swapOf } from './docked/swap';
+import { noticeOf } from './docked/swap';
 import { attachmentsOf, emptyDoc, type ComposerDoc } from './editor/doc';
 import { ipcDrafts, type DraftPort, type EditorHandle } from './editor/controller';
 import { rememberingRemoteDrafts } from './editor/drafts'; // P5 O7 M2
@@ -256,16 +256,12 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
     sendsDocuments: isRemoteLaneB(appSessionId) && attachmentsOf(doc).some((a) => a.kind === 'document'),
   });
 
-  // ---- the docked swap ---------------------------------------------------------------------------------------------
+  // ---- the docked swap: a card another child docks, and the notice above the frame (UX wave U1b, decision 14) ---------
   const cards = useDockedCards(appSessionId);
   const items = useAttention((s) => selectPendingOf(s, appSessionId));
-  const requests = useAttention((s) => s.requests);
-  const swap = useMemo(() => swapOf(items, requests), [items, requests]);
-  useEffect(() => swap.unread.forEach((item) => void useAttention.getState().loadRequest(client, item)), [swap.unread, client]);
+  const notice = useMemo(() => noticeOf(items), [items]);
   const card = cards[0] ?? null;
-  const settling = useSettling(swap.item); // P5 O9 M6: a request its terminal answered first stays docked, settled, for a moment (Q3)
-  const docked = card !== null || settling !== null;
-  const waiting = cards.length - (card ? 1 : 0) + (card && swap.item ? 1 : 0) + swap.waiting;
+  const docked = card !== null;
 
   // ---- focus: the one app-level ⌘L and the docked frame's return go through this -----------------------------------------
   const rootRef = useRef<HTMLElement>(null);
@@ -578,7 +574,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {/* P5 O9 M7: the images and PDFs lane A handed to the bridge, each with its state */}
       {!unstarted && <PendingUploads appSessionId={appSessionId} />}
       {rewoundEdit && <ResubmitLine resubmit={resubmit} onSend={() => void sendInlineEdit(client, appSessionId)} onLeave={() => cancelInlineEdit(appSessionId)} />}
-      {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
+      {notice && <RequestCard key={notice.id} item={notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}
       {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
       {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar it shows here */}
@@ -586,16 +582,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       <Frame
         appSessionId={appSessionId}
         docked={
-          docked ? (
-            <>
-              {card ? (
-                <div key={`card:${card.id}`}>{card.render()}</div>
-              ) : settling ? (
-                <RequestCard key={settling.id} item={settling} request={requests.get(settling.id) ?? null} placement="docked" paneIndex={paneIndex} />
-              ) : null}
-              {waiting > 0 && <p className="m-0 text-ui-sm text-fg-muted">{waiting === 1 ? '1 more waiting' : `${waiting} more waiting`}</p>}
-            </>
-          ) : null
+          card ? <div key={`card:${card.id}`}>{card.render()}</div> : null
         }
         // C10 seam: only a chip opened on the live frame asks for the engine's lists (the intent's frame shows none of them),
         // so the launch never reads what an unstarted chip opened, racing C10's first message

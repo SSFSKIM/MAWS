@@ -164,9 +164,10 @@ it.each([
   const item = { ...bare, id: at(bare.id) };
   act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]) }));
   const card = await screen.findByRole('region', { name: 'Session card' });
-  const frame = card.querySelector<HTMLElement>('[data-docked-frame]')!;
-  expect(frame).not.toBeNull();
-  await waitFor(() => expect(document.activeElement).toBe(ownedFocus ? frame : elsewhere));
+  // UX wave U1b: the request is drawn in the session's transcript, never in the composer's place, so the card's own
+  // composer takes the keyboard the compact one held
+  expect(card.querySelector('[data-docked-frame]')).toBeNull();
+  await waitFor(() => expect(ownedFocus ? card.contains(document.activeElement) && message().contains(document.activeElement) : document.activeElement === elsewhere).toBe(true));
   expect(useComposerStore.getState().focusOnMount.has(A)).toBe(false);
   await waitFor(() => expect(message().editor.getText()).toBe('Draft retained across expansion'));
 });

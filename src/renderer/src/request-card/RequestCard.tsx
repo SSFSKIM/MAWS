@@ -6,9 +6,11 @@
 // pending with Retry; UX wave U1b M2: all of it held by the request in the attention store, `deliver`), and owns the
 // keyboard: Enter and Esc (and a permission prompt's ⌘↩ and ⇧⌘↩, UX wave U1a §D) through C5's dispatcher, bound
 // `within` the element that owns focus for the placement, each on a fresh press only.
-// Docked, that is the `DockedCardFrame` around the card; in an Overview card, the nearest ancestor with a `tabindex` (C5's
-// article), since the article, not the card, holds focus there; hover and inline bind no key. Digits pick a question's
-// option from the same owner. U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
+// In an Overview card, that is the nearest ancestor with a `tabindex` (C5's article), since the article, not the card,
+// holds focus there; in a transcript (UX wave U1b: a waiting row's form, or the end row's open card), the transcript's
+// row, the same way; hover, a channel's inline card and a docked notice bind no key. Digits pick a question's option
+// from the same owner. UX wave U1b: no request docks in the composer's place; `docked` draws a notice above the composer.
+// U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
 // other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line, and offers
 // Allow once and Deny as the one rule for answers from outside a pane admits (U1a §H, `outsideAnswers`). U1a §I: a
 // file change says "Create" or "Edit" as its diff against the file read on the session's machine says (`proposed`). E1 M4b: a
@@ -23,8 +25,6 @@
 // answer included; past a background request's window it reads "Answer this in the terminal" (`lane-a/race.ts`).
 // UX wave U1a (M2, §E): a question's stepper has Dismiss (the decline Esc sends; on a terminal's asynchronous question,
 // the bridge's dismissal, which no key sends) and a double-click that picks a single choice and goes on.
-//
-// The card imports the docked frame from its own module, never `composer/index.ts`, so no editor code reaches it.
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
 import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
@@ -33,7 +33,6 @@ import type { SessionEvent } from '@shared/graph/events';
 import { engineQuestionsOf, nativeQuestionsOf } from '@shared/engine/surface-rows';
 import { SurfaceRow } from '../engine-surface/SurfaceRow';
 import { useNow } from '../app/use-now';
-import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { ipc } from '../ipc/client';
 import { answerSession, useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import type { Capability } from '../session/controls/types'; // P5 O9 M6
@@ -42,7 +41,7 @@ import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
 import { ANSWERED_ELSEWHERE, connectAnswers, useAttention, type Outcome } from '../stores/attention';
-import { markDocked, useComposerStore } from '../stores/composer';
+import { useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
@@ -91,7 +90,7 @@ export interface RequestCardProps {
   region?: 'row' | 'end';
 }
 
-// The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
+// The kind line (C5's table, so the Needs-you row, the hover and the card read alike), and the card's group name.
 export const HEADINGS = ATTENTION_HEADINGS;
 const TONE: Record<AttentionTone, string> = TONE_CLASS;
 const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
@@ -186,7 +185,7 @@ function titleOf(request: SessionEvent | null, requester: string): { title: stri
   }
 }
 
-// Whether the request is one the card answers in place (the docked frame hosts only these).
+// Whether the request is one the card answers in place.
 const answerable = (request: SessionEvent | null): boolean =>
   request !== null &&
   (request.kind === 'permission.requested' ||
@@ -254,12 +253,6 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const file = useProposedFile(item.appSessionId, item.id, fileRequest && proposedFilePath(fileRequest.toolName, fileRequest.input), phase !== 'pending');
   const proposed = useMemo(() => (fileRequest ? proposedChange(fileRequest.toolName, fileRequest.input, file) : null), [fileRequest, file]);
 
-  // The requests a docked placement shows: the transcript's slot then renders a pointer to it. A notice with no request
-  // read (unreadable, or no longer held) shows nothing to answer, so the transcript keeps its own card.
-  const { requestId } = item.request;
-  const shown = request !== null;
-  useEffect(() => (placement === 'docked' && requestId !== null && shown ? markDocked(item.appSessionId, requestId) : undefined), [placement, item.appSessionId, requestId, shown]);
-
   // The variant's key actions, and whether it has each (a key it lacks stays unbound).
   const keys = useRef<CardKeys>({ accept: null, decline: null });
   const [bound, setBound] = useState(NO_KEYS);
@@ -288,12 +281,10 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   useKeyChord('request.allowOnce', allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true });
   useKeyChord('request.allowLasting', allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true });
 
-  // Digits, from the element that owns the keys (the article, or the docked frame, which mounts once the request is
-  // known to be answerable).
-  const framed = placement === 'docked' && answerable(request) && !concealed;
+  // Digits, from the element that owns the keys (the article, or the transcript's row).
   useEffect(() => {
-    if (!live || (!owns && placement !== 'docked')) return;
-    const owner = owns ? ownerRef.current : (rootRef.current?.closest<HTMLElement>('[data-docked-frame]') ?? null);
+    if (!live || !owns) return;
+    const owner = ownerRef.current;
     if (!owner) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!/^[1-9]$/.test(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || isTextEntry(event.target)) return;
@@ -304,7 +295,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     };
     owner.addEventListener('keydown', onKeyDown);
     return () => owner.removeEventListener('keydown', onKeyDown);
-  }, [live, placement, framed, owns]);
+  }, [live, owns]);
 
   // U1b (Interfaces §E): when the element that holds the keyboard leaves with its request (a form answered, the last card
   // at the end), the keyboard goes to the session's composer, as the docked frame gave it back; when the card did not hold
@@ -407,11 +398,11 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
 
   // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool. U1b
   // (§E): wherever else it is drawn, a request's card is a group named by its kind's heading, as the docked frame named it.
-  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : framed ? {} : { role: 'group', 'aria-label': heading.text };
-  // W4: a question in the transcript is Claude Desktop's 480 px card; docked it fills the frame that stands in for the
-  // composer, and the Overview card is its own width. U1b: at the transcript's end the end's frame is its box.
+  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : { role: 'group', 'aria-label': heading.text };
+  // W4: a question in the transcript is Claude Desktop's 480 px card, and the Overview card is its own width. U1b: at
+  // the transcript's end the end's frame is its box.
   const questionCard = placement === 'inline' && region !== 'end' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
-  const content = (
+  return (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
       {asked !== null && (
         <div className="flex flex-col gap-1">
@@ -425,7 +416,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
         </div>
       )}
-      {!framed && asked === null && !rowHeader && (
+      {asked === null && !rowHeader && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
           <span>{heading.text}</span>
@@ -492,20 +483,6 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         </Controls>
       )}
     </div>
-  );
-
-  if (!framed) return content;
-  return (
-    <DockedCardFrame
-      appSessionId={item.appSessionId}
-      title={heading.text}
-      onAccept={live && bound.accept ? accept : null}
-      onDecline={live && bound.decline ? decline : null}
-      onAllowOnce={live && bound.allowOnce ? allowOnce : null}
-      onAllowLasting={live && bound.allowLasting ? allowLasting : null}
-    >
-      {content}
-    </DockedCardFrame>
   );
 }
 

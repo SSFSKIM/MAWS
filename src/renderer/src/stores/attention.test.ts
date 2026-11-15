@@ -8,7 +8,6 @@ import { item, record, remoteRow } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { swapOf } from '../composer/docked/swap';
 import { ANSWERED_ELSEWHERE, connectAnswers, createAttentionStore, NOT_PENDING_MS, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall, selectWaitingForms, selectWaitingRequests } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
@@ -213,7 +212,7 @@ describe('the originating request of an item, fetched once', () => {
     vi.useRealTimers();
   });
 
-  it('a read that fails twice is cached as unreadable, so the docked swap shows it as a notice instead of waiting', async () => {
+  it('a read that fails twice is cached as unreadable, so its card says so instead of waiting', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = createAttentionStore();
@@ -226,7 +225,6 @@ describe('the originating request of an item, fetched once', () => {
     await load;
     expect(store.getState().requests.get(older.id)).toBeNull();
     expect(store.getState().unreadable.get(older.id)).toBe('still no host');
-    expect(swapOf([older], store.getState().requests)).toMatchObject({ item: null, notice: older, unread: [] });
     await store.getState().loadRequest(fake.client, older); // asks nothing more
     expect(fake.invoked('attention.request')).toHaveLength(2);
     warn.mockRestore();

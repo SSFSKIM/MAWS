@@ -2,15 +2,15 @@
 // `useComposerStore`). M2 lands the seam the request card and the docked frame need before the composer exists:
 // a pending prefill per session (the refusal dialog's Edit prompt, C6's edit-and-resubmit and C10's hand-back put the
 // document here; M4's Composer takes it when mounted, so a prefill made from an Overview card waits for the pane),
-// the requests a docked placement is showing (the transcript's request slot shows a pointer for those), and the focus
-// targets a mounted composer registers (the docked frame gives focus back through them). M3 adds the `#` target each
+// and the focus targets a mounted composer registers (the docked frame gives focus back through them; UX wave U1b: the
+// marks of the requests a docked placement showed went with the dock). M3 adds the `#` target each
 // session remembers; M4 adds the composer's own state beside these: the synchronous `starting` gate of an unstarted
 // session's first send and the resubmit state the edit-and-resubmit flow (M4b) drives, each per session so they outlive
 // a tab switch. The final fixes add the models each session's engine last listed (C11's Session info and widgets read
 // them; the model chip names its model from `engine.models`). W3 (B6): the user bubble a session edits in place, with
 // its text, which outlives the virtualised row it sits in; the composer has no edit mode any more.
 import { create } from 'zustand';
-import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ListModelsResponse } from '@shared/wire/control';
 import type { DictationSink } from '../composer/editor/controller'; // E9
 import type { Anchor } from '@shared/anchor/anchor'; // E11
@@ -98,7 +98,6 @@ export const DEFAULT_MEMORY_TARGET: MemoryTarget = Object.freeze({ kind: 'projec
 
 export interface ComposerState {
   prefills: ReadonlyMap<AppSessionId, Prefill>;
-  docked: ReadonlyMap<AppSessionId, ReadonlyMap<RequestId, number>>; // how many docked placements show each request
   focusTargets: ReadonlyMap<AppSessionId, FocusTarget>;
   focusOnMount: ReadonlySet<AppSessionId>; // W9 (H3): a new tab's composer takes the keyboard when it mounts, once
   memoryTargets: ReadonlyMap<AppSessionId, MemoryTarget>; // M3: the `#` target chosen per session
@@ -149,7 +148,6 @@ export type ListedModel = ListModelsResponse['models'][number];
 
 const initial = (): ComposerState => ({
   prefills: new Map(),
-  docked: new Map(),
   focusTargets: new Map(),
   focusOnMount: new Set(),
   memoryTargets: new Map(),
@@ -196,32 +194,6 @@ export function takePrefill(appSessionId: AppSessionId): Prefill | null {
   }
   return prefill;
 }
-
-function countDocked(appSessionId: AppSessionId, requestId: RequestId, delta: 1 | -1): void {
-  useComposerStore.setState((s) => {
-    const counts = new Map(s.docked.get(appSessionId));
-    const next = (counts.get(requestId) ?? 0) + delta;
-    if (next > 0) counts.set(requestId, next);
-    else counts.delete(requestId);
-    const docked = new Map(s.docked);
-    if (counts.size > 0) docked.set(appSessionId, counts);
-    else docked.delete(appSessionId);
-    return { docked };
-  });
-}
-
-// A docked placement showing `requestId`, for as long as it is mounted; the disposer releases it once.
-export function markDocked(appSessionId: AppSessionId, requestId: RequestId): () => void {
-  countDocked(appSessionId, requestId, 1);
-  let released = false;
-  return () => {
-    if (released) return;
-    released = true;
-    countDocked(appSessionId, requestId, -1);
-  };
-}
-
-export const isDocked = (state: ComposerState, appSessionId: AppSessionId, requestId: RequestId): boolean => (state.docked.get(appSessionId)?.get(requestId) ?? 0) > 0;
 
 // W9 (H3): the session's composer takes the keyboard when it next mounts (C5's `createSession` marks the tab it opens,
 // so the strip's "+", the sidebar's New chat and "+", ⌘N, the Overview and the empty pane all hand focus over). One-shot:
