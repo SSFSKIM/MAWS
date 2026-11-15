@@ -1289,7 +1289,7 @@ test.describe('sessions', () => {
         await backToTabs(page);
         await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the session’s chat in front again' }).toBe(true);
         // decision 15: the floating Overview over the session's chat (the toolbar's toggle)
-        const overviewButton = page.getByRole('button', { name: 'Overview', exact: true });
+        const overviewButton = page.locator('[data-toolbar]').getByRole('button', { name: 'Overview', exact: true });
         await overviewButton.click();
         await expect(page.getByRole('dialog', { name: 'Overview' })).toBeVisible();
         await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the Overview over the session’s chat' }).toBe(false);
