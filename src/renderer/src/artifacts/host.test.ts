@@ -754,6 +754,51 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     handle.close();
   });
 
+  // Fix wave 2 (review item 2 across a host recovery): a `deleted` read the host's restart and a newer sync overtook
+  it('a `deleted` read that a host restart and a newer writable sync overtook parks nothing when its answer lands', async () => {
+    const h = harness();
+    h.hostState('ready', 7);
+    const handle = await h.artifacts.open(ARTIFACT);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(gets(h)).toBe(1));
+    h.hostState('restarting', 8);
+    h.hostState('ready', 9);
+    await vi.waitFor(() => expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2));
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false }));
+    read.answer(deleted(true)); // what the host said before its restart
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false });
+    handle.doc.get('root').insert(0, 'After the recovery. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the recovery. ');
+    handle.close();
+  });
+
+  // Fix wave 2 (review item 3 for typed refusals): the store's own word that it is not there to ask is no answer either
+  it('a standing read refused `unavailable` or `storeTooNew` (typed, as the host refuses when its store cannot open) keeps the replica read-only with its edit, as an untyped failure does', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    for (const reason of ['unavailable', 'storeTooNew'] as const) {
+      const h = harness();
+      const handle = await h.artifacts.open(ARTIFACT);
+      handle.doc.get('root').insert(0, 'Typed just before. ');
+      h.answers.set('artifacts.open', NOT_FOUND);
+      h.answers.set('artifacts.get', { ok: false, error: { code: 'internal', message: 'the artifact store could not be opened this run', issues: { reason, data: {} } } } as const);
+      h.host.dropAll();
+      await settle(RECONNECT_BACKOFF_MS[0]);
+      expect(gets(h)).toBe(1);
+      expect(handle.state(), reason).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+      expect(handle.state().refused, reason).toBeUndefined();
+      h.answers.delete('artifacts.open');
+      h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+      await settle();
+      await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+      expect(text(h.host.doc), reason).toBe('Typed just before. ');
+      handle.close();
+    }
+  });
+
   it('a refusal whose standing read went stale (the host left ready meanwhile) ends nothing: the next ready opens it again with the edit', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const h = harness();
