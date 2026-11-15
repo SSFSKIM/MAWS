@@ -21,7 +21,7 @@ import { resetCatalogStore } from '../../stores/catalog';
 import { resetSignIns } from '../connectors/sign-in';
 import { useCustomizeProject } from '../open';
 import { useCustomizePage, useOpenRequest } from '../page';
-import { NO_CHOICES, useDiscoverStore } from './store';
+import { useDiscoverStore } from './store';
 import { item } from './test-items';
 
 const A = at('project-quay' as ProjectId);
