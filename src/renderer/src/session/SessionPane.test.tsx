@@ -136,6 +136,35 @@ describe('session pane', () => {
     expect(screen.getByText('transcript waiting none')).toBeTruthy();
   });
 
+  // UX wave U2b (M2; A14, decision 16): no bar above the transcript, whatever the lane; where the holder notice stands in
+  // the composer's place (a terminal session nobody drives), the view's switch stands above it while MAWS draws the view
+  // in force there, and is absent otherwise.
+  it('draws no bar above the transcript, and the view’s switch above the holder notice while the view is in force', () => {
+    const id = idOf('Somersault terminal run');
+    const inForce = (on: boolean) => useTranscriptStore.setState({ entries: { [id]: { state: { ui: { ownerLane: on, noTurnFold: on } } } } as never });
+    inForce(false);
+    const view = render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    expect(document.querySelector('[data-view-switch]')).toBeNull();
+    act(() => inForce(true));
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    const notice = screen.getByText('Live in Terminal · pid 7135 · read-only');
+    const switchLine = document.querySelector('[data-view-switch]')!;
+    expect(switchLine.textContent).toBe('to-human view · full transcript ›');
+    expect(switchLine.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // directly above the notice
+    view.unmount();
+    useTranscriptStore.setState({ entries: {} });
+  });
+
+  it('draws no bar above the transcript of a session whose lane is on', () => {
+    const id = idOf('Charter + research');
+    useTranscriptStore.setState({ entries: { [id]: { state: { ui: { ownerLane: true, noTurnFold: true } } } } as never });
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Session view' })).toBeNull();
+    useTranscriptStore.setState({ entries: {} });
+  });
+
   // UX wave U4a (M7; decision 26 a): the `/btw` card is a layer of the pane over the transcript's bottom right corner,
   // beside the transcript's scroller and never inside it; the compact pill, which draws no transcript, has it in the flow
   // directly above the composer's frame

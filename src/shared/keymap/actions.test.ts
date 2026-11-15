@@ -177,6 +177,17 @@ describe('keymap: the table', () => {
   });
   // C7 end
 
+  // UX wave U2b (M2; ruling R9, §K): "Mark all read" is a command of the palette, beside "Toggle report and transcript"
+  // (which keeps its id and title): no chord, the renderer's, no menu, app-scoped; build F knows it not, so it takes no
+  // rebinding
+  it('carries Mark all read beside Toggle report and transcript, with no chord and no rebinding', () => {
+    expect(ACTIONS['transcript.toggleReport']).toEqual({ title: 'Toggle report and transcript', chord: null, sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTIONS['transcript.markAllRead']).toEqual({ title: 'Mark all read', chord: null, sink: 'renderer', menu: null, scope: 'app' });
+    expect(ACTION_IDS.indexOf('transcript.markAllRead')).toBe(ACTION_IDS.indexOf('transcript.toggleReport') + 1);
+    expect(isRebindable('transcript.markAllRead')).toBe(false);
+    expect(isRebindable('transcript.toggleReport')).toBe(true);
+  });
+
   // C11 start: Settings, Accounts and the ClaudeUsage hand-off (C11 execution document, Keymap and action entries)
   it('carries settings.open in the application menu at ⌘, and accounts.open (W6: Usage) in View; the hand-off stays out of the menu', () => {
     expect(ACTIONS['settings.open']).toEqual({ title: 'Settings…', chord: 'Cmd+,', sink: 'menu', menu: 'app', scope: 'app' });
