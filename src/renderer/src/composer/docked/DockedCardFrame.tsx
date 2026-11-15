@@ -1,16 +1,17 @@
 // The docked placement's chrome, focus and keys (C7 execution document, Composer public surface; §5.7): C10's trust,
 // relay-down and failed-start cards render inside this frame, so they take focus, give it back and answer Enter and Esc
-// under exactly one set of rules (UX wave U1b: no request docks; a request is drawn in its session's transcript). The frame root is focusable (tabIndex -1) and takes
-// focus on mount when its pane held focus; on unmount, if focus was inside the frame, it goes back to the session's
-// composer (the focus target a mounted composer registers), else to what held it before, unless the session's next
-// docked frame mounts in the same commit, which takes it instead. Enter and Esc are
-// `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them only while
-// the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its key unbound.
+// under exactly one set of rules (UX wave U1b: no request docks; a request is drawn in its session's transcript). The
+// frame root is focusable (tabIndex -1) and takes focus on mount when its pane held focus; on unmount, if focus was
+// inside the frame, it goes back to the session's composer (the focus target a mounted composer registers), else to
+// what held it before, unless the session's next docked frame mounts in the same commit, which takes it instead. Enter
+// and Esc are `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them
+// only while the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its
+// key unbound.
 // UX wave U1a (§D): a permission prompt adds `request.allowOnce` (⌘↩) and `request.allowLasting` (⇧⌘↩), bound the same
 // way; every key the frame binds acts on a fresh press only, so a key held through one answer cannot answer the request
 // whose frame takes focus next. UX wave U1a §J's "Composer paused" was a request's; the title line now reads the title
 // alone for every frame.
-// This module imports no editor code: the request card imports it directly, never through `composer/index.ts`.
+// This module imports no editor code.
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../keymap/useKeyChord';
