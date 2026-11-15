@@ -38,7 +38,7 @@ function body(row: Row) {
   switch (row.kind) {
     case 'time': return <TimeRow row={row} />;
     case 'user': return <SurfaceUserRow row={row} />;
-    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <ReportOnly value={row.reportOnly === true}><SurfaceAssistantRow row={row} /></ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages
+    case 'assistant_text': return <ReportOnly value={row.reportOnly === true}>{row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />}</ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages, a cut one's under its note
     case 'thinking': return <ThinkingRow row={row} />;
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;

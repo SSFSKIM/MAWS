@@ -21,7 +21,7 @@ import { isOutputTag, sourceTags } from './source-tags';
 type Token = { close: boolean; name: string };
 const tokenOf = (tag: string): Token => ({ close: tag.startsWith('</'), name: tag.replace(/^<\/?|(?: recommended)?>$/g, '') });
 // A question's `choice` tags that pair: an opener with the closer that ends it, innermost first; a crossing closer is no
-// pair and drops the openers before it. (The mark tags are the one reading's.)
+// pair and drops the openers before it. (The mark tags are the one reading's; the options pair within one of its runs.)
 function paired<T extends Token>(tokens: T[]): Set<T> {
   const stack: T[] = [];
   const pairs = new Set<T>();
@@ -43,18 +43,53 @@ export const hasMessages = (text: string, live = false): boolean => readMarked(t
 // `transcript/surface/Rows.tsx`'s question of a completed text the engine's surface drew natively.
 export const hasClosedMarks = (text: string): boolean => hasMessages(text);
 
-// A closing fence with mark tags glued after it on its line (the shared grammar's glued reading, `to-human-parser.ts`'s
-// `GLUED`): the reading closes the fence there and takes the tags, but CommonMark reads such a line as no closing
-// fence, so the code would run on and take the tags and every line after them. The text the full drawing hands to
-// Markdown therefore breaks each such line where the reading takes its tags: the fence alone on its line, the tags on
-// the next under the same indent. Nothing the reading takes moves between message and record, and a line the reading
-// leaves literal (inside a longer fence, say) is kept as written.
-const GLUED_CLOSER = /^([ \t]*)((?:`{3,}|~{3,})[ \t]*)((?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)+)$/gm;
+// A fence with mark tags glued to it on its line (the shared grammar's glued reading, `to-human-parser.ts`'s `GLUED`):
+// the reading takes the tags and reads the fence as a fence, but CommonMark does not. Tags glued before an opening fence
+// make the line a paragraph, so the fence opens nowhere and its closing line opens a code block of its own that runs
+// on; tags glued after a closing fence make the line no closing fence, so the code runs on and takes the tags and every
+// line after them. The text the full drawing hands to Markdown therefore breaks each such line where the reading takes
+// its tags: the tags on a line of their own beside the fence, under the same indent. An opening line is broken only
+// where its fence closes before the next tag the reading takes, so the code CommonMark then draws holds no tag of the
+// reading's. Nothing the reading takes moves between message and record, and a line the reading leaves literal (inside
+// a longer fence, say) is kept as written.
+const TAGS = String.raw`(?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)+`;
+const GLUED_OPENER = new RegExp(String.raw`^([ \t]*)(${TAGS})((\x60{3,}|~{3,}).*)$`);
+const GLUED_CLOSER = new RegExp(String.raw`^([ \t]*)((?:\x60{3,}|~{3,})[ \t]*)(${TAGS})$`);
+const ANY_CLOSER = new RegExp(String.raw`^[ \t]*(\x60{3,}|~{3,})[ \t]*(${TAGS})?$`);
 export function unglued(text: string, live = false): string {
-  if (text.search(GLUED_CLOSER) === -1) return text;
-  const taken = new Set(readMarked(text, live).tags);
-  return text.replace(GLUED_CLOSER, (line, indent: string, fence: string, tags: string, at: number) =>
-    taken.has(at + indent.length + fence.length) ? `${indent}${fence.trimEnd()}\n${indent}${tags}` : line);
+  if (!/(?:`{3}|~{3})/.test(text) || !/<\/?(?:message|to-human|essential|need-input|insight)>/.test(text)) return text;
+  const taken = readMarked(text, live).tags;
+  const takes = new Set(taken);
+  const lines = text.split('\n');
+  const starts: number[] = [];
+  for (let i = 0, at = 0; i < lines.length; at += lines[i].length + 1, i += 1) starts.push(at);
+  // Where the fence an opening line opens closes: the first later closing line of its kind, if no tag the reading
+  // takes stands before it (a closer's own glued tags come after its fence).
+  const closes = (from: number, fence: string): boolean => {
+    for (let i = from + 1; i < lines.length; i += 1) {
+      const close = ANY_CLOSER.exec(lines[i]);
+      const end = close === null ? starts[i] + lines[i].length : starts[i] + lines[i].length - (close[2]?.length ?? 0);
+      if (taken.some((at) => at > starts[from] + lines[from].length && at < end)) return false;
+      // a closing line whose glued tags the reading takes is broken below, so CommonMark closes the fence there too
+      if (close !== null && close[1][0] === fence[0] && close[1].length >= fence.length && (close[2] === undefined || takes.has(end))) return true;
+    }
+    return false;
+  };
+  return lines.map((line, i) => {
+    const opener = GLUED_OPENER.exec(line);
+    if (opener !== null) {
+      const [, indent, tags, rest, fence] = opener;
+      const info = rest.slice(fence.length);
+      const opens = !(fence[0] === '`' && info.includes('`')); // a backtick fence's info string holds no backtick
+      return opens && takes.has(starts[i] + indent.length) && closes(i, fence) ? `${indent}${tags.trimEnd()}\n${indent}${rest}` : line;
+    }
+    const closer = GLUED_CLOSER.exec(line);
+    if (closer !== null) {
+      const [, indent, fence, tags] = closer;
+      return takes.has(starts[i] + indent.length + fence.length) ? `${indent}${fence.trimEnd()}\n${indent}${tags}` : line;
+    }
+    return line;
+  }).join('\n');
 }
 
 const blank = (node: RootContent | undefined): boolean => node?.type === 'text' && !node.value.trim();
@@ -77,8 +112,19 @@ const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (t
   const reading = readMarked(source, live);
   const taken = new Set(reading.tags);
   const isMarkTag = (token: Token) => MARKS.includes(token.name);
-  const marks = tokens.filter((token) => isMarkTag(token) && taken.has(token.node.position!.start.offset!));
-  const byNode = new Map<RootContent, Token>([...marks, ...paired(tokens.filter((token) => !isMarkTag(token)))].map((token) => [token.node, token]));
+  const offsetOf = (token: { node: Element }) => token.node.position!.start.offset!;
+  const marks = tokens.filter((token) => isMarkTag(token) && taken.has(offsetOf(token)));
+  // A question's options pair within one run of the reading, between two tags it takes and never across one, as the
+  // shared grammar lifts them from one part's text and a closed head draws each span alone: an option whose tags stand
+  // on either side of a mark's tag is text, so the mark it crosses still ends where the reading ends it.
+  const runs = new Map<number, (Token & { node: Element })[]>();
+  for (const token of tokens) {
+    if (isMarkTag(token)) continue;
+    const run = reading.tags.filter((at) => at < offsetOf(token)).length;
+    runs.set(run, [...(runs.get(run) ?? []), token]);
+  }
+  const options = [...runs.values()].flatMap((run) => [...paired(run)]);
+  const byNode = new Map<RootContent, Token>([...marks, ...options].map((token) => [token.node, token]));
   const open: { name: string; message: number }[] = []; // message: the ordinal of an open mark's current run, else 0
   let messages = 0;
   let touched: number | null = null; // the message whose text the block being drawn holds

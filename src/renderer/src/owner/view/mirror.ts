@@ -151,8 +151,9 @@ export function holdsMessage(rows: readonly Row[], liveMarked?: string): boolean
 
 /**
  * A stretch's key, from its first row (decision 9): the first tool-use id of that row where it holds a call, else the
- * row's id. So it does not change while the stretch lives: one call becoming a run keeps its first call, a merged
- * read its first read. A stretch a mixed text heads is keyed by that text, as the mod keys a run by `runStart`.
+ * row's id. One call becoming a run keeps its first call, a merged read its first read. A stretch a mixed text heads
+ * is keyed by that text, as the mod keys a run by `runStart`. It is the key a press writes; which stretch it then opens
+ * is `namesOf`'s.
  */
 export function stretchKey(row: Row): string {
   switch (row.kind) {
@@ -161,6 +162,30 @@ export function stretchKey(row: Row): string {
     case 'agent_message': return row.peer?.toolUseId ?? row.id;
     default: return row.id;
   }
+}
+
+// Every key a row answers to: its own (`stretchKey`) and, for a run, the key each of its members had as a row of its
+// own, a call's tool-use id and a thought's row id (`cell:think:…` is the thought `think:…` the run took in).
+const THOUGHT_CELL = 'cell:';
+function namesOf(row: Row): string[] {
+  if (row.kind !== 'group') return [stretchKey(row)];
+  return [stretchKey(row), ...row.cells.map((cell) => cell.toolUseId ?? (cell.toolName === 'thinking' ? cell.id.slice(THOUGHT_CELL.length) : cell.id))];
+}
+
+/**
+ * Which stretch an open key opens (the whole-branch review of 2026-11-15): the one that holds a row the key names, by
+ * any key that row answers to. A key names a row, not a place, so the stretch the reader opened stays open while MAWS's
+ * own derivation reshapes it: a thought taken into the run its first call starts, a run of one call unwrapped when its
+ * turn completes, older rows paged in above it. The mod's run is the same run while it starts at the same row of the
+ * whole transcript (`runStart`, 430), which the mod reads whole and MAWS reads by pages and regroups, and its unfolding
+ * moves with a row whose id changes form (`adopt`). Open, a stretch is keyed by the first open key it holds, so the
+ * press on its `‹ fold to report` names a key that is open; closed, by `stretchKey` of its first row.
+ */
+function keyOf(head: Row | null, members: readonly Row[], open: ReadonlySet<string> | undefined): string {
+  if (open !== undefined && open.size > 0) {
+    for (const row of head === null ? members : [head, ...members]) for (const name of namesOf(row)) if (open.has(name)) return name;
+  }
+  return stretchKey(head ?? members[0]);
 }
 
 export interface Stretch {
@@ -188,7 +213,7 @@ interface Layout {
 // `runStart` and `runEnd` (430 to 470): a maximal run of consecutive folding rows, the rows of no stretch between
 // them included, headed by the mixed text directly before it (rows of no stretch aside); a mixed text with nothing
 // folding after it is a stretch of its own.
-function layoutOf(rows: readonly Row[], liveMarked: string | undefined): Layout {
+function layoutOf(rows: readonly Row[], liveMarked: string | undefined, open?: ReadonlySet<string>): Layout {
   const context = contextOf(rows, liveMarked);
   const classes = rows.map((row) => classOf(row, context));
   const spans: Span[] = [];
@@ -202,7 +227,7 @@ function layoutOf(rows: readonly Row[], liveMarked: string | undefined): Layout 
     const members = open.members.map((i) => rows[i]);
     const turns = new Set<TurnId>();
     for (const row of head === null ? members : [head, ...members]) if (row.turnId !== null && row.kind !== 'divider' && row.kind !== 'time') turns.add(row.turnId);
-    const stretch: Stretch = { key: stretchKey(head ?? members[0]), head, rows: members, turns };
+    const stretch: Stretch = { key: keyOf(head, members, open), head, rows: members, turns };
     const index = spans.length;
     spans.push({ stretch, head: open.head, first: open.first, last: open.last, members: open.members });
     if (open.head !== null) spanAt[open.head] = index;
@@ -239,19 +264,29 @@ function layoutOf(rows: readonly Row[], liveMarked: string | undefined): Layout 
   return { classes, spans, spanAt };
 }
 
-/** The stretches of the rows, in order. */
-export function stretchesOf(rows: readonly Row[], liveMarked?: string): Stretch[] {
-  return layoutOf(rows, liveMarked).spans.map((span) => span.stretch);
+/** The stretches of the rows, in order; with the open keys, each open one keyed by the open key it holds. */
+export function stretchesOf(rows: readonly Row[], liveMarked?: string, open?: ReadonlySet<string>): Stretch[] {
+  return layoutOf(rows, liveMarked, open).spans.map((span) => span.stretch);
+}
+
+/** The open keys held by the stretch that holds the row `key` names: folding that stretch takes them all. */
+export function openKeysOf(rows: readonly Row[], key: string, open: ReadonlySet<string>, liveMarked?: string): string[] {
+  for (const stretch of stretchesOf(rows, liveMarked)) {
+    const names = (stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]).flatMap(namesOf);
+    if (names.includes(key)) return names.filter((name) => open.has(name));
+  }
+  return [];
 }
 
 /**
  * The key of the stretch whose record holds the row or cell `id` out of sight while it is closed: null when the row
- * is in sight anyway (a row that stays, a stretch's head) or no row holds it.
+ * is in sight anyway (a row that stays, a stretch's head) or no row holds it. With the open keys, an open stretch is
+ * named by the open key it holds, so a caller tells an open stretch from a closed one by that key.
  */
-export function stretchHolding(rows: readonly Row[], id: RowId | CellId, liveMarked?: string): string | null {
+export function stretchHolding(rows: readonly Row[], id: RowId | CellId, liveMarked?: string, open?: ReadonlySet<string>): string | null {
   const at = rows.findIndex((row) => row.id === id || (row.kind === 'group' && row.cells.some((cell) => cell.id === id)));
   if (at < 0) return null;
-  const layout = layoutOf(rows, liveMarked);
+  const layout = layoutOf(rows, liveMarked, open);
   const span = layout.spans[layout.spanAt[at]];
   return span === undefined || span.head === at ? null : span.stretch.key;
 }
@@ -270,7 +305,7 @@ const recordFold = (stretch: string, open: boolean, at: Row): Row => ({ id: rowI
  * inside a closed stretch is drawn after its record line.
  */
 export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStretches'>, liveMarked?: string): Row[] {
-  const { classes, spans, spanAt } = layoutOf(rows, liveMarked);
+  const { classes, spans, spanAt } = layoutOf(rows, liveMarked, ui.openStretches);
   const opened = (span: Span) => ui.openStretches?.has(span.stretch.key) ?? false;
   const openTurns = new Set<TurnId>();
   for (const span of spans) if (opened(span)) for (const turn of span.stretch.turns) openTurns.add(turn);

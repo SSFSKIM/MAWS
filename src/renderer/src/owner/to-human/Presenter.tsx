@@ -10,11 +10,18 @@ import { hasMessages, liveMessageInk, messageInk, unglued } from './message-ink'
 // (one left open stays literal, as main reads it too); a streaming one (`streaming`) also for a mark still open at its
 // end.
 function AssistantInk({ text, live }: { text: string; live: boolean }) {
-  // Under a closed stretch's head (the mirror's `reportOnly`, read from the row's context) only its messages: another
-  // component, so a head that opens or folds over the same text mounts afresh (Streamdown's root re-renders for a new
-  // text or mode, never for new plugins).
+  return <div className="transcript-answer"><MarkedText text={text} live={live} /></div>;
+}
+
+/**
+ * A text with its messages drawn as the mod draws them, in whatever frame its row gives it (an answer's, a cut reply's).
+ * Under a closed stretch's head (the mirror's `reportOnly`, read from the row's context) only its messages: another
+ * component, so a head that opens or folds over the same text mounts afresh (Streamdown's root re-renders for a new
+ * text or mode, never for new plugins).
+ */
+export function MarkedText({ text, live }: { text: string; live: boolean }) {
   if (useReportOnly()) return <HeadMessages text={text} live={live} />;
-  return <div className="transcript-answer"><Markdown markdown={unglued(text, live)} live={live} decorate={live ? liveMessageInk : messageInk} /></div>;
+  return <Markdown markdown={unglued(text, live)} live={live} decorate={live ? liveMessageInk : messageInk} />;
 }
 
 // A closed stretch's head (UX wave U2b; the architect's direction of 2026-11-15): exactly the one reading's message
@@ -24,14 +31,14 @@ function AssistantInk({ text, live }: { text: string; live: boolean }) {
 // drawing does.
 function HeadMessages({ text, live }: { text: string; live: boolean }) {
   return (
-    <div className="transcript-answer">
+    <>
       {markedSpans(text, live).map((span, i) => (
         <div key={i} className="owner-message-ink">
           <MessageLabel first={i === 0} open={span.isOpen} />
           <Markdown markdown={span.text} live={false} decorate={messageInk} />
         </div>
       ))}
-    </div>
+    </>
   );
 }
 

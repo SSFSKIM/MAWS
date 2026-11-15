@@ -9,7 +9,7 @@ import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
 import { marksOfText } from '../transcript/model/owner-marks';
-import { holdsMessage, liveMarkedRowIds, mirrorsView, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
+import { holdsMessage, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -417,11 +417,14 @@ export function createTranscriptStore() {
     // rows when no view is mounted. Mounted views that compose alike name one stretch.
     const closedStretchesHolding = (key: string, current: TranscriptEntry, id: RowId | CellId): string[] => {
       if (!mirrorsView(current.state.ui)) return [];
-      const mounted = views.get(key);
-      const drawn = mounted?.size ? [...mounted].map((compose) => compose(current)) : [{ rows: current.rows, liveMarked: liveMarkedRowIds(current.state) }];
       const open = current.state.ui.openStretches;
-      const holding = drawn.map(({ rows, liveMarked }) => stretchHolding(rows, id, liveMarked));
+      const holding = composedViews(key, current).map(({ rows, liveMarked }) => stretchHolding(rows, id, liveMarked, open));
       return [...new Set(holding.filter((stretch): stretch is string => stretch !== null && !(open?.has(stretch) ?? false)))];
+    };
+    // The rows each mounted view of the key composes before the mirror; the key's own rows when none is mounted.
+    const composedViews = (key: string, current: TranscriptEntry): ReturnType<ComposeView>[] => {
+      const mounted = views.get(key);
+      return mounted?.size ? [...mounted].map((compose) => compose(current)) : [{ rows: current.rows, liveMarked: liveMarkedRowIds(current.state) }];
     };
     const scoped = (turn: TurnId | null): TurnId[] | 'all' => (turn === null ? 'all' : [turn]);
     // A jump to a cell wherever its turn has it (`jumpTo`'s search); false when the key holds no such cell.
@@ -620,7 +623,18 @@ export function createTranscriptStore() {
         if (entry(key)?.state.ui.view === view) return;
         changeUi(key, () => [], (ui) => void (ui.view = view));
       },
-      toggleStretch: (key, stretch) => changeUi(key, () => [], (ui) => toggle(ui.openStretches!, stretch)), // UX wave U2b
+      // UX wave U2b: a press on a closed record line opens its stretch by the key the line carries; one on an open
+      // stretch's `‹ fold to report` folds it, taking every open key it holds (two opened stretches can since have met)
+      toggleStretch(key, stretch) {
+        const current = entry(key);
+        if (!current) return;
+        const open = current.state.ui.openStretches ?? new Set<string>();
+        const held = open.has(stretch) ? new Set([stretch, ...composedViews(key, current).flatMap(({ rows, liveMarked }) => openKeysOf(rows, stretch, open, liveMarked))]) : null;
+        changeUi(key, () => [], (ui) => {
+          if (held === null) ui.openStretches!.add(stretch);
+          else for (const name of held) ui.openStretches!.delete(name);
+        });
+      },
       mountView(key, compose) {
         let mounted = views.get(key);
         if (!mounted) views.set(key, (mounted = new Set()));
