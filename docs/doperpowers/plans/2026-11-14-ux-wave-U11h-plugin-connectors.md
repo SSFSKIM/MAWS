@@ -703,6 +703,10 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 - Decision (the architect's ruling at the pre-build pass, 2026-11-15 (UTC)): the page's search finds a plugin's connector by its plugin's name under Show: Connectors as under All, with a test for each list. Written in M3's Decisions and tests, and §E.
   Date/Author: 2026-11-15 (UTC), the architect; recorded by the author of the pass.
 
+- Decision (the executor's pre-flight, 2026-11-15 (UTC)): the run's brief says the executor merges nothing; when a merge is due the architect names the head (`chain-merge.md`). So Concrete Steps 1's merge is moot (the branch at `c12eec1e5` holds `origin/master` `ef1d659ad`, which had not moved at the start: `git rev-list --count HEAD..origin/master` printed 0), and Concrete Steps 5's merge of master in M4 is not made by the executor: M4 runs its whole checks on the master the branch holds, and the stand-in minor stays 49 (48 on `ef1d659ad`) until the architect names a head. The milestones run in order, each reviewed before the next dispatches (M2 consumes M1's endpoints, M3 both, M4 the branch), and every worker reads the common build brief and the run's brief beside this document.
+  Rationale: the run's brief binds the executor where it is narrower than this document's steps; the merge is the chain merge's, which also takes the final minor (K-10).
+  Date/Author: 2026-11-15 (UTC), the executor (controller of the run).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
