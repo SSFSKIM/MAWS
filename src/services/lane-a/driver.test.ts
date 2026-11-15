@@ -33,25 +33,26 @@ vi.mock('./jobs', async (importOriginal) => {
 vi.mock('./transcript-jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./transcript-jobs')>();
   class Counted extends actual.TranscriptJobs {
-    private path: string | null = null;
+    private readonly located: { path: string | null };
     constructor(locate: () => Promise<string | null>) {
-      let self: Counted | undefined;
+      const located = { path: null as string | null }; // the path the last read located
       // one locate per read
       super(() =>
         locate().then((path) => {
           counts.timeline.push(`read ${String(path)}`);
-          if (self !== undefined) self.path = path;
+          located.path = path;
           return path;
         }),
       );
-      self = this;
+      this.located = located;
     }
     override read(): Promise<void> {
       return super.read().then(async () => {
-        const hold = this.path === null ? undefined : counts.holds.get(this.path);
+        const { path } = this.located;
+        const hold = path === null ? undefined : counts.holds.get(path);
         if (hold === undefined) return;
-        counts.holds.delete(this.path!);
-        counts.timeline.push(`held ${this.path}`);
+        counts.holds.delete(path!);
+        counts.timeline.push(`held ${path}`);
         await hold;
       });
     }
