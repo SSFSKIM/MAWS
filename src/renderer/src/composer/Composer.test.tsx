@@ -1230,8 +1230,8 @@ describe('the three menu chords', () => {
     );
     act(() => editorOf(0).focus());
     const { chipWidgets, modeMenus } = useComposerStore.getState();
-    await chord(...pressed);
-    await chord(...pressed);
+    await chord(pressed[0], pressed[1]);
+    await chord(pressed[0], pressed[1]);
     await act(async () => {});
     expect(useComposerStore.getState().chipWidgets).toBe(chipWidgets);
     expect(useComposerStore.getState().modeMenus).toBe(modeMenus);
