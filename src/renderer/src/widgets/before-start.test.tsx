@@ -17,7 +17,9 @@ import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE } from '../../../../test/support/machine';
 import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
-import { useCustomizeProject, useDiscoverRequest } from '../customize/open';
+import { useCustomizeProject } from '../customize/open';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { useLayout } from '../stores/layout';
 import { resetRemoteSpawn, useRemoteSpawn } from '../sessions/remote-spawn';
 import { putIntent, intent, resetSetupStore } from '../test-support/setup-intents';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
@@ -88,7 +90,7 @@ afterEach(() => {
   useMachines.setState({ roster: 'unread', machines: new Map() });
   useSettings.setState({ state: null });
   useCustomizeProject.setState({ projectId: undefined });
-  useDiscoverRequest.setState({}, true);
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
   delete (window as { maws?: unknown }).maws;
 });
 
@@ -276,7 +278,7 @@ describe('the Plugins dialog before the first message', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open Discover' }));
     expect(close).toHaveBeenCalled();
     expect(useCustomizeProject.getState()).toEqual({ projectId: null });
-    expect(useDiscoverRequest.getState()).toEqual({ cwd: null });
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
   });
 });
 

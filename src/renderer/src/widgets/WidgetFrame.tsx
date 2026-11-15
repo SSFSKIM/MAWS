@@ -39,17 +39,15 @@ interface WidgetFrameBase {
   note?: { text: string; tooltip: string };
 }
 
-// Embedded libraries belong to their page: no modal dismissal, session acquisition, or composer focus.
-export type WidgetFrameProps = WidgetFrameBase & (
-  | { variant?: 'modal'; appSessionId: AppSessionId; state: ReadState; close(): void }
-  | { variant: 'embedded'; appSessionId?: never; state: 'loading' | 'error' | 'ready'; close?: never; scope?: ReactNode }
-);
+// UX wave U11c: Customize's page draws its own head, so a frame is always a dialog's (the embedded variant went).
+export type WidgetFrameProps = WidgetFrameBase & { variant?: 'modal'; appSessionId: AppSessionId; state: ReadState; close(): void };
 
 // P2-B start (2026-10-09)
 const isTextField = (el: Element | null): boolean => el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || (el instanceof HTMLElement && el.isContentEditable);
 // `/` (no modifier, the keyboard not in a text field) focuses the library's search field (Desktop,
-// readable/app-2.16120.0/web/app/v1/c13348442-Cgf_p4WP.js:266-277): a key handler on the frame, not a global listener.
-function focusSearch(event: KeyboardEvent<HTMLDivElement>): boolean {
+// readable/app-2.16120.0/web/app/v1/c13348442-Cgf_p4WP.js:266-277): a key handler on the frame (and on Customize's page,
+// UX wave U11c), not a global listener.
+export function focusSearch(event: KeyboardEvent<HTMLElement>): boolean {
   if (event.key !== '/' || event.metaKey || event.ctrlKey || event.altKey || isTextField(event.target as Element)) return false;
   const field = event.currentTarget.querySelector<HTMLInputElement>('[data-widget-search]');
   if (!field) return false;
@@ -81,13 +79,12 @@ function dormantBody(appSessionId: AppSessionId, state: 'dormant' | 'starting' |
 
 export function WidgetFrame(props: WidgetFrameProps) {
   const { title, command, state, error, readAt, children, size = 'utility', heading, toolbar, subtitle, note } = props;
-  const embedded = props.variant === 'embedded';
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!embedded && !root.current?.contains(document.activeElement)) root.current?.focus();
-  }, [embedded]);
+    if (!root.current?.contains(document.activeElement)) root.current?.focus();
+  }, []);
   let body: ReactNode;
-  if (props.variant !== 'embedded' && (state === 'dormant' || state === 'starting' || state === 'unavailable')) body = dormantBody(props.appSessionId, state, error, readAt, children);
+  if (state === 'dormant' || state === 'starting' || state === 'unavailable') body = dormantBody(props.appSessionId, state, error, readAt, children);
   else if (state === 'loading') body = <p className="m-0 text-fg-muted">{FRAME.reading}</p>;
   else if (state === 'error')
     body = (
@@ -113,8 +110,8 @@ export function WidgetFrame(props: WidgetFrameProps) {
       tabIndex={-1}
       data-widget={command}
       data-widget-size={size} // P2-B (2026-10-09)
-      data-widget-variant={embedded ? 'embedded' : 'modal'}
-      className={`flex min-w-0 flex-col text-ui outline-none ${size === 'library' ? 'min-h-0 flex-1' : ''} ${embedded ? 'w-full' : ''}`}
+      data-widget-variant="modal"
+      className={`flex min-w-0 flex-col text-ui outline-none ${size === 'library' ? 'min-h-0 flex-1' : ''}`}
       onKeyDown={(event) => {
         // P2-B start (2026-10-09): `/` focuses the search field; an Escape a field or an inner layer already handled
         // (a non-empty search cleared, E8 D-16's sheet), or one bubbling through React from a layer portalled outside
@@ -122,7 +119,7 @@ export function WidgetFrame(props: WidgetFrameProps) {
         if (focusSearch(event)) return;
         if (event.key === 'Escape' && (event.defaultPrevented || !event.currentTarget.contains(event.target as Node))) return;
         // P2-B end
-        if (event.key !== 'Escape' || props.variant === 'embedded') return;
+        if (event.key !== 'Escape') return;
         event.preventDefault();
         event.stopPropagation();
         props.close();
@@ -130,38 +127,32 @@ export function WidgetFrame(props: WidgetFrameProps) {
       }}
     >
       {/* P2-B start (2026-10-09): the library's head: title and heading at the left, the toolbar at the right */}
-      <header className={size === 'library' ? `flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2 ${embedded ? 'flex-wrap' : ''}` : `flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2 ${note ? 'flex-wrap gap-y-1' : ''}`}>
-        {!(embedded && size === 'library') &&
-          (subtitle ? (
-            // U11a: the subtitle muted beside the title; the dialog's name stays the title (WidgetDialog's)
-            <div className="flex min-w-0 items-baseline gap-2">
-              <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
-              <span data-widget-subtitle className="min-w-0 truncate text-ui-sm text-fg-muted">
-                {subtitle}
-              </span>
-            </div>
-          ) : (
+      <header className={size === 'library' ? 'flex min-h-9 items-center gap-3 border-b border-border px-2 pb-2' : `flex items-baseline justify-between gap-3 border-b border-border px-2 pb-2 ${note ? 'flex-wrap gap-y-1' : ''}`}>
+        {subtitle ? (
+          // U11a: the subtitle muted beside the title; the dialog's name stays the title (WidgetDialog's)
+          <div className="flex min-w-0 items-baseline gap-2">
             <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
-          ))}
+            <span data-widget-subtitle className="min-w-0 truncate text-ui-sm text-fg-muted">
+              {subtitle}
+            </span>
+          </div>
+        ) : (
+          <h3 className="m-0 shrink-0 text-ui font-semibold">{title}</h3>
+        )}
         {size === 'library' && heading}
-        <span className={size === 'library' ? `flex min-w-0 items-center gap-2 ${embedded ? 'max-w-full' : 'ml-auto'}` : 'flex items-baseline gap-2'}>
+        <span className={size === 'library' ? 'ml-auto flex min-w-0 items-center gap-2' : 'flex items-baseline gap-2'}>
           {size === 'library' && toolbar}
           {/* P2-B end */}
-          {props.variant !== 'embedded' && (
-            <>
-              <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
-              <button type="button" aria-label={FRAME.close(title)} onClick={props.close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
-                ×
-              </button>
-            </>
-          )}
+          <code className="font-mono text-ui-sm text-fg-muted">/{command}</code>
+          <button type="button" aria-label={FRAME.close(title)} onClick={props.close} className="rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover focus-visible:outline-2">
+            ×
+          </button>
         </span>
         {note && (
           <p data-widget-note title={note.tooltip} className="m-0 w-full text-ui-sm text-fg-muted [overflow-wrap:anywhere]">
             {note.text}
           </p>
         )}
-        {props.variant === 'embedded' && props.scope && <div className="ml-auto max-w-full shrink-0 @max-sm/customize:ml-0 @max-sm/customize:w-full">{props.scope}</div>}
       </header>
       {/* P2-B (2026-10-09): the library's body takes the remaining height; its panes scroll, and A's dormant line, drawn
           above them, keeps the head's inset (2026-10-10) */}

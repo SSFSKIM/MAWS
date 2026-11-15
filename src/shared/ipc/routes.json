@@ -428,6 +428,7 @@
   "browserEngine.frame",
   "catalog.engineRefresh",
   "catalog.icon",
+  "catalog.pluginIcons",
   "catalog.refresh",
   "catalog.sources",
   "channel.history",

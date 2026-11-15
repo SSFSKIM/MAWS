@@ -1,12 +1,15 @@
 // The skills library's list and detail (P2-B execution document §5.10; Claude Desktop's Skills section,
 // readable/app-2.16120.0/web/app/v1/c5e558aae-DNGm5L2q.js:1076-1112, :1351-1398, and its plugin badge,
-// ccea1f474-BHx9TdZi.js:381-420): My items' group headings, a row per skill (the tile, the skill's name, its plugin's
+// ccea1f474-BHx9TdZi.js:381-420): My items' group headings, a row per skill (the image, its letter tile, UX wave U11c:
+// "Use in chat" says what the old "/" tile said; the skill's name, its plugin's
 // name or the engine's source word as a neutral badge, the description on a second line, "Use in chat" at the trailing
 // edge), and a small detail in place of the list (Back and ⌘[ return to it with its search and scroll). The badge is plain
 // text: in MAWS it would open another widget. "Use in chat" closes the dialog and puts `/<name> ` at the composer's caret,
 // sending nothing (§5.10; Desktop's local Code library has no such action, §11).
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Icon, SortIcon } from '../../app/IconButton';
+import { SortIcon } from '../../app/IconButton';
+import { ItemImage } from '../../customize/image/ItemImage';
+import { KindWord, NoLastControl } from '../../customize/KindWord';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -40,15 +43,6 @@ export function SkillsToolbar({ plugins, canReload = false, reloading = false, o
   );
 }
 
-// Only a verified invocation earns the slash; disk metadata uses a neutral document glyph.
-function SkillTile({ invocable, size = 'size-9' }: { invocable: boolean; size?: string }) {
-  return (
-    <span aria-hidden className={`flex ${size} shrink-0 items-center justify-center rounded-md border border-border bg-bg-active font-mono text-ui text-fg-muted`}>
-      {invocable ? '/' : <Icon><path d="M4 1.75h5l3 3v9.5H4zM9 1.75v3h3M6 8h4M6 10.5h4" /></Icon>}
-    </span>
-  );
-}
-
 function Centered({ children, role }: { children: ReactNode; role?: 'status' | 'alert' }) {
   return (
     <div role={role} className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
@@ -57,23 +51,29 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
   );
 }
 
+// A row's identity across answers: its file, else its name (the list's own key).
+export const skillRowKey = (row: SkillRow): string => row.path ?? row.name;
+
 // A click inside the row opens its detail unless it landed on a control of its own.
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open])') !== null;
 
-function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void }) {
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): under Customize's All, `kindWord`
+// ends the row in "Skill" and the width of the last control the other kinds' rows have.
+export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void; kindWord?: boolean }) {
   const label = labelOf(row);
   const badge = badgeOf(row);
   const invocation = invocationOf(row);
   return (
     <li
       data-skill-row={row.name}
+      data-skill-key={skillRowKey(row)}
       className="relative flex items-center gap-3 border-b border-border px-2 py-2 last:border-b-0 hover:bg-bg-hover"
       onClick={(event) => {
         if (!ownControl(event.target)) onOpen(row);
       }}
     >
       <button type="button" data-row-open aria-label={L.view(label)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
-      <SkillTile invocable={invocation !== null} />
+      <ItemImage kind="skill" seed={label} iconUrl={null} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span data-skill-name className="truncate font-medium text-fg" title={invocation === null ? undefined : `/${invocation}`}>
@@ -90,11 +90,18 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
+      {kindWord && (
+        <>
+          <KindWord kind="skill" />
+          <NoLastControl />
+        </>
+      )}
     </li>
   );
 }
 
-function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse?(name: string): void }) {
+// `backTo`: the list Back returns to (Customize's All: My items)
+export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: SkillRow; onBack(): void; onUse?(name: string): void; backTo?: string }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
   const invocation = invocationOf(row);
@@ -106,9 +113,9 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
   ];
   return (
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
-      <BackButton to={S.list} onBack={onBack} />
+      <BackButton to={backTo} onBack={onBack} />
       <div className="flex items-center gap-3">
-        <SkillTile invocable={invocation !== null} size="size-11" />
+        <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="head" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>
@@ -129,22 +136,27 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
   );
 }
 
-// A row's identity across answers: its file, else its name (the list's own key).
-const rowKey = (row: SkillRow): string => row.path ?? row.name;
-
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
 // selected row as `groups` has it now, so what it offers follows a new answer or a changed launch profile (the task
 // review of the branch panel's fix); a row a new answer no longer lists leaves the detail for the list.
-export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void }) {
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): on Customize's page, `onReset` clears
+// the page's search in place of the library store's, and each new `toList` (the page's view or a Show value pressed)
+// returns the detail to the list.
+export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList }: { groups: readonly SkillGroup[]; shown: readonly SkillGroup[]; onUse?(name: string): void; onDetail(open: boolean): void; onReset?(): void; toList?: number }) {
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
-  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
+  const [listed, setListed] = useState(toList);
+  if (listed !== toList) {
+    setListed(toList);
+    setSelectedKey(null);
+  }
+  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => skillRowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
-  const left = useRef<{ name: string; scrollTop: number } | null>(null);
+  const left = useRef<{ key: string; scrollTop: number } | null>(null);
   if (selectedKey !== null && selected === null) setSelectedKey(null); // its skill is gone: the list again
   const open = (row: SkillRow) => {
-    left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
-    setSelectedKey(rowKey(row));
+    left.current = { key: skillRowKey(row), scrollTop: pane.current?.scrollTop ?? 0 };
+    setSelectedKey(skillRowKey(row));
   };
   const back = () => setSelectedKey(null);
   const inDetail = selected !== null;
@@ -154,7 +166,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
     if (selectedKey !== null || from === null || pane.current === null) return;
     left.current = null;
     pane.current.scrollTop = from.scrollTop;
-    pane.current.querySelector<HTMLElement>(`[data-skill-row="${CSS.escape(from.name)}"] [data-row-open]`)?.focus();
+    pane.current.querySelector<HTMLElement>(`[data-skill-key="${CSS.escape(from.key)}"] [data-row-open]`)?.focus(); // a name two scopes can share
   }, [selectedKey]);
 
   const total = groups.reduce((n, g) => n + g.rows.length, 0);
@@ -170,7 +182,7 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail }: { groups: read
     body = (
       <Centered role="status">
         <p className="m-0 text-ui text-fg-muted">{L.noMatch}</p>
-        <button type="button" className={SECONDARY} onClick={() => setSkills({ search: '', sort: 'name' })}>
+        <button type="button" className={SECONDARY} onClick={onReset ?? (() => setSkills({ search: '', sort: 'name' }))}>
           {L.resetFilters}
         </button>
       </Centered>

@@ -18,8 +18,6 @@ import { focusPaneElement, paneDomId } from '../main/pane-dom';
 import { ProjectsView } from '../projects/ProjectsView';
 import { useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
-import { SECTION_OF_SHOW } from './customize';
-import { requestDiscover } from './discover';
 import { escapeTaker, leaveField } from './escape';
 
 export const PAGE_REGION_ID = 'region-page';
@@ -105,23 +103,12 @@ function Page({ destination }: { destination: Destination }) {
   );
 }
 
-// Customize at its `show`; its `discover` view reaches the plugins library, which is the only one that takes the request,
-// at the open, at a change of the page's fields and at a restored page (a `mine` view asks nothing: until U11c the library
-// keeps the tab the person left it on).
-function CustomizePage({ destination }: { destination: Extract<Destination, { kind: 'customize' }> }) {
-  const section = SECTION_OF_SHOW[destination.show];
-  const discover = destination.view === 'discover' && section === 'plugins';
-  useEffect(() => {
-    if (discover) requestDiscover();
-  }, [discover, destination]);
-  return <CustomizeView section={section} />;
-}
-
 function PageBody({ destination }: { destination: Destination }) {
   const Library = useSlot('artifactsLibrary');
   switch (destination.kind) {
     case 'customize':
-      return <CustomizePage destination={destination} />;
+      // UX wave U11c: the page's two fields, its view and its Show value; a change of either keeps the page mounted
+      return <CustomizeView view={destination.view} show={destination.show} />;
     case 'projects':
       return <ProjectsView />;
     case 'library':
