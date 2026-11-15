@@ -269,6 +269,25 @@ export function stretchesOf(rows: readonly Row[], liveMarked?: string, open?: Re
   return layoutOf(rows, liveMarked, open).spans.map((span) => span.stretch);
 }
 
+/**
+ * The keys an update carries an opening to (the whole-branch review's second look): an open key no row answers to any
+ * more, whose row the update took away, passes to the keys that row answered to that a row of the new rows still
+ * answers to. So the opening of a thought with no text, which the derivation keeps only while it streams or inside a run
+ * (`groups.ts`, `thoughtRow`), passes to its call when the run of that one call unwraps without it. A key whose row
+ * leaves with no successor stays as it is, and opens its stretch again if a row comes to answer to it.
+ */
+export function carriedKeys(before: readonly Row[], after: readonly Row[], open: ReadonlySet<string> | undefined): string[] {
+  if (open === undefined || open.size === 0 || before === after) return [];
+  const answered = new Set(after.flatMap(namesOf));
+  const carried = new Set<string>();
+  for (const key of open) {
+    if (answered.has(key)) continue;
+    const held = before.find((row) => namesOf(row).includes(key));
+    if (held !== undefined) for (const name of namesOf(held)) if (answered.has(name) && !open.has(name)) carried.add(name);
+  }
+  return [...carried];
+}
+
 /** The open keys held by the stretch that holds the row `key` names: folding that stretch takes them all. */
 export function openKeysOf(rows: readonly Row[], key: string, open: ReadonlySet<string>, liveMarked?: string): string[] {
   for (const stretch of stretchesOf(rows, liveMarked)) {

@@ -9,7 +9,7 @@ import { rowId } from '../../transcript/model/keys';
 import { applyEvents, createState, withUi } from '../../transcript/model/reduce';
 import type { Row, TurnId } from '../../transcript/model/rows';
 import { BASH_RESULT, builder } from '../../transcript/model/test-events';
-import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView, reportViewOf, stretchesOf, stretchHolding, stretchKey } from './mirror';
+import { carriedKeys, holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView, reportViewOf, stretchesOf, stretchHolding, stretchKey } from './mirror';
 
 const T1 = 'turn:u1' as TurnId;
 const T2 = 'turn:u2' as TurnId;
@@ -361,8 +361,11 @@ describe('a stretch stays the one the reader opened', () => {
     expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']); // the thought is gone
     const pressed = lines(mirrorRows(windowAt(0, false, true), {})).at(-1)!;
     const openStretches = new Set([pressed.stretch]);
+    let before = windowAt(0, false, true);
     for (const step of [0, 1, 2]) {
       const window = windowAt(step, false, true);
+      for (const key of carriedKeys(before, window, openStretches)) openStretches.add(key); // as the store's update does
+      before = window;
       expect(lines(mirrorRows(window, { openStretches })).map((line) => line.open), `at ${STEPS[step]}`).toEqual([true]);
     }
   });
