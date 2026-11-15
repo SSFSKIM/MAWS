@@ -445,7 +445,8 @@ describe('X9 artifact tools (E2)', () => {
     );
     expect(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'Classroom'])).toBe('artifact_create: no design system "Harbour"; the design systems are: Harbor, Classroom');
     expect(TOOL_ERRORS.designSystemAmbiguous('Harbor', [UUID, '22222222-2222-4222-8222-222222222222'])).toBe(`artifact_create: more than one design system is named "Harbor"; give one of these ids: ${UUID}, 22222222-2222-4222-8222-222222222222`);
-    expect(TOOL_ERRORS.designSystemNotForKind('file')).toBe('artifact_create: a file takes no design system');
+    expect(TOOL_ERRORS.designSystemNotForKind('file')).toBe('artifact_create: kind "file" takes no design system; designSystem is for document, presentation, design, dashboard');
+    expect(TOOL_ERRORS.noDesignSystem('Harbor', [])).toBe('artifact_create: no design system "Harbor"; there are no design systems');
   });
 
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {

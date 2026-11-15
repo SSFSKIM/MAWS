@@ -289,7 +289,7 @@ describe('artifact_create', () => {
     const harbor = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
     writeFileSync(join(w.cwd, 'report.pdf'), '%PDF-1.4');
     const before = rows('SELECT id FROM artifacts').length;
-    expect(textOf(await create({ content: '<p/>', title: 'Page', designSystem: harbor.id }))).toBe(TOOL_ERRORS.designSystemNotForKind('html'));
+    expect(textOf(await create({ content: '<p/>', title: 'Page', designSystem: harbor.id }))).toBe('artifact_create: kind "html" takes no design system; designSystem is for document, presentation, design, dashboard');
     expect(textOf(await create({ kind: 'file', path: 'report.pdf', title: 'Report', designSystem: 'Harbor' }))).toBe(TOOL_ERRORS.designSystemNotForKind('file'));
     expect(textOf(await create({ kind: 'design_system', title: 'Brand', designSystem: 'Harbor' }))).toBe(TOOL_ERRORS.designSystemNotForKind('design_system'));
     expect(rows('SELECT id FROM artifacts').length).toBe(before);
@@ -308,6 +308,14 @@ describe('artifact_create', () => {
     const shared = textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: 'harbor' }));
     expect(shared).toBe(TOOL_ERRORS.designSystemAmbiguous('harbor', [harbor.id, twin.id].sort()));
     expect(rows('SELECT id FROM artifacts').length).toBe(before + 1); // the twin alone
+  });
+
+  // the architect's ruling (2026-11-15): reachable, since the bundled systems are not seeded again into a store that once held one
+  it('refuses a design system in a library that has none, saying there are none', async () => {
+    const gone = await w.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+    await w.store.delete(gone.id);
+    expect(textOf(await create({ kind: 'presentation', title: 'Deck', designSystem: 'Harbor' }))).toBe('artifact_create: no design system "Harbor"; there are no design systems');
+    expect(w.store.list({ kind: 'presentation' })).toEqual([]);
   });
 
   it('refuses a document’s markdown content, which P3-B’s document create serves, writing nothing', async () => {

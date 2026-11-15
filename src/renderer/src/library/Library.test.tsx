@@ -394,7 +394,7 @@ describe('the tab stop across virtualization', () => {
   });
 
   // UX wave U10b (M8 decision 3): the design-system choice holds while the page is open, scrolled away or not
-  it('"Make something new" stays mounted, its choice kept, while the list scrolls away from it', async () => {
+  it('"Make something new" keeps its choice while the list scrolls away from it and back', async () => {
     rows = [...rows, ...SYSTEMS];
     readDefaults({});
     render(<Library />);
@@ -405,8 +405,9 @@ describe('the tab stop across virtualization', () => {
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
     await scrollTo(3_000);
     await waitFor(() => expect(screen.queryByRole('article', { name: 'Note 1' })).toBeNull());
-    expect(screen.getByRole('region', { name: 'Make something new' })).toBe(made);
-    expect(within(made).getByRole('button', { name: /^Design system/ }).textContent).toBe('Harbor');
+    await scrollTo(0);
+    const back = await screen.findByRole('region', { name: 'Make something new' });
+    expect(within(back).getByRole('button', { name: /^Design system/ }).textContent).toBe('Harbor');
   });
 
   it('a row holding the keyboard stays mounted, focused and the tab stop while the list scrolls away from it', async () => {
@@ -862,6 +863,62 @@ describe('Make something new', () => {
     act(() => useSettings.setState({ state: null })); // the defaults not read (yet)
     expect(choice(made).textContent).toBe('Design system');
     expect((choice(made) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // M8 decision 3 (fix wave 1): the choice is the page's; the views that do not draw the section do not forget it
+  it('the choice holds while the page is open: across a search typed and cleared, Pinned and back, and every Space and back; a page opened again starts at the default', async () => {
+    editors(...CARD_KINDS);
+    withSystems();
+    const user = userEvent.setup();
+    const page = render(<Library />);
+    const shown = async () => choice(await section()).textContent;
+    await waitFor(async () => expect(await shown()).toBe('MAWS · default'));
+    await user.click(choice(await section()));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await waitFor(async () => expect(await shown()).toBe('Harbor'));
+
+    act(() => setLibraryView({ query: 'plan' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ query: '' }));
+    expect(await shown()).toBe('Harbor');
+    act(() => setLibraryView({ view: 'pinned' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ view: 'all' }));
+    expect(await shown()).toBe('Harbor');
+    act(() => setLibraryView({ view: 'bySpace', spaceId: null }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ spaceId: HOME }));
+    expect(await shown()).toBe('Harbor');
+    await user.click(blank(await section(), 'Presentation'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: HOME, designSystemId: HARBOR }]));
+
+    page.unmount();
+    act(() => setLibraryView({ view: 'all', spaceId: null }));
+    render(<Library />);
+    await waitFor(async () => expect(await shown()).toBe('MAWS · default'));
+  });
+
+  // §I's card row, Constraint 9: the awaited start fails
+  it('a linked folder that cannot be added ends in a toast, and a chat that cannot be made in nothing; either way the card is enabled again', async () => {
+    const { useNotices } = await import('../stores/notices');
+    const creator = vi.fn(async (): Promise<AppSessionId | null> => null);
+    offs.push(registerSessionCreator(creator));
+    answers['session.projects.addFolder'] = () => ({ ok: false, error: { code: 'invalid_input', message: 'the folder is gone' } });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK })); // linked to a folder
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toContain('the folder is gone'));
+    expect(creator).not.toHaveBeenCalled();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+
+    act(() => setLibraryView({ spaceId: HOME })); // no folder: the session's creation itself fails
+    await user.click(card(made, 'Presentation'));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((card(made, 'Presentation') as HTMLButtonElement).disabled).toBe(false));
+    expect([...useComposerStore.getState().prefills.values()].map((prefill) => prefill.text)).not.toContain('Make a presentation in the Space “Home”: ');
   });
 
   it('a kind whose editor lands later gains its Blank at once', async () => {
