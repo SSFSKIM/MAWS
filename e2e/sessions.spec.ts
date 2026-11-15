@@ -9,10 +9,11 @@
 // temp directory (`MAWS_E2E_TRASH_DIR`, main's e2e seam), never the owner's `~/.Trash`. No native panel opens:
 // under MAWS_E2E `layout.pickFiles` answers from `MAWS_E2E_PICK_PATHS` or as cancelled (main's pick seam).
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto'; // UX wave U6e: the files service's content hash
+import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import { slugOf } from '../src/engine-host/fs/paths';
 import { fixtureIdentity } from '../test/support/fixture-session-id';
@@ -23,7 +24,7 @@ import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
-import { activeMainTab, mainTabById, mainTabs } from './support/shell';
+import { activeMainTab, backToTabs, mainTabById, mainTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -238,6 +239,71 @@ async function forkOf(page: Page, source: string): Promise<string> {
     }, { timeout: 20_000 })
     .toBeDefined();
   return fork!;
+}
+
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §G): an application-menu item's
+// enabled state by its id (null: no such item); the files service's content hash; two sentences of tools/code/copy.ts
+const menuEnabled = (maws: MawsLaunch, id: string) => maws.app.evaluate(({ Menu }, id) => Menu.getApplicationMenu()?.getMenuItemById(id)?.enabled ?? null, id);
+const sha256Of = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
+const MAWS_OWN = 'Read-only: MAWS does not edit its own files';
+const OUTSIDE_REFUSED = 'MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
+// A drawn box, and one held inside another (half a pixel for subpixel layout)
+type Box = { left: number; top: number; right: number; bottom: number };
+const boxOf = (locator: Locator): Promise<Box> =>
+  locator.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+  });
+function expectInside(inner: Box, outer: Box, what: string): void {
+  expect(inner.left, `${what}: its left edge inside`).toBeGreaterThanOrEqual(outer.left - 0.5);
+  expect(inner.right, `${what}: its right edge inside`).toBeLessThanOrEqual(outer.right + 0.5);
+  expect(inner.top, `${what}: its top inside`).toBeGreaterThanOrEqual(outer.top - 0.5);
+  expect(inner.bottom, `${what}: its bottom inside`).toBeLessThanOrEqual(outer.bottom + 0.5);
+}
+// The side column at a width its resizer's keys set exactly: Home its least (280 px, app/regions.ts's PANEL_BOUNDS), each
+// ← one step (8 px, app/Resizer.tsx) wider, End its widest the window allows
+async function sideColumnAt(page: Page, width: number | 'widest'): Promise<void> {
+  const resizer = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+  await resizer.focus();
+  if (width === 'widest') return void (await resizer.press('End'));
+  await resizer.press('Home');
+  for (let px = 280; px < width; px += 8) await resizer.press('ArrowLeft');
+  await expect(resizer).toHaveAttribute('aria-valuenow', String(width));
+}
+// K1, K3, K14, K15: a save's failure in a file's bar is a line of its own below the path and the controls, at the bar's
+// full width and drawn whole; Save and Wrap are one group on one line, which stays on the path's line where it fits
+async function expectFailureLine(viewer: Locator, where: string, roomy: boolean): Promise<void> {
+  const drawn = await viewer.evaluate((el) => {
+    const rect = (node: Element) => {
+      const r = node.getBoundingClientRect();
+      return { left: r.left, top: r.top, right: r.right, bottom: r.bottom };
+    };
+    const failure = Array.from(el.querySelectorAll('[role="alert"]')).find((node) => node.textContent?.startsWith('Could not save')) as HTMLElement;
+    const bar = failure.parentElement!;
+    const style = getComputedStyle(bar);
+    const group = el.querySelector('[data-bar-controls]')!;
+    const button = (text: string) => Array.from(group.querySelectorAll('button')).find((node) => node.textContent === text);
+    const [save, wrap] = [button('Save'), button('Wrap')];
+    return {
+      failure: rect(failure),
+      whole: failure.scrollWidth <= failure.clientWidth && failure.scrollHeight <= failure.clientHeight,
+      bar: rect(bar),
+      room: bar.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+      lead: rect(el.querySelector('[data-path-lead]')!),
+      group: rect(group),
+      save: save ? rect(save) : null,
+      wrap: wrap ? rect(wrap) : null,
+    };
+  });
+  expect(drawn.whole, `${where}: the failure drawn whole, never cut`).toBe(true);
+  expectInside(drawn.failure, drawn.bar, `${where}: the failure`);
+  expect(drawn.failure.right - drawn.failure.left, `${where}: the failure at the bar's full width`).toBeGreaterThanOrEqual(drawn.room - 1);
+  expect(drawn.failure.top, `${where}: the failure on a line below the path`).toBeGreaterThanOrEqual(drawn.lead.bottom - 0.5);
+  expect(drawn.failure.top, `${where}: and below Save and Wrap`).toBeGreaterThanOrEqual(drawn.group.bottom - 0.5);
+  expect(drawn.save && drawn.wrap, `${where}: Save and Wrap both in the controls' group`).not.toBeNull();
+  const [save, wrap] = [drawn.save!, drawn.wrap!];
+  expect(save.top < wrap.bottom && wrap.top < save.bottom, `${where}: Save and Wrap on one line`).toBe(true);
+  if (roomy) expect(drawn.group.top < drawn.lead.bottom && drawn.lead.top < drawn.group.bottom, `${where}: the group on the path's line, where it fits`).toBe(true);
 }
 
 test.describe('sessions', () => {
@@ -1061,12 +1127,13 @@ test.describe('sessions', () => {
     expect(seen).not.toContain('removed');
   });
 
-  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E; A1 to A4): on this Mac a
-  // file outside the session's folder opens, read-only, when the session's own transcript links it, and nothing else
-  // there opens: not a path written in prose, not one linked only in a message that was typed and never delivered, not
-  // one another session links, not a request that does not ask by the rule; its folder is not listed and the file is
-  // not written. Every file and both transcripts are invented, in temporary folders.
-  test("a file the transcript links opens read-only from outside the session's folder, and nothing else does", async () => {
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E; A1 to A4), as U6e leaves it
+  // (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §G; A1, A2, A5, A9): on this Mac a file
+  // outside the session's folder opens beside the chat when the session's own transcript links it, is edited, and is
+  // written only by Save; nothing else there opens or is written: not a path written in prose, not one linked only in a
+  // message that was typed and never delivered, not one another session links, not a request that does not ask by the
+  // rule; its folder is not listed. Every file and both transcripts are invented, in temporary folders.
+  test("a file the transcript links opens from outside the session's folder, is edited, and is written only by Save; nothing else is", async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u6c-outside-'))); // the open log takes the real path
@@ -1102,29 +1169,60 @@ test.describe('sessions', () => {
       const chip = (name: string) => main.locator(`[data-chip="path"][title="${file(name)}"]`);
       await expect(chip('notes.txt')).toBeVisible({ timeout: 20_000 });
       await expect(chip('unnamed.txt'), 'a path in prose is no chip').toHaveCount(0);
-      const sessionTabId = await activeMainTab(page).getAttribute('data-tab-id');
+      const strip = await tabIdsOf(page);
 
+      // U6b-1: the click opens the file beside the chat; U6e: editable, its bar the path alone, which says where Save writes
       await chip('notes.txt').click();
-      const machine = await localRef(page);
-      await expect(mainTabById(page, `file:${machine}:${file('notes.txt')}`), 'a file tab of the strip, in front').toHaveAttribute('aria-selected', 'true');
-      const notes = main.locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
+      const notes = sideColumn(page).locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
       const content = notes.locator('.cm-content');
       await expect(content).toHaveText(NOTES, { timeout: 20_000 });
-      await expect(notes).toHaveAttribute('data-editable', 'false');
-      await expect(content).toHaveAttribute('title', 'Read-only: the file is outside the folders this session works in');
-      await content.click();
-      await page.keyboard.type('xyz');
-      await expect(content).toHaveText(NOTES);
+      expect(await tabIdsOf(page), 'beside the chat: the main strip as it was').toEqual(strip);
+      await expect(sideTab(sideColumn(page), 'notes.txt'), 'the file’s tab has its full path as its tooltip').toHaveAttribute('title', file('notes.txt'));
+      await expect(notes.locator('[data-read-only]'), 'no label on a file that can be saved').toHaveCount(0);
+      const lead = notes.locator('[data-path-lead]');
+      await expect(lead).toHaveAttribute('data-outside', 'writable');
+      await expect(lead).toHaveAttribute('title', `Save writes to ${file('notes.txt')}`);
+      await expect(lead).toHaveAttribute('aria-description', `Save writes to ${file('notes.txt')}`);
+      await expect(notes).toHaveAttribute('data-editable', 'true');
+      await expect(content).not.toHaveAttribute('title');
       await expect(notes).toHaveAttribute('data-dirty', 'false');
-      await expect(notes.locator('[data-editor-controls]')).toHaveCount(0);
+      const save = notes.locator('[data-editor-controls]').getByRole('button', { name: 'Save', exact: true });
+      await expect(save, 'no Save before an edit').toHaveCount(0);
 
-      await mainTabById(page, sessionTabId!).click();
+      // A2: typing changes the tab alone; ⌘S (File › Save file) writes the typed text, and nothing beside the file changes
+      const EDITED = 'Notes edited in MAWS, outside the session’s folder.';
+      await content.click();
+      await page.keyboard.press('Meta+a');
+      await page.keyboard.type(EDITED);
+      await expect(notes).toHaveAttribute('data-dirty', 'true');
+      await expect(save).toBeVisible();
+      expect(readFileSync(file('notes.txt'), 'utf8'), 'nothing written before Save').toBe(texts['notes.txt']);
+      await appMenu(maws, 'file.save');
+      await expect.poll(() => readFileSync(file('notes.txt'), 'utf8'), { timeout: 20_000, message: 'File › Save file wrote the typed text' }).toBe(EDITED);
+      await expect(notes).toHaveAttribute('data-dirty', 'false');
+      await expect(notes).toHaveAttribute('data-pending', '0');
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
+
+      // A9: the file changed on disk meanwhile (no watch outside the folders): the next Save meets the merge view, and the
+      // disk's version stays until the person resolves
+      const THEIRS = 'Notes changed on disk by other means.\n';
+      writeFileSync(file('notes.txt'), THEIRS);
+      await content.click();
+      await page.keyboard.press('Meta+End');
+      await page.keyboard.type(' And a second edit.');
+      await expect(notes).toHaveAttribute('data-dirty', 'true');
+      await save.click();
+      await expect(notes).toHaveAttribute('data-theirs', 'merge', { timeout: 20_000 });
+      await expect(notes.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
+
       await chip('report.pdf').click();
-      const report = main.locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
+      const report = sideColumn(page).locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
       await expect(report.locator('[data-external-row]')).toContainText('PDF files open outside MAWS', { timeout: 20_000 });
       await report.getByRole('button', { name: 'Open externally' }).click();
       await expect.poll(() => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }), { timeout: 20_000 }).toBe(`${file('report.pdf')}\n`);
 
+      // A5: every other way is refused, and the bytes are read back
       const refusal = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
       const read = (appSessionId: string, name: string, named: boolean) => invoke(page, 'files.read', { appSessionId: appSessionId as never, path: file(name), ...(named ? { named: true as const } : {}) });
       expect(await read(s!, 'unnamed.txt', true), 'written only in prose').toMatchObject(refusal);
@@ -1133,9 +1231,252 @@ test.describe('sessions', () => {
       expect(await read(t!, 'notes.txt', true), 'linked only in another session').toMatchObject(refusal);
       expect(await read(s!, 'notes.txt', false), 'asked without the key').toMatchObject(refusal);
       expect(await invoke(page, 'files.list', { appSessionId: s! as never, path: outside }), 'its folder is not listed').toMatchObject(refusal);
-      expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: '0'.repeat(64) }), 'nor is it written').toMatchObject(refusal);
-      expect(readFileSync(file('notes.txt'), 'utf8')).toBe(texts['notes.txt']);
+      const saveOutside = (appSessionId: string, name: string) =>
+        invoke(page, 'files.writeOutside', { appSessionId: appSessionId as never, path: file(name), real: file(name), content: 'overwritten', expectedHash: sha256Of(readFileSync(file(name))) });
+      expect(await saveOutside(s!, 'unnamed.txt'), 'a save of a path written only in prose').toMatchObject(refusal);
+      expect(await saveOutside(s!, 'key'), 'a save of the start of a longer linked name').toMatchObject(refusal);
+      expect(await saveOutside(t!, 'notes.txt'), 'a save under a session that links nothing').toMatchObject(refusal);
+      expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: sha256Of(readFileSync(file('notes.txt'))) }), 'files.write takes the folders alone').toMatchObject(refusal);
+      expect(readFileSync(file('notes.txt'), 'utf8')).toBe(THEIRS);
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
       expect(maws.consoleErrors()).toEqual([]);
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §G; A3, A4, A7, A8, A11, and the
+  // look's measures K1, K3, K11 to K15): File › Open File… asks main's chooser (the e2e pick seam, MAWS_E2E_PICK_PATHS,
+  // read at each pick) and opens the chosen file beside the chat as a kept tab, savable; the Files list's menu row does
+  // the same; a relaunch keeps the tab, its text and its saves (the grants are a file of the profile). A file of MAWS's
+  // own profile reads "Read-only" with its panel and is never written. Where it is offered, and the geometry the owner's
+  // look rests on, each measured on the drawn window. Every file is invented, in temporary folders.
+  test('Open File… opens a chosen file beside the chat, it saves, and a relaunch keeps it', async () => {
+    test.setTimeout(240_000);
+    const repo = await ScratchRepo.create();
+    const store = await StoreFixture.create();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u6e-chosen-'))); // the chooser answers a real path
+    try {
+      // a deep folder, so the path is cut at a narrow column; a second file for the Files list's row; a folder of the
+      // same name and bytes elsewhere, for the swap of A7
+      const deep = join(outside, 'invented-notes', 'quarterly-plans', 'second-draft');
+      mkdirSync(deep, { recursive: true });
+      const chosen = join(deep, 'todo.txt');
+      const second = join(outside, 'second.txt');
+      const TODO = 'Ship the editor first.\n';
+      writeFileSync(chosen, TODO);
+      writeFileSync(second, 'A second invented file.\n');
+      const S = '5e551011-0000-4000-8000-0000000000e8';
+      await store.addTranscript(repo.root, S, [{ type: 'user', uuid: `u-${S}`, parentUuid: null, cwd: repo.root, sessionId: S, timestamp: '2026-11-14T10:00:00.000Z', message: { role: 'user', content: 'A session that links no file' } }]);
+      const first = await launchCase({ fixtures: [], trusted: [repo.root], store });
+      current = { ...first, repos: [repo] };
+      const { page, maws } = first;
+      assertPickSeamBuilt(maws);
+      const pick = (path: string | null) => maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), path ?? ''); // empty: the seam answers cancelled
+      // wide enough for the side column's widest (the Files tree beside a file needs 540 px of it), as a group's
+      // MAWS_E2E_WINDOW_SIZE sets it (e2e/support/launch.ts)
+      await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1600, 900));
+      await page.waitForFunction(() => window.innerWidth === 1600 && window.innerHeight === 900);
+      const [s] = await indexed(page, [S]);
+
+      await test.step('A11: with no session’s chat in front, File › Open File… is disabled; with one, enabled; under a page, disabled', async () => {
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'no session in front' }).toBe(false);
+        await (await sidebarRow(page, { appSessionId: s! })).click();
+        await expect(page.getByRole('tab', { name: /^A session that links no file/ })).toHaveAttribute('aria-selected', 'true');
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'a session of this Mac in front' }).toBe(true);
+        await openAppDestination(page, 'Customize');
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'a page over the session’s tab' }).toBe(false);
+        await backToTabs(page);
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the session’s chat in front again' }).toBe(true);
+      });
+
+      const strip = await tabIdsOf(page);
+      const viewerOf = (path: string, scope: Locator = sideColumn(page)) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
+      const todo = viewerOf(chosen);
+      const content = todo.locator('.cm-content');
+      const saveButton = (viewer: Locator) => viewer.locator('[data-editor-controls]').getByRole('button', { name: 'Save', exact: true });
+
+      await test.step('A3: cancelled, nothing opens; chosen, the file opens beside the chat as a kept tab and saves', async () => {
+        await pick(null);
+        await appMenu(maws, 'file.open');
+        expect(value(await invoke(page, 'layout.openFile', { appSessionId: s! as never })), 'the seam unset: the chooser cancelled').toEqual({ status: 'cancelled' });
+        await expect(sideColumn(page).locator('[data-file-viewer]'), 'a cancel opens nothing').toHaveCount(0);
+        await expect(page.locator('[data-toast-viewport]').getByText(/Open File/), 'and says nothing').toHaveCount(0);
+
+        await pick(chosen);
+        await appMenu(maws, 'file.open');
+        await expect(content).toHaveText(TODO.trimEnd(), { timeout: 20_000 });
+        expect(await tabIdsOf(page), 'beside the chat: the main strip as it was').toEqual(strip);
+        await expect(sideTab(sideColumn(page), 'todo.txt')).toHaveAttribute('title', chosen);
+        await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'a kept tab, not the preview').toHaveCount(0);
+        await expect(todo.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${chosen}`);
+        await expect(todo).toHaveAttribute('data-editable', 'true');
+        await expect(todo.locator('[data-read-only]')).toHaveCount(0);
+        await content.click();
+        await page.keyboard.press('Meta+a');
+        await page.keyboard.type('Ship the editor first, then Open File.');
+        await expect(todo).toHaveAttribute('data-dirty', 'true');
+        expect(readFileSync(chosen, 'utf8'), 'nothing written before Save').toBe(TODO);
+        await appMenu(maws, 'file.save');
+        await expect.poll(() => readFileSync(chosen, 'utf8'), { timeout: 20_000, message: '⌘S wrote the chosen file' }).toBe('Ship the editor first, then Open File.');
+        await expect(todo).toHaveAttribute('data-dirty', 'false');
+      });
+
+      await test.step('A3, K12: the Files list’s menu lies inside the tree at its real width, opened low and near its right edge; its row opens a second chosen file', async () => {
+        await sideColumnAt(page, 'widest');
+        const tree = sideColumn(page).locator('[data-files-tree][data-place="beside"]');
+        await expect(tree, 'the tree at the file’s left, at its own width').toBeVisible({ timeout: 20_000 });
+        const treeBox = await boxOf(tree);
+        expect(treeBox.right - treeBox.left, 'the tree no narrower than its least (tools/code/files/tree-state.ts)').toBeGreaterThanOrEqual(160);
+        const filesMenu = page.locator('[data-files-menu]');
+        for (const [x, y, where] of [[treeBox.left + 8, treeBox.bottom - 8, 'low in the tree'], [treeBox.right - 12, treeBox.bottom - 8, 'low, near the right edge'], [treeBox.right - 12, treeBox.top + 48, 'near the right edge']] as const) {
+          await page.mouse.click(x, y, { button: 'right' });
+          await expect(filesMenu, where).toBeVisible();
+          await expect(filesMenu.locator('[data-open-file]'), 'one row, no chord').toHaveText('Open File…');
+          expectInside(await boxOf(filesMenu), treeBox, `the menu opened ${where}`);
+          await page.keyboard.press('Escape');
+          await expect(filesMenu).toHaveCount(0);
+        }
+        await pick(second);
+        await page.mouse.click(treeBox.right - 12, treeBox.bottom - 8, { button: 'right' }); // clear of the divider, which straddles the tree's edge
+        await filesMenu.locator('[data-open-file]').click();
+        await expect(viewerOf(second).locator('.cm-content'), 'the row opened the chosen file beside the chat').toHaveText('A second invented file.', { timeout: 20_000 });
+        await expect(sideTab(sideColumn(page), 'second.txt')).toHaveAttribute('aria-selected', 'true');
+        await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'kept').toHaveCount(0);
+        expect(await tabIdsOf(page)).toEqual(strip);
+        await sideTab(sideColumn(page), 'todo.txt').click();
+        await expect(content).toHaveText('Ship the editor first, then Open File.');
+      });
+      expect(maws.consoleErrors()).toEqual([]);
+      await maws.app.close();
+
+      const again = await launchCase({ fixtures: [], trusted: [repo.root], store, userData: maws.userData });
+      current = { ...again, repos: [repo], dispose: async () => (await again.maws.cleanup(), await maws.cleanup()) };
+      const p2 = again.page;
+      const m2 = again.maws;
+      assertPickSeamBuilt(m2);
+      await m2.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1600, 900));
+      await p2.waitForFunction(() => window.innerWidth === 1600 && window.innerHeight === 900);
+      const pick2 = (path: string) => m2.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), path);
+      const side2 = () => sideColumn(p2);
+      const todo2 = side2().locator(`[data-file-viewer][data-path="${chosen}"]`);
+      const content2 = todo2.locator('.cm-content');
+      await test.step('A4: a relaunch brings the tab back with the saved text, and it saves again', async () => {
+        await expect(sideTab(side2(), 'todo.txt'), 'the chosen file’s tab is back beside the chat').toBeVisible({ timeout: 20_000 });
+        await sideTab(side2(), 'todo.txt').click();
+        await expect(content2).toHaveText('Ship the editor first, then Open File.', { timeout: 20_000 });
+        await expect(todo2).toHaveAttribute('data-editable', 'true');
+        await expect(todo2.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${chosen}`);
+        await content2.click();
+        await p2.keyboard.press('Meta+End');
+        await p2.keyboard.type(' Kept across a relaunch.');
+        await appMenu(m2, 'file.save');
+        await expect.poll(() => readFileSync(chosen, 'utf8'), { timeout: 20_000, message: 'the restored tab saves' }).toBe('Ship the editor first, then Open File. Kept across a relaunch.');
+        await expect(todo2).toHaveAttribute('data-dirty', 'false');
+      });
+
+      await test.step('A8, K2, K12, K13: a file of the profile opens read-only; "Read-only" opens its panel, inside the column at 360 and 320 px; it is never written', async () => {
+        const OWN = 'An invented note in the profile folder.\n';
+        writeFileSync(join(m2.userData, 'u6e-own-notes.txt'), OWN);
+        const own = realpathSync(join(m2.userData, 'u6e-own-notes.txt'));
+        await pick2(own);
+        await appMenu(m2, 'file.open');
+        const ownViewer = side2().locator(`[data-file-viewer][data-path="${own}"]`);
+        const ownContent = ownViewer.locator('.cm-content');
+        await expect(ownContent).toHaveText(OWN.trimEnd(), { timeout: 20_000 });
+        const label = ownViewer.locator('[data-read-only="maws"]');
+        await expect(label).toHaveText('Read-only');
+        await expect(label).toHaveAttribute('aria-description', MAWS_OWN);
+        expect((await boxOf(label)).right, 'K2: "Read-only" before the path').toBeLessThanOrEqual((await boxOf(ownViewer.locator('[data-path-lead]'))).left + 0.5);
+        await expect(ownViewer).toHaveAttribute('data-editable', 'false');
+        await expect(ownContent).toHaveAttribute('title', MAWS_OWN);
+        await ownContent.click();
+        await p2.keyboard.type('xyz');
+        await expect(ownContent).toHaveText(OWN.trimEnd());
+        await expect(ownViewer).toHaveAttribute('data-dirty', 'false');
+        await expect(ownViewer.locator('[data-editor-controls]'), 'no Save on a file that cannot be saved').toHaveCount(0);
+        const panel = p2.locator('[data-read-only-panel]');
+        for (const width of [360, 320]) {
+          await sideColumnAt(p2, width);
+          await label.click();
+          await expect(panel).toBeVisible();
+          await expect(panel).toHaveText(MAWS_OWN);
+          await expect(panel.getByRole('button'), 'no Open File… where choosing the file changes nothing').toHaveCount(0);
+          expectInside(await boxOf(panel), await boxOf(ownViewer), `the panel at a ${width} px column`);
+          await p2.keyboard.press('Escape');
+          await expect(panel).toHaveCount(0);
+        }
+        const hash = sha256Of(readFileSync(own));
+        expect(await invoke(p2, 'files.writeOutside', { appSessionId: s! as never, path: own, real: own, content: 'overwritten', expectedHash: hash }), 'files.writeOutside refuses MAWS’s own file').toMatchObject({ ok: false, error: { message: `not writable: ${own}` } });
+        expect(await invoke(p2, 'files.write', { appSessionId: s! as never, path: own, content: 'overwritten', expectedHash: hash }), 'and so does files.write').toMatchObject({ ok: false });
+        expect(readFileSync(own, 'utf8'), 'the bytes as they were').toBe(OWN);
+      });
+
+      await test.step('K11, A1: at a 320 px column the bar keeps the path, cut in its middle with both ends drawn and no stray glyph; its description the whole path', async () => {
+        await sideTab(side2(), 'todo.txt').click();
+        await expect(content2).toHaveText('Ship the editor first, then Open File. Kept across a relaunch.');
+        await sideColumnAt(p2, 320);
+        const lead = todo2.locator('[data-path-lead]');
+        await expect(lead).toHaveAttribute('aria-description', `Save writes to ${chosen}`);
+        await expect(lead).toHaveAttribute('title', `Save writes to ${chosen}`);
+        const drawn = await lead.evaluate((el) => {
+          const [folder, , name] = Array.from(el.children) as HTMLElement[];
+          const rect = (node: Element) => node.getBoundingClientRect();
+          return {
+            lead: { left: rect(el).left, right: rect(el).right },
+            folder: { text: folder!.textContent, left: rect(folder!).left, width: rect(folder!).width, cut: folder!.scrollWidth > folder!.clientWidth },
+            name: { text: name!.textContent, right: rect(name!).right, whole: name!.scrollWidth <= name!.clientWidth },
+            ch: rect(name!).width / Math.max(1, name!.textContent?.length ?? 1), // the mono font's character, from the name drawn whole
+          };
+        });
+        expect(drawn.folder.text, 'the folder part holds the whole folder').toBe(dirname(chosen));
+        expect(drawn.folder.cut, 'cut where the column is narrow').toBe(true);
+        expect(drawn.folder.left, 'the path’s start drawn').toBeCloseTo(drawn.lead.left, 0);
+        expect([drawn.name.text, drawn.name.whole], 'the name drawn whole').toEqual(['todo.txt', true]);
+        expect(drawn.name.right, 'the path’s end drawn, inside the bar').toBeLessThanOrEqual(drawn.lead.right + 0.5);
+        expect(drawn.folder.width, 'K11: two characters at the cut, so no lone glyph').toBeGreaterThanOrEqual(2 * drawn.ch - 0.5);
+      });
+
+      await test.step('A7, K1, K3, K14, K15: a save the path no longer leads to fails on a line of its own, whole, in a side tab and a main tab, Save and Wrap one group; the path put back, it saves', async () => {
+        await content2.click();
+        await p2.keyboard.press('Meta+End');
+        await p2.keyboard.type(' Then the swap.');
+        await expect(todo2).toHaveAttribute('data-dirty', 'true');
+        // a folder on the path swapped for a link to a folder that holds a file of the same name and bytes
+        const elsewhere = join(outside, 'elsewhere');
+        mkdirSync(elsewhere);
+        writeFileSync(join(elsewhere, 'todo.txt'), readFileSync(chosen));
+        renameSync(deep, `${deep}-was`);
+        symlinkSync(elsewhere, deep);
+        const bytes = () => [readFileSync(join(`${deep}-was`, 'todo.txt'), 'utf8'), readFileSync(join(elsewhere, 'todo.txt'), 'utf8')];
+        const before = bytes();
+        const failure = (viewer: Locator) => viewer.getByRole('alert').filter({ hasText: 'Could not save' });
+        await saveButton(todo2).click();
+        await expect(failure(todo2)).toHaveText(`Could not save: ${OUTSIDE_REFUSED}`, { timeout: 20_000 });
+        expect(bytes(), 'both files unchanged').toEqual(before);
+        await expect(todo2, 'the edit still in the tab').toHaveAttribute('data-dirty', 'true');
+        await expectFailureLine(todo2, 'a side tab at a 320 px column', false);
+
+        await todo2.locator('[data-move-to-main]').click();
+        const machine = await localRef(p2);
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'moved to the main area, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+        await expect(mainTabById(p2, `file:${machine}:${chosen}`), 'its tooltip the full path').toHaveAttribute('title', chosen);
+        const inMain = p2.locator('[data-region="main"]').locator(`[data-file-viewer][data-path="${chosen}"]`);
+        await expect(inMain).toHaveAttribute('data-dirty', 'true', { timeout: 20_000 });
+        await saveButton(inMain).click();
+        await expect(failure(inMain)).toHaveText(`Could not save: ${OUTSIDE_REFUSED}`, { timeout: 20_000 });
+        expect(bytes(), 'both files unchanged').toEqual(before);
+        await expectFailureLine(inMain, 'a main tab', true);
+
+        unlinkSync(deep);
+        renameSync(`${deep}-was`, deep);
+        await saveButton(inMain).click();
+        await expect.poll(() => readFileSync(chosen, 'utf8'), { timeout: 20_000, message: 'the path put back: the save lands' }).toBe('Ship the editor first, then Open File. Kept across a relaunch. Then the swap.');
+        expect(readFileSync(join(elsewhere, 'todo.txt'), 'utf8'), 'the other file untouched').toBe(before[1]);
+        await expect(inMain).toHaveAttribute('data-dirty', 'false');
+        await expect(failure(inMain)).toHaveCount(0);
+      });
+      expect(m2.consoleErrors()).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
