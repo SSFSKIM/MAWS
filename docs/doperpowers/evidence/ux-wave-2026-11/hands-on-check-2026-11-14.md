@@ -24,7 +24,7 @@ Dates: the check ran on 2026-11-14 (the owner's local day; 23:16Z to 23:58Z). Th
 
 Each of the four runs ended "1 failed", on one assertion only: the frame interval's p95 `<= 17` ms (received 18.2 or 18.3). Every other bound was met: no long task, no blocked input, scrollDelta 0, and domRows 15 to 21 against the bound of 40. The load averages at the runs were between 1.96 and 3.35.
 
-**Reading.** The 17 ms p95 bound is missed by both trees alike and in both launch contexts, so the miss is the machine's display pacing and not the landing; the final tree is not worse than its base. The cause is not known. A display-management utility that runs on that Mac is a suspect, not a finding. The bound itself is a row of `docs/tech-debt-tracker.md` (2026-11-14, "the anchoring scene's measured frame bound").
+**Reading.** The 17 ms p95 bound is missed by both trees alike and in both launch contexts, so the miss is the machine's display pacing and not the landing; the final tree is not worse than its base. The cause was on record before the check and was missed when the check was planned: the Mac mini's virtual display runs at about 54 Hz (`e2e/transcript.spec.ts`, the comment above `MEASURED`; `docs/doperpowers/plans/2026-10-14-gate-offload.md`, "the virtual display's about 54 Hz": p95 18.4 ms, max 18.8 ms), so the scene's 60 Hz frame budget cannot hold there on any tree. The frame bound of this proof is therefore not answered by this check; the other bounds are. The bound itself is a row of `docs/tech-debt-tracker.md` (2026-11-14, "the anchoring scene's measured frame bound").
 
 ## 2. The local latency bench (OX7)
 
