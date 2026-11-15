@@ -7,7 +7,7 @@
 // answer sent). Over the real transcript slot, the card's registered renderer, the attention store and the key
 // dispatcher. Every question, command and id is invented.
 import { act, cleanup, fireEvent, render, waitFor, within } from '@testing-library/react';
-import { useLayoutEffect, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -25,7 +25,7 @@ import { runAction } from '../keymap/actions-runtime';
 import { SessionPane } from '../session/SessionPane';
 import { useFloatingCard } from '../shell/floating';
 import { useAttention } from '../stores/attention';
-import { resetComposerStore } from '../stores/composer';
+import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { resetLaneAStore } from '../stores/lane-a';
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
@@ -396,6 +396,49 @@ describe('a way to a request from outside its transcript', () => {
     list([]);
     const none = render(<SessionPane appSessionId={APP} paneIndex={0} compact />);
     expect(none.queryByRole('button', { name: /Waiting for you/ })).toBeNull();
+  });
+
+  // The card's transcript, its history already read, shows the request in the commit the card mounts in, and its row
+  // takes the keyboard a frame later; the card's composer registers in the same commit, after the transcript, and its
+  // editor focuses in a frame it queues then (Tiptap's `commands.focus()`), so a composer marked to take the keyboard as
+  // it mounts would take it from the row. The line opens the card without that mark.
+  it('after the compact composer’s line opens the card, the keyboard stays on the request’s row as the card’s composer mounts beside its transcript', async () => {
+    function FrameComposer() {
+      const field = useRef<HTMLTextAreaElement>(null);
+      useEffect(
+        () =>
+          registerFocusTarget(APP, {
+            focusFrame: () => void requestAnimationFrame(() => field.current?.focus()),
+          } as unknown as Parameters<typeof registerFocusTarget>[1]),
+        [],
+      );
+      return <textarea ref={field} aria-label="Message" />;
+    }
+    const cardPane = () => (
+      <section data-pane="card">
+        {slot()}
+        <FrameComposer />
+      </section>
+    );
+    const { question, prompt, second } = scene();
+    act(() => useSessions.setState({ records: new Map([[APP, record(APP)]]) }));
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    carriedByCard();
+    const open = render(cardPane()); // the card open: its transcript reads the history
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    await settleFrames();
+    open.unmount();
+    act(() => useFloatingCard.setState({ closed: true }));
+    const compact = render(<SessionPane appSessionId={APP} paneIndex={0} compact />);
+    fireEvent.click(compact.getByRole('button', { name: 'Waiting for you · 3' }));
+    expect(useFloatingCard.getState().closed).toBe(false);
+    compact.unmount();
+    render(cardPane());
+    await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
+    await settleFrames();
+    await settleFrames();
+    expect(keyboardRow()).toBe('request-end');
+    expect(openPrompt()).toContain('make check');
   });
 });
 
