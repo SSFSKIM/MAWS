@@ -8,6 +8,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
+import { marksOfText } from '../transcript/model/owner-marks';
 import { holdsMessage, liveMarkedRowIds, mirrorsView, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
@@ -183,6 +184,24 @@ function holdsStoredMessage(state: TranscriptState): boolean {
     let holds = turnMessages.get(rows);
     if (holds === undefined) turnMessages.set(rows, (holds = holdsMessage(rows, '')));
     if (holds) return true;
+  }
+  return false;
+}
+
+// The guess at a lane turned on, without deriving a turn: a turn whose own events complete a text with a mark, kept per
+// turn state. The rows a lane off derives fold a marked commentary away, so they alone would miss it; a guess that is
+// wrong either way is settled by `put` (`withViewFlag`) against the rows the lane derives.
+const turnMarks = new WeakMap<object, boolean>();
+function eventsHoldMark(state: TranscriptState): boolean {
+  for (const id of state.order) {
+    const turn = state.turns.get(id);
+    if (turn === undefined) continue;
+    let marked = turnMarks.get(turn);
+    if (marked === undefined) {
+      marked = turn.events.some((event) => event.kind === 'assistant.block.complete' && event.agentId === turn.agentId && event.block.type === 'text' && marksOfText(event.block.text).marked);
+      turnMarks.set(turn, marked);
+    }
+    if (marked) return true;
   }
   return false;
 }
@@ -575,7 +594,7 @@ export function createTranscriptStore() {
         const was = current.state.ui;
         const laneChanged = (was.ownerLane ?? false) !== lane;
         if (!laneChanged && (was.tailMessage ?? false) === tailMessage && (modDraws === undefined || (was.modDraws ?? false) === modDraws)) return;
-        const flag = inForce({ ...current.state, ui: { ...was, ownerLane: lane, tailMessage } });
+        const flag = inForce({ ...current.state, ui: { ...was, ownerLane: lane, tailMessage } }) || (lane && laneChanged && eventsHoldMark(current.state));
         const flagChanged = flag !== (was.noTurnFold === true);
         changeUi(key, () => (laneChanged || flagChanged ? 'all' : []), (ui) => {
           ui.ownerLane = lane;

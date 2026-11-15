@@ -216,8 +216,9 @@ describe('the lane with an engine surface attached', () => {
   const assistantAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('session.ui.render') as { component: string; props: { text: string } }[]).filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text);
 
   it('both marked and unmarked texts are offered to the attached surface', async () => {
-    const { fake } = await attached(session());
+    const { fake, key } = await attached(session());
     await waitFor(() => expect(assistantAsks(fake)).toContain(MARKED));
+    act(() => useTranscriptStore.getState().setView(key, 'transcript')); // the full transcript: no record holds a text out of sight
     expect(document.querySelector('[data-owner-card]')).toBeNull();
     await waitFor(() => expect(assistantAsks(fake)).toContain('A plain answer.'));
     expect(assistantAsks(fake)).toContain(MARKED);

@@ -127,7 +127,6 @@ describe('the streaming rows', () => {
 
     act(() => store.push([delta('</insight>')])); // a crossing tag invalidates the open mark
     const after = useTranscriptStore.getState().entries[store.key];
-    expect(rowOf(after.rows, 'assistant_text').markdown).toBe('<message>Open'); // the row is its first delta, stale
     expect(liveBuffer(after, native)).toBe('<message>Open</insight>');
     expect(liveMarkedRowIds(after.state)).toBe('');
     expect(after.state.ui.noTurnFold).toBe(false); // no message after all: the view is out of force

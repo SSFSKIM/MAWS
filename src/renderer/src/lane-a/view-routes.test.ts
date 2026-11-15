@@ -73,7 +73,11 @@ async function viewOf(events: SessionEvent[]) {
   return { inForce: entry().state.ui.noTurnFold === true, closed: at('none'), opened: at('all'), keys: stretchesOf(restingRows(entry().state, entry().rows)).map((stretch) => stretch.key) };
 }
 
-/** What a person reads of the view: each row by its kind and words, ids aside (the routes key rows differently). */
+/**
+ * What a person reads of the view: each row by its kind and words, ids aside (the routes key rows differently). An
+ * error line is left out: the wire alone carries the process's own lines (its exit), and every error stays in sight on
+ * every route, so none is the fold's.
+ */
 const reading = (drawn: Row[]) =>
   drawn.flatMap((row): string[] => {
     switch (row.kind) {
@@ -84,7 +88,7 @@ const reading = (drawn: Row[]) =>
       case 'divider': return [`turn ${row.state}`];
       case 'cell': return [`call ${row.toolName}`];
       case 'group': return [`run ${row.cells.map((cell) => cell.toolName).join(' ')}`];
-      case 'time': return [];
+      case 'time': case 'error': return [];
       default: return [row.kind];
     }
   });
