@@ -36,7 +36,7 @@ const mainTabSite = (key: string): CloseSite => ({ reveal: () => useLayout.getSt
 // while the question was open) changes nothing: what holds the file now keeps it, edits and all (sequence 2).
 // UX wave U6e (the panel's finding 3): the merge view's veto guards a Save that would write the unresolved document; an
 // entry whose latest admission locks it is never saved, so its question is asked as any dirty tab's, and Don't save is
-// its way out (Save then writes nothing and keeps the tab).
+// its way out (the question offers no Save while the lock stands: `EditorDialogs`).
 const vetoed = (entry: { theirs: { view: string } | null; locked: unknown } | undefined) => entry?.theirs?.view === 'merge' && entry.locked === null;
 
 export async function closeGuardOf(key: string, site: CloseSite = mainTabSite(key)): Promise<boolean> {

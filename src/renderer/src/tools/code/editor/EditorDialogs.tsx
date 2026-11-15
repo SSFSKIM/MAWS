@@ -9,6 +9,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { Sheet, SheetForm } from '../../../sessions/Sheet';
 import { PRIMARY, SECONDARY } from '../../../sessions/ui';
 import { EDITOR_COPY } from '../copy';
+import { useViewer } from '../viewer/viewer-store';
 
 export type CloseChoice = 'save' | 'discard' | 'cancel';
 
@@ -49,22 +50,43 @@ export function EditorDialogs() {
   const open = useEditorDialog((s) => s.open);
   if (open === null) return null;
   if (open.kind === 'anchor') return <AnchorPlaceholder anchor={open.anchor} />;
+  return <CloseSheet open={open} />;
+}
+
+// UX wave U6e (the task review's finding 3): while the tab's latest admission locks it, Save cannot write, so the
+// question offers only Don't save and Cancel, and Cancel, which keeps the tab and its edits, holds the keyboard.
+function CloseSheet({ open }: { open: Extract<EditorDialog, { kind: 'close' }> }) {
+  const locked = useViewer((s) => (s.entries.get(open.tabId)?.locked ?? null) !== null);
   return (
     <Sheet title={EDITOR_COPY.closeTitle(open.name)} onClose={() => open.answer('cancel')} data-editor-close={open.tabId}>
-      <SheetForm
-        focusSubmit
-        canSubmit
-        onSubmit={() => open.answer('save')}
-        submitLabel={EDITOR_COPY.save}
-        submitClass={PRIMARY}
-        extra={
-          <button type="button" className={SECONDARY} onClick={() => open.answer('discard')}>
-            {EDITOR_COPY.dontSave}
-          </button>
-        }
-      >
-        <p className="m-0 text-fg-muted">{EDITOR_COPY.closeBody}</p>
-      </SheetForm>
+      {locked ? (
+        <div className="flex flex-col gap-3">
+          <p className="m-0 text-fg-muted">{EDITOR_COPY.closeBody}</p>
+          <div className="flex items-center justify-end gap-2">
+            <button type="button" className={SECONDARY} onClick={() => open.answer('discard')}>
+              {EDITOR_COPY.dontSave}
+            </button>
+            <button type="button" autoFocus className={SECONDARY} onClick={() => open.answer('cancel')}>
+              {EDITOR_COPY.cancel}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <SheetForm
+          focusSubmit
+          canSubmit
+          onSubmit={() => open.answer('save')}
+          submitLabel={EDITOR_COPY.save}
+          submitClass={PRIMARY}
+          extra={
+            <button type="button" className={SECONDARY} onClick={() => open.answer('discard')}>
+              {EDITOR_COPY.dontSave}
+            </button>
+          }
+        >
+          <p className="m-0 text-fg-muted">{EDITOR_COPY.closeBody}</p>
+        </SheetForm>
+      )}
     </Sheet>
   );
 }

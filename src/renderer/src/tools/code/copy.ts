@@ -134,7 +134,7 @@ export const EDITOR_COPY = {
   acceptMine: 'Accept mine', acceptTheirs: 'Accept theirs', acceptBoth: 'Accept both',
   mineLabel: (name: string | null) => (name ? `mine (${name})` : 'mine'), theirsLabel: (name: string | null) => (name ? `theirs (${name})` : 'theirs'), base: 'base',
   previousConflict: 'Previous conflict', nextConflict: 'Next conflict',
-  closeTitle: (name: string) => `Save changes to ${name}?`, closeBody: 'Your changes will be lost if you don’t save them.', dontSave: 'Don’t save',
+  closeTitle: (name: string) => `Save changes to ${name}?`, closeBody: 'Your changes will be lost if you don’t save them.', dontSave: 'Don’t save', cancel: 'Cancel', // the sheet's own Cancel (SheetForm's), drawn by the locked question (U6e)
   readOnly: {
     outside: 'Read-only: the file is outside the folders this session works in', // UX wave U6c: a file the transcript names; U6e: a daemon of the parent pin's answer alone (W6)
     // UX wave U6e (§D): a file the daemon admits for a read and never for a save
