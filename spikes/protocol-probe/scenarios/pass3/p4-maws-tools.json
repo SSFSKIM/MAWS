@@ -1229,6 +1229,31 @@
       "_meta": {
         "anthropic/alwaysLoad": true
       }
+    },
+    {
+      "name": "artifact_delete",
+      "title": "Delete artifact",
+      "description": "Delete a MAWS artifact this session made and no longer needs, such as an abandoned draft; without this tool, ask the user to delete it in the Library. Only an artifact that this session, or the session a side thread was opened from, created and that only agents have written to; anything else is refused with the reason. The user can undo it from the transcript. Returns the deleted artifact's id, kind and title.",
+      "inputSchema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "properties": {
+          "artifact": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"
+          }
+        },
+        "required": [
+          "artifact"
+        ],
+        "additionalProperties": false
+      },
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "title": "Delete artifact"
+      }
     }
   ]
 }
