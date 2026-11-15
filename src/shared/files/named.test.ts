@@ -766,7 +766,7 @@ describe('rowClaim: decision 22’s table over the recorded transcripts', () => 
           expect(counted, `${String(row.type)} ${path}: ${JSON.stringify(row).slice(0, 300)}`).toBe(true);
         } else if (claim.other) {
           other += 1;
-          expect(row.type === 'user' && !personWrote(row), JSON.stringify(row).slice(0, 300)).toBe(true);
+          expect((row.type === 'user' || row.type === 'attachment') && !personWrote(row), JSON.stringify(row).slice(0, 300)).toBe(true); // a queued prompt too (the panel's finding 2)
         } else if (claim.pending.length > 0) {
           waiting += 1;
           expect(row.type, JSON.stringify(row).slice(0, 300)).toBe('user');
