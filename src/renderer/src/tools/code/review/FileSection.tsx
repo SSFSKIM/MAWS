@@ -75,11 +75,16 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
     if (wanted && target) useReview.getState().loadFile(target, file.path, untracked);
   }, [wanted, target, file.path, untracked, scopeDiff]);
 
-  const text = useMemo(() => JSON.stringify(blocks), [blocks]);
-  const data = useMemo(() => blockData(file.path, file.oldPath, text), [file.path, file.oldPath, text]);
+  // The diff's data is prepared only for a body that draws it (unfolded, in the band, a text diff small enough to draw),
+  // and kept while it draws and its text is equal.
+  const shown = !folded && drawn;
+  const large = useMemo(() => shown && hunks !== null && tooLarge({ hunks }), [shown, hunks]);
+  const draws = shown && !untrackedDirectory && !binary && hunks !== null && hunks.length > 0 && !large;
+  const text = useMemo(() => (draws ? JSON.stringify(blocks) : null), [draws, blocks]);
+  const data = useMemo(() => (text === null ? null : blockData(file.path, file.oldPath, text)), [file.path, file.oldPath, text]);
 
   const body = (() => {
-    if (folded || !drawn) return null;
+    if (!shown) return null;
     if (untrackedDirectory)
       return (
         <p data-review-note className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
@@ -98,7 +103,7 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
       );
     if (binary) return <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.binaryFile}</p>;
     if (hunks === null) return <Loading />;
-    if (tooLarge({ hunks }))
+    if (large)
       return (
         <p data-review-too-large className="m-0 px-3 py-2 text-ui-sm text-fg-muted">
           {REVIEW_COPY.tooLarge}{' '}
@@ -111,7 +116,7 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
           )}
         </p>
       );
-    if (hunks.length === 0) return null; // a rename with no change, a mode change: nothing to draw
+    if (hunks.length === 0 || data === null) return null; // a rename with no change, a mode change: nothing to draw
     return (
       <Suspense fallback={<Loading />}>
         <FileBody path={file.path} data={data} mode={mode} wrap={wrap} />

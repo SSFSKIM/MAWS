@@ -17,7 +17,7 @@ import { FileSection } from './FileSection';
 import { useLineCommentsContext } from './LineComments';
 import { blocksOf, firstChangedLine, REVIEW_FILE_LINES_CAP, tooLarge, viewedSignature, type ReviewFile } from './review-model';
 import { fileDiffOf, useReview, type DiffTarget, type ScopeDiff } from './review-store';
-import { bodyLines, hunkOrder, isFolded, type StackHunk } from './stack-model';
+import { bodyLines, hunkOrder, isFolded, type FoldChoice, type StackHunk } from './stack-model';
 import { EMPTY_BAND, StackPlacer, type Band } from './stack-place';
 import { savePlace, setFold, toggleViewed, type ReviewMode, type ReviewUi } from './view-state';
 
@@ -46,51 +46,101 @@ export interface HeldFile {
 }
 
 // The sections of a scope and the hunks the counter counts (§F): those of every loaded file, folded or not, that is not
-// marked Viewed and not past the per-file cap, in stack order.
+// marked Viewed and not past the per-file cap, in stack order. Each file's section is made again only when what it is
+// made from changed (its row in the list, its own read, its mark, its fold, its hold), so a file's read, mark or fold
+// remakes that file's section and hunks alone.
 export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarget | null; placeKey: string; pastCap: boolean; ui: StoreApi<ReviewUi>; held?: HeldFile | null }): { sections: StackSection[]; order: StackHunk[] } {
   const { files, target, placeKey: key, pastCap, ui, held = null } = input;
   const marks = useStore(ui, (s) => s.viewed);
   const folds = useStore(ui, (s) => s.folds);
   const fetched = useReview((s) => s.files);
   return useMemo(() => {
-    const sections = files.map((file): StackSection => {
-      const untracked = file.kind === 'untracked';
-      const untrackedDirectory = untracked && file.path.endsWith('/');
+    const sections: StackSection[] = [];
+    const order: StackHunk[] = [];
+    for (const file of files) {
       // P5 O7 M8: an untracked file is read on its own as Source control reads it (the `untracked` scope), so it shows as
       // added; a scope past its cap reads each file on its own; a binary past it reads its header (what its mark signs)
-      const ownRead = target !== null && (file.kind === 'binary' ? file.header === null : file.hunks === null && !untrackedDirectory);
-      const load = ownRead && target ? fileDiffOf({ files: fetched }, target, file.path) : undefined;
-      const binary = file.kind === 'binary' || (untracked && load?.status === 'ok' && load.file?.kind === 'binary');
-      const latest = binary ? null : (file.hunks ?? (load?.status === 'ok' ? (load.file?.hunks ?? []) : null));
-      const hold = held !== null && held.placeKey === key && held.path === file.path && !binary ? held : null;
-      const hunks = hold ? hold.hunks : latest;
-      const header = file.header ?? (load?.status === 'ok' ? (load.file?.header ?? null) : null);
-      const markable = binary ? header !== null : !untrackedDirectory && hunks !== null;
-      const signature = markable ? viewedSignature({ kind: binary ? 'binary' : file.kind, header }, hunks) : null;
-      const mark = marks.get(key)?.get(file.path);
-      // A mark on a file whose own read has not answered yet holds until it does, so the file does not unfold meanwhile;
-      // one that no longer signs the file's change has dropped, and unfolds it.
-      const viewed = mark !== undefined && (signature === null ? ownRead : mark === signature);
-      const dropped = mark !== undefined && signature !== null && mark !== signature;
-      const folded = isFolded({ choice: folds.get(key)?.get(file.path), viewed, dropped, pastCap });
-      const failed = load?.status === 'error' ? load.message : null;
-      return {
+      const ownRead = target !== null && (file.kind === 'binary' ? file.header === null : file.hunks === null && !(file.kind === 'untracked' && file.path.endsWith('/')));
+      const from: SectionInputs = {
         file,
-        hunks,
-        blocks: hold ? hold.blocks : hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks),
-        binary,
-        signature,
-        viewed,
-        folded,
-        fetch: ownRead && (!folded || mark !== undefined),
-        failed,
-        lines: estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
-        changed: hold !== null && latest !== null && latest.join('\n') !== hold.hunks.join('\n'),
+        target,
+        key,
+        pastCap,
+        load: ownRead && target ? fileDiffOf({ files: fetched }, target, file.path) : undefined,
+        mark: marks.get(key)?.get(file.path),
+        choice: folds.get(key)?.get(file.path),
+        held: held !== null && held.placeKey === key && held.path === file.path ? held : null,
       };
-    });
-    const order = hunkOrder(sections.map((section) => ({ path: section.file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed })));
+      const entry = sectionFor(from, ownRead);
+      sections.push(entry.section);
+      for (const hunk of entry.hunks) order.push(hunk);
+    }
     return { sections, order };
   }, [files, target, key, pastCap, marks, folds, fetched, held]);
+}
+
+// What one file's section is made from, and what was made.
+interface SectionInputs {
+  file: ReviewFile;
+  target: DiffTarget | null;
+  key: string;
+  pastCap: boolean;
+  load: ReturnType<typeof fileDiffOf>;
+  mark: string | undefined;
+  choice: FoldChoice | undefined;
+  held: HeldFile | null;
+}
+interface MadeSection {
+  from: SectionInputs;
+  section: StackSection;
+  hunks: StackHunk[];
+}
+const sameInputs = (a: SectionInputs, b: SectionInputs): boolean =>
+  a.file === b.file && a.target === b.target && a.key === b.key && a.pastCap === b.pastCap && a.load === b.load && a.mark === b.mark && a.choice === b.choice && a.held === b.held;
+
+// The section last made for each of the list's files, by the file's own object (a re-read of the list makes new ones):
+// made again only when one of its inputs differs.
+const made = new WeakMap<ReviewFile, MadeSection>();
+function sectionFor(from: SectionInputs, ownRead: boolean): MadeSection {
+  const was = made.get(from.file);
+  if (was && sameInputs(was.from, from)) return was;
+  const next = sectionOf(from, ownRead);
+  made.set(from.file, next);
+  return next;
+}
+
+function sectionOf(from: SectionInputs, ownRead: boolean): MadeSection {
+  const { file, load, mark, choice, pastCap } = from;
+  const untracked = file.kind === 'untracked';
+  const untrackedDirectory = untracked && file.path.endsWith('/');
+  const binary = file.kind === 'binary' || (untracked && load?.status === 'ok' && load.file?.kind === 'binary');
+  const latest = binary ? null : (file.hunks ?? (load?.status === 'ok' ? (load.file?.hunks ?? []) : null));
+  const hold = binary ? null : from.held;
+  const hunks = hold ? hold.hunks : latest;
+  const header = file.header ?? (load?.status === 'ok' ? (load.file?.header ?? null) : null);
+  const markable = binary ? header !== null : !untrackedDirectory && hunks !== null;
+  const signature = markable ? viewedSignature({ kind: binary ? 'binary' : file.kind, header }, hunks) : null;
+  // A mark on a file whose own read has not answered yet holds until it does, so the file does not unfold meanwhile;
+  // one that no longer signs the file's change has dropped, and unfolds it.
+  const viewed = mark !== undefined && (signature === null ? ownRead : mark === signature);
+  const dropped = mark !== undefined && signature !== null && mark !== signature;
+  const folded = isFolded({ choice, viewed, dropped, pastCap });
+  const failed = load?.status === 'error' ? load.message : null;
+  const section: StackSection = {
+    file,
+    hunks,
+    blocks: hold ? hold.blocks : hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks),
+    binary,
+    signature,
+    viewed,
+    folded,
+    fetch: ownRead && (!folded || mark !== undefined),
+    failed,
+    lines: estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
+    changed: hold !== null && latest !== null && latest.join('\n') !== hold.hunks.join('\n'),
+  };
+  const counted = hunkOrder([{ path: file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed }]);
+  return { from, section, hunks: counted };
 }
 
 // What a body is estimated from before it is measured: nothing for a section that draws no body (a rename with no
@@ -188,8 +238,9 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
         placed.revealHunk(jump);
       }
     }
-    // M5: a card opened on a line this stack does not draw (the chip's newest comment, in a folded file or far from the
-    // scroll position) is brought into view, its file unfolded; one opened where the person points stays where it is.
+    // M5: a card opened on a line out of view (the chip's newest comment: in a folded file, far from the scroll position,
+    // or drawn above or below the viewport) is brought into view, its file unfolded; one opened where the person points
+    // (their pointer held in the scroller) or on a line wholly in view stays where it is.
     // M5 fix 5: one whose file is folded in a scope past the cap waits on a read the fold holds back: the file unfolds, as
     // a request's reveal unfolds its file (§F), is read, and the card is revealed at its line above once it is placed.
     if (waiting !== null && seen.waiting !== waiting.serial) {
@@ -199,9 +250,10 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     if (card !== null && seen.card !== card.serial) {
       seen.card = card.serial;
       const section = sections.find((each) => each.file.path === card.path);
-      if (section && (section.folded || !band.drawn.has(card.path))) {
+      const place = { path: card.path, row: { block: card.block, side: card.side, line: card.line }, offset: 0 };
+      if (section && (section.folded || (!placed.pointing() && !placed.inView(place)))) {
         if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
-        placed.revealPlace({ path: card.path, row: { block: card.block, side: card.side, line: card.line }, offset: 0 });
+        placed.revealPlace(place);
       }
     }
     const watching = observer.current;
