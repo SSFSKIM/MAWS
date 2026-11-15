@@ -92,7 +92,7 @@ describe('the label follows `spanRows`', () => {
   });
 
   it('a message still streaming reads its label and ` …`, its body the text so far; closed, the ` …` goes', () => {
-    const row = (markdown: string, live: boolean): Extract<Row, { kind: 'assistant_text' }> => ({ id: 'text:m1:0' as never, turnId: turnId.ofMessage(uuid('u1')), at: '2026-11-15T10:00:00.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown, live, phase: 'answer' });
+    const row = (markdown: string, live: boolean): Extract<Row, { kind: 'assistant_text' }> => ({ id: 'text:m1:0' as never, turnId: turnId.ofMessage(uuid('u1')), at: '2026-11-15T10:00:00.000Z', kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown, live, phase: 'answer', model: null });
     const streaming = render(<TranscriptProvider value={CONTEXT}><AssistantTextRow row={row('<message>\nHalfway thr', true)} /></TranscriptProvider>);
     expect(labels(streaming.container)).toEqual(['● message …']);
     expect(bodies(streaming.container)).toEqual(['Halfway thr']);
