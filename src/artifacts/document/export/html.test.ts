@@ -2,9 +2,12 @@
 // from outside it but `maws-artifact:` and `data:`), the editor's theme inlined with every `--ds-*` resolved, math and
 // code pre-rendered, the page Letter by default. Runs under Node, as A's export service in main runs it.
 import { describe, expect, it } from 'vitest';
+import { exportTheme, prepareViews } from '../../dashboard/export';
+import { exportDashboard, SNAPSHOTS } from '../../dashboard/fixtures/export';
 import { everyKindSource } from '../convert.fixture';
 import { houseSystem, type DesignSystemExport, type LocalTokens } from './design-system';
 import { exportHtml } from './html';
+import { defaultAuthorName, exportSource } from './source';
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const loadImage = async () => ({ bytes: PNG, mime: 'image/png' });
@@ -147,11 +150,23 @@ describe('exportHtml', () => {
 describe('the exported page', () => {
   const printBlock = (html: string): string => /@media print \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? '';
 
-  it('removes the browser’s own block margins at zero specificity, so the theme’s gap rule and the tokens govern', async () => {
-    const html = await exportHtml(everyKindSource());
-    expect(html).toContain('\n.ds-doc :where(p, h1, h2, h3, ul, ol, blockquote, table, pre) { margin-block: 0; }\n');
+  // The elements the browser gives a block margin of its own (Chromium's html.css, which the PDF is drawn with: p, the
+  // headings, the lists, dl, blockquote, figure, pre and its kin, hr, form); the editor's base stylesheet (Tailwind's
+  // preflight, `* { margin: 0 }`) removes every one of them, so the page must remove each one the export writes.
+  const BROWSER_BLOCK_MARGINS = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'menu', 'dir', 'dl', 'blockquote', 'figure', 'pre', 'listing', 'xmp', 'hr', 'form']);
+  const zeroedOf = (html: string): string[] => /\n\.ds-doc :where\(([^)]*)\) \{ margin-block: 0; \}\n/.exec(html)?.[1].split(', ') ?? [];
+
+  it('removes the browser’s own block margin from every element the export writes, at zero specificity', async () => {
+    const { doc } = exportDashboard();
+    const views = await prepareViews(doc, { read: async ({ ref }) => SNAPSHOTS[ref], theme: exportTheme(), authorName: defaultAuthorName });
+    // one of each block kind, and a drawn view (its figure, caption, SVG and table)
+    const pages = [await exportHtml(everyKindSource()), await exportHtml(exportSource(doc, 'Board'), { renderView: views })];
+    const written = new Set(pages.flatMap((html) => [...(/<main[\s\S]*<\/main>/.exec(html)?.[0] ?? '').matchAll(/<([a-z][a-z0-9]*)[\s>]/g)].map((match) => match[1])));
+    const margined = [...written].filter((tag) => BROWSER_BLOCK_MARGINS.has(tag)).sort();
+    expect(margined).toEqual(['blockquote', 'figure', 'h1', 'h2', 'h3', 'hr', 'ol', 'p', 'pre', 'ul']);
+    for (const html of pages) expect(margined.filter((tag) => !zeroedOf(html).includes(tag))).toEqual([]);
     // the theme's own gap rule still stands beside it, with the spacing token resolved
-    expect(html).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 12px;/);
+    expect(pages[0]).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 12px;/);
   });
 
   it('spaces a tab’s blocks, under its title, by the theme’s gap, as the editor spaces that tab', async () => {
