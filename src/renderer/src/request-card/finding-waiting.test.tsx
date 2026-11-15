@@ -29,6 +29,7 @@ import { resetComposerStore } from '../stores/composer';
 import { resetLaneAStore } from '../stores/lane-a';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
+import { preloadOf } from '../test-support/preload-of';
 import { resetShellStores } from '../test-support/shell-stores';
 import { TranscriptSlot, useTranscriptStore } from '../transcript';
 import { builder, request, tool } from '../transcript/model/test-events';
@@ -73,7 +74,7 @@ beforeEach(() => {
     'attention.request': (input: { requestId: string }) => ({ event: requests.get(input.requestId) ?? null }),
     'attention.pendingNavigate': { navigate: null },
   });
-  window.maws = fake.client as unknown as PreloadBridge;
+  window.maws = preloadOf(fake); // the page's real client (`ipc`) reads main's events through it
   offs = [connectKeys(), connectRequestCard()];
 });
 afterEach(() => {
