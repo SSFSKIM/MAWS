@@ -36,8 +36,10 @@ export interface StackSection {
 }
 
 // UX wave U5b, M5 (§G, decision 10): a file under an open card holds still: its hunks and blocks as they were when the
-// card opened, until the card goes or the person asks for the file's latest (Refresh).
+// card opened, until the card goes or the person asks for the file's latest (Refresh). A hold is one scope's (`placeKey`):
+// another scope's file of the same path draws its own hunks.
 export interface HeldFile {
+  placeKey: string;
   path: string;
   hunks: string[];
   blocks: string[][];
@@ -60,7 +62,7 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
       const load = ownRead && target ? fileDiffOf({ files: fetched }, target, file.path) : undefined;
       const binary = file.kind === 'binary' || (untracked && load?.status === 'ok' && load.file?.kind === 'binary');
       const latest = binary ? null : (file.hunks ?? (load?.status === 'ok' ? (load.file?.hunks ?? []) : null));
-      const hold = held !== null && held.path === file.path && !binary ? held : null;
+      const hold = held !== null && held.placeKey === key && held.path === file.path && !binary ? held : null;
       const hunks = hold ? hold.hunks : latest;
       const header = file.header ?? (load?.status === 'ok' ? (load.file?.header ?? null) : null);
       const markable = binary ? header !== null : !untrackedDirectory && hunks !== null;

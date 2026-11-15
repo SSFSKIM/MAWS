@@ -9,6 +9,7 @@
 // ("N unsent comments") and its place line belong; the card is drawn through a portal into the row the stack opens
 // under the commented line. `hostId` is the surface's own (the tool's tab id, a diff tab's id).
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -22,7 +23,7 @@ import '../code.css';
 import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
 import { defaultScope, latestTurnWithFiles, totals, type ReviewFile, type ReviewScope } from './review-model';
 import { diffOf, useReview, useReviewData, type ReviewData } from './review-store';
-import { LineCommentsContext, rowsIn, useLineComments, type LineCommentsValue } from './LineComments';
+import { CardSlot, LineCommentsContext, rowsIn, useCardSlot, useLeaveWithNoLines, useLineComments, type LineCommentsValue } from './LineComments';
 import { Stack, useStack, type HeldFile } from './Stack';
 import { everyFolded } from './stack-model';
 import { Toolbar, totalsWords } from './Toolbar';
@@ -66,6 +67,10 @@ function useWidth(): [(element: HTMLDivElement | null) => void, number] {
   return [setElement, width];
 }
 
+// The card's frame in Review: nothing is located or pinned (the `inline` layout).
+const CARD_FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'review' };
+const acceptsNone = () => false; // a Review card is opened on its host by id, never claimed (`targetOf` is null for a line)
+
 export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chips, focusRequest = 0, visible = true }: ReviewShellProps) {
   const scope = useStore(ui, (s) => s.scope);
   const turnId = useStore(ui, (s) => s.turnId);
@@ -104,9 +109,22 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
   const [measured, width] = useWidth();
   const mode = useStore(ui, (s) => s.mode);
   const key = scope ? placeKey(directory, scope, turnId, null) : '';
+
+  // The comment card's host (M5, §B), mounted for as long as the surface is: in the toolbar while the stack is drawn, in
+  // a line of its own where the toolbar stands while it is not; the card in the row under its line (`row`).
+  const slot = useCardSlot();
+  const [row, setRow] = useState<HTMLElement | null>(null);
+  const stacked = files !== null && files.length > 0;
+  useLeaveWithNoLines(hostId, data.list.phase === 'unavailable' || (files !== null && files.length === 0));
   return (
     <div ref={measured} data-review data-scope={scope ?? ''} data-mode={drawnMode(mode, width)} className="flex h-full min-h-0 flex-col bg-bg">
+      {createPortal(<CommentCardHost hostId={hostId} host="review" mode={hostMode} layout="inline" row={row} accepts={acceptsNone} frame={CARD_FRAME} visible={visible} subject={appSessionId} />, slot)}
       {chips ? <ScopeChips ui={ui} data={data} scope={scope} appSessionId={appSessionId} /> : null}
+      {stacked ? null : (
+        <div data-review-card-bar className="flex shrink-0 items-center border-b border-border px-3 py-1.5">
+          <CardSlot element={slot} />
+        </div>
+      )}
       {data.list.phase === 'unavailable' ? (
         <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
           {data.list.message}
@@ -121,8 +139,9 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
         <StackView
           appSessionId={appSessionId}
           hostId={hostId}
-          hostMode={hostMode}
-          visible={visible}
+          cardSlot={slot}
+          row={row}
+          setRow={setRow}
           ui={ui}
           data={data}
           files={files}
@@ -144,8 +163,9 @@ const drawnMode = (mode: ReviewMode, width: number): ReviewMode => (mode === 'sp
 interface StackViewProps {
   appSessionId: AppSessionId;
   hostId: string;
-  hostMode: 'panel' | 'tab';
-  visible: boolean;
+  cardSlot: HTMLElement; // the card host's element, shown in the toolbar
+  row: HTMLElement | null; // the row under the commented line the card is drawn in
+  setRow(row: HTMLElement | null): void;
   ui: StoreApi<ReviewUi>;
   data: ReviewData;
   files: readonly ReviewFile[];
@@ -156,13 +176,9 @@ interface StackViewProps {
   refused: string | null;
 }
 
-// The card's frame in Review: nothing is located or pinned (the `inline` layout).
-const CARD_FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'review' };
-const acceptsNone = () => false; // a Review card is opened on its host by id, never claimed (`targetOf` is null for a line)
-
-// The toolbar over the stack, both from one resolution of the scope's files; the comment card's host in the toolbar,
-// and the comments on lines over the stack (M5).
-function StackView({ appSessionId, hostId, hostMode, visible, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
+// The toolbar over the stack, both from one resolution of the scope's files; the comment card's host shown in the
+// toolbar, and the comments on lines over the stack (M5).
+function StackView({ appSessionId, hostId, cardSlot, row, setRow, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
   const [held, setHeld] = useState<HeldFile | null>(null);
   const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui, held });
   const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
@@ -172,15 +188,15 @@ function StackView({ appSessionId, hostId, hostMode, visible, ui, data, files, p
   const allFolded = everyFolded(sections.map((section) => section.folded));
   const current = Math.min(hunk, Math.max(0, order.length - 1));
 
-  // The row under the commented line the card is drawn in, and the file held still under the open card: its hunks as
-  // the card found them, taken when the card opens on it and let go when the card goes (§G, decision 10).
-  const [row, setRow] = useState<HTMLElement | null>(null);
+  // The file held still under the open card: its hunks as the card found them in this scope, taken when the card opens
+  // on it and let go when the card goes or another scope is drawn (§G, decision 10).
   const comments = useLineComments({ appSessionId, hostId, repoRoot: data.status?.repoRoot ?? null, sections });
   const holdPath = comments.holdPath;
-  if (holdPath === null ? held !== null : held?.path !== holdPath) {
+  if (holdPath === null ? held !== null : held?.path !== holdPath || held.placeKey !== key) {
     const section = holdPath === null ? undefined : sections.find((each) => each.file.path === holdPath);
     if (holdPath === null) setHeld(null);
-    else if (section?.hunks) setHeld({ path: holdPath, hunks: section.hunks, blocks: section.blocks });
+    else if (section?.hunks) setHeld({ placeKey: key, path: holdPath, hunks: section.hunks, blocks: section.blocks });
+    else if (held !== null) setHeld(null);
   }
   // Refresh: the held file takes its latest hunks, and the card is drawn again at its comment's place there, the
   // keyboard back in its field once it is (the library drops the old row's elements before the card leaves them, so the
@@ -197,13 +213,13 @@ function StackView({ appSessionId, hostId, hostMode, visible, ui, data, files, p
     focusAtEnd(field);
   }, [row]);
   const { rows, card, add } = comments;
-  const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, rows, add]);
+  const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, rows, add, setRow]);
 
   return (
     <LineCommentsContext.Provider value={value}>
       <Toolbar
         totals={totalsWords(totals(files))}
-        chip={<CommentCardHost hostId={hostId} host="review" mode={hostMode} layout="inline" row={row} accepts={acceptsNone} frame={CARD_FRAME} visible={visible} subject={appSessionId} />}
+        chip={<CardSlot element={cardSlot} />}
         allFolded={allFolded}
         onFoldAll={() => ui.setState((s) => foldAll(s, key, files.map((file) => file.path), allFolded ? 'open' : 'closed'))}
         counter={order.length > 0 ? { index: current, count: order.length } : null}

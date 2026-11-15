@@ -1,13 +1,14 @@
 // Comments on lines in a Review surface (UX wave U5b, M5; the execution document's §B and §G, decisions 4, 10 and 11).
-// One surface (the panel's Review, a diff tab) mounts the card's host once, in its toolbar, and draws the pass of its
+// One surface (the panel's Review, a diff tab) mounts the card's host once, for as long as it is, shown in its toolbar (or
+// where the toolbar stands while there is none: `useCardSlot`), and draws the pass of its
 // session (`passKey('review', session, session)`) in its diff: the card in the library's widget row under the line of
 // the store's open card when that card is its own, every other comment of the pass as a row under its line (one line of
 // its words, a click that edits it, Remove). A comment is placed again from its quote at every refresh (`placeOf`); one
 // whose line left the diff stays in the pass and the chip and is drawn under no line. While the card is open on a file
-// of this surface, that file holds still (`HeldFile`, the surface's).
+// of this surface, that file holds still in its scope (`HeldFile`, the surface's).
 //
 // The context carries what the diff's rows need; with no provider (a surface that takes no comments) nothing is drawn.
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FileLineAnchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { CARD_WIDTH } from '../../../side/card/placement';
@@ -101,6 +102,43 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
   }, [stray]);
 
   return { key, card: placed.card, holdPath: placed.holdPath, rows: placed.rows, add };
+}
+
+/**
+ * The card host's own element (§B): the surface mounts its host once, into this element, for as long as the surface is;
+ * `CardSlot` shows it where the host's chip and place line belong (the toolbar, or the line standing in the toolbar's
+ * place while there is none). One element moved between them, so the host is never mounted again.
+ */
+export function useCardSlot(): HTMLElement {
+  const [element] = useState(() => {
+    const slot = document.createElement('div');
+    slot.className = 'contents';
+    return slot;
+  });
+  return element;
+}
+
+export function CardSlot({ element }: { element: HTMLElement }) {
+  const place = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const parent = place.current!;
+    parent.appendChild(element);
+    return () => {
+      if (element.parentNode === parent) parent.removeChild(element);
+    };
+  }, [element]);
+  return <div ref={place} className="contents" />;
+}
+
+/**
+ * A surface with no line to draw a card under (its scope has no files, or cannot be read): its open card is left, its
+ * comment staying in the pass, so the chip stands for it until a file returns.
+ */
+export function useLeaveWithNoLines(hostId: string, noLines: boolean): void {
+  const serial = useCommentCard((s) => (noLines && s.open !== null && s.open.hostId === hostId && s.open.phase.kind === 'composing' ? s.open.serial : null));
+  useEffect(() => {
+    if (serial !== null) leaveCard(serial);
+  }, [serial]);
 }
 
 const NO_ROWS: readonly PlacedComment[] = [];

@@ -80,3 +80,9 @@
   height: 24px;
   transform: translate(-50%, -50%);
 }
+/* The comment card host's place in Review (M5, §B): while it draws neither the unsent-comments chip nor the place line, it
+   takes no room (no gap in the toolbar, no line where the toolbar stands). */
+[data-review-card-bar]:has([data-card-inline]:empty),
+[data-review-toolbar-chip]:has([data-card-inline]:empty) {
+  display: none;
+}
