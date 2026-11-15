@@ -19,7 +19,6 @@ import { useEffect, useMemo, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
-import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import { ipc } from '../../ipc/client';
 import { useSessions } from '../../stores/sessions';
 import { SECONDARY } from '../../sessions/ui';
@@ -28,6 +27,7 @@ import { Gone, useManage } from '../../widgets/plugins/manage';
 import { factsOf } from '../../widgets/plugins/operation';
 import { useEngineRead } from '../../widgets/read';
 import { DiscoverPane } from '../discover/DiscoverPane';
+import type { Inventory } from '../inventory';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
 import { ConnectorRow } from './ConnectorRow';
 import { CONNECTORS as C } from './copy';
@@ -42,7 +42,7 @@ const DIRECTORY_SERVERS = 'directory:servers';
 export function ConnectorsMine({ cwd, place, servers, readAt, inventoryState, attached, askIn, search, onResetSearch, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
-  servers: readonly CustomizationServer[] | undefined; // the inventory's, once read
+  servers: Inventory['servers'] | undefined; // the inventory's, once read
   readAt: number; // when the inventory last answered
   inventoryState: ReactNode; // reading, failed (with Retry), or the warnings
   attached: AppSessionId | null; // the page's attached session
@@ -86,7 +86,7 @@ export function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | nul
 }
 
 // The configured servers, with a removal's result kept at the head once its row has left.
-function Configured({ servers, readAt, cwd, place, attached, askIn, search, onResetSearch }: { servers: readonly CustomizationServer[]; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn; search: string; onResetSearch(): void }) {
+function Configured({ servers, readAt, cwd, place, attached, askIn, search, onResetSearch }: { servers: Inventory['servers']; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn; search: string; onResetSearch(): void }) {
   const { ops } = useManage();
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it

@@ -46,7 +46,7 @@ describe('a custom connector’s add', () => {
     expect(holds()).toBe(false); // while the receipt is out
     await act(() => fake.reply('connectors.addJson', { opId: 'op-1' }));
     expect(holds()).toBe(false);
-    expect(result.current.entries.get('connector:add:project:files-probe')!.request.input).toEqual({ name: 'files-probe', scope: 'project', entry: { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Probe-Key', value: '•••' }, { name: 'X-Probe-Mode', value: '•••' }] } });
+    expect((result.current.entries.get('connector:add:project:files-probe')!.request as PluginsRequest).input).toEqual({ name: 'files-probe', scope: 'project', entry: { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Probe-Key', value: '•••' }, { name: 'X-Probe-Mode', value: '•••' }] } });
     act(() => fake.event('plugins.operation', { opId: 'op-1', action: 'mcp-add', target: 'files-probe', phase: 'done', outcome: { ok: false, error: { code: 'cli_failed', message: 'MCP server files-probe already exists in user config', failureCode: null, shownCommand: null } } }));
     expect(holds()).toBe(false);
     expect(result.current.entries.get('connector:add:project:files-probe')!.state.phase).toBe('done');

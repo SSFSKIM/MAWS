@@ -4,16 +4,16 @@
 // + opens the install sheet with the add step for a marketplace the engine lacks, the contents and the runs-code
 // warning, and runs the add, then the install only once the add succeeded; a failed install leaves the marketplace
 // added and offers its removal; an installed card opens My items; Skills names the plugin and its skills.
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
 import type { CatalogHome, CatalogItem, CatalogPage, CatalogQueryInput } from '@shared/ipc/schema/catalog';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { useLibraryStore } from '../../widgets/plugins/library-store';
-import { PluginsLibrary } from '../../widgets/PluginsWidget';
-import { CustomizeView } from '../CustomizeView';
-import { SkillsDiscover, SkillsManage } from './SkillsDiscover';
+import { mountCustomize } from '../../test-support/customize-page';
+import { useLayout } from '../../stores/layout';
+import { useCustomizePage } from '../page';
 import { connectCatalogEvents } from './read';
 import { NO_CHOICES, useDiscoverStore } from './store';
 import { item } from './test-items';
@@ -176,6 +176,8 @@ afterEach(() => {
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
   useSessions.setState({ projects: new Map() });
   useCustomizeProject.setState({ projectId: undefined }, true);
+  useCustomizePage.setState({ search: '' });
+  useLayout.setState({ destination: null });
   forgetKeptOperations();
   delete (window as { maws?: PreloadBridge }).maws;
 });
@@ -188,14 +190,16 @@ const client = () => {
   disconnect = connectCatalogEvents(ipc, qc);
   return qc;
 };
-const mountPlugins = () =>
-  render(
-    <QueryClientProvider client={client()}>
-      <PluginsLibrary cwd={PROJECT} appSessionId={null} discover={{ cwd: PROJECT }} />
-    </QueryClientProvider>,
-  );
+// UX wave U11c: Customize's page on the project's folder, My items with Plugins chosen
+const at = (show: 'plugins' | 'skills', view: 'mine' | 'discover' = 'mine') => {
+  useCustomizeProject.setState({ projectId: null, directory: PROJECT }, true);
+  return mountCustomize({ view, show }, client());
+};
+const mountPlugins = () => at('plugins');
+const head = () => document.querySelector<HTMLElement>('[data-customize-header]')!;
+const press = (name: string) => fireEvent.click(within(head()).getByRole('radio', { name }));
 const discover = async () => {
-  fireEvent.click(screen.getByRole('radio', { name: 'Discover' }));
+  press('Discover');
   await screen.findByRole('region', { name: 'Featured' });
 };
 const card = (id: string) => document.querySelector<HTMLElement>(`[data-shelf] [data-catalog-card="${CSS.escape(id)}"]`)!;
@@ -481,14 +485,9 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
       useSessions.setState({ projects: new Map([[A, projectRecord(A, 0, { directory: PROJECT })], [B, projectRecord(B, 1, { directory: '/tmp/discover/project-b' })]]) });
       useCustomizeProject.setState({ projectId: A }, true);
       holding.add('marketplaces.add');
-      render(
-        <QueryClientProvider client={client()}>
-          <CustomizeView section={section} />
-        </QueryClientProvider>,
-      );
-      const tab = () => screen.getByRole('tabpanel', { name: panel });
+      mountCustomize({ view: 'mine', show: section }, client());
       const shelfCard = () => found(`[data-discover="${section}"] [data-shelf] [data-catalog-card="${CSS.escape(cardOf.id)}"]`);
-      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      press('Discover');
       fireEvent.click(within(await shelfCard()).getByRole('button', { name: `Add ${name}` }));
       await resolved();
       fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
@@ -497,7 +496,7 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
       act(() => held.get('marketplaces.add')!());
       await waitFor(() => expect(invoked('plugins.install')).toEqual([expect.objectContaining({ cwd: PROJECT, plugin: `${name}@maws-discover-test` })]));
       fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
-      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      expect(head().querySelector('[data-state="on"]')!.textContent).toBe('Discover'); // the view is the page's, kept
       await waitFor(async () => expect(within(await shelfCard()).getByRole('status').textContent).toBe('done'));
     });
   }
@@ -505,13 +504,7 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
 
 describe('Customize › Skills › Discover', () => {
   it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
-    render(
-      <QueryClientProvider client={client()}>
-        <SkillsManage cwd={PROJECT}>
-          <SkillsDiscover cwd={PROJECT} onOpenInstalled={() => {}} />
-        </SkillsManage>
-      </QueryClientProvider>,
-    );
+    at('skills', 'discover');
     expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
     expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
@@ -524,26 +517,19 @@ describe('Customize › Skills › Discover', () => {
 
   it('an add-then-install asked here finishes after the person leaves for My items and for Plugins, its line still on the card', async () => {
     holding.add('marketplaces.add');
-    const qc = client();
-    const view = (section: 'plugins' | 'skills') => (
-      <QueryClientProvider client={qc}>
-        <CustomizeView section={section} />
-      </QueryClientProvider>
-    );
-    const { rerender } = render(view('skills'));
-    const skills = () => screen.getByRole('tabpanel', { name: 'Skills' });
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'Discover' }));
+    mountCustomize({ view: 'mine', show: 'skills' }, client());
+    press('Discover');
     const shelf = await found(`[data-discover="skills"] [data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
     await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'My items' })); // Discover leaves
-    rerender(view('plugins')); // and so does the section
+    press('My items'); // Discover leaves
+    press('Plugins'); // and so does the kind
     act(() => held.get('marketplaces.add')!());
     await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd: HOME, binary: BINARY, plugin: 'skills-only@maws-discover-test', scope: 'user' }]));
-    rerender(view('skills'));
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'Discover' }));
+    press('Skills');
+    press('Discover');
     const back = await found(`[data-discover="skills"] [data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     await waitFor(() => expect(within(back).getByRole('status').textContent).toBe('done'));
   });

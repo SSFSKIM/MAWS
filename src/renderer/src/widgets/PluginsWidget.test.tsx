@@ -27,8 +27,12 @@ import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { connectCatalogEvents } from '../customize/discover/read';
 import { NO_CHOICES, useDiscoverStore } from '../customize/discover/store';
 import { item } from '../customize/discover/test-items';
-import { useCustomizeProject, useDiscoverRequest } from '../customize/open';
-import { PluginsLibrary, PluginsWidget } from './PluginsWidget';
+import { useCustomizeProject } from '../customize/open';
+import { useCustomizePage, useOpenRequest } from '../customize/page';
+import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
+import { useLayout } from '../stores/layout';
+import { CustomizeAtDestination, mountCustomize } from '../test-support/customize-page';
+import { PluginsWidget } from './PluginsWidget';
 import { useReadLoads } from './read';
 import { forgetKeptOperations } from './plugins/operation';
 import { REL } from '../test-support/relative-time';
@@ -140,7 +144,9 @@ afterEach(() => {
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
   useSessions.setState({ engine: new Map(), records: new Map(), digests: new Map(), projects: new Map() });
   useCustomizeProject.setState({ projectId: undefined });
-  useDiscoverRequest.setState({}, true);
+  useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: null });
+  useCustomizePage.setState(useCustomizePage.getInitialState(), true);
+  useOpenRequest.setState({ request: null });
   useReadLoads.setState({ loads: new Map() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   delete (window as { maws?: unknown }).maws;
@@ -196,15 +202,14 @@ const toDiscover = async () => {
 };
 const card = (name: string) => document.querySelector<HTMLElement>(`[data-catalog-grid] [data-catalog-card][data-install-name="${name}"]`)!;
 const addOn = (name: string) => fireEvent.click(within(card(name)).getByRole('button', { name: `Add ${name}` }));
-// Customize's library for the stand-in's cwd, Discover beside My items, with the window's catalog.changed listener.
-const discoverLibrary = (client: QueryClient, appSessionId: AppSessionId | null = null) => {
+const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+// Customize's page for the stand-in's cwd (UX wave U11c: the library is the page's, My items, Plugins, with Discover
+// beside it), with the window's catalog.changed listener. A ready session in that folder is the page's attachment.
+const customize = (client: QueryClient = newClient()) => {
   connected?.();
   connected = connectCatalogEvents(ipc, client);
-  return (
-    <QueryClientProvider client={client}>
-      <PluginsLibrary cwd={cwd} appSessionId={appSessionId} discover={{ cwd }} />
-    </QueryClientProvider>
-  );
+  useCustomizeProject.setState({ projectId: null, directory: cwd }, true);
+  return mountCustomize({ view: 'mine', show: 'plugins' }, client);
 };
 let connected: (() => void) | null = null;
 const openAdd = (item: 'Add marketplace' | 'Manage marketplaces') => {
@@ -225,19 +230,14 @@ const marketItems = (name: string) => {
   return items;
 };
 
-describe('plugins library: embedded and offline', () => {
-  const library = (directory = cwd, appSessionId: AppSessionId | null = null) => (
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-      <PluginsLibrary cwd={directory} appSessionId={appSessionId} />
-    </QueryClientProvider>
-  );
+describe('plugins library: Customize’s page and offline', () => {
   const sessionCalls = () => backend.calls.filter((call) => call.command.startsWith('session.'));
 
   it('without a session lists and manages plugins by cwd, and reads only the app-wide built-in mods', async () => {
     const actual = await vi.importActual<typeof import('./plugins/builtin-mods')>('./plugins/builtin-mods');
     vi.mocked(useBuiltInMods).mockImplementation(actual.useBuiltInMods); // including its no-session IPC input
     backend.script('mods.list', () => [{ id: 'maws.to-human', name: 'To-human', description: 'Agents mark what is for you', version: 1, enabled: true, source: 'maws-contract' }]);
-    render(library());
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await waitFor(() => expect(screen.getByText('To-human')).toBeTruthy());
     expect(invoked('plugins.list')).toEqual([{ cwd }]);
@@ -263,7 +263,7 @@ describe('plugins library: embedded and offline', () => {
   });
 
   it('offline keeps Discover’s install and both marketplace sheets without acquiring a session', async () => {
-    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(invoked('catalog.home')).toEqual([]); // My items reads no catalog
     await toDiscover();
@@ -290,21 +290,21 @@ describe('plugins library: embedded and offline', () => {
     await waitFor(() => expect(invoked('marketplaces.add')).toEqual([{ cwd, binary: BINARY, source: 'example/plugins', scope: 'user' }])); // P4-AGG M3: the sheet's scope, user by default
     expect(sessionCalls()).toEqual([]);
   });
-  it('embedded never takes modal focus or closes on Escape, and only a ready attachment exposes live facts', async () => {
+  it('the page never takes modal focus or closes on Escape, and only a ready attachment exposes live facts', async () => {
     const focusEditor = vi.fn();
     const off = registerFocusTarget(ID, { focusEditor, focusFrame: () => {}, insertText: () => {} });
     const launcher = document.createElement('button');
     document.body.append(launcher);
     launcher.focus();
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    render(library(cwd, ID));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     expect(document.activeElement).toBe(launcher);
     expect(screen.queryByRole('button', { name: 'Close Plugins' })).toBeNull();
     expect(screen.queryByText('/plugins')).toBeNull();
     expect(loadedLine().textContent).toContain('11 plugins loaded in this session');
     const search = screen.getByRole('searchbox', { name: 'Search plugins' });
-    fireEvent.keyDown(document.querySelector('[data-widget="plugins"]')!, { key: '/' });
+    fireEvent.keyDown(document.querySelector('[data-customize-page]')!, { key: '/' });
     expect(document.activeElement).toBe(search);
     fireEvent.change(search, { target: { value: 'probe' } });
     fireEvent.keyDown(search, { key: 'Escape' });
@@ -325,10 +325,8 @@ describe('plugins library: embedded and offline', () => {
   it('keeps a cwd operation, Stop and its follow-up confirmation through exit and a new attachment', async () => {
     const nextBare = 'app-9a1d4262' as AppSessionId;
     const nextId = at(nextBare);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const content = (appSessionId: AppSessionId | null) => <QueryClientProvider client={client}><PluginsLibrary cwd={cwd} appSessionId={appSessionId} /></QueryClientProvider>;
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    const view = render(content(ID));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     menu('e8-probe@e8-scratch', 'Update');
     await resolved();
@@ -342,9 +340,7 @@ describe('plugins library: embedded and offline', () => {
     expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Updating the plugin…');
     fireEvent.click(within(row('e8-probe@e8-scratch')).getByRole('button', { name: 'Stop' }));
     await waitFor(() => expect(invoked('plugins.cancel')).toEqual([{ opId: 'pop-1' }]));
-    view.rerender(content(null));
-    act(() => useSessions.setState({ engine: new Map([[nextId, lifted(backend.status(nextBare))]]) }));
-    view.rerender(content(nextId));
+    act(() => useSessions.setState({ engine: new Map([[nextId, { ...lifted(backend.status(nextBare)), cwd }]]) })); // another session, ready in the page's folder
     expect(loadedLine()).toBeTruthy();
     expect(within(row('e8-probe@e8-scratch')).getByRole('status').textContent).toBe('Updating the plugin…');
 
@@ -365,10 +361,8 @@ describe('plugins library: embedded and offline', () => {
   it('keeps Discover’s detail and a pending sheet at its chosen scope when the ready attachment changes', async () => {
     const nextBare = 'app-9a1d4262' as AppSessionId;
     const nextId = at(nextBare);
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const content = (appSessionId: AppSessionId | null) => discoverLibrary(client, appSessionId);
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    const view = render(content(ID));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await toDiscover();
     fireEvent.click(within(card('e8-other')).getByRole('button', { name: 'View e8-other' }));
@@ -382,9 +376,7 @@ describe('plugins library: embedded and offline', () => {
     expect(sheet()).toBeTruthy();
     expect(within(sheet()).getByText('No running session to reload')).toBeTruthy();
     expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
-    view.rerender(content(null));
-    act(() => useSessions.setState({ engine: new Map([[nextId, lifted(backend.status(nextBare))]]) }));
-    view.rerender(content(nextId));
+    act(() => useSessions.setState({ engine: new Map([[nextId, { ...lifted(backend.status(nextBare)), cwd }]]) })); // another session, ready in the page's folder
     expect(detail()?.getAttribute('data-catalog-detail')).toBe(offers[0].id);
     expect(within(sheet()).getByRole('radio', { name: 'Project' })).toHaveProperty('checked', true);
     expect(within(sheet()).getByText('Reloads plugins in 1 running session')).toBeTruthy();
@@ -398,13 +390,11 @@ describe('plugins library: embedded and offline', () => {
     expect(sessionCalls()).toEqual([]);
   });
   it('changing project dismisses an old confirmation instead of retargeting its write to the new cwd', async () => {
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    const content = (directory: string) => <QueryClientProvider client={client}><PluginsLibrary cwd={directory} appSessionId={null} /></QueryClientProvider>;
-    const view = render(content(cwd));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     menu('e8-probe@e8-scratch', 'Turn off');
     await resolved();
-    view.rerender(content('/work/another-project'));
+    act(() => useCustomizeProject.setState({ projectId: null, directory: '/work/another-project' }, true));
     await waitFor(() => expect(invoked('plugins.list')).toContainEqual({ cwd: '/work/another-project' }));
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(invoked('plugins.disable')).toEqual([]);
@@ -571,7 +561,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
     expect(document.querySelector('[data-plugin-fact="loaded"]')!.textContent).toBe('Not observed yet');
   });
 
-  it('Show › Loaded in this session with nothing observed says it is unknown, never that nothing matches (scale review D scalpel-2#1)', async () => {
+  it('Filter › Loaded in this session with nothing observed says it is unknown, never that nothing matches (scale review D scalpel-2#1)', async () => {
     backend.script('session.observedFacts', () => null);
     useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }));
     useSessions.setState({ engine: new Map([[ID, { ...lifted(backend.status(BARE)), process: 'ready', plugins: [], pluginErrors: [], pluginWarnings: [], pluginsObservedAt: null }]]) });
@@ -648,11 +638,17 @@ describe('plugins widget: management', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
     expect(close).toHaveBeenCalledTimes(1);
     expect(useCustomizeProject.getState()).toEqual({ projectId: project }); // the project whose directory it is
-    expect(useDiscoverRequest.getState()).toEqual({ cwd }); // taken by the library showing that project's page
-    // Customize's library for that page opens on Discover, mounted for the request
-    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
+    // the page, where the layout says, is Discover's plugins over that project's directory
+    const client = newClient();
+    connected = connectCatalogEvents(ipc, client);
+    render(
+      <QueryClientProvider client={client}>
+        <CustomizeAtDestination />
+      </QueryClientProvider>,
+    );
     await waitFor(() => expect(document.querySelector('[data-discover="plugins"]')).toBeTruthy());
-    expect(useDiscoverRequest.getState()).toEqual({});
+    expect(invoked('catalog.home')).toEqual([{ tab: 'plugins', cwd }]);
   });
   // Decision Log 10: Discover for the session's exact directory, never its parent project nor the user configuration
   for (const [where, directoryOf, owned] of [
@@ -674,12 +670,12 @@ describe('plugins widget: management', () => {
       );
       fireEvent.click(screen.getByRole('button', { name: 'Open Discover' }));
       expect(useCustomizeProject.getState()).toEqual({ projectId: null, directory: here });
-      expect(useDiscoverRequest.getState()).toEqual({ cwd: here });
+      expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
     });
   }
   it('Cancel on the confirm sheet runs nothing; a card’s + runs the argument list the sheet showed, at the scope chosen', async () => {
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await toDiscover();
     const other = () => card('e8-other');
@@ -828,7 +824,7 @@ describe('plugins widget: management', () => {
   });
 
   it('an install whose plugin left the catalog keeps the engine’s failure at Discover’s head after its card leaves (M3: the widgets gate)', async () => {
-    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } })));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     await toDiscover();
     addOn('e8-other');
@@ -1036,8 +1032,8 @@ describe('plugins widget: whole-branch review fixes', () => {
     mount();
     await waitFor(() => expect(row('e8-tools@e8-scratch')).toBeTruthy());
     expect(row('e8-probe@e8-scratch')).toBeNull();
-    // Show › Other projects
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Show' }), { key: 'Enter' });
+    // Filter › Other projects
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Filter' }), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Other projects' }));
     const elsewhere = await waitFor(() => row('e8-probe@e8-scratch'));
     expect(elsewhere.textContent).toContain('In other · manage it from a session there');
@@ -1123,7 +1119,7 @@ describe('plugins widget: the library', () => {
     expect(row('e8-probe@e8-scratch').textContent).toContain('a1b2c3d4e5f6'); // a commit prefix is a version as it is
   });
 
-  it('Name flattens the groups; Show filters; a search that finds nothing offers Reset filters', async () => {
+  it('Name flattens the groups; Filter filters; a search that finds nothing offers Reset filters', async () => {
     await library();
     fireEvent.keyDown(screen.getByRole('button', { name: 'Sort by' }), { key: 'Enter' });
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Name' }));
@@ -1326,7 +1322,7 @@ describe('plugins widget: the detail', () => {
 
   it('the switch (Customize’s), clicked on My items while its detail shows, returns to the list', async () => {
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]) });
-    render(discoverLibrary(new QueryClient({ defaultOptions: { queries: { retry: false } } }), ID));
+    customize();
     await waitFor(() => expect(row('e8-probe@e8-scratch')).toBeTruthy());
     fireEvent.click(view('e8-probe@e8-scratch'));
     expect(detail()).toBeTruthy();
