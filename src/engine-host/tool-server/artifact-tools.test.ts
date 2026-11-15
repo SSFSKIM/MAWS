@@ -395,6 +395,27 @@ describe('artifact_describe_type', () => {
     expect(textOf(wrong)).toContain('presentation');
   });
 
+  // UX wave U10b (M10, §E.4): `space` describes a new artifact in that Space
+  it('describes a new artifact in the Space it names, by id or name: its home and the Space’s default; an unknown Space is refused; an artifact named too governs', async () => {
+    const owner = await w.store.create({ kind: 'design_system', title: 'Owner' }, HUMAN);
+    const brand = await w.store.create({ kind: 'design_system', title: 'Space brand' }, HUMAN);
+    const launch = await w.store.createSpace({ name: 'Launch' });
+    await w.store.createSpace({ name: 'Plain' });
+    await w.store.setDefaults({ owner: owner.id, spaces: { [launch.id]: brand.id } });
+    w.store.registerDesignSystemContext(async (system) => `LAW:${system.title}`);
+    const describe = (args: Record<string, unknown>) => artifactDescribeTypeTool(w.deps()).call(args, w.ctx());
+    expect(ArtifactDescribeTypeResultSchema.parse(jsonOf(await describe({ kind: 'presentation', space: 'Launch' })))).toEqual({ status: 'described', kind: 'presentation', ...KIND_GUIDES.presentation, home: 'Launch', designSystem: 'LAW:Space brand' });
+    expect(jsonOf(await describe({ kind: 'document', space: launch.id }))).toMatchObject({ home: 'Launch', designSystem: 'LAW:Space brand' });
+    expect(jsonOf(await describe({ kind: 'design', space: 'plain' }))).toMatchObject({ home: 'Plain', designSystem: 'LAW:Owner' }); // a Space with no default: the owner's
+    expect(jsonOf(await describe({ kind: 'html', space: 'Launch' }))).toEqual({ status: 'described', kind: 'html', ...KIND_GUIDES.html, home: 'Launch' });
+    const unknown = await describe({ kind: 'document', space: 'Nowhere' });
+    expect(unknown.isError).toBe(true);
+    expect(artifactRefusalOf(textOf(unknown))).toMatchObject({ reason: 'notFound', space: 'Nowhere' });
+    expect(textOf(unknown)).toContain('no Space "Nowhere"; the Spaces are "Launch", "Plain"');
+    const deck = ArtifactCreateResultSchema.parse(jsonOf(await create({ kind: 'presentation', title: 'Deck', handle: 'deck' })));
+    expect(jsonOf(await describe({ kind: 'presentation', artifact: 'deck', space: 'Launch' }))).toMatchObject({ artifactId: deck.artifactId, home: 'General', designSystem: 'LAW:Owner' });
+  });
+
   it('returns the kind’s guide and format reference, placeholders included', async () => {
     for (const kind of ['html', 'document', 'presentation'] as const) {
       expect(ArtifactDescribeTypeResultSchema.parse(jsonOf(await artifactDescribeTypeTool().call({ kind }, w.ctx())))).toEqual({ status: 'described', kind, ...KIND_GUIDES[kind] });
