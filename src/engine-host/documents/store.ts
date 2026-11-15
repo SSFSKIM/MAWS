@@ -520,7 +520,7 @@ export class ArtifactStore {
     if (creator.kind !== 'session') throw refuse('byUser');
     if (!lineage.includes(creator.appSessionId)) throw refuse('otherSession');
     const mark = readMark(this.storage.getMeta(agentDraftKey(row.id)));
-    if (markStands(mark, this.storage.newestContentSeq(row.id))) return mark;
+    if (mark !== null && markStands(mark, this.storage.newestContentSeq(row.id))) return mark;
     throw refuse(mark?.broken === 'person' ? 'edited' : 'unknown');
   }
 

@@ -15,6 +15,7 @@ export const commands = [
   'artifacts.downloadAsset', // P3-E (E2 M3): main's
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', // P3-H H3b: main's
   'artifacts.holdDatasets', 'artifacts.releaseDatasets', // E3: main's, a window's holds
+  'artifacts.undelete', // UX wave U10b: the undo of an agent's delete
 ] as const;
 
 export const events = ['artifacts.changed', 'artifacts.resync' /* P3-A M5: main's */, 'artifacts.console' /* P3-A M7: main's */] as const;

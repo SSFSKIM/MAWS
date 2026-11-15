@@ -418,6 +418,7 @@
   "artifacts.state",
   "artifacts.status",
   "artifacts.testLoopDelay",
+  "artifacts.undelete",
   "artifacts.update",
   "artifacts.uploadAsset",
   "artifacts.versionState",

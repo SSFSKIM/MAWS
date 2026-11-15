@@ -47,5 +47,5 @@ export function markAfterRow(mark: AgentDraftMark, newest: number, row: { actor:
   return { ...mark, seq: row.seq };
 }
 
-// Whether the mark stands against the pair's newest sequence now (0 when it has no rows).
-export const markStands = (mark: AgentDraftMark | null, newest: number): mark is AgentDraftMark => mark !== null && mark.broken === undefined && mark.seq === newest;
+// Whether the mark stands against the pair's newest sequence now (0 when it has no rows); no mark never does.
+export const markStands = (mark: AgentDraftMark, newest: number): boolean => mark.broken === undefined && mark.seq === newest;
