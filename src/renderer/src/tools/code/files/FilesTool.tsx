@@ -29,10 +29,10 @@ import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
 import { FILES_COPY, REFUSAL } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
-import { openFile } from '../open-file';
+import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { listingKey, useFiles } from './store';
-import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, sideFileOf, type FilesTabParams } from './tabs';
+import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
 import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
@@ -163,7 +163,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   const treeId = `files-tree-${tabId}`;
   const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
   return (
-    <div ref={measure} data-files-tab data-file={file ?? ''} onClickCapture={secondClick} onDoubleClick={keepChosen} className="flex h-full min-h-0 min-w-0">
+    <div ref={measure} data-files-tab data-file={file ?? ''} onDoubleClick={(event) => keepChosen(tabId, event.target)} className="flex h-full min-h-0 min-w-0">
       {place === 'alone' ? (
         <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 min-w-0 flex-1">
           {sessionTree}
@@ -206,22 +206,33 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
 }
 
 // A double-click on a tree row keeps the tab its first click opened (L1). Where the tree stood in the file's place, the
-// first click ends it and the second lands on the file now drawn there, so the row's own double-click never fires: the
-// file chosen by a click is remembered until the next click that is not the second of a pair (its `detail`, the
-// system's click count, is under two), and a double-click elsewhere in a Files tab keeps it. A single click is not
-// delayed. One record for the window: the second click can land in another Files tab, when the chosen file opened one.
-let chosenByClick: { appSessionId: AppSessionId; path: string } | null = null;
-function chosenFile(appSessionId: AppSessionId, path: string): void {
-  chosenByClick = { appSessionId, path };
+// first click ends it and the second lands on the file now drawn there, so the row's own double-click never fires. So a
+// row's click that opened its file beside the chat records the file and the tab it is in, and the record holds for the
+// very next click in the window only: when that click is the pair's second (`detail`, the system's click count, two or
+// more), the double-click that follows it keeps the file, if it lands in that same tab, on no control of its own (a
+// button, the divider, a row), and the tab still holds the file. Any other click, any key, and that double-click end the
+// record. A single click is not delayed. One record for the window: the second click is heard wherever it lands.
+let chosenByClick: { tabId: string; path: string; second: boolean } | null = null;
+let listening = false;
+function listenForThePair(): void {
+  if (listening || typeof window === 'undefined') return;
+  listening = true;
+  // Capture, so the record is judged before any handler of the click (the row's own sets the next record after it).
+  window.addEventListener('click', (event) => void (chosenByClick = chosenByClick && !chosenByClick.second && event.detail >= 2 ? { ...chosenByClick, second: true } : null), true);
+  window.addEventListener('keydown', () => void (chosenByClick = null), true);
+  window.addEventListener('dblclick', () => void (chosenByClick = null)); // after the page's handlers
 }
-function secondClick(event: { detail: number }): void {
-  if (event.detail < 2) chosenByClick = null;
+function chosenFile(path: string, opened: Opened | null): void {
+  listenForThePair();
+  chosenByClick = opened?.surface === 'side' ? { tabId: opened.tabId, path, second: false } : null;
 }
-function keepChosen(event: { target: EventTarget }): void {
+const OWN_DOUBLE_CLICK = 'button, a, input, textarea, select, [role="button"], [role="separator"], [role="treeitem"]';
+function keepChosen(tabId: string, target: EventTarget): void {
   const chosen = chosenByClick;
   chosenByClick = null;
-  if (chosen === null || (event.target instanceof Element && event.target.closest('[role="treeitem"]'))) return; // a row keeps by itself
-  openFile(chosen.appSessionId, chosen.path, null, { keep: true });
+  if (chosen === null || !chosen.second || chosen.tabId !== tabId || sideFileOf(tabId)?.held.file !== chosen.path) return;
+  if (target instanceof Element && target.closest(OWN_DOUBLE_CLICK)) return; // a control's own double-click
+  keep(tabId);
 }
 
 function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {
@@ -301,8 +312,7 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     if (row.kind !== 'entry' || row.entry.kind !== 'file') return;
     chosen();
     if (main) return void openFile(appSessionId, row.path, null, { main: true });
-    chosenFile(appSessionId, row.path); // before the open, which may draw the file where the row stood
-    openFile(appSessionId, row.path, null);
+    chosenFile(row.path, openFile(appSessionId, row.path, null));
   };
   // A double-click on a file keeps the tab its first click opened (L1).
   const keepRow = (row: TreeRow) => {
