@@ -286,6 +286,48 @@ describe('a way to a request from outside its transcript', () => {
     expect(openPrompt()).toContain('make check');
   });
 
+  // The re-review of M5: leaving for no session at all (a page, the Overview) is leaving too.
+  it.each([
+    ['a page', () => useLayout.getState().openDestination({ kind: 'library' })],
+    ['the Overview', () => useLayout.getState().setOverviewOpen(true)],
+  ])('a remembered request is let go when the person leaves for %s: its transcript ready later focuses nothing', async (_, leave) => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    act(() => leave());
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+    expect(toasts()).toEqual([]);
+  });
+
+  it('a remembered request does not fire after the person left for a page and came back', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    act(() => useLayout.getState().openDestination({ kind: 'library' }));
+    front(APP); // opening the session's tab closes the page
+    expect(useLayout.getState().destination).toBeNull();
+    await mountLater();
+    expect(keyboardRow()).toBeNull();
+    expect(openPrompt()).toContain('make check');
+  });
+
+  it('a remembered request still lands when the session stays in front until its transcript is ready', async () => {
+    const showWaiting = await showWaitingOf();
+    const { question, prompt, second } = scene();
+    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    front(APP);
+    act(() => showWaiting(APP, second.id));
+    render(<section data-pane={0}>{slot()}</section>);
+    await waitFor(() => expect(keyboardRow()).toBe('request-end'));
+    expect(openPrompt()).toContain('make lint');
+  });
+
   it('a later call, even one that finds nothing to show, lets the remembered request go', async () => {
     const showWaiting = await showWaitingOf();
     const { question, prompt, second } = scene();
