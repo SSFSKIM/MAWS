@@ -413,4 +413,86 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(hunkLabel()).toBe('Showing hunk 10 of 10');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
   });
+  // §F's gesture (Decision Log 17 b): a scroll event the stack did not make is the person's while a pointer is held in the
+  // scroller or within GESTURE_MS (500) of their last wheel, touch, key or pointer release there, and a layout change
+  // otherwise; a reveal starting ends the window. The clock is the test's: `performance.now` answers `clock`, so each
+  // boundary is exact and nothing waits.
+  describe('the person’s gesture', () => {
+    let clock = 0;
+    beforeEach(() => {
+      clock = 1_000;
+      vi.spyOn(performance, 'now').mockImplementation(() => clock);
+    });
+    // A scroll event with no input before it, as the browser sends for a scroll it makes itself.
+    const scrollWithoutInput = (top: number) => act(() => void (scroller().scrollTop = top));
+
+    // Five files of 40 lines; the person reads the third by hand at `clock`, and the offset one step further on.
+    async function reading() {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      await mount(files);
+      const at = page.topOf(sectionOf(files[2].path)) + HEADER + 10 * ROW;
+      page.scrollTo(at);
+      await page.settle();
+      const row = page.rowAtTop();
+      expect(row).toEqual(expect.objectContaining({ path: files[2].path }));
+      return { files, at, row, further: at + 5 * ROW };
+    }
+
+    it('takes a scroll 500 ms after the person’s last wheel for theirs: the scroller stays where it went', async () => {
+      const { row, further } = await reading();
+      clock += 500;
+      scrollWithoutInput(further);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(further);
+      expect(page.rowAtTop()).not.toEqual(row);
+    });
+
+    it('takes a scroll 501 ms after the person’s last wheel for a layout change: the place read before stands', async () => {
+      const { at, row, further } = await reading();
+      clock += 501;
+      scrollWithoutInput(further);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(at);
+      expect(page.rowAtTop()).toEqual(row);
+    });
+
+    it('takes every scroll while a pointer is held in the scroller for the person’s, however long the hold', async () => {
+      const { further } = await reading();
+      fireEvent.pointerDown(scroller());
+      clock += 60_000;
+      scrollWithoutInput(further);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(further);
+    });
+
+    it('ends the held pointer’s gesture 500 ms after its release: a scroll then is the person’s, a scroll one millisecond later is a layout change', async () => {
+      const { further } = await reading();
+      fireEvent.pointerDown(scroller());
+      clock += 60_000;
+      fireEvent.pointerUp(window); // released over anything, as a drag of the scroll bar may end outside the scroller
+      clock += 500;
+      scrollWithoutInput(further);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(further);
+      const row = page.rowAtTop();
+      clock += 1;
+      scrollWithoutInput(further + 5 * ROW);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(further);
+      expect(page.rowAtTop()).toEqual(row);
+    });
+
+    it('ends an earlier wheel’s window when a reveal starts: a scroll 100 ms into the reveal is a layout change, and the requested file stays at the top', async () => {
+      const { files, further } = await reading();
+      clock += 100;
+      request(files[3].path);
+      await page.settle();
+      const top = page.topOf(sectionOf(files[3].path));
+      expect(scroller().scrollTop).toBe(top);
+      clock += 100; // 200 ms after the wheel: inside its window, had the reveal not ended it
+      scrollWithoutInput(further);
+      await page.settle();
+      expect(scroller().scrollTop).toBe(top);
+    });
+  });
 });
