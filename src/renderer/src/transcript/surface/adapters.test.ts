@@ -326,6 +326,15 @@ describe('transcript surface adapters', () => {
     expect(commandInput(compact!, own)?.props).toEqual(commandInput(compact!, state)?.props);
   });
 
+  it('asks with its command’s line for an output placed directly after its command’s turn, as the file’s routes place it', () => {
+    const b = builder(); b.turn('u1', '/model haiku'); b.end(['u1']);
+    b.emit('user.message', { messageUuid: uuid('o1'), content: '<local-command-stdout>Set model</local-command-stdout>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null });
+    const { rows, state } = setup(b);
+    const row = find(rows, 'local_command');
+    expect(row.turnId).toBeNull();
+    expect(commandInput(row, state)?.props).toEqual({ command: 'model', args: 'haiku', text: 'Set model', isErrored: false });
+  });
+
   it('asks with no command for an output that stands alone with no run', () => {
     const b = builder();
     b.emit('user.message', { messageUuid: uuid('o1'), content: '<local-command-stdout>Loose output</local-command-stdout>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null });

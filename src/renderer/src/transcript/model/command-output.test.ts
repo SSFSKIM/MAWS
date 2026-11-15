@@ -74,6 +74,46 @@ describe('a command output’s row', () => {
     ]);
   });
 
+  // The architect's ruling on M1's report: `lone` means no bubble of its command is drawn directly above it, on every
+  // route, decided on the drawn order. The file's routes place an output as a loose event after its command's turn
+  // (written here as the backfill writes it: the command's turn ends, then the output arrives with no turn open).
+  it('is not alone when it is placed directly after its command’s turn, as the file’s routes place it', () => {
+    const b = builder();
+    b.turn('u1', '/usage');
+    b.end(['u1']);
+    output(b, 'o1', '<local-command-stdout>Total cost: $0.03</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
+    const [row] = outputs(b.events);
+    expect(row!.turnId).toBeNull();
+    expect(row!.lone).toBeUndefined();
+  });
+
+  it('two commands in a row: each output reads its own command’s bubble, never the one before', () => {
+    const b = builder();
+    b.turn('u1', '/cost');
+    b.end(['u1']);
+    output(b, 'o1', '<local-command-stdout>Total cost: $0.03</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
+    b.turn('u2', '/rename demo');
+    b.end(['u2']);
+    output(b, 'o2', '<local-command-stdout>Session renamed to: demo</local-command-stdout>', commandEntry({ run: { command: 'rename', args: 'demo' }, plain: false }));
+    const drawn = rows(b.events).filter((row) => row.kind !== 'time');
+    expect(drawn.map((row) => (row.kind === 'user' ? `bubble ${row.text}` : row.kind === 'local_command' ? `output ${row.text}${row.lone ? ' lone' : ''}` : row.kind))).toEqual([
+      'bubble /cost', 'output Total cost: $0.03', 'bubble /rename demo', 'output Session renamed to: demo',
+    ]);
+  });
+
+  it('is alone when it is placed after a turn a prompt opened, or before any turn', () => {
+    const b = builder();
+    output(b, 'o0', '<local-command-stdout>Before any turn</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
+    b.turn('u1', 'Summarise the notes.');
+    b.text('m1', 0, 'Done.');
+    b.end(['u1']);
+    output(b, 'o1', '<local-command-stdout>Total cost: $0.04</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
+    expect(outputs(b.events).map((row) => [row.text, row.turnId, row.lone])).toEqual([['Before any turn', null, true], ['Total cost: $0.04', null, true]]);
+  });
+  // A loose row of another kind between a command's turn and its output: no recording holds one (the probes' files place
+  // each output directly after its command's turn), so no order is written here for it. By the rule, its output would
+  // then have no bubble directly above it and stand alone.
+
   it('copies as its line: the mark, then the output, the name first when it stands alone with a run, and no heading', () => {
     const b = builder();
     output(b, 'o0', '<local-command-stdout>## Context Usage\n\n**Tokens:** 1k</local-command-stdout>', commandEntry({ run: { command: 'context', args: '' }, plain: false }));
