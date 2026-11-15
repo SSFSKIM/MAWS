@@ -336,6 +336,8 @@ Expected size, lines added plus removed, tests included: M1 about 1,000, M2 abou
 
 The scene added to `e2e/discover-connectors.spec.ts`, beside the `add` case and with its scratch configuration directory: G1 as written (the scratch configuration's entry compared as parsed, `mcp list` naming both adds, the row in My items), then G2's add at `project` scope on the page of the scratch project the group's harness already has (the `.mcp.json` compared as parsed, the warning and the masked command seen before Add), then the same name added again at another scope, which the engine host refuses on the line. Invented names and values; no sign-in, no Keychain item.
 
+2026-11-14, UX wave U11c: the action stands in the page's head while Show is Connectors or All; an add's line is kept for the place and no longer dropped when the project changes; once the add has ended the page's book holds its outcome and name and no longer its request. (`docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md`)
+
 ### M3 — The dialog's sentence, the record, the whole checks, the hand-back
 
 **At its end** the Connectors dialog's head carries the new sentence, the landing's record is written, and the acceptance has been run as far as an executor can run it.

@@ -270,7 +270,7 @@ describe('Search settings: choosing a result', () => {
     type('marketplace');
     expect(optionTexts()).toEqual(['Customize · Plugins, skills and connectors']);
     press('Enter');
-    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'all' }); // UX wave U7b: a page, no tab; U11c: All
     expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     expect(b.sets).toEqual([]);
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null });

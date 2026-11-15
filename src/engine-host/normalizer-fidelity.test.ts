@@ -134,5 +134,8 @@ describe('the remote reader over the recorded journals', () => {
     }
     expect(ends).toBeGreaterThan(300);
     expect(unread).toEqual([]);
-  });
+    // The case walks every recorded journal, so its time grows with the fixture set (each engine probe adds journals):
+    // it ran longer than the 5 s default under load once the set grew beyond about 800 files. Its own bound, so the file's other
+    // cases keep the default and a real hang there still fails fast.
+  }, 60_000);
 });

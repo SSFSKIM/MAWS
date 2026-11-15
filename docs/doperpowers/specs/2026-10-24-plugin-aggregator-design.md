@@ -204,6 +204,8 @@ e2e/fixtures/catalog/ (M1)
 
 ### Discover, per tab
 
+2026-11-14, UX wave U11 (O-14), the owner's answer of 2026-11-12: Customize's outer level is My items and Discover; the kind (plugins, skills, connectors) is a filter inside each, with All. (`docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md`)
+
 | Tab | Discover shows | Add does |
 |---|---|---|
 | Plugins | every plugin item | install the plugin |
