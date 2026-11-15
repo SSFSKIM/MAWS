@@ -1136,13 +1136,16 @@ describe('a move’s ordered writes', () => {
     const landed: Record<string, unknown> = { ...values };
     const stored: Record<string, unknown>[] = [{ ...landed }];
     const sent: string[] = [];
+    const log: { key: string; value: unknown }[] = []; // every write sent, in order, with what it carried
     const held = new Map<string, ((ok: boolean) => void)[]>();
     const holding = new Set<string>();
+    const failing = new Set<string>();
     const client = {
       ...fake.client,
       invoke(name: string, input: { key: string; value: unknown }, opts?: unknown) {
         if (name !== 'layout.set') return (fake.client.invoke as (n: string, i: unknown, o?: unknown) => Promise<unknown>)(name, input, opts);
         sent.push(input.key);
+        log.push({ key: input.key, value: input.value });
         return new Promise((resolve) => {
           const answer = (ok: boolean) => {
             if (ok) landed[input.key] = input.value;
@@ -1150,7 +1153,7 @@ describe('a move’s ordered writes', () => {
             resolve(ok ? { ok: true, value: undefined } : { ok: false, error: { code: 'internal', message: 'disk full' } });
           };
           if (holding.has(input.key)) held.set(input.key, [...(held.get(input.key) ?? []), answer]);
-          else answer(true);
+          else answer(!failing.has(input.key));
         });
       },
     } as unknown as MawsBridge;
@@ -1162,8 +1165,11 @@ describe('a move’s ordered writes', () => {
       await hydrating;
     };
     return {
-      store, hydrate, sent, landed, stored,
+      store, hydrate, sent, log, landed, stored,
       hold: (key: string) => void holding.add(key),
+      // Every write of `key` fails from now on, until `heal`.
+      fail: (key: string) => void failing.add(key),
+      heal: (key: string) => void failing.delete(key),
       // Answers the oldest held write of `key`; later writes of it answer at once.
       answer: async (key: string, ok: boolean) => {
         holding.delete(key);
@@ -1226,10 +1232,11 @@ describe('a move’s ordered writes', () => {
     run.hold(LIST);
     const before = run.sent.length;
     toSide(run.store);
-    expect(run.sent.slice(before).sort()).toEqual([LIST, 'panelTools.params'].sort());
+    expect(run.sent.slice(before)).toEqual([LIST]); // one write at a time, in the log's order
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
     expect(run.sent.slice(before)).not.toContain('main.tabs');
     await run.answer(LIST, true);
+    expect(run.sent.slice(before)).toEqual([LIST, 'panelTools.params', 'main.tabs']);
     const between = await relaunch({ ...run.landed, 'main.tabs': inMain['main.tabs'] });
     expect([holdsFile(between.main), between.sideIds]).toEqual([true, []]); // in both lists: the read keeps the main tab
     await vi.advanceTimersByTimeAsync(0);
@@ -1252,10 +1259,9 @@ describe('a move’s ordered writes', () => {
     expect(run.sent.slice(before)).toEqual(['main.tabs']);
     const stored = await relaunch(run.landed);
     expect([holdsFile(stored.main), stored.sideIds]).toEqual([false, [side.id]]); // still where it was
-    run.store.getState().openTab({ kind: 'diagnostics' }); // the destination's key changes again
+    run.store.getState().openTab({ kind: 'diagnostics' }); // the next change: the failed write is sent again
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
-    const later = run.sent.slice(before);
-    expect(later.lastIndexOf(LIST)).toBeGreaterThan(later.lastIndexOf('main.tabs'));
+    expect(run.sent.slice(before)).toEqual(['main.tabs', 'main.tabs', LIST, 'panelTools.params', 'main.tabs']);
     const after = await relaunch(run.landed);
     expect([holdsFile(after.main), after.sideIds]).toEqual([true, []]);
   });
@@ -1284,7 +1290,7 @@ describe('a move’s ordered writes', () => {
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
     expect(run.sent.slice(before)).not.toContain(LIST);
     await run.answer('main.tabs', true);
-    expect(run.sent.slice(before).filter((key) => key === LIST)).toHaveLength(1);
+    expect(run.sent.slice(before)).toEqual(['main.tabs', LIST, 'panelTools.params', LIST]);
     expect((run.landed[LIST] as { tabs: { id: string }[] }).tabs.map((tab) => tab.id)).toEqual(['terminal:aaaa0002']);
   });
 
@@ -1347,22 +1353,98 @@ describe('a move’s ordered writes', () => {
     expect([holdsFile(after.main), after.main.panes.some((pane) => pane.tabs.some((tab) => tab.id === LIB_KEY)), after.sideIds]).toEqual([true, false, [libSide.id]]);
   });
 
-  it.each(orders)('%s, the first write failed: no write leaves a file nowhere, and beforeunload sends both', async (_, first, one, two) => {
+  // Recovery from a failed first write needs no unload: the next change sends the failed write again, and the log
+  // goes on in its order from there.
+  it.each(orders)('%s, the first write failed: no write leaves a file nowhere, and the next change recovers the store', async (_, first, one, two) => {
     const run = ordered(apart);
     await run.hydrate();
-    run.hold(first);
-    one(run.store);
+    run.fail(first);
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await run.answer(first, false);
-    expect(error).toHaveBeenCalledExactlyOnceWith(`[layout] layout.set ${first} failed`, { code: 'internal', message: 'disk full' });
-    error.mockRestore();
+    one(run.store);
+    await vi.advanceTimersByTimeAsync(0);
     two(run.store);
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    expect(error).toHaveBeenCalledWith(`[layout] layout.set ${first} failed`, { code: 'internal', message: 'disk full' });
+    error.mockRestore();
     await everyReadKeepsBoth(run.stored);
-    window.dispatchEvent(new Event('beforeunload'));
-    await vi.advanceTimersByTimeAsync(0);
+    run.heal(first);
+    run.store.getState().openTab({ kind: 'diagnostics' }); // a later change, no unload
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    await everyReadKeepsBoth(run.stored);
     const after = await relaunch(run.landed);
+    const ids = after.main.panes.flatMap((pane) => pane.tabs.map((tab) => tab.id));
+    expect([holdsFile(after.main), ids.includes(LIB_KEY), ids.includes('diagnostics'), after.sideIds]).toEqual([true, false, true, [libSide.id]]);
+  });
+
+  // An unload sends the whole log at once, in its order; a death part way leaves a prefix of it stored.
+  it.each(orders)('%s, the first write failed: every prefix of what an unload sends keeps both files', async (_, first, one, two) => {
+    const run = ordered(apart);
+    await run.hydrate();
+    run.fail(first);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    one(run.store);
+    await vi.advanceTimersByTimeAsync(0);
+    two(run.store);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    const stored = { ...run.landed };
+    const from = run.log.length;
+    window.dispatchEvent(new Event('beforeunload'));
+    const flushed = run.log.slice(from);
+    await vi.advanceTimersByTimeAsync(0);
+    error.mockRestore();
+    expect(flushed.length).toBeGreaterThan(0);
+    for (let n = 0; n <= flushed.length; n++) {
+      const prefix = { ...stored };
+      for (const { key, value } of flushed.slice(0, n)) prefix[key] = value;
+      expect(await found(prefix)).toEqual({ app: true, lib: true });
+    }
+    const all = { ...stored };
+    for (const { key, value } of flushed) all[key] = value;
+    const after = await relaunch(all);
     expect([holdsFile(after.main), after.main.panes.some((pane) => pane.tabs.some((tab) => tab.id === LIB_KEY)), after.sideIds]).toEqual([true, false, [libSide.id]]);
+  });
+
+  it('a session joining while the first write of two moves keeps failing is stored, after them, once that write lands', async () => {
+    const C = at('app-c' as AppSessionId);
+    const run = ordered(apart);
+    await run.hydrate();
+    run.fail('main.tabs');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    toMain(run.store);
+    await vi.advanceTimersByTimeAsync(0);
+    libToSide(run.store);
+    run.store.getState().openTab({ kind: 'session', appSessionId: C }); // joins mid-cycle: its write waits its turn
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    error.mockRestore();
+    await everyReadKeepsBoth(run.stored);
+    expect(run.stored.some((landed) => JSON.stringify(landed['main.tabs']).includes(`session:${C}`))).toBe(false); // not before the moves
+    run.heal('main.tabs');
+    run.store.getState().openTab({ kind: 'diagnostics' });
+    await vi.advanceTimersByTimeAsync(0); // no write delay: the join was in the log already
+    await everyReadKeepsBoth(run.stored);
+    expect(JSON.stringify(run.landed['main.tabs'])).toContain(`session:${C}`);
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([true, [libSide.id]]);
+  });
+
+  // The bound under a failing head: a change of a key whose write is the log's last merges into it; only a change of
+  // another key, or a move, adds to the log. What the unload sends is the log.
+  it('under a failing first write the log grows only by what a change adds after another key’s entry', async () => {
+    const run = ordered(beside);
+    await run.hydrate();
+    run.fail('main.tabs');
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    toMain(run.store); // main.tabs, the list, the params
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < 5; i++) {
+      run.store.getState().openTab({ kind: 'file', path: `/r/x${i}.ts`, line: null, appSessionId: A, machine: TEST_MACHINE });
+      await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 2); // each change at its own debounce moment
+    }
+    const from = run.log.length;
+    window.dispatchEvent(new Event('beforeunload'));
+    expect(run.log.slice(from).map(({ key }) => key)).toEqual(['main.tabs', LIST, 'panelTools.params', 'main.tabs']);
+    await vi.advanceTimersByTimeAsync(0);
+    error.mockRestore();
   });
 
   it('a session joining main.tabs while a move beside the chat holds it waits for the move’s list, then is written at once', async () => {
