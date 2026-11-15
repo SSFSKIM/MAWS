@@ -20,7 +20,7 @@
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
 import { addressed, localRef } from './support/address';
-import { openSurface, sideColumn, sideTabNames, surface, mainTabById } from './support/shell';
+import { openSurface, sideColumn, sideTab, sideTabNames, surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -510,10 +510,17 @@ test('an ask beside an open file: its form stands in the capsule’s row under t
     const treeRow = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
     await expect(treeRow(s.repo)).toBeVisible();
     if ((await treeRow(s.repo).getAttribute('aria-expanded')) !== 'true') await treeRow(s.repo).click();
+    await expect(treeRow(s.repo)).toHaveAttribute('aria-expanded', 'true'); // the tree expands its first root by itself
     await treeRow(notes).click();
-    const viewer = s.page.locator(`[data-file-viewer][data-path="${notes}"]`);
+    // the file opens beside the chat: a tab in the side column, the session's tab still in front in the main area
+    const viewer = sideColumn(s.page).locator(`[data-file-viewer][data-path="${notes}"]`);
     await expect(viewer.locator('.cm-line').first()).toBeVisible();
+    const fileTab = sideTab(sideColumn(s.page), 'notes.ts');
+    await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+    const sessionTab = mainTabById(s.page, `session:${await addressed(s.page, id)}`);
+    await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
     const strip = await sideTabNames(s.page, 'upper');
+    expect(strip).toContain('notes.ts');
 
     await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, BESIDE_ASK));
     await allowNext(s, id); // mcp__maws__ask (the recording's redundant approval)
@@ -540,6 +547,8 @@ test('an ask beside an open file: its form stands in the capsule’s row under t
     await expect(viewer.locator('.cm-line').first()).toBeVisible();
     await expect(sheetOf(s)).toHaveCount(0);
     expect(await sideTabNames(s.page, 'upper'), 'no tab added to the side column').toEqual(strip);
+    await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+    await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
 
     // a draft in the row; Open beside opens the sheet on the same draft
     await sectionOf(form, 'tone').getByRole('radio', { name: 'Upbeat' }).click();
