@@ -669,6 +669,8 @@ Every refusal still opens with `ORG.notSigned` or stands alone as today; that pr
 | the head's sentence, once | Off here is off for every session in <place>. |
 | its tooltip | The engine records it in ~/.claude.json. |
 
+2026-11-14, UX wave U11g: the head's sentence is now “A switch here is for this chat, and every session started in <place> afterwards.” (`docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md`); today's sentence claimed sessions that are open, which the engine does not tell.
+
 `MCP_ACTIONS.persisted` goes. The `/mcp` beside the title stays.
 
 **Status words**, one function, read by the dialog, the terminal session's dialog, the "+" › Connectors submenu and Customize's live list:

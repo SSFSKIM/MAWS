@@ -388,10 +388,12 @@ describe('M5c’s rows', () => {
     expect(OFFERS.commands['delivery.receipts']).toEqual({ kind: 'call', executor: 'machine', target: 'machine', grade: 'list' });
     expect(OFFERS.commands['connectors.callback']).toEqual({ kind: 'call', executor: 'machine', target: 'machine' });
     expect(OFFERS.commands['client.windowShown']).toMatchObject({ kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' });
-    for (const name of ['catalog.engine', 'catalog.engineRefresh', 'delivery.connect', 'delivery.deliver', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.add', 'connectors.remove']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    for (const name of ['catalog.engine', 'catalog.engineRefresh', 'delivery.connect', 'delivery.deliver', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.add', 'connectors.remove', 'connectors.addJson' /* UX wave U11g */]) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
     const { a } = await scene();
     expect(codeOf(await call(a, 'catalog.engine', { cwd: null }))).toBe('not-offered');
     expect(codeOf(await call(a, 'catalog.engineRefresh', {}))).toBe('not-offered');
+    // UX wave U11g (G6): a custom connector's add reaches no other machine's engine host
+    expect(codeOf(await call(a, 'connectors.addJson', { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', folder: '/tmp/files-probe', entry: { type: 'stdio', command: 'files-probe', args: [], env: [] } }))).toBe('not-offered');
   });
 
   it('take each lease command at its floor: a `view` holder opens and uses a lease, and is refused its tool calls (`converse` by effect)', async () => {
