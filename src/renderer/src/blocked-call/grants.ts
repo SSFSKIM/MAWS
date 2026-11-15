@@ -18,7 +18,7 @@ import { drivenByBridge, heldWords, sendToSession, sessionControls, useSessionCo
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { laneAStateOf, useLaneA } from '../stores/lane-a';
 import { useMachines } from '../stores/machines';
-import { attachQueue, useQueueStore } from '../stores/queue';
+import { useQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore, type TranscriptEntry } from '../stores/transcript';
 import { approvalsFor, blockedKey, drawsCell, hiddenTurnsOf, type BlockedCall } from '../transcript/model/blocked';
@@ -26,6 +26,7 @@ import { expandedTurnRows } from '../transcript/model/derive';
 import { cellId } from '../transcript/model/keys';
 import type { CellId, Row } from '../transcript/model/rows';
 import { isAbortedReason } from '../transcript/model/classify';
+import { holdSession } from './hold';
 
 export const SETTLE_MS = 5_000;
 /** Probe B's one place: how a grant is sent to a session MAWS runs while a turn runs. 'next' by probe B's recordings (u1c-b-*, 27 of 27; spikes/protocol-probe/findings-uxwave-u1c-during-turn.txt). */
@@ -274,10 +275,9 @@ function unfollow(): void {
   timer = null;
 }
 
-// What the store holds for each session with a grant out: the session's queue attachment (its snapshot and its events)
-// and its transcript's attachment (the source a view attached), so that closing the pane does not stop the record the
-// grant ends on. The lane A store lists every session its machine serves, whatever is mounted: nothing to hold. Let go
-// when the session's last grant ends, or the session goes.
+// What the store holds for each session with a grant out (`holdSession`: the session's queue and its transcript), so
+// that closing the pane does not stop the record the grant ends on. The lane A store lists every session its machine
+// serves, whatever is mounted: nothing to hold. Let go when the session's last grant ends, or the session goes.
 const holds = new Map<AppSessionId, () => void>();
 function keep(sessions: ReadonlySet<AppSessionId>): void {
   for (const [appSessionId, release] of holds) {
@@ -285,12 +285,7 @@ function keep(sessions: ReadonlySet<AppSessionId>): void {
     holds.delete(appSessionId);
     release();
   }
-  for (const appSessionId of sessions) {
-    if (holds.has(appSessionId)) continue;
-    const queue = attachQueue(appSessionId);
-    const transcript = useTranscriptStore.getState().hold(appSessionId);
-    holds.set(appSessionId, () => (queue(), transcript()));
-  }
+  for (const appSessionId of sessions) if (!holds.has(appSessionId)) holds.set(appSessionId, holdSession(appSessionId));
 }
 
 /** Tests: the window starts with no grant out and no notice. */
