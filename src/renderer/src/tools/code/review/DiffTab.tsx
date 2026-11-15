@@ -76,7 +76,7 @@ function DiffTabBody({ tab, parsed, directory }: { tab: DiffTabRef; parsed: Ref;
   if (!synced) return null;
   return (
     <div data-diff-tab={tab.ref} className="h-full min-h-0">
-      <ReviewShell key={`${tab.id}\0${directory}`} appSessionId={tab.appSessionId} directory={directory} ui={ui} chips={false} />
+      <ReviewShell key={`${tab.id}\0${directory}`} appSessionId={tab.appSessionId} directory={directory} ui={ui} hostId={tab.id} hostMode="tab" chips={false} />
     </div>
   );
 }

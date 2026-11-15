@@ -9,6 +9,9 @@
 // nothing for a rename without a change; the note for an untracked folder; "Diff unavailable: …" with Retry for a file
 // whose own read failed. A folded section has no body; an unfolded one outside the stack's band (M4) is a spacer of the
 // height the stack gives it.
+//
+// UX wave U5b, M5 (§G, decision 10): while the card is open on a line of the file, the file holds still; when the scope's
+// re-read brings other hunks for it, the header shows one muted line under its row, "This file changed · Refresh".
 import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { REVIEW_COPY } from '../copy';
 import type { DiffBlockData } from './FileBody';
@@ -56,10 +59,11 @@ export interface FileSectionProps {
   onFold(): void;
   onViewed(): void;
   onOpen(line: number | null): void;
+  onRefresh(): void; // the file held under an open card takes its latest hunks
 }
 
-export function FileSection({ section, drawn, near, spacer, width, mode, wrap, target, scopeDiff, openLine, firstLine, onFold, onViewed, onOpen }: FileSectionProps) {
-  const { file, hunks, blocks, binary, signature, viewed, folded, fetch, failed } = section;
+export function FileSection({ section, drawn, near, spacer, width, mode, wrap, target, scopeDiff, openLine, firstLine, onFold, onViewed, onOpen, onRefresh }: FileSectionProps) {
+  const { file, hunks, blocks, binary, signature, viewed, folded, fetch, failed, changed } = section;
   const narrow = width > 0 && width < NARROW_HEADER_WIDTH;
   const untracked = file.kind === 'untracked';
   const untrackedDirectory = untracked && file.path.endsWith('/');
@@ -110,36 +114,47 @@ export function FileSection({ section, drawn, near, spacer, width, mode, wrap, t
     if (hunks.length === 0) return null; // a rename with no change, a mode change: nothing to draw
     return (
       <Suspense fallback={<Loading />}>
-        <FileBody data={data} mode={mode} wrap={wrap} />
+        <FileBody path={file.path} data={data} mode={mode} wrap={wrap} />
       </Suspense>
     );
   })();
 
   return (
     <section data-review-file={file.path} data-kind={file.kind} data-folded={folded || undefined} data-viewed={viewed || undefined}>
-      <div data-review-file-header className="sticky top-0 z-10 flex h-8 items-center gap-2 border-b border-border bg-bg px-2">
-        <button type="button" data-review-fold aria-expanded={!folded} onClick={onFold} className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2">
-          <FoldMark folded={folded} />
-          <PathLabel file={file} />
-          <Badge file={file} />
-          <Counts file={file} />
-        </button>
-        <ViewedControl markable={signature !== null} viewed={viewed} narrow={narrow} onToggle={onViewed} />
-        {file.openPath !== null ? (
-          narrow ? (
-            <button type="button" data-open-file aria-label={REVIEW_COPY.openFile} title={REVIEW_COPY.openFile} className={glyph} onClick={() => onOpen(openLine)}>
-              {REVIEW_COPY.openFileGlyph}
-            </button>
+      <div data-review-file-header className="sticky top-0 z-10 border-b border-border bg-bg">
+        <div className="flex h-8 items-center gap-2 px-2">
+          <button type="button" data-review-fold aria-expanded={!folded} onClick={onFold} className="flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-ui-sm outline-accent focus-visible:outline-2">
+            <FoldMark folded={folded} />
+            <PathLabel file={file} />
+            <Badge file={file} />
+            <Counts file={file} />
+          </button>
+          <ViewedControl markable={signature !== null} viewed={viewed} narrow={narrow} onToggle={onViewed} />
+          {file.openPath !== null ? (
+            narrow ? (
+              <button type="button" data-open-file aria-label={REVIEW_COPY.openFile} title={REVIEW_COPY.openFile} className={glyph} onClick={() => onOpen(openLine)}>
+                {REVIEW_COPY.openFileGlyph}
+              </button>
+            ) : (
+              <button type="button" data-open-file className={quiet} onClick={() => onOpen(openLine)}>
+                {REVIEW_COPY.openFile}
+              </button>
+            )
           ) : (
-            <button type="button" data-open-file className={quiet} onClick={() => onOpen(openLine)}>
-              {REVIEW_COPY.openFile}
+            // a deleted file: nothing to open, and the column kept so the Viewed controls stay in line (D10)
+            <span aria-hidden data-review-open-placeholder className={`${narrow ? glyph : quiet} invisible`}>
+              {narrow ? REVIEW_COPY.openFileGlyph : REVIEW_COPY.openFile}
+            </span>
+          )}
+        </div>
+        {changed && (
+          <p data-review-file-changed="" className="m-0 flex items-center gap-1 pb-1 pl-8 text-ui-sm text-fg-muted">
+            {REVIEW_COPY.fileChanged}
+            <span aria-hidden>·</span>
+            <button type="button" className="inline-flex min-h-6 items-center rounded-sm px-1 text-accent outline-accent hover:underline focus-visible:outline-2" onClick={onRefresh}>
+              {REVIEW_COPY.refresh}
             </button>
-          )
-        ) : (
-          // a deleted file: nothing to open, and the column kept so the Viewed controls stay in line (D10)
-          <span aria-hidden data-review-open-placeholder className={`${narrow ? glyph : quiet} invisible`}>
-            {narrow ? REVIEW_COPY.openFileGlyph : REVIEW_COPY.openFile}
-          </span>
+          </p>
         )}
       </div>
       {folded ? null : drawn ? body !== null && <div data-review-body>{body}</div> : <div aria-hidden data-review-spacer style={{ height: spacer }} />}

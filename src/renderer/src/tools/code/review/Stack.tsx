@@ -14,6 +14,7 @@ import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import { openFile } from '../open-file';
 import { FileSection } from './FileSection';
+import { useLineCommentsContext } from './LineComments';
 import { blocksOf, firstChangedLine, REVIEW_FILE_LINES_CAP, tooLarge, viewedSignature, type ReviewFile } from './review-model';
 import { fileDiffOf, useReview, type DiffTarget, type ScopeDiff } from './review-store';
 import { bodyLines, hunkOrder, isFolded, type StackHunk } from './stack-model';
@@ -31,12 +32,21 @@ export interface StackSection {
   fetch: boolean; // its own read is wanted now
   failed: string | null; // its own read failed, with the message
   lines: number; // its body's rows for an estimate before it is measured: 0 when it draws no body, 1 for a line of words
+  changed: boolean; // held under an open card while the scope's read brought other hunks for it (M5)
+}
+
+// UX wave U5b, M5 (§G, decision 10): a file under an open card holds still: its hunks and blocks as they were when the
+// card opened, until the card goes or the person asks for the file's latest (Refresh).
+export interface HeldFile {
+  path: string;
+  hunks: string[];
+  blocks: string[][];
 }
 
 // The sections of a scope and the hunks the counter counts (§F): those of every loaded file, folded or not, that is not
 // marked Viewed and not past the per-file cap, in stack order.
-export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarget | null; placeKey: string; pastCap: boolean; ui: StoreApi<ReviewUi> }): { sections: StackSection[]; order: StackHunk[] } {
-  const { files, target, placeKey: key, pastCap, ui } = input;
+export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarget | null; placeKey: string; pastCap: boolean; ui: StoreApi<ReviewUi>; held?: HeldFile | null }): { sections: StackSection[]; order: StackHunk[] } {
+  const { files, target, placeKey: key, pastCap, ui, held = null } = input;
   const marks = useStore(ui, (s) => s.viewed);
   const folds = useStore(ui, (s) => s.folds);
   const fetched = useReview((s) => s.files);
@@ -49,7 +59,9 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
       const ownRead = target !== null && (file.kind === 'binary' ? file.header === null : file.hunks === null && !untrackedDirectory);
       const load = ownRead && target ? fileDiffOf({ files: fetched }, target, file.path) : undefined;
       const binary = file.kind === 'binary' || (untracked && load?.status === 'ok' && load.file?.kind === 'binary');
-      const hunks = binary ? null : (file.hunks ?? (load?.status === 'ok' ? (load.file?.hunks ?? []) : null));
+      const latest = binary ? null : (file.hunks ?? (load?.status === 'ok' ? (load.file?.hunks ?? []) : null));
+      const hold = held !== null && held.path === file.path && !binary ? held : null;
+      const hunks = hold ? hold.hunks : latest;
       const header = file.header ?? (load?.status === 'ok' ? (load.file?.header ?? null) : null);
       const markable = binary ? header !== null : !untrackedDirectory && hunks !== null;
       const signature = markable ? viewedSignature({ kind: binary ? 'binary' : file.kind, header }, hunks) : null;
@@ -63,7 +75,7 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
       return {
         file,
         hunks,
-        blocks: hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks),
+        blocks: hold ? hold.blocks : hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks),
         binary,
         signature,
         viewed,
@@ -71,11 +83,12 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
         fetch: ownRead && (!folded || mark !== undefined),
         failed,
         lines: estimateLines(file, hunks, binary || untrackedDirectory || (hunks === null && failed !== null)),
+        changed: hold !== null && latest !== null && latest.join('\n') !== hold.hunks.join('\n'),
       };
     });
     const order = hunkOrder(sections.map((section) => ({ path: section.file.path, hunks: section.hunks, blocks: section.blocks.map((block) => block.length), viewed: section.viewed })));
     return { sections, order };
-  }, [files, target, key, pastCap, marks, folds, fetched]);
+  }, [files, target, key, pastCap, marks, folds, fetched, held]);
 }
 
 // What a body is estimated from before it is measured: nothing for a section that draws no body (a rename with no
@@ -105,15 +118,17 @@ export interface StackProps {
   wrap: boolean;
   reveal: { path: string; n: number } | null; // a requested file the list holds, by its identity
   onRevealed(): void;
+  onRefresh(path: string): void; // a file held under an open card takes its latest hunks (M5)
 }
 
-export function Stack({ appSessionId, ui, sections, order, placeKey: key, target, scopeDiff, width, mode, wrap, reveal, onRevealed }: StackProps) {
+export function Stack({ appSessionId, ui, sections, order, placeKey: key, target, scopeDiff, width, mode, wrap, reveal, onRevealed, onRefresh }: StackProps) {
   const scroller = useRef<HTMLDivElement>(null);
   const placer = useRef<StackPlacer | null>(null);
   const [band, setBand] = useState<Band>(EMPTY_BAND);
   const hunk = useStore(ui, (s) => s.hunk);
   const navigate = useStore(ui, (s) => s.navigate);
   const current = Math.min(hunk, Math.max(0, order.length - 1));
+  const card = useLineCommentsContext()?.card ?? null; // M5: this surface's open card, under its line
 
   // Mounted: the placer, the observers of every box that can move the page, and the saved place as the first reveal;
   // unmounted, the place in force is saved.
@@ -148,7 +163,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
 
   // Every commit is a layout change: the placer takes the sections as drawn, the requests made since (a file, a hunk
   // jump), and applies the place again.
-  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number }>({ reveal: null, navigate });
+  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null }>({ reveal: null, navigate, card: null });
   useLayoutEffect(() => {
     const placed = placer.current;
     if (!placed) return;
@@ -168,6 +183,16 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
       if (jump) {
         if (sections.find((section) => section.file.path === jump.path)?.folded) ui.setState((s) => setFold(s, key, jump.path, 'open'));
         placed.revealHunk(jump);
+      }
+    }
+    // M5: a card opened on a line this stack does not draw (the chip's newest comment, in a folded file or far from the
+    // scroll position) is brought into view, its file unfolded; one opened where the person points stays where it is.
+    if (card !== null && seen.card !== card.serial) {
+      seen.card = card.serial;
+      const section = sections.find((each) => each.file.path === card.path);
+      if (section && (section.folded || !band.drawn.has(card.path))) {
+        if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
+        placed.revealPlace({ path: card.path, row: { block: card.block, side: card.side, line: card.line }, offset: 0 });
       }
     }
     const watching = observer.current;
@@ -221,6 +246,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
             onFold={() => ui.setState((s) => setFold(s, key, file.path, section.folded ? 'open' : 'closed'))}
             onViewed={() => section.signature !== null && ui.setState((s) => toggleViewed(s, key, file.path, section.signature!))}
             onOpen={(line) => file.openPath !== null && openFile(appSessionId, file.openPath, line)}
+            onRefresh={() => onRefresh(file.path)}
           />
         );
       })}

@@ -343,6 +343,8 @@ describe('comments on lines in Review', () => {
     addOn('src/other.ts', 'new', 2);
     await painted(() => card() !== null);
     type('Name it for what it counts.');
+    leave();
+    await painted(() => chip() !== null);
     const checkout = '/repo/.claude/worktrees/w1';
     act(() => useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo', title: { text: 'Berth import', source: 'user' }, agentFolder: { checkout, cwd: checkout, branch: 'w1', linked: true } })) })));
     await waitFor(() => expect(main.callsOf('git.diff')).toContainEqual({ directory: checkout, scope: 'all' }));

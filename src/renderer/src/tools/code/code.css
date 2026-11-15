@@ -66,3 +66,17 @@
 .review-diff .diff-table-scroll-container {
   font-family: var(--font-mono) !important;
 }
+/* Review's add-comment button (UX wave U5b, M5; §G, D6): the library draws a glyph of 1.4 times the diff's font (16.8 px);
+   its pressed area is a 24 px square around it. */
+.review-diff .diff-add-widget {
+  position: relative;
+}
+.review-diff .diff-add-widget::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}

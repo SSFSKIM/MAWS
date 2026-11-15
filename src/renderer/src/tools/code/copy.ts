@@ -84,6 +84,9 @@ export const REVIEW_COPY = {
   removed: (n: number) => `−${count(n)}`,
   binaryFile: 'Binary file',
   retry: 'Retry',
+  // A file held still under an open comment card while the agent changed it (UX wave U5b, M5; §G, §I)
+  fileChanged: 'This file changed',
+  refresh: 'Refresh',
   untrackedNote: 'Untracked file · not in the diff',
   // The toolbar (UX wave U5b, §F): Collapse all and the View menu, which holds the stack's Unified, Split and Wrap
   collapseAll: 'Collapse all',

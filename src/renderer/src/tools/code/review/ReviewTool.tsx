@@ -62,7 +62,7 @@ function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext 
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{REVIEW_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
+  return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} hostId={ctx.editorHost.tabId} hostMode="panel" chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
 }
 
 export const reviewTool: PanelTool<ReviewState, ReviewParams> = {

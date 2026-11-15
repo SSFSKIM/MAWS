@@ -4,11 +4,16 @@
 // stylesheet and the highlighter) loads on first use under the `Loading` fallback (ruled 2026-09-29, O2), while the
 // chips, the toolbar and the headers draw at once. Review reads no file bytes (K4): an untracked file is read as
 // Source control reads it, its diff against /dev/null.
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+//
+// UX wave U5b, M5 (§B, §G; decision 4): the surface's comment card host is mounted once, in the toolbar, where its chip
+// ("N unsent comments") and its place line belong; the card is drawn through a portal into the row the stack opens
+// under the commented line. `hostId` is the surface's own (the tool's tab id, a diff tab's id).
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import { useTranscriptStore } from '../../../transcript';
 import { REFUSAL, REVIEW_COPY } from '../copy';
 import { useViewer } from '../viewer/viewer-store';
@@ -16,7 +21,8 @@ import '../code.css';
 import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
 import { defaultScope, latestTurnWithFiles, totals, type ReviewFile, type ReviewScope } from './review-model';
 import { diffOf, useReview, useReviewData, type ReviewData } from './review-store';
-import { Stack, useStack } from './Stack';
+import { LineCommentsContext, rowsIn, useLineComments, type LineCommentsValue } from './LineComments';
+import { Stack, useStack, type HeldFile } from './Stack';
 import { everyFolded } from './stack-model';
 import { Toolbar, totalsWords } from './Toolbar';
 import { decide, foldAll, placeKey, selectLastTurn, selectScope, type ReviewMode, type ReviewUi } from './view-state';
@@ -27,6 +33,8 @@ export interface ReviewShellProps {
   appSessionId: AppSessionId;
   directory: string; // the session's working folder: workingFolder(session).path
   ui: StoreApi<ReviewUi>;
+  hostId: string; // the surface's own id, its comment card host's (UX wave U5b, M5)
+  hostMode: 'panel' | 'tab';
   chips: boolean; // the panel tool's scope chips; a diff tab's scope is its ref's
   focusRequest?: number; // the panel tool's: a growth re-reads the scope
   visible?: boolean; // the panel tool's: becoming visible re-reads the scope
@@ -57,7 +65,7 @@ function useWidth(): [(element: HTMLDivElement | null) => void, number] {
   return [setElement, width];
 }
 
-export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest = 0, visible = true }: ReviewShellProps) {
+export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chips, focusRequest = 0, visible = true }: ReviewShellProps) {
   const scope = useStore(ui, (s) => s.scope);
   const turnId = useStore(ui, (s) => s.turnId);
   const redecide = useStore(ui, (s) => s.redecide);
@@ -111,6 +119,9 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
       ) : files ? (
         <StackView
           appSessionId={appSessionId}
+          hostId={hostId}
+          hostMode={hostMode}
+          visible={visible}
           ui={ui}
           data={data}
           files={files}
@@ -131,6 +142,9 @@ const drawnMode = (mode: ReviewMode, width: number): ReviewMode => (mode === 'sp
 
 interface StackViewProps {
   appSessionId: AppSessionId;
+  hostId: string;
+  hostMode: 'panel' | 'tab';
+  visible: boolean;
   ui: StoreApi<ReviewUi>;
   data: ReviewData;
   files: readonly ReviewFile[];
@@ -141,19 +155,49 @@ interface StackViewProps {
   refused: string | null;
 }
 
-// The toolbar over the stack, both from one resolution of the scope's files.
-function StackView({ appSessionId, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
-  const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui });
+// The card's frame in Review: nothing is located or pinned (the `inline` layout).
+const CARD_FRAME: CardFrame = { scale: 1, offset: { x: 0, y: 0 }, key: 'review' };
+const acceptsNone = () => false; // a Review card is opened on its host by id, never claimed (`targetOf` is null for a line)
+
+// The toolbar over the stack, both from one resolution of the scope's files; the comment card's host in the toolbar,
+// and the comments on lines over the stack (M5).
+function StackView({ appSessionId, hostId, hostMode, visible, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
+  const [held, setHeld] = useState<HeldFile | null>(null);
+  const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui, held });
   const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
   const mode = useStore(ui, (s) => s.mode);
   const hunk = useStore(ui, (s) => s.hunk);
   const wrap = useViewer((s) => s.wrap);
   const allFolded = everyFolded(sections.map((section) => section.folded));
   const current = Math.min(hunk, Math.max(0, order.length - 1));
+
+  // The row under the commented line the card is drawn in, and the file held still under the open card: its hunks as
+  // the card found them, taken when the card opens on it and let go when the card goes (§G, decision 10).
+  const [row, setRow] = useState<HTMLElement | null>(null);
+  const comments = useLineComments({ appSessionId, hostId, repoRoot: data.status?.repoRoot ?? null, sections });
+  const holdPath = comments.holdPath;
+  if (holdPath === null ? held !== null : held?.path !== holdPath) {
+    const section = holdPath === null ? undefined : sections.find((each) => each.file.path === holdPath);
+    if (holdPath === null) setHeld(null);
+    else if (section?.hunks) setHeld({ path: holdPath, hunks: section.hunks, blocks: section.blocks });
+  }
+  // Refresh: the held file takes its latest hunks, and the card is drawn again at its comment's place there. The keyboard
+  // is put in the card's field first, so the card drawn again takes it back (CardComposer's remount rule).
+  const onRefresh = useCallback(
+    (path: string) => {
+      row?.querySelector<HTMLTextAreaElement>('[data-comment-card] textarea')?.focus();
+      setHeld((was) => (was?.path === path ? null : was));
+    },
+    [row],
+  );
+  const { rows, card, add } = comments;
+  const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, rows, add]);
+
   return (
-    <>
+    <LineCommentsContext.Provider value={value}>
       <Toolbar
         totals={totalsWords(totals(files))}
+        chip={<CommentCardHost hostId={hostId} host="review" mode={hostMode} layout="inline" row={row} accepts={acceptsNone} frame={CARD_FRAME} visible={visible} subject={appSessionId} />}
         allFolded={allFolded}
         onFoldAll={() => ui.setState((s) => foldAll(s, key, files.map((file) => file.path), allFolded ? 'open' : 'closed'))}
         counter={order.length > 0 ? { index: current, count: order.length } : null}
@@ -179,8 +223,9 @@ function StackView({ appSessionId, ui, data, files, placeKey: key, width, reveal
         wrap={wrap}
         reveal={reveal}
         onRevealed={onRevealed}
+        onRefresh={onRefresh}
       />
-    </>
+    </LineCommentsContext.Provider>
   );
 }
 

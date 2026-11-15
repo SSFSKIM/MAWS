@@ -3,7 +3,7 @@
 // ResizeObserver reporting a body, a header or the scroller) and answering what the stack draws (the band) and where its
 // scroller stands. The place has two parts and no third: the live place, always kept, read after every scroll the person
 // makes and applied again at every layout change; and at most one outstanding reveal (the saved place after a mount, a
-// requested file's top, a hunk jump's row), applied instead of the live place until it is reached or the person's input
+// requested file's top, a hunk jump's row, the line of a card opened where the stack draws nothing), applied instead of the live place until it is reached or the person's input
 // cancels it. The live place changes in three ways only: the person's scroll, read where it lands; a reveal cancelled by
 // the person's input, read where the reveal left the scroller; a reveal reached, the place it reached. A reveal still
 // out never moves it, so the place saved at an unmount is the one in force (a saved place restored at a mount is the
@@ -117,7 +117,12 @@ export class StackPlacer {
 
   // ↑ or ↓: the hunk's first row at the reading edge.
   revealHunk(hunk: StackHunk): void {
-    this.begin({ place: hunkPlace(hunk) });
+    this.revealPlace(hunkPlace(hunk));
+  }
+
+  // A place at the reading edge (a hunk's first row; a card opened on a line not drawn, M5).
+  revealPlace(place: StackPlace): void {
+    this.begin({ place });
     this.relayout();
   }
 
