@@ -7,16 +7,24 @@
 // cancels it. The live place changes in three ways only: the person's scroll, read where it lands; a reveal cancelled by
 // the person's input, read where the reveal left the scroller; a reveal reached, the place it reached. A reveal still
 // out never moves it, so the place saved at an unmount is the one in force (a saved place restored at a mount is the
-// live place from the start). A scroll event is the person's only during their gesture (a wheel, touch, key or pointer
-// press in the scroller, and a moment after); any other the stack did not make is a layout change (the browser's clamp
-// of a page that shrank under it). Positions are the model's (`stack-model.ts`) over the measures of the page
-// (`stack-dom.ts`), so the band and the place read the same offsets. No React here.
+// live place from the start). Each of the three reads the hunk counter again where the place now is. A scroll event is
+// the person's only during their gesture (a wheel, touch, key or pointer press in the scroller, and a moment after); any
+// other the stack did not make is a layout change. A scroll that comes under a layout not measured yet (the page's
+// height or the scroller's changed since) is that layout change first: the browser's clamp of a page that shrank under
+// it is nothing more, and the person's own scroll is their movement from the place the layout change holds. Positions
+// are the model's (`stack-model.ts`) over the measures of the page (`stack-dom.ts`), so the band and the place read the
+// same offsets. No React here.
 //
 // The reading edge is the scroller's top under the sticky header: what the person reads is the row just below the
-// header that stays at the top, so a place names that row, and a hunk jumped to stands there.
+// header that stays at the top, so a place names that row, and a hunk jumped to stands there. The header is the one of
+// the section the place is in (a held file's has a second row).
+//
+// The cost of a scroll is the band's, not the scope's: the sections are found and their headers measured at a layout
+// change and kept until the next (a scroll changes neither); a scroll measures the drawn bodies and reads the rows of the
+// file at the reading edge, and the counter resolves that file's hunks alone, each row found by its index.
 import { reviewLayout } from './measure';
-import { drawnSections, rowsOf, settled } from './stack-dom';
-import { bandOf, hunkPlace, placeAt, stackLayout, topOfPlace, type RowsOf, type StackHunk, type StackLayout, type StackRow } from './stack-model';
+import { drawnSections, rowsOf, settled, type DrawnSection } from './stack-dom';
+import { bandOf, edgeAt, headerOf, hunkPlace, placeAt, rowOf, sectionAt, stackLayout, topOfPlace, type RowsOf, type StackHunk, type StackLayout, type StackRow } from './stack-model';
 import type { StackPlace } from './view-state';
 
 // A header not measured yet (`h-8`).
@@ -56,7 +64,15 @@ interface Measured {
   viewport: number;
   layout: StackLayout;
   rows: RowsOf;
-  sticky: number; // the header that stays at the top
+}
+
+// The page as last found at a layout change: its sections by path, the drawn bodies among them, and the heights of the
+// scroller's content and viewport then (a scroll under other heights comes after a layout change not measured yet).
+interface Found {
+  sections: Map<string, DrawnSection>;
+  bodies: [string, HTMLElement][];
+  height: number;
+  viewport: number;
 }
 
 const sameSet = (a: ReadonlySet<string>, b: ReadonlySet<string>) => a.size === b.size && [...a].every((item) => b.has(item));
@@ -76,6 +92,8 @@ export class StackPlacer {
   private readonly bodies = new Map<string, number>(); // last measured while drawn, by path
   private band: Band = EMPTY_BAND;
   private pending = false; // a band handed to the host and not drawn yet: the page lags the model
+  private found: Found | null = null;
+  private at = 0; // the scroller's offset when the stack last read or set it: a scroll of the person's moves from here
   private live: StackPlace | null = null;
   // The outstanding reveal: a place, or a requested file's section at the scroller's top (`top`), whatever its header
   // measures when it is applied.
@@ -90,6 +108,8 @@ export class StackPlacer {
   // Mounted: a saved place for this key is the live place and the first reveal.
   attach(scroller: HTMLElement, saved: StackPlace | null): void {
     this.scroller = scroller;
+    this.found = null;
+    this.at = scroller.scrollTop;
     this.live = saved;
     this.begin(saved ? { place: saved } : null);
   }
@@ -97,6 +117,7 @@ export class StackPlacer {
   // Unmounted: the place then in force (a reveal reached became the live place; one still out never moved it).
   detach(): StackPlace | null {
     this.scroller = null;
+    this.found = null;
     return this.live;
   }
 
@@ -134,8 +155,8 @@ export class StackPlacer {
     this.reveal = null;
     const m = this.measure();
     if (!m?.laidOut) return;
-    this.live = placeAt(m.layout, m.el.scrollTop + m.sticky, m.rows);
-    if (this.live) this.host.saved(this.live);
+    this.read(m);
+    this.at = m.el.scrollTop;
   }
 
   press(): void {
@@ -151,68 +172,92 @@ export class StackPlacer {
   }
 
   // A scroll event: the stack's own is ignored; the person's is read as the live place, and moves the counter; any other
-  // is a layout change.
+  // is a layout change. Under a layout not measured yet it is that layout change first: the browser's clamp (the page
+  // shrank, and the scroller was moved up to its new end) is nothing more; the person's scroll is their movement, from
+  // where the layout change holds the place they read.
   scrolled(): void {
     const el = this.scroller;
     if (!el) return;
     if (this.own !== null && Math.abs(el.scrollTop - this.own) < 1) return;
     this.own = null;
-    if (!this.pressed && performance.now() - this.gesture > GESTURE_MS) {
+    const theirs = this.pressed || performance.now() - this.gesture <= GESTURE_MS;
+    const moved = !this.sameShape(el);
+    if (!theirs || (moved && el.scrollTop < this.at && atEnd(el))) {
       this.relayout();
       return;
     }
     this.reveal = null;
-    const m = this.measure();
+    const by = el.scrollTop - this.at;
+    const m = this.measure(moved);
     if (!m) return;
-    this.live = placeAt(m.layout, el.scrollTop + m.sticky, m.rows);
-    if (this.live) this.host.saved(this.live);
-    this.count(m);
+    const held = moved && this.live !== null ? topOfPlace(m.layout, this.live, m.rows) : null;
+    if (held !== null) this.write(el, this.scrollFor(m.layout, this.live!, held) + by);
+    this.read(m);
+    this.at = el.scrollTop;
     this.setBand(this.bandFor(m, el.scrollTop));
+  }
+
+  // A pointer held down in the scroller: what opens now opens where the person points.
+  pointing(): boolean {
+    return this.pressed;
+  }
+
+  // Whether a place's row stands wholly in view, between the reading edge and the scroller's bottom (a card opened on a
+  // line the person can see is not moved to).
+  inView(place: StackPlace): boolean {
+    const m = this.measure(true);
+    if (!m?.laidOut || place.row === null) return false;
+    const at = topOfPlace(m.layout, place, m.rows);
+    const index = m.layout.index.get(place.path);
+    const rows = index === undefined ? null : m.rows(index);
+    const row = rows ? rowOf(rows, place.row) : undefined;
+    if (!at?.exact || !at.edge || !row) return false;
+    const top = m.el.scrollTop;
+    return at.top >= edgeAt(m.layout, top) - 0.5 && at.top + row.height <= top + m.viewport + 0.5;
   }
 
   // A layout change: the reveal, else the live place, applied again under the heights the page now has.
   relayout(): void {
-    const m = this.measure();
+    const m = this.measure(true);
     if (!m) return;
+    const { el, layout, rows } = m;
     if (!m.laidOut) {
-      this.setBand(this.bandFor(m, m.el.scrollTop));
+      this.setBand(this.bandFor(m, el.scrollTop));
+      this.at = el.scrollTop;
       return;
     }
-    const { el, layout, rows, sticky } = m;
     const reveal = this.reveal;
     const at = reveal ? topOfPlace(layout, reveal.place, rows) : null;
     if (reveal && at === null) this.reveal = null; // its file left the stack: the live place stands
     if (reveal && at !== null) {
       // A section folded is not reached yet: the jump that unfolds it draws it next. A section's top (a request, or a
       // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top.
-      const exact = at.exact && !this.input.sections.find((section) => section.path === reveal.place.path)?.folded;
-      const want = Math.max(0, reveal.top || !at.edge ? at.top : at.top - sticky);
+      const exact = at.exact && !this.input.sections[layout.index.get(reveal.place.path)!]?.folded;
+      const want = reveal.top ? Math.max(0, at.top) : this.scrollFor(layout, reveal.place, at);
       this.write(el, want);
       const band = this.bandFor(m, el.scrollTop);
       const lags = this.pending || !sameBand(band, this.band);
       if (exact && !lags && (Math.abs(el.scrollTop - want) < 1 || (want > el.scrollTop && atEnd(el)))) {
         this.reveal = null; // reached: the place reached is the live place
-        this.live = placeAt(layout, el.scrollTop + sticky, rows);
-        if (this.live) this.host.saved(this.live);
+        this.read(m);
       }
       this.setBand(band);
+      this.at = el.scrollTop;
       return;
     }
-    if (this.live === null) this.live = placeAt(layout, el.scrollTop + sticky, rows);
+    if (this.live === null) this.read(m);
     else {
       const target = topOfPlace(layout, this.live, rows);
-      if (target !== null) this.write(el, Math.max(0, target.edge ? target.top - sticky : target.top));
+      if (target !== null) this.write(el, this.scrollFor(layout, this.live, target));
       // A place read where its file was not drawn yet names no row; once the file draws, the row at the same spot is
       // read, so the place survives what moves inside the file from then on.
-      if (target !== null && this.live.row === null && !this.pending && this.drawsRows(layout, this.live.path, rows)) {
-        this.live = placeAt(layout, el.scrollTop + sticky, rows);
-        if (this.live) this.host.saved(this.live);
-      }
+      if (target !== null && this.live.row === null && !this.pending && this.drawsRows(layout, this.live.path, rows)) this.read(m);
       // Counted again only once the file read at the edge draws its rows: until then a drawn body weighs what the page
       // shows, which can put the edge past hunks it has not reached.
-      if (this.recount && !this.pending && this.live !== null && this.drawsRows(layout, this.live.path, rows)) this.count(m);
+      else if (this.recount && !this.pending && this.drawsRows(layout, this.live.path, rows)) this.count(m);
     }
     this.setBand(this.bandFor(m, el.scrollTop));
+    this.at = el.scrollTop;
   }
 
   // A reveal begins: the person's gesture before it is over, and the counter is the jump's.
@@ -222,23 +267,51 @@ export class StackPlacer {
     this.recount = false;
   }
 
+  // The live place read where the scroller stands, saved, and the counter read there with it: whichever of its three
+  // ways the place changes by, the counter follows it.
+  private read(m: Measured): void {
+    this.live = placeAt(m.layout, edgeAt(m.layout, m.el.scrollTop), m.rows);
+    if (this.live) this.host.saved(this.live);
+    this.count(m);
+  }
+
+  // Where the scroller stands for a place found at `target`: its row under its own section's header at the reading
+  // edge, or, for a section-top fallback, the section's top at the scroller's top.
+  private scrollFor(layout: StackLayout, place: StackPlace, target: { top: number; edge: boolean }): number {
+    return Math.max(0, target.edge ? target.top - headerOf(layout, layout.index.get(place.path)!) : target.top);
+  }
+
   // ---- the page --------------------------------------------------------------------------------------------------------
 
+  // The scroller's content and viewport are as tall as when the page was last found: no layout change since.
+  private sameShape(el: HTMLElement): boolean {
+    return this.found !== null && el.scrollHeight === this.found.height && el.clientHeight === this.found.viewport;
+  }
+
   // The measures of the page now (kept only while it is laid out: a hidden or collapsed scroller measures nothing), the
-  // model's layout from them, and the drawn rows of each body, read once per layout.
-  private measure(): Measured | null {
+  // model's layout from them, and the drawn rows of each body, read once per layout. The sections are found, and their
+  // headers measured, at a layout change (`fresh`, or the scroller's heights changed since); otherwise those of the last
+  // are kept, and only the drawn bodies are measured.
+  private measure(fresh = false): Measured | null {
     const el = this.scroller;
     if (!el) return null;
     const viewport = el.clientHeight;
     const laidOut = viewport > 0;
-    const dom = drawnSections(el);
+    if (fresh || !this.sameShape(el) || this.found!.bodies.some(([, body]) => !body.isConnected)) {
+      const sections = drawnSections(el);
+      const bodies: [string, HTMLElement][] = [];
+      for (const [path, { header, body }] of sections) {
+        if (laidOut && header) this.headers.set(path, reviewLayout.height(header));
+        if (body) bodies.push([path, body]);
+      }
+      this.found = { sections, bodies, height: el.scrollHeight, viewport };
+    }
+    const dom = this.found!.sections;
     // A drawn body weighs what the page shows, settled or not, so the model is the page; only a settled body's height
     // is kept for the spacer that stands for it later.
     const shown = new Map<string, number>();
     if (laidOut)
-      for (const [path, { header, body }] of dom) {
-        if (header) this.headers.set(path, reviewLayout.height(header));
-        if (!body) continue;
+      for (const [path, body] of this.found!.bodies) {
         const height = reviewLayout.height(body);
         shown.set(path, height);
         if (settled(body)) this.bodies.set(path, height);
@@ -261,13 +334,12 @@ export class StackPlacer {
       }
       return cache.get(index)!;
     };
-    const sticky = layout.tops.length > 0 ? layout.bodyTops[0] - layout.tops[0] : 0;
-    return { el, laidOut, viewport, layout, rows, sticky };
+    return { el, laidOut, viewport, layout, rows };
   }
 
   private drawsRows(layout: StackLayout, path: string, rows: RowsOf): boolean {
-    const index = layout.paths.indexOf(path);
-    return index >= 0 && (rows(index)?.length ?? 0) > 0;
+    const index = layout.index.get(path);
+    return index !== undefined && (rows(index)?.length ?? 0) > 0;
   }
 
   // The band around a scroll position. A scroller not laid out yet is taken as tall as the window, so the work stays
@@ -294,34 +366,46 @@ export class StackPlacer {
 
   // The scroller put at an offset, within what it can reach; its scroll event is then known as the stack's own.
   private write(el: HTMLElement, top: number): void {
-    const next = Math.min(top, Math.max(0, el.scrollHeight - el.clientHeight));
+    const next = Math.max(0, Math.min(top, el.scrollHeight - el.clientHeight));
     if (Math.abs(next - el.scrollTop) >= 1) {
       this.own = next;
       el.scrollTop = next;
     }
     this.own = el.scrollTop;
+    this.at = el.scrollTop;
   }
 
   // The hunk at the reading edge (the first before any has scrolled past); at the end of the scroller a later hunk
-  // jumped to stands. A hunk of a file whose rows are not drawn has no stop yet: the file above the edge is passed, the
-  // file below it not reached, and the file at the edge is counted again once its rows draw.
-  private count({ el, layout, rows, sticky }: Measured): void {
+  // jumped to stands. Every hunk of a file above the one at the edge is passed and none below it is reached, so only that
+  // file's hunks are resolved: the hunks run in the stack's order, and the first of the edge's file is found by halving.
+  // A hunk of a file whose rows are not drawn has no stop yet: it is counted again once its rows draw.
+  private count({ el, layout, rows }: Measured): void {
     const { order, current } = this.input;
-    const edge = el.scrollTop + sticky + 4;
-    const indexOf = new Map(layout.paths.map((path, index) => [path, index]));
+    const edge = edgeAt(layout, el.scrollTop) + 4;
     let at = 0;
     let unsure = false;
-    order.forEach((hunk, n) => {
-      const stop = topOfPlace(layout, hunkPlace(hunk), rows);
-      if (stop === null) return;
-      if (stop.exact) {
-        if (stop.top <= edge) at = n;
-        return;
+    if (order.length > 0 && layout.paths.length > 0) {
+      const index = sectionAt(layout, edge);
+      const sectionOf = (n: number) => layout.index.get(order[n].path) ?? -1;
+      let first = 0;
+      let after = order.length;
+      while (first < after) {
+        const mid = (first + after) >> 1;
+        if (sectionOf(mid) < index) first = mid + 1;
+        else after = mid;
       }
-      const index = indexOf.get(hunk.path)!;
-      if (layout.bodyTops[index] + (layout.bodies[index] ?? 0) <= edge) at = n;
-      else if (layout.bodyTops[index] <= edge) unsure = true;
-    });
+      at = Math.max(0, first - 1);
+      for (let n = first; n < order.length && order[n].path === layout.paths[index]; n++) {
+        const stop = topOfPlace(layout, hunkPlace(order[n]), rows);
+        if (stop === null) continue;
+        if (stop.exact) {
+          if (stop.top <= edge) at = n;
+          continue;
+        }
+        if (layout.bodyTops[index] + (layout.bodies[index] ?? 0) <= edge) at = n;
+        else if (layout.bodyTops[index] <= edge) unsure = true;
+      }
+    }
     this.recount = unsure;
     if (at < current && atEnd(el)) return;
     if (at !== current) this.host.counted(at);

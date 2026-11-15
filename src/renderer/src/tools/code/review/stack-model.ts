@@ -19,6 +19,7 @@ export interface SectionMeasure {
 
 export interface StackLayout {
   paths: string[];
+  index: ReadonlyMap<string, number>; // each path's section, so a place is found without a search
   tops: number[]; // each section's top in the scroller
   bodyTops: number[]; // each section's body's top: the section's top and its header
   bodies: (number | null)[]; // each body's height in the layout, measured or estimated; null for a folded section, which has none
@@ -54,9 +55,11 @@ export function bodyLines(file: { hunks: readonly string[] | null; added: number
 // Three cases and no fourth (§F): an unfolded body weighs its measure, or its estimate before a first one, whether it
 // is drawn or a spacer; a folded section weighs its header alone.
 export function stackLayout(sections: readonly SectionMeasure[]): StackLayout {
-  const layout: StackLayout = { paths: [], tops: [], bodyTops: [], bodies: [], total: 0 };
+  const index = new Map<string, number>();
+  const layout: StackLayout = { paths: [], index, tops: [], bodyTops: [], bodies: [], total: 0 };
   for (const section of sections) {
     const body = section.folded ? null : (section.body ?? estimatedBody(section.lines));
+    if (!index.has(section.path)) index.set(section.path, layout.paths.length);
     layout.paths.push(section.path);
     layout.tops.push(layout.total);
     layout.bodyTops.push(layout.total + section.header);
@@ -90,11 +93,46 @@ export function bandOf(tops: readonly number[], heights: readonly (number | null
 // band, or not laid out yet).
 export type RowsOf = (index: number) => readonly StackRow[] | null;
 
-// The section holding `y`: the last whose top is at or above it.
-function sectionAt(layout: StackLayout, y: number): number {
-  let at = 0;
-  for (let i = 1; i < layout.tops.length && layout.tops[i] <= y; i++) at = i;
-  return at;
+// The section holding `y`: the last whose top is at or above it (0 above the first), found by halving, since the tops
+// never decrease.
+export function sectionAt(layout: StackLayout, y: number): number {
+  let low = 0;
+  let high = layout.tops.length - 1;
+  while (low < high) {
+    const mid = (low + high + 1) >> 1;
+    if (layout.tops[mid] <= y) low = mid;
+    else high = mid - 1;
+  }
+  return Math.max(0, low);
+}
+
+// The header over a section: what stands over the reading edge while the section is at the scroller's top, so the inset
+// of a place in it (a held file's header has a second row, decision 10).
+export const headerOf = (layout: StackLayout, index: number): number => layout.bodyTops[index] - layout.tops[index];
+
+// The reading edge at a scroll position: just under the header standing at the scroller's top, the header of the section
+// the edge falls in, so a place read here and stood again (`topOfPlace`, less its own section's header) is the same.
+export function edgeAt(layout: StackLayout, scrollTop: number): number {
+  if (layout.paths.length === 0) return scrollTop;
+  const under = scrollTop + headerOf(layout, sectionAt(layout, scrollTop));
+  return scrollTop + headerOf(layout, sectionAt(layout, under));
+}
+
+// A drawn body's row by its block, side and line, through an index made once per rows read (the page is read once per
+// layout, and every hunk of a file is looked up in the same rows).
+const indexed = new WeakMap<readonly StackRow[], Map<string, StackRow>>();
+const rowKey = (block: number, side: 'old' | 'new', line: number) => `${block}\0${side}\0${line}`;
+export function rowOf(rows: readonly StackRow[], at: { block: number; side: 'old' | 'new'; line: number }): StackRow | undefined {
+  let byKey = indexed.get(rows);
+  if (!byKey) {
+    byKey = new Map();
+    for (const row of rows) {
+      const key = rowKey(row.block, row.side, row.line);
+      if (!byKey.has(key)) byKey.set(key, row);
+    }
+    indexed.set(rows, byKey);
+  }
+  return byKey.get(rowKey(at.block, at.side, at.line));
 }
 
 // Where the person is reading (§F, the live place): the section at the scroller's top edge, the diff row at that edge
@@ -124,16 +162,15 @@ export function placeAt(layout: StackLayout, scrollTop: number, rowsOf: RowsOf):
 // section's top. The offset into the row is bounded by the row's current height, so a row that shrank (a zoom out, a
 // wider wrapped diff) keeps the place in it. Null when the stack no longer lists the file.
 export function topOfPlace(layout: StackLayout, place: StackPlace, rowsOf: RowsOf): { top: number; exact: boolean; edge: boolean } | null {
-  const index = layout.paths.indexOf(place.path);
-  if (index === -1) return null;
+  const index = layout.index.get(place.path);
+  if (index === undefined) return null;
   const top = layout.tops[index];
   const body = layout.bodies[index];
   if (place.row === null) return { top: top + Math.min(place.offset, layout.bodyTops[index] - top + (body ?? 0)), exact: true, edge: true };
   if (body === null) return { top, exact: true, edge: false };
   const rows = rowsOf(index);
   if (rows === null) return { top, exact: false, edge: false };
-  const { block, side, line } = place.row;
-  const row = rows.find((candidate) => candidate.block === block && candidate.side === side && candidate.line === line);
+  const row = rowOf(rows, place.row);
   if (!row) return { top, exact: true, edge: false };
   return { top: layout.bodyTops[index] + row.top + Math.min(place.offset, Math.max(0, row.height - 1)), exact: true, edge: true };
 }
