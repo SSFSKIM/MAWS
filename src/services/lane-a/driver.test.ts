@@ -783,7 +783,7 @@ describe('subagents', () => {
       next.agentSpawned({ agentId: A1, toolUseId: tool(A1) });
     };
     s.b.reset();
-    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)], { timeout: 5000 }).toEqual(['running/bridge', 'terminal:5151']);
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)], { timeout: 3000 }).toEqual(['running/bridge', 'terminal:5151']);
     const bodies = messagesOf(s.h.planes, s.watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').map((m) => m.body as { origin?: string; subagents?: LaneAAgent[] });
     expect(bodies.some((b) => b.origin === 'terminal:4242' && (b.subagents ?? []).some((a) => a.evidence === 'bridge'))).toBe(false);
   });
