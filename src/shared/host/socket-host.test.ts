@@ -14,7 +14,7 @@ import type { HostEmit } from './runtime';
 import { startSocketHost, type SocketHost } from './socket-host';
 import { PEER_CAPABILITIES, SOCKET_PROTOCOL, splitLines } from './socket-protocol';
 
-const FILES = { lock: 'host.lock', breakLock: 'host.lock.break', token: 'host.token' };
+const FILES = { lock: 'host.lock', breaker: 'host.lock.break', token: 'host.token' };
 
 let root: string;
 const hosts: SocketHost[] = [];

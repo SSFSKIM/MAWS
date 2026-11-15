@@ -814,8 +814,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // P5 O16 M3c fix wave 2: the old host's exit (or its link's loss) ends the update it waited in; #473: a drain's
         // close ends it below, with the verdict on its exit
         host.updatePending = false;
-        const replace = typeof loss === 'object' && 'replace' in loss ? loss : null;
-        if (replace === null || stopped) setHandover(host, null);
+        if (!(typeof loss === 'object' && 'replace' in loss) || stopped) setHandover(host, null);
         // P5 O16 M3b fix wave 1: the old link closed: its host's completions have no one to settle (fix wave 3: refused)
         const drainLink = host.draining;
         const drained = host.draining ? host.routes.closed(host.draining) : null;
@@ -840,17 +839,17 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         // on it: `mawsd`'s with no app attached) cannot hear it say so; there only the exit itself tells a crash (a
         // signal or a failure code, known for a process this run started), as before the evidence. A close whose
         // process lives on is no `replace` (the transport reports it quiet: reconnected to, taken back; fix wave 3b)
-        if (replace !== null) {
+        if (typeof loss === 'object' && 'replace' in loss) {
           const detached = saidHandedOver;
           // fix wave 3b: an armed idle exit, like an unheard link, makes a clean exit planned, never a proven abnormal one
-          const { code, signal } = replace.replace;
+          const { code, signal } = loss.replace;
           const abnormal = signal !== null || (code !== null && code !== 0);
-          const planned = detached || (drainLink !== null && drainLink === host.drainStopped) || (!abnormal && (!host.drainHears || replace.idleAsked));
+          const planned = detached || (drainLink !== null && drainLink === host.drainStopped) || (!abnormal && (!host.drainHears || loss.idleAsked));
           host.drainStopped = null;
           host.drainHears = false;
           setHandover(host, null, closed === null ? undefined : { pid: pidOfStartedAtKey(closed), startedAt: startedAtOfKey(closed), handedOver: planned }); // #473
           failSent(host, planned ? 'handed its sessions over' : 'exited');
-          if (!planned) return unexpected(replace.replace);
+          if (!planned) return unexpected(loss.replace);
           if (host.state.state !== 'restarting') transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
           return launch(host);
         }
