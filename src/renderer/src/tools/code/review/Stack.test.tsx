@@ -682,14 +682,14 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
 
     // The branch panel's third finding: a scroll under a layout not measured yet is that layout change first.
     it('holds the place the person read when the page shrinks inside their gesture: the browser’s clamp is a layout change', async () => {
-      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 10)); // every body drawn: no spacer keeps the page tall
       await mount(files);
-      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER + 10 * ROW); // by hand, into the second file
+      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER + 4 * ROW); // by hand, into the second file
       await page.settle();
       const row = page.rowAtTop();
       expect(row).toEqual(expect.objectContaining({ path: files[1].path }));
       clock += 100; // inside the wheel's window
-      page.setZoom(0.125); // the page shrinks under the scroller: the browser clamps it before the observers report
+      page.setZoom(0.5); // the page shrinks under the scroller: the browser clamps it, into the third file, before the observers report
       await page.settle();
       expect(page.clamped()).toBeGreaterThan(0);
       expect(page.rowAtTop()).toEqual(row);
