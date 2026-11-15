@@ -674,6 +674,13 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 
 - 2026-11-15 (UTC): the one pass over "Statements about U11g's code", on master `93905c9ef` merged into this branch. G-1 and G-4 to G-10 hold, G-4 and G-9 with the code's names added; G-2, G-3 and G-11 are restated. Corrected to them: M1's touched files (no test's list of commands); M2 (the opening's read moves whole; the two sheets' import cycle ends through `sheet-parts.tsx`, closing the tracker row U11g left; one more reader of an ended entry's request); §D; §H (no minor at the chain merge; the two-build proof under an equal wire); the e2e table (U11g's scene by name); sizes (M2 about 2,150 lines, the landing about 4,450). No decision changed.
 
+- 2026-11-15 (UTC), the architect's rulings after the document's last pass, recorded by the executor before M1 is dispatched; each names the milestone that builds it.
+  - *Ruling 1 (M1, M2).* The author's three restatements stand as written: the action opens through `askIn` (G-2); the opening's read is `useConnectorManage`'s and moves whole to the page's one place, with its held-open cases kept (G-3, M2); main's new command joins neither command-list test (G-11, M1).
+  - *Ruling 2 (M2, closed in M5's record).* The two connector sheets import each other today. M2 ends it as written: `Configured`, `Problem`, `Unresolved` and `ConnectorSheetEnv` move to `customize/connectors/sheet-parts.tsx`, which both sheets import and which imports neither; no re-export is left; M2's test over the folder's relative imports stays. The tracker row U11g left for this closes in M5's record.
+  - *Ruling 3 (every milestone; M1 first, where the one new command is written).* No wire minor and no new stored form: `WIRE_MINOR` and the wire's manifest are not in the diff. A milestone that finds it must store or send something stops and reports; nobody takes a minor to get past a check.
+  - *Ruling 4 (M2).* If M2's builder finds it is two reviewable pieces (the move of the bodies; the one place that holds what a person started), it may build and commit them in that order as two steps of one milestone. It does not change what M2 proves, and M2 is reviewed whole before M3 and M4 start.
+  - *Red before green (C2 in M2, C12 in M2, C7 in M1).* Where today's code lacks the behaviour and a test can show it failing first, the test is committed and run red on the VM before the code; the failing case names are quoted in the milestone's report.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
