@@ -498,6 +498,27 @@ describe('the chat over the artifact beside the split (UX wave U10b)', () => {
     expect(openConversation()!.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('waiting');
   });
 
+  // The architect's ruling of 2026-11-15 on M7's mark: what the mark shows, Show chat's description says, in the words
+  // the app already has: the side card's "Waiting for you", else the row dot's "Unread"; none with neither.
+  it.each([
+    { state: 'waiting', unread: false, waiting: true, description: 'Waiting for you' },
+    { state: 'unread', unread: true, waiting: false, description: 'Unread' },
+    { state: 'waiting and unread', unread: true, waiting: true, description: 'Waiting for you' },
+    { state: 'neither', unread: false, waiting: false, description: null },
+  ])('Show chat’s description, $state: $description', async ({ unread, waiting, description }) => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(hideChatButton()!);
+    act(() => {
+      useSessions.setState({ records: new Map([[A, { ...record(A), unread }], [B, record(B)]]) });
+      if (waiting) useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) });
+    });
+    expect(showChatButton()!.textContent, 'no new visible words').toBe('Show chat');
+    expect(showChatButton()!.getAttribute('aria-description')).toBe(description);
+  });
+
   it('over a tab with no header the bar has Open conversation alone, 452 px; a hidden chat becomes the bar when such a tab comes in front, and stays the bar when the header comes back', async () => {
     const user = userEvent.setup();
     shell();
