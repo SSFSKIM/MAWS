@@ -420,9 +420,9 @@ describe('a way to a request from outside its transcript', () => {
         <FrameComposer />
       </section>
     );
-    const { question, prompt, second } = scene();
+    const { prompt, second } = scene(); // two prompts, both at the end: the oldest is the open one
     act(() => useSessions.setState({ records: new Map([[APP, record(APP)]]) }));
-    act(() => useAttention.getState().applySnapshot([question, prompt, second], TEST_MACHINE));
+    act(() => useAttention.getState().applySnapshot([prompt, second], TEST_MACHINE));
     carriedByCard();
     const open = render(cardPane()); // the card open: its transcript reads the history
     await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
@@ -430,7 +430,7 @@ describe('a way to a request from outside its transcript', () => {
     open.unmount();
     act(() => useFloatingCard.setState({ closed: true }));
     const compact = render(<SessionPane appSessionId={APP} paneIndex={0} compact />);
-    fireEvent.click(compact.getByRole('button', { name: 'Waiting for you · 3' }));
+    fireEvent.click(compact.getByRole('button', { name: 'Waiting for you · 2' }));
     expect(useFloatingCard.getState().closed).toBe(false);
     compact.unmount();
     render(cardPane());
