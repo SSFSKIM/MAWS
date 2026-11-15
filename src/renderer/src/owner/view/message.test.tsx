@@ -126,6 +126,7 @@ describe('the label follows `spanRows`', () => {
     ['narration on both sides of a mark inside a line', 'Before <message>For you</message> after.', ['For you']],
     ['two adjacent marks inside a line', 'Checked. <message>First.</message> <message>Second.</message> Done.', ['First.', 'Second.']],
     ['a mark nested inside a line', 'Look: <message>Outer <insight>inner</insight> tail</message> end.', ['Outer', 'inner', 'tail']],
+    ['a mark inside an emphasis inside a line', 'Note **<message>Bold one.</message>** end.', ['Bold one.']],
     ['a mark inside a line beside one on its own lines', 'Intro <message>inline</message> words.\n\n<message>\nBlock.\n</message>', ['inline', 'Block.']],
   ])('a closed stretch’s head draws %s as only its messages', (_name, text, expected) => {
     const view = head(text);

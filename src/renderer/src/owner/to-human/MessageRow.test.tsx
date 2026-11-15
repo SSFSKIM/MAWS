@@ -59,7 +59,7 @@ describe('a message tool’s call in a mounted transcript', () => {
   let keys = 0;
   async function mounted(events: SessionEvent[], ownerLane: boolean) {
     const source: TranscriptSource = { key: `message-row-${++keys}`, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
-    render(<Transcript source={source} variant="session" ownerLane={ownerLane} />);
+    render(<Transcript source={source} variant="session" ownerLane={ownerLane} browserActivity={false} /* no browser of its own to list */ />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
     await act(() => Promise.resolve());
   }
