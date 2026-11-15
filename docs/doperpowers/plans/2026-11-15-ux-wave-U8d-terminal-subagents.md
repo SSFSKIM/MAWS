@@ -27,7 +27,7 @@ How to see it working: in a terminal session on this Mac that MAWS drives, ask t
 - [x] (2026-11-15) M1 — the ledger's agents half and the derivation: `885fcdeb1`..`1cea6c170`, fix rounds `76a232b4a`..`1c1dc2fe5` (N1, the recorded vectors) and `563686989`..`ed908c05d` (the launch row, N7, N8); reviewed clean twice; `jobs.test.ts` 62/62, `src/services/lane-a` and `src/shared/lane-a` 236/236 on the build VM.
 - [x] (2026-11-15) M2 — the driver: the three inputs, the body, what it costs: `f35a83874`..`80a03f500`, fix rounds `a16f0c929`..`94c55364b` and `62df856a6`..`33a2bf942`; reviewed clean after two rounds; `src/services/lane-a`, `spine-root`, `src/main/lane-a`, `src/shared/lane-a`, `src/renderer/src/lane-a` 1069/1069 and Node 22 `src/services/lane-a` 261/261 on the build VM.
 - [x] (2026-11-15) M3 — the window: the statuses laid over the graph: `bcf93a79c`..`806b8a214`, fix `e3bb5eee5`..`cd3c793f2`; reviewed, its last finding deferred as debt (Decision Log 13); the renderer's `lane-a`, `tools/agents`, `panel/summary`, `stores` and the tokens guard 2031/2031 on the build VM.
-- [ ] M4 — the e2e scenes, the record, and the acceptance run.
+- [x] (2026-11-15) M4 — the e2e scenes, the record, and the acceptance run: `aa4fb61d2` (the three `lane-a` scenes), `06ee76d0d` (the fixture walk's rule, Decision Log 14), review fix `c4f59347a`; reviewed clean; e2e tsc, `eslint e2e` and the script tests (588/588) green at `c4f59347a`; the whole unit suite ran once at `aa4fb61d2` (its one failure caused by the branch, the fixture walk, fixed at `06ee76d0d`; the rest the VM's). The scenes are typechecked, not run.
 - [ ] The proofs an executor does not run (the Mac runs of `lane-a` and `agents`; class 1a; the branch's review).
 
 ## Words used here
