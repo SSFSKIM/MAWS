@@ -10,6 +10,7 @@ import {
   estimatedBody,
   everyFolded,
   hunkOrder,
+  hunkPlace,
   isFolded,
   placeAt,
   stackLayout,
@@ -73,14 +74,14 @@ describe('the band', () => {
 });
 
 describe('the place', () => {
-  // The third file's rows, from its body's top: one row of 20 px a line, the new side's lines 40 to 59.
-  const rowsOfThird = (rowPx = 20): StackRow[] => Array.from({ length: 20 }, (_, i) => ({ side: 'new' as const, line: 40 + i, top: i * rowPx }));
+  // The third file's rows, from its body's top: one row of 20 px a line, the new side's lines 40 to 59, in one block.
+  const rowsOfThird = (rowPx = 20): StackRow[] => Array.from({ length: 20 }, (_, i) => ({ block: 0, side: 'new' as const, line: 40 + i, top: i * rowPx, height: rowPx }));
   const five = (bodies: (number | null)[]) => stackLayout(bodies.map((body, i) => section(`src/f${i}.ts`, { body })));
 
   it('is the section, the row and the pixels below the row at the scroller’s top edge', () => {
     const layout = five([400, 400, 400, 400, 400]);
     const scrollTop = layout.bodyTops[2] + 5 * 20 + 7; // seven pixels into the sixth row of the third file
-    expect(placeAt(layout, scrollTop, (i) => (i === 2 ? rowsOfThird() : null))).toEqual({ path: 'src/f2.ts', row: { side: 'new', line: 45 }, offset: 7 });
+    expect(placeAt(layout, scrollTop, (i) => (i === 2 ? rowsOfThird() : null))).toEqual({ path: 'src/f2.ts', row: { block: 0, side: 'new', line: 45 }, offset: 7 });
   });
 
   it('survives a change of the heights above it: the same file and row come back to the top', () => {
@@ -96,14 +97,14 @@ describe('the place', () => {
 
   it('falls back to the section’s top when its row is gone from the drawn body', () => {
     const layout = five([400, 400, 400, 400, 400]);
-    const place = { path: 'src/f2.ts', row: { side: 'new' as const, line: 45 }, offset: 7 };
+    const place = { path: 'src/f2.ts', row: { block: 0, side: 'new' as const, line: 45 }, offset: 7 };
     const without45 = (i: number) => (i === 2 ? rowsOfThird().filter((row) => row.line !== 45) : null);
     expect(topOfPlace(layout, place, without45)).toEqual({ top: layout.tops[2], exact: true });
   });
 
   it('is scrolled to by its section until the section draws, and then exactly', () => {
     const layout = five([400, 400, null, 400, 400]);
-    const place = { path: 'src/f2.ts', row: { side: 'new' as const, line: 45 }, offset: 7 };
+    const place = { path: 'src/f2.ts', row: { block: 0, side: 'new' as const, line: 45 }, offset: 7 };
     expect(topOfPlace(layout, place, noRows)).toEqual({ top: layout.tops[2], exact: false });
     expect(topOfPlace(layout, place, (i) => (i === 2 ? rowsOfThird() : null))).toEqual({ top: layout.bodyTops[2] + 5 * 20 + 7, exact: true });
   });
@@ -115,7 +116,38 @@ describe('the place', () => {
     expect(placeAt(layout, layout.tops[2] + 10, () => rowsOfThird())).toEqual({ path: 'c.ts', row: null, offset: 10 }); // in the header
     expect(topOfPlace(layout, { path: 'b.ts', row: null, offset: 12 }, noRows)).toEqual({ top: layout.tops[1] + 12, exact: true });
     // a row place in a section folded since is reached at the section's top: its body will not draw
-    expect(topOfPlace(layout, { path: 'b.ts', row: { side: 'old', line: 3 }, offset: 4 }, noRows)).toEqual({ top: layout.tops[1], exact: true });
+    expect(topOfPlace(layout, { path: 'b.ts', row: { block: 0, side: 'old', line: 3 }, offset: 4 }, noRows)).toEqual({ top: layout.tops[1], exact: true });
+  });
+
+  it('keeps the edit block a row is in: the same side and line in two blocks of Last turn come back in the later one', () => {
+    // one file of two edits, each block holding the new side's lines 1 to 10; a 20 px gap between the blocks
+    const rows: StackRow[] = [0, 1].flatMap((block) => Array.from({ length: 10 }, (_, i) => ({ block, side: 'new' as const, line: 1 + i, top: block * 220 + i * 20, height: 20 })));
+    const layout = stackLayout([section('/p/a.ts', { body: 420 })]);
+    const rowsOf = () => rows;
+    const place = placeAt(layout, layout.bodyTops[0] + 220 + 4 * 20 + 6, rowsOf)!;
+    expect(place).toEqual({ path: '/p/a.ts', row: { block: 1, side: 'new', line: 5 }, offset: 6 });
+    expect(topOfPlace(layout, place, rowsOf)).toEqual({ top: layout.bodyTops[0] + 220 + 4 * 20 + 6, exact: true });
+    // a hunk's reveal targets its own block's row
+    expect(hunkPlace({ path: '/p/a.ts', index: 2, block: 1, anchor: { side: 'new', line: 5 } })).toEqual({ path: '/p/a.ts', row: { block: 1, side: 'new', line: 5 }, offset: 0 });
+    expect(topOfPlace(layout, hunkPlace({ path: '/p/a.ts', index: 2, block: 1, anchor: { side: 'new', line: 5 } }), rowsOf)!.top).toBe(layout.bodyTops[0] + 220 + 4 * 20);
+  });
+
+  it('bounds the restored offset by the row’s current height, so a row that shrank keeps the place in it', () => {
+    const layout = five([400, 400, 400, 400, 400]);
+    // nineteen pixels into a 20 px row, then a zoom out to 10 px rows
+    const place = placeAt(layout, layout.bodyTops[2] + 5 * 20 + 19, (i) => (i === 2 ? rowsOfThird() : null))!;
+    expect(place.row).toEqual({ block: 0, side: 'new', line: 45 });
+    const zoomed = five([200, 200, 200, 200, 200]);
+    const smaller = (i: number) => (i === 2 ? rowsOfThird(10) : null);
+    const restored = topOfPlace(zoomed, place, smaller)!;
+    expect(restored.exact).toBe(true);
+    expect(placeAt(zoomed, restored.top, smaller)?.row).toEqual({ block: 0, side: 'new', line: 45 });
+    // a wrapped row three lines tall, read 50 px in, then the column widened and the row is one line again
+    const wrapped = (tall: number) => (i: number) => (i === 2 ? rowsOfThird().map((row) => (row.line < 45 ? row : row.line === 45 ? { ...row, height: tall } : { ...row, top: row.top + tall - 20 })) : null);
+    const deep = placeAt(layout, layout.bodyTops[2] + 5 * 20 + 50, wrapped(60))!;
+    expect(deep).toEqual({ path: 'src/f2.ts', row: { block: 0, side: 'new', line: 45 }, offset: 50 });
+    const back = topOfPlace(layout, deep, wrapped(20))!;
+    expect(placeAt(layout, back.top, wrapped(20))?.row).toEqual({ block: 0, side: 'new', line: 45 });
   });
 
   it('has no top in a stack that no longer lists its file, and no place in an empty stack', () => {

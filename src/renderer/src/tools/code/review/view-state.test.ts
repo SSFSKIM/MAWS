@@ -80,10 +80,10 @@ describe('folds', () => {
 describe('places', () => {
   it('keeps one place per key, the latest written', () => {
     let state = ui();
-    state = { ...state, ...savePlace(state, KEY, { path: 'a.ts', row: { side: 'new', line: 12 }, offset: 3 }) };
+    state = { ...state, ...savePlace(state, KEY, { path: 'a.ts', row: { block: 0, side: 'new', line: 12 }, offset: 3 }) };
     state = { ...state, ...savePlace(state, placeKey(DIR, 'turn', T, null), { path: '/work/berth/b.ts', row: null, offset: 0 }) };
-    state = { ...state, ...savePlace(state, KEY, { path: 'c.ts', row: { side: 'old', line: 2 }, offset: 0 }) };
-    expect(state.places.get(KEY)).toEqual({ path: 'c.ts', row: { side: 'old', line: 2 }, offset: 0 });
+    state = { ...state, ...savePlace(state, KEY, { path: 'c.ts', row: { block: 1, side: 'old', line: 2 }, offset: 0 }) };
+    expect(state.places.get(KEY)).toEqual({ path: 'c.ts', row: { block: 1, side: 'old', line: 2 }, offset: 0 });
     expect(state.places.get(placeKey(DIR, 'turn', T, null))).toEqual({ path: '/work/berth/b.ts', row: null, offset: 0 });
   });
 });
