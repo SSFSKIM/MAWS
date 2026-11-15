@@ -875,3 +875,33 @@ describe('the whole-branch review: a read-only store, a create’s replay', () =
     expect(lookup).toHaveBeenCalledTimes(1);
   });
 });
+
+// UX wave U10b (M10 fix wave 1, the task review): two creates with one tool-use id overlap. Both used to pass the replay
+// lookup and settle their own decorations; the second then got the first's recorded answer from the op ledger yet marked
+// the newer instructions it had read and never returned, so the next read left them out. Now the second joins the
+// first's whole response, as A's generic create does, and marks nothing of its own.
+describe('fix wave 1 (M10): overlapping creates with one tool-use id and a Space’s instructions', () => {
+  it('answer one response, and the instructions changed between them reach the next read', async () => {
+    const brand = await world.store.create({ kind: 'design_system', title: 'Brand' }, HUMAN);
+    const notes = await world.store.createSpace({ name: 'Field notes' });
+    await world.store.setDefaults({ owner: brand.id, spaces: {} });
+    await world.store.setSpaceInstructions(notes.id, 'Use metres.');
+    const held: (() => void)[] = []; // the design system's context, held open per ask, released in order
+    world.store.registerDesignSystemContext((system) => new Promise((resolve) => held.push(() => resolve(`# DESIGN of ${system.title}`))));
+    const create = documentCreateTool(deps());
+    const input = { kind: 'document', title: 'Memo', content: '# Memo', space: 'Field notes' };
+    const toolUseId = 'toolu_overlap' as ToolUseId;
+    const first = call(create, input, { toolUseId });
+    await vi.waitFor(() => expect(held).toHaveLength(1)); // the first has read the instructions and waits on the context
+    await world.store.setSpaceInstructions(notes.id, 'Use metres and Celsius.');
+    const second = call(create, input, { toolUseId });
+    for (let turn = 0; turn < 20; turn++) await settle(); // a second that ran on would read the new text and wait on the context too
+    held.shift()!();
+    const answered = json(await first);
+    held.shift()?.();
+    expect(json(await second)).toEqual(answered); // one response
+    expect(answered.spaceInstructions).toEqual({ spaceId: notes.id, name: 'Field notes', text: 'Use metres.' });
+    expect(json(await read({ artifact: answered.artifactId as string })).spaceInstructions).toEqual({ spaceId: notes.id, name: 'Field notes', text: 'Use metres and Celsius.' });
+    expect(world.store.list({ kind: 'document' })).toHaveLength(1);
+  });
+});
