@@ -131,8 +131,15 @@ async function expectWrap(h: Harness, wrapped: boolean, message: string): Promis
   const drawn = () =>
     body.evaluate((el, long) => {
       const cells = Array.from(el.querySelectorAll<HTMLElement>('td')).filter((td) => td.querySelector('td') === null);
-      const longCell = cells.find((td) => (td.textContent ?? '').includes(long));
-      const shortCell = cells.find((td) => /^[+-]?\s*scratch$/.test((td.textContent ?? '').trim()));
+      // A cell's text without the add-a-comment widget, which the library draws inside the content cell of a wrapped
+      // split row (its "+"), and in the number cell elsewhere.
+      const textOf = (td: HTMLElement) => {
+        const copy = td.cloneNode(true) as HTMLElement;
+        for (const widget of Array.from(copy.querySelectorAll('.diff-add-widget-wrapper'))) widget.remove();
+        return copy.textContent ?? '';
+      };
+      const longCell = cells.find((td) => textOf(td).includes(long));
+      const shortCell = cells.find((td) => /^[+-]?\s*scratch$/.test(textOf(td).trim()));
       if (!longCell || !shortCell) return null;
       const overflow = Math.max(0, ...Array.from(el.querySelectorAll<HTMLElement>('*')).map((each) => (getComputedStyle(each).overflowX === 'visible' ? 0 : each.scrollWidth - each.clientWidth)));
       return { wraps: longCell.getBoundingClientRect().height >= 2 * shortCell.getBoundingClientRect().height, overflows: overflow > 0 };
@@ -359,7 +366,11 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
       expect(tab.files).toEqual(panel.files);
       expect(tab.hunks).toEqual(panel.hunks);
       await expect(h.page.locator('[data-diff-tab] [data-chip]'), 'a ref fixes the scope: no chips').toHaveCount(0);
-      // the main area's width: the toolbar on one line, its totals beside its controls (measured)
+      // The main area beside Review's wide column (at the window's 1280 px, 416 px: 1280 less the sidebar's 240 and the
+      // column's 624) is narrower than the toolbar's parts on one line: the toolbar as drawn at that width. With the
+      // column at its narrowest the main area holds them on one line, its totals beside its controls (measured).
+      await expectToolbarAsDrawn(tabReview, 'the tab’s toolbar beside the wide column');
+      await reviewAt(h, 280);
       await expect.poll(async () => (await toolbarLayout(tabReview)).lines, 'the tab’s toolbar on one line').toBe(1);
       const line = await toolbarLayout(tabReview);
       expect(Math.abs(line.totals.middle - line.controls.middle), 'the totals beside the controls').toBeLessThanOrEqual(2);
