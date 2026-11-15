@@ -1,8 +1,10 @@
 // M3 of the DC9 plan, in a real browser: a direct channel's center on a desktop is the session view — MAWS's report
 // over the session's own transcript (the composite's §9.1), against DC3's fake machine replaying its committed
-// `two-subagents` recording through DC5's DX3 double (`fake-machine.ts`): its `<message>` spans and questions, one
-// working record per marked turn, an unmarked turn whole; the Report · Transcript toggle and back; a reload drawing the
-// same rows; a marked response folding its turn while it streams, and settling with no double. Older rows page in at
+// `two-subagents` recording through DC5's DX3 double (`fake-machine.ts`): its `<message>` spans and questions, and, once
+// the session holds a message, each stretch of work between the rows the person reads folded to one record line (UX wave
+// U2b: the to-human view's fold by stretch, which the desk draws through MAWS's transcript); the Report · Transcript
+// toggle and back; a reload drawing the same rows; a marked response drawn as its message while it streams, its turn's
+// work folded, and settling with no double. Older rows page in at
 // the top of the view until the first row, on a live session and on one that ended while the view was open, against
 // the recorded session's plane (`depth-player.ts`), whose snapshots can be cut short (the fake machine's recording fits
 // one snapshot). The column and the center share one subscription.
@@ -20,7 +22,8 @@ import { readRecording } from '../../../src/renderer/src/lane-a/test-support/ses
 const MACHINE = 'fake';
 const ANSWER = 'You chose blue';
 const streamingRows = (scope: Locator) => scope.locator('[data-row-id^="desk-stream:"]');
-const records = (scope: Locator) => scope.locator('[data-row-id^="owner-record:"]');
+const records = (scope: Locator) => scope.locator('[data-row-id^="record-fold:"]'); // a stretch's record line, closed or open
+const workingLine = (scope: Locator) => scope.locator('[data-kind="divider"]').filter({ hasText: /Working/ }); // the running turn's line
 const rowIds = (scope: Locator) => scope.locator('[data-row-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-row-id')));
 const occurrences = (scope: Locator, text: string) => scope.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
 const toggle = (page: Page, view: 'Report' | 'Transcript') => page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: view });
@@ -89,27 +92,32 @@ const isAnswerChunk = (uuid: string, replay: FakeMachineReplay) => {
   return (s: Step) => named?.k === 'block-row' && s.k === 'chunk' && s.turnId === named.body.turnId && s.step === named.body.step && s.chunk.index === named.body.index;
 };
 
-test("the report: the marks and questions, one working record per marked turn, an unmarked turn whole; the toggle shows the transcript and back; a reload draws the same rows", async ({ page, hub }) => {
+test("the report: the marks and questions in view, one record line per stretch of the work between them, the last turn's unmarked answer folded too; the toggle shows the transcript and back; a reload draws the same rows", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   fm.playThrough();
   await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
   await expect(view.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(page.getByTestId('session-status')).toHaveText('');
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
-  // The unmarked last turn draws whole: its prompt and its answer, at the end.
+  // UX wave U2b: the session holds a message, so every stretch of work folds, an unmarked turn's as well: the last
+  // turn's prompt is in view and its answer (one to three hundred, a word a line) is behind its record line.
   await expect(view).toContainText('Count from one to three hundred');
-  await expect(view).toContainText('three hundred');
+  await expect(view).not.toContainText('forty-nine');
   const report = await allRowIds(view);
-  const marked = report.filter((id) => id.startsWith('owner-record:'));
-  expect(marked).toHaveLength(1); // the turn that answered with a <message>, its work folded
+  const folds = report.filter((id) => id.startsWith('record-fold:'));
+  // Two stretches, each closed: the first turn's commentary, the hand-backs' notices and the Bash call (up to the
+  // questions), and the last turn's answer. The subagents' row, the questions and the message stay.
+  expect(folds).toHaveLength(2);
+  expect(folds.every((id) => id.startsWith('record-fold:closed:'))).toBe(true);
   await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
-  await expect(records(view)).toContainText(/Working record · \d+ tool calls?/);
+  await expect(records(view).first()).toHaveText('› working record');
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // the Bash call, folded
   await expect(view).toContainText('Color→blue'); // its question (the ask mod's, answered) stays in view
 
   await toggle(page, 'Transcript').click();
   await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
   const transcript = await allRowIds(view);
-  expect(transcript.filter((id) => id.startsWith('owner-record:'))).toEqual([]);
+  expect(transcript.filter((id) => id.startsWith('record-fold:'))).toEqual([]);
   expect(transcript.filter((id) => id.startsWith('divider:')).length).toBeGreaterThan(report.filter((id) => id.startsWith('divider:')).length);
 
   await toggle(page, 'Report').click();
@@ -187,6 +195,9 @@ for (const width of [1280, 1440, 1920]) {
     await expect(view).toContainText('Both subagents reported back.');
     const jump = view.getByRole('button', { name: 'Jump to latest' });
     await view.locator('[data-transcript-scroller]').evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTo({ top: 0 }); });
+    // UX wave U2b: the session holds a message, so the wide answer (no message of its own) is the first stretch's
+    // record, behind the first record line; opened, it draws in place
+    await view.getByRole('button', { name: '› working record', exact: true }).first().click();
     await expect(view.locator('[data-streamdown="table-wrapper"]')).toBeVisible();
     await expect(view.locator('[data-streamdown="code-block"]')).toBeVisible();
     await expect(jump).toBeVisible();
@@ -224,18 +235,16 @@ test('a turn no row ended draws at rest while its machine reports the session id
   await page.goto(`${hub.url}/p/${PROJECT}/s/${S.asks}`);
   const view = page.getByTestId('session-view');
   await expect(view).toContainText('Both subagents reported back.');
-  const record = records(view).last().locator('.owner-record');
-  const divider = view.locator('[data-row-id^="divider:"]').last().locator('.transcript-disclosure');
-  /** The turn draws working (true) or at rest: its record's running mark in the report, its divider in the transcript. */
+  // UX wave U2b: the session holds a message, so no turn folds and a turn's line has no disclosure
+  const divider = view.locator('[data-row-id^="divider:"]').last().locator('.transcript-turn-line');
+  /**
+   * The turn draws working (true) or at rest: in the report, the running turn's line, which stands while the turn works
+   * and no closed turn's line does (every record closed); in the transcript, its line.
+   */
   const draws = async (working: boolean) => {
     await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
-    if (working) {
-      await expect(record).toHaveAttribute('data-working', '');
-      await expect(record.locator('.owner-record-running')).toBeVisible();
-    } else {
-      await expect(record).not.toHaveAttribute('data-working');
-      await expect(record.locator('.owner-record-running')).toHaveCount(0);
-    }
+    await expect(workingLine(view)).toHaveCount(working ? 1 : 0);
+    await expect(view.locator('[data-kind="divider"]')).toHaveCount(working ? 1 : 0);
     await toggle(page, 'Transcript').click();
     await expect(divider).toHaveText(working ? /^Working( for \d+s)?$/ : 'Continued for 2s'); // MAWS's words for the engine's turn, closed at its last row
     await toggle(page, 'Report').click();
@@ -252,7 +261,7 @@ test('a turn no row ended draws at rest while its machine reports the session id
   await draws(true);
 });
 
-test('a marked response folds its turn and shows its mark while it streams, before its row is written; settling leaves no double', async ({ page, hub }) => {
+test('a marked response is drawn as its message while it streams, before its row is written, and the work before it folds behind one record line; settling leaves no double', async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   const uuid = answerRow(fm);
   fm.step(fm.recording.steps.findIndex(isAnswerChunk(uuid, fm)) - fm.played); // up to the answer's first chunk
@@ -264,10 +273,15 @@ test('a marked response folds its turn and shows its mark while it streams, befo
     fm.step(1);
     await page.waitForTimeout(20);
   }
-  await expect(streamingRows(view).last()).toContainText(`<message>${ANSWER}`);
-  await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
-  await expect(records(view)).toHaveCount(1); // an open mark folds independently of its closed-only ink
-  await expect(records(view).locator('.transcript-working-dots')).toHaveCount(1);
+  // UX wave U2b: a message still streaming is drawn as the message it is, under its label and ` …`, its mark out of
+  // sight; the session now holds a message, so the work since the prompt folds behind one record line, and the
+  // running turn's line says it works.
+  await expect(streamingRows(view).last()).not.toContainText('<message>');
+  await expect(streamingRows(view).last().locator('.owner-message-ink')).toContainText(ANSWER);
+  await expect(streamingRows(view).last().locator('.owner-message-label')).toHaveText('● message …');
+  await expect(records(view)).toHaveCount(1);
+  await expect(records(view)).toHaveText('› working record');
+  await expect(workingLine(view)).toHaveCount(1);
   await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   const named = fm.recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (named.k !== 'block-row') throw new Error('no block-row');
@@ -283,7 +297,7 @@ test('a marked response folds its turn and shows its mark while it streams, befo
   fm.playThrough();
   await expect(streamingRows(view)).toHaveCount(0);
   await expect.poll(() => occurrences(view, ANSWER)).toBe(1);
-  await expect(records(view)).toHaveCount(1);
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // still folded
 });
 
 /** The recorded session's plane with its snapshots cut to the newest `limit` rows, the browser on its channel. */
@@ -363,7 +377,7 @@ const readerRow = (view: Locator) =>
     const top = el.getBoundingClientRect().top;
     const rows = [...el.querySelectorAll('[data-row-id]')]
       .map((row) => ({ id: row.getAttribute('data-row-id')!, y: row.getBoundingClientRect().top - top, bottom: row.getBoundingClientRect().bottom - top }))
-      .filter((row) => row.bottom > 0 && !/^(time|divider|owner-record|desk-stream):/.test(row.id))
+      .filter((row) => row.bottom > 0 && !/^(time|divider|record-fold|desk-stream):/.test(row.id))
       .sort((a, b) => a.y - b.y);
     return rows[0] ?? null;
   });
@@ -410,11 +424,13 @@ for (const delay of [0, 300, 1500]) {
 }
 
 // The snapshot must be tall enough that its top is far from the card at its tail: since the UX wave's arrival rows fold
-// a hand-back's report with its turn, forty rows of the long history draw too little, and sixty draw what forty did.
+// a hand-back's report with its turn, forty rows of the long history draw too little, and sixty drew what forty did;
+// U2b's fold by stretch draws each copy of the session shorter again (its prompt, its subagents, its message and two
+// record lines), so the snapshot is twice that, to keep its top well clear of the card.
 test("a notification's landing on a request reaches its card from far up in the history: the list brings it in, focused and marked", async ({ page, hub }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await stageProject(hub);
-  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 60 }));
+  const played = (player = new DepthPlayer(hub, { project: PROJECT, machine: 'mini', session: S.asks, extraRows: longHistory, limit: 120 }));
   played.skip(played.script.length);
   played.holdRows = true; // the reader stays where they went: no older page lands under them
   await hub.raise(PROJECT, 'mini', { request: 'toolu_far', session: S.asks, tool: 'Bash', input: { command: 'pnpm e2e' } });

@@ -153,8 +153,9 @@ test('older rows page in when the reader reaches the top, and the reader stays w
     .toBe(true);
   await expect.poll(() => hub.up.filter((u) => u.frame.t === 'rows').length).toBe(1); // the reader reached the top
   // The reader's anchor: the first drawn row whose id outlives the rebuild (a turn's time and divider rows are keyed
-  // by the turn, which the older page can re-identify once it holds the turn's prompt).
-  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"]):not([data-row-id^="owner-record:"])').first().getAttribute('data-row-id'))!;
+  // by the turn, which the older page can re-identify once it holds the turn's prompt; UX wave U2b: a stretch's record
+  // line is keyed by the stretch's first row, which an older page can move up).
+  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"]):not([data-row-id^="record-fold:"])').first().getAttribute('data-row-id'))!;
   // Live chunks while the page is on its way, drawn before the reader's place is taken.
   const streamed = (await streamingRows(depth).last().textContent()) ?? '';
   player.advance(3);
