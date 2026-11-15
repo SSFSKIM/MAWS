@@ -40,7 +40,7 @@ Build F and the final build on one profile, with a live engine, for what the cro
 
 **Which case.** At each of three attaches the session was handed over at the attach. The host's log: the client connects with wire 3.46, and the older supervisor exits by the handover about 45 ms later.
 
-**(a) F keeps the session, the final build's app opens it.** F kept a session in the middle of a long command; the final build's app opened the same profile. The next-step row's Send now was offered at once (its title: "Sends this now; what the agent is running keeps running"), and no updating sentence was shown. Pressed: the call's row read "Moved <the command> to the background after 53s", the message's row read "Sent during this turn", the agent answered the message, later the background command's completion arrived, and the turn's last word came. Pass on the written conditions of row 9 of `docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md`.
+**(a) F keeps the session, the final build's app opens it.** F kept a session in the middle of a long command; the final build's app opened the same profile. The next-step row's Send now was offered at once (its title: "Sends this now; what the agent is running keeps running"), and no updating sentence was shown. Pressed: the call's row read "Moved `<the command>` to the background after 53s", the message's row read "Sent during this turn", the agent answered the message, later the background command's completion arrived, and the turn's last word came. Pass on the written conditions of row 9 of `docs/doperpowers/plans/2026-11-12-ux-wave-U4a-composer.md`.
 
 **(b) The final build keeps the session, F's app opens it.** F's Send now (its title: "Stops the running turn, then sends this") stopped the turn: "You stopped after 44s · 1 tool call". The message was answered, the rows were in order, and no row was missing. Pass.
 
@@ -52,7 +52,7 @@ Build F and the final build on one profile, with a live engine, for what the cro
 
 Ruled by the architect on 2026-11-15 (UTC): row 9 is green, and neither observation blocks swapping the apps.
 
-1. **Not proven, not a fail.** In (a) the turn's line read "Worked for 58s · Ran a command" and the message's row "Sent during this turn". The Purpose of U4a's document says a turn ended by a sent-now message reads "Ended for your message after <t>". The engine process in (a) had been launched by build F, and the final build's Send now title promises that the command keeps running, so an answer inside the same turn may be the engine's own choice. What settles it is the same press on a session the final build launched itself ("Owed to the next live slot", 1).
+1. **Not proven, not a fail.** In (a) the turn's line read "Worked for 58s · Ran a command" and the message's row "Sent during this turn". The Purpose of U4a's document says a turn ended by a sent-now message reads "Ended for your message after `<t>`". The engine process in (a) had been launched by build F, and the final build's Send now title promises that the command keeps running, so an answer inside the same turn may be the engine's own choice. What settles it is the same press on a session the final build launched itself ("Owed to the next live slot", 1).
 2. **A bug, board ticket 668 (P2).** After F's Send now had stopped an earlier turn, the final build's app, attached during a later turn, showed "Queue paused because you interrupted" with Resume above a fresh "Next step" row. The paused state crossed the handover and outlived the turn it belonged to.
 
 ## 4. Settings: the native popup, Esc, quit, classic scroll bars
@@ -77,7 +77,7 @@ The paths of the Settings dialog that nothing in the gate proves on macOS (the t
 
 By the architect's ruling of 2026-11-15 (UTC), two checks go together to the next run with a live engine: the paid live run of the tools group on the artifact-link landing (U6d) if it can carry them, else the next slot on the Mac mini. They are listed here so that neither is lost.
 
-1. **Send now on a next-step row of a session the final build launched itself.** Does the turn end reading "Ended for your message after <t>", or does the message read "Sent during this turn" (observation 1)?
+1. **Send now on a next-step row of a session the final build launched itself.** Does the turn end reading "Ended for your message after `<t>`", or does the message read "Sent during this turn" (observation 1)?
 2. **A crossing with a thinking turn:** a thought of ten seconds or more drawn by one build and read by the other.
 
 ## What the check taught about its own script
