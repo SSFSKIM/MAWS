@@ -6,6 +6,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RequestAnswer } from '@shared/engine/answers';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
@@ -91,6 +92,27 @@ describe('the follower of settlements', () => {
     useAttention.setState({ receipts: new Map() });
     stop = followSettlements();
     expect(receiptOf(HERE)).toEqual({ dismissed: true });
+  });
+
+  // The branch review (2026-11-15 UTC): a late answer's port writes what it was told of the settlement into the lane A
+  // store's `told` before it says `not_pending`. With a state stream that has not caught up (the request still listed
+  // pending, no settlement), the receipt is written from `told` in the settlement's own words, not the generic one.
+  it.each([
+    ['answered in the terminal', { winner: 'terminal', outcome: 'answered', by: 'terminal' }, { settled: 'Answered in the terminal' }],
+    ['dismissed in the terminal', { winner: 'terminal', outcome: 'withdrawn', by: 'terminal' }, { dismissed: true }],
+  ] as const)('writes what a late answer was told, %s, through the lane A port, while the state still lists the request pending', async (_name, told, receipt) => {
+    const LANE = at('app-lane-late' as AppSessionId);
+    useSessions.setState((s) => ({ records: new Map(s.records).set(LANE, record(LANE, { holder: { kind: 'terminal', pid: 4242 } })), recordsVersion: s.recordsVersion + 1 }));
+    fake = fakeClient({ 'laneA.answer': { outcome: 'not_pending', settled: told, message: 'already answered' }, 'laneA.catalog': null });
+    window.maws = fake.client as unknown as PreloadBridge;
+    applyLaneAState(LANE, laneAState(LANE, { engineSessionId: 'eng-late', pending: [{ request: CALL, session: 'eng-late', tool: 'AskUserQuestion', input: {} }] }));
+    stop = followSettlements();
+    const question = fixtureRequest('pass1', 'question-roundtrip', 137);
+    const item = itemFor(question, LANE, { kind: 'async_input', request: { requestId: CALL as never, toolUseId: CALL, taskId: null, agentId: null } });
+    const answer: RequestAnswer = { kind: 'question', answers: { 'Which fruits do you like?': 'Apple' } };
+    await expect(useAttention.getState().deliver(item, answer)).resolves.toBe('not_pending');
+    expect(fake.invoked('laneA.answer')).toHaveLength(1);
+    expect(receiptOf(LANE)).toEqual(receipt);
   });
 
   it('writes nothing once stopped', () => {
