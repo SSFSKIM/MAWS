@@ -10,14 +10,17 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { registerArtifactEditor, resetArtifactEditors } from '../artifacts/registry';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
+import { useSettings } from '../stores/settings';
 import { useLayout } from '../stores/layout';
 import { allTabs } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
+import { askClaudePrefill } from './copy';
 import { useLibraryDialog } from './dialogs';
 import { resetExportFormats } from './export';
 import { Library } from './Library';
@@ -52,6 +55,15 @@ function row(n: number, over: Partial<LibraryRow> = {}): LibraryRow {
     sessions: [],
     ...over,
   };
+}
+
+// UX wave U10b: two design systems in the library, and the owner's and the Spaces' defaults (settings 14) as read
+const HARBOR = id(0xd1);
+const CLASSROOM = id(0xd2);
+const SYSTEMS = [row(0xd1, { kind: 'design_system', title: 'Harbor' }), row(0xd2, { kind: 'design_system', title: 'Classroom' })];
+function readDefaults(defaults: { owner?: string; spaces?: Record<string, string> }): void {
+  const artifacts = { ...SETTINGS_DEFAULTS_V21.artifacts, defaultDesignSystem: defaults.owner ?? null, spaceDesignSystems: defaults.spaces ?? {} };
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, artifacts }, resolvedTheme: 'light' } });
 }
 
 // What main's index holds, and how `library.list` filters it (as M1's store does: counts without the kind).
@@ -145,6 +157,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  useSettings.setState({ state: null });
   delete (window as { maws?: unknown }).maws;
   offs.splice(0).forEach((off) => off());
 });
@@ -188,7 +201,7 @@ describe('the views and the groups', () => {
     await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: WORK }));
     expect(screen.getByRole('radio', { name: 'By Space' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('heading', { level: 2, name: 'Work' })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'New document' }));
+    await user.click(screen.getByRole('button', { name: 'Blank document' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document', spaceId: WORK }]));
 
     await user.click(screen.getByRole('button', { name: 'All Spaces' }));
@@ -270,7 +283,7 @@ describe('General home', () => {
     await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: null }));
     await waitFor(() => expect(screen.queryByRole('article', { name: 'Launch plan' })).toBeNull());
     expect(screen.getByRole('article', { name: 'Pricing page' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'New document' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Blank document' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
   });
 });
@@ -378,6 +391,22 @@ describe('the tab stop across virtualization', () => {
     expect(stops()).toHaveLength(1);
     const inView = screen.getAllByRole('article').filter((a) => startOf(a) + 56 > 2_000).sort((a, b) => startOf(a) - startOf(b));
     expect(stop).toBe(inView[0]);
+  });
+
+  // UX wave U10b (M8 decision 3): the design-system choice holds while the page is open, scrolled away or not
+  it('"Make something new" stays mounted, its choice kept, while the list scrolls away from it', async () => {
+    rows = [...rows, ...SYSTEMS];
+    readDefaults({});
+    render(<Library />);
+    const made = await screen.findByRole('region', { name: 'Make something new' });
+    const user = userEvent.setup();
+    await waitFor(() => expect(within(made).getByRole('button', { name: /^Design system/ }).textContent).toBe('MAWS · default'));
+    await user.click(within(made).getByRole('button', { name: /^Design system/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await scrollTo(3_000);
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Note 1' })).toBeNull());
+    expect(screen.getByRole('region', { name: 'Make something new' })).toBe(made);
+    expect(within(made).getByRole('button', { name: /^Design system/ }).textContent).toBe('Harbor');
   });
 
   it('a row holding the keyboard stays mounted, focused and the tab stop while the list scrolls away from it', async () => {
@@ -621,37 +650,67 @@ describe('a late answer to a dismissed sheet', () => {
 });
 
 describe('Make something new', () => {
-  it('a kind with an editor makes an untitled one and opens it; the others ask Claude; HTML only asks Claude; File adds a file', async () => {
-    registerArtifactEditor('document', { Panel: () => null });
-    const creator = vi.fn(async () => at(S(7)));
-    offs.push(registerSessionCreator(creator));
-    answers['layout.pickFiles'] = () => ok({ files: [{ path: '/Users/me/report.pdf', name: 'report.pdf', bytes: 10, mediaType: null, data: null }] });
-    const user = userEvent.setup();
-    render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const card = (kind: string) => within(section).getByRole('group', { name: kind });
+  // UX wave U10b (l6-artifacts-08): four cards that ask Claude, a Blank beside each, More, and one design-system choice
+  const CARD_KINDS = ['document', 'presentation', 'dashboard', 'design'] as const;
+  const section = () => screen.findByRole('region', { name: 'Make something new' });
+  const card = (within_: HTMLElement, label: string) => within(within(within_).getByRole('group', { name: label })).getByRole('button', { name: label });
+  const blank = (within_: HTMLElement, label: string) => within(within(within_).getByRole('group', { name: label })).getByRole('button', { name: `Blank ${label.toLowerCase()}` });
+  const choice = (within_: HTMLElement) => within(within_).getByRole('button', { name: /^Design system/ });
+  const prefillOf = (n: number) => useComposerStore.getState().prefills.get(at(S(n)));
+  const withSystems = (defaults: { owner?: string; spaces?: Record<string, string> } = {}) => {
+    rows = [...rows, ...SYSTEMS];
+    readDefaults(defaults);
+  };
+  const editors = (...kinds: ArtifactKind[]) => kinds.forEach((kind) => registerArtifactEditor(kind, { Panel: () => null }));
 
-    expect(within(card('Document')).getAllByRole('button').map((b) => b.textContent)).toEqual(['New', 'Ask Claude']);
-    expect(within(card('Presentation')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Ask Claude']);
-    expect(within(card('HTML page')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Ask Claude']);
-    expect(within(card('File')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Add a file…', 'Ask Claude']);
-
-    await user.click(within(card('Document')).getByRole('button', { name: 'New document' }));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
-    await waitFor(() => expect(tabIds()).toContain(artifactTab(id(99))));
-
-    await user.click(within(card('File')).getByRole('button', { name: 'Add a file…' }));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'file', title: 'report.pdf', content: { path: '/Users/me/report.pdf' } }));
-    expect(main.callsOf('layout.pickFiles')).toEqual([{ kind: 'files', directory: null, multiple: false, pathsOnly: true }]);
-
-    await user.click(within(card('Presentation')).getByRole('button', { name: 'Ask Claude to make a presentation' }));
-    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(at(S(7)))).toEqual({ text: 'Make a presentation: ' });
-    expect(tabIds()).toContain(`session:${at(S(7))}`);
+  it('opens with the words for the kind, its Space and a chosen system that is not the default', () => {
+    for (const kind of CARD_KINDS) {
+      const noun = kind;
+      expect(askClaudePrefill(kind)).toBe(`Make a ${noun}: `);
+      expect(askClaudePrefill(kind, 'Work')).toBe(`Make a ${noun} in the Space “Work”: `);
+      expect(askClaudePrefill(kind, undefined, 'Classroom')).toBe(`Make a ${noun}, in the design system “Classroom”: `);
+      expect(askClaudePrefill(kind, 'Work', 'Classroom')).toBe(`Make a ${noun} in the Space “Work”, in the design system “Classroom”: `);
+    }
+    expect(askClaudePrefill('html', 'Work')).toBe('Make an HTML page in the Space “Work”: ');
+    expect(askClaudePrefill('design_system')).toBe('Make a design system: ');
   });
 
-  // P3-F wave S (F5, the owner's DL13 change): Ask Claude from a Space starts in the Space's folder and names the Space
-  it('Ask Claude from a Space starts in its linked folder’s project, else the focused project, and the prefill names the Space', async () => {
+  it('is four cards, each one button that asks Claude, with Blank beside it, not in it', async () => {
+    editors(...CARD_KINDS);
+    render(<Library />);
+    const made = await section();
+    expect(within(made).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['Document', 'Presentation', 'Dashboard', 'Design']);
+    for (const [label, blurb] of [['Document', 'Notes, specs and reports'], ['Presentation', 'A slide deck'], ['Dashboard', 'Charts bound to data'], ['Design', 'Artboards on a canvas']]) {
+      const group = within(made).getByRole('group', { name: label });
+      expect(within(group).getAllByRole('button')).toEqual([card(made, label!), blank(made, label!)]);
+      expect(card(made, label!).textContent).toBe(`${label}${blurb}`);
+      expect(card(made, label!).contains(blank(made, label!))).toBe(false); // siblings: no button inside a button
+      expect(blank(made, label!).textContent).toBe('Blank');
+    }
+    expect(within(made).queryByRole('group', { name: 'HTML page' })).toBeNull();
+    expect(within(made).queryByRole('group', { name: 'File' })).toBeNull();
+  });
+
+  it('a card leaves the page for a new chat whose composer holds the opening words; it is disabled until the chat is made, so a second press starts none', async () => {
+    const made = deferred<AppSessionId>();
+    const creator = vi.fn(() => made.promise);
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    render(<Library />);
+    const presentation = card(await section(), 'Presentation');
+    await user.click(presentation);
+    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
+    expect((presentation as HTMLButtonElement).disabled).toBe(true);
+    await user.click(presentation);
+    expect(creator).toHaveBeenCalledTimes(1);
+    await act(async () => made.resolve(at(S(7))));
+    expect(prefillOf(7)).toEqual({ text: 'Make a presentation: ' });
+    expect(tabIds()).toContain(`session:${at(S(7))}`);
+    expect((presentation as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // P3-F wave S (F5, the owner's DL13 change): from a Space a card starts in the Space's folder and names the Space
+  it('a card from a Space starts in its linked folder’s project, else the focused project, and the words name the Space', async () => {
     const creator = vi.fn(async () => at(S(8)));
     offs.push(registerSessionCreator(creator));
     const location = { kind: 'directory', path: '/Users/me/work' };
@@ -659,25 +718,25 @@ describe('Make something new', () => {
     const user = userEvent.setup();
     act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const card = (kind: string) => within(section).getByRole('group', { name: kind });
-
-    await user.click(await within(card('Presentation')).findByRole('button', { name: 'Ask Claude to make a presentation in the Space “Work”' }));
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Presentation') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Presentation'));
     await waitFor(() => expect(creator).toHaveBeenCalledWith(at('p-9'), location));
     expect(main.callsOf('session.projects.addFolder')).toEqual([{ directory: '/Users/me/work' }]);
-    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a presentation in the Space “Work”: ' });
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a presentation in the Space “Work”: ' }));
 
     act(() => setLibraryView({ spaceId: HOME })); // a Space with no linked folder
-    await user.click(await within(card('Document')).findByRole('button', { name: 'Ask Claude to make a document in the Space “Home”' }));
+    await user.click(card(made, 'Document'));
     await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
     expect(creator).toHaveBeenLastCalledWith(null);
     expect(main.callsOf('session.projects.addFolder')).toHaveLength(1);
-    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
   });
 
-  // P4: before the Spaces list has answered, a narrowed view's Ask Claude would start in the focused project with no
-  // Space words; it waits, disabled, until the Space is known, and stays so for a Space the list does not hold
-  it('Ask Claude from a narrowed Space is disabled until the Spaces list names the Space, then its prefill names it', async () => {
+  // H23 (ruled 2026-11-15, L5): before the Spaces list has answered, a card would start in the focused project with no
+  // Space words and Blank would make an artifact the page cannot yet name the Space of; both wait, disabled
+  it('while the narrowed Space loads, each card and its Blank are disabled, Add a file… is not; a Space the list does not hold stays so', async () => {
+    editors(...CARD_KINDS);
     const creator = vi.fn(async () => at(S(9)));
     offs.push(registerSessionCreator(creator));
     let answerSpaces: (() => void) | null = null;
@@ -685,30 +744,133 @@ describe('Make something new', () => {
     const user = userEvent.setup();
     act(() => setLibraryView({ view: 'bySpace', spaceId: HOME }));
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const ask = () => within(within(section).getByRole('group', { name: 'Document' })).getByRole('button', { name: /^Ask Claude/ });
+    const made = await section();
     await waitFor(() => expect(answerSpaces).not.toBeNull());
-    expect((ask() as HTMLButtonElement).disabled).toBe(true);
-    await user.click(ask());
+    for (const label of ['Document', 'Presentation', 'Dashboard', 'Design']) {
+      expect((card(made, label) as HTMLButtonElement).disabled, label).toBe(true);
+      expect((blank(made, label) as HTMLButtonElement).disabled, label).toBe(true);
+    }
+    await user.click(card(made, 'Document'));
+    await user.click(blank(made, 'Document'));
     expect(creator).not.toHaveBeenCalled();
+    expect(main.callsOf('artifacts.create')).toEqual([]);
+    await user.click(within(made).getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Add a file…' }).hasAttribute('data-disabled')).toBe(false);
+    await user.keyboard('{Escape}');
 
     await act(async () => answerSpaces!());
-    await waitFor(() => expect((ask() as HTMLButtonElement).disabled).toBe(false));
-    expect(ask().getAttribute('aria-label')).toBe('Ask Claude to make a document in the Space “Home”');
-    await user.click(ask());
-    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(at(S(9)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(false);
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(9)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
 
     act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile)
-    expect((ask() as HTMLButtonElement).disabled).toBe(true);
+    expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
+    expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it('a kind whose editor lands later gains its New at once', async () => {
+  it('More holds Design system (Ask Claude, Blank), HTML page and Add a file…', async () => {
+    editors('design_system');
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    answers['layout.pickFiles'] = () => ok({ files: [{ path: '/Users/me/report.pdf', name: 'report.pdf', bytes: 10, mediaType: null, data: null }] });
+    const user = userEvent.setup();
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    expect(within(section).queryByRole('button', { name: 'New design' })).toBeNull();
+    const more = within(await section()).getByRole('button', { name: 'More' });
+    await user.click(more);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Design system', 'HTML page', 'Add a file…']);
+    await user.click(screen.getByRole('menuitem', { name: 'Design system' }));
+    const sub = await screen.findByRole('menuitem', { name: 'Ask Claude' });
+    expect(within(sub.closest<HTMLElement>('[role="menu"]')!).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Ask Claude', 'Blank']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Blank' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'design_system', title: 'Untitled design system' }]));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Design system' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Ask Claude' }));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a design system: ' }));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'HTML page' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make an HTML page: ' }));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Add a file…' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'file', title: 'report.pdf', content: { path: '/Users/me/report.pdf' } }));
+    expect(main.callsOf('layout.pickFiles')).toEqual([{ kind: 'files', directory: null, multiple: false, pathsOnly: true }]);
+  });
+
+  it('the choice shows the system a new artifact here gets, "<name> · default", first; a system chosen is named in a card’s words and bound by Blank; the default binds none', async () => {
+    editors(...CARD_KINDS);
+    withSystems({ spaces: { [WORK]: CLASSROOM } });
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
+    expect(choice(made).textContent).toBe('Classroom · default');
+    await user.click(choice(made));
+    expect(screen.getAllByRole('menuitemradio').map((item) => [item.textContent, item.getAttribute('aria-checked')])).toEqual([['Classroom · default', 'true'], ['Harbor', 'false']]);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Harbor'));
+
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document in the Space “Work”, in the design system “Harbor”: ' }));
+    await user.click(blank(made, 'Presentation'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: WORK, designSystemId: HARBOR }]));
+
+    await user.click(choice(made));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Classroom · default' }));
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
+    await user.click(blank(made, 'Design'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'design', title: 'Untitled design', spaceId: WORK }));
+    await user.click(card(made, 'Dashboard'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a dashboard in the Space “Work”: ' }));
+  });
+
+  it('on All the default is the owner’s, else the bundled floor', async () => {
+    withSystems({ owner: HARBOR });
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(choice(made).textContent).toBe('Harbor · default'));
+    act(() => readDefaults({}));
+    await waitFor(() => expect(choice(made).textContent).toBe('MAWS · default'));
+  });
+
+  it('while the design systems or the defaults are read, the choice says "Design system", disabled, and a card starts its chat with no system in the words', async () => {
+    withSystems({ owner: HARBOR });
+    let answerSystems: (() => void) | null = null;
+    answers['library.list'] = (input) => {
+      const filter = (input as { filter?: LibraryFilter }).filter;
+      if (filter?.kind !== 'design_system') return ok(list(filter));
+      return new Promise((resolve) => (answerSystems = () => resolve(ok(list(filter)))));
+    };
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(answerSystems).not.toBeNull());
+    expect(choice(made).textContent).toBe('Design system');
+    expect((choice(made) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document: ' }));
+    await act(async () => answerSystems!());
+    await waitFor(() => expect(choice(made).textContent).toBe('Harbor · default'));
+    act(() => useSettings.setState({ state: null })); // the defaults not read (yet)
+    expect(choice(made).textContent).toBe('Design system');
+    expect((choice(made) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('a kind whose editor lands later gains its Blank at once', async () => {
+    render(<Library />);
+    const made = await section();
+    expect(within(made).queryByRole('button', { name: 'Blank design' })).toBeNull();
     act(() => void registerArtifactEditor('design', { Panel: () => null }));
-    expect(within(section).getByRole('button', { name: 'New design' })).toBeTruthy();
+    expect(blank(made, 'Design')).toBeTruthy();
   });
 });
 

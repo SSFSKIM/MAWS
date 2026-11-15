@@ -16,10 +16,12 @@ import { createAbsolutePositionFromRelativePosition, createRelativePositionFromJ
 import { pmnodeToDelta } from '@artifacts/yjs/prosemirror';
 import { applyV1, diffV1, stateV2, transact } from '@artifacts/yjs';
 import { KIND_GUIDES } from '@artifacts/types/guides';
+import { TOOL_ERRORS } from '@shared/maws/tools'; // UX wave U10b
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import committedFingerprint from '@artifacts/document/fingerprint.json';
 import { onSessionReplica, isWarming, warmInSlices } from '../documents/kinds/document-host';
 import { registerDocumentKind } from '../documents/kinds/document';
+import { registerDashboards } from '../dashboards'; // UX wave U10b
 import { HUMAN, openDocumentWorld, type DocumentWorld } from '../documents/kinds/document-world.fixture';
 import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
@@ -129,6 +131,31 @@ describe('artifact_create of a document', () => {
     expect(refusalOf(unknown)).toEqual({ reason: 'notFound', space: 'Elsewhere' });
     expect(textOfResult(unknown)).toContain('no Space "Elsewhere"');
     expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+  });
+
+  // UX wave U10b (l6-artifacts-08, H10): a document and a dashboard take a design system, which governs them and guides the answer
+  it('binds a document or a dashboard to the design system it names, the answer’s guide that system’s, and refuses one that is not there', async () => {
+    const dashboards = registerDashboards({ documents: world });
+    try {
+      const create = documentCreateTool(deps());
+      const house = await world.store.create({ kind: 'design_system', title: 'House' }, HUMAN);
+      const harbor = await world.store.create({ kind: 'design_system', title: 'Harbor' }, HUMAN);
+      await world.store.setDefaults({ owner: house.id, spaces: {} });
+      world.store.registerDesignSystemContext(async (s) => `# DESIGN of ${s.title}`);
+      const memo = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Memo', content: 'One line.', designSystem: 'Harbor' }));
+      expect(memo).toMatchObject({ designSystem: '# DESIGN of Harbor' });
+      expect(world.store.get(memo.artifactId)!.designSystemId).toBe(harbor.id);
+      const board = json<{ artifactId: string }>(await call(create, { kind: 'dashboard', title: 'Board', designSystem: harbor.id }));
+      expect(board).toMatchObject({ kind: 'dashboard', designSystem: '# DESIGN of Harbor' });
+      expect(world.store.get(board.artifactId)!.designSystemId).toBe(harbor.id);
+      const plain = json<{ artifactId: string }>(await call(create, { kind: 'document', title: 'Plain' }));
+      expect(world.store.get(plain.artifactId)!.designSystemId).toBeUndefined();
+      const missing = await call(create, { kind: 'document', title: 'Lost', designSystem: 'Harbour' });
+      expect(textOfResult(missing)).toBe(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'House']));
+      expect(world.store.list({ kind: 'document' }).filter((artifact) => artifact.title === 'Lost')).toEqual([]);
+    } finally {
+      dashboards.close();
+    }
   });
 
   it('hands every other kind to the tool it wraps', async () => {

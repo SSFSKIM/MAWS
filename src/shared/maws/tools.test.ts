@@ -22,6 +22,7 @@ import {
   ASK_MODALITIES, // P3-D
   ASK_NOTE_MAX,
   ASK_PREVIEW_MAX,
+  DESIGN_SYSTEM_KINDS, // UX wave U10b
   AskAnswerSchema,
   AskInputSchema,
   AskResultSchema,
@@ -128,7 +129,7 @@ describe('X9: the maws server and its twelve tools', () => {
   // U6d (O-44): the agent opens no artifact by itself, and nothing it is served invites the call that did
   it('invites no call of show_pane for an artifact: artifact_create ends on the link, and no other tool names show_pane', () => {
     expect(MAWS_TOOLS.artifact_create.description.endsWith('To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.')).toBe(true);
-    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1275);
+    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458); // UX wave U10b: designSystem's sentence
     for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
   });
 });
@@ -430,6 +431,21 @@ describe('X9 artifact tools (E2)', () => {
     expect(ArtifactCreateResultSchema.safeParse({ ...created, spaceId: 'not-a-uuid' }).success).toBe(false);
     const listed = { id: UUID, kind: 'presentation', title: 'Deck', revision: 0, updatedAt: '2026-10-19T00:00:00.000Z', lastEditor: null, spaceId: UUID, spaceName: 'P3 sitting' };
     expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [listed] }).success).toBe(true);
+  });
+
+  // UX wave U10b (l6-artifacts-08): a create bound to a design system, by its id or its name, for the kinds a system governs
+  it('admits a design system on artifact_create by its id or its name, for the four kinds a system governs, and says so after the Space', () => {
+    expect(DESIGN_SYSTEM_KINDS).toEqual(['document', 'presentation', 'design', 'dashboard']);
+    expect(parseToolArguments('artifact_create', { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' })).toEqual({ ok: true, data: { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' } });
+    expect(parseToolArguments('artifact_create', { kind: 'dashboard', title: 'Board', designSystem: UUID, space: 'P3 sitting' }).ok).toBe(true);
+    for (const designSystem of ['', 'x'.repeat(201), 7]) expect(ArtifactCreateInputSchema.safeParse({ kind: 'design', title: 'Site', designSystem }).success, JSON.stringify(designSystem)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_create')!.inputSchema).toMatchObject({ properties: { designSystem: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_create.description).toContain(
+      "a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id",
+    );
+    expect(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'Classroom'])).toBe('artifact_create: no design system "Harbour"; the design systems are: Harbor, Classroom');
+    expect(TOOL_ERRORS.designSystemAmbiguous('Harbor', [UUID, '22222222-2222-4222-8222-222222222222'])).toBe(`artifact_create: more than one design system is named "Harbor"; give one of these ids: ${UUID}, 22222222-2222-4222-8222-222222222222`);
+    expect(TOOL_ERRORS.designSystemNotForKind('file')).toBe('artifact_create: a file takes no design system');
   });
 
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {
