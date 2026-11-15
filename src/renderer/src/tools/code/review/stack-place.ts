@@ -105,6 +105,7 @@ export class StackPlacer {
   private recount = false; // the counter was last read where a file's rows were not drawn yet
   private card: StackPlace | null = null; // the line of a card opened and not drawn under it yet
   private inputs = 0; // the person's inputs in the scroller so far
+  private focusing = false; // a field the person did not ask for took the keyboard: the scroll to it is not theirs
 
   constructor(private readonly host: PlacerHost) {}
 
@@ -163,6 +164,7 @@ export class StackPlacer {
     this.gesture = performance.now();
     this.inputs += 1;
     this.card = null;
+    this.focusing = false;
     if (!this.reveal) return;
     this.reveal = null;
     const m = this.measure();
@@ -192,6 +194,10 @@ export class StackPlacer {
     if (!el) return;
     if (this.own !== null && Math.abs(el.scrollTop - this.own) < 1) return;
     this.own = null;
+    if (this.focusing) {
+      this.relayout();
+      return;
+    }
     const theirs = this.pressed || performance.now() - this.gesture <= GESTURE_MS;
     const moved = !this.sameShape(el);
     if (!theirs || (moved && el.scrollTop < this.at && atEnd(el))) {
@@ -207,6 +213,13 @@ export class StackPlacer {
     this.read(m);
     this.at = el.scrollTop;
     this.setBand(this.bandFor(m, el.scrollTop));
+  }
+
+  // A field in the stack took the keyboard though the person did not open it there (a card whose opening their input
+  // cancelled): the browser's scroll to it, which comes next, is a layout change whatever the gesture, and the place
+  // stands. The person's next input, or a layout change applied first, ends it.
+  holdFocus(): void {
+    this.focusing = true;
   }
 
   // How many inputs the person has made in the scroller (a wheel, touch, key or pointer press): one made since a moment
@@ -236,6 +249,7 @@ export class StackPlacer {
 
   // A layout change: the reveal, else the live place, applied again under the heights the page now has.
   relayout(): void {
+    this.focusing = false;
     const m = this.measure(true);
     if (!m) return;
     const { el, layout, rows } = m;

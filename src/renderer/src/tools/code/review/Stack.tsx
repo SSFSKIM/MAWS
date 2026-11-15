@@ -154,6 +154,26 @@ function estimateLines(file: ReviewFile, hunks: readonly string[] | null, words:
   return tooLarge({ hunks }) ? 1 : bodyLines({ hunks, added: file.added, removed: file.removed });
 }
 
+// The cards a surface's stack has handled, kept with the surface (its view state's store) rather than with a stack's
+// mount: Review hidden and shown again remounts the stack, and an open card it already handled is not a new opening
+// there (X-072: the saved place is restored, the card left where it is). `waiting`: the card waiting on its file's read,
+// and the person's inputs in the scroller when it began; `cancelled`: a card whose opening the person's input during
+// that wait cancelled, whose field's focus scroll is then not theirs either.
+interface CardsHandled {
+  card: number | null;
+  waiting: { serial: number; inputs: number } | null;
+  cancelled: number | null;
+}
+const cardsHandled = new WeakMap<StoreApi<ReviewUi>, CardsHandled>();
+function cardsOf(ui: StoreApi<ReviewUi>): CardsHandled {
+  let cards = cardsHandled.get(ui);
+  if (!cards) {
+    cards = { card: null, waiting: null, cancelled: null };
+    cardsHandled.set(ui, cards);
+  }
+  return cards;
+}
+
 // The browser's own scroll anchoring would move the scroller when a body above changes height, under the placer, which
 // keeps the place itself; it is off here (inline, so it does not depend on a utility being generated).
 const NO_SCROLL_ANCHORING = { overflowAnchor: 'none' } as const;
@@ -199,6 +219,17 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     const release = () => placed.release();
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
+    // A card still waiting on its read across a remount opens where it is: the saved place is restored meanwhile.
+    const cards = cardsOf(ui);
+    if (cards.waiting) cards.waiting = { serial: cards.waiting.serial, inputs: -1 };
+    // The field of a card whose opening was cancelled takes the keyboard (as it mounts in its row, or later): the
+    // browser's scroll to it is not the person's.
+    const focused = (event: FocusEvent) => {
+      const now = cardsOf(ui);
+      if (now.cancelled === null || now.cancelled !== now.card) return;
+      if (event.target instanceof Element && event.target.closest('[data-review-card-row]')) placed.holdFocus();
+    };
+    el.addEventListener('focusin', focused);
     if (typeof ResizeObserver !== 'undefined') {
       const ro = new ResizeObserver(() => placed.relayout());
       ro.observe(el);
@@ -207,6 +238,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     return () => {
       window.removeEventListener('pointerup', release);
       window.removeEventListener('pointercancel', release);
+      el.removeEventListener('focusin', focused);
       observer.current?.ro.disconnect();
       observer.current = null;
       placer.current = null;
@@ -217,7 +249,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
 
   // Every commit is a layout change: the placer takes the sections as drawn, the requests made since (a file, a hunk
   // jump), and applies the place again.
-  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null; waiting: { serial: number; inputs: number } | null }>({ reveal: null, navigate, card: null, waiting: null });
+  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number }>({ reveal: null, navigate });
   useLayoutEffect(() => {
     const placed = placer.current;
     if (!placed) return;
@@ -246,16 +278,18 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     // a request's reveal unfolds its file (§F), is read, and the card is revealed at its line above once it is placed.
     // The architect's review: the person's input in the scroller while the card waited on its read is theirs; the card
     // then opens under its line where that is, neither revealed nor shown.
-    if (waiting !== null && seen.waiting?.serial !== waiting.serial) {
-      seen.waiting = { serial: waiting.serial, inputs: placed.inputCount() };
+    const cards = cardsOf(ui);
+    if (waiting !== null && cards.waiting?.serial !== waiting.serial) {
+      cards.waiting = { serial: waiting.serial, inputs: placed.inputCount() };
       if (sections.find((each) => each.file.path === waiting.path)?.folded) ui.setState((s) => setFold(s, key, waiting.path, 'open'));
     }
-    if (card !== null && seen.card !== card.serial) {
-      seen.card = card.serial;
+    if (card !== null && cards.card !== card.serial) {
+      cards.card = card.serial;
       const section = sections.find((each) => each.file.path === card.path);
       const place = { path: card.path, row: { block: card.block, side: card.side, line: card.line }, offset: 0 };
-      const movedOn = seen.waiting?.serial === card.serial && placed.inputCount() !== seen.waiting.inputs;
-      if (!movedOn) {
+      const movedOn = cards.waiting?.serial === card.serial && placed.inputCount() !== cards.waiting.inputs;
+      if (movedOn) cards.cancelled = card.serial;
+      else {
         if (section && (section.folded || (!placed.pointing() && !placed.inView(place)))) {
           if (section.folded) ui.setState((s) => setFold(s, key, card.path, 'open'));
           placed.revealPlace(place);
