@@ -110,4 +110,61 @@ describe('/fork', () => {
     await settle();
     expect(forkSession.mock.calls).toEqual([[REMOTE, { kind: 'inPlace' }, { message: { content: 'elsewhere', display: 'elsewhere' }, rewindTo: null }]]);
   });
+
+  // UX wave U4b (decision 11; the Decision Log's line on the panel review): the panel acts once, when nothing refuses it.
+  // Opened while the turn runs there it waits; the turn ending with the panel still open, it closes and forks, as an
+  // ordinary open does; a panel dismissed meanwhile, or one the turn outlasts, forks nothing.
+  describe('opened while the turn runs on the other machine', () => {
+    const turn = (state: 'busy' | 'idle') => act(() => useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far', { state }), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) }));
+    beforeEach(() => machineLists([SESSION_ACTS_CAPABILITY]));
+
+    it('busy, then idle with the panel open: forks once, and closes the panel', async () => {
+      turn('busy');
+      const close = vi.fn();
+      render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      expect(screen.getByRole('status').textContent).toBe(TURN_RUNS);
+      turn('idle');
+      await settle();
+      expect(forkSession.mock.calls).toEqual([[REMOTE, { kind: 'inPlace' }, { message: null, rewindTo: null }]]);
+      expect(close).toHaveBeenCalledTimes(1);
+      turn('busy'); // the fork's own launch, or a further turn: nothing more
+      turn('idle');
+      await settle();
+      expect(forkSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('busy, dismissed, then idle: forks nothing', async () => {
+      turn('busy');
+      const close = vi.fn();
+      const view = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      view.unmount(); // the panel dismissed: the host draws it no longer
+      turn('idle');
+      await settle();
+      expect(forkSession).not.toHaveBeenCalled();
+    });
+
+    it('busy for the panel’s whole life: forks nothing', async () => {
+      turn('busy');
+      const close = vi.fn();
+      const { rerender, unmount } = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      rerender(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      unmount();
+      await settle();
+      expect(forkSession).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it('an ordinary open, the turn idle there: forks once and closes, as today', async () => {
+      turn('idle');
+      const close = vi.fn();
+      const { rerender } = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      rerender(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      expect(forkSession).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
+  });
 });
