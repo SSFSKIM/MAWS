@@ -6,7 +6,7 @@
 // prompt's geometry; every command, question and id is invented.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { Profiler, type ReactNode } from 'react';
+import { Profiler, useEffect, useState, type ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
@@ -42,6 +42,7 @@ import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
 import { journalToEvents } from '../transcript/dev/journal';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
+import { RequestCard } from './RequestCard';
 import { itemFor, permission, type RequestEvent } from './test-requests';
 
 const APP = at('app-keys' as AppSessionId);
@@ -186,6 +187,13 @@ async function mount(items: AttentionItem[], extra: ReactNode = null) {
   await waitFor(() => expect(editor()).toBeTruthy());
 }
 
+// Draws its children once `reveal` (handed to `onReady`) is called: a plain state update, outside any event or store.
+function Revealed({ onReady, children }: { onReady: (reveal: () => void) => void; children: ReactNode }) {
+  const [shown, setShown] = useState(false);
+  useEffect(() => onReady(() => setShown(true)), [onReady]);
+  return shown ? children : null;
+}
+
 type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string } };
 const pane = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${index}` });
 const editor = () => within(pane(0)).queryByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement | null;
@@ -284,23 +292,20 @@ describe('a prompt’s keys reach it', () => {
   });
 
   // The architect's ruling of 2026-11-15 UTC on the branch review: no painted frame shows the decision buttons without
-  // the pane's chords taken. The request's read is held, so the card first draws its loading line; once it lands, the
-  // body's buttons are drawn, and an Esc arrives in the first moment after that commit, before any later task: the
-  // commit's layout work is done and its passive effects may not be.
+  // the pane's chords taken. The prompt is drawn by a render no event and no store started (a plain state update, as a
+  // list's own measuring makes), so React paints its commit before it runs the commit's passive effects; an Esc arrives
+  // in the first moment after that commit, while the buttons are on screen.
   it('an Esc in the composer at the first paint of the prompt’s buttons is taken and answers nothing: no Stop', async () => {
     const { prompt } = scene();
-    const held = commands();
-    delete held['attention.request'];
-    fake = fakeClient(held);
-    window.maws = preloadOf(fake);
-    const seen: { pressed: KeyboardEvent | null; queued: boolean } = { pressed: null, queued: false };
+    const event = requests.get('rp')!;
+    const seen: { reveal: (() => void) | null; pressed: KeyboardEvent | null; queued: boolean } = { reveal: null, pressed: null, queued: false };
     const atFirstPaint = () => {
-      if (seen.queued || document.querySelector('[data-request-end] [data-decision-buttons]') === null) return;
+      if (seen.queued || document.querySelector('[data-decision-buttons]') === null) return;
       seen.queued = true;
       queueMicrotask(() => {
-        const event = new KeyboardEvent('keydown', { ...ESCAPE, bubbles: true, cancelable: true });
-        seen.pressed = event;
-        editor()!.dispatchEvent(event);
+        const press = new KeyboardEvent('keydown', { ...ESCAPE, bubbles: true, cancelable: true });
+        seen.pressed = press;
+        editor()!.dispatchEvent(press);
       });
     };
     busy();
@@ -309,30 +314,34 @@ describe('a prompt’s keys reach it', () => {
       <Profiler id="pane" onRender={atFirstPaint}>
         <QueryClientProvider client={queryClient}>
           <section data-pane={0} aria-label="pane 0">
-            <TranscriptSlot appSessionId={APP} />
+            <Revealed onReady={(reveal) => (seen.reveal = reveal)}>
+              <div className="transcript-row" tabIndex={-1}>
+                <RequestCard item={prompt} request={event} placement="inline" region="end" keys="pane" paneIndex={null} />
+              </div>
+            </Revealed>
             <Composer appSessionId={APP} paneIndex={0} />
           </section>
         </QueryClientProvider>
       </Profiler>,
     );
     await waitFor(() => expect(editor()).toBeTruthy());
-    await waitFor(() => expect(fake.pending('attention.request')).toBe(1));
+    await waitFor(() => expect(seen.reveal).not.toBeNull());
     focusOn(editor()!);
-    // outside act, as the page runs: React schedules the read's render and its effects as it does in the window
+    // outside act, as the window runs: React schedules the render and its effects as it does there
     const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
     const before = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
     actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
     try {
-      await fake.reply('attention.request', { event: requests.get('rp') });
+      seen.reveal!();
       for (let i = 0; i < 20 && seen.pressed === null; i++) await new Promise((resolve) => setTimeout(resolve, 5));
     } finally {
       actEnvironment.IS_REACT_ACT_ENVIRONMENT = before;
     }
     expect(seen.pressed, 'the Esc arrived at the first paint of the buttons').not.toBeNull();
-    expect(seen.pressed!.defaultPrevented, 'the prompt took it').toBe(true);
     await flush();
-    expect(answered()).toEqual([]);
     expect(fake.invoked('session.interrupt'), 'no Stop').toEqual([]);
+    expect(answered()).toEqual([]);
+    expect(seen.pressed!.defaultPrevented, 'the prompt took it').toBe(true);
   });
 
   it('a held chord answers one prompt of two: its repeats are taken while the second opens, and a fresh press answers the second once armed', async () => {
