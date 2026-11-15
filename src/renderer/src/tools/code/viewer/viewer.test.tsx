@@ -1405,6 +1405,101 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     main.grant(MAIN_A, OUT); // the person chose the file
   };
 
+  // Fix round 3: one order for the admission. Every read that can set it draws a number when it is sent; an answer sets
+  // it only above the last number that did, and a refused answer sets and records nothing. So the read sent after the
+  // grant wins whatever order the answers land in.
+  const lastRead = (main: ReturnType<typeof disk>) => main.callsOf('files.read').at(-1);
+
+  it('one order (a): of two overlapping admission-only reads, the later-sent one’s answer stands when the earlier lands last', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    await lockedDirty(main);
+    const earlier = main.hold('files.read');
+    act(() => useViewer.getState().readAdmission(A, OUT)); // answers chosen, writable, once released
+    await waitFor(() => expect(lastRead(main)).toMatchObject({ offset: 0, length: 1 }));
+    const count = main.callsOf('files.read').length;
+    main.own.add('/elsewhere');
+    act(() => useViewer.getState().readAdmission(A, OUT)); // answers MAWS's own at once
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(count + 1));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'maws', editable: false }));
+    earlier.release();
+    await settle();
+    expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true, pin: OUT });
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+  });
+
+  it('one order (b): a save’s conflict read sent before an admission-only read lands after it and does not override it', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.files[OUT] = 'theirs\n'; // the save conflicts
+    const write = main.hold('files.writeOutside');
+    const conflictRead = main.hold('files.read');
+    const saving = useViewer.getState().save(FILE(OUT));
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(1));
+    main.names.delete(OUT); // the conflict read, sent now, answers: only added
+    write.release();
+    await waitFor(() => expect(lastRead(main)).toMatchObject({ hash: true, offset: 0 }));
+    const count = main.callsOf('files.read').length;
+    main.names.add(OUT); // the admission-only read, sent after it, answers: named, writable
+    act(() => useViewer.getState().readAdmission(A, OUT));
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(count + 1));
+    await settle();
+    conflictRead.release();
+    expect(await act(() => saving)).toBe('conflict');
+    expect(shown()).toMatchObject({ locked: null, editable: true, pin: OUT, theirs: { view: 'merge', text: 'theirs\n' } });
+  });
+
+  it('one order (c): Open File… recovers a dirty tab locked as added when an older read’s answer lands after the post-grant one', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    offs.push(connectCodeEvents());
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.names.delete(OUT);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'added', editable: false, dirty: true, pin: OUT, pending: 0 }));
+    const older = main.hold('files.read');
+    const count = main.callsOf('files.read').length;
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' })); // sent before the grant: only added
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(count + 1));
+    main.picks(() => ({ status: 'opened', path: OUT }));
+    await userEvent.setup().click(label()!);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Open File…' }));
+    await waitFor(() => expect(lastRead(main)).toMatchObject({ offset: 0, length: 1 }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: null, editable: true }));
+    older.release();
+    await waitFor(() => expect(shown().pending).toBe(0));
+    await settle();
+    expect(shown()).toMatchObject({ locked: null, editable: true, dirty: true, pin: OUT, text: 'one\n', hash: fakeHash('one\n') });
+    expect(view().state.doc.toString()).toBe('mine one\n');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('mine one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'mine one\n', expectedHash: fakeHash('one\n'), real: OUT }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+  });
+
+  it('one order (d): a refused answer landing between an admission-only read’s send and its answer sets and records nothing', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    await lockedDirty(main); // granted after the lock
+    const refused = main.hold('files.read');
+    delete main.files[OUT];
+    const count = main.callsOf('files.read').length;
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' })); // answers not found
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(count + 1));
+    main.files[OUT] = 'one\n';
+    const admission = main.hold('files.read');
+    act(() => useViewer.getState().readAdmission(A, OUT)); // answers chosen, writable
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(count + 2));
+    refused.release();
+    await waitFor(() => expect(shown().pending).toBe(0));
+    expect(shown()).toMatchObject({ locked: 'added', editable: false });
+    admission.release();
+    await waitFor(() => expect(shown()).toMatchObject({ locked: null, editable: true, dirty: true, pin: OUT }));
+  });
+
   it('an admission-only answer that lands after the entry moved to another session changes nothing', async () => {
     const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
     await lockedDirty(main);
