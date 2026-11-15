@@ -8,6 +8,7 @@ import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { remoteRow } from '../../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
@@ -21,6 +22,9 @@ import { useNotices } from '../../stores/notices';
 import type { SessionQueue } from '../../stores/queue';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
+import { rowsOf } from '../../transcript/model/derive';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder } from '../../transcript/model/test-events';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { HOST_UPDATING } from './host-wire';
 import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
@@ -170,6 +174,64 @@ describe('the stack’s rows and their marks', () => {
     expect(row.getAttribute('data-queue-state')).toBe('handed');
     expect(mark(row)).toBe('Next step');
     expect(within(row).queryAllByRole('button')).toEqual([]);
+  });
+});
+
+describe('a waiting answer (UX wave U4b, X-049)', () => {
+  // an invented async ask: two questions, the first with a header, in a turn that has ended and folded
+  const LAYOUT: AskQuestion = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+  const THEME: AskQuestion = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice', options: [{ label: 'Dark' }, { label: 'Light' }] };
+  const SIZE: AskQuestion = { id: 'q3', question: 'How large should the tiles be?', modality: 'text' };
+  const GRID: AskAnswer = { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] };
+  const asked = (questions: AskQuestion[]) => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_a', 'mcp__maws__ask', { blocking: false, questions });
+    b.result('toolu_a', [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: 'toolu_a' }) }]);
+    b.text('m1', 0, 'I will go on meanwhile.');
+    b.end(['u1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(state); // the turn folded: the ask's capsule is one of the rows it leaves in view
+    expect(rows.some((row) => row.kind === 'ask')).toBe(true);
+    useTranscriptStore.setState({ entries: { [APP]: { state, rows } as never } });
+  };
+  const texts = () => rows().map((row) => row.querySelector('[data-row-text]')?.textContent);
+
+  it('reads "Answer to <header>: <words>" where the window holds the ask under a folded turn, and the question’s own text where it holds none', () => {
+    const { client } = bridge();
+    const view = () => <QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT], [GRID]))] })} client={client} />;
+    const { rerender } = render(view());
+    expect(texts()).toEqual(['Answer to Which layout should the gallery use?: Grid']);
+    asked([LAYOUT]);
+    rerender(view());
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
+    expect(mark(rows()[0])).toBe('Next step');
+  });
+
+  it('reads the same once a Stop holds it, marked Held', () => {
+    asked([LAYOUT]);
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy={false} queue={queue([entry('q-a', { content: askSteerText('toolu_a', [LAYOUT], [GRID]) })], { paused: true, pauseReason: 'interrupt' })} client={client} />);
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
+    expect(mark(rows()[0])).toBe('Held');
+  });
+
+  it('several questions read counted and in the asked order, whole in the row’s hover title; the row offers Send now only', () => {
+    asked([LAYOUT, THEME, SIZE]);
+    const answers: AskAnswer[] = [GRID, { id: 'q2', question: THEME.question, status: 'skipped' }, { id: 'q3', question: SIZE.question, status: 'decide_for_me' }];
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT, THEME, SIZE], answers))] })} client={client} />);
+    const line = 'Answers to 3 questions: Layout: Grid; Theme: Skipped; How large should the tiles be?: Decide for me';
+    expect(texts()).toEqual([line]);
+    expect(rows()[0].querySelector('[data-row-text]')?.getAttribute('title')).toBe(line);
+    expect(within(rows()[0]).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent)).toEqual(['Send now']);
+  });
+
+  it('a folded stack whose first row is an answer names it', () => {
+    asked([LAYOUT]);
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1'), entry('q-2')], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT], [GRID]))] })} client={client} />);
+    expect(within(stack()).getByRole('button', { expanded: false }).textContent).toBe('3 queued · Next: Answer to Layout: Grid');
   });
 });
 
