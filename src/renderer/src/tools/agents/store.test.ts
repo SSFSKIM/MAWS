@@ -562,7 +562,7 @@ describe('a terminal session this Mac drives', () => {
   it('discards this Mac’s kept statuses at a first bind to another machine’s feed, so that coming back to this machine’s reads lays none', async () => {
     let remote = false;
     const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'a1' }, { seq: 1 })]);
-    const off = registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null));
+    releases.push(registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null)));
     const release = await watchDisk(D, [sidecar('a1')]);
     plane(D, 'snapshot', [gone('a1')]);
     watchEnded(D);
@@ -579,7 +579,6 @@ describe('a terminal session this Mac drives', () => {
     await fake.answer('subagents', [sidecar('a1')]);
     await fake.answer('workflows', []);
     expect(statusesOf(D)).toEqual({ a1: 'unknown' });
-    off();
   });
 
   it('holds the session’s lane A watch while its graph is watched and its bridge is live, and lets it go with the last watcher and when the state goes', async () => {
