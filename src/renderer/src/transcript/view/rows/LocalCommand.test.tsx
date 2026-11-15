@@ -2,13 +2,14 @@
 // rows-find.md, Acceptance 1 and 2, decision 4, Interfaces B): a dim `⎿`, then the output, drawn once (through the
 // transcript's markdown, or preformatted for a terminal's text) and clipped at two lines until opened by "Show more".
 // The closed and the open state draw the same text. The rows come from the probes' recorded sessions through the live
-// route (the journal through the normaliser) and the file's rows (the reader another machine's rows go through); that
-// the bound is two lines of the row's type is the scene's (M6).
+// route (the journal through the normaliser) and the file's rows (the reader another machine's rows go through). The
+// closed bound is the bottom of the second drawn line (ruling R19), read from the line boxes the drawing measures; with
+// no layout here the boxes are given as a layout would measure them, and the pixels are the scene's (M6).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { cleanup, fireEvent, within } from '@testing-library/react';
 import type { JsonObject } from 'desk-hub/protocol';
-import { afterEach, describe, expect, it, onTestFinished } from 'vitest';
+import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../../test/support/fixtures';
 import { freshSource, subagentLookupOf } from '../../../lane-a/plane-transcript';
@@ -32,18 +33,15 @@ async function fromFileRows(name: string): Promise<CommandRow[]> {
 }
 const starting = (rows: CommandRow[], text: string) => rows.find((row) => row.text.startsWith(text))!;
 
-/** The output's drawn height, as layout would give it: `tall` rows overflow two lines, the rest fit. */
+// The line boxes a layout would measure in an output: `tall` ones draw seven 18 px lines, the rest one.
+const measured = vi.hoisted(() => ({ tall: (_element: HTMLElement): boolean => false }));
+vi.mock('./command-bound', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./command-bound')>();
+  return { ...actual, drawnLineBoxes: (element: HTMLElement) => (measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top, bottom: top + 18 })) };
+});
 function renderedOutputs(tall: (element: HTMLElement) => boolean) {
-  const output = (element: HTMLElement) => element.classList.contains('transcript-command-output');
-  Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get(this: HTMLElement) { return output(this) ? (tall(this) ? 400 : 18) : 0; } });
-  Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
-    configurable: true,
-    get(this: HTMLElement) { return output(this) ? (this.hasAttribute('data-open') || !tall(this) ? this.scrollHeight : 36) : 0; },
-  });
-  onTestFinished(() => {
-    Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
-    Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
-  });
+  measured.tall = tall;
+  onTestFinished(() => { measured.tall = () => false; });
 }
 /** Longer than two lines at the column the scenes use: /cost's seven lines and /context's sixty-one, not a one-line output. */
 const longOutput = (element: HTMLElement) => (element.textContent ?? '').length > 100;
@@ -64,6 +62,7 @@ describe('a command’s output, drawn', () => {
       expect(line.querySelector('.transcript-command-mark')?.getAttribute('aria-hidden'), text).toBe('true');
       expect(line.querySelector('.transcript-command-output')?.textContent, text).toContain(text);
       expect(within(line).queryByRole('button', { name: 'Show more' }), text).toBeNull();
+      expect(line.querySelector<HTMLElement>('.transcript-command-output')!.style.getPropertyValue('--command-bound'), text).toBe(''); // one line: no bound
       expect(line.hasAttribute('data-error'), text).toBe(false);
       cleanup();
     }
@@ -79,6 +78,7 @@ describe('a command’s output, drawn', () => {
       const closed = output.textContent;
       expect(output.hasAttribute('data-open'), text).toBe(false);
       expect(output.hasAttribute('data-collapsed'), text).toBe(true);
+      expect(output.style.getPropertyValue('--command-bound'), text).toBe('36px'); // the bottom of the second drawn line (R19)
       const more = within(container).getByRole('button', { name: 'Show more' });
       expect(more.getAttribute('aria-expanded'), text).toBe('false');
       fireEvent.click(more);
