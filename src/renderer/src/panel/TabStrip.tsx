@@ -28,11 +28,11 @@ import { useLayout, type LayoutState } from '../stores/layout';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
-import { beginDrag, endDrag, endDragFrom, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
+import { beginDrag, endDrag, endDragFrom, holdSideViews, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { DropHighlight, DropOverlay } from '../shell/DropOverlay'; // UX wave U6b-1 (M4)
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { EDITOR_COPY } from '../tools/code/copy'; // UX wave U6b-1
-import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
 import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import { groupOf, sideGroups, type SideGroupName } from './surface-model';
@@ -60,8 +60,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
   // keyboard in this strip.
   const move = (tabId: string, to: SideGroupName): SideGroupName | null => {
     handKeyboardTo(tabId, to);
-    useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    const landed = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    const landed = moveBetweenGroups(appSessionId, tabId, to);
     if (landed !== to) takesKeyboard(tabId, to);
     return landed;
   };
@@ -106,8 +105,17 @@ function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName, st
 // The drop: the tab joins `group` (`moveSurfaceTab`, which refuses a group's only tab when it would make the second
 // group) and, once there, is kept; a tab no list holds any more moves nothing.
 function joinGroup(appSessionId: AppSessionId | null, tabId: string, group: SideGroupName): void {
-  useLayout.getState().moveSurfaceTab(appSessionId, tabId, group);
-  if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) === group) keep(tabId);
+  if (moveBetweenGroups(appSessionId, tabId, group) === group) keep(tabId);
+}
+
+// A side tab into the other group, answering the group it ended in. A file's view mounts again there, so its key is held
+// first, as for a move to the main area (Decision 20b; the branch review's third finding): the prune of the view that
+// goes, and the viewer's cap, leave its entry for the view that comes.
+function moveBetweenGroups(appSessionId: AppSessionId | null, tabId: string, to: SideGroupName): SideGroupName | null {
+  const file = sideFileOf(tabId);
+  if (file !== null) holdSideViews(file.key);
+  useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
+  return groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
 }
 
 // The highlight shows while a drag the strip would take is over it; it goes with that drag, by whichever path the drag
