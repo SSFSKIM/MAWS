@@ -602,3 +602,165 @@ describe('a move’s stored writes', () => {
     expect(main.sets.indexOf(panelKey)).toBeGreaterThan(main.sets.indexOf('main.tabs'));
   });
 });
+
+// ---- the agent's mark across the person's moves (UX wave U6e, decision 19) ------------------------------------------------
+
+// Decision 19: "The first open of that file by the person (a click, Open File…, a move of the tab) removes the mark and reads
+// again." Every way the person moves a file's tab is that open: the tab's `agent` (where the tab has one) and the entry's
+// mark both go, and the file is read again as the person's. The file is outside the folders and the person chose it for
+// A: a grant, which a read with `agent` skips, so the agent's reads are refused and the person's admit it. Each case starts
+// from the agent's mark on the tab and its entry, and the entry is kept across the act.
+describe('the person’s moves of a file the agent marked (U6e)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const NOTES = 'notes\n';
+  beforeEach(() => {
+    disk = installDisk({ [APP]: ORIGINAL, [LIB]: 'export const b = 2;\n', [OTHER]: 'c\n', [OUT]: NOTES }, { outside: ['/elsewhere'] });
+    disk.grant('app-a', OUT);
+  });
+  const entry = () => useViewer.getState().entries.get(KEY(OUT));
+  const reads = () => disk.callsOf('files.read').filter((input) => input.path === OUT);
+  const refusal = () => document.querySelector('[data-refusal]');
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+  const reviewTab = () => panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id;
+
+  // The agent's open beside A's chat: a marked tab, read as the agent's, refused.
+  async function agentMarkedBeside(): Promise<string> {
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    const tabId = sideTabOf(OUT)!;
+    expect(paramsOf(tabId)).toMatchObject({ agent: true });
+    await waitFor(() => expect(refusal()).not.toBeNull());
+    expect(reads().every((input) => input.agent === true)).toBe(true);
+    expect(entry()).toMatchObject({ status: 'error', agent: true });
+    return tabId;
+  }
+  // The person's own kept tab whose entry the cap took, drawn again by the agent's show: no mark on the tab, the entry's
+  // reads the agent's (the panel's finding 1), refused.
+  async function personsTabTheAgentShowed(): Promise<string> {
+    act(() => void openFile(A, OUT, null, { keep: true }));
+    const tabId = sideTabOf(OUT)!;
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', agent: false }));
+    act(() => panelHost.selectTab(reviewTab()));
+    await settle();
+    act(() => useViewer.setState((s) => ({ entries: new Map([...s.entries].filter(([key]) => key !== KEY(OUT))) })));
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    await waitFor(() => expect(refusal()).not.toBeNull());
+    expect(paramsOf(tabId)).not.toHaveProperty('agent');
+    expect(entry()).toMatchObject({ status: 'error', agent: true });
+    return tabId;
+  }
+  // The person's act read the file again as the person's, and it is admitted.
+  async function readAsPersons(before: number) {
+    await waitFor(() => expect(reads().length).toBeGreaterThan(before));
+    expect(reads().at(-1)).not.toHaveProperty('agent');
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', text: NOTES, agent: false }));
+    expect(refusal()).toBeNull();
+  }
+
+  const toMain: [string, (tabId: string) => Promise<void> | void][] = [
+    ['its tab’s menu', async (tabId) => fireEvent.click(await menuItem(panelTabElement(tabId), TRANSFER_COPY.moveToMain))],
+    ['the button in its bar', () => fireEvent.click(region('panel').querySelector<HTMLElement>('[data-move-to-main]')!)],
+    ['View ▸ Move to tab', () => act(() => runAction('artifact.moveToTab'))],
+    ['a drag onto the main strip', (tabId) => {
+      const dt = transfer();
+      drag('dragStart', panelTabElement(tabId), dt);
+      const strip = within(region('main')).getByRole('tablist');
+      expect(drag('dragOver', strip, dt)).toBe(true);
+      drag('drop', strip, dt);
+    }],
+    ['⌘-click, the tree’s open as a main tab', () => act(() => void openFile(A, OUT, null, { main: true }))],
+  ];
+
+  it.each(toMain)('to the main area by %s, the agent’s tab beside the chat reads as the person’s there', async (_, move) => {
+    renderBoth();
+    const tabId = await agentMarkedBeside();
+    const before = reads().length;
+    await move(tabId);
+    expect(front()).toBe(KEY(OUT));
+    expect(sideTabOf(OUT)).toBeUndefined();
+    await readAsPersons(before);
+  });
+
+  it.each(toMain)('to the main area by %s, the person’s tab the agent’s show read reads as the person’s there', async (_, move) => {
+    renderBoth();
+    const tabId = await personsTabTheAgentShowed();
+    const before = reads().length;
+    await move(tabId);
+    expect(front()).toBe(KEY(OUT));
+    await readAsPersons(before);
+  });
+
+  const toSide: [string, (key: string) => Promise<void> | void][] = [
+    ['its tab’s menu', async (key) => fireEvent.click(await menuItem(mainTabElement(key), TRANSFER_COPY.moveToPanel))],
+    ['View ▸ Move to side surface', () => act(() => runAction('artifact.moveToPanel'))],
+    ['a drag onto the side column', (key) => {
+      const dt = transfer();
+      drag('dragStart', mainTabElement(key), dt);
+      const target = screen.getByTestId('panel-drop-target');
+      expect(drag('dragOver', target, dt)).toBe(true);
+      drag('drop', target, dt);
+    }],
+  ];
+
+  it.each(toSide)('beside the chat by %s, the main tab the agent’s open read reads as the person’s there, its tab unmarked', async (_, move) => {
+    renderBoth();
+    act(() => void openFile(A, OUT, null, { asked: 'agent', main: true })); // no entry yet: the main tab's reads are the agent's
+    await waitFor(() => expect(refusal()).not.toBeNull());
+    expect(front()).toBe(KEY(OUT));
+    expect(entry()).toMatchObject({ status: 'error', agent: true });
+    const before = reads().length;
+    await move(KEY(OUT));
+    expect(mainTabOf(OUT)).toBeUndefined();
+    const tabId = sideTabOf(OUT)!;
+    expect(paramsOf(tabId)).toEqual({ file: OUT, line: null });
+    await readAsPersons(before);
+  });
+
+  // U6b-1's branch review, finding 4: a file with unsaved edits or a save under way opens kept, and the agent's mark stays
+  // on such a kept tab; the tab here is given that state directly.
+  it.each([['its menu'], ['a drag onto the column’s lower part']])('into the other group by %s, the agent’s kept tab loses its mark and reads as the person’s', async (way) => {
+    renderBoth();
+    const tabId = await agentMarkedBeside();
+    act(() => useLayout.getState().setPanelParams(tabId, { file: OUT, line: null, agent: true })); // kept, marked
+    await settle();
+    const before = reads().length;
+    if (way === 'its menu') fireEvent.click(await menuItem(panelTabElement(tabId), 'Move below'));
+    else {
+      const dt = transfer();
+      drag('dragStart', panelTabElement(tabId), dt);
+      const target = document.querySelector<HTMLElement>('[data-side-lower-drop] [data-drop-overlay]')!;
+      drag('dragEnter', target, dt);
+      expect(drag('dragOver', target, dt)).toBe(true);
+      drag('drop', target, dt);
+    }
+    expect(groupOf(sideGroups(useLayout.getState(), A), tabId)).toBe('lower');
+    expect(paramsOf(tabId)).toEqual({ file: OUT, line: null });
+    await readAsPersons(before);
+  });
+
+  it('into the other group by its menu, the agent’s preview tab is kept, loses its mark and reads as the person’s', async () => {
+    renderBoth();
+    const tabId = await agentMarkedBeside();
+    const before = reads().length;
+    fireEvent.click(await menuItem(panelTabElement(tabId), 'Move below'));
+    expect(paramsOf(tabId)).toEqual({ file: OUT, line: null });
+    await readAsPersons(before);
+  });
+
+  it.each([['the agent’s tab beside the chat'], ['the person’s tab the agent’s show read']])('Reopen closed tab over %s reads as the person’s in the main area', async (start) => {
+    renderBoth();
+    act(() => void openFile(A, OUT, null, { main: true })); // the person's main tab, closed and remembered
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready' }));
+    act(() => runAction('tab.close'));
+    await waitFor(() => expect(mainTabOf(OUT)).toBeUndefined());
+    expect(closedIds()).toContain(KEY(OUT));
+    act(() => useLayout.getState().activateTab(`session:${A}`));
+    await settle();
+    if (start === 'the agent’s tab beside the chat') await agentMarkedBeside();
+    else await personsTabTheAgentShowed();
+    const before = reads().length;
+    act(() => runAction('tab.reopen'));
+    expect(front()).toBe(KEY(OUT));
+    expect(sideTabOf(OUT)).toBeUndefined();
+    await readAsPersons(before);
+  });
+});
