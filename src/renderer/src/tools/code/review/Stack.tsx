@@ -158,7 +158,7 @@ function estimateLines(file: ReviewFile, hunks: readonly string[] | null, words:
 // mount: Review hidden and shown again remounts the stack, and an open card it already handled is not a new opening
 // there (X-072: the saved place is restored, the card left where it is). `waiting`: the card waiting on its file's read,
 // and the person's inputs in the scroller when it began; `cancelled`: a card whose opening the person's input during
-// that wait cancelled, whose field's focus scroll is then not theirs either.
+// that wait cancelled, until its field's first focus, whose scroll is then not theirs either.
 interface CardsHandled {
   card: number | null;
   waiting: { serial: number; inputs: number } | null;
@@ -222,12 +222,15 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     // A card still waiting on its read across a remount opens where it is: the saved place is restored meanwhile.
     const cards = cardsOf(ui);
     if (cards.waiting) cards.waiting = { serial: cards.waiting.serial, inputs: -1 };
-    // The field of a card whose opening was cancelled takes the keyboard (as it mounts in its row, or later): the
-    // browser's scroll to it is not the person's.
+    // The field of a card whose opening was cancelled takes the keyboard as it mounts in its row: the browser's scroll
+    // to it is not the person's. That first focus alone: every later one into the card (the person's Tab to its next
+    // control) is theirs.
     const focused = (event: FocusEvent) => {
       const now = cardsOf(ui);
       if (now.cancelled === null || now.cancelled !== now.card) return;
-      if (event.target instanceof Element && event.target.closest('[data-review-card-row]')) placed.holdFocus();
+      if (!(event.target instanceof Element) || !event.target.closest('[data-review-card-row]')) return;
+      now.cancelled = null;
+      placed.holdFocus();
     };
     el.addEventListener('focusin', focused);
     if (typeof ResizeObserver !== 'undefined') {
