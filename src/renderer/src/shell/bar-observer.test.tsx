@@ -1,6 +1,6 @@
 // UX wave U10b (O-43): the observer behind the bar's raised surface (`drawsBesideTheBox` in FloatingPill.tsx), measured.
-// It watches the bar's surface; a session streaming its answer redraws nothing there, so its callback and the bar's
-// renders stay bounded however many deltas arrive. Counts, not times.
+// It watches the bar's surface; a session streaming its answer redraws nothing there (the compact pane draws no
+// transcript), so neither its callback nor the bar runs while deltas arrive. Counts, not times.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -107,10 +107,11 @@ async function streamingTranscript() {
   const b = builder();
   b.turn('u1');
   act(() => push(b.events.splice(0)));
-  return (n: number) => {
+  // one delta per task, as the wire delivers them, so each would be its own mutation delivery
+  return async (n: number) => {
     for (let i = 0; i < n; i += 1) {
       const delta = b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'text', textDelta: `word${i} `, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
-      act(() => push([delta]));
+      await act(async () => push([delta]));
     }
   };
 }
@@ -120,22 +121,33 @@ const surfaceWatch = () => {
   return watches.find((watch) => watch.target === surface)!;
 };
 
-it('the bar’s observer watches its surface, and a streamed answer runs it and redraws the bar a bounded number of times', async () => {
-  const view = mount();
-  await waitFor(() => expect(screen.getByRole('textbox', { name: 'Message', hidden: true })).toBeTruthy());
+const message = () => screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: { commands: { insertContent(text: string): boolean } } };
+
+it('the bar’s observer watches its surface, and an answer streaming above it runs it and redraws the bar no times', async () => {
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
   const stream = await streamingTranscript();
   const watch = surfaceWatch();
-  const mounted = { runs: watch.runs, renders: marks.reads };
-  stream(N);
-  await act(async () => {});
+  expect(watch.options).toEqual({ subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['hidden', 'class'] });
+  const before = { runs: watch.runs, renders: marks.reads };
+  await stream(N);
   expect(useTranscriptStore.getState().entries[A]?.rows.length ?? 0, 'the deltas reached the transcript').toBeGreaterThan(0);
-  const streamed = { runs: watch.runs, renders: marks.reads };
+  expect({ runs: watch.runs - before.runs, renders: marks.reads - before.renders }, `${N} streamed deltas`).toEqual({ runs: 0, renders: 0 });
+
+  // the counts are live: a mark redraws the bar (its button, outside the surface), and typing in the box runs the observer
   act(() => useSessions.setState({ records: new Map([[A, { ...record(A), unread: true }]]) }));
-  const marked = { runs: watch.runs, renders: marks.reads };
-  const editor = (screen.getByRole('textbox', { name: 'Message', hidden: true }) as HTMLElement & { editor: { commands: { insertContent(text: string): boolean } } }).editor;
-  for (let i = 0; i < N; i += 1) act(() => void editor.commands.insertContent('a'));
-  await act(async () => {});
-  const typed = { runs: watch.runs, renders: marks.reads };
-  expect({ options: watch.options, mounted, streamed, marked, typed }).toEqual({});
-  view.unmount();
+  expect(marks.reads - before.renders, 'the mark redraws the bar').toBeGreaterThan(0);
+  expect(watch.runs, 'the mark is outside the surface').toBe(before.runs);
+  await act(async () => void message().editor.commands.insertContent('a'));
+  expect(watch.runs - before.runs, 'a keystroke in the box runs the observer').toBeGreaterThan(0);
+});
+
+it('the bar’s observer is disconnected when the bar goes', async () => {
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
+  const watch = surfaceWatch();
+  expect(watch.disconnected).toBe(false);
+  act(() => useFloatingCard.setState({ closed: false })); // the card takes the bar's place
+  await waitFor(() => expect(screen.queryByRole('region', { name: 'Chat' })).toBeNull());
+  expect(watch.disconnected).toBe(true);
 });
