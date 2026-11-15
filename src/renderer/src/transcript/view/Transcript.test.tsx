@@ -806,12 +806,12 @@ describe('the compaction’s row', () => {
 
   it('is the last row while `compacting` holds a time, ticks once a second, and goes when it is null', async () => {
     const source = sourceOf(deniedThenAnswer());
-    const view = render(<Transcript source={source} variant="session" compacting={null} />);
+    const view = render(<Transcript source={source} variant="session" browserActivity={false} compacting={null} />); // no browser activity: the test's key is no address
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
     await screen.findByText('Done.');
     vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] }); // the row's clock, once the history is in
     vi.setSystemTime(T0);
-    view.rerender(<Transcript source={source} variant="session" compacting={T0} />);
+    view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={T0} />);
     expect(lastRow().dataset.rowId).toBe('activity:compacting');
     const line = within(lastRow()).getByRole('status');
     expect(line.textContent).toBe('Compacting session…');
@@ -820,7 +820,7 @@ describe('the compaction’s row', () => {
     expect(within(line).getByRole('timer').textContent).toBe('1s');
     act(() => void vi.advanceTimersByTime(61_000));
     expect(line.textContent).toBe('Compacting session… 1m 02s');
-    view.rerender(<Transcript source={source} variant="session" compacting={null} />);
+    view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={null} />);
     expect(document.querySelector('[data-row-id="activity:compacting"]')).toBeNull();
     expect(screen.queryByText(/Compacting session/)).toBeNull();
   });

@@ -8,6 +8,7 @@
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { Row } from '../transcript/model/rows';
 import { useLaneA } from './lane-a';
 import { useSessions } from './sessions';
 import { useTranscriptStore } from './transcript';
@@ -17,6 +18,10 @@ export type CompactingSource = { kind: 'engine' } | { kind: 'bridge'; rpc: strin
 interface Held {
   since: number; // ms since the epoch, this window's clock
   source: CompactingSource;
+  // a bridge's: the ids of the compaction boundaries among the session's rows when it went on (null: no rows held yet;
+  // the first rows that arrive are taken as those), so a new boundary is told by its id and never by its time, which is
+  // the transcript machine's clock
+  known?: ReadonlySet<string> | null;
 }
 
 interface CompactingState {
@@ -26,6 +31,11 @@ interface CompactingState {
 export const useCompacting = create<CompactingState>(() => ({ held: new Map() }));
 
 const ENGINE: CompactingSource = { kind: 'engine' };
+const LIVE_BRIDGE: ReadonlySet<string | undefined> = new Set(['live', 'starting']); // `starting` passes; nothing else holds one
+const boundaries = (rows: readonly Row[]) => new Set(rows.flatMap((row) => (row.kind === 'boundary' && row.boundaryKind === 'compaction' ? [row.id] : [])));
+// A session's transcript is kept under its id, on this machine's route and on another machine's (`ipcSource`,
+// `remoteTranscriptOf`).
+const rowsOf = (appSessionId: AppSessionId): readonly Row[] | undefined => useTranscriptStore.getState().entries[appSessionId]?.rows;
 const sameSource = (a: CompactingSource, b: CompactingSource) => (a.kind === 'engine' ? b.kind === 'engine' : b.kind === 'bridge' && a.rpc === b.rpc);
 
 function put(appSessionId: AppSessionId, held: Held | null): void {
@@ -41,8 +51,10 @@ function put(appSessionId: AppSessionId, held: Held | null): void {
 export function noteCompacting(appSessionId: AppSessionId, source: CompactingSource, on: boolean): void {
   const current = useCompacting.getState().held.get(appSessionId);
   if (on) {
-    if (current === undefined) put(appSessionId, { since: Date.now(), source });
-    else if (!sameSource(current.source, source)) put(appSessionId, { since: current.since, source });
+    if (current === undefined) {
+      const rows = source.kind === 'bridge' ? rowsOf(appSessionId) : undefined;
+      put(appSessionId, { since: Date.now(), source, ...(source.kind === 'bridge' && { known: rows === undefined ? null : boundaries(rows) }) });
+    } else if (!sameSource(current.source, source)) put(appSessionId, { ...current, source });
   } else if (current !== undefined && sameSource(current.source, source)) put(appSessionId, null);
 }
 
@@ -69,23 +81,23 @@ export function connectCompacting(): () => void {
   const offSessions = useSessions.subscribe((state, before) => {
     if (state.engine !== before.engine) followEngine(state.engine, before.engine);
   });
-  // A terminal session's compaction ends with its bridge leaving `live` (or its state going), whatever the bridge said
+  // A terminal session's compaction ends with its bridge's state going, or becoming anything but `live` or `starting`
   const offLaneA = useLaneA.subscribe((state, before) => {
     if (state.states === before.states) return;
     for (const [appSessionId, held] of useCompacting.getState().held) {
-      if (held.source.kind !== 'bridge') continue;
-      if (before.states.get(appSessionId)?.bridge === 'live' && state.states.get(appSessionId)?.bridge !== 'live') clearCompacting(appSessionId);
+      if (held.source.kind === 'bridge' && !LIVE_BRIDGE.has(state.states.get(appSessionId)?.bridge)) clearCompacting(appSessionId);
     }
   });
-  // ... and with a compaction's boundary that reaches its transcript after the compaction began. A session's transcript
-  // is kept under its id, on this machine's route and on another machine's (`ipcSource`, `remoteTranscriptOf`). Read
-  // only while a bridge holds one, and only for a key whose rows changed.
+  // ... and with a compaction's boundary that was not among its rows when it went on (told by id). Read only while a
+  // bridge holds one, and only for a key whose rows changed.
   const offRows = useTranscriptStore.subscribe((state, before) => {
     for (const [appSessionId, held] of useCompacting.getState().held) {
       if (held.source.kind !== 'bridge') continue;
       const rows = state.entries[appSessionId]?.rows;
       if (rows === undefined || rows === before.entries[appSessionId]?.rows) continue;
-      if (rows.some((row) => row.kind === 'boundary' && row.boundaryKind === 'compaction' && Date.parse(row.at) > held.since)) clearCompacting(appSessionId);
+      const known = held.known;
+      if (!known) put(appSessionId, { ...held, known: boundaries(rows) }); // the history it started over
+      else if (rows.some((row) => row.kind === 'boundary' && row.boundaryKind === 'compaction' && !known.has(row.id))) clearCompacting(appSessionId);
     }
   });
   return () => {

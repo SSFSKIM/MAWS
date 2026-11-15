@@ -218,6 +218,7 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
     entry.overflowed = false;
+    if (agentId === null) clearCompacting(appSessionId); // UX wave U3b (M4): this window's own reset, as the link's
     tell(entry, { kind: 'reset' });
   }
   entry.watchers.add(watcher);
