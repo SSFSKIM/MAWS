@@ -263,8 +263,13 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     if (!final || final.isSymbolicLink()) throw new Refusal();
     return { roots, real0, mark };
 
-    // U6e step 5: the first evidence that holds, in the order of decision 7
+    // U6e step 5: the first evidence that holds, in the order of decision 7. A save whose client ended meanwhile (its
+    // signal) is admitted by none of it (S4): the grant asked again after the search would otherwise admit it.
     async function markOf(real: string): Promise<Mark | null> {
+      const mark = await firstEvidence(real);
+      return purpose.save === true && asked.signal?.aborted === true ? null : mark;
+    }
+    async function firstEvidence(real: string): Promise<Mark | null> {
       if (chosen(real)) return 'chosen';
       if (sent !== undefined && (await sent(appSessionId, real))) return 'sent';
       const form = await namesIt();
@@ -450,7 +455,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   // compared with the one confirmed at the open (write rule, line 3)
   async function writeOutside({ appSessionId, path, content, expectedHash, real }: FilesWriteOutsideInput, remote = false, signal?: AbortSignal): Promise<FilesWriteOutput> {
     const bytes = sized(content);
-    return save(await openConfirmed(appSessionId, path, 'write', OUTSIDE_SAVE, remote, { signal }), path, bytes, expectedHash, real);
+    return save(await openConfirmed(appSessionId, path, 'write', OUTSIDE_SAVE, remote, { signal }), path, bytes, expectedHash, { real, signal });
   }
 
   function sized(content: string): Buffer {
@@ -460,14 +465,20 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   }
 
   // The two writes' shared part, over a confirmed read-write descriptor it closes: MAWS's own folders refused (U6e, write
-  // rule line 5), the shown real path compared when given, then the file's section.
-  async function save({ handle, stat, real }: Confirmed, path: string, bytes: Buffer, expectedHash: string, shown?: string): Promise<FilesWriteOutput> {
+  // rule line 5), the shown real path compared when given, then the file's section. `outside.signal`: the outside
+  // save's client end, which refuses the save before the section and again inside it, before anything is written (S4).
+  async function save({ handle, stat, real }: Confirmed, path: string, bytes: Buffer, expectedHash: string, outside?: { real: string; signal?: AbortSignal }): Promise<FilesWriteOutput> {
     const tooLarge = () => new Error(`too large to edit: ${path}`);
+    const ended = () => {
+      if (outside?.signal?.aborted === true) throw new Refusal();
+    };
     try {
       if (isOwn(real)) throw new Error(`not writable: ${path}`);
-      if (shown !== undefined && real !== shown) throw new Error(FILES_MOVED);
+      if (outside !== undefined && real !== outside.real) throw new Error(FILES_MOVED);
       if (Number(stat.size) > FILES_WRITE_MAX_BYTES) throw tooLarge();
+      ended();
       return await exclusive(`${stat.dev}:${stat.ino}`, async () => {
+        ended(); // a write of the same file ahead of it may have kept it waiting
         const now = await handle.stat({ bigint: true }); // the cap applies to the size as it is inside the section
         const current = Number(now.size) <= FILES_WRITE_MAX_BYTES ? await readWhole(handle, Number(now.size), FILES_WRITE_MAX_BYTES) : null;
         if (current === null) throw tooLarge();
