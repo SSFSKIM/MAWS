@@ -20,6 +20,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { LaneAAgent } from '@shared/lane-a/agents';
+import { isAddress, machineOf } from '@shared/machine/address';
+import { ipc } from '../../ipc/client';
 import { withStatuses, type StatusedMeta } from '../../lane-a/agents/task-feed';
 import { watchLaneA } from '../../lane-a/watches';
 import { forgetLaneAAgents, useLaneA } from '../../stores/lane-a';
@@ -407,11 +409,12 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
           }, WORKFLOW_REREAD_MS);
         }),
       );
-      // U8d: the statuses its watch carries, laid again as they change, and the watch held while the bridge is up
+      // U8d: the statuses its watch carries, laid again as they change, and the watch held while the bridge of a session
+      // this Mac drives is up
       let laneA: (() => void) | null = null;
       const holdLaneA = () => {
         const bridge = useLaneA.getState().states.get(id)?.bridge;
-        const up = bridge === 'live' || bridge === 'starting';
+        const up = (bridge === 'live' || bridge === 'starting') && isAddress(id) && machineOf(id) === ipc.localMachine;
         if (up && laneA === null) laneA = watchLaneA(id, () => {});
         else if (!up && laneA !== null) {
           laneA();

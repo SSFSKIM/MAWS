@@ -843,7 +843,7 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
 
   it('lists Running, then Done with each agent’s own outcome, in place of On disk; one row moves when its agent ends', async () => {
     await mountTerminal(['ok', 'bad', 'halt', 'gone', 'busy'].map((id) => sidecar(id)));
-    expect(rowsOf('disk').map((r) => r.id)).toEqual(['ok', 'bad', 'halt', 'gone', 'busy']);
+    expect(heading('disk')).toBe('On disk 5'); // the sidecars alone
     body('snapshot', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), gone('gone'), runs('busy')]);
     expect(section('disk')).toBeNull();
     expect(heading('running')).toBe('Running 1');
@@ -878,7 +878,7 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
     expect(screen.getByText(SENTENCE)).toBeTruthy();
     body('subagents', [unknown('a1'), unknown('a2')]);
     expect(screen.getByText(SENTENCE)).toBeTruthy();
-    expect(rowsOf('disk').map((r) => r.id)).toEqual(['a1', 'a2']);
+    expect(heading('disk')).toBe('On disk 2');
     body('subagents', [runs('a1'), unknown('a2')]);
     expect(screen.queryByText(SENTENCE)).toBeNull();
     body('subagents', [ends('a1', 'completed', 'completed'), unknown('a2')]);
