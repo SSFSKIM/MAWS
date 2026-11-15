@@ -633,11 +633,11 @@ export const TOOL_ERRORS = {
   tooLarge: (tool: ArtifactToolName, path: string, bytes: number) => `${tool}: too large: ${path} (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`,
   artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_publish`,
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
+  artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
+  noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   // UX wave U10b (l6-artifacts-18, §A.2): a publish names path or files, exactly one; path is an html page's alone
   publishPathOrFiles: 'artifact_publish: give path or files, not both and not neither',
   publishPathHtmlOnly: (kind: string) => `artifact_publish: path publishes an html page; send files for a ${kind}`,
-  artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
-  noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
   captureFailed: (reason: string) => `artifact_screenshot: MAWS could not capture the artifact: ${reason}`,
   captureTimeout: `artifact_screenshot: MAWS did not answer within ${CAPTURE_ANSWER_MS / 1000} s`,
