@@ -97,10 +97,11 @@ function scene() {
   const second = b.emit('permission.requested', permissionOf('rp2', 'b2', 'make lint'));
   events = b.events;
   for (const event of [asked, prompt, second]) requests.set(event.requestId, event);
+  // ids addressed on the test machine, as the page holds them, so that main's bare id in a notification names them
   return {
-    question: itemFor(asked as RequestEvent, APP, { summary: 'Which colour?' }),
-    prompt: itemFor(prompt as RequestEvent, APP, { summary: 'Bash: make check' }),
-    second: itemFor(second as RequestEvent, APP, { summary: 'Bash: make lint' }),
+    question: itemFor(asked as RequestEvent, APP, { id: at('att-rq' as AttentionId), summary: 'Which colour?' }),
+    prompt: itemFor(prompt as RequestEvent, APP, { id: at('att-rp' as AttentionId), summary: 'Bash: make check' }),
+    second: itemFor(second as RequestEvent, APP, { id: at('att-rp2' as AttentionId), summary: 'Bash: make lint' }),
   };
 }
 
@@ -139,7 +140,7 @@ describe('the card column’s card, Waiting for you', () => {
     const WaitingCard = await waitingCard();
     const { question, prompt, second } = scene();
     const fromAgent = { ...second, request: { ...second.request, agentId: 'agent-x' as AttentionItem['request']['agentId'] } };
-    const unanswerable = { ...prompt, id: 'att-error' as AttentionId, kind: 'error' as const, request: { ...prompt.request, requestId: null } };
+    const unanswerable = { ...prompt, id: at('att-error' as AttentionId), kind: 'error' as const, request: { ...prompt.request, requestId: null } };
     act(() => useAttention.getState().applySnapshot([fromAgent, unanswerable, prompt, question], TEST_MACHINE));
     const view = render(<WaitingCard appSessionId={APP} />);
     expect(card()!.querySelector('h3')!.textContent).toBe('Waiting for you · 3');
