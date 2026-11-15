@@ -9,6 +9,8 @@ import { expect, type Locator, type Page, type TestInfo } from '@playwright/test
 import type { CommandInput, CommandName, CommandResult } from '../src/shared/ipc/schema';
 import { AppSessionIdSchema } from '../src/shared/graph/ids';
 import { addressed, localRef } from './support/address';
+import { chooseCustomize, customizeHead, customizePage } from './support/customize';
+import { CATALOG_FIXTURES_ENV } from '../src/main/catalog/fetch';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
@@ -233,16 +235,25 @@ test('Chrome measurements: document, deck and live Customize at both desktop siz
         await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
         await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
         await expect(page.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
+        await chooseCustomize(page, { view: 'My items', show: 'Plugins' }); // UX wave U11c: the sidebar opens All; the loaded line is Plugins'
         await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
-        await capture('customize-live-plugins', { header: '[data-region="page"] [data-customize-header]', sections: '[aria-label="Customize sections"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', library: '[data-widget-variant="embedded"] > header', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
+        // UX wave U11c: the head's two rows (the view with the scopes; Show with the kind's tools) in place of the section
+        // tabs and the embedded library's header
+        await capture('customize-live-plugins', { header: '[data-region="page"] [data-customize-header]', viewRow: '[data-customize-header] [data-customize-row="view"]', showRow: '[data-customize-header] [data-customize-row="show"]', project: 'select[aria-label="Project"]', live: 'select[aria-label="Live session"]', loaded: '[data-plugins-loaded]', firstPlugin: '[data-plugin-row="chrome-review@chrome-tools"]' });
       }
       expect(maws.consoleErrors()).toEqual([]);
     } finally { await maws.cleanup(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, M5; renamed from "Chrome: live Customize
+// keeps scopes on its two control rows and loaded feedback on the third"): the head's two rows, the view with the Project
+// and Live session selects, then Show with the plugins' tools, each sharing its row; the loaded line under them; the
+// same measures. And C6: an installed plugin whose directory record has an icon draws it as image data, one the
+// directory does not list draws its tile. My items reads only the copy of the directory held (`catalog.pluginIcons`), so
+// the copy is made first, as a visit to Discover makes it.
 // eslint-disable-next-line no-empty-pattern -- this case owns its ready-session fixture launch
-test('Chrome: live Customize keeps scopes on its two control rows and loaded feedback on the third', async ({}, info) => {
+test('Chrome: live Customize keeps scopes on the head’s two rows and loaded feedback under them; an installed plugin draws its directory icon', async ({}, info) => {
   test.setTimeout(90_000);
   const root = mkdtempSync(join(tmpdir(), 'maws-customize-chrome-'));
   const directory = join(root, 'chrome-project');
@@ -256,39 +267,58 @@ test('Chrome: live Customize keeps scopes on its two control rows and loaded fee
   writeFileSync(source, JSON.stringify(scenario));
   const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
   const market = scratchMarketplace(join(root, 'market'), { name: 'chrome-tools', plugins });
-  const cli = writePluginCliStub(root, { marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }], installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }], fail: {} });
+  // C6: a plugin the recorded directory lists with an icon, installed from the seed marketplace that lists it
+  const official = [{ name: 'frontend-design', version: '1.0.0', description: 'A plugin the recorded directory lists with an icon.' }];
+  const officialMarket = scratchMarketplace(join(root, 'official'), { name: 'claude-plugins-official', plugins: official });
+  const cli = writePluginCliStub(root, {
+    marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }, { name: 'claude-plugins-official', source: 'directory', path: officialMarket, plugins: official }],
+    installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }, { id: 'frontend-design@claude-plugins-official', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }],
+    fail: {},
+  });
   try {
-    const maws = await launchMaws({ userData: root, env: { ...ENV, MAWS_SESSION_SOURCE: `stub:${source}`, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin } });
+    const maws = await launchMaws({ userData: root, env: { ...ENV, MAWS_SESSION_SOURCE: `stub:${source}`, MAWS_WIDGET_BACKEND: 'fixtures', MAWS_E2E_ENGINE_BIN: cli.bin, [CATALOG_FIXTURES_ENV]: join(REPO_ROOT, 'e2e/fixtures/catalog') } });
     try {
       const { page } = maws;
       await openSession(page);
+      value(await invoke(page, 'catalog.refresh', {})); // the directory's copy held, from the recordings
       await sidebar(page).getByRole('button', { name: 'Customize', exact: true }).click();
       await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption(await addressed(page, 'proj-harness')); // P5 O6 M2: the option's value is the project's address
-      // UX wave U7b (O-40): Customize is a page; its name is the title bar's heading, so the header row holds the section
-      // tabs and the Project select, and the content is measured against the page's box
-      const header = pageRegion(page).locator('[data-customize-header]');
-      const library = page.locator('[data-widget="plugins"][data-widget-variant="embedded"] > header');
-      await expect(library.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
+      await chooseCustomize(page, { show: 'Plugins' }); // the sidebar opens All; the loaded line is Plugins'
+      // UX wave U7b (O-40): Customize is a page; its name is the title bar's heading, and the content is measured against
+      // the page's box
+      const header = customizeHead(page);
+      const viewRow = header.locator('[data-customize-row="view"]');
+      const showRow = header.locator('[data-customize-row="show"]');
+      await expect(viewRow.getByRole('combobox', { name: 'Live session', exact: true })).toBeVisible();
       await expect(page.locator('[data-plugin-row="chrome-review@chrome-tools"]')).toBeVisible({ timeout: 15_000 });
       for (const { width, height } of SIZES) {
         await size(maws, width, height);
         await expect(header.getByRole('heading', { name: 'Customize', exact: true })).toHaveCount(0);
-        const headerControls = await Promise.all([box(header.getByRole('tablist', { name: 'Customize sections' })), box(header.getByRole('combobox', { name: 'Project', exact: true }))]);
-        const libraryControls = await Promise.all([box(library.getByRole('radio', { name: 'My items', exact: true })), box(library.getByRole('searchbox', { name: 'Search plugins', exact: true })), box(library.getByRole('combobox', { name: 'Live session', exact: true }))]);
-        for (const row of [headerControls, libraryControls]) {
+        const viewControls = await Promise.all([box(viewRow.getByRole('radiogroup', { name: 'Library', exact: true })), box(viewRow.getByRole('combobox', { name: 'Project', exact: true })), box(viewRow.getByRole('combobox', { name: 'Live session', exact: true }))]);
+        const showControls = await Promise.all([box(showRow.getByRole('radiogroup', { name: 'Show', exact: true })), box(showRow.getByRole('searchbox', { name: 'Search plugins', exact: true }))]);
+        for (const row of [viewControls, showControls]) {
           const centers = row.map((rect) => rect.y + rect.height / 2);
           expect(Math.max(...centers) - Math.min(...centers), 'scope controls share their earned row at desktop widths').toBeLessThanOrEqual(1);
         }
-        await expect(library.getByRole('heading', { name: 'Plugins', exact: true })).toHaveCount(0);
+        await expect(header.getByRole('heading', { name: 'Plugins', exact: true })).toHaveCount(0);
         const loaded = await box(page.locator('[data-plugins-loaded]'));
         const content = await box(page.locator('[data-plugin-row="chrome-review@chrome-tools"]'));
         const pageBox = await box(pageRegion(page));
-        expect(loaded.y).toBeGreaterThanOrEqual((await box(library)).y + (await box(library)).height);
+        const headBox = await box(header);
+        expect(loaded.y).toBeGreaterThanOrEqual(headBox.y + headBox.height);
         expect(content.y).toBeGreaterThan(loaded.y + loaded.height);
         expect(await pageRegion(page).evaluate((node) => node.scrollWidth - node.clientWidth)).toBe(0);
-        await info.attach(`customize-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, page: pageBox, headerControls, libraryControls, loaded, firstPlugin: content, contentTopFromPage: content.y - pageBox.y }, null, 2)), contentType: 'application/json' });
-        await shot(maws, info, 'customize-three-rows');
+        await info.attach(`customize-chrome-regression-${width}x${height}.json`, { body: Buffer.from(JSON.stringify({ window: { width, height }, page: pageBox, head: headBox, viewControls, showControls, loaded, firstPlugin: content, contentTopFromPage: content.y - pageBox.y }, null, 2)), contentType: 'application/json' });
+        await shot(maws, info, 'customize-head-two-rows');
       }
+      await test.step('C6: the directory’s icon on the plugin it lists, as image data; a tile on the one it does not', async () => {
+        const listed = customizePage(page).locator('[data-plugin-row="frontend-design@claude-plugins-official"] [data-item-image]');
+        await expect(listed).toHaveAttribute('data-item-image', 'icon', { timeout: 15_000 });
+        await expect(listed.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
+        const unlisted = customizePage(page).locator('[data-plugin-row="chrome-review@chrome-tools"] [data-item-image]');
+        await expect(unlisted).toHaveAttribute('data-item-image', 'tile');
+        await expect(unlisted.locator('img')).toHaveCount(0);
+      });
       expect(maws.consoleErrors()).toEqual([]);
     } finally { await maws.cleanup(); }
   } finally { rmSync(root, { recursive: true, force: true }); }
