@@ -4,7 +4,7 @@
 // update the host admitted before a delete is a row of the person's (the agent's delete then refused, the Library's
 // taking it into the deleted state); one that arrives after either delete is refused, its channel closed `host`, with no
 // row and no acknowledgement; and a new open of the deleted artifact's document is closed the same way.
-import { randomUUID } from 'node:crypto';
+import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -98,7 +98,7 @@ const closeOf = (r: Remote, id: string) => (r.inbox.find((m) => (m as Msg).id ==
 
 /** An `edit` open of the artifact's document, synced to the host's first frame; and a person's update to send on it. */
 async function open(m: Awaited<ReturnType<typeof machine>>) {
-  const id = randomUUID().replace(/-/g, '').slice(0, 22);
+  const id = randomBytes(16).toString('base64url');
   const from = m.a.inbox.length;
   await m.a.channel.send({ t: 'streamOpen', id, kind: 'document', credit: 1024 * 1024, document: { artifactId: m.id, mode: 'edit' } });
   expect(await waitFor(m.a, (x) => x.id === id && (x.t === 'streamOpened' || x.t === 'streamRefused'), 'the answer', from)).toMatchObject({ t: 'streamOpened' });
@@ -163,7 +163,7 @@ describe('a document over the link and a delete', () => {
   it('a new open of the deleted artifact’s document is closed `host`', async () => {
     const m = await machine();
     expect(await agentDelete(m)).toBe('deleted');
-    const id = randomUUID().replace(/-/g, '').slice(0, 22);
+    const id = randomBytes(16).toString('base64url');
     await m.a.channel.send({ t: 'streamOpen', id, kind: 'document', credit: 1024 * 1024, document: { artifactId: m.id, mode: 'edit' } });
     await until(() => closeOf(m.a, id) ?? (m.a.inbox.find((x) => (x as Msg).id === id && (x as Msg).t === 'streamRefused') ? 'refused' : undefined), 'the stream’s end');
     expect(framesOf(m.a, id)).toEqual([]);

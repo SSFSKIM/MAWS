@@ -12,6 +12,8 @@ import type { DocumentStorage, StoredDoc, ThreadChange } from '@artifacts/host';
 import { decodeMap, encodeMap, mergeMaps, PROVENANCE_STEP_MS } from '@artifacts/yjs';
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
+import { agentDraftKey, markAfterRow, readMark, type AgentDraftMark } from './agent-draft'; // UX wave U10b (M4)
+import { mainOf, suggestionKey } from './doc-keys';
 import { StoreTooNewError } from './errors';
 import { openStore, type OpenedStore, type StoreStatus } from './migrations';
 
@@ -109,7 +111,9 @@ export class SqliteDocumentStorage implements DocumentStorage {
   appendInBatch(row: { artifactId: string; actor: Actor; at: number; update: Uint8Array; provenance?: Uint8Array; bindClients: number[]; hostClient?: number; credit?: Map<number, Actor> }): number {
     this.begin();
     const key = this.actorInBatch(row.actor, row.at);
+    const draft = this.draftBefore(row.artifactId); // UX wave U10b (M4)
     const seq = Number(this.sql('INSERT INTO artifact_updates (artifactId, actor, at, bytes) VALUES (?, ?, ?, ?)').run(row.artifactId, key, row.at, row.update).lastInsertRowid);
+    this.draftAfter(draft, row.actor, seq);
     if (row.provenance) this.attributeInBatch({ artifactId: row.artifactId, seq, at: row.at, provenance: row.provenance });
     for (const clientId of row.bindClients) {
       const credited = row.credit?.get(clientId);
@@ -124,9 +128,41 @@ export class SqliteDocumentStorage implements DocumentStorage {
   appendContentInBatch(row: { artifactId: string; actor: Actor; at: number; content: (seq: number) => string }): number {
     this.begin();
     const key = this.actorInBatch(row.actor, row.at);
+    const draft = this.draftBefore(row.artifactId); // UX wave U10b (M4)
     const seq = Number(this.sql("INSERT INTO artifact_updates (artifactId, actor, at, content) VALUES (?, ?, ?, '{}')").run(row.artifactId, key, row.at).lastInsertRowid);
     this.sql('UPDATE artifact_updates SET content = ? WHERE seq = ?').run(row.content(seq), seq);
+    this.draftAfter(draft, row.actor, seq);
     return seq;
+  }
+
+  // UX wave U10b (M4; agent-draft.ts): the agent-draft mark's upkeep, in the batch the row joins, at the two places every
+  // content row is appended. Before the row: the artifact's mark, if one stands to be kept, and the pair's newest
+  // sequence (its own document's and its suggestion document's rows); after it: the mark moved past the row. An artifact
+  // with no mark costs this one lookup, and a broken one is never written again.
+  private draftBefore(artifactId: string): { key: string; mark: AgentDraftMark; newest: number } | null {
+    const main = mainOf(artifactId) ?? artifactId;
+    const key = agentDraftKey(main);
+    const mark = readMark(this.getMeta(key));
+    if (mark === null || mark.broken !== undefined) return null;
+    return { key, mark, newest: this.newestContentSeq(main) };
+  }
+
+  private draftAfter(draft: { key: string; mark: AgentDraftMark; newest: number } | null, actor: Actor, seq: number): void {
+    if (draft) this.setMeta(draft.key, JSON.stringify(markAfterRow(draft.mark, draft.newest, { actor, seq })));
+  }
+
+  // UX wave U10b (M4): the newest sequence of the artifact's content rows, its own document's and its suggestion
+  // document's (0 when it has none), the open batch's included. The prune keeps each document's newest row, so this
+  // survives maintenance.
+  newestContentSeq(artifactId: string): number {
+    const row = this.sql('SELECT MAX(seq) AS s FROM artifact_updates WHERE artifactId IN (?, ?)').get(artifactId, suggestionKey(artifactId)) as { s: number | null };
+    return row.s ?? 0;
+  }
+
+  // UX wave U10b (M4, the fence of §C.5): whether the artifact's row holds `deletedAt`, the open batch's write included,
+  // so a delete fences its artifact from the statement that writes it and an undelete lowers the fence with its own.
+  isDeleted(artifactId: string): boolean {
+    return (this.sql('SELECT deletedAt FROM artifacts WHERE id = ?').get(artifactId) as { deletedAt: number | null } | undefined)?.deletedAt != null;
   }
 
   // The `update`-tier attribution row of log row `seq` (Decision Log 5), its time floored to the minute.
