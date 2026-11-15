@@ -1241,7 +1241,10 @@ describe('a move’s ordered writes', () => {
     run.hold('main.tabs');
     const before = run.sent.length;
     toMain(run.store);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     await run.answer('main.tabs', false);
+    expect(error).toHaveBeenCalledExactlyOnceWith('[layout] layout.set main.tabs failed', { code: 'internal', message: 'disk full' });
+    error.mockRestore();
     await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
     expect(run.sent.slice(before)).toEqual(['main.tabs']);
     const stored = await relaunch(run.landed);
@@ -1260,7 +1263,10 @@ describe('a move’s ordered writes', () => {
     run.hold(LIST);
     toMain(run.store);
     await vi.advanceTimersByTimeAsync(0);
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     await run.answer(LIST, false);
+    expect(error).toHaveBeenCalledExactlyOnceWith(`[layout] layout.set ${LIST} failed`, { code: 'internal', message: 'disk full' });
+    error.mockRestore();
     const after = await relaunch(run.landed);
     expect([holdsFile(after.main), after.sideIds]).toEqual([true, []]);
   });

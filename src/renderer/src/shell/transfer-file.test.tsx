@@ -29,7 +29,7 @@ import { registerEditor, sideFilesViewer } from '../tools/code/editor/register';
 import { filesTool } from '../tools/code/files/FilesTool';
 import { useFiles } from '../tools/code/files/store';
 import { connectSideFiles } from '../tools/code/files/tabs';
-import { resetTreeState } from '../tools/code/files/tree-state';
+import { resetTreeState, useTreeState } from '../tools/code/files/tree-state';
 import { openFile, resetKeptOpens } from '../tools/code/open-file';
 import { FileViewer } from '../tools/code/viewer/FileViewer';
 import { existingViewState, useViewer, VIEWER_ENTRIES_MAX } from '../tools/code/viewer/viewer-store';
@@ -46,7 +46,7 @@ const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const offs: (() => void)[] = [];
 let disk: ReturnType<typeof installDisk>;
 beforeAll(() => import('../tools/code/viewer/CodeView'));
-beforeEach(() => {
+beforeEach(async () => {
   resetPanelStores();
   // Review in view beside A's chat, so the column is drawn before a file is beside it (a target for a main tab's drag).
   const review = ref('review:aaaa0001');
@@ -70,6 +70,7 @@ beforeEach(() => {
   );
   registerSlot('panelHost', PanelHost);
   registerSlot('fileTab', FileViewer);
+  await act(() => useTreeState.getState().load()); // Files' tree state read before any tab draws it
 });
 afterEach(() => {
   cleanup();
