@@ -2,7 +2,7 @@
 // near the scroll position are drawn, a folded section weighs its header alone, the place the person reads is kept
 // through a resize, a zoom and late drawing and is returned to after Review was hidden, and the hunk counter counts and
 // moves across the whole stack. The page is laid out by `fakeStackLayout`: happy-dom lays nothing out.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
@@ -24,6 +24,23 @@ import { reviewTool } from './ReviewTool';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
+// What the stack prepares, counted (UX wave U5b-1's branch panel, its ninth finding): each block's data for the diff
+// library, and each section's blocks (a section made again).
+const prepared = vi.hoisted(() => ({ diffs: 0, sections: 0 }));
+vi.mock('./review-model', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./review-model')>();
+  return {
+    ...actual,
+    diffViewHunks: (...args: Parameters<typeof actual.diffViewHunks>) => {
+      prepared.diffs += 1;
+      return actual.diffViewHunks(...args);
+    },
+    blocksOf: (...args: Parameters<typeof actual.blocksOf>) => {
+      prepared.sections += 1;
+      return actual.blocksOf(...args);
+    },
+  };
+});
 // The library measures text on a canvas, which happy-dom does not draw.
 HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text: string) => ({ width: text.length * 7 }) })) as never;
 
@@ -62,7 +79,8 @@ function made(index: number, hunks: number, lines: number): Made {
   return { path, patch: `${out.join('\n')}\n`, added, starts };
 }
 
-function statusOf(files: readonly Made[]): GitStatus {
+// `staged`: the first file has a change in the index too, so Staged is listed; `untracked`: files listed untracked.
+function statusOf(files: readonly Made[], options: { staged?: boolean; untracked?: readonly Made[] } = {}): GitStatus {
   return {
     repoRoot: '/repo',
     gitDir: '/repo/.git',
@@ -75,7 +93,10 @@ function statusOf(files: readonly Made[]): GitStatus {
     ahead: 0,
     behind: 0,
     dirty: true,
-    files: files.map((file) => ({ path: file.path, oldPath: null, index: '.', worktree: 'M', untracked: false })),
+    files: [
+      ...files.map((file, i) => ({ path: file.path, oldPath: null, index: options.staged && i === 0 ? 'M' : '.', worktree: 'M', untracked: false })),
+      ...(options.untracked ?? []).map((file) => ({ path: file.path, oldPath: null, index: '?', worktree: '?', untracked: true })),
+    ],
     stashCount: 0,
     checkedAt: '2026-09-29T10:00:00.000Z',
   };
@@ -84,17 +105,23 @@ function statusOf(files: readonly Made[]): GitStatus {
 const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: false });
 
 // Main over a scope of `files`, the whole patch in one answer, or past the scope's cap with each file read alone; `hold`
-// keeps a file's own read open until the test releases it (its patch) or refuses it (a failed read).
-function stackMain(files: readonly Made[], options: { pastCap?: boolean } = {}) {
+// keeps a file's own read open until the test releases it (its patch) or refuses it (a failed read). An untracked file
+// is read alone. `files` is read at each call, so a test that changes it and tells of the change has the scope re-read.
+interface StackMainOptions {
+  pastCap?: boolean;
+  staged?: boolean;
+  untracked?: readonly Made[];
+}
+function stackMain(files: readonly Made[], options: StackMainOptions = {}) {
   const held = new Map<string, ReturnType<typeof deferred<ReturnType<typeof ok> | null>>>();
   const state = { hold: null as string | null };
   const main = installFakeMain((name, input) => {
     switch (name) {
       case 'git.watch':
-        return ok(statusOf(files));
+        return ok(statusOf(files, options));
       case 'git.diff': {
         if (typeof input.path === 'string') {
-          const file = files.find((f) => f.path === input.path);
+          const file = [...files, ...(options.untracked ?? [])].find((f) => f.path === input.path);
           const answer = ok(file ? { patch: file.patch, files: [numstat(file)] } : { patch: '', files: [] });
           if (state.hold === input.path) {
             const late = deferred<ReturnType<typeof ok> | null>();
@@ -129,6 +156,23 @@ const ownReads = (main: ReturnType<typeof stackMain>) => main.callsOf('git.diff'
 const hide = () => act(() => panelHost.showSummary());
 const show = () => act(() => panelHost.selectTab(panelOf(A)!.tabs[0].id));
 const request = (path: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { path } }));
+const next = () => fireEvent.click(screen.getByLabelText('Next hunk'));
+const chipOf = (id: string) => document.querySelector<HTMLButtonElement>(`[data-chip="${id}"]`)!;
+const card = () => document.querySelector<HTMLElement>('[data-comment-card]');
+// The add button on a line of the new side, pressed as a pointer does (the library opens the card on the mouse press).
+function addOn(path: string, line: number): void {
+  const add = sectionOf(path).querySelector(`[data-line-new-num="${line}"]`)!.closest('tr')!.querySelector<HTMLButtonElement>('[data-add-widget="new"] button')!;
+  fireEvent.pointerDown(add);
+  fireEvent.mouseDown(add);
+  fireEvent.pointerUp(window);
+}
+// A line's row on the new side, and the first row of the hunk it opens (the hunk's header row where one is drawn).
+const lineRow = (path: string, line: number) => sectionOf(path).querySelector(`[data-line-new-num="${line}"]`)!.closest('tr')!;
+function hunkTop(path: string, line: number): HTMLElement {
+  const row = lineRow(path, line);
+  const above = row.previousElementSibling as HTMLElement | null;
+  return above?.dataset.state === 'hunk' ? above : row;
+}
 
 describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
   const offs: (() => void)[] = [];
@@ -147,6 +191,10 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
   });
   afterEach(() => {
     cleanup();
+    act(() => {
+      useCommentCard.setState({ open: null, passes: new Map() });
+      resetPlaceNotes();
+    });
     page.restore();
     offs.splice(0).forEach((off) => off());
     for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
@@ -154,12 +202,12 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     vi.unstubAllGlobals();
   });
 
-  async function mount(files: readonly Made[], options: { pastCap?: boolean } = {}) {
+  async function mount(files: readonly Made[], options: StackMainOptions = {}) {
     const main = stackMain(files, options);
     act(() => void panelHost.addTool('review', { appSessionId: A }));
     render(<TestHost />);
     await page.settle();
-    expect(sections()).toHaveLength(files.length);
+    expect(sections()).toHaveLength(files.length + (options.untracked?.length ?? 0));
     return main;
   }
 
@@ -236,6 +284,40 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(read.length).toBeLessThan(50);
     expect(read).toContain(files[0].path);
     expect(read).not.toContain(files[100].path);
+  });
+
+  // The branch panel's ninth finding: a section that draws no diff prepares none, and a file's own read makes that file's
+  // section again and no other. Counts of preparations, over two hundred files.
+  it('prepares the diff data of the bodies it draws and of no other file: of two hundred, those near the scroll position', async () => {
+    const files = Array.from({ length: 200 }, (_, i) => made(i, 1, 6));
+    prepared.diffs = 0;
+    await mount(files);
+    const drawn = drawnBodies().length;
+    expect(drawn).toBeGreaterThan(0);
+    expect(prepared.diffs).toBeGreaterThanOrEqual(drawn);
+    expect(prepared.diffs).toBeLessThan(20); // the band's bodies (the bound the band's own case gives them), not 200
+    prepared.diffs = 0;
+    page.scrollTo(Math.round(scroller().scrollHeight / 2));
+    await page.settle();
+    expect(prepared.diffs).toBeGreaterThan(0); // the bodies that came into the band
+    expect(prepared.diffs).toBeLessThan(20);
+  });
+
+  it('makes again the section of the file whose own read answered and no other: one of two hundred and one', async () => {
+    const files = Array.from({ length: 200 }, (_, i) => made(i, 1, 6));
+    const untracked = made(200, 1, 6);
+    const main = await mount(files, { untracked: [untracked] });
+    main.state.hold = untracked.path; // its own read, asked once it is near the scroll position, stays out
+    page.scrollTo(scroller().scrollHeight);
+    await page.settle();
+    expect(ownReads(main).map((input) => input.path)).toContain(untracked.path);
+    prepared.sections = 0;
+    prepared.diffs = 0;
+    main.release(untracked.path);
+    await page.settle();
+    expect(sectionOf(untracked.path).querySelector('[data-review-body] table')).not.toBeNull();
+    expect(prepared.sections).toBeLessThanOrEqual(2); // its section (not 201)
+    expect(prepared.diffs).toBeLessThanOrEqual(2); // its body's data
   });
 
   it('keeps the file and row the person reads at the top through a change of width and a zoom', async () => {
@@ -416,6 +498,89 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(hunkLabel()).toBe('Showing hunk 10 of 10');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
   });
+  // The branch panel's first finding: the counter is read again whenever the live place is set, a reveal reached included.
+  it('counts the hunk at the reading edge once a requested file is reached, and moves on from it', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 2, 10));
+    await mount(files);
+    expect(hunkLabel()).toBe('Showing hunk 1 of 10');
+    request(files[3].path);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(page.topOf(sectionOf(files[3].path)));
+    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    next();
+    await page.settle();
+    expect(hunkLabel()).toBe('Showing hunk 8 of 10');
+    expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[1] });
+  });
+
+  it('counts the hunk at the saved place when a scope is chosen again, and moves on from it', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 2, 10));
+    await mount(files, { staged: true });
+    for (let n = 0; n < 5; n++) next(); // to the third file's second hunk
+    await page.settle();
+    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
+    const jumped = { path: files[2].path, side: 'new', line: files[2].starts[1] };
+    expect(page.rowAtTop()).toEqual(jumped);
+    fireEvent.click(chipOf('staged')); // another scope: its counter starts at its first hunk; this scope's place is kept
+    await page.settle();
+    expect(hunkLabel()).toBe('Showing hunk 1 of 10');
+    fireEvent.click(chipOf('uncommitted'));
+    await page.settle();
+    expect(page.rowAtTop()).toEqual(jumped); // the saved place
+    expect(hunkLabel()).toBe('Showing hunk 6 of 10'); // and the counter read there
+    next();
+    await page.settle();
+    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[0] });
+  });
+
+  // The branch panel's second finding: the reading edge is under the header of the section the place is in.
+  it('stands a hunk jumped to under its own section’s header, which the held file’s “This file changed” line makes taller', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 2, 10));
+    offs.push(registerCommentComposer(openComment));
+    const main = await mount(files);
+    const held = files[1];
+    page.scrollTo(page.topOf(sectionOf(held.path)) + HEADER); // by hand, to the second file, its first added line in view
+    await page.settle();
+    addOn(held.path, held.added[0]); // a card under it: the file holds still
+    await page.settle();
+    expect(card()).not.toBeNull();
+    files[1] = made(1, 2, 11); // the agent changes the file under the card
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: statusOf(files), reason: 'worktree' }));
+    await waitFor(() => expect(sectionOf(held.path).querySelector('[data-review-file-changed]')).not.toBeNull());
+    await page.settle();
+    expect(page.headerOf(held.path)).toBe(HEADER + 28);
+    const at = Number(/hunk (\d+) of/.exec(hunkLabel()!)![1]) - 1;
+    for (let n = at; n < 3; n++) next(); // to the held file's second hunk
+    for (let n = at; n > 3; n--) fireEvent.click(screen.getByLabelText('Previous hunk'));
+    await page.settle();
+    expect(hunkLabel()).toBe('Showing hunk 4 of 10');
+    expect(page.topOf(hunkTop(held.path, held.starts[1])) - scroller().scrollTop).toBe(page.headerOf(held.path));
+    expect(page.rowAtTop()).toEqual({ path: held.path, side: 'new', line: held.starts[1] });
+  });
+
+  // The branch panel's fifth finding: whether a card's line is revealed is decided by whether its row is in view.
+  it('brings into view the line of a card opened from the chip while that line is drawn above the viewport', async () => {
+    const files = [made(0, 1, 10), ...Array.from({ length: 4 }, (_, i) => made(i + 1, 1, 40))];
+    offs.push(registerCommentComposer(openComment));
+    await mount(files);
+    addOn(files[0].path, files[0].added[0]); // in view at the top
+    await page.settle();
+    const field = within(card()!).getByRole('textbox', { name: 'Comment' });
+    fireEvent.change(field, { target: { value: 'Say what this counts.' } });
+    fireEvent.keyDown(field, { key: 'Escape' }); // a draft: the card goes, the chip stands for it
+    await page.settle();
+    expect(card()).toBeNull();
+    page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER + 10 * ROW); // by hand, into the second file
+    await page.settle();
+    expect(sectionOf(files[0].path).querySelector('[data-review-body] table')).not.toBeNull(); // drawn, in the band
+    expect(page.topOf(lineRow(files[0].path, files[0].added[0]))).toBeLessThan(scroller().scrollTop); // and out of view
+    fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
+    await page.settle();
+    expect(card()).not.toBeNull();
+    expect(page.rowAtTop()).toEqual({ path: files[0].path, side: 'new', line: files[0].added[0] });
+  });
+
   // UX wave U5b, M5: a comment's card opening under a line, and closing, is a layout change; the place holds through both.
   it('keeps the row the person reads at the top when a comment’s card opens under a line above it, and when it closes', async () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
@@ -512,6 +677,30 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       await page.settle();
       expect(scroller().scrollTop).toBe(further);
       expect(page.rowAtTop()).toEqual(row);
+    });
+
+    // The branch panel's third finding: a scroll under a layout not measured yet is that layout change first.
+    it('holds the place the person read when the page shrinks inside their gesture: the browser’s clamp is a layout change', async () => {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      await mount(files);
+      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER + 10 * ROW); // by hand, into the second file
+      await page.settle();
+      const row = page.rowAtTop();
+      expect(row).toEqual(expect.objectContaining({ path: files[1].path }));
+      clock += 100; // inside the wheel's window
+      page.setZoom(0.2); // the page shrinks under the scroller: the browser clamps it before the observers report
+      await page.settle();
+      expect(page.clamped()).toBeGreaterThan(0);
+      expect(page.rowAtTop()).toEqual(row);
+    });
+
+    it('adds the person’s scroll to the place a layout change holds when the scroll comes before the page is measured again', async () => {
+      const { files, row } = await reading();
+      clock += 100;
+      page.setRows((path) => (path === files[1].path ? 1.5 * ROW : ROW)); // the second file's rows grow above the reading edge, unreported
+      page.scrollTo(scroller().scrollTop + 5 * ROW); // the person's scroll, five rows on, under the grown page
+      await page.settle();
+      expect(page.rowAtTop()).toEqual({ ...row!, line: row!.line + 5 });
     });
 
     it('ends an earlier wheel’s window when a reveal starts: a scroll 100 ms into the reveal is a layout change, and the requested file stays at the top', async () => {

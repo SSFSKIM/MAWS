@@ -2,9 +2,12 @@
 // (`reviewLayout`) answers from a model of the drawn page, its scroller scrolls within a clamped height and reports each
 // change of its offset as a browser does, and a ResizeObserver reports every element it watches when the test lets the
 // page settle. When the page shrinks under the scroller, the browser's clamp is reported as a browser does it: a scroll
-// event of its own, at the next turn and before the observers, with no input before it. The model is one column: sections one under the other, a header over a body or a spacer, a body as tall
-// as its diff rows (or one line of words when it holds no table), each row `row` high or as `rowOf` says for its file, a
-// widget row (a comment's card) and an extend row (unsent comments) as high as the options say.
+// event of its own, at the next turn and before the observers, with no input before it. The model is one column:
+// sections one under the other, a header over a body or a spacer (a header `header` high, and `changed` more while it
+// holds a held file's "This file changed · Refresh" line), a body as tall as its diff rows (or one line of words when it
+// holds no table), each row `row` high or as `rowOf` says for its file, a widget row (a comment's card) and an extend row
+// (unsent comments) as high as the options say. The header standing at the scroller's top is the one of the section
+// there, and the person reads the row just under it.
 // Unified rows only: Split's two tables side by side are not modelled. Imported only by happy-dom suites.
 import { act } from '@testing-library/react';
 import { vi } from 'vitest';
@@ -14,6 +17,7 @@ export interface StackLayoutOptions {
   viewport: number; // the scroller's height
   width?: number; // the stack's width (720)
   header?: number; // a section's header (30)
+  changed?: number; // the line a held file's header gains, "This file changed · Refresh" (28; UX wave U5b, M5)
   row?: number; // a diff row (20)
   note?: number; // a body of words: "Loading", "Binary file" (24)
   widget?: number; // the library's widget row under a line, holding a comment's card (160; UX wave U5b, M5)
@@ -37,6 +41,7 @@ export function fakeStackLayout(options: StackLayoutOptions) {
 
   const sectionOf = (el: Element) => el.closest<HTMLElement>('[data-review-file]');
   const pathOf = (el: Element) => sectionOf(el)?.dataset.reviewFile ?? '';
+  const headerOf = (section: Element) => (header + (section.querySelector(':scope > [data-review-file-header] [data-review-file-changed]') ? (options.changed ?? 28) : 0)) * zoom;
   const trsOf = (body: Element) => [...body.querySelectorAll('tr')];
   const rowHeight = (tr: Element) => {
     const state = (tr as HTMLElement).dataset.state;
@@ -53,14 +58,14 @@ export function fakeStackLayout(options: StackLayoutOptions) {
   });
   const sectionHeight = (section: Element) => {
     const { body, spacer } = partsOf(section);
-    return header * zoom + (body ? bodyHeight(body) : spacer ? spacerHeight(spacer) : 0);
+    return headerOf(section) + (body ? bodyHeight(body) : spacer ? spacerHeight(spacer) : 0);
   };
   const scroller = () => document.querySelector<HTMLElement>(SCROLLER);
   const sections = () => [...(scroller()?.querySelectorAll(':scope > [data-review-file]') ?? [])];
 
   function height(el: Element): number {
     if (el.matches('[data-review-file]')) return sectionHeight(el);
-    if (el.matches('[data-review-file-header]')) return header * zoom;
+    if (el.matches('[data-review-file-header]')) return headerOf(sectionOf(el)!);
     if (el.matches('[data-review-body]')) return bodyHeight(el);
     if (el.matches('[data-review-spacer]')) return spacerHeight(el as HTMLElement);
     if (el.tagName === 'TR') return rowHeight(el);
@@ -77,7 +82,7 @@ export function fakeStackLayout(options: StackLayoutOptions) {
       top += sectionHeight(other);
     }
     if (el === section || el.matches('[data-review-file-header]')) return top;
-    top += header * zoom;
+    top += headerOf(section);
     const body = el.closest('[data-review-body]');
     if (!body || el === body || el.tagName !== 'TR') return top;
     for (const tr of trsOf(body)) {
@@ -201,13 +206,22 @@ export function fakeStackLayout(options: StackLayoutOptions) {
       rowOf = next;
     },
     header: () => header * zoom,
+    headerOf: (path: string) => headerOf(sections().find((section) => (section as HTMLElement).dataset.reviewFile === path)!), // as drawn now
     clamped: () => clamps, // the clamps the browser reported
     // The diff row the person reads at the top: the first under the sticky header (a hunk's header row reads as the
     // hunk's first row, under it).
     rowAtTop(): StackPageRow | null {
       const el = scroller();
       if (!el) return null;
-      const edge = el.scrollTop + header * zoom;
+      const scrollTop = el.scrollTop;
+      let at: Element | null = null; // the section at the scroller's top, whose header stands there
+      let from = 0;
+      for (const section of sections()) {
+        if (from > scrollTop) break;
+        at = section;
+        from += sectionHeight(section);
+      }
+      const edge = scrollTop + (at ? headerOf(at) : header * zoom);
       const trs = [...el.querySelectorAll<HTMLElement>('[data-review-body] tr')];
       for (let index = 0; index < trs.length; index++) {
         const top = topOf(trs[index]);

@@ -10,6 +10,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { addressOf } from '@shared/machine/address';
@@ -18,8 +19,10 @@ import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/mach
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { openComment } from '../../../side/register';
-import { passKey, resetPlaceNotes, useCommentCard } from '../../../side/card/store';
+import { passKey, resetPlaceNotes, useCommentCard, type PassComment } from '../../../side/card/store';
 import { useMachines } from '../../../stores/machines';
+import { useTranscriptStore, type TurnId } from '../../../transcript';
+import { builder } from '../../../transcript/model/test-events';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
@@ -95,13 +98,13 @@ function commentsMain() {
     failing: new Set<string>(), // files whose own read fails
     files: FILES(),
     content: null as null | (() => Promise<ReturnType<typeof ok>>), // a test's own answer to the comments' content
-    status: STATUS,
+    status: STATUS as GitStatus | null, // null: git.watch fails (outside Git, or a failed watch)
     staged: null as null | { patch: string; files: GitDiffFile[] }, // the Staged scope's read; null, Uncommitted's
   };
   const main = installFakeMain((name, input) => {
     switch (name) {
       case 'git.watch':
-        return ok(state.status);
+        return state.status ? ok(state.status) : fail('fatal: not a git repository');
       case 'git.diff':
         if (typeof input.path === 'string') return state.failing.has(input.path) ? fail('the disk is busy') : ok({ patch: state.perFile[input.path] ?? '', files: state.files.filter((file) => file.path === input.path) });
         if (state.pastCap) return ok({ patch: state.patch + PAST_THE_CAP, files: state.files });
@@ -893,5 +896,80 @@ describe('comments on lines in Review', () => {
     expect(box().checked).toBe(true);
     expect(box().disabled).toBe(true);
     expect(box().closest('label')!.getAttribute('title')).toBe('A side thread is not available on Studio yet');
+  });
+
+  // Last turn: one file edited twice, each edit a block of its own whose new side shows `l9` at line 9.
+  describe('on Last turn', () => {
+    afterEach(() => {
+      for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
+      act(() => useCommentCard.setState({ open: null, passes: new Map() }));
+    });
+
+    async function lastTurn(file: string) {
+      const b = builder();
+      b.turn('u1');
+      const edit = (id: string, input: Record<string, unknown>, hunk: { oldStart: number; oldLines: number; newStart: number; newLines: number; lines: string[] }) => {
+        b.toolUse(id, 'Edit', { file_path: file, ...input }, `m-${id}`, 0);
+        b.result(id, 'ok', { structured: { filePath: file, structuredPatch: [hunk], userModified: false } });
+      };
+      edit('e1', { old_string: 'l8', new_string: 'EIGHT' }, { oldStart: 7, oldLines: 3, newStart: 7, newLines: 3, lines: [' l7', '-l8', '+EIGHT', ' l9'] });
+      edit('e2', { old_string: 'l10', new_string: 'TEN' }, { oldStart: 9, oldLines: 3, newStart: 9, newLines: 3, lines: [' l9', '-l10', '+TEN', ' l11'] });
+      b.text('m9', 0, 'Done.');
+      b.end(['u1']);
+      await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(b.events) }));
+      const divider = useTranscriptStore.getState().rows(A).find((row) => row.kind === 'divider' && row.files?.length);
+      if (divider?.kind !== 'divider') throw new Error('no changed-file divider');
+      act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'turn', turnId: divider.turnId as TurnId } }));
+      render(<TestHost />);
+      await painted(() => (bodyOf(file)?.querySelectorAll('[data-review-block] table').length ?? 0) === 2);
+    }
+    // A line's add button in one block, pressed as the library listens for it.
+    function addIn(path: string, block: number, line: number): void {
+      const cell = bodyOf(path)?.querySelector(`[data-review-block="${block}"] [data-line-new-num="${line}"]`);
+      const button = cell?.closest('tr')?.querySelector<HTMLButtonElement>('[data-add-widget="new"] button');
+      expect(button, `the add button on ${path} block ${block} line ${line}`).toBeTruthy();
+      fireEvent.mouseDown(button!);
+    }
+
+    // The branch panel's sixth finding: Last turn names its files absolutely, which needs no repository's root.
+    it('takes a comment on a line of Last turn when Git cannot be read: the add button opens the card, and its draft is drawn under its line', async () => {
+      main.state.status = null;
+      await lastTurn('/scratch/two.ts');
+      addIn('/scratch/two.ts', 0, 8);
+      await painted(() => card() !== null);
+      expect(pass()!.comments.map((c) => [c.anchor, c.quote])).toEqual([[expect.objectContaining({ kind: 'file-line', path: '/scratch/two.ts', line: 8 }), 'EIGHT']]);
+      type('Name the eighth line.');
+      leave();
+      await painted(() => card() === null && unsentRows('/scratch/two.ts').length === 1);
+      expect(lineRow('/scratch/two.ts', 'new', 8)!.nextElementSibling?.contains(unsentRows('/scratch/two.ts')[0])).toBe(true);
+    });
+
+    // The branch panel's fourth finding: a full pass adds nothing, and the comment it opens keeps the block it was made in.
+    it('keeps the newest comment in the block it was made in when a full pass refuses an add on the same text in another block', async () => {
+      const path = '/repo/two.ts';
+      await lastTurn(path);
+      const seeded: PassComment[] = Array.from({ length: MESSAGE_COMMENTS_MAX - 1 }, (_, i) => ({
+        id: String(900_000 + i),
+        anchor: { kind: 'file-line', locator: `${path}#L7`, label: 'two.ts:7', path, line: 7 },
+        quote: 'l7',
+        text: `An earlier comment, number ${i + 1}.`,
+        screenshot: null,
+        rect: null,
+        flight: null,
+        refused: null,
+      }));
+      act(() => useCommentCard.setState({ passes: new Map([[KEY, { host: 'review', subject: A, appSessionId: A, comments: seeded, toMain: true }]]) }));
+      addIn(path, 0, 9); // the pass's last place: a comment in the first edit's block
+      await painted(() => card() !== null);
+      type('The ninth line, as the first edit left it.');
+      leave();
+      await painted(() => card() === null);
+      expect(pass()!.comments).toHaveLength(MESSAGE_COMMENTS_MAX);
+      addIn(path, 1, 9); // the same text in the second edit's block: the pass is full, and its newest is opened
+      await painted(() => card() !== null && cardRow() !== null);
+      expect(pass()!.comments).toHaveLength(MESSAGE_COMMENTS_MAX);
+      expect(field().value).toBe('The ninth line, as the first edit left it.');
+      expect(cardRow()!.closest('[data-review-block]')?.getAttribute('data-review-block')).toBe('0');
+    });
   });
 });
