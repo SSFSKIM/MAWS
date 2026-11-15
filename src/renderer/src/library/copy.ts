@@ -178,4 +178,14 @@ export const SPACE_COPY = {
   changeFolder: 'Change folder…',
   unlink: 'Unlink folder',
   delete: 'Delete Space…',
+  // UX wave U10b (l8-settings-13; M9, §E.2, §E.3): a Space's instructions for agents. The sheet's title is the chip's name.
+  instructions: 'Instructions…', // the menu item, directly after Rename…
+  instructionsFor: (name: string) => `Instructions for “${name}”`,
+  mark: 'Instructions', // on the heading line of a Space that has them
+  receivers: 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.',
+  limit: (n: number) => `${n.toLocaleString('en-US')} of 8,000 characters`,
+  cancel: 'Cancel',
+  save: 'Save',
+  // the chip's body, sent with the first message of a chat a card starts from the Space
+  chipBody: (name: string, text: string) => `Instructions of the Space “${name}”, set by the user in MAWS:\n${text}`,
 };

@@ -13,26 +13,30 @@
 // library's others. It is the page's state (`MakeChoiceContext`, held by `Library`): it holds while the page is open,
 // through the views, searches and scrolls that take this section away, and is not stored. A system chosen that is not the default is named in a card's words, which the agent's
 // `artifact_create` takes as its `designSystem`, and passed by Blank as `designSystemId`.
+// U10b (l8-settings-13, M9 and §E.3): a chat started from a Space that has instructions carries them as one pasted chip
+// after the opening words, named `Instructions for “<name>”`, its body the section's line and then the text. They are
+// the ones known when the card is pressed (this Mac's `spaces.instructions`); a Space without any adds no chip.
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import { DropdownMenu } from 'radix-ui';
 import { createContext, useContext, useId, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { LibrarySpace } from '@shared/ipc/schema/library';
+import { pastedPlaceholder } from '@shared/composer/pasted-content';
 import { ChevronDownIcon, Icon } from '../app/IconButton';
 import { useDocumentGoverningSystem } from '../artifacts/design-system/documents';
 import { artifactEditorFor, useArtifactEditor } from '../artifacts/registry';
 import { ipc } from '../ipc/client';
 import { createSession, focusedProject, useSessionCreatorRegistered } from '../keymap/actions-runtime';
-import { prefillComposer } from '../stores/composer';
+import { prefillComposer, type Prefill } from '../stores/composer';
 import { placeOf, useLayout } from '../stores/layout';
 import { useSettings } from '../stores/settings';
 import { createArtifact, openArtifactTab } from './actions';
-import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, untitledTitle } from './copy';
+import { askClaudePrefill, KIND_BLURBS, KIND_LABELS, LIBRARY_PAGE as P, SPACE_COPY, untitledTitle } from './copy';
 import { toastFailure } from './dialogs';
 import { ChevronRightIcon, KindIcon, MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
-import { useLibraryList, useLibrarySpaces } from './store';
+import { useLibraryList, useLibrarySpaces, useSpaceInstructions } from './store';
 
 const CARD_KINDS = ['document', 'presentation', 'dashboard', 'design'] as const satisfies readonly ArtifactKind[];
 const DEFAULT = 'default'; // the radio value of the default system (no system id is it)
@@ -73,9 +77,16 @@ async function addFile(spaceId: string | null): Promise<void> {
   await make({ kind: 'file', title: file.name, content: { path: file.path }, ...(spaceId !== null && { spaceId }) });
 }
 
-// A new chat, in the Space's linked folder when it has one, whose composer holds `words`. The place in front is read at
-// the press, so a tab the person moves to while the folder is added stays in front and the chat opens behind it.
-async function askClaude(words: string, space: LibrarySpace | undefined): Promise<void> {
+// The opening words, then one pasted chip carrying the Space's instructions (§E.3).
+function withInstructions(words: string, space: LibrarySpace, instructions: string): Prefill {
+  const body = SPACE_COPY.chipBody(space.name, instructions);
+  return { text: `${words}${pastedPlaceholder(1, body.split('\n').length)}`, pasted: [{ name: SPACE_COPY.instructionsFor(space.name), text: body }] };
+}
+
+// A new chat, in the Space's linked folder when it has one, whose composer holds `words` (and the Space's instructions,
+// when it has any). The place in front is read at the press, so a tab the person moves to while the folder is added stays
+// in front and the chat opens behind it.
+async function askClaude(words: string, space: LibrarySpace | undefined, instructions: string | undefined): Promise<void> {
   const front = placeOf(useLayout.getState());
   let appSessionId: AppSessionId | null;
   if (space?.linkedDir !== undefined) {
@@ -85,7 +96,7 @@ async function askClaude(words: string, space: LibrarySpace | undefined): Promis
   } else {
     appSessionId = await createSession(focusedProject(), { front });
   }
-  if (appSessionId !== null) prefillComposer(appSessionId, { text: words });
+  if (appSessionId !== null) prefillComposer(appSessionId, space && instructions !== undefined ? withInstructions(words, space, instructions) : { text: words });
 }
 
 // The choice: null while the library's design systems or the owner's and the Spaces' defaults are still being read.
@@ -148,8 +159,8 @@ function SystemChoice({ choice }: { choice: ReturnType<typeof useSystemChoice> }
 // A card is one button that asks Claude; Blank is a second button beside it, at its upper right, never inside it. The
 // press awaits the chat's creation (and the linked folder's project first): the card is disabled meanwhile, so a
 // second press starts no second chat.
-function KindCard(props: { kind: (typeof CARD_KINDS)[number]; spaceId: string | null; space: LibrarySpace | undefined; spaceKnown: boolean; system: ShownSystem | null }) {
-  const { kind, spaceId, space, spaceKnown, system } = props;
+function KindCard(props: { kind: (typeof CARD_KINDS)[number]; spaceId: string | null; space: LibrarySpace | undefined; spaceKnown: boolean; system: ShownSystem | null; instructions: string | undefined }) {
+  const { kind, spaceId, space, spaceKnown, system, instructions } = props;
   const editor = useArtifactEditor(kind);
   const creator = useSessionCreatorRegistered();
   const [starting, setStarting] = useState(false);
@@ -158,7 +169,7 @@ function KindCard(props: { kind: (typeof CARD_KINDS)[number]; spaceId: string | 
   const start = async () => {
     setStarting(true);
     try {
-      await askClaude(askClaudePrefill(kind, space?.name, system?.title), space);
+      await askClaude(askClaudePrefill(kind, space?.name, system?.title), space, instructions);
     } finally {
       setStarting(false);
     }
@@ -200,7 +211,7 @@ function KindCard(props: { kind: (typeof CARD_KINDS)[number]; spaceId: string | 
 
 // More: Design system (Ask Claude, Blank), HTML page (Ask Claude) and Add a file…, opened under it and aligned to its
 // right edge, Design system's entries on the menu's left.
-function More({ spaceId, space, spaceKnown }: { spaceId: string | null; space: LibrarySpace | undefined; spaceKnown: boolean }) {
+function More({ spaceId, space, spaceKnown, instructions }: { spaceId: string | null; space: LibrarySpace | undefined; spaceKnown: boolean; instructions: string | undefined }) {
   const canAsk = useSessionCreatorRegistered() && spaceKnown;
   const systemEditor = useArtifactEditor('design_system');
   return (
@@ -224,7 +235,7 @@ function More({ spaceId, space, spaceKnown }: { spaceId: string | null; space: L
             </DropdownMenu.SubTrigger>
             <DropdownMenu.Portal>
               <DropdownMenu.SubContent sideOffset={4} collisionPadding={OPEN_LEFT} className={MENU}>
-                <DropdownMenu.Item disabled={!canAsk} className={MENU_ITEM} onSelect={() => void askClaude(askClaudePrefill('design_system', space?.name), space)}>
+                <DropdownMenu.Item disabled={!canAsk} className={MENU_ITEM} onSelect={() => void askClaude(askClaudePrefill('design_system', space?.name), space, instructions)}>
                   {P.askClaude}
                 </DropdownMenu.Item>
                 {systemEditor && (
@@ -239,7 +250,7 @@ function More({ spaceId, space, spaceKnown }: { spaceId: string | null; space: L
               </DropdownMenu.SubContent>
             </DropdownMenu.Portal>
           </DropdownMenu.Sub>
-          <DropdownMenu.Item disabled={!canAsk} className={MENU_ITEM} onSelect={() => void askClaude(askClaudePrefill('html', space?.name), space)}>
+          <DropdownMenu.Item disabled={!canAsk} className={MENU_ITEM} onSelect={() => void askClaude(askClaudePrefill('html', space?.name), space, instructions)}>
             <KindIcon kind="html" className="size-3.5 text-fg-muted" />
             {KIND_LABELS.html}
           </DropdownMenu.Item>
@@ -258,6 +269,8 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
   const space = spaceId === null ? undefined : spaces?.find((s) => s.id === spaceId);
   const spaceKnown = spaceId === null || space !== undefined;
   const choice = useSystemChoice(spaceId);
+  const held = useSpaceInstructions();
+  const instructions = spaceId === null ? undefined : held.get(spaceId);
   return (
     <section aria-labelledby="library-make" className="flex flex-col gap-2 pb-4">
       <div className="flex min-w-0 items-center gap-2 px-2 text-ui-sm text-fg-muted">
@@ -270,10 +283,10 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
       <div className="flex items-stretch gap-2">
         <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2">
           {CARD_KINDS.map((kind) => (
-            <KindCard key={kind} kind={kind} spaceId={spaceId} space={space} spaceKnown={spaceKnown} system={choice?.bound ?? null} />
+            <KindCard key={kind} kind={kind} spaceId={spaceId} space={space} spaceKnown={spaceKnown} system={choice?.bound ?? null} instructions={instructions} />
           ))}
         </div>
-        <More spaceId={spaceId} space={space} spaceKnown={spaceKnown} />
+        <More spaceId={spaceId} space={space} spaceKnown={spaceKnown} instructions={instructions} />
       </div>
     </section>
   );
