@@ -105,17 +105,20 @@ A probe that answers anything but three of three leaves its place at the shipped
 - *The button greys out until the agent has it* (recommended, and what is built). The approval waits above the composer like any message; there you can send it now or delete it. When the agent reads it, the line "You approved …" appears and the row reads "· approved". If you delete it, the button comes back.
 - *The row reads "· approved" at once.* One state fewer on the row, but it says approved while the message may still sit in a held queue, and before any "You approved" line is in the transcript.
 - *Place:* `readsApproved` in `transcript/model/blocked.ts`, which the label and the control both ask.
+- **The owner's answer (2026-11-15):** "Button greys out (Recommended)". While the approval waits above the composer the row's button is greyed and cannot be pressed twice; the row reads approved once the agent has read it. Built as answered (Decision Log 32).
 
 **Card 2. While that approval waits above the composer, what should its row there read?**
 - *One line, "You approved `cmd`", with Send now and Delete* (recommended, and what is built). It reads as the line the transcript will draw, and it cannot be edited into something else.
 - *The message as it will be sent.* The engine's whole sentence ("Permission granted for this exact command only, as one whole string: …"), two lines of it, with Edit as on any waiting message. Nothing is built in the stack.
 - *Place:* §G (`stack.ts`, `QueueList.tsx`).
+- **The owner's answer (2026-11-15):** "\"You approved cmd\" (Recommended)". The waiting row above the composer reads "You approved <command>", with Send now and Delete. Built as answered: a waiting grant's row draws Send now and Delete and no More menu, so no Edit and no move (`QueueList.tsx`, `row.grant`); the stack's uncertain row of a grant keeps U4a's own controls, Resume, Edit and Delete, and its Edit only puts the sentence in the box (Decision Log 30, 32).
 
 **Card 3. A blocked call's row sits inside its turn's fold, and the turn's line says "1 auto-denied". Should a blocked call that nobody has approved stay in view?**
 - *Yes, while it is in the session's newest turn* (recommended; not built in this landing). The moment after a block is the moment the button is for: the agent has stopped and is asking. A button two clicks away, behind a small count, will mostly lose to typing "go ahead", and the typed words name no exact command. It stays only until it is approved or the next turn starts, so at most the newest turn's unapproved blocks are ever in view. It needs the fold rule (`isPersistentRow` in `derive.ts`, and the to-human view's working record), which is U2's, so it is a landing of its own after this one.
 - *No: the count is the way to it* (what is built, as the child's file says). Nothing more on screen; the person who wants the row clicks "1 auto-denied".
 - *Yes, every one, always.* Rejected as a recommendation: a long session would keep every block nobody cared about in view for good.
 - *Place:* the fold rule, in a later landing; this landing builds the second option.
+- **The owner's answer (2026-11-15):** "Yes, in the newest turn (Recommended)". A blocked call that nobody has approved stays in view under the newest ended turn's line; an older turn's stays folded. It is board ticket 703's (blocked by this landing), and nothing of it is built here: this landing keeps the turn line's count that leads to the row (Decision Log 32).
 
 The look needs no drawn example before it is built: one quiet button, one muted line and, for a subject the line cannot show whole, one block of monospace text, inside an existing row and in today's tokens. The owner sees the states (offered under its line, offered under its subject, greyed, approved, blocked again) on the screenshots of M5's scenes; the subject's block is a look decided on safety grounds (ruling F2) and is part of that look.
 
@@ -774,6 +777,8 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   Date/Author: 2026-11-15, M3's executor; accepted by the architect; folded by the controller.
 - Decision 31 (M3, on Design 3's claim): a drawn blocked row has every later approval loaded, because every source fills the store as the newest window plus older pages joined before it, with no gap: a local session's `HistoryPager` (`transcript/source/older.ts`) puts a page before all it holds (`loadOlder`), and a jump into history (`seek`) walks the pages back to the one holding the target, taken in with one rebuild, never a window around it; another machine's rows (`lane-a/plane-transcript.ts`, `loadOlder`) are `[...older, ...this.rows]`. No route draws a window that is not the transcript's end.
   Date/Author: 2026-11-15, M3's executor; recorded by the controller.
+- Decision 32 (the owner, 2026-11-15, on the three cards): card 1, "Button greys out (Recommended)", is the default built in `readsApproved`; card 2, "\"You approved cmd\" (Recommended)", is the default built in §G (a waiting grant's row draws Send now and Delete and no More menu; the uncertain row keeps U4a's Resume, Edit and Delete); card 3, "Yes, in the newest turn (Recommended)", is board ticket 703's, blocked by this landing, and nothing of it is built here (M5's tracker rows need nothing for it). No behaviour of this landing changes.
+  Date/Author: 2026-11-15, the owner, through the architect; recorded by the controller.
 
 ## Outcomes & Retrospective
 
