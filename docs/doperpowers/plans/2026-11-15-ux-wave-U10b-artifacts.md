@@ -751,7 +751,7 @@ The bar publishes its height as the open card publishes its place (`rect` and `h
 |---|---|---|---|
 | split | Expand pane | bar | the bar's editor |
 | card | the card's Close | bar | Open conversation on the bar |
-| bar | Open conversation; the session chosen in the sidebar or its tab (the split's float); ⇧⌘\; ⌥⌘B over a side surface | card | the card's composer |
+| bar | Open conversation; the session chosen in the sidebar or its tab (the split's float, with the artifact's pane focused: the Decision Log, 2026-11-15, ticket 690); ⇧⌘\; ⌥⌘B over a side surface | card | the card's composer |
 | bar | Hide chat | hidden | Show chat in the header |
 | hidden | Show chat | bar | the bar's editor |
 | hidden | the session chosen in the sidebar or its tab (the split's float); ⇧⌘\; ⌥⌘B over a side surface | card | the card's composer |
@@ -1126,6 +1126,7 @@ The execution of U10b-3 (M6, M7), on branch `ux-wave/U10b-3` from `015c2a727`. T
 - M6, 2026-11-15: while hidden, the raise still records the request ids it sees, so Show chat brings the bar (A6's "Waiting for you · N" above the box), not the card; the next new request raises the bar as usual.
 - M6, 2026-11-15: `presentationForNewSession` is applied by a layout subscription when the panel's card moves to another session, with the keyboard left where it was; today it answers `left`, so a different answer of the owner would change only that function.
 - M6, 2026-11-15: every reset, and `showChatHeaderGone`, also clear `showChatTakesFocus`, so a Show chat that never mounts cannot take the keyboard later; `setClosed` clears `hidden` for both values. `useShowChatHeader` lives in `shell/floating.ts` (it imports `panel/editor-host`, which imports only the layout stores). Calling `showChatHeaderGone` is the float's layer's, in M7.
+- M6, 2026-11-15 (UTC), the architect's ruling: §F.1's row "bar, the session chosen in the sidebar or its tab (the split's float) → card" is narrowed to the states in which the artifact's pane is focused. With the keyboard in the bar the focused pane is already the session's, so choosing that session moves nothing and opens nothing; today's pill behaves the same, and Open conversation and ⇧⌘\ open the card from there. One case pins today's behaviour in that state (the bar stays the bar, nothing throws). The fix, a choice of the focused pane's own floating session opening its card decided in one place, is board ticket 690; this landing edits neither the layout store nor the sidebar.
 
 ## Outcomes & Retrospective
 
