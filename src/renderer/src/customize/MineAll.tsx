@@ -91,12 +91,13 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
 
   // What the place holds, whatever the search: the empty state and the mods turn on it, never on what a search keeps.
   const holdsItems = identities.some((identity) => identity.group !== null) || skillGroups.length > 0 || connectors.length > 0;
-  // Empty only once every read has answered with nothing: a read in error (a failed refresh over an empty answer among
-  // them) has not, and its part's state stands instead.
-  const nothing = plugins.state === 'answered' && !pluginsInError && inventory.data !== undefined && inventory.error === null && !holdsItems;
+  // Empty only once every read has answered with nothing and the search is empty: a read in error (a failed refresh over
+  // an empty answer among them) has not, and its part's state stands instead; a search over an empty place matches
+  // nothing (its mods stay hidden) and says so.
+  const searched = search.trim() !== '';
+  const nothing = plugins.state === 'answered' && !pluginsInError && inventory.data !== undefined && inventory.error === null && !holdsItems && !searched;
   // The mods stand beside at least one plugin, skill or connector (ruled point 7), and under the plugins' failure (§E).
   const modRows = plugins.state !== 'out' && (holdsItems || pluginsInError) && mods.read.state === 'ready' ? modsMatching(mods.read.rows, search).sort((a, b) => byName(a.name, b.name)) : [];
-  const searched = search.trim() !== '';
   const answered = plugins.state !== 'out' && inventory.data !== undefined;
   const nothingMatches = answered && searched && pluginRows.length + modRows.length + skillRows.length + connectorShown.length === 0;
 

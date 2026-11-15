@@ -381,19 +381,23 @@ describe('My items, All', () => {
     expect(where()).toEqual({ kind: 'customize', view: 'discover', show: 'all' });
   });
 
-  it('on an empty place a search keeps “Nothing here yet.”, even one that names a mod; on a place with items it finds the mod', async () => {
+  it('on an empty place a search, even one that names a mod, draws no mod and reads “Nothing matches these filters.” with Reset; on a place with items it finds the mod', async () => {
     installed = [KEEL];
     skills = [];
     servers = [];
     mountCustomize({ view: 'mine', show: 'all' });
     expect(await screen.findByText('Nothing here yet.')).toBeTruthy();
-    search('To-human');
-    await act(async () => {});
+    for (const text of ['To-human', 'nothing like this']) {
+      search(text);
+      await act(async () => {});
+      expect(document.querySelector('[data-mod-row]'), text).toBeNull();
+      expect(screen.queryByText('Nothing here yet.'), text).toBeNull();
+      expect(within(list()).getByRole('status').textContent, text).toContain('Nothing matches these filters.');
+    }
+    fireEvent.click(within(within(list()).getByRole('status')).getByRole('button', { name: 'Reset filters' }));
+    expect(useCustomizePage.getState().search).toBe('');
     expect(screen.getByText('Nothing here yet.')).toBeTruthy();
     expect(document.querySelector('[data-mod-row]')).toBeNull();
-    search('nothing like this');
-    expect(screen.getByText('Nothing here yet.')).toBeTruthy();
-    expect(screen.queryByText('Nothing matches these filters.')).toBeNull();
     cleanup();
     useCustomizePage.setState({ search: '' });
     skills = [SKILLS[0]!];
