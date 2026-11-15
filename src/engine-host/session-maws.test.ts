@@ -33,6 +33,7 @@ import { EngineSession, type EngineSessionOptions } from './session';
 import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
 import { openDocuments, type Documents } from './documents'; // P3-A
+import { linkedReadOf } from '@shared/maws/linked-read'; // UX wave U10b (M10)
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -925,7 +926,7 @@ describe('a Space’s instructions in the artifact tools’ answers on an Engine
     const users = () => run.transport.writes.filter((f): f is Extract<StdinFrame, { type: 'user' }> => f.type === 'user');
     await until(() => users().length === 1, 'the message with its linked read');
     const blocks = users()[0]!.message.content as unknown as { text: string }[];
-    expect(blocks[1]!.text).toContain(`"artifactId":"${page.id}"`); // the read went out with the message
+    expect(linkedReadOf(blocks[1]!.text)).toMatchObject({ artifactId: page.id, title: 'Tide table' }); // the read went out with the message
     expect(blocks[1]!.text).not.toContain('spaceInstructions');
     expect(blocks[1]!.text).not.toContain('Use metres.');
     expect((await ask(run, 'artifact_read', { artifact: page.id })).spaceInstructions).toEqual(given(notes, NOTES)); // the agent's own read is the first
