@@ -121,6 +121,11 @@
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
+// An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
+// machines run reads it, so scripts/ci-gate-peer.mjs admits a peer of this build's own wire when it is named with
+// --peer-exact beside this group in --gates. No minor is crossed then: the assertions that hold a crossing of one (OX1's
+// additive rule, the hello and welcome at each end's minor, the gap's `unknown_command`) are skipped, each said in the
+// report as a skipped check naming the wire (skipWireSkew), and everything else runs, the stored forms read both ways first.
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -187,6 +192,11 @@ interface Build {
   mainOnly: Set<string>; // the commands its windows cannot send: its preload bridges only the others
 }
 const wireOf = (build: Build) => `${build.manifest.major}.${build.manifest.minor}`;
+// Whether two builds speak one wire (builds() holds their majors equal), and the report's word for a wire-skew assertion
+// skipped for such a pair: skipped, not passed, since it would hold nothing
+const sameWire = (a: Build, b: Build) => a.manifest.minor === b.manifest.minor;
+const skipWireSkew = (build: Build, check: string) =>
+  test.info().annotations.push({ type: 'skipped check', description: `${check}: both builds speak wire ${wireOf(build)} (equal wire: stored forms only), so no minor is crossed` });
 type CommandEntry = { owner: string; input: unknown };
 const commandOf = (build: Build, name: string) => build.manifest.entries[`commands.${name}`] as CommandEntry | undefined;
 
@@ -216,7 +226,8 @@ function builds(): { older: Build; newer: Build; here: Build; peer: Build } {
   const [older, newer] = here.manifest.minor < peer.manifest.minor ? [here, peer] : [peer, here];
   // OX1's rule between the two, as between two minors: within a major nothing may change but additively (a JSON Schema
   // rendering rebased after a zod upgrade reads as breaking here too; such a pair is not one this check can vouch for)
-  expect(classifyWireChange(older.manifest, newer.manifest).breaking, `${older.label} (wire ${wireOf(older)}) to ${newer.label} (wire ${wireOf(newer)})`).toEqual([]);
+  if (sameWire(older, newer)) skipWireSkew(here, "OX1's additive rule from the older minor to the newer (classifyWireChange)");
+  else expect(classifyWireChange(older.manifest, newer.manifest).breaking, `${older.label} (wire ${wireOf(older)}) to ${newer.label} (wire ${wireOf(newer)})`).toEqual([]);
   return { older, newer, here, peer };
 }
 
@@ -327,6 +338,13 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
+  // an equal wire has no gap to probe: neither build lacks a command of the other's
+  const crossesMinor = !sameWire(keeper, attacher);
+  if (!crossesMinor && gap) {
+    skipWireSkew(keeper, "the gap: the newer build's added commands, unknown_command from the older supervisor");
+    said.push('  gap: not probed: the two builds speak one wire');
+    gap = null;
+  }
 
   // the keeper: a paced replay kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
@@ -373,11 +391,16 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   // says this build's engine-host build and wire, and the app's main reads the welcome `mawsd` reflects from upstream
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
   const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
-  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello, at its own minor`).toContain(hello);
   const welcome = `connected to supervisor pid ${kept.pid} build ${kept.buildId} wire ${wireOf(keeper)} capabilities [`;
-  expect(second.output(), "the attaching app's main: the welcome, at the supervisor's minor").toContain(welcome);
-  if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
-  said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
+  if (crossesMinor) {
+    expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello, at its own minor`).toContain(hello);
+    expect(second.output(), "the attaching app's main: the welcome, at the supervisor's minor").toContain(welcome);
+    if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
+    said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
+  } else {
+    skipWireSkew(keeper, "the hello and the welcome across the minor, each at its end's wire (host.log, the attaching app's main, mawsd's log)");
+    said.push('  hello, welcome: not checked across a minor: the two builds speak one wire');
+  }
   if (keeperDaemon !== null) {
     // How the keeper's `mawsd` goes depends on the attacher's build and shape. On the daemon shape (P5 O15 M1) its build
     // check asks that `mawsd`, of another build, to restart, and its own serves the kept engine host. One that knows the
@@ -555,7 +578,8 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   await expect.poll(() => isAlive(kept.pid), { timeout: 15_000, message: 'the kept supervisor is gone' }).toBe(false);
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
   const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
-  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
+  if (sameWire(keeper, attacher)) skipWireSkew(keeper, "the hello to the kept host across the minor, at the attacher's wire (host.log)");
+  else expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
   expect(s.log(), 'host.log: the kept host handed over').toContain('exiting (handover)');
   await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
   if (keeperDaemon !== null) {
