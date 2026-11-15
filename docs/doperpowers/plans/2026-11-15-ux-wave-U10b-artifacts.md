@@ -803,6 +803,7 @@ The bar publishes its height as the open card publishes its place (`rect` and `h
 | file | owner | the insertion | milestone |
 |---|---|---|---|
 | `src/renderer/src/composer/frame/bar.ts` (new), `frame/Frame.tsx`, `Composer.tsx` | U4 | §F.3: the context, one prop, three conditions, and the bar in the registered `draftShown` | M7 |
+| `src/renderer/src/keymap/actions-runtime.ts` | U6 | `createSession`'s `opts` gains `front?: ViewedPlace`, the place in front at the press, used in place of its own first read; the comparison at the answer stays where it is. Only the Library's card passes it (ruled 2026-11-15) | M8 |
 | `src/renderer/src/composer/editor/recall.ts` | U4 | §E.3: a prefill's pasted name is kept. If the pasted chip's pressed area is under 24 px tall (L5), M9's executor reports it and does not change the chip, which is the composer's | M9 |
 | `src/renderer/src/main/Pane.tsx` | U9 | "Show chat" in `TabHeader`'s controls, before Restore split | M7 |
 | `src/renderer/src/panel/PanelHeader.tsx` | U8 | "Show chat" in `RegionControls`, before the float control (M7); a checkbox entry in `ExportEntries` (M3) | M7, M3 |
@@ -831,7 +832,7 @@ U5a's insertions in U10's files (`reply` in `document-tools.ts` and `edit-plan.t
 | Undo | `artifacts.undelete` here or over the link | Undo is disabled; a second press sends nothing | the sentence under the row; Undo enabled again; a link that drops mid-act ends with "Not restored: <machine> is offline" | M5 |
 | the row's live state | the library's read | Undo is drawn disabled until it answers | an offline machine: "Deleted <title>" with Undo disabled and its sentence as a line of the row | M5 |
 | an edit in an editor open on a deleted artifact | the host's acknowledgement, which does not come | the editor takes no further edit and shows the notice; Undo restores the artifact and the edit is sent | the tab closed while deleted: the unsent edit goes with the replica, as the notice said | M5 |
-| a card of "Make something new" | the linked folder's project, then the session's creation | the card is disabled; moving to another tab opens the chat behind | today's toast | M8 |
+| a card of "Make something new" | the linked folder's project, then the session's creation | the card is disabled; moving to another tab opens the chat behind (the place in front at the press is carried to `createSession` as `front`, §H) | a refused folder: today's toast; a failed creation: as today, logged and no toast (corrected 2026-11-15) | M8 |
 | the sheet's Save | `spaces.setInstructions` | the buttons are disabled; closing the sheet does not cancel | the sentence in the sheet, the text kept | M9 |
 | Show chat, Hide chat | nothing (state changes at the press) | a request arriving in the same tick is judged against the state the tick leaves | — | M6 |
 
@@ -978,6 +979,7 @@ Tracker rows (`docs/tech-debt-tracker.md`), added by the pull request named and 
 7. (U10b-4) A component of a design system that is not bundled is drawn on the largest canvas, unmeasured, because its frame is sandboxed (M11, decision 3). Closes with a size the canon declares, the route the section names.
 8. (U10b-3) In the bar the three menu chords of the composer do nothing, and a plugin's hint is not drawn (H11). Closes on the owner's word if either is missed.
 9. (U10b-3) A deck's Notes row stands under the bar; Hide chat clears it (B6).
+10. (U10b-4) A failed session creation shows the person nothing, for every caller of `createSession` (it logs and answers null); the Library's card keeps that behaviour (§I, ruled 2026-11-15).
 
 Rows 195 and "364" (H26) close on the owner's look at the component cards (Proof, 3), through the board scripts, by the session that keeps them.
 
@@ -1123,6 +1125,9 @@ Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's 
 - M8 (2026-11-15): accessible names only, no new words on screen: a card is named by its visible name, "Blank" by `Blank <noun>`, the choice by `Design system: <shown>`. When nothing else governs, the bundled floor is shown as "MAWS", as a document's breadcrumb names it. More's submenu is placed on the menu's left by a right-side collision padding on Radix's `SubContent` (not seen laid out; M11's scene and the owner's look). A card's line wraps rather than truncates.
 - M8 (2026-11-15, the architect's ruling): §D.1's two refusals are replaced. `designSystemNotForKind` echoes the kind as the agent passed it, in quotes, and names the kinds that take one (`artifact_create: kind "html" takes no design system; designSystem is for document, presentation, design, dashboard`), so no article is needed; the first text, filled with a code name, read "a html" and "a design_system". `noDesignSystem` with no live design system ends "there are no design systems" in place of an empty list, with a test for the empty case.
 - M8 (2026-11-15, the architect's ruling): the drawn page's frame 6 differs from the document; the document's version (each card, its Blank and the choice disabled while the Space loads) is right. `library/Rows.tsx` is accepted into M8's touch list.
+- M8 (2026-11-15, the architect's ruling on the task review's finding): a card press awaits the linked folder before `createSession`, which read the place in front only at its own call, so a tab switch during the folder's await opened the chat in front. `createSession`'s `opts` gains `front?: ViewedPlace` (an insertion in U6's `keymap/actions-runtime.ts`, now a §H row), the place captured at the press, used in place of its first read; the comparison at the answer is unchanged, so one place still decides "opens behind". No other caller passes it. Named among the pull request's insertions in other children's files.
+- M8 (2026-11-15, the architect's ruling): §I's card row corrected: a refused folder is today's toast; a failed session creation is as today, logged with no toast; no new sentence in this landing. Tracker row 10 records that a failed creation shows nothing, for every caller.
+- M8 fix wave 1 (2026-11-15): the design-system choice is held by the `Library` page component and passed to the section through a context, so a search, Pinned, the list of all Spaces or a scroll does not reset it and a reopened page starts at the default; not the view store, which outlives the page. The `Rows.tsx` change of the first build is reverted as no longer needed.
 
 ## Outcomes & Retrospective
 
