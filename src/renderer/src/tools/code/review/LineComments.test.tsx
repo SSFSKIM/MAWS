@@ -528,6 +528,7 @@ describe('comments on lines in Review', () => {
     expect(unplacedRows().map((row) => row.textContent)).toEqual(['export const b = 2;Name it for what it counts.']); // drawn with a card open elsewhere
     fireEvent.click(unplacedEdit(0));
     await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Name it for what it counts.');
+    await painted(() => unsentRows('src/report.ts').length === 1); // the newest, under its line again
     expect(unsentRows('src/report.ts').map((row) => row.textContent)).toEqual(['Quote only where a comma is.']);
   });
 
