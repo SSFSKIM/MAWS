@@ -33,6 +33,11 @@ export function codeRegions(text: string): CodeRegion[] {
   return regionsOf(text, STRICT);
 }
 
+/** The glued reading's code regions: a recovery only, read where the strict one leaves a tag unpaired (UX wave U2b). */
+export function gluedCodeRegions(text: string): CodeRegion[] {
+  return regionsOf(text, GLUED);
+}
+
 function regionsOf(text: string, fences: Fences): CodeRegion[] {
   const regions: CodeRegion[] = [];
   let paragraph: [number, number] | null = null;

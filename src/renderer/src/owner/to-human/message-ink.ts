@@ -11,8 +11,7 @@
 // The first message of the text carries the bullet (`spanRows`, 1411; the engine marks every text row of its
 // conversation as the first of its reply, ruling 4), a later one none. While the text streams a mark still open at its
 // end reads as open (the shared grammar's `parseLive`): its message is drawn under its label and ` …`. A closed
-// stretch's head (`only`) draws its messages alone, as the mod draws a folded mixed row: exactly the marked ranges, a
-// mark inside a line cut out of its paragraph, where the full drawing keeps the authored paragraph whole.
+// stretch's head draws its message spans alone (`owner/view/marked.ts`, in `Presenter.tsx`), not through this tree.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
 import type { Plugin } from 'unified';
 import { codeRegions, insideCode } from '@shared/owner/to-human-parser';
@@ -59,7 +58,7 @@ type Unit = { node: RootContent; message: number | null };
 
 // Only the source tokenizer's span has an exact tag range. Never rescan decoded text: an entity or backslash-escaped
 // example can have the same displayed characters without having been an output tag in the source.
-const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<[], Root> => () => (tree, file) => {
+const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (tree, file) => {
   const source = String(file.value);
   const tokens: (Token & { node: Element })[] = [];
   const collect = (node: Root | RootContent) => {
@@ -131,49 +130,10 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
     return units;
   };
 
-  // A closed stretch's head (`only`) keeps exactly the marked ranges: a block with tags among its own children is cut
-  // at every tag into the runs `parseMarked` reads, each run under its message, the words outside any mark dropped.
-  const holdsTag = (node: RootContent): boolean => byNode.has(node) || (node.type === 'element' && node.tagName !== 'code' && node.children.some(holdsTag));
-  const inMessage = () => open.findLast((entry) => entry.message)?.message ?? null;
-  const runs = (block: Element): Unit[] => {
-    const units: Unit[] = [];
-    let kids: ElementContent[] = [];
-    let run = inMessage();
-    const flush = () => {
-      while (blank(kids[0]) || lineBreak(kids[0])) kids.shift();
-      while (blank(kids.at(-1)) || lineBreak(kids.at(-1))) kids.pop();
-      if (kids.length) units.push({ node: { ...block, properties: { ...block.properties }, children: kids }, message: run });
-      kids = [];
-    };
-    for (const child of block.children) {
-      const token = byNode.get(child);
-      if (token) {
-        enter(token);
-        if (inMessage() !== run) { flush(); run = inMessage(); }
-        continue;
-      }
-      const before = removed;
-      touched = null;
-      const drawn = transform(child) as ElementContent[];
-      if (removed === before) { kids.push(...drawn); continue; }
-      // A tag inside an inline element (`**<message>…</message>**`): the element goes whole, under the message it holds.
-      flush();
-      kids.push(...drawn);
-      const after = inMessage();
-      run = touched;
-      flush();
-      run = after;
-    }
-    flush();
-    return units;
-  };
-
   const units: Unit[] = [];
   for (const child of tree.children) {
     touched = null;
-    const tagged = child.type === 'element' && child.children.some((kid) => byNode.has(kid));
-    if (only && child.type === 'element' && holdsTag(child) && child.tagName !== 'pre') units.push(...runs(child));
-    else if (tagged && child.tagName === 'p') units.push(...cut(child));
+    if (child.type === 'element' && child.tagName === 'p' && child.children.some((kid) => byNode.has(kid))) units.push(...cut(child));
     else for (const node of transform(child)) units.push({ node, message: touched });
   }
   // The runs still open at the end of a streaming text: their messages read ` …`.
@@ -188,7 +148,7 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
     if (node.type !== 'element' || message === null) {
       wrapper = null;
       current = null;
-      if (!only) grouped.push(node);
+      grouped.push(node);
       continue;
     }
     if (!wrapper || current !== message) {
@@ -203,11 +163,9 @@ const decorateWith = ({ live, only }: { live: boolean; only: boolean }): Plugin<
 };
 
 // Streamdown caches its processor by its plugins' function names (`generateCacheKey`, read in streamdown's dist), so
-// each decoration carries a name of its own: four anonymous plugins would share the first one's processor.
+// each decoration carries a name of its own: two anonymous plugins would share the first one's processor.
 const named = (name: string, plugin: Plugin<[], Root>): Plugin<[], Root> => Object.defineProperty(plugin, 'name', { value: name });
 
-/** The decoration of a text's one Markdown tree: completed or streaming, whole or its messages alone (a closed head). */
-export const messageInk = { source: sourceTags, decorate: named('messageInk', decorateWith({ live: false, only: false })) };
-export const liveMessageInk = { source: sourceTags, decorate: named('liveMessageInk', decorateWith({ live: true, only: false })) };
-export const reportMessageInk = { source: sourceTags, decorate: named('reportMessageInk', decorateWith({ live: false, only: true })) };
-export const liveReportMessageInk = { source: sourceTags, decorate: named('liveReportMessageInk', decorateWith({ live: true, only: true })) };
+/** The decoration of a text's one Markdown tree, completed or streaming. */
+export const messageInk = { source: sourceTags, decorate: named('messageInk', decorateWith({ live: false })) };
+export const liveMessageInk = { source: sourceTags, decorate: named('liveMessageInk', decorateWith({ live: true })) };
