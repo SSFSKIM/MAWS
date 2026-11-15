@@ -16,6 +16,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AgentId, AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
 import { placeWaiting, type Placed } from '@shared/attention/waiting';
+import { isAddress } from '@shared/machine/address';
 import { selectWaitingForms, selectWaitingRequests, useAttention, type Settling } from '../../stores/attention';
 import { useTranscriptStore } from '../../stores/transcript';
 import { END_ROW, endRequestId } from '../model/keys';
@@ -54,8 +55,12 @@ export function waitingViewsOf(key: string): readonly Pick<WaitingView, 'show'>[
 }
 
 // The session a store key names: the key is the session's id, or `<appSessionId>:<agentId>` for a child's transcript
-// (the rows' own rule, `useRowSession`).
-const sessionOf = (key: string): AppSessionId | null => (key === '' ? null : ((key.includes(':') ? key.slice(0, key.indexOf(':')) : key) as AppSessionId));
+// (the rows' own rule, `useRowSession`). Every MAWS session id on the page is an address (P5 O6 M2), so a key whose
+// session part is none names no MAWS session: desk web's (`desk:<project>:<session>`), a source's generated key.
+const sessionOf = (key: string): AppSessionId | null => {
+  const head = key.includes(':') ? key.slice(0, key.indexOf(':')) : key;
+  return isAddress(head) ? (head as AppSessionId) : null;
+};
 
 type FormRow = Extract<Row, { kind: 'question' | 'plan' | 'ask' }>;
 const isFormRow = (row: Row): row is FormRow => row.kind === 'question' || row.kind === 'plan' || row.kind === 'ask';
@@ -172,8 +177,8 @@ export function useTranscriptWaiting({ storeKey, agent, rows, list, idPrefix }: 
       // let go a microtask later, so a region that tracks again in the same commit (the end's, as its list changes)
       // never reads as out of view in between
       queueMicrotask(() => {
+        if (elements.current.get(id) !== before) release(before); // tracked again elsewhere meanwhile: the old one goes
         if (elements.current.has(id)) return;
-        release(before);
         setTracked((now) => withIds(now, [id], false));
         setHidden((now) => withIds(now, [id], false));
       });

@@ -7,6 +7,7 @@ import { useAttention } from '../../stores/attention'; // UX wave U1b
 import type { AttentionItem } from '@shared/graph/attention'; // UX wave U1b
 import { afterAccepted } from '../../composer/editor/submit';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine'; // UX wave U1b
 import type { Serialized } from '../../composer/editor/serialize';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
@@ -427,7 +428,7 @@ describe('Transcript', () => {
     b.turn('u1');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
-    const source = sourceOf(b.events);
+    const source = { ...sourceOf(b.events), key: at('transcript-test-waiting') }; // a MAWS session's key is its address (M5's fix)
     const item = { id: 'att-r1', appSessionId: source.key, sessionId: null, kind: 'question', request: { requestId: 'r1', toolUseId: 'q1', taskId: null, agentId: null }, summary: 'Question', createdAt: '2026-09-28T10:00:00.000Z', state: 'pending', stateChangedAt: '2026-09-28T10:00:00.000Z', expiresAt: null } as unknown as AttentionItem;
     useAttention.setState({ bySession: new Map([[source.key as AppSessionId, [item]]]), version: useAttention.getState().version + 1 });
     onTestFinished(() => useAttention.setState({ bySession: new Map(), version: useAttention.getState().version + 1 }));

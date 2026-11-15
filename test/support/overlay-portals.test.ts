@@ -71,7 +71,7 @@ function rendererSources(dir: string): string[] {
 // The parser reads only the sources that could make a portal (the tree's other files would cost seconds): one that
 // names one, or one with an escaped identifier, which could spell the name otherwise.
 function scanned(sources: readonly { file: string; text: string }[]): string[] {
-  return sources.filter(({ text }) => text.includes('Portal')).flatMap(({ file, text }) => overlayPortalViolations(text, file));
+  return sources.filter(({ text }) => text.includes('Portal') || text.includes('\\u')).flatMap(({ file, text }) => overlayPortalViolations(text, file));
 }
 
 describe('an overlay that takes keys is portalled to the body', () => {
