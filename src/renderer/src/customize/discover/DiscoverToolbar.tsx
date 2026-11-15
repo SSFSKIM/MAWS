@@ -3,7 +3,7 @@
 // refresh at a time), the catalog's age, and the Sources popover with each source's state ("offline, from 2 days ago",
 // "unavailable", the records it could not read). Below them, the filter row: the class chips (Anthropic, Partner,
 // Community, Added by you: the trust label's class), the Category menu, Not installed, and a removable chip for a shelf's
-// See all.
+// See all. Under All (UX wave U11c M4, §F) no Category menu: the kinds' categories are not one list.
 import { Popover } from 'radix-ui';
 import type { CatalogChip, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
 import { formatAgo } from '@shared/app/date-format';
@@ -120,18 +120,20 @@ export function FilterRow({ tab, cwd }: { tab: Tab; cwd: string | null }) {
           </button>
         ))}
       </span>
-      <span className="flex items-center gap-1">
-        <Choice
-          label={D.category}
-          icon={<FilterIcon />}
-          value={choices.category?.value ?? ANY}
-          values={[ANY, ...categories.map((c) => c.value)]}
-          words={words}
-          isDefault={choices.category === null}
-          onChange={(value) => setChoices(tab, { category: value === ANY ? null : { value, title: categories.find((c) => c.value === value)?.title ?? value } })}
-        />
-        <span className="text-ui-sm text-fg-muted">{choices.category ? null : D.category}</span>
-      </span>
+      {tab !== 'all' && (
+        <span className="flex items-center gap-1">
+          <Choice
+            label={D.category}
+            icon={<FilterIcon />}
+            value={choices.category?.value ?? ANY}
+            values={[ANY, ...categories.map((c) => c.value)]}
+            words={words}
+            isDefault={choices.category === null}
+            onChange={(value) => setChoices(tab, { category: value === ANY ? null : { value, title: categories.find((c) => c.value === value)?.title ?? value } })}
+          />
+          <span className="text-ui-sm text-fg-muted">{choices.category ? null : D.category}</span>
+        </span>
+      )}
       <label className="inline-flex h-7 items-center gap-1.5 px-1 text-ui-sm text-fg-muted">
         <input type="checkbox" checked={choices.notInstalled} onChange={(event) => setChoices(tab, { notInstalled: event.target.checked })} className="accent-accent" />
         {D.notInstalled}

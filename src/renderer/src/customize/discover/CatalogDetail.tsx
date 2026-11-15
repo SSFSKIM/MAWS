@@ -6,7 +6,7 @@
 // shown after install"; the runs-code warning; and + (the install sheet). An item the engine cannot install says why and
 // shows its documentation link as text, with no +; a failed scan turns + off with its reason. Plain text throughout.
 import { useEffect, useRef } from 'react';
-import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { CatalogItem, CatalogKindTab } from '@shared/ipc/schema/catalog';
 import { formatDate } from '@shared/app/date-format';
 import { OperationLine } from '../../widgets/plugins/manage';
 import { BackButton, backOnChord } from '../../widgets/plugins/PluginDetail';
@@ -18,7 +18,7 @@ import { DISCOVER as D } from './copy';
 import { addable, marketplaceOf, metricWords, runsCodeWords, trustOf } from './present';
 import { useCatalogItem } from './read';
 
-export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: CatalogItem; tab: CatalogTab; cwd: string | null; onBack(): void }) {
+export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: CatalogItem; tab: CatalogKindTab; cwd: string | null; onBack(): void }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => root.current?.focus(), []);
   // the item as the catalog reads it now, else as it was opened (an install's change may drop and return it)

@@ -5,9 +5,12 @@
 // shelf's cards align. The whole card is one target, "View <name>" (its detail; an item installed here opens it in My
 // items); + is its own focus stop. Installed here reads "Installed" in place of +; installed only in another project
 // reads "Installed in another project" and keeps +. A change's operation line sits on the card it was asked from.
-import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
+// In Discover › All's grid (UX wave U11c M4, §F) the card says its kind, Plugin or Connector, muted, beside its name; a
+// card is always drawn as one kind's (`tab`), which decides what its + asks and what its contents say.
+import type { CatalogItem, CatalogKindTab } from '@shared/ipc/schema/catalog';
 import { IconButton, PlusIcon } from '../../app/IconButton';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
+import { PAGE } from '../copy';
 import { ItemImage } from '../image/ItemImage';
 import { catalogSeedOf } from '../image/tile';
 import { catalogKey, installRequestOf } from './add';
@@ -33,7 +36,7 @@ export function TrustLabel({ item }: { item: CatalogItem }) {
 }
 
 /** + for an item: the install sheet for its chosen route; disabled while its change runs. */
-export function AddButton({ item, tab, variant = 'icon' }: { item: CatalogItem; tab: CatalogTab; variant?: 'icon' | 'text' }) {
+export function AddButton({ item, tab, variant = 'icon' }: { item: CatalogItem; tab: CatalogKindTab; variant?: 'icon' | 'text' }) {
   const { ops, ask } = useManage();
   const key = catalogKey(item);
   const request = installRequestOf(item, tab);
@@ -62,9 +65,14 @@ export function InstalledMark() {
   );
 }
 
-export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: CatalogTab; onOpen(item: CatalogItem): void }) {
+export function CatalogCard({ item, tab, kindWord = false, onOpen }: { item: CatalogItem; tab: CatalogKindTab; kindWord?: boolean; onOpen(item: CatalogItem): void }) {
   const metric = metricWords(item);
   const here = item.installed === 'here';
+  const name = (
+    <span className="truncate font-medium text-fg" title={item.installName ?? item.name}>
+      {item.name}
+    </span>
+  );
   return (
     <li
       data-catalog-card={item.id}
@@ -80,9 +88,16 @@ export function CatalogCard({ item, tab, onOpen }: { item: CatalogItem; tab: Cat
       <div className="relative flex min-w-0 items-start gap-3">
         <ItemImage kind={item.kind} seed={catalogSeedOf(item)} iconUrl={item.iconUrl} size="card" />
         <div className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate font-medium text-fg" title={item.installName ?? item.name}>
-            {item.name}
-          </span>
+          {kindWord ? (
+            <span className="flex min-w-0 items-baseline gap-1.5">
+              {name}
+              <span data-kind-word={item.kind} className="shrink-0 text-ui-sm text-fg-muted">
+                {PAGE.kindWord[item.kind]}
+              </span>
+            </span>
+          ) : (
+            name
+          )}
           {/* the publisher keeps its line: the trust label wraps beneath it when both do not fit, into the room a
               two-line description leaves above the components (the card's height is fixed) */}
           <span data-catalog-byline className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-ui-sm text-fg-muted">

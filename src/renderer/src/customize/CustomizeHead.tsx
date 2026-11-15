@@ -10,7 +10,7 @@
 // Refresh; Plugins: the search, Filter, Sort by and the Add menu; Skills: the search, Sort by while a plugin brings a
 // skill, Refresh; Connectors: the search ("Search connectors"), "Add custom connector…" and Refresh (U11g's action, which
 // stands in My items under Connectors and under All; ruled point 7). Discover: that kind's own tools, the Add menu under
-// Plugins; under All (until M4 draws its own, Plugins' Discover), the search, Refresh and the catalog's age.
+// Plugins; under All, All's own search, Refresh and the catalog's age.
 import { useQueryClient } from '@tanstack/react-query';
 import { ToggleGroup } from 'radix-ui';
 import { useMemo, type ReactNode } from 'react';
@@ -86,7 +86,7 @@ export function CustomizeHead({ view, show, inDetail, onView, onShow, project, l
 
 function Tools({ view, show }: { view: PageView; show: CustomizeShow }) {
   const { askIn, openDialog } = usePlace();
-  if (view === 'discover') return show === 'plugins' ? <DiscoverToolbar tab="plugins" add={<AddMenu onOpen={openDialog} />} /> : <DiscoverToolbar tab={show === 'all' ? 'plugins' : show} />;
+  if (view === 'discover') return show === 'plugins' ? <DiscoverToolbar tab="plugins" add={<AddMenu onOpen={openDialog} />} /> : <DiscoverToolbar tab={show} />;
   const addCustom = (
     <button type="button" data-connector-add-custom className={BUTTON} onClick={() => askIn(CUSTOM_ADD_KEY, CUSTOM_ADD, null)}>
       {CONNECTORS.addCustom}

@@ -87,8 +87,12 @@ export type CatalogSourceStatus = z.infer<typeof CatalogSourceStatusSchema>;
 export const CatalogSortSchema = z.enum(['installs', 'updated', 'name']); // 'installs' is rank for connectors
 export type CatalogSort = z.infer<typeof CatalogSortSchema>;
 
-export const CatalogTabSchema = z.enum(['plugins', 'skills', 'connectors']);
+// UX wave U11c M4 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §F): `all` is Discover's All, both kinds
+// (main's commands, not on the wire between builds)
+export const CatalogTabSchema = z.enum(['plugins', 'skills', 'connectors', 'all']);
 export type CatalogTab = z.infer<typeof CatalogTabSchema>;
+/** A tab of one kind: what All's shelves and See all name. */
+export type CatalogKindTab = Exclude<CatalogTab, 'all'>;
 // The filter chips: ownership class and review tier together (the trust label's class: the tier where the directory has
 // one, else the ownership)
 export const CatalogChipSchema = z.enum(['anthropic', 'partner', 'community', 'added']);
@@ -98,8 +102,8 @@ export const CATALOG_PAGE_SIZE = 60;
 export const CATALOG_PAGE_MAX = 200;
 
 export const CatalogShelfSchema = z.strictObject({
-  key: z.string(), // 'added', a seed's source key, or `category:<value>`: the query's `source` or `category` filter
-  kind: z.enum(['added', 'source', 'category']),
+  key: z.string(), // 'added', a seed's source key, or `category:<value>`: the query's `source` or `category` filter; on All, `kind:<tab>`: the kind See all chooses in Show
+  kind: z.enum(['added', 'source', 'category', 'kind']),
   title: z.string(),
   items: z.array(CatalogItemSchema), // the shelf's first items in shelf order
   total: z.number().int(),

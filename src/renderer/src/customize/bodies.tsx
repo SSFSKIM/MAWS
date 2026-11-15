@@ -3,11 +3,12 @@
 // state above it (the page's one place, ./place.tsx) is what changed. My items: the plugins (the loaded line, the source
 // groups, MAWS's built-in mods, a plugin's detail in the list's place), the skills on disk (their groups and detail), the
 // configured connectors with what the attached session has live; All, the one list of the three kinds (./MineAll.tsx, M3).
-// Discover: that kind's catalog; until M4 draws its own, Discover's All draws Plugins'. A body is keyed by the place, so
+// Discover: that kind's catalog; All, the kinds' shelves and one grid across them (M4). A body is keyed by the place, so
 // a change of project resets its details.
 // A detail, My items' or Discover's, is told to the head (`onDetail`) and returns to its list on `toList`.
 // Keep means keep (§D): the kinds share the place's one book, and each kind's lines offer what they offered: Reload again
-// on a plugin's line alone, as Skills' Discover and the connectors had no session's reload to offer (`WithoutReload`).
+// on a plugin's line alone, as Skills' Discover and the connectors had no session's reload to offer (`WithoutReload`;
+// under Discover's All, per card, `KindLines`).
 import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { McpBody, present } from '../widgets/McpWidget';
@@ -34,11 +35,10 @@ const clearSearch = () => useCustomizePage.setState({ search: '' });
 
 export function CustomizeBody({ view, show, onDetail, toList }: { view: PageView; show: CustomizeShow; onDetail(open: boolean): void; toList: number }) {
   const { cwd } = usePlace();
-  const kind = show === 'all' ? 'plugins' : show; // Discover's All: Plugins' until M4 draws its own
   return (
     <Fragment key={cwd ?? 'user'}>
       {view === 'discover' ? (
-        <DiscoverBody kind={kind} onDetail={onDetail} toList={toList} />
+        <DiscoverBody kind={show} onDetail={onDetail} toList={toList} />
       ) : show === 'all' ? (
         <MineAll onDetail={onDetail} toList={toList} />
       ) : show === 'plugins' ? (
@@ -52,9 +52,16 @@ export function CustomizeBody({ view, show, onDetail, toList }: { view: PageView
   );
 }
 
-function DiscoverBody({ kind, onDetail, toList }: { kind: Exclude<CustomizeShow, 'all'>; onDetail(open: boolean): void; toList: number }) {
+function DiscoverBody({ kind, onDetail, toList }: { kind: CustomizeShow; onDetail(open: boolean): void; toList: number }) {
   const { cwd } = usePlace();
   switch (kind) {
+    case 'all':
+      // a card installed here opens My items on its own kind: a plugin on its detail, a connector's list
+      return (
+        <div data-customize-body="all" className="flex min-h-0 flex-1 flex-col px-1 pt-2">
+          <DiscoverPane tab="all" cwd={cwd} onOpenInstalled={(item) => (item.kind === 'connector' ? openMine('connectors') : openMine('plugins', { pluginId: pluginIdOf(item) ?? undefined }))} onDetail={onDetail} toList={toList} />
+        </div>
+      );
     case 'plugins':
       return (
         <div data-customize-body="plugins" className="flex min-h-0 flex-1 flex-col px-1 pt-2">
