@@ -27,6 +27,9 @@ HTMLCanvasElement.prototype.getContext = (() => ({ font: '', measureText: (text:
 const VIEWPORT = 400;
 const HEADER = 30;
 const ROW = 20;
+// The runner's time-out for the cases over 200 files: happy-dom draws a diff slowly, and a stack that draws every body
+// (no band) takes seconds. A bound on the run, not an assertion.
+const LARGE = 60_000;
 
 // A file of the stack: `hunks` hunks, each `lines` context lines around one added line, 40 lines apart.
 interface Made {
@@ -197,7 +200,7 @@ describe('the stack laid out', () => {
     expect(drawnBodies().length).toBeLessThan(20);
     expectBand();
     expect(sectionOf(files[199].path).querySelector('[data-review-body]')).not.toBeNull();
-  });
+  }, LARGE);
 
   it('after Collapse all, the stack is as tall as its headers: no body and no spacer is left', async () => {
     const files = Array.from({ length: 200 }, (_, i) => made(i, 1, 6));
@@ -210,7 +213,7 @@ describe('the stack laid out', () => {
     expect(spacers()).toEqual([]);
     expect(drawnBodies()).toEqual([]);
     expect(scroller().scrollHeight).toBe(200 * HEADER);
-  });
+  }, LARGE);
 
   it('past the scope cap, first paints its headers alone, and Expand all reads the files near the scroll position and no more', async () => {
     const files = Array.from({ length: 200 }, (_, i) => made(i, 1, 6));
@@ -225,7 +228,7 @@ describe('the stack laid out', () => {
     expect(read.length).toBeLessThan(40);
     expect(read).toContain(files[0].path);
     expect(read).not.toContain(files[199].path);
-  });
+  }, LARGE);
 
   it('keeps the file and row the person reads at the top through a change of width and a zoom', async () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
