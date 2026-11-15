@@ -34,7 +34,7 @@ async function fromFileRows(name: string): Promise<CommandRow[]> {
 const starting = (rows: CommandRow[], text: string) => rows.find((row) => row.text.startsWith(text))!;
 
 // The line boxes a layout would measure in an output: `tall` ones draw seven 18 px lines, the rest one.
-const measured = vi.hoisted(() => ({ tall: (_element: HTMLElement): boolean => false }));
+const measured = vi.hoisted((): { tall: (element: HTMLElement) => boolean } => ({ tall: () => false }));
 vi.mock('./command-bound', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./command-bound')>();
   return { ...actual, drawnLineBoxes: (element: HTMLElement) => (measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top, bottom: top + 18 })) };
