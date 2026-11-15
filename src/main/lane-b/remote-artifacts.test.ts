@@ -127,7 +127,7 @@ describe('artifact writes', () => {
   // so an act held while the link is down never reaches a machine that does not know the command; the others keep theirs
   it('seal the undelete needing the peer’s `rl2.artifact-undelete`, and every other write `rl2.artifacts`', async () => {
     const l = lab();
-    l.link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'artifacts.undelete' ? undefined : { artifact: row(A1) } });
+    l.link.onAct = (act) => act.settle({ state: 'done', result: undefined }); // both answer nothing
     // a peer whose handshake does not list it is sent nothing
     expect(await l.cmd('artifacts.undelete', { artifactId: A1 })).toMatchObject({ ok: false });
     expect(l.link.acts).toEqual([]);
