@@ -174,7 +174,7 @@ async function mount(items: AttentionItem[], extra: ReactNode = null) {
       </section>
     </QueryClientProvider>,
   );
-  await waitFor(() => expect(end()?.querySelector('[data-decision-buttons]')).not.toBeNull());
+  await waitFor(() => expect(end() && within(end()!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
   await waitFor(() => expect(editor()).toBeTruthy());
 }
 
