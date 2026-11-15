@@ -154,6 +154,18 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(recalls.map(recallText)).toEqual([bubble]);
   });
 
+  // the task review of the fix wave: a row of an orphan envelope (its ask not held here) and an image draws both, as
+  // finding 2 rules; the recall keeps it too, as the row draws it, rather than skipping the image with the envelope
+  it('recalls a row of an orphan envelope and an image once, as the row draws it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-9', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const read = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text: envelope }]);
+    expect(read.text).toBe(envelope);
+    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments)], [turn('t1', 'human')], []);
+    expect(recalls.length).toBe(1);
+    expect(recalls[0]).toMatchObject({ source: 'session', prefill: { text: envelope, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] } });
+  });
+
   it('keeps two entries with the same display and different bodies apart', () => {
     const listed = [entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'one') }), entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'two') })];
     const recalled = recallEntries([], [], listed).map((r) => serializeDraft(recallDoc(r), ctx).pastedContents['1']?.content);
