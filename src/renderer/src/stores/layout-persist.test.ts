@@ -1447,6 +1447,29 @@ describe('a move’s ordered writes', () => {
     error.mockRestore();
   });
 
+  // The branch review's second finding: a move beside the chat whose session's tab joins the main area while another
+  // logged write is in flight. The join's entry waits in the log; the file's close, later in the same step, must not
+  // count as a second join and put a main.tabs without the file ahead of the move's destination.
+  it('a move beside the chat that opens its session’s tab while another write is in flight stores the file somewhere at every point', async () => {
+    const run = ordered({ 'main.tabs': storedMain({ ...LAYOUT_DEFAULTS.main, panes: [{ tabs: [{ id: KEY, ...fileTab, pinned: false }], activeTabId: KEY }] }) });
+    await run.hydrate();
+    run.hold('panelTools.params');
+    run.store.getState().setPanelParams('terminal:aaaa0009', { cwd: '/r' }); // an ordinary write, in flight
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
+    expect(run.sent.at(-1)).toBe('panelTools.params');
+    // moveFileToSide's step: the session's tab first (a join), the side tab, the main tab closed; then the order
+    run.store.getState().openTab({ kind: 'session', appSessionId: A });
+    run.store.getState().setPanelParams(side.id, { file: FILE, line: null });
+    run.store.getState().updatePanelTabs(A, (refs) => [...refs, side]);
+    run.store.getState().closeTab(KEY, { remember: false });
+    writeInOrder([LIST, 'panelTools.params'], ['main.tabs'], run.store);
+    await run.answer('panelTools.params', true);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 4);
+    for (const landed of run.stored) expect((await found(landed)).app).toBe(true);
+    const after = await relaunch(run.landed);
+    expect([holdsFile(after.main), after.sideIds]).toEqual([false, [side.id]]);
+  });
+
   it('a session joining main.tabs while a move beside the chat holds it waits for the move’s list, then is written at once', async () => {
     const C = at('app-c' as AppSessionId);
     const run = ordered(inMain);
