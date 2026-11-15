@@ -117,6 +117,9 @@ export function connectAnswers(port: AnswerPort): () => void {
 // A question's call, for the receipts a delivery writes: the engine's or a bridge's question (kind `question`, or
 // `async_input` for a terminal's asynchronous question) with a call id; null for any other request.
 const questionCall = (item: AttentionItem): ToolUseId | null => (item.kind === 'question' || item.kind === 'async_input' ? item.request.toolUseId : null);
+// Decision 8b: a plan's row keeps the known answer too, so the answered-elsewhere receipt is written for a plan's call as
+// well as a question's.
+const answeredCall = (item: AttentionItem): ToolUseId | null => (item.kind === 'plan' ? item.request.toolUseId : questionCall(item));
 
 // What a delivered answer says of its question (M1's D-5, moved here with the delivery): the answers sent, or a dismissal
 // for the decline; nothing for an answer to any other request. A question's item, the engine's or a bridge's, is of kind
@@ -381,9 +384,11 @@ export function createAttentionStore() {
           } else if (outcome === 'not_pending') {
             if (answerPort.terminalOnly(item)) write(null); // P5 O9 M6: the terminal's to answer, still pending
             else {
-              // decision 8a: the question's row says so past the card's two seconds, until its own answers arrive; a
-              // receipt already held (a settlement's own words, an answer, a dismissal) says more and stays
-              if (call !== null && stayed && get().receipts.get(item.appSessionId)?.get(call) === undefined) get().recordReceipt(item.appSessionId, call, { settled: ANSWERED_ELSEWHERE });
+              // decisions 8a and 8b: the question's or plan's row says so past the card's two seconds, until its own
+              // answers or outcome arrive; a receipt already held (a settlement's own words, an answer, a dismissal)
+              // says more and stays
+              const elsewhere = answeredCall(item);
+              if (elsewhere !== null && stayed && get().receipts.get(item.appSessionId)?.get(elsewhere) === undefined) get().recordReceipt(item.appSessionId, elsewhere, { settled: ANSWERED_ELSEWHERE });
               const said: Delivery = { phase: 'not_pending' };
               write(said);
               setTimeout(() => {
