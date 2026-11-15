@@ -478,6 +478,7 @@ export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSc
 export const ArtifactExportResultSchema = z.strictObject({
   status: z.literal('exported'), artifactId: z.uuid(), format: z.enum(ARTIFACT_EXPORT_FORMATS), revision: z.number().int().min(0), path: z.string(), copiedTo: z.string().optional(),
   blockedRequests: z.number().int().positive().optional(), // remote resources the page named, which the export did not load (P3-A Decision Log 44b)
+  pages: z.number().int().positive().optional(), // UX wave U10b (§B.4): a pdf's page count, counted in the exported file by the tool server
 });
 export type ArtifactExportResult = z.infer<typeof ArtifactExportResultSchema>;
 
@@ -548,7 +549,7 @@ export const MAWS_TOOLS = {
   artifact_read: {
     title: 'Read artifact',
     description:
-      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure, a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
+      "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
     input: ArtifactReadInputSchema,
     annotations: MAWS_TOOL_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it
@@ -577,7 +578,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; a pdf\'s answer also names pages, its page count; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },

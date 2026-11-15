@@ -9,12 +9,23 @@ export type Op =
   | { op: 'insert'; after?: string; before?: string; markdown: string }
   | { op: 'delete'; id: string }
   | { op: 'move'; id: string; after: string | null }
-  | { op: 'set_cell'; table: string; row: number; col: number; markdown: string };
+  | { op: 'set_cell'; table: string; row: number; col: number; markdown: string }
+  // UX wave U10b (§B.2 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the document's page, not a block
+  | { op: 'set_page'; size?: 'letter' | 'a4' | 'system'; density?: 'standard' | 'compact' };
+/** An op on the document's blocks: every op but `set_page`. */
+export type BlockOp = Exclude<Op, { op: 'set_page' }>;
 
+/** A block op's result. */
 export interface OpResult {
   line: string;
   target: string;
   newIds: string[];
+}
+/** A `set_page`'s result: the page in force after it (`system`, `standard`: the document sets none). */
+export interface PageOpResult {
+  op: 'set_page';
+  size: 'letter' | 'a4' | 'system';
+  density: 'standard' | 'compact';
 }
 
 export type Slot = [client: number, clock: number];
@@ -33,8 +44,9 @@ export interface Carry extends AttributionCarry {
   blocks?: Array<[Slot, Slot]>;
 }
 
-export interface Applied {
-  results: OpResult[];
+/** What a batch answers: one result per op, in op order (a batch of block ops alone answers block results alone). */
+export interface Applied<R extends OpResult | PageOpResult = OpResult | PageOpResult> {
+  results: R[];
   carries: Carry[];
   /** Open threads whose mark no live text carries after the batch (derived; the threads map is never written). */
   orphaned: string[];

@@ -154,6 +154,12 @@ describe('the exported page', () => {
     expect(html).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 12px;/);
   });
 
+  it('spaces a tab’s blocks, under its title, by the theme’s gap, as the editor spaces that tab', async () => {
+    const html = await exportHtml(everyKindSource());
+    expect(html).toContain('\n.ds-doc .doc-tab > * + * { margin-top: 12px; }\n');
+    expect(html).toMatch(/<section class="doc-tab" data-tab="[^"]*"><h1 class="doc-tab-title">/);
+  });
+
   it('keeps a heading with what follows it in print', async () => {
     const print = printBlock(await exportHtml(everyKindSource()));
     expect(print).toContain('.ds-doc :where(h1, h2, h3) { break-after: avoid; }');
