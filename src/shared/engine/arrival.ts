@@ -10,8 +10,8 @@
 // The rules of reading (UC-2): (1) marks first, text second: a class is given only where the carrier's own marks allow
 // it (its origin object, its envelope tag, its attachment type, `local_command_source`, the fields the engine writes for
 // a scheduled fire), and the person's typed prompt is never an arrival, but for MAWS's own two texts (its answer
-// envelope and its consent message) and a background session's prompt that opens with a whole sminos frame line
-// (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
+// envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line: UX
+// wave U1c) and a background session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
 // a peer; (3) one carrier can hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two
 // carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { parseAskSteer } from '../maws/ask';
@@ -79,32 +79,83 @@ export function readAnswerEnvelope(text: string): Answer | null {
   return steer === null ? null : { class: 'answer', tool: 'maws', call: steer.askId, summary: text, answers: steer.result.answers, dismissed: false };
 }
 
+type Consent = Extract<Arrival, { class: 'consent' }>;
+type GrantKind = Consent['kind'];
+
 /**
  * The one definition of the consent sentence: U1c sends it, the reader matches it whole. It is the engine's own
- * "Recently blocked" sentence for one call (`cli.pretty.js` of 2.1.322, the template that ends "if you would like."),
- * the command or the call's input quoted as one JSON string.
+ * "Recently blocked" sentence for one call (`cli.pretty.js` of 2.1.322, `Yn`, the template that ends "if you would
+ * like."), the command or the call's input quoted as one JSON string in the engine's encoding (`quoted`).
  */
-export function consentMessage(kind: 'command' | 'call', subject: string): string {
-  return `${consentHead(kind)}${JSON.stringify(subject)}${consentTail(kind)}`;
+export function consentMessage(kind: GrantKind, subject: string): string {
+  return grantSentence(kind, [quoted(subject)]);
 }
-const consentHead = (kind: 'command' | 'call') => `Permission granted for this exact ${kind} only, as one whole string: `;
-const consentTail = (kind: 'command' | 'call') =>
-  `. This does not approve any other ${kind}, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact ${kind} if you would like.`;
 
-/** The consent a text is, whole, from its first word to its last; null for any other text, one word changed included. */
-function consentOf(text: string): Extract<Arrival, { class: 'consent' }> | null {
+// UX wave U1c (the U1c document, Design 2 and Interfaces §C, 1): the engine quotes each subject as JSON, then escapes
+// every invisible or separator character but the plain space as `\uXXXX`, one escape per UTF-16 unit (`Dp`, `Pp`), so
+// such a character is visible in the sentence the model reads. For printable ASCII it is `JSON.stringify` alone.
+const INVISIBLE = /(?! )[\p{C}\p{Z}\p{Default_Ignorable_Code_Point}]/gu;
+const escapedUnits = (match: string): string => Array.from({ length: match.length }, (_, i) => `\\u${match.charCodeAt(i).toString(16).padStart(4, '0')}`).join('');
+const quoted = (subject: string): string => JSON.stringify(subject).replace(INVISIBLE, escapedUnits);
+
+/** The engine's sentence for one call or for several (`Yn`), its subjects already quoted. */
+function grantSentence(kind: GrantKind, subjects: readonly string[]): string {
+  const one = subjects.length === 1;
+  const these = one ? `this exact ${kind}` : `these exact ${kind}s`;
+  return `${grantHead(kind, one)}${subjects.join(', ')}. This does not approve any other ${kind}, any part of ${one ? 'this one' : 'these'}, or running ${one ? 'it' : 'them'} with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${these} if you would like.`;
+}
+const GRANT_OPENING = 'Permission granted for ';
+const grantHead = (kind: GrantKind, one: boolean): string => `${GRANT_OPENING}${one ? `this exact ${kind}` : `these exact ${kind}s`} only, ${one ? 'as one whole string' : 'each as one whole string'}: `;
+
+/**
+ * The grants a text is, whole, from its first word to its last, in order: the sentence for one call or the engine's
+ * for several (read from the bundle; no recording holds it), every subject in the engine's encoding or every one in the
+ * plain one (what builds before U1c sent, and what a person may paste). None for any other text, one word changed
+ * included: the text must equal the sentence rebuilt from what was parsed.
+ */
+export function readConsents(text: string): Consent[] {
   for (const kind of ['command', 'call'] as const) {
-    const [head, tail] = [consentHead(kind), consentTail(kind)];
-    if (!text.startsWith(head) || !text.endsWith(tail) || text.length < head.length + tail.length) continue;
-    let subject: unknown;
-    try {
-      subject = JSON.parse(text.slice(head.length, text.length - tail.length));
-    } catch {
-      continue;
+    for (const one of [true, false]) {
+      const head = grantHead(kind, one);
+      if (!text.startsWith(head)) continue;
+      const subjects = quotedStrings(text, head.length);
+      if (subjects === null || (one ? subjects.length !== 1 : subjects.length < 2)) continue;
+      if (grantSentence(kind, subjects.map(quoted)) === text || grantSentence(kind, subjects.map((subject) => JSON.stringify(subject))) === text) {
+        return subjects.map((subject) => ({ class: 'consent', kind, subject }));
+      }
     }
-    if (typeof subject === 'string' && consentMessage(kind, subject) === text) return { class: 'consent', kind, subject };
   }
-  return null;
+  return [];
+}
+
+/** The JSON strings at `from`, separated by ", ", up to the first character that follows none; null when none parses there. */
+function quotedStrings(text: string, from: number): string[] | null {
+  const subjects: string[] = [];
+  let at = from;
+  for (;;) {
+    if (text[at] !== '"') return subjects.length > 0 ? subjects : null;
+    let end = at + 1;
+    while (end < text.length && text[end] !== '"') end += text[end] === '\\' ? 2 : 1;
+    if (end >= text.length) return null;
+    try {
+      subjects.push(JSON.parse(text.slice(at, end + 1)) as string);
+    } catch {
+      return null;
+    }
+    if (!text.startsWith(', "', end + 1)) return subjects;
+    at = end + 3;
+  }
+}
+
+/**
+ * The grants in the person's own text (rule 1): the whole text's, else, for a text that holds a line break, those of
+ * each line that is a whole sentence, in order. The engine joins waiting messages with one line break, and a sentence
+ * holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c document, Design 2).
+ */
+export function personsGrants(text: string): Consent[] {
+  const whole = readConsents(text);
+  if (whole.length > 0 || !text.includes('\n') || !text.includes(GRANT_OPENING)) return whole;
+  return text.split('\n').flatMap((line) => readConsents(line));
 }
 
 type Read = { arrivals: Arrival[]; open: OpenArrivals };
@@ -161,11 +212,10 @@ function personsPrompt(row: Json, text: string): Arrival[] {
   return personsText(text);
 }
 
+// MAWS's answer envelope is read on the whole text; a text that is one is never a grant, nor are its lines (U1c).
 function personsText(text: string): Arrival[] {
-  const consent = consentOf(text);
-  if (consent !== null) return [consent];
   const answer = readAnswerEnvelope(text);
-  return answer === null ? [] : [answer];
+  return answer === null ? personsGrants(text) : [answer];
 }
 
 /** A row or a queued command of the peer origin (or a teammate's, which has none): the engine's inbox. */

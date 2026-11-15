@@ -53,7 +53,7 @@ import {
   arrivalTurnOpened, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, opensAtHead, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
   type LiveArrivals,
 } from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
-import { interruptAnswered, interruptWritten, lifecycleSeen, noSendNow, outputSeen, promptStarted, promptWritten, replayJoins, turnEnded, type SendNowState } from './normalizer-send-now'; // UX wave U4a
+import { interruptAnswered, interruptWritten, joinedMarks, lifecycleSeen, marksWritten, noSendNow, outputSeen, promptStarted, promptWritten, replayJoins, turnEnded, type SendNowState } from './normalizer-send-now'; // UX wave U4a; U1c the marks
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -461,7 +461,10 @@ export class Normalizer {
       // UX wave U4a (decision 32 b): unless the engine wrote several waiting prompts as one under this uuid: then the one
       // message it wrote, which a reader draws in their place
       const joined = replayJoins(this.state.sendNow, uuid, content);
-      if (joined !== null) out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, joined }, attribution);
+      if (joined === null) return;
+      // UX wave U1c (Interfaces §C, 4): with the consent marks the host put on each frame it joins, in the joined order
+      const consent = joinedMarks(this.state.sendNow, uuid, joined);
+      out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, joined, ...(consent.length > 0 && { arrival: consent }) }, attribution);
       return;
     }
     if (main && this.arrivalIn(frame, row.seq, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
@@ -734,7 +737,8 @@ export class Normalizer {
     this.state.lastUserMessageUuid = uuid;
     // UX wave U3 (UC-2, class `consent`; decision 10): MAWS's own "Approve and retry" message is the person's prompt or
     // steer and carries its arrival, which draws it as one line
-    const consent = readArrivals({ type: 'user', origin: { kind: 'human' }, message: frame.message }).filter((arrival) => arrival.class === 'consent');
+    const consent = readArrivals({ type: 'user', origin: { kind: 'human' }, message: frame.message }).filter((arrival): arrival is Extract<Arrival, { class: 'consent' }> => arrival.class === 'consent');
+    if (uuid !== null) marksWritten(this.state.sendNow, uuid, consent); // UX wave U1c: for a join that takes this frame
     out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...(consent.length > 0 && { arrival: consent }) }, main);
   }
 

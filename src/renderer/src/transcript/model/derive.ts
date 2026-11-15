@@ -33,6 +33,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import { consentMessage, readConsents } from '@shared/engine/arrival'; // UX wave U1c
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -402,6 +403,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (block.completeEventId) byComplete.set(block.completeEventId, block);
   }
   let user: RowOf<'user'> | null = null;
+  let userBeside: RowOf<'user'>[] = []; // UX wave U1c: the approval rows beside the opening message, after it
   let model: string | null = null;
   let retry: RowOf<'error'> | null = null;
   let retryAt: string | null = null; // the first api.retry's time: the in-place row keeps its position
@@ -447,16 +449,33 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
   const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
-  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
-    const text = userTextOf(event.content);
+  const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false, content = event.content): RowOf<'user'> => {
+    const text = userTextOf(content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
       ...(turn.waited && turn.state === 'open' && !turn.accepted && !openerDropped && !steer && { unread: true as const }), // UX wave U4a (decision 12)
       ...anchorOf(text), // E3
-      ...consentOf(event), // UX wave U3 (decision 10)
     };
   };
+  // UX wave U3 (decision 10); U1c (the U1c document, Design 2 and Interfaces §C, 5): the rows of a person's message. A
+  // message that carries consent marks is drawn by its lines: the bubble for its other words, the grant lines taken out,
+  // and one approval row per mark after it, in order (an approval row beside its message is no point to rewind to and no
+  // prompt to edit); with no other words the first mark takes the message's own row. When the lines do not give exactly
+  // the marks, the bubble keeps the whole text and every mark still gets its row, so no approval is lost to a text this
+  // rule did not foresee. One mark on a text that is its sentence is the one row it always was.
+  const messageRows = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'>[] => {
+    const marks = consentMarks(event);
+    if (marks.length === 0) return [userRow(event, id, editable, steer)];
+    const beside = (from: number) => marks.slice(from).map((mark, n): RowOf<'user'> => ({
+      ...userRow(event, rowId.grant(event.messageUuid ?? event.id, from + n), false, steer, consentMessage(mark.kind, mark.subject)), messageUuid: null, consent: mark,
+    }));
+    const words = wordsBesideGrants(event.content, marks);
+    if (words === undefined) return [userRow(event, id, editable, steer), ...beside(0)];
+    if (words === null) return [{ ...userRow(event, id, editable, steer), consent: marks[0]! }, ...beside(1)];
+    return [userRow(event, id, editable, steer, words), ...beside(0)];
+  };
+  const opener = ([first, ...beside]: RowOf<'user'>[]): [RowOf<'user'>, RowOf<'user'>[]] => [first!, beside];
   // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, and
   // those that came before any of the turn's work (head.ts, the reducer's reading too), so the resolution pass can place
   // them
@@ -552,11 +571,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (answersHeldAsk(event)) {
           // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && opensTurn(event, turn.id) && user === null && !dropped(event.messageUuid)) {
-          user = userRow(event, rowId.user(event.messageUuid), true);
+          [user, userBeside] = opener(messageRows(event, rowId.user(event.messageUuid), true));
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
-          user = userRow(event, rowId.userOfEvent(event.id), false);
+          [user, userBeside] = opener(messageRows(event, rowId.userOfEvent(event.id), false));
         } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
-          items.push({ kind: 'steer', row: userRow(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true) });
+          for (const row of messageRows(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true)) items.push({ kind: 'steer', row });
         }
         break;
       }
@@ -988,7 +1007,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // E11: the engine's process ended it; UX wave U4a (Interfaces B): a message sent now ended it
   const cause = turn.closedCause ?? (turn.ended?.endedForMessage === true ? 'message' : null);
   const rows: Row[] = [...above];
-  if (user) rows.push(user);
+  if (user) rows.push(user, ...userBeside);
   // The divider summarises a work area. UX wave U2 (O-15, l2-transcript-04): a turn in which nothing was done has no
   // line, whoever started it (an arrival's line already names a turn the person did not start); a turn the engine
   // accepted keeps one while it runs and when stopped, even with only partial text or no output. A pending prompt has
@@ -1531,11 +1550,24 @@ function callQuestions(turn: TurnState | null, state: TranscriptState | null, ca
   return Array.isArray(questions) ? questions.map(record).filter((q) => typeof q.question === 'string').map((q) => ({ question: str(q.question), header: str(q.header) })) : [];
 }
 
-// UX wave U3 (decision 10): the consent an "Approve and retry" prompt carries, for its user row.
-function consentOf(event: Event<'user.message'>): Pick<RowOf<'user'>, 'consent'> {
-  if (event.isSynthetic) return {};
-  const consent = carriedOf(event.arrival).find((entry) => entry.class === 'consent');
-  return consent === undefined ? {} : { consent: { kind: consent.kind, subject: consent.subject } };
+// UX wave U3 (decision 10); U1c: the consents an "Approve and retry" message carries, in order, for its rows.
+function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['consent']>[] {
+  if (event.isSynthetic) return [];
+  return carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [{ kind: entry.kind, subject: entry.subject }] : []));
+}
+
+// UX wave U1c (Interfaces §C, 5): the person's words beside the grants a message's lines hold, when those grants are
+// exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
+// when the lines do not give the marks, or the words cannot be told apart from content that is not one string.
+function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
+  const text = messageText(content);
+  const whole = readConsents(text);
+  const lines = whole.length > 0 ? [{ line: text, grants: whole }] : text.split('\n').map((line) => ({ line, grants: readConsents(line) }));
+  const grants = lines.flatMap((line) => line.grants);
+  if (grants.length !== marks.length || grants.some((grant, i) => grant.kind !== marks[i]!.kind || grant.subject !== marks[i]!.subject)) return undefined;
+  const others = lines.filter((line) => line.grants.length === 0).map((line) => line.line);
+  if (others.every((line) => line.trim() === '')) return null;
+  return typeof content === 'string' ? others.join('\n') : undefined;
 }
 
 function agentListRow(use: Event<'tool.use'>, result: Event<'tool.result'> | undefined, turnId: TurnId, context: TurnContext): RowOf<'agent_list'> {
