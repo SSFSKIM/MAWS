@@ -32,6 +32,7 @@ import { useOpenAgents } from '../open-agents';
 import { SubagentsSummary } from './SubagentsSummary';
 import type { BackgroundHandle } from '../background/BackgroundTool';
 import { subagentsTool, type SubagentsHandle, type SubagentsParams } from './SubagentsTool';
+import { relayDisabledReason } from './RelayComposer'; // UX wave U8d
 import { REL } from '../../../test-support/relative-time';
 import { laneAState } from '../../../lane-a/test-support/lane-a-state'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../../stores/lane-a'; // P5 O9
@@ -872,6 +873,20 @@ describe('a terminal session this Mac drives, its statuses from its watch', () =
     expect(row('quit').querySelector('[data-part="state"]')?.className).toContain('text-fg-muted');
     body('subagents', [ends('ok', 'completed', 'completed'), ends('bad', 'failed', 'failed'), ends('halt', 'stopped', 'killed'), { ...gone('quit') }, ends('p', 'stopped', 'killed'), { ...orphan, evidence: 'session' }]);
     expect(lines()).toMatchObject({ quit: 'ended with the session', orphan: 'ended with the session', ok: `finished · ${M3}` });
+  });
+
+  // Decision Log 17 (a): the drill-in's reason says what the row's word says, from the same rule.
+  it('says This agent ended in the drill-in’s relay box where the row reads ended, and This agent ended with the session where the row does', async () => {
+    const { handle } = await mountTerminal([sidecar('quit'), sidecar('gone')], { agentId: 'quit' as AgentId });
+    body('snapshot', [{ agentId: 'quit', meta: meta('quit'), status: 'exited', evidence: 'bridge', running: false, startedAt: at(0) }, gone('gone')]);
+    const placeholder = () => screen.getByRole('textbox').getAttribute('placeholder');
+    expect(placeholder()).toBe('This agent ended');
+    act(() => handle.openAgent('gone' as AgentId));
+    expect(placeholder()).toBe('This agent ended with the session');
+    // a parent's relay box (a session MAWS runs) reads the same rule
+    const nodeOf = (id: string) => useTaskGraph.getState().entries.get(A)!.graph.tasks.get(id as TaskId);
+    const reasonOf = (id: string) => relayDisabledReason({ node: nodeOf(id), status: null, relay: undefined, session: TITLE });
+    expect([reasonOf('quit'), reasonOf('gone')]).toEqual([{ text: 'This agent ended', tooltip: null }, { text: 'This agent ended with the session', tooltip: null }]);
   });
 
   it('keeps under Running, reading ended beside (+1), an agent the bridge holds as stopped while its nested agent runs', async () => {
