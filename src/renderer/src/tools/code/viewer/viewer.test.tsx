@@ -2,7 +2,9 @@
 // target, and the `fileTab` slot over a fake X2 client (a refusal in words, continuation reads, the line jump, Source,
 // the follow-the-file refresh, the no-session tab).
 import { EditorView } from '@codemirror/view';
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { isolateHistory } from '@codemirror/commands';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mimeOf } from '@shared/files/mime';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -17,6 +19,7 @@ import { useSessions } from '../../../stores/sessions';
 import type { TranscriptEntry } from '../../../stores/transcript';
 import { useTranscriptStore, type TurnId } from '../../../transcript';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
+import { openChosen } from '../files/open-chosen';
 import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
@@ -620,8 +623,10 @@ describe('a read-only mount (E2)', () => {
 // UX wave U6c (M3; docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E and sequences W1 to W6):
 // a file outside the session's folders that its transcript names is read with `named`, held read-only with the reason
 // as the editor's title, and read again when it is asked for again, since no watch keeps it current; a session on
-// another machine is asked as today.
-describe('a file the transcript names (U6c)', () => {
+// another machine is asked as today. UX wave U6e (W6): these are now a daemon of the parent pin's answers (`older`), which
+// say `named` with no `outside`, so the page holds the file read-only as U6c built it; this build's daemon is the suite
+// below.
+describe('a file the transcript names (U6c), from a daemon of the parent pin', () => {
   const OUT = '/elsewhere/notes.txt';
   const PDF = '/elsewhere/report.pdf';
   const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -642,7 +647,7 @@ describe('a file the transcript names (U6c)', () => {
   // transcript names there (no other session's names any).
   function disk(files: Record<string, string>, named: string[] = []) {
     const names = new Set(named);
-    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path) });
+    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && names.has(path), older: true });
     return { ...served, names };
   }
   // A file tab the layout holds (so a remount finds its entry), shown.
@@ -873,6 +878,461 @@ describe('a file the transcript names (U6c)', () => {
     expect(shown()).toMatchObject({ appSessionId: B, status: 'error', named: false, text: '' });
     expect(codeText()).toBeNull();
     expect(main.callsOf('files.read').map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b']);
+  });
+});
+
+// UX wave U6e (M3; docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §D and sequences W2 to W8, W10):
+// a file from outside the session's folders that this build's daemon admits for a save (a counted name, a grant or the
+// agent's delivery) is editable, its path saying where Save writes, and is saved by `files.writeOutside` with the real
+// path the page pinned when it showed the document; a file the daemon admits for a read alone (MAWS's own, only added to
+// the Library, named only by a tool's result) reads "Read-only", a button whose panel gives the reason. Invented paths
+// under `/elsewhere` and `/r`, invented text.
+describe('a file from outside the folders edits and saves (U6e)', () => {
+  const OUT = '/elsewhere/notes.txt';
+  const REAL = '/elsewhere/real/notes.txt'; // OUT's real path: a link on the way
+  const SWAPPED = '/elsewhere/swapped/notes.txt';
+  const REMOTE = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const SENTENCES = {
+    maws: 'Read-only: MAWS does not edit its own files',
+    added: 'Read-only: this file is in the Library, not in this session’s folders. Choose it with File ▸ Open File… to edit it',
+    result: 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it',
+    outside: 'Read-only: the file is outside the folders this session works in',
+  } as const;
+  const MOVED = 'Could not save: the path no longer leads to the file that was opened';
+  const REFUSED = 'Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it';
+  const UNAVAILABLE = 'Could not save: MAWS’s service on this Mac is from an earlier version and cannot save a file from outside the session’s folders. Try again in a moment';
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('./CodeView'));
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+  });
+
+  const shown = (path = OUT) => useViewer.getState().entries.get(FILE(path))!;
+  const view = () => EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement)!;
+  const typed = (text: string) => act(() => view().dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  const lead = () => document.querySelector<HTMLElement>('[data-path-lead]')!;
+  const label = () => document.querySelector<HTMLElement>('[data-read-only]');
+  const saveButton = () => screen.queryByRole('button', { name: 'Save' });
+  const title = () => document.querySelector('.cm-content')?.getAttribute('title') ?? null;
+  const editorEditable = () => view().state.facet(EditorView.editable);
+  // The disk as this build's daemon answers it: `/elsewhere` outside session A's folders; what admits a file there for A
+  // (a counted name, a result-only name, an added record, the agent's delivery), and MAWS's own folders.
+  function disk(files: Record<string, string>, how: { names?: string[]; results?: string[]; sent?: string[]; added?: string[]; own?: string[]; older?: boolean } = {}) {
+    const names = new Set(how.names ?? []);
+    const results = new Set(how.results ?? []);
+    const sent = new Set(how.sent ?? []);
+    const forA = (set: Set<string>) => (appSessionId: string, path: string) => appSessionId === MAIN_A && set.has(path);
+    const served = installDisk(files, { outside: ['/elsewhere'], names: forA(names), results: forA(results), sent: forA(sent), added: how.added, own: how.own, older: how.older });
+    return { ...served, names, results, sent, saves: () => [...served.callsOf('files.write'), ...served.callsOf('files.writeOutside')] };
+  }
+  const show = (path = OUT, appSessionId: AppSessionId = A) => {
+    act(() => void openFile(appSessionId, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path, null, appSessionId)} />);
+  };
+  const editable = async (path = OUT) => {
+    await waitFor(() => expect(shown(path)).toMatchObject({ status: 'ready', editable: true }));
+    await waitFor(() => expect(editorEditable()).toBe(true));
+  };
+
+  it('A1: a linked file opens editable, no label, its path saying where Save writes; typing writes nothing; Save writes it by files.writeOutside with its real path', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    main.reals[OUT] = REAL;
+    show();
+    await editable();
+    expect(shown()).toMatchObject({ named: true, locked: null, pin: REAL });
+    expect(readOnlyReason(shown())).toBeNull();
+    expect(label()).toBeNull();
+    expect(lead().textContent).toBe(OUT); // the bar shows the path as any file's
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(`Save writes to ${REAL}`);
+    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${REAL}`);
+    expect(title()).toBeNull(); // the editor's title is gone for a file that can be saved
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('true');
+    typed('two ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    await settle();
+    expect(main.saves()).toEqual([]);
+    expect(main.files[OUT]).toBe('one\n');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('two one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'two one\n', expectedHash: fakeHash('one\n'), real: REAL }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+    expect(shown()).toMatchObject({ dirty: false, saving: false, saveError: null });
+  });
+
+  it('a chosen and a sent file save the same way; a file inside the folders keeps its tooltip and today’s files.write', async () => {
+    const main = disk({ [OUT]: 'chosen\n', '/elsewhere/sent.txt': 'sent\n', '/r/app.ts': 'inside\n' }, { sent: ['/elsewhere/sent.txt'] });
+    main.grant(MAIN_A, OUT);
+    for (const path of [OUT, '/elsewhere/sent.txt']) {
+      const shownNow = show(path);
+      await editable(path);
+      expect(lead().getAttribute('title')).toBe(`Save writes to ${path}`);
+      typed('+');
+      await waitFor(() => expect(shown(path).dirty).toBe(true));
+      expect(await act(() => useViewer.getState().save(FILE(path)))).toBe('ok');
+      shownNow.unmount();
+    }
+    expect(main.files).toMatchObject({ [OUT]: '+chosen\n', '/elsewhere/sent.txt': '+sent\n' });
+    expect(main.callsOf('files.writeOutside').map((input) => input.real)).toEqual([OUT, '/elsewhere/sent.txt']);
+    show('/r/app.ts');
+    await editable('/r/app.ts');
+    expect(shown('/r/app.ts')).toMatchObject({ named: false, pin: null, locked: null });
+    expect(lead().getAttribute('title')).toBe('/r/app.ts');
+    expect(lead().hasAttribute('data-outside')).toBe(false);
+    expect(lead().hasAttribute('aria-description')).toBe(false);
+    typed('+');
+    await waitFor(() => expect(shown('/r/app.ts').dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(FILE('/r/app.ts')))).toBe('ok');
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: MAIN_A, path: '/r/app.ts', content: '+inside\n', expectedHash: fakeHash('inside\n') }]);
+    expect(main.callsOf('files.writeOutside')).toHaveLength(2);
+  });
+
+  it('a session on another machine reads with no named and saves by files.write, as today', async () => {
+    const main = disk({ '/r/a.ts': 'remote\n' });
+    const remote: Extract<TabRef, { kind: 'file' }> = { ...fileTab('/r/a.ts', null, REMOTE), id: `file:${OTHER_MACHINE}:/r/a.ts`, machine: OTHER_MACHINE };
+    render(<FileViewer tab={remote} />);
+    await waitFor(() => expect(useViewer.getState().entries.get(remote.id)).toMatchObject({ status: 'ready', editable: true, pin: null }));
+    await waitFor(() => expect(editorEditable()).toBe(true));
+    typed('+');
+    await waitFor(() => expect(useViewer.getState().entries.get(remote.id)!.dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(remote.id))).toBe('ok');
+    expect(main.callsOf('files.read').every((input) => !('named' in input) && !('agent' in input))).toBe(true);
+    expect(main.callsOf('files.write')).toEqual([{ appSessionId: 'app-r', path: '/r/a.ts', content: '+remote\n', expectedHash: fakeHash('remote\n') }]);
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  // §D's "Read-only": each reason a button before the path and after what the tab puts at the bar's start, in the normal
+  // text colour, its sentence its accessible description and the editor's title; a press opens the panel with the
+  // sentence, and "Open File…" where choosing the file makes it editable.
+  const READ_ONLY = [
+    { reason: 'maws', path: '/r/profile/settings.json', how: { own: ['/r/profile'] }, button: false, note: 'MAWS’s own, inside the folders' },
+    { reason: 'maws', path: '/elsewhere/profile/key.txt', how: { own: ['/elsewhere/profile'], names: ['/elsewhere/profile/key.txt'] }, button: false, note: 'MAWS’s own, outside' },
+    { reason: 'added', path: OUT, how: { added: [OUT] }, button: true, note: 'only added to the Library' },
+    { reason: 'result', path: OUT, how: { results: [OUT] }, button: true, note: 'named only by a tool’s result' },
+    { reason: 'outside', path: OUT, how: { names: [OUT], older: true }, button: false, note: 'named by a daemon of the parent pin' },
+  ] as const;
+  it.each(READ_ONLY)('“Read-only” for $reason ($note): before the path, its sentence, a panel on a press', async ({ reason, path, how, button }) => {
+    const main = disk({ [path]: 'held\n' }, how);
+    act(() => void openFile(A, path, null, { main: true }));
+    render(<FileViewer tab={fileTab(path)} start={<button type="button" data-start>start</button>} />);
+    await waitFor(() => expect(shown(path)?.status).toBe('ready'));
+    expect(readOnlyReason(shown(path))).toBe(reason);
+    expect(shown(path).editable).toBe(false);
+    const at = label()!;
+    expect(at.tagName).toBe('BUTTON');
+    expect(at.getAttribute('data-read-only')).toBe(reason);
+    expect(at.textContent).toBe('Read-only');
+    expect(at.getAttribute('aria-description')).toBe(SENTENCES[reason]);
+    expect(at.className.split(/\s+/)).toContain('text-fg');
+    const bar = at.parentElement!;
+    const order = [...bar.children];
+    expect(order.indexOf(bar.querySelector('[data-start]')!)).toBe(order.indexOf(at) - 1);
+    expect(order.indexOf(lead())).toBe(order.indexOf(at) + 1);
+    await waitFor(() => expect(title()).toBe(SENTENCES[reason]));
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-editable')).toBe('false');
+    expect(saveButton()).toBeNull();
+    vi.spyOn(document.querySelector('[data-file-viewer]')!, 'getBoundingClientRect').mockReturnValue({ width: 320, height: 600, top: 0, left: 0, right: 320, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    await userEvent.setup().click(at);
+    const panel = await screen.findByRole('dialog');
+    expect(panel.hasAttribute('data-read-only-panel')).toBe(true);
+    expect(within(panel).getByText(SENTENCES[reason])).toBeTruthy();
+    expect(panel.className.split(/\s+/)).toContain('shadow-float');
+    expect(panel.style.getPropertyValue('--read-only-column')).toBe('320px'); // never wider than its column (K13)
+    expect(panel.className.split(/\s+/)).toContain('w-[min(24rem,calc(var(--read-only-column,25rem)_-_1rem))]');
+    const open = within(panel).queryByRole('button', { name: 'Open File…' });
+    expect(open !== null).toBe(button);
+    if (open) {
+      fireEvent.click(open);
+      await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: MAIN_A }]));
+    }
+    expect(main.saves()).toEqual([]);
+    expect(await useViewer.getState().save(FILE(path))).toBe('noop');
+  });
+
+  it('“Read-only” takes the keyboard: Enter on it opens the panel', async () => {
+    disk({ [OUT]: 'held\n' }, { results: [OUT] });
+    show();
+    await waitFor(() => expect(label()).not.toBeNull());
+    act(() => label()!.focus());
+    await userEvent.setup().keyboard('{Enter}');
+    expect(within(await screen.findByRole('dialog')).getByText(SENTENCES.result)).toBeTruthy();
+  });
+
+  // K11: drawn from the first frame the open knows the state; K10: kept across a refused read while the entry holds the
+  // file's real path.
+  it('“Read-only” is drawn from the first frame the open’s state is known, and kept across a refused read', async () => {
+    const main = disk({ [OUT]: 'held\n' }, { added: [OUT] });
+    const gate = main.hold('files.read');
+    const frames: boolean[] = [];
+    const observer = new MutationObserver(() => {
+      const viewerEl = document.querySelector('[data-file-viewer]');
+      if (viewerEl && viewerEl.getAttribute('data-kind') !== '') frames.push(label() !== null);
+    });
+    observer.observe(document.body, { subtree: true, childList: true, attributes: true });
+    show();
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(1));
+    expect(label()).toBeNull(); // the open does not know the state yet
+    gate.release();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: 'added', pin: OUT }));
+    observer.disconnect();
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.every(Boolean)).toBe(true);
+    main.added.delete(OUT); // the Library's record goes: the next read is refused
+    act(() => void openFile(A, OUT, null, { main: true }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Refused');
+    expect(shown()).toMatchObject({ status: 'error', named: false, locked: 'added', pin: OUT });
+    expect(label()?.getAttribute('data-read-only')).toBe('added');
+  });
+
+  it('W3: a conflict’s read that answers another real path leaves the pin; the next save sends it and is refused; Reload pins the version taken', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.files[OUT] = 'theirs\n'; // changed on disk: the save conflicts
+    const write = main.hold('files.writeOutside');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(1));
+    main.reals[OUT] = SWAPPED; // a folder on the path swapped before the conflict reads the file
+    await act(async () => write.release());
+    await waitFor(() => expect(shown()).toMatchObject({ saving: false, theirs: { view: 'merge', real: SWAPPED } }));
+    expect(shown().pin).toBe(OUT);
+    expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-theirs')).toBe('merge');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(2));
+    expect(main.callsOf('files.writeOutside')[1]).toMatchObject({ real: OUT, expectedHash: fakeHash('theirs\n') });
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(MOVED));
+    expect(main.files[OUT]).toBe('theirs\n');
+    expect(main.callsOf('files.write')).toEqual([]);
+    act(() => useViewer.getState().reload(FILE(OUT)));
+    expect(shown()).toMatchObject({ pin: SWAPPED, dirty: false, text: 'theirs\n' });
+  });
+
+  it('W4: under unsaved edits a read without named keeps the pin and the outside save; own or not writable stop it at once, the document standing; a later read gives it back', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    offs.push(connectCodeEvents());
+    const changed = () => act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.outside.delete('/elsewhere'); // the folder is the session's now
+    changed();
+    await waitFor(() => expect(shown().loads).toBe(2));
+    expect(shown()).toMatchObject({ named: false, pin: OUT, locked: null, editable: true, dirty: true });
+    main.own.add('/elsewhere'); // and MAWS's own
+    changed();
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true }));
+    await waitFor(() => expect(editorEditable()).toBe(false));
+    expect(view().state.doc.toString()).toBe('mine one\n');
+    expect(saveButton()).toBeNull();
+    expect(label()?.getAttribute('data-read-only')).toBe('maws');
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.saves()).toEqual([]);
+    main.own.delete('/elsewhere');
+    changed();
+    await waitFor(() => expect(shown()).toMatchObject({ locked: null, editable: true }));
+    expect(label()).toBeNull();
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('mine one\n'));
+    expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: MAIN_A, path: OUT, content: 'mine one\n', expectedHash: fakeHash('one\n'), real: OUT }]);
+    expect(main.callsOf('files.write')).toEqual([]);
+  });
+
+  it('W4: under unsaved edits an answer that the file is only added stops the save the same way', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    offs.push(connectCodeEvents());
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.names.delete(OUT); // the conversation no longer names it; the Library's added record still admits a read
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'added', editable: false, dirty: true, pin: OUT }));
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.saves()).toEqual([]);
+  });
+
+  it('W5: a save over a file changed on disk answers conflict and shows the merge view; nothing is written', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.files[OUT] = 'other\n';
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(shown()).toMatchObject({ saving: false, theirs: { view: 'merge', text: 'other\n', real: OUT } }));
+    expect(main.files[OUT]).toBe('other\n');
+    expect(screen.getByText('Changed on disk since you opened it')).toBeTruthy();
+  });
+
+  it('W6: named with no outside (a daemon of the parent pin) is read-only with U6c’s title, and Save sends nothing', async () => {
+    const main = disk({ [OUT]: 'held\n' }, { names: [OUT], older: true });
+    show();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', named: true, pin: null, locked: null, editable: false }));
+    expect(readOnlyReason(shown())).toBe('outside');
+    await waitFor(() => expect(title()).toBe(SENTENCES.outside));
+    expect(lead().getAttribute('title')).toBe(OUT);
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.saves()).toEqual([]);
+  });
+
+  it('W7: a save refused with the service’s sentence asks for Open File…; choosing the file selects the tab with the edits, reads nothing over them, and the save lands', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.names.delete(OUT); // the conversation was cleared
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(REFUSED));
+    expect(main.files[OUT]).toBe('one\n');
+    expect(main.callsOf('files.write')).toEqual([]);
+    main.picks(() => ({ status: 'opened', path: OUT }));
+    const reads = main.callsOf('files.read').length;
+    await act(() => openChosen(A));
+    await settle();
+    expect(main.callsOf('files.read')).toHaveLength(reads);
+    expect(view().state.doc.toString()).toBe('mine one\n');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('mine one\n'));
+    expect(main.callsOf('files.write')).toEqual([]);
+  });
+
+  it('W8: a daemon replaced by one that does not know files.writeOutside answers unknown_command; no files.write follows; both files unchanged', async () => {
+    const INSIDE = '/r/notes.txt';
+    const main = disk({ [OUT]: 'one\n', [INSIDE]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.daemon.older = true; // the daemon replaced by one of the parent pin
+    main.reals[OUT] = INSIDE; // a folder on the path retargeted to a file of the same bytes inside the folders
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(UNAVAILABLE));
+    expect(main.callsOf('files.writeOutside')).toHaveLength(1);
+    await settle();
+    expect(main.callsOf('files.write')).toEqual([]);
+    expect(main.files).toMatchObject({ [OUT]: 'one\n', [INSIDE]: 'one\n' });
+  });
+
+  it('a refused save of a file inside the folders shows the service’s words, as today', async () => {
+    const main = disk({ '/r/app.ts': 'inside\n' });
+    show('/r/app.ts');
+    await editable('/r/app.ts');
+    typed('+');
+    await waitFor(() => expect(shown('/r/app.ts').dirty).toBe(true));
+    main.outside.add('/r');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe(`Could not save: ${OUTSIDE_REFUSAL}`));
+    main.outside.delete('/r');
+    main.own.add('/r');
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Could not save: not writable: /r/app.ts'));
+    expect(main.callsOf('files.writeOutside')).toEqual([]);
+  });
+
+  // K1, K14, K15, K3: the failure on a line of its own at the bar's full width, never cut; Save and Wrap one group.
+  it('a save’s failure takes a line of its own, never cut; Save and Wrap stay one group on the path’s line', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    main.names.delete(OUT);
+    fireEvent.click(saveButton()!);
+    const failure = await screen.findByRole('alert');
+    const bar = lead().parentElement!;
+    expect(failure.parentElement).toBe(bar); // a line of the bar, not a part of the controls
+    expect(bar.lastElementChild).toBe(failure);
+    const classes = failure.className.split(/\s+/);
+    expect(classes).toContain('basis-full');
+    expect(classes).not.toContain('truncate');
+    const group = bar.querySelector('[data-bar-controls]')!;
+    expect(group.parentElement).toBe(bar);
+    expect(within(group as HTMLElement).getByRole('button', { name: 'Save' })).toBeTruthy();
+    expect(within(group as HTMLElement).getByRole('button', { name: 'Wrap' })).toBeTruthy();
+  });
+
+  it('W2: a save in flight when its tab closes lands nowhere, and the file is what the save wrote', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    const { unmount } = show();
+    await editable();
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    const write = main.hold('files.writeOutside');
+    const saving = useViewer.getState().save(FILE(OUT));
+    await waitFor(() => expect(main.callsOf('files.writeOutside')).toHaveLength(1));
+    act(() => useLayout.getState().closeTab(FILE(OUT)));
+    unmount();
+    expect(useViewer.getState().entries.has(FILE(OUT))).toBe(false);
+    write.release();
+    expect(await saving).toBe('noop');
+    await settle();
+    expect(useViewer.getState().entries.has(FILE(OUT))).toBe(false);
+    expect(main.files[OUT]).toBe('mine one\n');
+  });
+
+  it('W10: a file named only by a tool’s result, once the agent links it in its own text, is editable when shown again, and Save writes', async () => {
+    const main = disk({ [OUT]: 'from a tool\n' }, { results: [OUT] });
+    const first = show();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', locked: 'result', editable: false }));
+    expect(lead().getAttribute('data-outside')).toBe('result');
+    expect(label()?.getAttribute('data-read-only')).toBe('result');
+    main.names.add(OUT); // the agent's own text links it
+    first.unmount();
+    render(<FileViewer tab={fileTab(OUT)} />); // shown again
+    await editable();
+    expect(shown()).toMatchObject({ locked: null, named: true, pin: OUT });
+    expect(label()).toBeNull();
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    typed('mine ');
+    await waitFor(() => expect(shown().dirty).toBe(true));
+    fireEvent.click(saveButton()!);
+    await waitFor(() => expect(main.files[OUT]).toBe('mine from a tool\n'));
+  });
+
+  // The architect's case (M3's brief): at the narrowest width the bar keeps the path cut in its middle, both ends drawn
+  // (the folder part cut first, at least its first character and the ellipsis; the name whole), and the path's
+  // accessible description carries the whole path. M4's scene measures the 320 px step.
+  it('at the narrowest width the path is cut in its middle with both ends visible, and its accessible description is the whole path', async () => {
+    const LONG = '/elsewhere/notes/plans/todo.txt';
+    disk({ [LONG]: 'one\n' }, { names: [LONG] });
+    show(LONG);
+    await waitFor(() => expect(shown(LONG)?.status).toBe('ready'));
+    const [folder, slash, name] = [...lead().children] as HTMLElement[];
+    expect(lead().textContent).toBe(LONG);
+    expect([folder.textContent, slash.textContent, name.textContent]).toEqual(['/elsewhere/notes/plans', '/', 'todo.txt']);
+    expect(folder.className.split(/\s+/)).toEqual(expect.arrayContaining(['truncate', 'min-w-[2ch]']));
+    expect(slash.className.split(/\s+/)).toContain('shrink-0');
+    expect(name.className.split(/\s+/)).toContain('shrink-0');
+    expect(lead().style.minWidth).toBe(`${'todo.txt'.length + 3}ch`); // the name, the slash and the folder's two characters
+    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${LONG}`);
+  });
+
+  it('reads with agent while the tab holds the agent’s mark; a grant alone is then refused, and the read without it shows the file', async () => {
+    const main = disk({ [OUT]: 'chosen\n', '/elsewhere/report.pdf': '%PDF-1.4 invented\n' }, { names: ['/elsewhere/report.pdf'] });
+    main.grant(MAIN_A, OUT);
+    act(() => void openFile(A, OUT, null, { main: true }));
+    const { rerender } = render(<FileViewer tab={fileTab(OUT)} agent />);
+    expect((await screen.findByRole('alert')).textContent).toContain(OUTSIDE_REFUSAL);
+    expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: OUT, named: true, agent: true })]);
+    rerender(<FileViewer tab={fileTab(OUT)} />); // the person's open removes the mark
+    await editable();
+    expect(main.callsOf('files.read').at(-1)).not.toHaveProperty('agent');
+    cleanup();
+    act(() => void openFile(A, '/elsewhere/report.pdf', null, { main: true }));
+    render(<FileViewer tab={fileTab('/elsewhere/report.pdf')} agent />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open externally' }));
+    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/elsewhere/report.pdf', named: true, agent: true }]));
   });
 });
 

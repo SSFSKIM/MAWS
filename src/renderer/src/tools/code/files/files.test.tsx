@@ -8,13 +8,15 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesEntry } from '@shared/ipc/schema/files';
 import { FilesTreeSchema } from '@shared/ipc/schema/layout';
 import type { SessionRecord } from '@shared/graph/session';
-import { bareOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
+import type { MachineState } from '@shared/ipc/schema/machines';
 import { record } from '../../../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
+import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
 import { installDisk } from '../../../test-support/code-disk';
 import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
@@ -164,6 +166,7 @@ const QUIET: Partial<Record<string, ReturnType<typeof answer>>> = {
   'git.watch': fail('not a git repository'),
   'git.unwatch': answer(),
   'fs.workflows': answer({ runs: [] }),
+  'layout.openFile': answer({ status: 'cancelled' }), // UX wave U6e: the chooser, cancelled
 };
 
 function mainWith(tree: Record<string, FilesEntry[] | string>) {
@@ -726,6 +729,73 @@ describe('files tool', () => {
 // relaunch. A row's click opens the file in the preview tab, a double-click keeps it, ⌘-click opens a main tab. The row of
 // the file in view is marked. In a tab too narrow for both, the tree folds, and its button shows it in the file's place
 // (the owner's answer on card R8). happy-dom has no layout: a tab's width is reported by a fake ResizeObserver.
+// UX wave U6e (M3; §D, "Reported" 1, K6, K7, K9): the Files list's menu, opened by a right-click in the tree or ⇧F10 with
+// the keyboard in it, holds the one row "Open File…", with no chord; for a session on another machine the row is
+// disabled and names the machine, the menu at most max-w-96 wide and a long name cut, the whole row its title.
+describe('the Files list’s menu (U6e)', () => {
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof mainWith>;
+  const R = addressOf(OTHER_MACHINE, 'app-remote') as AppSessionId;
+  const STUDIO = 'the-rehearsal-room-mac-mini-upstairs';
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    main = mainWith(REPO);
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })).set(R, record(R, { directory: '/r' })) }));
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: STUDIO } as MachineState]]) });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    useMachines.setState({ machines: new Map() });
+  });
+  const openTree = async (appSessionId: AppSessionId) => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId }));
+    return screen.findByRole('tree');
+  };
+
+  it('a right-click in the tree opens the one row “Open File…”, with no chord, which asks Open File… for the tab’s session', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    fireEvent.contextMenu(item('src'));
+    const menu = await screen.findByRole('menu');
+    expect(menu.hasAttribute('data-files-menu')).toBe(true);
+    expect(menu.className.split(/\s+/)).toEqual(expect.arrayContaining(['max-w-96', 'shadow-float']));
+    const rows = within(menu).getAllByRole('menuitem');
+    expect(rows.map((row) => row.textContent)).toEqual(['Open File…']);
+    expect(rows[0].hasAttribute('data-open-file')).toBe(true);
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
+  });
+
+  it('⇧F10 with the keyboard in the tree opens it', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus());
+    fireEvent.keyDown(item('src'), { key: 'F10', shiftKey: true });
+    expect((await screen.findByRole('menu')).hasAttribute('data-files-menu')).toBe(true);
+  });
+
+  it('for a session on another machine the row is disabled, names the machine in the muted colour, cut, with its whole text as its title', async () => {
+    const tree = await openTree(R);
+    fireEvent.contextMenu(tree);
+    const row = within(await screen.findByRole('menu')).getByRole('menuitem');
+    const whole = `Open File… (this session runs on ${STUDIO})`;
+    expect(row.textContent).toBe(whole);
+    expect(row.getAttribute('title')).toBe(whole);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.className.split(/\s+/)).toContain('truncate');
+    expect(row.querySelector('.text-fg-muted')?.textContent).toBe(` (this session runs on ${STUDIO})`);
+    fireEvent.click(row);
+    await act(flush);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+});
+
 describe('the tree at the file’s left', () => {
   const APP = '/r/src/app.ts';
   const STAGED = '/r/src/staged.ts';
