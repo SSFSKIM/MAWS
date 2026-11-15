@@ -27,7 +27,7 @@ How to see it working, on the wave's build: in a session whose agent changed sev
 - [x] (2026-11-15 UTC) M3 — The stack drawn (`176e8ee92`..`4c02123a0`, fix `f9021073d`..`bb511afe8`; reviewed clean)
 - [x] (2026-11-15 UTC) M4 — The band, the place and the hunk counter (`8e9c757e6`..`dcd368046`, fix `1da221687`..`a94f369cb`; reviewed clean). Before it, M3's fix 2 for the desk's web app (`5ef3ebfb7`..`1cb670da8`; reviewed clean)
 - [x] (2026-11-15 UTC) M5 — Comments on lines (`d205cc395`..`d02e034e6`; fixes `06d3c597a`..`386679b1e`, `fa66e0461`..`d0ca36877`, `91eeb362b`..`6c3f7938e`, `9ccfbca00`..`d0b0c1d39`, `064e123a5`..`079bf8707`; reviewed clean). Before it, M4's deferred gesture-window tests (`6d198d86f`)
-- [ ] M6 — U5b-1's scenes, record and acceptance
+- [x] (2026-11-15 UTC) M6 — U5b-1's scenes, record and acceptance (`2dd54eaf3`..`1ac14094a`, fix `4e232aeb5`..`081ffaec0`; reviewed clean; the whole unit suite and typecheck run once at `1ac14094a`)
 - [ ] U5b-1: the branch review, class 1a, the Mac runs, the owner's look at the stacked Review on a real change, the pull request (the architect).
 - [ ] M7 — The three reads on a machine, and their cost
 - [ ] M8 — The reads over the machine link
