@@ -3,6 +3,7 @@
 // the text typed immediately before the act is there once in the new place, and the undo history came with it
 // (Constraint 9). The main area and the side column are drawn as the shell draws them, with the real file viewer.
 import { isolateHistory, undo } from '@codemirror/commands';
+import { getChunks } from '@codemirror/merge';
 import { EditorView } from '@codemirror/view';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -12,12 +13,14 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 import { registerShellActions } from '../app/shell-actions';
 import { registerSlot, resetSlots } from '../app/slots';
+import { connectCodeEvents } from '../ipc/events';
 import { queryClient } from '../ipc/query';
 import { runAction } from '../keymap/actions-runtime';
 import { MainArea } from '../main/MainArea';
 import { panelHost, registerPanelTool, usePanelHost } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
 import { PanelRegion } from '../panel/PanelRegion';
+import { groupOf, sideGroups } from '../panel/surface-model';
 import { persistLayout, useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
@@ -394,6 +397,54 @@ describe('Reopen closed tab on a file that is beside the chat', () => {
   });
 });
 
+// ---- a second session's open of a file with unsaved edits (the branch review's fourth finding) ------------------------------
+
+describe('a file with unsaved edits opened beside a second session’s chat', () => {
+  it('is a kept tab there, not a preview, so a later open in that session does not replace it', async () => {
+    renderBoth();
+    const side = await openBeside(APP);
+    type(side, '// mine\n');
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    act(() => void openFile(B, APP)); // an open that would give B a preview
+    const tabId = sideTabOf(APP, B)!;
+    expect(useLayout.getState().panelParams[tabId]).toEqual({ file: APP, line: null });
+    act(() => void openFile(B, LIB));
+    expect(sideTabOf(APP, B)).toBe(tabId);
+  });
+});
+
+// ---- the merge view across a move (the Mac run's second failure) ----------------------------------------------------------
+
+describe('a file in the merge view moved to the main area', () => {
+  const numbered = (edit: Record<number, string> = {}) => Array.from({ length: 10 }, (_, i) => `${edit[i + 1] ?? `line ${i + 1}`}\n`).join('');
+  const chunksIn = (name: 'main' | 'panel') => region(name).querySelectorAll<HTMLElement>('.cm-deletedChunk');
+
+  it('takes theirs there: the chunk’s lines are the disk’s, and the bar counts one change', async () => {
+    offs.push(connectCodeEvents());
+    disk.files[APP] = numbered();
+    renderBoth();
+    const side = await openBeside(APP, { keep: true });
+    act(() => {
+      const line = side.state.doc.line(2);
+      side.dispatch({ changes: { from: line.from, to: line.to, insert: 'mine 2' }, userEvent: 'input.type', annotations: isolateHistory.of('full') });
+    });
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    disk.files[APP] = numbered({ 8: 'theirs 8' });
+    act(() => disk.emit('files.changed', { appSessionId: 'app-a' as AppSessionId, path: APP, kind: 'changed' }));
+    fireEvent.click(await within(region('panel')).findByRole('button', { name: 'Compare' }));
+    await waitFor(() => expect(chunksIn('panel')).toHaveLength(2));
+    act(() => void moveFileToMain(sideTabOf(APP)!));
+    await waitFor(() => expect(chunksIn('main')).toHaveLength(2));
+    const counted = () => region('main').querySelector('[data-merge-changes]')?.textContent;
+    expect(counted()).toBe('2 changes from disk');
+    fireEvent.click(within(chunksIn('main')[1]).getByRole('button', { name: 'Take theirs' }));
+    await waitFor(() => expect(counted()).toBe('1 change from disk'));
+    const main = editorIn('main')!;
+    expect(main.state.doc.toString()).toBe(numbered({ 2: 'mine 2', 8: 'theirs 8' }));
+    expect(getChunks(main.state)?.chunks).toHaveLength(1);
+  });
+});
+
 // ---- the viewer's hold (Decision 20b; sequence 11) -------------------------------------------------------------------------
 
 describe('the editor’s state across a move, at the viewer’s cap', () => {
@@ -422,6 +473,33 @@ describe('the editor’s state across a move, at the viewer’s cap', () => {
     twentyUnsaved();
     act(() => void (toMain ? moveFileToMain(sideTabOf(APP)!) : moveFileToSide(KEY(APP))));
     const moved = await editorShowing(toMain ? 'main' : 'panel', `// mine\n${ORIGINAL}`);
+    expect(existingViewState(KEY(APP))?.codeScroll).toBe(120);
+    act(() => void undo(moved));
+    expect(moved.state.doc.toString()).toBe(ORIGINAL);
+  });
+
+  // The branch review's third finding: a move between the side groups remounts the file's view as a move to the main
+  // area does, so it holds the key the same way.
+  it.each([['its menu'], ['a drag onto the column’s lower part']])('a clean file with an undo history moved to the other group by %s keeps its history and its scroll', async (way) => {
+    renderBoth();
+    const view = await openBeside(APP, { keep: true });
+    type(view, '// mine\n');
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(KEY(APP)))).toBe('ok');
+    view.scrollDOM.scrollTop = 120;
+    twentyUnsaved();
+    const tabId = sideTabOf(APP)!;
+    if (way === 'its menu') fireEvent.click(await menuItem(panelTabElement(tabId), 'Move below'));
+    else {
+      const dt = transfer();
+      drag('dragStart', panelTabElement(tabId), dt);
+      const target = document.querySelector<HTMLElement>('[data-side-lower-drop] [data-drop-overlay]')!;
+      drag('dragEnter', target, dt);
+      expect(drag('dragOver', target, dt)).toBe(true);
+      drag('drop', target, dt);
+    }
+    expect(groupOf(sideGroups(useLayout.getState(), A), tabId)).toBe('lower');
+    const moved = await editorShowing('panel', `// mine\n${ORIGINAL}`);
     expect(existingViewState(KEY(APP))?.codeScroll).toBe(120);
     act(() => void undo(moved));
     expect(moved.state.doc.toString()).toBe(ORIGINAL);

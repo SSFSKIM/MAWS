@@ -137,16 +137,21 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   const session = appSessionId!;
   if (!agent) layout.closeDestination();
   const params = (preview: boolean, marked: boolean): FilesTabParams => ({ file: path, line, ...(preview ? { preview: true as const } : {}), ...(marked ? { agent: true as const } : {}) });
+  // The branch review's fourth finding: a file whose one entry has unsaved edits or a save under way (made beside another
+  // chat) opens kept, as its first edit keeps a preview: a preview of it could be replaced with no close question. U6e:
+  // such a keep is no person's act, so it leaves the agent's mark; only the opener's own keep removes it
+  const entry = useViewer.getState().entries.get(key);
+  const kept = (options.keep ?? false) || entry?.dirty === true || entry?.saving === true;
   let tabId: string;
   let mark = agent && !options.keep; // the mark the tab holds after the open
   if (placement.tabId === null) {
-    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep, mark), asked: options.asked });
+    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!kept, mark), asked: options.asked });
   } else {
     // a reused tab is the preview unless kept; a selected one stays what it was, unless the opener keeps it. U6e: a reused
     // tab takes the agent's mark with the agent's open; a selected one keeps the mark it has from the agent's show, and
     // loses it with a person's open or a keep
     const held = fileOfTab(layout.panelParams[placement.tabId]);
-    const preview = placement.how === 'reuse' ? !options.keep : held?.preview === true && !options.keep;
+    const preview = placement.how === 'reuse' ? !kept : held?.preview === true && !kept;
     mark = agent && !options.keep && (placement.how === 'reuse' || held?.agent === true);
     layout.setPanelParams(placement.tabId, params(preview, mark));
     tabId = placement.tabId;

@@ -28,11 +28,11 @@ import { useLayout, type LayoutState } from '../stores/layout';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
-import { beginDrag, endDrag, endDragFrom, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
+import { beginDrag, endDrag, endDragFrom, holdSideViews, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { DropHighlight, DropOverlay } from '../shell/DropOverlay'; // UX wave U6b-1 (M4)
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { EDITOR_COPY } from '../tools/code/copy'; // UX wave U6b-1
-import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
 import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
 import { personsSideTabClick } from '../tools/code/open-file'; // UX wave U6e (decision 19): a person's click on a file's tab is the person's open
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
@@ -61,8 +61,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
   // keyboard in this strip.
   const move = (tabId: string, to: SideGroupName): SideGroupName | null => {
     handKeyboardTo(tabId, to);
-    useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    const landed = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    const landed = moveBetweenGroups(appSessionId, tabId, to);
     if (landed !== to) takesKeyboard(tabId, to);
     return landed;
   };
@@ -104,11 +103,19 @@ function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName, st
   return from !== null && from !== group ? dragging.tabId : null;
 }
 
-// The drop: the tab joins `group` (`moveSurfaceTab`, which refuses a group's only tab when it would make the second
-// group) and, once there, is kept; a tab no list holds any more moves nothing.
-function joinGroup(appSessionId: AppSessionId | null, tabId: string, group: SideGroupName): void {
-  useLayout.getState().moveSurfaceTab(appSessionId, tabId, group);
-  if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) === group) keep(tabId);
+// A side tab into the other group, by the drag or the menu, answering the group it ended in (`moveSurfaceTab` refuses a
+// group's only tab when it would make the second group; a tab no list holds any more moves nothing). A file's view mounts again
+// there, so its key is held first, as for a move to the main area (Decision 20b; the branch review's third finding): the
+// prune of the view that goes, and the viewer's cap, leave its entry for the view that comes. A tab whose move was made
+// is kept (Decision 6; the fifth finding: the menu's move as the drag's), wherever it lands: the upper group's only tab
+// moved below joins both groups into the upper one.
+function moveBetweenGroups(appSessionId: AppSessionId | null, tabId: string, to: SideGroupName): SideGroupName | null {
+  const file = sideFileOf(tabId);
+  if (file !== null) holdSideViews(file.key);
+  const before = useLayout.getState();
+  before.moveSurfaceTab(appSessionId, tabId, to);
+  if (useLayout.getState() !== before) keep(tabId); // a refused move sets nothing
+  return groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
 }
 
 // The highlight shows while a drag the strip would take is over it; it goes with that drag, by whichever path the drag
@@ -135,7 +142,7 @@ function useGroupDrop(appSessionId: AppSessionId | null, group: SideGroupName) {
       if (tabId === null || (panelTabOfDrop(event)?.tabId ?? tabId) !== tabId) return;
       event.preventDefault();
       endDrag();
-      joinGroup(appSessionId, tabId, group);
+      moveBetweenGroups(appSessionId, tabId, group);
     },
   };
   return { over: over && live, handlers };
@@ -153,7 +160,7 @@ export function LowerGroupDrop({ appSessionId }: { appSessionId: AppSessionId | 
   if (tabId === null) return null;
   return (
     <div data-side-lower-drop className="absolute inset-x-0 bottom-0 z-20 h-1/2">
-      <DropOverlay accepts label={COPY.moveBelow} onDrop={() => joinGroup(appSessionId, tabId, 'lower')} />
+      <DropOverlay accepts label={COPY.moveBelow} onDrop={() => void moveBetweenGroups(appSessionId, tabId, 'lower')} />
     </div>
   );
 }
@@ -351,7 +358,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
   );
   // Every tab is a trigger, disabled while its menu would be empty, so a tab is not mounted again when its menu gains or
   // loses its items (a second tab opened, a group closed) and the keyboard stays on it.
-  const toMain = panelTabMoves(tab);
+  const toMain = panelTabMoves(tab, params); // the subscribed params: a file given to a tree-only tab shows here
   return (
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild disabled={!toMain && moveTo === null} onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>

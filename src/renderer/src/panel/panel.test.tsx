@@ -10,6 +10,7 @@ import { connectPanelHost, panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
 import { SurfaceRow } from './SurfaceRow';
 import { PANEL_TAB_DRAG_TYPE } from '../shell/transfer';
+import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { drag, transfer } from '../test-support/drag';
 import type { PanelTool } from './tool';
 
@@ -503,6 +504,43 @@ describe('a side tab dragged between the groups', () => {
     expect(groupsOf()).toEqual([[review], [file, terminal], file]);
     expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
     expect(useLayout.getState().dragging).toBeNull();
+  });
+
+  // The branch review's fifth finding: the menu's move keeps a preview file tab, as the drag does (Decision 6).
+  it('by its menu’s Move below a preview file tab joins the other group and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()).toEqual([[review], [file], file]);
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
+  // The medium review of finding 5: the upper group's only tab moved below joins both groups into the upper one; the move
+  // was made, so the tab is kept though it lands in the upper group.
+  it('by its menu’s Move below the upper group’s only tab, a preview file tab, joins the groups into one and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    expect(groupsOf()).toEqual([[file], [review], review]);
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()[1]).toBeNull();
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
+  // The Mac run's first failure: a tree-only Files tab given a file by its params (the preview's reuse) is a tab that
+  // moves to the main area from then on, its menu offering it (the compiled project: no read memoized on the tab alone).
+  it('a tree-only Files tab given a file through its params offers Move to main area in its menu', async () => {
+    renderHost();
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain })).toBeTruthy();
   });
 
   it('onto the lower part of a one-group column it makes the second group; the target shows only while a side tab drags', () => {

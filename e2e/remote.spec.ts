@@ -745,8 +745,14 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       }).toPass({ timeout: 30_000 });
       await expect(treeRow(NOTES), 'the checkout’s committed file').toBeVisible({ timeout: 60_000 });
 
+      // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens
+      // beside the chat, a tab of the side column, read on B; the main strip is as it was, the session's tab in front
+      const strip = await mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
       await treeRow(NOTES).click();
       const viewer = page.locator(`[data-file-viewer][data-path="${join(checkout, NOTES)}"]`);
+      await expect(sideColumn(page).locator(`[data-files-tab][data-file="${join(checkout, NOTES)}"] [data-file-viewer]`), `B's file beside the chat\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+      await expect(mainTabById(page, `session:${address}`), 'the session’s tab still in front').toHaveAttribute('aria-selected', 'true');
+      expect(await mainTabs(page).locator('[role="tab"]').evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? '')), 'the main strip as it was').toEqual(strip);
       await expect(viewer).toHaveAttribute('data-editable', 'true', { timeout: 60_000 });
       await expect(viewer.locator('.cm-content')).toHaveAttribute('contenteditable', 'true');
       await expect(viewer.locator('.cm-content .cm-line').first()).toHaveText(NOTES_TEXT.trim());
@@ -762,8 +768,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         })
         .toBe(`${TYPED}\n${NOTES_TEXT}`);
       await expect(viewer).toHaveAttribute('data-dirty', 'false');
-      // back to the session's tab: the panel's tools are the session's
-      await mainTabById(page, `session:${address}`).click();
+      // the session's tab never left the front: the panel's tools are the session's
+      await expect(mainTabById(page, `session:${address}`)).toHaveAttribute('aria-selected', 'true');
     });
 
     await test.step('M4: files written on B show in A’s tree and status with no click, one written while A is cut off after the reconnect', async () => {

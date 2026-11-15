@@ -86,6 +86,16 @@ export function activeTab(main: Strip): TabRef | null {
   return pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
 }
 
+// The sessions the strip has in view, the focused pane's first: each pane's active tab's, the other pane's only while
+// it is split. What the card column and the side surfaces speak of, so a focus move between the panes of a split changes
+// neither while a session stays in view.
+export function sessionsInView(main: Strip): AppSessionId[] {
+  const shown = (pane: PaneState | undefined) => sessionOfTab(pane?.tabs.find((t) => t.id === pane.activeTabId) ?? null);
+  const focused = shown(main.panes[main.focusedPane] ?? main.panes[0]);
+  const beside = main.panes.length === 2 ? shown(main.panes[main.focusedPane === 0 ? 1 : 0]) : null;
+  return [focused, beside].filter((session): session is AppSessionId => session !== null);
+}
+
 // The session a tab belongs to, which the right panel shows (C8's tenth ask): a session, agent or diff tab's, a file
 // tab's when it was opened from a session; none for the app-wide tabs.
 export function sessionOfTab(tab: TabTarget | null): AppSessionId | null {

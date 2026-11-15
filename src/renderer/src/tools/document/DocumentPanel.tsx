@@ -5,6 +5,9 @@
 // artifact's own context), the history rail on A's IPC, the page in the governing design system's scope when D's is
 // provided, `onShown` once the document is on screen. P4-B4: an open's place (a link's fragment, `show_pane`'s `at`)
 // reaches the editor as its `reveal`, the open request for this artifact on this surface, taken once the editor has it.
+// UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the header's Export menu shows a
+// document's page in force, from its setting, its overrides and its governing system's page (./page.ts), and its page
+// items write through the tab's state; a dashboard's menu and history card keep their six rows.
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { DocumentEditor, type DocumentRail, type DocumentShown } from '@artifacts/document/editor/DocumentEditor'; // P3-F (F7): DocumentShown
 import type { Editor } from '@tiptap/core';
@@ -20,7 +23,8 @@ import { useSendToAction } from '../../delivery/header'; // P4-B5
 import { takeOpenRequest, useOpenRequest } from '../artifacts/viewers/requests'; // P4-B4
 import { useArtifactCommentTarget } from './comment-session'; // P3-F1
 import { forgetCardActivation, useDocumentComments } from './comments'; // P4-B3: forgetCardActivation
-import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useSystemFor } from './design-system'; // P3-D: useSystemFor
+import { documentDesignSystem, PageSystemProvider, SystemPage, useDocumentOverrides, useDocumentPageSetting, useSystemFor, useExportSystem } from './design-system'; // P3-D: useSystemFor; UX wave U10b: the page
+import { pageInForce } from './page'; // UX wave U10b
 import { documentExports, documentHeader, type DocumentHeaderCommands } from './header';
 import { useLibraryRow, useLibrarySpaces } from '../../library/store';
 import { returnedTo } from './history-api'; // P4 (tracker L274)
@@ -55,25 +59,32 @@ const NO_TARGET = { context: { kind: 'none' } } as const; // P3-F1: unused while
 export function DocumentBody({ artifactId, state, scope, visible, onShown, surface, renderChart, artifactKind, additionalActions, onDisplayedDocument, blockCommentQuote /* P3-E */ }: DocumentEditorProps & DocumentShellAdditions & { surface: 'panel' | 'main' }) {
   const snapshot = useSyncExternalStore(state.subscribe, state.snapshot);
   const title = snapshot.title || 'Document'; // until the artifact's row is read
+  const governing = useSystemFor(snapshot.placement);
+  // UX wave U10b (§B.5): the page in force, as the export decides it
+  const kind = artifactKind === 'dashboard' ? 'dashboard' : 'document';
+  const pageSystem = useExportSystem(governing);
+  const setting = useDocumentPageSetting(snapshot.handle?.doc ?? null);
+  const inForce = useMemo(() => pageInForce(setting.page, setting.overrides, pageSystem), [setting, pageSystem]); // resolves the system's tokens: once per change
   const commands = useMemo<DocumentHeaderCommands>(
     () => ({
       toggleRail: (rail) => state.toggleRail(rail),
       saveVersion: () => state.requestSaveVersion(),
       setSuggestions: (on) => void state.setSuggestions(on),
       export: (format, pageSize) => void state.export(format, pageSize),
+      choosePage: (item) => state.choosePage(item, pageSystem), // UX wave U10b
       dismissExport: () => state.dismissExport(),
       closeGuard: state.closeGuard,
     }),
-    [state],
+    [state, pageSystem],
   );
+  const writable = snapshot.document !== null && !snapshot.document.readOnly && !snapshot.previewing; // UX wave U10b: a version shown, or opened to view
   const header = documentHeader(
-    { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting, shown: snapshot.shown /* P3-F (F7) */ },
+    { title, document: snapshot.document, saving: snapshot.saving, previewing: snapshot.previewing, unresolved: snapshot.unresolved, rail: snapshot.rail, history: true, suggestions: snapshot.suggestions, exporting: snapshot.exporting, shown: snapshot.shown /* P3-F (F7) */, kind, page: { ...inForce, disabled: !writable } /* UX wave U10b */ },
     commands,
   );
   // P4-B5: Send to, the shown version's when one is previewed (none while two are compared, as Export)
   const sendTo = useSendToAction(snapshot.title && snapshot.shown !== 'compare' ? { artifactId, kind: artifactKind ?? 'document', title: snapshot.title, ...(snapshot.shown && { versionId: snapshot.shown.versionId }) } : null);
   const actions = [...(header.actions ?? []), ...(additionalActions ?? []), ...(sendTo ? [sendTo] : [])]; // P3-E: a dashboard's actions after B's; P4-B5: Send to last
-  const governing = useSystemFor(snapshot.placement);
   const systemRow = useLibraryRow(governing && 'id' in governing ? governing.id : null).value;
   const spaces = useLibrarySpaces().value;
   const home = snapshot.placement.spaceId ? spaces?.find((space) => space.id === snapshot.placement.spaceId)?.name : 'General';
@@ -176,7 +187,7 @@ export function DocumentBody({ artifactId, state, scope, visible, onShown, surfa
         host={state.host}
         comments={target === null ? undefined : comments /* P3-F1 */}
         history={state.history}
-        versionExports={(versionId) => documentExports({ versionId }, snapshot.exporting?.phase === 'running', (format, pageSize) => void state.export(format, pageSize, versionId))}
+        versionExports={(versionId) => documentExports({ versionId }, snapshot.exporting?.phase === 'running', (format, pageSize) => void state.export(format, pageSize, versionId), { kind } /* UX wave U10b: a document's card, the four formats */)}
         suggestions={state.host}
         rail={snapshot.rail}
         onRailChange={onRailChange}

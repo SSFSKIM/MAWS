@@ -24,7 +24,7 @@ import { addressed, localRef } from './support/address';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
-import { activeMainTab, backToTabs, mainTabById, mainTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
+import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -1132,7 +1132,9 @@ test.describe('sessions', () => {
   // outside the session's folder opens beside the chat when the session's own transcript links it, is edited, and is
   // written only by Save; nothing else there opens or is written: not a path written in prose, not one linked only in a
   // message that was typed and never delivered, not one another session links, not a request that does not ask by the
-  // rule; its folder is not listed. Every file and both transcripts are invented, in temporary folders.
+  // rule; its folder is not listed. Every file and both transcripts are invented, in temporary folders. UX wave U6b-1
+  // (Interfaces §G): the linked file opens beside the chat, the text file and then the PDF's row in the session's one
+  // preview tab, and the main strip stays as it was, the session's tab in front.
   test("a file the transcript links opens from outside the session's folder, is edited, and is written only by Save; nothing else is", async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -1169,15 +1171,26 @@ test.describe('sessions', () => {
       const chip = (name: string) => main.locator(`[data-chip="path"][title="${file(name)}"]`);
       await expect(chip('notes.txt')).toBeVisible({ timeout: 20_000 });
       await expect(chip('unnamed.txt'), 'a path in prose is no chip').toHaveCount(0);
-      const strip = await tabIdsOf(page);
+      const sessionTabId = await activeMainTab(page).getAttribute('data-tab-id');
+      const stripIds = () => mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+      const strip = await stripIds();
+      const asItWas = async () => {
+        expect(await stripIds(), 'the main strip as it was').toEqual(strip);
+        await expect(activeMainTab(page), 'the session’s tab in front').toHaveAttribute('data-tab-id', sessionTabId!);
+      };
 
       // U6b-1: the click opens the file beside the chat; U6e: editable, its bar the path alone, which says where Save writes
       await chip('notes.txt').click();
-      const notes = sideColumn(page).locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
+      const machine = await localRef(page);
+      const side = sideColumn(page);
+      const notes = side.locator(`[data-file-viewer][data-path="${file('notes.txt')}"]`);
+      await expect(notes, 'the file beside the chat').toBeVisible({ timeout: 20_000 });
+      await expect(mainTabById(page, `file:${machine}:${file('notes.txt')}`), 'no file tab of the strip').toHaveCount(0);
+      await asItWas();
       const content = notes.locator('.cm-content');
       await expect(content).toHaveText(NOTES, { timeout: 20_000 });
-      expect(await tabIdsOf(page), 'beside the chat: the main strip as it was').toEqual(strip);
-      await expect(sideTab(sideColumn(page), 'notes.txt'), 'the file’s tab has its full path as its tooltip').toHaveAttribute('title', file('notes.txt'));
+      await asItWas();
+      await expect(sideTab(side, 'notes.txt'), 'the file’s tab has its full path as its tooltip').toHaveAttribute('title', file('notes.txt'));
       await expect(notes.locator('[data-read-only]'), 'no label on a file that can be saved').toHaveCount(0);
       const lead = notes.locator('[data-path-lead]');
       await expect(lead).toHaveAttribute('data-outside', 'writable');
@@ -1216,9 +1229,12 @@ test.describe('sessions', () => {
       await expect(notes.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
       expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
 
-      await chip('report.pdf').click();
-      const report = sideColumn(page).locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
+      await chip('report.pdf').click(); // the session's tab never left the front, so its transcript is where it was
+      const report = side.locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
       await expect(report.locator('[data-external-row]')).toContainText('PDF files open outside MAWS', { timeout: 20_000 });
+      await expect(side.locator(`[data-files-tab][data-file="${file('report.pdf')}"]`), 'in the preview tab the text file was shown in').toBeVisible();
+      await expect(side.locator(`[data-files-tab][data-file="${file('notes.txt')}"]`)).toHaveCount(0);
+      await asItWas();
       await report.getByRole('button', { name: 'Open externally' }).click();
       await expect.poll(() => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }), { timeout: 20_000 }).toBe(`${file('report.pdf')}\n`);
 
