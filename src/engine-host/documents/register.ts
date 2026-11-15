@@ -46,6 +46,7 @@ export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShap
   'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', 'artifacts.datasetRefreshRequest': 'immediate', // E3
   'artifacts.datasetFiles': 'immediate', 'artifacts.rereadDatasetFile': 'immediate', // WR 67
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
+  'spaces.instructions': 'immediate', 'spaces.setInstructions': 'immediate', // UX wave U10b (M9)
 };
 
 export interface ArtifactsSurfaceDeps {
@@ -329,6 +330,15 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('spaces.delete', async ({ spaceId }) => {
     await storeOf().deleteSpace(spaceId);
+  });
+  // UX wave U10b (M9, §E.1): a Space's instructions, this machine's windows' alone (not offered over the link)
+  serve('spaces.instructions', () => {
+    const store = storeOf();
+    return store.readCommitted(() => ({ instructions: store.allSpaceInstructions() }));
+  });
+  serve('spaces.setInstructions', async ({ spaceId, text }) => {
+    const store = storeOf();
+    await store.writeCommitted(() => store.setSpaceInstructions(spaceId, text)); // a Space gone is store state too
   });
 
   const offs: (() => void)[] = [];
