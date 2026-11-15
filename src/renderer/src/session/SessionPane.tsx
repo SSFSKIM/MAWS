@@ -130,12 +130,13 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
       {!compact && <ReportBar appSessionId={id} />}
       {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
       {/* UX wave U4a (M7): a positioned box around the transcript's scroller, so the session's `/btw` card is a layer of the
-          pane over the transcript's bottom right corner and not of the scroller. UX wave U1b: inside the floating card
-          (`[data-pane="card"]`), while it holds a request at its end (`[data-request-end]`), the box keeps 200 px, so the
-          request's card is not clipped by the transcript's scroller at the card's minimum size; the card's body then
-          scrolls between it and the composer. A main pane, a card with no request at its end and the compact pane
+          pane over the transcript's bottom right corner and not of the scroller. UX wave U1b (the branch review's rule of
+          2026-11-15 UTC): inside the floating card (`[data-pane="card"]`), while the session has a request waiting that
+          its transcript draws, in its call's row or at its end (both carry `[data-request-waiting]`), the box keeps
+          200 px, so the request's form is not clipped by the transcript's scroller at the card's minimum size; the card's
+          body then scrolls between it and the composer. A main pane, a card with no request waiting and the compact pane
           (which draws no transcript) lay out as before. */}
-      {!compact && <div className="relative flex min-h-0 flex-1 flex-col in-data-[pane=card]:has-[[data-request-end]]:min-h-50">
+      {!compact && <div className="relative flex min-h-0 flex-1 flex-col in-data-[pane=card]:has-[[data-request-waiting]]:min-h-50">
         <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
           <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} waiting={noticed ? undefined : 'stacked'} /* UX wave U4a: the composer's stack draws a waiting message */ />

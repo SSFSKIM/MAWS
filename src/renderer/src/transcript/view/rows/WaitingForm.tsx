@@ -4,7 +4,8 @@
 // element the transcript tracks. Only while the session's list names the call with a request that is no permission
 // prompt, whose delivery is not closed as answered elsewhere, and with a renderer present: otherwise the row draws its
 // receipt as before, so a row never draws an empty form slot. The row asks no mod's site of its own while the form stands
-// (law 2: the card asks the AskUserQuestion site for its form, once).
+// (law 2: the card asks the AskUserQuestion site for its form, once). The form's element carries `data-request-waiting`,
+// as the end does while a request stands there: the floating card's floor reads it (`session/SessionPane.tsx`).
 import { useCallback, useMemo, type ReactNode } from 'react';
 import { selectWaitingByCall, useAttention } from '../../../stores/attention';
 import { rowId } from '../../model/keys';
@@ -34,7 +35,7 @@ function useWaitingForm(row: FormRow): ReactNode {
   }, [item, row.turnId, row.at, row.toolUseId, row.kind]);
   if (renderRequest === null || item === undefined || item.kind === 'permission' || closed || slot === null) return null;
   return (
-    <div ref={tracked} className="transcript-waiting-form" data-waiting-form={item.id}>
+    <div ref={tracked} className="transcript-waiting-form" data-waiting-form={item.id} data-request-waiting="">
       {renderRequest(slot)}
     </div>
   );
