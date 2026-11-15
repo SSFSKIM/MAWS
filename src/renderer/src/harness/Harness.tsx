@@ -3,9 +3,14 @@
 // action the transcript calls (C7 and C8 are absent here), and assigns `window.__maws_harness` for Playwright. Two
 // examples of what C7 and C8 do with the public surface: "Request cards" docks an example card in every pending
 // request's slot through `renderRequest`, and after a subagent row is opened, "Show child" mounts a second Transcript
-// with `variant: 'child'` over that agent's own events (C8's drill-in).
+// with `variant: 'child'` over that agent's own events (C8's drill-in). UX wave U1b: once the page is asked to raise one
+// of a fixture's questions (`raise`), the transcript draws its requests through the real card's renderer, so a waiting
+// question's form stands in the row of its call (Proof 3, `synthetic/questions`).
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { MessageUuid } from '@shared/graph/ids';
+import { flushSync } from 'react-dom';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId, AttentionId, MessageUuid } from '@shared/graph/ids';
+import { renderSessionRequest } from '../request-card'; // UX wave U1b
 import { useTranscriptStore } from '../stores/transcript';
 import { rowId } from '../transcript/model/keys';
 import type { Row, SubagentRef } from '../transcript/model/rows';
@@ -18,10 +23,14 @@ import { FIXTURES, loadFixture } from './fixtures';
 import { FrameMetrics, percentile } from './metrics';
 import { HarnessSession } from './player';
 import { textOfTurn } from './paged';
+import { lowerQuestion, raiseQuestion } from './questions'; // UX wave U1b
 
 // `window.__maws_harness` is declared once for every harness page, this one's members included (`./env.d.ts`).
 
 const SPEEDS = [0, 1, 4, 16];
+// UX wave U1b: the session a transcript reads its waiting requests for, its store key's session part (the rows' rule,
+// `useRowSession`): the part before the first `:`.
+const sessionOfKey = (key: string) => (key.includes(':') ? key.slice(0, key.indexOf(':')) : key) as AppSessionId;
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 const painted = async () => {
   await nextFrame();
@@ -43,6 +52,7 @@ export function Harness() {
   const [opened, setOpened] = useState<SubagentRef | null>(null); // the last subagent row the transcript opened
   const [child, setChild] = useState<{ ref: SubagentRef; source: TranscriptSource } | null>(null);
   const [cards, setCards] = useState(false);
+  const [realCards, setRealCards] = useState(false); // UX wave U1b: the real card's renderer, from the first `raise`
   const [effort, setEffort] = useState<string | null>(params.get('effort')); // W8
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
@@ -134,6 +144,28 @@ export function Harness() {
         const { messageUuid } = textOfTurn(session.events, n);
         return session.rows().find((row) => row.kind === 'assistant_text' && row.messageUuid === messageUuid)?.id ?? null;
       },
+      questions: () => {
+        const session = current();
+        const state = useTranscriptStore.getState().entries[session.key]?.state;
+        return session.events.flatMap((event) => {
+          if (event.kind !== 'question.requested') return [];
+          const turn = state?.index.toolUses.get(event.toolUseId);
+          return [{
+            call: event.toolUseId,
+            row: rowId.question(event.toolUseId),
+            turn: state === undefined || turn === undefined ? 0 : state.order.indexOf(turn) + 1,
+            dismissed: session.events.some((answered) => answered.kind === 'question.answered' && answered.toolUseId === event.toolUseId && Object.keys(answered.answers).length === 0),
+          }];
+        });
+      },
+      raise: (call) => {
+        const session = current();
+        const request = session.events.find((event): event is Extract<SessionEvent, { kind: 'question.requested' }> => event.kind === 'question.requested' && event.toolUseId === call);
+        if (!request) throw new Error(`no question asks by ${call}`);
+        flushSync(() => setRealCards(true));
+        return raiseQuestion(sessionOfKey(session.key), request);
+      },
+      lower: (id) => lowerQuestion(sessionOfKey(current().key), id as AttentionId),
     };
     const frameMetrics = frames.current;
     window.__maws_harness = api;
@@ -208,7 +240,7 @@ export function Harness() {
       </div>
       {session ? (
         <div className="flex min-h-0 flex-1">
-          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} />
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : realCards ? renderSessionRequest : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} />
           {child && (
             <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
               <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">

@@ -11,11 +11,12 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
-import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import type { HarnessApi, HarnessMetrics, HarnessQuestion } from '../src/renderer/src/harness/api';
 import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
 import { addressed } from './support/address';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 import { unfoldSessionCard } from './support/shell';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
@@ -772,6 +773,176 @@ test('an answered question reads as one compact receipt that stays in view when 
   const box = (await widget.boundingBox())!;
   expect(box.width, 'a compact widget, 480 px at most').toBeLessThanOrEqual(480);
   expect(box.height, 'two lines').toBeLessThan(72);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1b: a question's form in the row of its call (Proof 3, acceptance 6 and 13; the architect's ruling A2) ----
+// `synthetic/questions` is the seeded transcript with three AskUserQuestion turns put in it (harness/questions.ts): two
+// asked and never answered, a hundred turns apart, and one dismissed whole as its last turn. `raise` makes a call's
+// request a waiting one of the transcript's session (an attention item and its request event, as main's feed and the
+// card's read would hold them), and from then on the page draws requests through the real card's renderer.
+const QUESTIONS = 'synthetic/questions';
+const questionsOf = (page: Page): Promise<HarnessQuestion[]> => page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.questions());
+const raise = (page: Page, call: string): Promise<string> => page.evaluate((c) => (window as unknown as HarnessWindow).__maws_harness.raise(c), call);
+const lower = (page: Page, id: string) => page.evaluate((i) => (window as unknown as HarnessWindow).__maws_harness.lower(i), id);
+const scrollToTurn = (page: Page, n: number) => page.evaluate((turn) => (window as unknown as HarnessWindow).__maws_harness.scrollToTurn(turn), n);
+const PILL = 'Needs your input. Scroll to the request';
+// The reader leaves follow mode as a wheel turned upward leaves it (the list releases on that intent).
+const leaveFollow = (page: Page) =>
+  page.evaluate(() => document.querySelector<HTMLElement>('[data-transcript-scroller]')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })));
+// The first row whose box shows in the scroller, and how far its top stands from the scroller's top (negative: partly
+// scrolled past).
+const firstShown = (page: Page) =>
+  page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const top = scroller.getBoundingClientRect().top;
+    const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'))
+      .map((row) => ({ id: row.dataset.rowId!, box: row.getBoundingClientRect() }))
+      .filter(({ box }) => box.height > 0 && box.bottom > top + 0.5)
+      .sort((a, b) => a.box.top - b.box.top);
+    return rows.length === 0 ? null : { id: rows[0].id, offset: rows[0].box.top - top };
+  });
+// Where a row stands against the scroller: above it, in it, below it, or not mounted by the virtual list.
+const placeOf = (page: Page, rowId: string) =>
+  page.evaluate((id) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+    if (row === null) return 'unmounted';
+    const view = scroller.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    return box.bottom <= view.top ? 'above' : box.top >= view.bottom ? 'below' : 'in view';
+  }, rowId);
+
+// The child's check, "a row that mounts a card far from the end" (Proof 3, acceptance 13): with the reader in the middle
+// of a transcript of several hundred rows, a question raised for a call whose row stands just above the viewport (mounted
+// by the list's overscan, so its form mounts there and the row grows) and one for a call far below leave the reader's
+// first visible row where it was, to the pixel. The form scrolled out (the list unmounts its row) and back holds what was
+// picked in it: the draft is held by the request, not by the row. With requests waiting out of view the jump button is
+// the pill, and it goes to the oldest of them.
+test('a question raised above and below a reader mid-transcript moves nothing they see, and its form scrolled away and back keeps its draft', async ({ harness }) => {
+  test.setTimeout(90_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  expect((await metrics(page)).rows, 'several hundred rows').toBeGreaterThan(500);
+  const [above, below] = (await questionsOf(page)).filter((question) => !question.dismissed);
+  expect(below.turn - above.turn, 'the two calls a hundred turns apart').toBeGreaterThan(50);
+
+  // The reader in the middle: the row of the first call just above the viewport, the second's far below it.
+  await leaveFollow(page);
+  await scrollToTurn(page, above.turn);
+  await settle(page, 500);
+  await expect.poll(() => placeOf(page, above.row), { message: 'the first call’s row is mounted' }).not.toBe('unmounted');
+  await page.evaluate((id) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`)!;
+    scroller.scrollTop += row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + 24;
+  }, above.row);
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'a reader in the middle').toBe(false);
+  expect(await placeOf(page, above.row), 'the first call’s row stands just above the viewport, mounted').toBe('above');
+  expect(await placeOf(page, below.row), 'the second call’s row is below the viewport').not.toBe('in view');
+  const before = await firstShown(page);
+  expect(before, 'a row is shown').not.toBeNull();
+  const scrolled = await scrollerTop(page);
+
+  // Both raised: the first's form mounts in its row above the reader, the second's is out of reach below.
+  const first = await raise(page, above.call);
+  await raise(page, below.call);
+  const form = page.locator(`[data-waiting-form="${first}"]`);
+  await expect(form, 'the form mounts in the row above the reader').toBeAttached();
+  await expect(form.getByRole('group', { name: 'Question' })).toBeAttached();
+  await settle(page, 500);
+  const after = await firstShown(page);
+  expect(after?.id, 'the same row is the first the reader sees').toBe(before!.id);
+  expect(Math.abs(after!.offset - before!.offset), `the reader's first row stays to the pixel (scrollTop ${scrolled} → ${await scrollerTop(page)})`).toBeLessThanOrEqual(1);
+  expect(await placeOf(page, above.row), 'the grown row is still above the reader').toBe('above');
+
+  // Two requests wait out of view: the jump button is the pill, and it goes to the older, the keyboard on its row.
+  const pill = page.getByRole('button', { name: PILL });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveAttribute('data-state', 'input');
+  await expect(pill).toHaveText(/Needs your input/);
+  await pill.click();
+  await expect(form, 'the pill shows the oldest request out of view').toBeInViewport();
+  await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
+
+  // A pick in the form, the form scrolled out until the list unmounts its row, and back: the pick is still there.
+  const thursday = form.getByRole('radio', { name: /Thursday/ });
+  await thursday.click();
+  await expect(thursday).toHaveAttribute('aria-checked', 'true');
+  await scrollToTurn(page, 1);
+  await settle(page, 300);
+  await expect(form, 'scrolled far away, the row and its form are unmounted').toHaveCount(0);
+  await scrollToTurn(page, above.turn);
+  await expect(form).toBeVisible();
+  await expect(form.getByRole('radio', { name: /Thursday/ }), 'the draft is held by the request').toHaveAttribute('aria-checked', 'true');
+  await expect(form.getByRole('radio', { name: /Tuesday/ })).toHaveAttribute('aria-checked', 'false');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 6 (the jump button's request state, §D): with the reader at the end, following, a question that waits in a
+// row far above makes the jump button the pill, though the reader is at the end; the pill scrolls to the question and puts
+// the keyboard on its row; once no request waits the pill is gone, and the reader, away from the end, has the round
+// button back.
+test('a question waiting far above a reader at the end: the pill reads Needs your input, goes to it, and goes once it no longer waits', async ({ harness }) => {
+  test.setTimeout(90_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  expect((await metrics(page)).following, 'the reader at the end').toBe(true);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ }), 'following, nothing out of view: no button').toHaveCount(0);
+  const [, waiting] = (await questionsOf(page)).filter((question) => !question.dismissed);
+  const id = await raise(page, waiting.call);
+
+  const pill = page.getByRole('button', { name: PILL });
+  await expect(pill, 'at the end, the pill: the request is out of view').toBeVisible();
+  await expect(pill).toHaveAttribute('data-state', 'input');
+  await expect(pill).toHaveAttribute('title', PILL);
+  await expect(pill).toHaveText(/Needs your input/);
+  expect((await metrics(page)).following, 'a request waiting above moves no follower').toBe(true);
+  expect(await distanceFromEnd(page), 'the reader is still at the end').toBeLessThanOrEqual(80);
+
+  await pill.click();
+  const form = page.locator(`[data-waiting-form="${id}"]`);
+  await expect(form, 'the pill scrolls to the question').toBeInViewport();
+  await expect(form.getByRole('group', { name: 'Question' })).toBeVisible();
+  await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
+  await expect(pill, 'in view, the request needs no pill').toHaveCount(0);
+
+  await lower(page, id);
+  await expect(form, 'no longer waiting, the row draws its receipt').toHaveCount(0);
+  await expect(page.locator(`[data-row-id="question:${waiting.call}"] .transcript-question`)).toBeVisible();
+  await expect(pill, 'nothing waits: no pill').toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ }), 'away from the end, the round button').toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// The architect's ruling A2 (M1 builds it, this scene asserts it on a real layout; the unit DOM computes none): a question
+// dismissed whole reads Dismissed on each of its lines (the owner's card 2), and a header of fourteen characters beside it
+// is shown whole, not cut: a header is cut only when header and answer together exceed the widget's widest width.
+test('a dismissed question’s receipt shows each header whole beside Dismissed', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  const dismissed = (await questionsOf(page)).find((question) => question.dismissed)!;
+  const widget = page.locator(`[data-row-id="${dismissed.row}"] .transcript-question`);
+  await expect(widget).toBeVisible();
+  const lines = widget.locator('[data-question]');
+  await expect(lines).toHaveCount(2);
+  await expect(lines.locator('.transcript-question-answer')).toHaveText(['Dismissed', 'Dismissed']);
+  await expect(lines.locator('[data-question-label]')).toHaveText(['Release window', 'Sign-off']);
+  const layout = await lines.first().evaluate((line) => {
+    const label = line.querySelector<HTMLElement>('[data-question-label]')!;
+    const answer = line.querySelector<HTMLElement>('.transcript-question-answer')!;
+    return { cut: label.scrollWidth > label.clientWidth, labelRight: label.getBoundingClientRect().right, answerLeft: answer.getBoundingClientRect().left, answerLines: Math.round(answer.getBoundingClientRect().height / parseFloat(getComputedStyle(answer).lineHeight)) };
+  });
+  expect(layout.cut, 'the fourteen-character header is not cut beside Dismissed').toBe(false);
+  expect(layout.labelRight, 'the header stands before its answer, on its line').toBeLessThan(layout.answerLeft);
+  expect(layout.answerLines, 'Dismissed on one line').toBe(1);
   expect(harness.consoleErrors()).toEqual([]);
 });
 

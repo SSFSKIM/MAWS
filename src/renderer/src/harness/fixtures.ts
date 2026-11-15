@@ -6,6 +6,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseJournalRow } from '@shared/wire/journal';
 import { synthesise } from '../../../../test/support/synth-transcript';
 import { journalToEvents } from '../transcript/dev/journal';
+import { QUESTIONS_FIXTURE, questionsFixture } from './questions'; // UX wave U1b
 
 // Vite requires each glob's options as a literal.
 const pass1 = import.meta.glob<string>(['../../../../spikes/protocol-probe/fixtures/*.jsonl', '!**/fixtures/private/**'], { query: '?raw', import: 'default' });
@@ -52,6 +53,7 @@ function synthetic(turns: number): LoadedFixture {
 
 const LOADERS = new Map<string, Loader>([
   ['synthetic/500', () => Promise.resolve(synthetic(500))],
+  [QUESTIONS_FIXTURE, () => Promise.resolve(questionsFixture())], // UX wave U1b: a long transcript with question calls in it
   ...journals('pass1', pass1),
   ...journals('pass2', pass2),
   ...journals('pass3', pass3),
