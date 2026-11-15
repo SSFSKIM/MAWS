@@ -7,8 +7,9 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import { fontFaceCss, rewriteCssUrls, type AssetUrl } from '../assets';
 import { canonKind, DOCUMENT_CSS_PATH } from '../canon';
 import { generateTokensCss } from '../css';
-import type { TokenSet } from '../tokens';
-import { defaultSystem } from '../../types/design_system/defaults';
+import { TOKENS_PATH } from '../model';
+import { parseTokens, type TokenSet } from '../tokens';
+import { defaultSystem, type DefaultSystemSource } from '../../types/design_system/defaults';
 import { COMPONENT_CANVASES, componentCanvas, componentFrameCss, type ComponentCanvas } from './component-canvas';
 import { assetSource, frameCsp, frameDocument, rewriteHtmlAssets } from './frame';
 
@@ -17,11 +18,19 @@ const BASE = 'html, body { margin: 0; }';
 const SLIDE_BASE = `body { width: ${SLIDE.width}px; height: ${SLIDE.height}px; overflow: hidden; } body > section { width: ${SLIDE.width}px; height: ${SLIDE.height}px; box-sizing: border-box; overflow: hidden; }`;
 const LARGEST = COMPONENT_CANVASES[2]; // the largest
 
-// A component's canvas: the table's for a bundled system's component as it was bundled (a default's, or a duplicate's,
-// which keeps its key), else the largest, since a component since changed was not measured (§J).
-function canvasOf(bundledKey: string | null, path: string, html: string): ComponentCanvas {
-  if (bundledKey === null || defaultSystem(bundledKey)?.files[path] !== html) return LARGEST;
-  return componentCanvas(bundledKey, path);
+// A component's canvas: the table's for a bundled system's component drawn as it was measured (a default's, or a
+// duplicate's, which keeps its key), else the largest (§J). As measured: its file is the bundled file, and the frame's
+// tokens and faces are the bundle's, since the frame draws the system's tokens as they are now and an edited spacing
+// token can make a component outgrow the table's canvas (the branch review of U10b-4).
+function canvasOf(bundle: DefaultSystemSource | null, path: string, html: string): ComponentCanvas {
+  return bundle !== null && bundle.files[path] === html ? componentCanvas(bundle.key, path) : LARGEST;
+}
+
+const bundleTokens = new Map<string, TokenSet | null>(); // by bundled key: the bundle's token file, read once
+function drawnAsBundled(bundle: DefaultSystemSource, deck: string, faces: string, toUrl: AssetUrl): boolean {
+  if (!bundleTokens.has(bundle.key)) bundleTokens.set(bundle.key, parseTokens(bundle.files[TOKENS_PATH] ?? '').tokens);
+  const tokens = bundleTokens.get(bundle.key)!;
+  return tokens !== null && generateTokensCss(tokens, { medium: 'deck' }) === deck && fontFaceCss(bundle.files[DOCUMENT_CSS_PATH], tokens, toUrl) === faces;
 }
 
 // A US high-school handout (the product's frame, the spec's Decision Log 6), in the blocks B's editor writes.
@@ -50,6 +59,8 @@ export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, str
   const deck = generateTokensCss(tokens, { medium: 'deck' });
   const html = (path: string) => rewriteHtmlAssets(files[path]!, toUrl);
   const paths = Object.keys(files).sort();
+  const bundled = bundledKey === null ? undefined : defaultSystem(bundledKey);
+  const bundle = bundled !== undefined && drawnAsBundled(bundled, deck, faces, toUrl) ? bundled : null; // the table's canvases hold
   return {
     layouts: paths
       .filter((path) => canonKind(path) === 'layout')
@@ -57,7 +68,7 @@ export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, str
     components: paths
       .filter((path) => canonKind(path) === 'component')
       .map((path) => {
-        const canvas = canvasOf(bundledKey, path, files[path]!);
+        const canvas = canvasOf(bundle, path, files[path]!);
         return { path, canvas, srcDoc: frameDocument({ csp, styles: [BASE, componentFrameCss(canvas), faces, deck], body: html(path) }) };
       }),
     document:

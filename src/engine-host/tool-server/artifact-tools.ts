@@ -48,7 +48,7 @@ import {
   instructionsIn,
   lineageOf,
   loaderFields,
-  markInstructed,
+  instructedOnDelivery,
   opIdOf,
   publisherOf,
   readSourceFile,
@@ -171,8 +171,7 @@ export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts
     }) : undefined;
     const given = instructionsField(session, instructions); // UX wave U10b (M10)
     const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...placement, ...(designCheck && { designCheck }), ...(designSystem !== null && { designSystem }), ...given };
-    markInstructed(session, instructions, given);
-    return toolText(result);
+    return instructedOnDelivery(toolText(result), session, instructions, given);
   }));
 }
 
@@ -278,11 +277,10 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         ),
       );
       deps.session.guided.add(kind);
-      markInstructed(deps.session, instructions, given); // UX wave U10b (M10)
       // the session's base: what it just wrote (a replayed call leaves none for a Y kind: the agent reads first)
       if (base) store.service.replica(ctx.appSessionId, recorded.artifactId).base = base;
       if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
-      return toolText(recorded);
+      return instructedOnDelivery(toolText(recorded), deps.session, instructions, given); // UX wave U10b (M10)
     })),
   );
 }
@@ -363,8 +361,7 @@ export function artifactReadTool(deps: ArtifactToolDeps, opts: { instructs?: boo
       // still answers reads
       if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifactId, ctx.appSessionId, 'viewed'));
       const given = instructionsField(deps.session, read.instructions); // UX wave U10b (M10)
-      markInstructed(deps.session, read.instructions, given);
-      return toolText({ ...result, ...given });
+      return instructedOnDelivery(toolText({ ...result, ...given }), deps.session, read.instructions, given);
     }),
   );
 }

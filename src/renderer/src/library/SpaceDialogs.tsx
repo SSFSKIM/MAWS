@@ -18,7 +18,7 @@ import { DIALOG_COPY as D, SPACE_COPY } from './copy';
 import { closeLibraryDialog, openLibraryDialog, toastFailure, useLibraryDialog, type SheetOf } from './dialogs';
 import { MoreIcon } from './icons';
 import { MENU, MENU_ITEM } from './LibraryHeader';
-import { useSpaceInstructions } from './store';
+import { useSpaceInstructions, useSpaceInstructionsRead } from './store';
 import { showSpace, useLibraryView } from './view';
 
 const SPACE_NAME_MAX = 200;
@@ -224,11 +224,15 @@ export function DeleteSpaceSheet({ dialog }: SheetOf<'deleteSpace'>) {
 // scrolling, so Save stays in view; Enter makes a new line. Save is offered whenever the text differs from what is stored,
 // the empty text included (saving it removes them). The field takes at most SPACE_INSTRUCTIONS_MAX characters (a paste is
 // cut there), and from 7,500 a line under it counts them. A save holds both buttons disabled and the field read-only; a failure is said here and
-// keeps the text; closing the sheet meanwhile does not cancel the save, and a failure then is toasted.
+// keeps the text; closing the sheet meanwhile does not cancel the save, and a failure then is toasted. The branch review
+// of U10b-4: text the person never saw is never overwritten, so the field is held (read-only) until the stored text is
+// read, and a read that failed says so and offers no Save.
 export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>) {
   const { space } = dialog;
   const close = () => closeLibraryDialog(dialog);
-  const stored = useSpaceInstructions().get(space.id) ?? '';
+  const known = useSpaceInstructionsRead();
+  const stored = known.status === 'read' ? (known.instructions.get(space.id) ?? '') : '';
+  const unknown = known.status !== 'read'; // the field is held: what it would overwrite is not shown
   const [edited, setEdited] = useState<string | null>(null); // null until the owner edits: the stored text, as read
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -248,7 +252,7 @@ export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>)
       <form
         onSubmit={(event) => {
           event.preventDefault();
-          if (!busy && text !== stored) void save();
+          if (!busy && !unknown && text !== stored) void save();
         }}
         className="flex flex-col gap-3"
       >
@@ -256,21 +260,25 @@ export function SpaceInstructionsSheet({ dialog }: SheetOf<'spaceInstructions'>)
         <textarea
           aria-label={title}
           autoFocus
-          readOnly={busy} // what is saved is what the field shows: nothing typed during the save is lost
+          readOnly={busy || unknown} // what is saved is what the field shows: nothing typed during the save is lost
+          aria-busy={known.status === 'unread' || undefined}
           value={text}
           maxLength={SPACE_INSTRUCTIONS_MAX}
           onChange={(event) => setEdited(event.target.value.slice(0, SPACE_INSTRUCTIONS_MAX))}
           className={`${FIELD} max-h-[40vh] min-h-[calc(8lh+0.5rem)] resize-none overflow-y-auto leading-snug field-sizing-content`}
         />
         {text.length >= INSTRUCTIONS_COUNTED_FROM && <p className="m-0 text-ui-sm text-fg-muted">{SPACE_COPY.limit(text.length)}</p>}
+        {known.status === 'failed' && <p className="m-0 text-ui-sm text-danger">{known.error}</p>}
         {error && <p className="m-0 text-ui-sm text-danger">{error}</p>}
         <div className="flex items-center justify-end gap-2">
           <button type="button" disabled={busy} onClick={close} className={SECONDARY}>
             {SPACE_COPY.cancel}
           </button>
-          <button type="submit" disabled={busy || text === stored} className={PRIMARY}>
-            {SPACE_COPY.save}
-          </button>
+          {known.status !== 'failed' && (
+            <button type="submit" disabled={busy || unknown || text === stored} className={PRIMARY}>
+              {SPACE_COPY.save}
+            </button>
+          )}
         </div>
       </form>
     </Sheet>

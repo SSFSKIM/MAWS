@@ -71,8 +71,9 @@ export class ArtifactSession {
 // An answer about a Space (a create in it, a read of an artifact in it, a describe of a kind there) carries the Space's
 // instructions when the Space has some and the session was not given them at this stamp (M9 restamps a text only when
 // it changes), so once per session and Space, again after a change or a compaction. What an answer carries is settled
-// with the answer; it counts as given once the answer is made (`markInstructed`, after the call's last fallible step),
-// so a call that fails gives nothing. A replayed call answers what it recorded and marks nothing.
+// with the answer; it counts as given only once the server hands that answer to the engine (`instructedOnDelivery`, the
+// result's `delivered`; the branch review of U10b-4), so a call that fails, or one the engine withdrew while it ran,
+// gives nothing. A replayed call answers what it recorded and marks nothing.
 export interface HeldInstructions {
   given: SpaceInstructionsAnswer;
   at: number;
@@ -92,8 +93,9 @@ export function instructionsField(session: { instructed: ReadonlyMap<string, num
   return held && session.instructed.get(held.given.spaceId) !== held.at ? { spaceInstructions: held.given } : {};
 }
 
-export function markInstructed(session: { instructed: Map<string, number> }, held: HeldInstructions | null, field: { spaceInstructions?: SpaceInstructionsAnswer }): void {
-  if (held && field.spaceInstructions) session.instructed.set(held.given.spaceId, held.at);
+// The answer, with the mark of what it carries made once the engine has it.
+export function instructedOnDelivery(result: McpToolResult, session: { instructed: Map<string, number> }, held: HeldInstructions | null, field: { spaceInstructions?: SpaceInstructionsAnswer }): McpToolResult {
+  return held && field.spaceInstructions ? { ...result, delivered: () => void session.instructed.set(held.given.spaceId, held.at) } : result;
 }
 
 export interface ArtifactToolDeps {

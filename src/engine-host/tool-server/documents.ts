@@ -71,7 +71,7 @@ import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
 import { designSystemNamed, spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5); UX wave U10b: designSystemNamed
-import { instructionsField, instructionsIn, markInstructed, OpJoin } from './artifact-context'; // UX wave U10b (M10; fix wave 1: OpJoin)
+import { instructedOnDelivery, instructionsField, instructionsIn, OpJoin } from './artifact-context'; // UX wave U10b (M10; fix wave 1: OpJoin)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 
@@ -655,8 +655,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }
         const given = instructionsField(deps.session, instructions); // UX wave U10b (M10)
-        markInstructed(deps.session, instructions, given);
-        return toolText({ ...result, ...given });
+        return instructedOnDelivery(toolText({ ...result, ...given }), deps.session, instructions, given);
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
@@ -771,9 +770,8 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
             ),
           );
           deps.session.guided.add(kind); // P3-E
-          markInstructed(deps.session, instructions, given); // UX wave U10b (M10)
           store.service.replica(ctx.appSessionId, created.artifactId); // the session's replica keeps the document loaded
-          return toolText(created);
+          return instructedOnDelivery(toolText(created), deps.session, instructions, given); // UX wave U10b (M10)
         });
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);

@@ -195,12 +195,32 @@ export const librarySpaces = (s: LibraryState, machine?: MachineRef) => (s.reads
 // knows no such command). One map per answer, so a selector over it is stable.
 const NO_INSTRUCTIONS: ReadonlyMap<string, string> = new Map();
 const instructionMaps = new WeakMap<object, ReadonlyMap<string, string>>();
-export function spaceInstructionsOf(s: LibraryState): ReadonlyMap<string, string> {
-  const answer = s.reads.get(instructionsKey())?.value as { spaceId: string; text: string }[] | undefined;
-  if (answer === undefined) return NO_INSTRUCTIONS;
+function instructionsMapOf(answer: { spaceId: string; text: string }[]): ReadonlyMap<string, string> {
   let map = instructionMaps.get(answer);
   if (!map) instructionMaps.set(answer, (map = new Map(answer.map(({ spaceId, text }) => [spaceId, text]))));
   return map;
+}
+export function spaceInstructionsOf(s: LibraryState): ReadonlyMap<string, string> {
+  const answer = s.reads.get(instructionsKey())?.value as { spaceId: string; text: string }[] | undefined;
+  return answer === undefined ? NO_INSTRUCTIONS : instructionsMapOf(answer);
+}
+
+// The same read as a writer needs it (the branch review of U10b-4): not read yet, failed (no answer yet and a refusal,
+// whose message it keeps while it is read again), or read (the last good answer, which a later refused read keeps). A field that would overwrite the stored
+// text is held until it is read. One value per read, so a selector over it is stable.
+export type SpaceInstructionsRead = { status: 'unread' } | { status: 'failed'; error: string } | { status: 'read'; instructions: ReadonlyMap<string, string> };
+const UNREAD: SpaceInstructionsRead = { status: 'unread' };
+const readsOfInstructions = new WeakMap<LibraryRead<unknown>, SpaceInstructionsRead>();
+export function spaceInstructionsReadOf(s: LibraryState): SpaceInstructionsRead {
+  const read = s.reads.get(instructionsKey());
+  if (read === undefined || (read.value === undefined && read.error === null)) return UNREAD;
+  let known = readsOfInstructions.get(read);
+  if (!known) {
+    const answer = read.value as { spaceId: string; text: string }[] | undefined;
+    known = answer === undefined ? { status: 'failed', error: read.error! } : { status: 'read', instructions: instructionsMapOf(answer) };
+    readsOfInstructions.set(read, known);
+  }
+  return known;
 }
 
 export function useLibraryList(filter?: LibraryFilter, machine?: MachineRef): LibraryRead<LibraryList> {
@@ -223,6 +243,11 @@ export function useLibrarySpaces(machine?: MachineRef): LibraryRead<LibrarySpace
 export function useSpaceInstructions(): ReadonlyMap<string, string> {
   useEffect(() => watchSpaceInstructions(), []);
   return useLibrary(spaceInstructionsOf);
+}
+
+export function useSpaceInstructionsRead(): SpaceInstructionsRead {
+  useEffect(() => watchSpaceInstructions(), []);
+  return useLibrary(spaceInstructionsReadOf);
 }
 
 // An `artifact` tab's title for the strip and the toolbar: its row's, null until known (or when it is not in the library).

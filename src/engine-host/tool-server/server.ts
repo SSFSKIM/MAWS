@@ -40,6 +40,10 @@ export type McpContentBlock = { type: 'text'; text: string } | { type: 'image'; 
 export interface McpToolResult {
   content: McpContentBlock[];
   isError?: true;
+  // UX wave U10b (the branch review of U10b-4): what the tool counts as done only once the engine has this answer (a
+  // Space's instructions given, artifact-context.ts's `instructedOnDelivery`). The server runs it as it hands the answer
+  // over, never for a call withdrawn or answered from outside, and writes the answer without it.
+  delivered?: () => void;
 }
 
 export interface McpToolDefinition {
@@ -238,7 +242,9 @@ export class MawsToolServer {
       this.deps.onChange?.();
     }
     if (controller.signal.aborted || call.answered) return this.retire(requestId);
-    await this.result(requestId, id, result);
+    const { delivered, ...answer } = result;
+    delivered?.();
+    await this.result(requestId, id, answer);
     this.retire(requestId);
   }
 
