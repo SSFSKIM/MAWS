@@ -33,3 +33,10 @@ it('a later request is not lapsed by an earlier one’s frame', () => {
   earlier.forEach((callback) => callback(0));
   expect(takesFocus('transcriptA', 'record-fold:open:s1')).toBe(true);
 });
+
+it('naming several lines, is taken by the first of them drawn, once', () => {
+  handFocus('transcriptA', ['record-fold:closed:s1', 'record-fold:closed:s2']);
+  expect(takesFocus('transcriptA', 'record-fold:closed:s3')).toBe(false);
+  expect(takesFocus('transcriptA', 'record-fold:closed:s2')).toBe(true);
+  expect(takesFocus('transcriptA', 'record-fold:closed:s1')).toBe(false);
+});

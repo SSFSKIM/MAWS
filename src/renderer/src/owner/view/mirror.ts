@@ -288,14 +288,18 @@ export function carriedKeys(before: readonly Row[], after: readonly Row[], open:
   return [...carried];
 }
 
-/** The open keys held by the stretch that holds the row `key` names: folding that stretch takes them all. */
-export function openKeysOf(rows: readonly Row[], key: string, open: ReadonlySet<string>, liveMarked?: string): string[] {
+/** Every key the stretch that holds the row `key` names answers to, by its rows: its record lines carry one of them. */
+export function keysOfStretch(rows: readonly Row[], key: string, liveMarked?: string): string[] {
   for (const stretch of stretchesOf(rows, liveMarked)) {
     const names = (stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]).flatMap(namesOf);
-    if (names.includes(key)) return names.filter((name) => open.has(name));
+    if (names.includes(key)) return names;
   }
   return [];
 }
+
+/** The open keys held by the stretch that holds the row `key` names: folding that stretch takes them all. */
+export const openKeysOf = (rows: readonly Row[], key: string, open: ReadonlySet<string>, liveMarked?: string): string[] =>
+  keysOfStretch(rows, key, liveMarked).filter((name) => open.has(name));
 
 /**
  * The key of the stretch whose record holds the row or cell `id` out of sight while it is closed: null when the row

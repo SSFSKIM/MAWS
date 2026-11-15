@@ -9,7 +9,7 @@ import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
 import { marksOfText } from '../transcript/model/owner-marks';
-import { carriedKeys, holdsMessage, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
+import { carriedKeys, holdsMessage, keysOfStretch, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -116,7 +116,7 @@ export interface TranscriptStore {
   // stretch each mounted view draws its target in; the returned function releases it (the view unmounts)
   mountView(key: string, compose: ComposeView): () => void;
   setView(key: string, view: 'report' | 'transcript'): void;
-  toggleStretch(key: string, stretch: string): void;
+  toggleStretch(key: string, stretch: string): readonly string[]; // the keys the stretch's other record line can carry
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
   // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
   jumpToMessage(key: string, anchor: MessageAnchor): boolean;
@@ -635,13 +635,17 @@ export function createTranscriptStore() {
       // stretch's `‹ fold to report` folds it, taking every open key it holds (two opened stretches can since have met)
       toggleStretch(key, stretch) {
         const current = entry(key);
-        if (!current) return;
+        if (!current) return [stretch];
         const open = current.state.ui.openStretches ?? new Set<string>();
-        const held = open.has(stretch) ? new Set([stretch, ...composedViews(key, current).flatMap(({ rows, liveMarked }) => openKeysOf(rows, stretch, open, liveMarked))]) : null;
+        const views = composedViews(key, current);
+        const held = open.has(stretch) ? new Set([stretch, ...views.flatMap(({ rows, liveMarked }) => openKeysOf(rows, stretch, open, liveMarked))]) : null;
         changeUi(key, () => [], (ui) => {
           if (held === null) ui.openStretches!.add(stretch);
           else for (const name of held) ui.openStretches!.delete(name);
         });
+        // opened, its open line carries the key just written; folded, its closed line carries its first row's key, one of
+        // the keys its rows answer to
+        return held === null ? [stretch] : [...new Set([stretch, ...views.flatMap(({ rows, liveMarked }) => keysOfStretch(rows, stretch, liveMarked))])];
       },
       mountView(key, compose) {
         let mounted = views.get(key);
