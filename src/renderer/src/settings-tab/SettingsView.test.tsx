@@ -170,7 +170,7 @@ describe('settings tab writes one field per row', () => {
     useLayout.setState({ main: LAYOUT_DEFAULTS.main, destination: null, settings: { section: null } });
     renderView();
     fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' }); // UX wave U7b: a page, no tab
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'all' }); // UX wave U7b: a page, no tab; U11c: All
     expect(useLayout.getState().settings).toBeNull();
     expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     expect(b.sets).toEqual([]);

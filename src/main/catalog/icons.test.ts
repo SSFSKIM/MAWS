@@ -127,3 +127,23 @@ describe('the icons’ fetch in each environment', () => {
     expect(asked).toEqual([PLUGIN_ICON]);
   });
 });
+
+// UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, C7): My items' rows ask for icons through
+// this same rule, which the landing does not widen. The rule's routes, as they stood before it.
+describe('the catalog rule the icons go through', () => {
+  it('is unchanged: the same six routes, origins, paths, queries, types and caps', () => {
+    const MiB = 1024 * 1024;
+    const TOKEN = '[A-Za-z0-9._~%-]{1,512}';
+    expect(CATALOG_EGRESS.name).toBe('catalog');
+    expect(CATALOG_EGRESS.timeoutMs).toBe(120_000);
+    expect(CATALOG_EGRESS.routes.map((route) => ({ ...route, path: route.path.source, query: route.query?.source ?? null }))).toEqual([
+      { origin: 'https://raw.githubusercontent.com', path: '^\\/[A-Za-z0-9-]{1,39}\\/[A-Za-z0-9._-]{1,100}\\/HEAD\\/\\.claude-plugin\\/marketplace\\.json$', query: null, contentTypes: ['text/plain'], maxBytes: 8 * MiB },
+      { origin: 'https://api.anthropic.com', path: '^\\/api\\/directory\\/plugins$', query: `^\\?visibility=public&limit=5000(?:&page=${TOKEN})?$`, contentTypes: ['application/json'], maxBytes: 48 * MiB },
+      { origin: 'https://api.anthropic.com', path: '^\\/api\\/directory\\/servers$', query: `^\\?limit=500(?:&cursor=${TOKEN})?$`, contentTypes: ['application/json'], maxBytes: 4 * MiB },
+      { origin: 'https://storage.googleapis.com', path: '^\\/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819\\/plugin-stats\\/plugin-details\\.json$', query: null, contentTypes: ['application/json'], maxBytes: 2 * MiB },
+      { origin: 'https://api.anthropic.com', path: '^\\/api\\/directory\\/plugin-icons\\/[0-9a-f]{64}\\/256\\.png$', query: null, contentTypes: ['image/png'], maxBytes: 512 * 1024 },
+      { origin: 'https://storage.googleapis.com', path: '^\\/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f\\/mcp-directory\\/icons\\/[A-Za-z0-9._-]{1,100}\\.(?:png|svg)$', query: null, contentTypes: ['image/png', 'image/svg+xml'], maxBytes: 512 * 1024 },
+    ]);
+  });
+});
+
