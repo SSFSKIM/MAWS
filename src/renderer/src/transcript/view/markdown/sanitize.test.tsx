@@ -70,7 +70,7 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     const hrefs = [...view().querySelectorAll('a')].map((a) => a.getAttribute('href'));
     expect(hrefs).toContain('https://example.com/a');
     expect(hrefs).toContain('mailto:me@example.com');
-    // The path chip (Link.tsx) names the path it opens; it is a button, never a navigable link.
+    // The path link (Link.tsx) names the path it opens; it acts as a button, never a navigable link.
     expect([...view().querySelectorAll('[data-chip="path"]')].map((chip) => chip.getAttribute('title'))).toEqual(['src/renderer/x.ts']);
   });
 
@@ -80,7 +80,8 @@ describe.each([false, true])('markdown sanitisation (live: %s)', (live) => {
     setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: () => {} }); // App.tsx's host actions: the chip is drawn where a tab can open (Link.tsx)
     try {
       const root = render(<Markdown markdown={`Open [the plan](maws-artifact:${ARTIFACT}) now.`} live={live} />).container;
-      expect([...root.querySelectorAll('[data-chip="artifact"]')].map((chip) => [chip.tagName, chip.getAttribute('data-artifact-id'), chip.textContent])).toEqual([['BUTTON', ARTIFACT, 'the plan']]);
+      // UX wave U6d: link text, a span with the role of a button, never a <button> (which could not wrap) nor an <a>
+      expect([...root.querySelectorAll('[data-chip="artifact"]')].map((chip) => [chip.tagName, chip.getAttribute('role'), chip.getAttribute('data-artifact-id'), chip.textContent])).toEqual([['SPAN', 'button', ARTIFACT, 'the plan']]);
       expect(root.querySelector('a')).toBeNull();
       expect(root.innerHTML).not.toContain('maws-artifact:');
     } finally {

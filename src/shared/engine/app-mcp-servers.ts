@@ -24,6 +24,9 @@ const ENGINE_RESERVED_SERVER_NAMES = new Set([
   'claude-in-chrome', 'computer-use', 'workspace', 'webagent', 'claude-code-remote', 'remote-browser', 'claude-device',
 ]);
 
+// UX wave U11g (§A "The reserved names"): the one predicate a custom connector's form and `connectors.addJson` read
+export const isReservedServerName = (name: string): boolean => name === RESERVED_SERVER_NAME || ENGINE_RESERVED_SERVER_NAMES.has(name);
+
 const isServerUrl = (url: string): boolean => {
   if (!URL.canParse(url) || url.trim() !== url) return false; // refused rather than trimmed: validators never transform
   const { protocol, hostname } = new URL(url);

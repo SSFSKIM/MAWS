@@ -11,7 +11,7 @@ vi.mock('electron', () => ({
   app: {
     setPath: (name: string, path: string) => order.push(`setPath ${name} ${path}`),
     exit: (code: number) => order.push(`exit ${code}`),
-    commandLine: { appendSwitch: (name: string) => order.push(`switch ${name}`), getSwitchValue: () => '' },
+    commandLine: { appendSwitch: (name: string, value?: string) => order.push(value === undefined ? `switch ${name}` : `switch ${name} ${value}`), getSwitchValue: () => '' },
     requestSingleInstanceLock: () => (order.push('requestSingleInstanceLock'), true),
     whenReady: () => (order.push('whenReady'), new Promise(() => {})),
     on: (event: string) => order.push(`on ${event}`),
@@ -27,7 +27,12 @@ vi.mock('electron', () => ({
 }));
 vi.mock('node:fs', async (importOriginal) => ({ ...(await importOriginal<typeof import('node:fs')>()), writeSync: (fd: number, text: string) => order.push(`writeSync ${fd} ${text}`) }));
 vi.mock('./stdio-guard', () => ({ guardStdio: () => order.push('guardStdio') }));
-vi.mock('./chromium-features', () => ({ STARTUP_DISABLED_FEATURES: [], disableChromiumFeatures: () => order.push('disableChromiumFeatures') }));
+// The Blink settings are the real module's (ticket 662), so the order below pins the switch's exact value as appended.
+vi.mock('./chromium-features', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./chromium-features')>()),
+  STARTUP_DISABLED_FEATURES: [],
+  disableChromiumFeatures: () => order.push('disableChromiumFeatures'),
+}));
 vi.mock('../render/scheme', () => ({ registerStoreSchemes: () => order.push('registerStoreSchemes') }));
 // Each root as the test's stand-in, registered afresh before each import (a case may stand in one that fails to load)
 function standInRoots(): void {
@@ -40,6 +45,9 @@ function standInRoots(): void {
     return { runRenderHost: (entryDir: string) => order.push(`runRenderHost ${entryDir}`) };
   });
 }
+
+// Ticket 662: Blink's DNS prefetching off, appended by the entry before any root loads (so before `ready`), this value only.
+const BLINK_SETTINGS = 'switch blink-settings dnsPrefetchingEnabled=false';
 
 describe("main's entry", () => {
   const env = { ...process.env };
@@ -62,7 +70,7 @@ describe("main's entry", () => {
   it('runs the shared bootstrap, then loads the app root', async () => {
     await import('./index');
     await vi.waitFor(() => expect(order).toContain('app'));
-    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', 'registerStoreSchemes', 'app']);
+    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', BLINK_SETTINGS, 'registerStoreSchemes', 'app']);
     expect(process.listenerCount('SIGUSR1')).toBe(listeners.length + 1); // the inspector refusal
     expect(order).not.toContain('render-host root');
   });
@@ -71,7 +79,7 @@ describe("main's entry", () => {
     process.argv = [argv[0]!, 'out/main/index.js', '--render-host', '/scratch/profile'];
     await import('./index');
     await vi.waitFor(() => expect(order).toContain(`runRenderHost ${__dirname}`));
-    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', 'registerStoreSchemes', 'render-host root', `runRenderHost ${__dirname}`]); // the entry's own directory, where mawsd.js is
+    expect(order).toEqual(['guardStdio', 'setPath userData /scratch/profile', 'switch use-mock-keychain', 'disableChromiumFeatures', BLINK_SETTINGS, 'registerStoreSchemes', 'render-host root', `runRenderHost ${__dirname}`]); // the entry's own directory, where mawsd.js is
     expect(order).not.toContain('app');
     expect(process.listenerCount('SIGUSR1')).toBe(listeners.length + 1);
   });

@@ -8,7 +8,7 @@
 import { writeSync } from 'node:fs';
 import { app } from 'electron';
 import { guardStdio } from './stdio-guard'; // cua board #97
-import { disableChromiumFeatures, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3
+import { disableChromiumFeatures, setBlinkSettings, STARTUP_BLINK_SETTINGS, STARTUP_DISABLED_FEATURES } from './chromium-features'; // P3-F1 fix 3; ticket 662
 import { registerStoreSchemes } from '../render/scheme'; // P5 O5 M2: the scheme's Electron half
 
 // cua board #97: before any log line, so a launcher's closed pipe or terminal never turns a console call into a crash.
@@ -25,6 +25,9 @@ if (process.env.MAWS_USER_DATA) app.setPath('userData', process.env.MAWS_USER_DA
 if (process.env.MAWS_E2E) app.commandLine.appendSwitch('use-mock-keychain');
 // P3-F1 fix 3: no mDNS responder on *:5353 when a frame gathers ICE candidates (see chromium-features.ts); one merged switch.
 disableChromiumFeatures(app.commandLine, STARTUP_DISABLED_FEATURES);
+// Ticket 662: Blink's DNS prefetching off for every renderer, so no page can send a name out in a prefetch (see
+// chromium-features.ts, whose setBlinkSettings is the switch's one writer).
+setBlinkSettings(app.commandLine, STARTUP_BLINK_SETTINGS);
 // E2: the store's scheme is privileged before the app is ready (protocol.registerSchemesAsPrivileged); P3-A M7: the
 // artifact store's; P3-L M6b: the deliverable store's no more
 registerStoreSchemes();

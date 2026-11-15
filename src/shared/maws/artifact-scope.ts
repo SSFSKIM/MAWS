@@ -2,8 +2,8 @@
 // its own. A-39's tab-sharing rule applied to artifacts: a side thread reaches its parent's, and a thread of a thread
 // reaches every side-thread ancestor up to the family root, nearest first, so the root's artifact is found through the
 // chain. Main resolves it at every launch over the index (`session.launch {spec, artifactScope}`, never stored by the
-// host); P2-F L122: the window resolves the same chain for `show_pane`'s deliverable target, over its session records
-// and, for an ancestor they lack (archived), main's index.
+// host). P2-F L122 had the window resolve the same chain for `show_pane`'s deliverable target; that lookup left with the
+// retired `artifact` pane (UX wave U6d), and the services are the chain's one reader.
 import type { AppSessionId } from '../graph/ids';
 import type { Lineage } from '../graph/session';
 

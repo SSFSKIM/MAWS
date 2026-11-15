@@ -8,10 +8,10 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CommandName } from '@shared/ipc/schema';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import type { RunnerAction } from '@shared/plugins/cli';
+import { isMcpEntryAdd, type RunnerAction } from '@shared/plugins/cli';
 import { ipc } from '../../ipc/client';
 import { transportWords } from '../read';
-import type { PluginOpState, PluginsRequest } from './present';
+import { shownRequestOf, type PluginOpState, type PluginsRequest } from './present';
 
 const COMMAND_OF = {
   install: 'plugins.install',
@@ -25,6 +25,13 @@ const COMMAND_OF = {
   'mcp-add': 'connectors.add', // P4-AGG M4: Customize › Connectors
   'mcp-remove': 'connectors.remove',
 } as const satisfies Record<RunnerAction, CommandName>;
+
+// UX wave U11g (§B, §D): a request whose input holds an entry is a custom connector's add, sent as `connectors.addJson`
+// with the page's folder its name is checked against; every other request sends what COMMAND_OF says.
+function commandOf(request: PluginsRequest, cwd: string, binary: string): { command: CommandName; input: object } {
+  if (request.action === 'mcp-add' && isMcpEntryAdd(request.input)) return { command: 'connectors.addJson', input: { cwd, binary, ...request.input, folder: request.folder ?? null } };
+  return { command: COMMAND_OF[request.action], input: { cwd, binary, ...request.input } };
+}
 
 export interface PluginOperationEntry {
   request: PluginsRequest;
@@ -130,11 +137,15 @@ class OperationBook {
     }
   }
 
-  readonly run = async (key: string, request: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null> => {
+  // UX wave U11g (§D): the book keeps the request as shown, so nothing it holds while the section is mounted holds the
+  // content of a value slot; the request itself goes only into the send.
+  readonly run = async (key: string, asked: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null> => {
+    const request = shownRequestOf(asked);
+    const sent = commandOf(asked, cwd, binary);
     this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
     if (this.kept) this.listen(); // a kept book listens before it asks, shown or not
     this.asking += 1;
-    const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never, { machine: ipc.localMachine }); // P5 O6 M4: this machine's plugins (read.ts)
+    const result = await ipc.invoke(sent.command, sent.input as never, { machine: ipc.localMachine }); // P5 O6 M4: this machine's plugins (read.ts)
     this.asking -= 1;
     const held = this.early;
     if (this.asking === 0) this.early = [];
