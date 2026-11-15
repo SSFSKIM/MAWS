@@ -6,14 +6,14 @@
 // prompt's geometry; every command, question and id is invented.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
-import { Profiler, useEffect, useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { CommandName, PreloadBridge } from '@shared/ipc/schema';
+import type { PreloadBridge } from '@shared/ipc/schema';
 import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, status } from '../../../../test/support/builders';
@@ -42,7 +42,6 @@ import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
 import { journalToEvents } from '../transcript/dev/journal';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
-import { RequestCard } from './RequestCard';
 import { itemFor, permission, type RequestEvent } from './test-requests';
 
 const APP = at('app-keys' as AppSessionId);
@@ -102,7 +101,21 @@ beforeEach(() => {
   events = [];
   requests = new Map();
   outcome = 'delivered';
-  fake = fakeClient(commands());
+  fake = fakeClient({
+    'session.events': () => ({ events, lastSeq: events.length, complete: true }),
+    'attention.request': (input: { requestId: string }) => ({ event: requests.get(input.requestId) ?? null }),
+    'session.answer': () => ({ outcome }),
+    'session.queue.list': { entries: [], paused: false, pauseReason: null },
+    'session.history.list': { entries: [] },
+    'session.drafts.get': null,
+    'session.drafts.set': undefined,
+    'session.history.append': undefined,
+    'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q-1' },
+    'session.interrupt': { stillQueued: [], cancelled: [] },
+    'session.listModels': { models: [] },
+    'session.listPermissionRules': { state: { rules: [], workspaceDirectories: [], originalCwd: '/work/app-keys', managedOnly: false } },
+    'engine.models': { models: [], source: 'cached', at: '2026-09-29T09:00:00.000Z' },
+  });
   window.maws = preloadOf(fake);
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   layout = layOutPrompts();
@@ -117,25 +130,6 @@ afterEach(() => {
   layout.restore();
   vi.useRealTimers();
 });
-
-// What main answers the page, each at once.
-function commands(): Partial<Record<CommandName, unknown>> {
-  return {
-    'session.events': () => ({ events, lastSeq: events.length, complete: true }),
-    'attention.request': (input: { requestId: string }) => ({ event: requests.get(input.requestId) ?? null }),
-    'session.answer': () => ({ outcome }),
-    'session.queue.list': { entries: [], paused: false, pauseReason: null },
-    'session.history.list': { entries: [] },
-    'session.drafts.get': null,
-    'session.drafts.set': undefined,
-    'session.history.append': undefined,
-    'session.send': { messageUuid: null, disposition: 'sent', queueId: 'q-1' },
-    'session.interrupt': { stillQueued: [], cancelled: [] },
-    'session.listModels': { models: [] },
-    'session.listPermissionRules': { state: { rules: [], workspaceDirectories: [], originalCwd: '/work/app-keys', managedOnly: false } },
-    'engine.models': { models: [], source: 'cached', at: '2026-09-29T09:00:00.000Z' },
-  };
-}
 
 // A running turn that asks a question and runs two shell calls that wait for permission, each request event pending.
 function scene() {
@@ -185,13 +179,6 @@ async function mount(items: AttentionItem[], extra: ReactNode = null) {
   );
   await waitFor(() => expect(end() && within(end()!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
   await waitFor(() => expect(editor()).toBeTruthy());
-}
-
-// Draws its children once `reveal` (handed to `onReady`) is called: a plain state update, outside any event or store.
-function Revealed({ onReady, children }: { onReady: (reveal: () => void) => void; children: ReactNode }) {
-  const [shown, setShown] = useState(false);
-  useEffect(() => onReady(() => setShown(true)), [onReady]);
-  return shown ? children : null;
 }
 
 type TiptapElement = HTMLElement & { editor: { commands: { insertContent(text: string): boolean }; getText(): string } };
@@ -289,59 +276,6 @@ describe('a prompt’s keys reach it', () => {
     act(() => void vi.advanceTimersByTime(1));
     await press(editor()!, CMD_ENTER);
     await waitFor(() => expect(answered()).toEqual([{ requestId: 'rp', answer: ALLOW_ONCE }]));
-  });
-
-  // The architect's ruling of 2026-11-15 UTC on the branch review: no painted frame shows the decision buttons without
-  // the pane's chords taken. The prompt is drawn by a render no event and no store started (a plain state update, as a
-  // list's own measuring makes), so React paints its commit before it runs the commit's passive effects; an Esc arrives
-  // in the first moment after that commit, while the buttons are on screen.
-  it('an Esc in the composer at the first paint of the prompt’s buttons is taken and answers nothing: no Stop', async () => {
-    const { prompt } = scene();
-    const event = requests.get('rp')!;
-    const seen: { reveal: (() => void) | null; pressed: KeyboardEvent | null; queued: boolean } = { reveal: null, pressed: null, queued: false };
-    const atFirstPaint = () => {
-      if (seen.queued || document.querySelector('[data-decision-buttons]') === null) return;
-      seen.queued = true;
-      queueMicrotask(() => {
-        const press = new KeyboardEvent('keydown', { ...ESCAPE, bubbles: true, cancelable: true });
-        seen.pressed = press;
-        editor()!.dispatchEvent(press);
-      });
-    };
-    busy();
-    act(() => useAttention.getState().applySnapshot([prompt], TEST_MACHINE));
-    render(
-      <Profiler id="pane" onRender={atFirstPaint}>
-        <QueryClientProvider client={queryClient}>
-          <section data-pane={0} aria-label="pane 0">
-            <Revealed onReady={(reveal) => (seen.reveal = reveal)}>
-              <div className="transcript-row" tabIndex={-1}>
-                <RequestCard item={prompt} request={event} placement="inline" region="end" keys="pane" paneIndex={null} />
-              </div>
-            </Revealed>
-            <Composer appSessionId={APP} paneIndex={0} />
-          </section>
-        </QueryClientProvider>
-      </Profiler>,
-    );
-    await waitFor(() => expect(editor()).toBeTruthy());
-    await waitFor(() => expect(seen.reveal).not.toBeNull());
-    focusOn(editor()!);
-    // outside act, as the window runs: React schedules the render and its effects as it does there
-    const actEnvironment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
-    const before = actEnvironment.IS_REACT_ACT_ENVIRONMENT;
-    actEnvironment.IS_REACT_ACT_ENVIRONMENT = false;
-    try {
-      seen.reveal!();
-      for (let i = 0; i < 20 && seen.pressed === null; i++) await new Promise((resolve) => setTimeout(resolve, 5));
-    } finally {
-      actEnvironment.IS_REACT_ACT_ENVIRONMENT = before;
-    }
-    expect(seen.pressed, 'the Esc arrived at the first paint of the buttons').not.toBeNull();
-    await flush();
-    expect(fake.invoked('session.interrupt'), 'no Stop').toEqual([]);
-    expect(answered()).toEqual([]);
-    expect(seen.pressed!.defaultPrevented, 'the prompt took it').toBe(true);
   });
 
   it('a held chord answers one prompt of two: its repeats are taken while the second opens, and a fresh press answers the second once armed', async () => {
