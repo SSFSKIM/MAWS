@@ -38,10 +38,16 @@ export function diffLines(hunks: readonly string[]): { side: LineSide; line: num
     for (const raw of lines.slice(1)) {
       const prefix = raw[0];
       const text = raw.slice(1);
-      if (prefix === '-') out.push({ side: 'old', line: old++, text });
-      else if (prefix === '+') out.push({ side: 'new', line: neu++, text });
-      else if (prefix === ' ') {
-        out.push({ side: 'old', line: old++, text }, { side: 'new', line: neu++, text });
+      if (prefix === '-') {
+        out.push({ side: 'old', line: old, text });
+        old += 1;
+      } else if (prefix === '+') {
+        out.push({ side: 'new', line: neu, text });
+        neu += 1;
+      } else if (prefix === ' ') {
+        out.push({ side: 'old', line: old, text }, { side: 'new', line: neu, text });
+        old += 1;
+        neu += 1;
       }
     }
   }
