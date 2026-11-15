@@ -65,7 +65,9 @@ const capsuleOf = (s: Scene) => s.pane.locator('section.transcript-ask');
 // UX wave U1b (Interfaces §D, "A waiting row"; M6): while its ask waits, the capsule's row holds the ask's form under its
 // title line (the request card's in-place body: the sheet's own sections, drafts and Submit), and its button reads Open
 // beside, which opens the sheet on the same form and draft. Nothing opens the sheet by itself.
-// Two animation frames: whatever a store write made before them is committed to the page by their end.
+// Two animation frames, taken once the row's form shows the ask (the check before each call): the ask store holds it
+// by then, so a layout write made in the same handler or the microtask after it, as the open M6 removed was, is
+// committed to the page by their end. It says nothing of work that runs later than that.
 const settledFrames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 const formOf = (s: Scene) => capsuleOf(s).locator('.transcript-ask-form [data-hover-ask]');
 async function openBeside(s: Scene, askId: string): Promise<Locator> {

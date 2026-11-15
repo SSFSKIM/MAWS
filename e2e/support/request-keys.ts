@@ -34,8 +34,8 @@ export async function answerByKey(page: Page, opts: { focus: Locator; control: L
 }
 
 // When each request card first drew a keyed button (page time), and, for a prompt (a card with its row of decision
-// buttons, `[data-decision-buttons]`), what of the page its guard reads (UX wave U1b, Interfaces §F): whether the card
-// is in view and its buttons' row wholly visible (intersection observers rooted at the viewport, which clip by every
+// buttons, `[data-decision-buttons]`), the page's side of what its guard reads (UX wave U1b, Interfaces §F): whether the
+// card is in view and its buttons' row wholly visible by area (intersection observers rooted at the viewport, which clip by every
 // scrolling ancestor as the guard's own test does), whether a menu, dialog or popover is open (the dispatcher's
 // `OPEN_OVERLAY`), whether the card shows its keyed control enabled (live), and the page time each of those last turned
 // true (an overlay: closed). A scene waits on that observed state, never on time from the first drawing: the guard
@@ -88,8 +88,10 @@ export async function watchPrompts(page: Page): Promise<void> {
   });
 }
 
-// Waits until the prompt `card` (a `[data-request-card]` element with its buttons' row) is armed as its guard arms it
-// (§F): in view, live, no overlay open, and for the two chords that allow (the default) its buttons' row wholly visible,
+// Waits until the prompt `card` (a `[data-request-card]` element with its buttons' row) reads armed by what the page
+// shows of the guard's conditions. Close to the guard, not the guard: wholeness here is the row's intersection area, while
+// the guard also hit-tests the row's four inner corners (a row covered by another element is not whole to it), and the
+// guard's own times start in its watch, which this does not see. Read (§F): in view, live, no overlay open, and for the two chords that allow (the default) its buttons' row wholly visible,
 // each of those for at least the grace (400 ms, and a frame's margin) since it last turned true. `deny`: Esc's rule,
 // which does not wait on the buttons' row. A premise of every press that must answer, and of every assertion that a
 // key answered nothing although the prompt would have taken it.
@@ -107,7 +109,7 @@ export async function pastGrace(page: Page, card: Locator, opts: { deny?: boolea
       if (!deny && !state.whole) return 'its buttons not wholly visible';
       const since = Math.max(state.shownAt, state.liveAt, prompts.clearedAt, deny ? 0 : state.wholeAt);
       return performance.now() - since >= 450 ? 'armed' : 'within its grace';
-    }, [id!, opts.deny === true] as const), { message: `the prompt ${id} armed as its guard arms it` })
+    }, [id!, opts.deny === true] as const), { message: `the prompt ${id} armed, as the page shows the guard's conditions` })
     .toBe('armed');
 }
 

@@ -771,7 +771,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
     await expect(end(page).locator('[data-request-card]').getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
     // how long the receipt stands, read by the page itself (its own clock, from its drawing to its going): a lower bound
-    // only, which a loaded machine can only lengthen
+    // only, and a staging limit as much as a measure: the store's timer starts at its write, a little before the DOM shows
+    // the line, so the drawn span can fall short of SETTLED_MS by that delay; 2.5 s leaves it room
     await page.evaluate(() => {
       const seen: { shown: number | null; gone: number | null } = { shown: null, gone: null };
       (window as unknown as { __u1bSettling: typeof seen }).__u1bSettling = seen;
@@ -1116,6 +1117,20 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     for (const [call, lines] of delivered) await expect.poll(() => receiptLines(questionRow(page, call)), { timeout: 15_000, message: `${call}: its row after the delivery` }).toEqual(lines);
     await expect(main(page).getByText('The sminos plugin sent a message'), 'no bubble holds the engine’s framing').toHaveCount(0);
     await expect(main(page).getByText(/The human responded to your async AskUserQuestion/)).toHaveCount(0);
+
+    // acceptance 5's fold (decision 9, with the ruling on D-7 (b)): the delivery's turn has other work (two commands and a
+    // reply), so its "answered: …" lines (U3a's notice, still derived) fold with it: folded, none stands outside the fold,
+    // and the questions' rows above still read their answers; opened, the lines are there
+    const answerLines = main(page).locator('.transcript-row[data-kind="notice"]').filter({ hasText: /answered: / });
+    const turnLine = main(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').filter({ hasText: /^Worked for / }).last();
+    await expect(turnLine, 'the delivery’s turn reads Worked for: it has other work').toBeVisible({ timeout: 15_000 });
+    if ((await turnLine.getAttribute('aria-expanded')) === 'true') await turnLine.click();
+    await expect(turnLine).toHaveAttribute('aria-expanded', 'false');
+    await expect(answerLines, 'folded, no answer line stands outside the fold').toHaveCount(0);
+    for (const [call, lines] of delivered) expect(await receiptLines(questionRow(page, call)), `${call}: its row, the turn folded`).toEqual(lines);
+    await turnLine.click();
+    await expect(turnLine).toHaveAttribute('aria-expanded', 'true');
+    await expect(answerLines, 'opened, the answer’s own lines are there').not.toHaveCount(0);
 
     // after a reload, the rows read the same from the file
     await page.reload();
