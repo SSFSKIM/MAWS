@@ -381,6 +381,68 @@ describe('My items, All', () => {
     expect(where()).toEqual({ kind: 'customize', view: 'discover', show: 'all' });
   });
 
+  it('on an empty place a search keeps “Nothing here yet.”, even one that names a mod; on a place with items it finds the mod', async () => {
+    installed = [KEEL];
+    skills = [];
+    servers = [];
+    mountCustomize({ view: 'mine', show: 'all' });
+    expect(await screen.findByText('Nothing here yet.')).toBeTruthy();
+    search('To-human');
+    await act(async () => {});
+    expect(screen.getByText('Nothing here yet.')).toBeTruthy();
+    expect(document.querySelector('[data-mod-row]')).toBeNull();
+    search('nothing like this');
+    expect(screen.getByText('Nothing here yet.')).toBeTruthy();
+    expect(screen.queryByText('Nothing matches these filters.')).toBeNull();
+    cleanup();
+    useCustomizePage.setState({ search: '' });
+    skills = [SKILLS[0]!];
+    mountCustomize({ view: 'mine', show: 'all' });
+    await waitFor(() => expect(rows()).toEqual(['Mod maws.to-human', 'Skill tide-tables']));
+    search('To-human');
+    expect(rows()).toEqual(['Mod maws.to-human']);
+  });
+
+  // An empty answer, then a Refresh whose read fails: a read in error has not answered with nothing, so its part's state
+  // stands in place of the empty state.
+  for (const failing of ['plugins', 'inventory'] as const)
+    it(`held open: after an empty answer, a Refresh whose ${failing === 'plugins' ? 'plugin list' : 'inventory'} read fails shows that read’s failure, not the empty state`, async () => {
+      installed = [KEEL];
+      skills = [];
+      servers = [];
+      mountCustomize({ view: 'mine', show: 'all' });
+      expect(await screen.findByText('Nothing here yet.')).toBeTruthy();
+      const rejected = Promise.reject(new Error(`The ${failing} read failed`));
+      rejected.catch(() => {});
+      if (failing === 'plugins') listAnswer = rejected;
+      else inventoryAnswer = rejected;
+      fireEvent.click(within(tools()!).getByRole('button', { name: 'Refresh' }));
+      await waitFor(() => expect(screen.queryByText('Nothing here yet.')).toBeNull());
+      const at = part(failing === 'plugins' ? 'plugins' : 'skills');
+      await waitFor(() => expect(at.textContent).toContain(`The ${failing} read failed`));
+      expect(document.querySelector('[data-mod-row]') !== null).toBe(failing === 'plugins'); // the mods stand under the plugins' failure, never beside nothing
+      if (failing === 'inventory') {
+        const retry = within(within(at).getByRole('alert')).getByRole('button', { name: 'Retry' });
+        inventoryAnswer = null;
+        fireEvent.click(retry);
+        expect(await screen.findByText('Nothing here yet.')).toBeTruthy();
+      }
+    });
+
+  it('Back from the second of two skills of one name returns the keyboard to that row', async () => {
+    skills = [skill('tide-tables', 'project', 'Reads the tides'), { ...skill('tide-tables', 'user', 'Reads the tides at home'), path: `${HOME}/skills/tide-tables/SKILL.md` }];
+    mountCustomize({ view: 'mine', show: 'all' });
+    await waitFor(() => expect(within(list()).getAllByRole('button', { name: 'View tide-tables' })).toHaveLength(2));
+    const second = within(list()).getAllByRole('button', { name: 'View tide-tables' })[1]!;
+    const secondRow = second.closest('li')!;
+    fireEvent.click(second);
+    const detail = await found('[data-skill-detail="tide-tables"]');
+    expect(detail.textContent).toContain('Reads the tides at home');
+    fireEvent.click(within(detail).getByRole('button', { name: /^Back to / }));
+    await waitFor(() => expect(document.querySelector('[data-skill-detail]')).toBeNull());
+    expect(document.activeElement?.closest('li')).toBe(secondRow);
+  });
+
   it('beside one skill alone the mods are drawn', async () => {
     installed = [];
     skills = [SKILLS[0]!];
