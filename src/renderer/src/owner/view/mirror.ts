@@ -271,19 +271,34 @@ export function stretchesOf(rows: readonly Row[], liveMarked?: string, open?: Re
 
 /**
  * The keys an update carries an opening to (the whole-branch review's second look): an open key no row answers to any
- * more, whose row the update took away, passes to the keys that row answered to that a row of the new rows still
- * answers to. So the opening of a thought with no text, which the derivation keeps only while it streams or inside a run
- * (`groups.ts`, `thoughtRow`), passes to its call when the run of that one call unwraps without it. A key whose row
- * leaves with no successor stays as it is, and opens its stretch again if a row comes to answer to it.
+ * more, whose row the update took away, passes to a surviving identity. First, the keys of the stretch it stood in
+ * that a new row still answers to: its own row's other keys, and the rows it folded with. When none survives, the row
+ * that stands in its place: the first row the update brought in where it stood (after the last row before it that
+ * survives). So the opening of a thought with no text, which has a row only while it streams (`thoughtRow`, `groups.ts`;
+ * finished, a textless thought with no recorded time travels in no cell of its call's run), stays with the commentary
+ * it folded with, or passes to the run its call starts in its place, and from a run to its call when the run unwraps.
+ * A key whose row leaves with no successor stays as it is, and opens its stretch again if a row comes to answer to it.
+ * `ui.openStretches` holds keys as before; the carry only adds keys.
  */
-export function carriedKeys(before: readonly Row[], after: readonly Row[], open: ReadonlySet<string> | undefined): string[] {
+export function carriedKeys(before: readonly Row[], after: readonly Row[], open: ReadonlySet<string> | undefined, liveMarked?: string): string[] {
   if (open === undefined || open.size === 0 || before === after) return [];
   const answered = new Set(after.flatMap(namesOf));
+  const gone = [...open].filter((key) => !answered.has(key));
+  if (gone.length === 0) return [];
+  const known = new Set(before.flatMap(namesOf));
+  const stretches = stretchesOf(before, liveMarked).map((stretch) => (stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]).flatMap(namesOf));
   const carried = new Set<string>();
-  for (const key of open) {
-    if (answered.has(key)) continue;
-    const held = before.find((row) => namesOf(row).includes(key));
-    if (held !== undefined) for (const name of namesOf(held)) if (answered.has(name) && !open.has(name)) carried.add(name);
+  for (const key of gone) {
+    const at = before.findIndex((row) => namesOf(row).includes(key));
+    if (at < 0) continue;
+    let names = (stretches.find((stretch) => stretch.includes(key)) ?? namesOf(before[at])).filter((name) => answered.has(name));
+    if (names.length === 0) {
+      const kept = before.slice(0, at).findLast((row) => namesOf(row).some((name) => answered.has(name)));
+      const from = kept === undefined ? 0 : after.findIndex((row) => namesOf(row).some((name) => namesOf(kept).includes(name))) + 1;
+      const successor = after[from];
+      names = successor !== undefined && !namesOf(successor).some((name) => known.has(name)) ? namesOf(successor) : [];
+    }
+    for (const name of names) if (!open.has(name)) carried.add(name);
   }
   return [...carried];
 }

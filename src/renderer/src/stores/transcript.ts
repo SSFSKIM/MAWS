@@ -370,7 +370,7 @@ export function createTranscriptStore() {
         next.rows = rowsOf(next.state);
         next.working = next.state.current !== null;
         // UX wave U2b: an opening whose row the update took away passes to what that row also answered to (`carriedKeys`)
-        const carried = carriedKeys(current.rows, next.rows, next.state.ui.openStretches);
+        const carried = carriedKeys(current.rows, next.rows, next.state.ui.openStretches, liveMarkedRowIds(current.state));
         if (carried.length > 0) {
           const ui = copyUi(next.state.ui, []);
           for (const name of carried) ui.openStretches!.add(name);
