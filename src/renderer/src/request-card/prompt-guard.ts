@@ -36,6 +36,8 @@ export interface PromptGuard {
 }
 
 const CLIPS = new Set(['auto', 'scroll', 'hidden', 'clip']);
+// An intersection ratio above nothing and below any sliver a card can show (a pixel of a card a million pixels tall).
+const SLIVER = 1e-6;
 const HALF_PIXEL = 0.5;
 
 interface Box {
@@ -44,6 +46,10 @@ interface Box {
   right: number;
   bottom: number;
 }
+// Something of the element is shown: what is left of its rectangle has area. The one test of *in view*, whether the page
+// is read at a press or an intersection entry reports it (a target that only touches the view's edge intersects by the
+// browser's word, with an empty rectangle, and is not shown).
+const hasArea = (box: Box) => box.right > box.left && box.bottom > box.top;
 // What is left of a rectangle is the whole of it, to within half a pixel.
 const within = (seen: Box, r: Box) => Math.abs(seen.left - r.left) <= HALF_PIXEL && Math.abs(seen.top - r.top) <= HALF_PIXEL && Math.abs(seen.right - r.right) <= HALF_PIXEL && Math.abs(seen.bottom - r.bottom) <= HALF_PIXEL;
 
@@ -63,7 +69,7 @@ function visible(element: HTMLElement): Box | null {
   }
   [box.left, box.top] = [Math.max(box.left, 0), Math.max(box.top, 0)];
   [box.right, box.bottom] = [Math.min(box.right, window.innerWidth), Math.min(box.bottom, window.innerHeight)];
-  return box.right > box.left && box.bottom > box.top ? box : null;
+  return hasArea(box) ? box : null;
 }
 
 /** Any sliver of the element is visible. */
@@ -128,7 +134,7 @@ export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: nu
       let nowShown = shown;
       let nowWhole = isWhole;
       for (const entry of entries) {
-        if (entry.target === card) nowShown = entry.isIntersecting;
+        if (entry.target === card) nowShown = entry.isIntersecting && hasArea(entry.intersectionRect);
         if (entry.target !== buttons) continue;
         const nowEntirely = entire(entry);
         nowWhole = nowEntirely && (entirely && isWhole ? true : uncovered(buttons, entry.boundingClientRect));
@@ -136,7 +142,8 @@ export function watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs: nu
       }
       see(now, nowShown, nowWhole);
     },
-    { threshold: [0, 1] },
+    // `SLIVER`: the card's first area, as an entry of its own (from touching the edge to a sliver crosses no other)
+    { threshold: [0, SLIVER, 1] },
   );
   intersections.observe(card);
   intersections.observe(buttons);
