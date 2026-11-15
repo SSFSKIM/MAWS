@@ -1,4 +1,4 @@
-// Shared by the suites of a closed stretch's head (not a test file itself): invented texts, each with the message spans
+// Shared by the suites of the marks' one reading (not a test file itself): invented texts, each with the message spans
 // the mod's `parseMarked` reads in it (`to-human/hooks/mods/to-human.tsx` 144, at 0.8.2), worked out by its rules. A
 // mark inside a Markdown container (emphasis, a list item, a quote, a table cell) is a span of its own, the
 // container's words outside the mark are the record's, and each run of text under one mark is a span. Each span here

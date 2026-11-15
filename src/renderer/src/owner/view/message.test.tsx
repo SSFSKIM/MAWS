@@ -23,7 +23,7 @@ import { Transcript } from '../../transcript/view/Transcript';
 import { assistantPresentation } from '../to-human/Presenter';
 import { ToHumanMessageRow } from '../to-human/MessageRow';
 import { ReportOnly } from './Message';
-import { MARKED_CASES } from './marked-cases';
+import { MARKED_CASES } from '@shared/owner/marked-cases';
 
 afterEach(() => {
   cleanup();
@@ -165,10 +165,27 @@ describe('the label follows `spanRows`', () => {
     expect(view.container.textContent).not.toMatch(/arration/);
   });
 
-  it('a closed stretch’s head draws a mark left open to its end as the mod does, its label reading ` …`', () => {
-    const view = head('<message>Done.</message> narration <message>Still open');
-    expect(labels(view.container)).toEqual(['● message', 'message …']);
-    expect(bodies(view.container).map((body) => body.trim())).toEqual(['Done.', 'Still open']);
+  // The one reading (fix wave 3): a mark left open in a completed text is the record's in every reader, as the shared
+  // grammar has it, so the same words do not change from message to record when the record opens.
+  it('a closed stretch’s head leaves a mark open at the end of its completed text out, as the full drawing leaves it literal', () => {
+    const text = '<message>Done.</message> narration <message>Still open';
+    const view = head(text);
+    expect(labels(view.container)).toEqual(['● message']);
+    expect(bodies(view.container).map((body) => body.trim())).toEqual(['Done.']);
+    cleanup();
+    const whole = draw(text);
+    expect(labels(whole.container)).toEqual(['● message']);
+    expect(whole.container.textContent).toContain('<message>Still open');
+  });
+
+  it('draws a message whose closing fence is glued to its closer, in the gate, the full drawing and the closed head', () => {
+    const text = '<message>\n```sh\nls\n```</message>';
+    expect(assistantPresentation(text)).not.toBeNull();
+    const whole = draw(text);
+    expect(labels(whole.container)).toEqual(['● message']);
+    expect(whole.container.textContent).not.toContain('</message>');
+    cleanup();
+    expect(labels(head(text).container)).toEqual(['● message']);
   });
 
   it('the full drawing keeps a mark inside a line in its authored paragraph, under one label', () => {
