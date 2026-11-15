@@ -13,6 +13,11 @@
 // pills at the bottom right. The main split's card is drawn by `SplitCardLayer` in the main area's grid, on the content
 // row across every column (never over a tab strip), over the pane beside the floating one; a press or focus in it
 // focuses the floating pane, which it stands for. The open card publishes its rect and region (`useFloatingCard`).
+//
+// UX wave U10b (O-43; its execution document §F.1 to §F.3, M7): closed, the float is the bar (`FloatingPill.tsx`: the
+// composer's box alone with Open conversation and Hide chat), or hidden, when the layer draws nothing and the header of
+// what the float sits over holds Show chat (`ShowChat.tsx`). The layer turns a hidden chat into the bar once that header
+// is gone (`showChatHeaderGone`).
 import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize } from '@shared/ipc/schema/layout';
@@ -20,8 +25,11 @@ import { IconButton, MaximizeIcon } from '../app/IconButton';
 import { SessionPane } from '../session/SessionPane';
 import { mainCardKey, useLayout } from '../stores/layout';
 import { currentSet } from '../stores/layout-model';
-import { CARD_MARGIN, CARD_MIN, cardHost, cardSession, cardSizeKey, closeCard, dockCard, placeCard, splitFloat, useFloatingCard, type CardHost, type CardRect, type ColumnDrag } from './floating';
-import { Pill, useSessionTitle } from './FloatingPill';
+import {
+  CARD_MARGIN, CARD_MIN, cardHost, cardSession, cardSizeKey, chatPresentation, closeCard, dockCard, placeCard, sameRect, showChatHeaderGone, showChatHeaderHeld, splitFloat, useFloatingCard,
+  usePublishedPlace, useShowChatHeader, type CardHost, type CardRect, type ColumnDrag,
+} from './floating';
+import { Bar, useSessionTitle } from './FloatingPill';
 
 type Bounds = { width: number; height: number };
 
@@ -64,8 +72,6 @@ function useBodyTop(layer: RefObject<HTMLElement | null>, body: RefObject<HTMLEl
 }
 
 type Rect = CardRect;
-const sameRect = (a: Rect | null, b: Rect) => a !== null && (['left', 'top', 'width', 'height'] as const).every((k) => a[k] === b[k]);
-const rounded = (r: DOMRect): Rect => ({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
 
 // `element`'s rect in px from the layer's top left, followed through either's resizes (a column's width and the pane's
 // height change its size; the layer moving with the header's height resizes the layer).
@@ -147,15 +153,22 @@ export function SplitCardOutline({ floating }: { floating: 0 | 1 }) {
   );
 }
 
-// The card or its pill of the `host` region's card, while that card is up.
+// The card, the bar or nothing (hidden) of the `host` region's float, while that float is up.
 function CardOrPill({ host, area, bounds }: { host: CardHost; area: RefObject<HTMLElement | null>; bounds: Bounds }) {
   const session = useLayout((s) => (cardHost(s) === host ? cardSession(s) : null));
-  const closed = useFloatingCard((s) => s.closed);
+  const presentation = useFloatingCard(chatPresentation);
   const column = useFloatingCard((s) => s.column?.element ?? null);
   const columnRect = useRectIn(area, column);
   const pillHosted = useFloatingCard((s) => s.pillHost !== null);
-  if (session === null) return null;
-  if (closed) return !pillHosted && <Pill appSessionId={session} placement="floating" />;
+  // UX wave U10b (§F.2): what the float sits over no longer holds Show chat: a hidden chat becomes the bar, once. Read
+  // again here, after the commit, since a tab that has just come in front registers its header in a layout effect.
+  const offered = useShowChatHeader();
+  const hiddenHere = session !== null && presentation === 'hidden';
+  useEffect(() => {
+    if (hiddenHere && !offered && !showChatHeaderHeld()) showChatHeaderGone();
+  }, [hiddenHere, offered]);
+  if (session === null || presentation === 'hidden') return null;
+  if (presentation === 'bar') return !pillHosted && <Bar host={host} appSessionId={session} area={area} bounds={bounds} />;
   return <Card key={session} host={host} appSessionId={session} area={area} bounds={bounds} column={column && columnRect && { element: column, rect: columnRect }} />;
 }
 
@@ -194,24 +207,7 @@ function Card({ host, appSessionId, area, bounds, column }: { host: CardHost; ap
 
   // P4-B3 (X37, its Decision Log 15): the open card's rect in client px, after every render (a resize, a column) and
   // whenever it or its layer resizes (the window, the regions); withdrawn as it goes.
-  const publish = () => {
-    const element = self.current;
-    if (!element) return;
-    const rect = rounded(element.getBoundingClientRect());
-    const now = useFloatingCard.getState();
-    if (now.host !== host || !sameRect(now.rect, rect)) useFloatingCard.setState({ rect, host });
-  };
-  useLayoutEffect(publish);
-  useLayoutEffect(() => {
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
-    if (self.current) observer?.observe(self.current);
-    if (area.current) observer?.observe(area.current);
-    return () => {
-      observer?.disconnect();
-      if (useFloatingCard.getState().host === host) useFloatingCard.setState({ rect: null, host: null });
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `publish` reads the element and the host of the moment
-  }, [host, area]);
+  usePublishedPlace(self, area, host);
 
   // The split's card stands for its floating pane (its Decision Log 7): a press or focus in it focuses that pane.
   const focusPane = () => {

@@ -73,7 +73,11 @@ const mainRegion = () => document.querySelector<HTMLElement>('[data-region="main
 const area = () => mainRegion().querySelector<HTMLElement>('[data-main-area]')!;
 const columns = () => area().style.gridTemplateColumns;
 const card = () => screen.queryByRole('region', { name: 'Session card' });
-const pill = () => screen.queryByRole('button', { name: 'Show session card' });
+// UX wave U10b (O-43, §F.4): what Close and Expand leave is the bar, the composer's box alone with its two buttons
+const bar = () => screen.queryByRole('region', { name: 'Chat' });
+const openConversation = () => screen.queryByRole('button', { name: 'Open conversation' });
+const hideChatButton = () => screen.queryByRole('button', { name: 'Hide chat' });
+const showChatButton = () => screen.queryByRole('button', { name: 'Show chat' });
 const composers = () => screen.queryAllByTestId('composer').map((el) => el.dataset.session);
 const set = () => currentSet(useLayout.getState().main);
 const divider = () => within(mainRegion()).getByRole('separator', { name: 'Resize panes' });
@@ -229,38 +233,39 @@ describe('the split’s floating card in the Shell', () => {
     act(() => useLayout.getState().focusPane(1));
     act(() => runAction('main.expandArtifactPane'));
     expect(card()).toBeNull();
-    expect(within(screen.getByRole('region', { name: 'Compact session composer' })).getByTestId('composer').dataset.session).toBe(A);
+    expect(within(bar()!).getByTestId('composer').dataset.session).toBe(A);
     expect(composers()).toEqual([A]);
     act(() => runAction('panel.float')); // ⌥⌘B docks the split's compact session
     expect(card()).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Compact session composer' })).toBeNull();
+    expect(bar()).toBeNull();
     expect(composers()).toEqual([A]);
     expect(live).toEqual({ now: 1, most: 1 });
     expect(set().splitRatio).toBe(0.4);
   });
 
-  it('Close leaves the pill at the bottom right with the unread dot; the pill brings the card back; a new request raises it', async () => {
+  it('Close leaves the bar at the bottom right with the unread mark; Open conversation brings the card back; a new request raises it', async () => {
     const user = userEvent.setup();
     shell();
     dragTo(150);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
     expect(card()).toBeNull();
     expect(composers()).toEqual([A]);
-    expect(set().focusedPane, 'the pill is no pane: A is what is on screen').toBe(1);
-    const shown = pill()!;
-    expect(document.activeElement).toBe(shown);
-    const compact = screen.getByRole('region', { name: 'Compact session composer' });
-    expect([shown.dataset.floatingPill, compact.style.right, compact.style.bottom]).toEqual(['floating', '16px', '16px']);
+    expect(set().focusedPane, 'the bar is no pane: A is what is on screen').toBe(1);
+    const shown = openConversation()!;
+    expect(document.activeElement, 'after the card’s Close the keyboard is on Open conversation').toBe(shown);
+    const compact = bar()!;
+    expect([compact.style.right, compact.style.bottom, compact.dataset.chatPresentation]).toEqual(['16px', '16px', 'bar']);
     expect(mainRegion().contains(shown)).toBe(true);
-    expect(shown.querySelector('[aria-label="Unread"]')).toBeNull();
+    expect(shown.title, 'its tooltip is the session’s title').toBe('Alpha session');
+    expect(shown.querySelector('[data-session-mark]')).toBeNull();
     act(() => useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }]]) }));
-    expect(shown.querySelector('[aria-label="Unread"]')).not.toBeNull();
+    expect(shown.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('unread');
     focused.splice(0);
     await user.click(shown);
     expect(card()).not.toBeNull();
     expect(focused).toEqual([A]);
     await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
-    expect(document.activeElement).toBe(pill());
+    expect(document.activeElement).toBe(openConversation());
     focused.splice(0);
     act(() => useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) }));
     expect(card()).not.toBeNull();
@@ -312,7 +317,7 @@ describe('the split’s floating card in the Shell', () => {
     act(() => useFloatingCard.getState().setClosed(true));
     act(() => useLayout.getState().closeTab(S.id));
     expect(card()).toBeNull();
-    expect(pill()).toBeNull();
+    expect(bar()).toBeNull();
     expect(composers()).toEqual([]);
   });
 
@@ -342,15 +347,23 @@ describe('the split’s floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
   });
 
-  it('the open card publishes its rect and region, and withdraws them as a pill', async () => {
+  // UX wave U10b (B6): the bar publishes its own place the same way, so a scrolling artifact under it keeps that room;
+  // hidden, nothing floats and nothing is published
+  it('the open card publishes its rect and region, the bar its own in their place, and hidden withdraws them', async () => {
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const r = this.hasAttribute('data-floating-card') ? { left: 1004, top: 300, width: 420, height: 420 } : { left: 0, top: 0, width: 0, height: 0 };
+      const r = this.hasAttribute('data-floating-card')
+        ? { left: 1004, top: 300, width: 420, height: 420 }
+        : this.dataset.chatPresentation === 'bar'
+          ? { left: 940, top: 676, width: 484, height: 60 }
+          : { left: 0, top: 0, width: 0, height: 0 };
       return { ...r, x: r.left, y: r.top, right: r.left + r.width, bottom: r.top + r.height, toJSON: () => ({}) } as DOMRect;
     });
     shell();
     dragTo(150);
     expect(useFloatingCard.getState()).toMatchObject({ host: 'split', rect: { left: 1004, top: 300, width: 420, height: 420 } });
     await userEvent.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    expect(useFloatingCard.getState()).toMatchObject({ host: 'split', rect: { left: 940, top: 676, width: 484, height: 60 } });
+    await userEvent.click(hideChatButton()!);
     expect(useFloatingCard.getState()).toMatchObject({ host: null, rect: null });
   });
 
@@ -362,7 +375,7 @@ describe('the split’s floating card in the Shell', () => {
     await user.click(within(header()).getByRole('button', { name: 'Expand pane', pressed: false }));
     expect(set()).toMatchObject({ floating: { sessionTabId: S.id }, splitRatio: 0.4 });
     expect(card()).toBeNull();
-    expect(screen.getByRole('region', { name: 'Compact session composer' })).toBeTruthy();
+    expect(bar()).toBeTruthy();
     expect(focused).toEqual([A]);
     await user.click(within(header()).getByRole('button', { name: 'Restore split', pressed: true }));
     expect(set().floating).toBeUndefined();
@@ -388,19 +401,19 @@ describe('the split’s floating card in the Shell', () => {
     expect(within(panelHeader).getByRole('button', { name: 'Float conversation over surface' })).toBeTruthy();
   });
 
-  // Over a Browser main tab in A the page is a native view: its chrome's row hosts the split card's pill (a panel
-  // chrome hosts only the panel card's), and the layer draws none
-  it('a main tab’s browser chrome hosts the split card’s pill; a panel chrome does not', () => {
+  // Over a Browser main tab in A the page is a native view: its chrome's row hosts the split card's chip (a panel
+  // chrome hosts only the panel card's), and the layer draws no bar
+  it('a main tab’s browser chrome hosts the split card’s chip; a panel chrome does not', () => {
     shell();
     dragTo(150);
     act(() => useFloatingCard.getState().setClosed(true));
     const panelChrome = render(<ChromePill surface="panel" />);
     expect(within(panelChrome.container).queryByRole('button', { name: 'Show session card' })).toBeNull();
-    expect(mainRegion().querySelector('[data-floating-pill="floating"]')).not.toBeNull();
+    expect(mainRegion().querySelector('[data-chat-presentation="bar"]')).not.toBeNull();
     panelChrome.unmount();
     const mainChrome = render(<ChromePill surface="main" />);
     expect(within(mainChrome.container).getByRole('button', { name: 'Show session card' }).dataset.floatingPill).toBe('inline');
-    expect(mainRegion().querySelector('[data-floating-pill="floating"]')).toBeNull();
+    expect(mainRegion().querySelector('[data-chat-presentation="bar"]')).toBeNull();
   });
 
   it('⌘⇧\\ from A goes into the card, opening a pill, its composer taking the keyboard', () => {
@@ -413,6 +426,109 @@ describe('the split’s floating card in the Shell', () => {
     expect(card()).not.toBeNull();
     expect(set().focusedPane).toBe(0);
     expect(focused).toEqual([A]);
+  });
+});
+
+// UX wave U10b (O-43; its execution document §F, M7): over the artifact beside the split the closed float is the bar,
+// the composer's box alone with Open conversation and, while the tab in front registers a header, Hide chat; hidden,
+// that header holds Show chat directly before Restore split.
+describe('the chat over the artifact beside the split (UX wave U10b)', () => {
+  const header = () => mainRegion().querySelector<HTMLElement>('[data-pane="1"] [data-editor-header]');
+  const NOTES: TabRef = { id: `file:${TEST_MACHINE}:/invented/notes.md`, kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE, pinned: false };
+
+  it('Expand leaves the bar, 484 px with both buttons, the keyboard in its composer; Hide chat, then Show chat before Restore split with the keyboard; Show chat brings the bar back', async () => {
+    const user = userEvent.setup();
+    shell();
+    act(() => useLayout.getState().focusPane(1));
+    await user.click(within(header()!).getByRole('button', { name: 'Expand pane' }));
+    expect(card()).toBeNull();
+    expect(bar()!.style.width).toBe('484px');
+    expect([openConversation(), hideChatButton()].every((button) => button !== null && bar()!.contains(button))).toBe(true);
+    expect(focused, 'after Expand the keyboard is in the bar’s editor').toEqual([A]);
+    expect(showChatButton(), 'no Show chat while the bar shows').toBeNull();
+
+    await user.click(hideChatButton()!);
+    expect(bar()).toBeNull();
+    expect(card()).toBeNull();
+    expect(composers(), 'hidden: nothing of the session is mounted').toEqual([]);
+    const show = within(header()!).getByRole('button', { name: 'Show chat' });
+    expect(show.nextElementSibling?.getAttribute('aria-label'), 'directly before Restore split').toBe('Restore split');
+    expect(document.activeElement, 'after Hide chat Show chat has the keyboard').toBe(show);
+
+    focused.splice(0);
+    await user.click(show);
+    expect(bar()).not.toBeNull();
+    expect(showChatButton()).toBeNull();
+    expect(focused, 'after Show chat the keyboard is in the bar’s editor').toEqual([A]);
+    await user.click(openConversation()!);
+    expect(card()).not.toBeNull();
+    expect(showChatButton(), 'no Show chat while the card shows').toBeNull();
+  });
+
+  it('from hidden, ⇧⌘\\ from the artifact’s pane opens the card with the keyboard in its composer', async () => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(hideChatButton()!);
+    expect(set().focusedPane).toBe(1);
+    focused.splice(0);
+    act(() => runAction('pane.focusOther'));
+    expect(card()).not.toBeNull();
+    expect(focused).toEqual([A]);
+  });
+
+  it('a request while hidden opens nothing and marks Show chat as waiting, before unread; the bar Show chat brings back carries the same mark', async () => {
+    const user = userEvent.setup();
+    useSessions.setState({ records: new Map([[A, { ...record(A), title: { text: 'Alpha session', source: 'user' }, unread: true }], [B, record(B)]]) });
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(hideChatButton()!);
+    const mark = () => showChatButton()?.querySelector('[data-session-mark]')?.getAttribute('data-session-mark');
+    expect(mark()).toBe('unread');
+    expect(showChatButton()!.textContent, 'its words').toBe('Show chat');
+    act(() => useAttention.setState({ bySession: new Map([[A, [permissionOfA()]]]) }));
+    expect(card()).toBeNull();
+    expect(bar()).toBeNull();
+    expect(showChatButton()!.querySelectorAll('[data-session-mark]')).toHaveLength(1);
+    expect(mark(), 'waiting wins over unread').toBe('waiting');
+    await user.click(showChatButton()!);
+    expect(card(), 'the request seen while hidden does not raise the bar Show chat brings back').toBeNull();
+    expect(openConversation()!.querySelector('[data-session-mark]')?.getAttribute('data-session-mark')).toBe('waiting');
+  });
+
+  it('over a tab with no header the bar has Open conversation alone, 452 px; a hidden chat becomes the bar when such a tab comes in front, and stays the bar when the header comes back', async () => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(hideChatButton()!);
+    act(() => useLayout.getState().openTab({ kind: 'diagnostics' }, { pane: 1 }));
+    expect(bar()).not.toBeNull();
+    expect(bar()!.style.width).toBe('452px');
+    expect(hideChatButton()).toBeNull();
+    expect(openConversation()).not.toBeNull();
+    expect(showChatButton()).toBeNull();
+    act(() => useLayout.getState().activateTab(PREFS.id));
+    expect(bar(), 'it does not hide again by itself').not.toBeNull();
+    expect(bar()!.style.width).toBe('484px');
+  });
+
+  // M6's report: a tab that has just opened registers its header in a layout effect at its first mount, after the render
+  // in which `useShowChatHeader` read false; the layer reads the registration again before it turns hidden into the bar.
+  it('a switch to a newly opened tab that registers its header keeps the chat hidden', async () => {
+    const user = userEvent.setup();
+    shell();
+    dragTo(150);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(hideChatButton()!);
+    act(() => useLayout.getState().openTab({ kind: 'file', path: '/invented/notes.md', line: null, appSessionId: null, machine: TEST_MACHINE }, { pane: 1 }));
+    await act(async () => {});
+    expect(set().panes[1]!.activeTabId).toBe(NOTES.id);
+    expect(useFloatingCard.getState()).toMatchObject({ closed: true, hidden: true });
+    expect(bar()).toBeNull();
+    expect(within(header()!).getByRole('button', { name: 'Show chat' })).toBeTruthy();
   });
 });
 
@@ -525,7 +641,7 @@ describe('the round trip with the real transcript and composer', () => {
     act(() => runAction('main.expandArtifactPane')); // compress from the editor beside it
     expect(card()).toBeNull();
     await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip'));
-    await userEvent.click(screen.getByRole('button', { name: 'Show session card' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Open conversation' }));
     expect(card()).not.toBeNull();
     await waitFor(() => expect(editor().editor.getText()).toBe('kept across the round trip'));
     await waitFor(() => expect(scrolls.at(-1)).toBe(shownAt(inPane)));

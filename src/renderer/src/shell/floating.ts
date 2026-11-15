@@ -13,6 +13,7 @@
 // UX wave U10b (O-43; its execution document §F.1, §F.2, M6): the float has three presentations, the card, the bar (what
 // Close and Expand leave, the composer's box alone; in code still the pill) and hidden (nothing floats, and the header of
 // what the float sat over holds Show chat). `closed` keeps its meaning, "not the card"; `hidden` says which closed one.
+import { useLayoutEffect, type RefObject } from 'react';
 import { create } from 'zustand';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -64,6 +65,7 @@ export interface FloatingCardState {
   pillHost: object | null; // a browser chrome drawing the pill in its row (the layer then draws none)
   // P4-B3 (X37, its Decision Log 15): the open card's rect in client px and its region, published by the card from a
   // layout effect and its resize observer; null for a pill or no card. Editors may keep their controls out from under it.
+  // UX wave U10b (B6): the bar publishes its own the same way (`usePublishedPlace`); `chatPresentation` tells them apart.
   rect: CardRect | null;
   host: CardHost | null;
   setClosed(closed: boolean): void; // either way, not hidden
@@ -333,6 +335,40 @@ export function useColumnWidth(surface: 'panel' | 'main'): number | null {
   return up && !closed ? Math.max(CARD_MIN.w, drag ?? stored ?? COLUMN_DEFAULT_W) : null;
 }
 
+// ---- the float's published place (X37; UX wave U10b, B6) ---------------------------------------------------------------
+
+export const sameRect = (a: CardRect | null, b: CardRect) => a !== null && (['left', 'top', 'width', 'height'] as const).every((k) => a[k] === b[k]);
+export const roundedRect = (r: DOMRect): CardRect => ({ left: Math.round(r.left), top: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) });
+
+// P4-B3 (X37, its Decision Log 15): what floats (the open card, or UX wave U10b's bar) publishes its rect in client px
+// and its region after every render and whenever it or its layer resizes; withdrawn as it goes.
+export function usePublishedPlace(self: RefObject<HTMLElement | null>, area: RefObject<HTMLElement | null>, host: CardHost): void {
+  const publish = () => {
+    const element = self.current;
+    if (!element) return;
+    const rect = roundedRect(element.getBoundingClientRect());
+    const now = useFloatingCard.getState();
+    if (now.host !== host || !sameRect(now.rect, rect)) useFloatingCard.setState({ rect, host });
+  };
+  useLayoutEffect(publish);
+  useLayoutEffect(() => {
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    if (self.current) observer?.observe(self.current);
+    if (area.current) observer?.observe(area.current);
+    return () => {
+      observer?.disconnect();
+      if (useFloatingCard.getState().host === host) useFloatingCard.setState({ rect: null, host: null });
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `publish` reads the element and the host of the moment
+  }, [host, area]);
+}
+
+// UX wave U10b (B6): the room a scrolling artifact on `surface` keeps at the end of its scroll, so that its last line can
+// stand above the bar: the bar's published height and its margin while the bar floats over that surface, else 0.
+export function useBarRoom(surface: 'panel' | 'main'): number {
+  return useFloatingCard((s) => (chatPresentation(s) === 'bar' && s.host === hostOf(surface) && s.rect !== null ? s.rect.height + CARD_MARGIN : 0));
+}
+
 // ---- transitions (§D1.2) ----------------------------------------------------------------------------------------------
 
 const layout = () => useLayout.getState();
@@ -485,11 +521,20 @@ function splitHeaderTab(state: Layout): string | null {
 const holdsShowChat = (host: CardHost | null, headerRegistered: boolean): boolean => host === 'panel' || (host === 'split' && headerRegistered);
 
 // §F.2: whether Hide chat is offered. The bar draws it only while this is true, and the float's layer calls
-// `showChatHeaderGone` when it turns false.
+// `showChatHeaderGone` when it turns false (once `showChatHeaderHeld` agrees).
 export function useShowChatHeader(): boolean {
   const host = useLayout(cardHost);
   const tab = useLayout(splitHeaderTab);
   return holdsShowChat(host, useEditorHostRegistration(tab === null ? null : { surface: 'main', tabId: tab }) !== null);
+}
+
+// The same rule read now. A tab that has just come in front registers its header in a layout effect, after the render
+// that read `useShowChatHeader`, so the float's layer reads it again here before it turns a hidden chat into the bar
+// (M6's report: a switch to a newly opened artifact keeps the chat hidden).
+export function showChatHeaderHeld(): boolean {
+  const state = layout();
+  const tab = splitHeaderTab(state);
+  return holdsShowChat(cardHost(state), tab !== null && editorHostOf({ surface: 'main', tabId: tab }) !== null);
 }
 
 // The bar's Hide chat: bar → hidden, Show chat in the header taking the keyboard. Only from the bar, and only where a
@@ -499,8 +544,7 @@ export function useShowChatHeader(): boolean {
 // order (§I); the request's id stays recorded, and Show chat brings the bar.
 export function hideChat(): void {
   const state = layout();
-  const tab = splitHeaderTab(state);
-  if (!holdsShowChat(cardHost(state), tab !== null && editorHostOf({ surface: 'main', tabId: tab }) !== null)) return;
+  if (!showChatHeaderHeld()) return;
   const raise = raisedThisTick;
   const presentation = chatPresentation(useFloatingCard.getState());
   const takesBackRaise = presentation === 'card' && raise !== null && raise.session === cardSession(state);

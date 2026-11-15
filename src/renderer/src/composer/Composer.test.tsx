@@ -15,6 +15,7 @@ import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, bareOf } from '@shared/machine/address';
 import type { TabSet } from '@shared/ipc/schema/layout'; // E9
 import { digest, humanTurn, item, record, status } from '../../../../test/support/builders'; // C12: digest; E11 F2b: item
+import { loadJournal } from '../../../../test/support/fixtures'; // UX wave U10b: the plugin sites' recorded answers
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address'; // P5 O7 M2
@@ -1235,6 +1236,52 @@ describe('the three menu chords', () => {
     expect(useComposerStore.getState().chipWidgets).toBe(chipWidgets);
     expect(useComposerStore.getState().modeMenus).toBe(modeMenus);
     expect(invoked('session.listModels'), 'no chip opened to read the engine’s models').toEqual([]);
+  });
+});
+
+// UX wave U10b (O-43; §F.3, H11): in the float's bar nothing is drawn under the box: a plugin's band stands above the
+// frame as in a pane, and its hint under the frame is not drawn.
+describe('the composer as the float’s bar (UX wave U10b)', () => {
+  const ENGINE = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
+  // The render answers pass3/mods-surface-render-sites recorded, by component (the first of each).
+  function recorded(): Record<string, unknown> {
+    const asked = new Map<string, string>();
+    const out: Record<string, unknown> = {};
+    for (const row of loadJournal('pass3', 'mods-surface-render-sites')) {
+      const f = row.frame as { type?: string; request_id?: string; request?: { subtype?: string; component?: string }; response?: { request_id?: string; response?: unknown } };
+      if (row.direction === 'out' && f.type === 'control_request' && f.request?.subtype === 'ui_render') asked.set(f.request_id!, f.request.component!);
+      if (row.direction === 'in' && f.type === 'control_response' && asked.has(f.response!.request_id!)) out[asked.get(f.response!.request_id!)!] ??= f.response!.response;
+    }
+    return out;
+  }
+  // every site's render asked so far, answered as the fixture did
+  async function answerSites(): Promise<void> {
+    const answers = recorded();
+    let answered = 0;
+    await waitFor(() => expect(fake.pending('session.ui.render')).toBeGreaterThan(0));
+    while (fake.pending('session.ui.render') > 0) {
+      const input = fake.invoked('session.ui.render')[answered++] as { component: string };
+      await act(() => fake.reply('session.ui.render', answers[input.component] ?? ENGINE));
+    }
+  }
+
+  it.each([
+    ['in a pane', false],
+    ['in the bar', true],
+  ])('%s a plugin’s band stands above the frame, and its hint is drawn under it only in a pane', async (_, bar) => {
+    live(A, { status: { uiSurface: { clientId: 'maws-main' } } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Pane index={0}>
+          <ComposerBarContext.Provider value={bar}>
+            <Composer appSessionId={A} paneIndex={0} />
+          </ComposerBarContext.Provider>
+        </Pane>
+      </QueryClientProvider>,
+    );
+    await answerSites();
+    expect(await within(composerOf(0)).findByRole('region', { name: 'From plugins' })).toBeTruthy();
+    expect(composerOf(0).querySelector('[data-plugin-hint]') !== null).toBe(!bar);
   });
 });
 
