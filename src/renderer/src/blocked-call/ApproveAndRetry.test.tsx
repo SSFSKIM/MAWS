@@ -335,11 +335,13 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     const row = drawn(store, blockedIds(store)[0]!);
     fireEvent.click(row.button()!);
     await flush();
+    expect(row.line(), 'pressed, the send unanswered').toBe('Auto mode blocked: make build');
     await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-1' });
+    expect(row.line(), 'the send answered').toBe('Auto mode blocked: make build');
     act(() => queueOf(store.key, { entries: [entry(store.key, consentMessage('command', 'make build'))] }));
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
+    expect(row.line(), 'the queue lists it').toBe('Auto mode blocked: make build');
     expect(row.button()!.disabled, 'listed in the queue: the clock is stopped').toBe(true);
-    expect(row.line()).toBe('Auto mode blocked: make build');
     act(() => queueOf(store.key, { entries: [] }));
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS - 1));
     expect(row.button()!.disabled, 'just before the clock runs out').toBe(true);
