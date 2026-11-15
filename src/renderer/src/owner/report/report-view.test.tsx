@@ -16,6 +16,8 @@ import { api, BASH_RESULT, builder } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
 import sitting31 from './fixtures/sitting-31.txt?raw';
+import { loadEngineJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../../transcript/dev/journal';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -112,6 +114,19 @@ describe('the report view', () => {
     await waitFor(() => expect(turnLines()).toHaveLength(1));
     expect(turnLines()[0].textContent).toMatch(/^Worked for/);
     expect(document.querySelector('[data-plugin-spinner]')).toBeNull();
+  });
+
+  // The scene "the to-human view folds work by stretch, draws each message as the mod does…" (e2e/transcript.spec.ts)
+  // over its own recorded replay: opening the first turn's call shows that turn's line (decision 11).
+  it('over the report scene’s recorded replay, opening the first turn’s call shows its turn’s line, with no chevron', async () => {
+    await mounted(journalToEvents(loadEngineJournal('p2c-report-marks')));
+    await waitFor(() => expect(records()).toHaveLength(3));
+    expect(turnLines()).toEqual([]);
+    fireEvent.click(document.querySelector('[data-row-id="record-fold:closed:toolu_01P2cM5Bash01"] button')!);
+    await waitFor(() => expect(folds()).toHaveLength(1));
+    expect(document.querySelectorAll('[data-kind="divider"]')).toHaveLength(1);
+    expect(turnLines()[0].textContent).toMatch(/Worked for .* · Ran a command/);
+    expect(dividers()).toEqual([]);
   });
 
   it('folds each stretch between the rows the person reads under one line, and opens it in one click with no second fold', async () => {
