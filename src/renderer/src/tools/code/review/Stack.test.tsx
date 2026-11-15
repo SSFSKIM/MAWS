@@ -9,7 +9,7 @@ import { record } from '../../../../../../test/support/builders';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { useSessions } from '../../../stores/sessions';
-import { deferred, installFakeMain, ok } from '../../../test-support/code';
+import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { fakeStackLayout, type FakeStackLayout } from '../../../test-support/review-layout';
 import { useTranscriptStore } from '../../../transcript';
@@ -81,9 +81,9 @@ function statusOf(files: readonly Made[]): GitStatus {
 const numstat = (file: Made): GitDiffFile => ({ path: file.path, oldPath: null, insertions: file.added.length, deletions: 0, binary: false });
 
 // Main over a scope of `files`, the whole patch in one answer, or past the scope's cap with each file read alone; `hold`
-// keeps a file's own read open until the test releases it.
+// keeps a file's own read open until the test releases it (its patch) or refuses it (a failed read).
 function stackMain(files: readonly Made[], options: { pastCap?: boolean } = {}) {
-  const held = new Map<string, ReturnType<typeof deferred<ReturnType<typeof ok>>>>();
+  const held = new Map<string, ReturnType<typeof deferred<ReturnType<typeof ok> | null>>>();
   const state = { hold: null as string | null };
   const main = installFakeMain((name, input) => {
     switch (name) {
@@ -94,9 +94,9 @@ function stackMain(files: readonly Made[], options: { pastCap?: boolean } = {}) 
           const file = files.find((f) => f.path === input.path);
           const answer = ok(file ? { patch: file.patch, files: [numstat(file)] } : { patch: '', files: [] });
           if (state.hold === input.path) {
-            const late = deferred<ReturnType<typeof ok>>();
+            const late = deferred<ReturnType<typeof ok> | null>();
             held.set(input.path, late);
-            return late.promise.then(() => answer);
+            return late.promise.then((given) => given ?? answer);
           }
           return answer;
         }
@@ -113,7 +113,7 @@ function stackMain(files: readonly Made[], options: { pastCap?: boolean } = {}) 
         return ok();
     }
   });
-  return { ...main, state, release: (path: string) => held.get(path)?.resolve(ok()) };
+  return { ...main, state, release: (path: string) => held.get(path)?.resolve(null), refuse: (path: string, message: string) => held.get(path)?.resolve(fail(message)) };
 }
 
 const scroller = () => document.querySelector<HTMLElement>('[data-review-stack]')!;
@@ -125,6 +125,7 @@ const hunkLabel = () => document.querySelector('[data-review-hunk]')?.textConten
 const ownReads = (main: ReturnType<typeof stackMain>) => main.callsOf('git.diff').filter((input) => typeof input.path === 'string');
 const hide = () => act(() => panelHost.showSummary());
 const show = () => act(() => panelHost.selectTab(panelOf(A)!.tabs[0].id));
+const request = (path: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { path } }));
 
 describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
   const offs: (() => void)[] = [];
@@ -315,6 +316,67 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     await page.settle();
     expect(third.querySelector('[data-review-body] table')).not.toBeNull();
     expect(scroller().scrollTop).toBe(at);
+  });
+
+  it('saves the place it was restoring when Review is hidden before the read answers, and restores it when shown', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+    const { main, reading } = await revealIntoUnread(files);
+    hide(); // the reveal is not reached: the place saved is the one it was restoring, not where it stood meanwhile
+    main.release(files[2].path);
+    main.state.hold = null;
+    show();
+    await page.settle();
+    expect(page.rowAtTop()).toEqual(reading);
+  });
+
+  it('takes a scroll the browser makes when the page shrinks under the scroller for a layout change, not the person’s: the reveal stands and lands', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+    const { main, reading } = await revealIntoUnread(files);
+    const before = scroller().scrollTop;
+    page.setZoom(0.5); // every height halves: the browser clamps the scroller, with a scroll event and no input
+    await page.settle();
+    expect(page.clamped()).toBeGreaterThan(0);
+    expect(scroller().scrollTop).toBe(before / 2); // the section, by its estimate, under the new heights
+    main.release(files[2].path);
+    await page.settle();
+    expect(page.rowAtTop()).toEqual(reading);
+  });
+
+  it('leaves the scroller where it stands when a reveal’s read fails: the section reads Diff unavailable with Retry', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+    const { main, third } = await revealIntoUnread(files);
+    const at = scroller().scrollTop;
+    main.refuse(files[2].path, 'git failed');
+    await page.settle();
+    expect(third.querySelector('[data-review-body]')?.textContent).toContain('Diff unavailable');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(scroller().scrollTop).toBe(at);
+  });
+
+  it('brings the same file to the top again on a second request after the person scrolled away', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+    await mount(files);
+    request(files[3].path);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(page.topOf(sectionOf(files[3].path)));
+    page.scrollTo(0);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(0);
+    request(files[3].path);
+    await page.settle();
+    expect(scroller().scrollTop).toBe(page.topOf(sectionOf(files[3].path)));
+  });
+
+  it('counts the hunk at the reading edge after a long scroll into a file that was not drawn, once its rows draw', async () => {
+    const files = Array.from({ length: 20 }, (_, i) => made(i, 2, 10));
+    await mount(files);
+    const sixth = sectionOf(files[5].path);
+    expect(sixth.querySelector('[data-review-body]')).toBeNull(); // outside the band: a spacer
+    page.scrollTo(page.topOf(sixth) + HEADER + 2 * ROW); // by hand, into the sixth file's first hunk
+    await page.settle();
+    expect(sixth.querySelector('[data-review-body] table')).not.toBeNull();
+    expect(page.rowAtTop()).toEqual(expect.objectContaining({ path: files[5].path }));
+    expect(hunkLabel()).toBe('Showing hunk 11 of 40');
   });
 
   it('lands a reveal into a file still being read on its row once the read answers, and keeps that place', async () => {

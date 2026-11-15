@@ -1,7 +1,8 @@
 // Review's stack laid out for happy-dom, which lays nothing out (UX wave U5b, M4): the stack's one measure seam
 // (`reviewLayout`) answers from a model of the drawn page, its scroller scrolls within a clamped height and reports each
 // change of its offset as a browser does, and a ResizeObserver reports every element it watches when the test lets the
-// page settle. The model is one column: sections one under the other, a header over a body or a spacer, a body as tall
+// page settle. When the page shrinks under the scroller, the browser's clamp is reported as a browser does it: a scroll
+// event of its own, at the next turn and before the observers, with no input before it. The model is one column: sections one under the other, a header over a body or a spacer, a body as tall
 // as its diff rows (or one line of words when it holds no table), each row `row` high or as `rowOf` says for its file.
 // Unified rows only: Split's two tables side by side are not modelled. Imported only by happy-dom suites.
 import { act } from '@testing-library/react';
@@ -141,6 +142,16 @@ export function fakeStackLayout(options: StackLayoutOptions) {
     }
   }
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
+  // The browser's clamp of a scroller left past its end by a page that shrank.
+  let clamps = 0;
+  const clamp = () =>
+    act(() => {
+      const el = scroller();
+      if (!el || (tops.get(el) ?? 0) <= maxTop()) return;
+      tops.set(el, maxTop());
+      clamps++;
+      el.dispatchEvent(new Event('scroll'));
+    });
   const flush = () =>
     act(() => {
       for (const { callback, targets } of [...observers]) {
@@ -157,6 +168,7 @@ export function fakeStackLayout(options: StackLayoutOptions) {
     async settle(turns = 25): Promise<void> {
       for (let turn = 0; turn < turns; turn++) {
         await act(() => new Promise<void>((resolve) => setImmediate(resolve)));
+        clamp();
         flush();
       }
     },
@@ -178,6 +190,7 @@ export function fakeStackLayout(options: StackLayoutOptions) {
       rowOf = next;
     },
     header: () => header * zoom,
+    clamped: () => clamps, // the clamps the browser reported
     // The diff row the person reads at the top: the first under the sticky header (a hunk's header row reads as the
     // hunk's first row, under it).
     rowAtTop(): StackPageRow | null {
