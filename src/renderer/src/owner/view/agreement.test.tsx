@@ -159,7 +159,7 @@ describe('the drawn row says what the one reading says', () => {
     const inks = [...root.querySelectorAll('.owner-message-ink')];
     const messages = inks.map((ink) => stripped([...ink.children].filter((child) => !child.classList.contains('owner-message-label')).map((child) => child.textContent).join('')));
     const outside = root.cloneNode(true) as HTMLElement;
-    for (const ink of outside.querySelectorAll('.owner-message-ink, .transcript-cut-note')) ink.remove();
+    for (const ink of outside.querySelectorAll('.owner-message-ink, .transcript-cut-note, .transcript-cut-partway')) ink.remove();
     return { messages, record: stripped(outside.textContent) };
   };
 
@@ -170,13 +170,15 @@ describe('the drawn row says what the one reading says', () => {
     const whole = renderRow(row);
     expect(read(whole.container), 'the row drawn whole').toEqual({ messages, record });
     whole.unmount();
-    const cut = renderRow({ ...row, cut: true as const });
-    expect(read(cut.container), 'the row as a reply an interrupt cut').toEqual({ messages, record });
-    cut.unmount();
+    for (const cutRow of [{ ...row, cut: true as const }, { ...row, cut: true as const, partway: true as const }]) {
+      const cut = renderRow(cutRow);
+      expect(read(cut.container), `the row as a reply an interrupt cut${cutRow.partway ? ', kept partway' : ''}`).toEqual({ messages, record });
+      cut.unmount();
+    }
     if (messages.length === 0) return; // a text with no message never heads a stretch
-    for (const head of [{ ...row, reportOnly: true as const }, { ...row, cut: true as const, reportOnly: true as const }]) {
+    for (const head of [{ ...row, reportOnly: true as const }, { ...row, cut: true as const, reportOnly: true as const }, { ...row, cut: true as const, partway: true as const, reportOnly: true as const }]) {
       const view = renderRow(head);
-      expect(read(view.container), `a closed stretch’s head${head.cut ? ', cut' : ''}`).toEqual({ messages, record: '' });
+      expect(read(view.container), `a closed stretch’s head${head.cut ? ', cut' : ''}${'partway' in head ? ', kept partway' : ''}`).toEqual({ messages, record: '' });
       view.unmount();
     }
   });

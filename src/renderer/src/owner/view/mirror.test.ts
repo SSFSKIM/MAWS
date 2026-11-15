@@ -285,7 +285,7 @@ describe('over a derived session', () => {
 describe('a stretch stays the one the reader opened', () => {
   const STEPS = ['the thought', 'the call', 'the completion'] as const;
   const COMMENTARY = rowId.text('m1' as never, 0);
-  function rowsAt(step: number): Row[] {
+  function rowsAt(step: number, textless = false): Row[] {
     const b = builder();
     b.turn('u0', 'Set it up');
     b.toolUse('t0', 'Bash', { command: 'ls' });
@@ -294,7 +294,10 @@ describe('a stretch stays the one the reader opened', () => {
     b.end(['u0']);
     b.turn('u1', 'Read the second file');
     b.text('m1', 0, 'Looking at the second file first.');
-    b.thinking('m2', 0, 'Which of the two holds the answer?');
+    if (!textless) b.thinking('m2', 0, 'Which of the two holds the answer?');
+    // a thought with no text: streaming alone it has a row; finished, the derivation keeps it only inside a run
+    else if (step === 0) b.emit('assistant.block.delta', { apiMessageId: 'm2' as never, blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
+    else b.thinking('m2', 0, '');
     if (step >= 1) b.toolUse('t1', 'Bash', { command: 'cat second.txt' }, 'm2', 1);
     if (step >= 2) {
       b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
@@ -303,8 +306,8 @@ describe('a stretch stays the one the reader opened', () => {
     const state = applyEvents(createState(null, null), b.events);
     return rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
   }
-  const windowAt = (step: number, paged: boolean): Row[] => {
-    const rows = rowsAt(step);
+  const windowAt = (step: number, paged: boolean, textless = false): Row[] => {
+    const rows = rowsAt(step, textless);
     return paged ? rows : rows.slice(rows.findIndex((r) => r.id === COMMENTARY) + 1);
   };
   const lines = (rows: readonly Row[]) => rows.filter((r): r is Extract<Row, { kind: 'record_fold' }> => r.kind === 'record_fold');
@@ -350,5 +353,17 @@ describe('a stretch stays the one the reader opened', () => {
     const after = new Set(openStretches);
     after.delete(folding.stretch);
     expect(lines(mirrorRows(window, { openStretches: after })).every((line) => !line.open)).toBe(true);
+  });
+  // The thirteenth timeline: a thought with no text, opened while it streams alone (its row's id is the key the press
+  // writes), taken into its call's run, then gone when the run of one call unwraps; the opening passes to the call.
+  it('a thought with no text, opened while it streams alone: open in its call’s run, and still open once the run unwraps without it', () => {
+    expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking']);
+    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']); // the thought is gone
+    const pressed = lines(mirrorRows(windowAt(0, false, true), {})).at(-1)!;
+    const openStretches = new Set([pressed.stretch]);
+    for (const step of [0, 1, 2]) {
+      const window = windowAt(step, false, true);
+      expect(lines(mirrorRows(window, { openStretches })).map((line) => line.open), `at ${STEPS[step]}`).toEqual([true]);
+    }
   });
 });

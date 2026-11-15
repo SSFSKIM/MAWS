@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { mirrorRows } from '../owner/view/mirror';
 import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
@@ -660,6 +661,38 @@ describe('transcript store: the to-human view', () => {
     expect(ui(store).openStretches).toEqual(new Set(['t1', 'elsewhere', stretch]));
     store.getState().toggleStretch(KEY, stretch); // its open line carries the first open key it holds, its head's
     expect(ui(store).openStretches).toEqual(new Set(['elsewhere']));
+  });
+
+  // The whole-branch review's second look: a thought with no text keeps a row only while it streams or inside a run;
+  // opened while it streams alone, the stretch keeps its opening when the run of its one call unwraps without it.
+  it('a stretch opened by a thought with no text stays open once the run of its one call unwraps without the thought', async () => {
+    const b = builder();
+    b.turn('u0');
+    b.text('m0', 0, '<message>Ready.</message>');
+    b.end(['u0']);
+    b.turn('u1');
+    b.emit('assistant.block.delta', { apiMessageId: api('m2'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
+    const { source, push } = pushSource(b.events);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const rows = () => store.getState().entries[KEY].rows;
+    const thought = rows().find((row) => row.kind === 'thinking')!;
+    store.getState().toggleStretch(KEY, thought.id); // the press on its record line writes the thought's id
+    const openLine = () => mirrorRows(rows(), ui(store)).filter((row) => row.kind === 'record_fold').at(-1);
+    expect(openLine()).toMatchObject({ open: true });
+    let at = b.events.length;
+    b.thinking('m2', 0, '');
+    b.toolUse('t1', 'Bash', { command: 'ls' }, 'm2', 1);
+    push(b.events.slice(at));
+    expect(rows().some((row) => row.kind === 'group')).toBe(true);
+    expect(openLine()).toMatchObject({ open: true });
+    at = b.events.length;
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.end(['u1']);
+    push(b.events.slice(at));
+    expect(rows().some((row) => row.kind === 'thinking' || row.kind === 'group')).toBe(false); // unwrapped, the thought gone
+    expect(openLine()).toMatchObject({ open: true });
   });
 
   it('a jump in the view to a row a closed record holds opens the stretch that holds it, and only there', async () => {
