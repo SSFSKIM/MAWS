@@ -58,7 +58,7 @@ export interface DocumentHeaderCommands {
 export const FORMAT_NAMES: Record<DocumentExportFormat, string> = { md: 'Markdown', html: 'Web page', docx: 'Word', pdf: 'PDF' };
 /** UX wave U10b (§B.5): the one sentence of an export the document's last write held back (M3 decision 3). */
 export const EXPORT_COPY = {
-  exportNotSaved: 'Your last change to this document is not saved yet, so nothing was exported. Try again in a moment.',
+  exportNotSaved: 'The last change is not saved yet. Try again in a moment.',
 } as const;
 // A dashboard's rows (H8: it has no page setting), each with the size it prints on
 const DASHBOARD_EXPORTS: ReadonlyArray<{ format: DocumentExportFormat; pageSize: PageSize; label: string }> = [
