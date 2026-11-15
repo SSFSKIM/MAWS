@@ -308,11 +308,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return { root: null, path: '', entries: entries.filter((entry) => entry !== null), truncated: false };
   }
 
-  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed, raw = false }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
+  async function read({ appSessionId, path, offset = 0, length = FILES_READ_DEFAULT_LENGTH, hash = false, named: asksNamed, raw: asksRaw }: FilesReadInput, remote = false, signal?: AbortSignal): Promise<FilesReadOutput> {
     // E2: a delivered file is read; U6c: a named one too, and its every answer says so
     const { handle, stat, real, named: byName } = await openConfirmed(appSessionId, path, 'file', DELIVERED_OR_NAMED, remote, { named: asksNamed, signal });
     // U6b-2: a raw read is this machine's caller's alone; another machine's `raw` is passed over, as its `named` is
-    const answer = await readOpened(handle, stat, real, offset, length, hash, raw && !remote ? { path } : null);
+    const answer = await readOpened(handle, stat, real, offset, length, hash, asksRaw === true && !remote ? { path } : null);
     return byName ? { ...answer, named: true } : answer;
   }
 
@@ -345,11 +345,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     return readOpened(handle, stat, real, offset, length, hash);
   }
 
-  // The read itself, over a confirmed descriptor it closes. UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-
-  // file-frames.md, M2): a raw read (`raw`, with the path as the request gave it) answers the bytes of exactly the range
-  // asked as base64, unsettled, with the descriptor's `identity`; the descriptor's state is read again after the bytes,
-  // and a read whose file changed between the two is refused, so one answer never holds bytes of two versions. What
-  // passes is a write that leaves all five values as they were (a file system whose times did not move between them).
+  // The read itself, over a confirmed descriptor it closes. UX wave U6b-2 (its execution document's M2): a raw read
+  // (`raw`, with the path as the request gave it) answers the bytes of exactly the range asked as base64, unsettled,
+  // with the descriptor's `identity`; the descriptor's state is read again after the bytes, and a read whose file
+  // changed between the two is refused, so one answer never holds bytes of two versions. What passes is a write that
+  // leaves all five values as they were (a file system whose times did not move between them).
   async function readOpened(handle: FileHandle, stat: BigIntStats, real: string, offset: number, length: number, hash: boolean, raw: { path: string } | null = null): Promise<FilesReadOutput> {
     try {
       // A hashed read is one read of the descriptor: the whole file into one buffer, hashed, and every byte answered
