@@ -12,7 +12,7 @@ import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
-import { isPersistentRow, rowsOf, turnRows, withAllExpanded } from './derive';
+import { isPersistentRow, rowsOf, turnRows, withAllExpanded, withQueueTail } from './derive';
 import { NOTICE } from './copy';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState, type TranscriptState } from './reduce';
@@ -696,6 +696,38 @@ describe('a person’s message that carries grants (U1c)', () => {
     const rows = of(expanded(b.events), 'user');
     expect(said(rows)).toEqual(['says: Run the checks.', `says: ${OTHER}`, 'approved: make build']);
     expect(rows.slice(1).map((row) => [row.steer, row.messageUuid])).toEqual([[true, 's1'], [true, null]]);
+  });
+
+  // M1's review (findings 1 and 2): the rows beside a message go with it, and content that is not only text stays whole
+  it('keeps an attachment visible when text blocks hold two exact grants and no ordinary words: the whole bubble, then one approval row per mark', () => {
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+    const content = [{ type: 'text', text: consentMessage('command', 'make build') }, { type: 'text', text: consentMessage('command', 'make check') }, image];
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('j1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('j1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [consent('make build'), consent('make check')] });
+    b.end(['j1']);
+    const rows = of(rowsOf(reduce(b.events)), 'user');
+    expect(rows.map((row) => row.attachments.length)).toEqual([1, 0, 0]);
+    expect(rows[0]).not.toHaveProperty('consent');
+    expect(said(rows.slice(1))).toEqual(['approved: make build', 'approved: make check']);
+  });
+
+  it('hides all rows of a mixed grant message when it is withdrawn back into the queue, and of a message of several grants', () => {
+    for (const [content, marks] of [
+      [`${OTHER}\n${consentMessage('command', 'make build')}`, ['make build']],
+      [`${consentMessage('command', 'make build')}\n${consentMessage('command', 'make check')}`, ['make build', 'make check']],
+    ] as const) {
+      const b = builder();
+      b.turn('u1', 'count slowly');
+      b.emit('user.message', { messageUuid: uuid('s1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: marks.map(consent) });
+      b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'cancelled' });
+      const rows = rowsOf(reduce(b.events));
+      const ofMessage = of(rows, 'user').filter((row) => row.id !== rowId.user(uuid('u1')));
+      expect(ofMessage.map((row) => row.dropped), content).toEqual([true, true]);
+      expect(of(withQueueTail(rows, new Set(['s1']), []), 'user').map((row) => row.id), content).toEqual([rowId.user(uuid('u1'))]);
+      expect(of(withQueueTail(rows, new Set(['u1']), []), 'user').map((row) => row.id), content).toEqual(of(rows, 'user').map((row) => row.id)); // another message's withdrawal hides none
+      expect(ofMessage.slice(1).map((row) => [row.messageUuid, row.editable]), content).toEqual(ofMessage.slice(1).map(() => [null, false]));
+    }
   });
 
   describe('probe B’s recordings, live from the journal and from the transcript file (Acceptance 14)', () => {
