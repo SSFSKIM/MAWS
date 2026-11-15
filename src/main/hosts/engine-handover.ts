@@ -10,16 +10,25 @@
 // A report is fresh for ENGINE_HANDOVER_FRESH_MS from its arrival, three of `mawsd`'s resends, so one or two lost to a
 // reconnect do not end it; past that, with the machine link down, at `none`, or from an older `mawsd` that sends none,
 // both read nothing and main falls back to today's bound.
+// - #473: `verdict(incarnation)`, `mawsd`'s verdict on a drained host's exit (the drain's end report, `ended`), for main's
+//   own verdict on the relayed engine host (host-supervisor.ts `relayedVerdict`): main's link was dropped at the drain's
+//   start, so its look at the gone process can come before the host said it handed over, or before `mawsd` read it.
+//   While a drain is reported (or ended within the freshness) and its verdict is not in, main waits for it, bounded by
+//   HANDOVER_VERDICT_WAIT_MS; an end report naming another process, or no drain, leaves nothing to wait for.
+import { startedAtKey, type StartedAtKey } from '@shared/host/completion-routes';
 import type { HostSupervisor } from '@shared/host/host-supervisor';
 import type { EngineHandover } from '@shared/ipc/schema/daemon';
 import type { HostStatus } from '@shared/ipc/schema/host';
 
 export const ENGINE_HANDOVER_FRESH_MS = 15_000;
+// #473: past `mawsd`'s own look at the gone process (its poll after the drain's close, the host's exit flush before it)
+export const HANDOVER_VERDICT_WAIT_MS = 5_000;
 
 export interface EngineHandoverWatch {
   drainingAt(): number | null;
   reason(): NonNullable<HostStatus['handover']> | null;
   onChange(listener: () => void): () => void; // a report arrived, went stale or was dropped
+  verdict(incarnation: StartedAtKey, ms?: number): Promise<boolean | null> | null; // #473: true handed over, false crashed, null not told in time
   bind(hosts: Pick<HostSupervisor, 'onEvent' | 'onState'>): () => void;
 }
 
@@ -28,6 +37,9 @@ export function watchEngineHandover(): EngineHandoverWatch {
   let drainEnded: number | null = null; // fix wave 3: when the last draining report ended
   let stale: ReturnType<typeof setTimeout> | null = null;
   const listeners = new Set<() => void>();
+  let ended: { report: NonNullable<EngineHandover['ended']>; heardAt: number } | null = null; // #473: the last drain's verdict
+  let verdictIn = false; // the drain last reported has its end report
+  const verdictListeners = new Set<() => void>();
   const changed = () => {
     for (const listener of [...listeners]) listener();
   };
@@ -46,6 +58,12 @@ export function watchEngineHandover(): EngineHandoverWatch {
   };
   const fresh = (): EngineHandover | null => (last !== null && Date.now() - last.heardAt < ENGINE_HANDOVER_FRESH_MS ? last.report : null);
   const heard = (report: EngineHandover) => {
+    if (report.state === 'draining') verdictIn = false;
+    if (report.ended !== undefined) {
+      ended = { report: report.ended, heardAt: Date.now() };
+      verdictIn = true;
+      for (const listener of [...verdictListeners]) listener();
+    }
     if (report.state === 'none') return drop();
     if (stale !== null) clearTimeout(stale);
     ending();
@@ -63,6 +81,26 @@ export function watchEngineHandover(): EngineHandoverWatch {
     onChange(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
+    },
+    verdict(incarnation, ms = HANDOVER_VERDICT_WAIT_MS) {
+      const told = (): boolean | null => (ended !== null && Date.now() - ended.heardAt < ENGINE_HANDOVER_FRESH_MS && startedAtKey(ended.report.pid, ended.report.startedAt) === incarnation ? ended.report.handedOver : null);
+      const now = told();
+      if (now !== null) return Promise.resolve(now);
+      const drain = draining() ?? drainEnded;
+      if (verdictIn || drain === null || Date.now() - drain >= ENGINE_HANDOVER_FRESH_MS) return null;
+      return new Promise((resolve) => {
+        const done = (value: boolean | null) => {
+          clearTimeout(timer);
+          verdictListeners.delete(check);
+          resolve(value);
+        };
+        const check = () => {
+          const value = told();
+          if (value !== null || verdictIn) done(value);
+        };
+        const timer = setTimeout(() => done(null), ms);
+        verdictListeners.add(check);
+      });
     },
     bind(hosts) {
       const offs = [

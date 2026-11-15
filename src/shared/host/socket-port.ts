@@ -176,6 +176,16 @@ export class SocketPort implements HostPort {
     this.socket.once('close', () => clearTimeout(timer));
   }
 
+  // #473: what this end wrote has all been handed to the kernel after close's end (the stream's finish), or the socket
+  // has ended (closed, destroyed at the grace's end); a process that exits before then drops the rest
+  finished(): Promise<void> {
+    if (this.socket.writableFinished || this.socket.destroyed) return Promise.resolve();
+    return new Promise((resolve) => {
+      this.socket.once('finish', () => resolve());
+      this.socket.once('close', () => resolve());
+    });
+  }
+
   private receive(line: string): void {
     if (this.dead) return;
     let data: unknown;
