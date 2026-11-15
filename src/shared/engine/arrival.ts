@@ -11,9 +11,10 @@
 // it (its origin object, its envelope tag, its attachment type, `local_command_source`, the fields the engine writes for
 // a scheduled fire), and the person's typed prompt is never an arrival, but for MAWS's own two texts (its answer
 // envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line: UX
-// wave U1c) and a background session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
-// a peer; (3) one carrier can hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two
-// carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
+// wave U1c) and a background session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
+// frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
+// hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
+// (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { parseAskSteer } from '../maws/ask';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
