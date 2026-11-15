@@ -20,6 +20,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFile, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
+import type { AppSessionId } from '@shared/graph/ids';
 import { ipcError, type IpcError } from '@shared/ipc/errors';
 import type { CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { FILES_READ_MAX_LENGTH, opensExternally, type FilesReadOutput } from '@shared/ipc/schema/files';
@@ -79,6 +80,18 @@ export async function fetchToFile(link: RemoteLink, source: RemoteCopySource, to
     if (++tries > REMOTE_READ_TRIES) return { ok: false, error: ipcError('internal', `${name}: the file kept changing on machine ${link.name} while it was copied`) };
     log(`lane B: ${name} of ${link.name}: the file changed while it was copied; copied again`);
   }
+}
+
+// Red first (UX wave U6b-2, M3): the name exists, its body is built next.
+export async function fetchInto(
+  _link: RemoteLink,
+  _source: { appSessionId: AppSessionId; path: string },
+  _sink: FileHandle,
+  _max: number,
+  _log: (line: string) => void,
+  _options: { label: string; seen(first: { mime: string; bytes: number }): void },
+): Promise<Result<{ written: number } | 'too-large'>> {
+  throw new Error('not built');
 }
 
 async function readInto(link: RemoteLink, name: 'files.read' | 'library.read', source: RemoteCopySource, file: FileHandle, max: number, hashed: boolean, log: (line: string) => void): Promise<Result<Pass>> {

@@ -39,7 +39,7 @@ export function readFileInPages(link: RemoteLink, input: Record<string, unknown>
   return readInPages(link, 'files.read', input, log);
 }
 
-export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
+export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void, _label?: string): Promise<Result> {
   const whole = await dispatchOverLink(link, name, input);
   if (!tooLarge(whole)) return whole;
   const said = `lane B: ${name} of ${link.name} ${String(input.path ?? input.artifactId)}`;
