@@ -15,7 +15,7 @@ import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { freshSource, subagentLookupOf } from '../../lane-a/plane-transcript';
 import { journalToEvents } from '../dev/journal';
 import { answerActionsOf } from './answer-actions';
-import { rowsOf } from './derive';
+import { restingRows, rowsOf } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 
@@ -37,6 +37,11 @@ const fromRows = (text: string): Promise<SessionEvent[]> =>
 const fromJournal = (name: string): SessionEvent[] => journalToEvents(loadUxwaveJournal(name));
 
 const drawn = (events: SessionEvent[]): Row[] => rowsOf(applyEvents(createState(null, null), events));
+/** Another machine's terminal session is drawn at rest while its controls say no turn runs (RemoteTranscriptSlot's `atRest`): its rows carry no turn's end. */
+const drawnAtRest = (events: SessionEvent[]): Row[] => {
+  const state = applyEvents(createState(null, null), events);
+  return restingRows(state, rowsOf(state));
+};
 /** Each entry as `[the answer's words, rewindTo, fork]`. */
 function entries(rows: Row[]) {
   const words = new Map(rows.flatMap((row) => (row.kind === 'assistant_text' ? [[row.id, row.markdown] as const] : [])));
@@ -44,7 +49,7 @@ function entries(rows: Row[]) {
 }
 async function threeRoutes(name: string): Promise<Record<'live' | 'file' | 'rows', Row[]>> {
   const text = recorded(name);
-  return { live: drawn(fromJournal(name)), file: drawn(await fromFile(text)), rows: drawn(await fromRows(text)) };
+  return { live: drawn(fromJournal(name)), file: drawn(await fromFile(text)), rows: drawnAtRest(await fromRows(text)) };
 }
 
 // probe 6's source "commands": ONE typed; "/rename uxw renamed"; "/cost" (run as /usage); TWO typed
@@ -81,7 +86,7 @@ describe('the action row over the recorded sessions, on every route', () => {
 describe('a fork cut at a typed command’s row (u3b-forkcmd-rename-command)', () => {
   it('ends with the answer before the probe’s own next prompt, and draws no row for the engine’s caveat', async () => {
     const text = recorded('u3b-forkcmd-rename-command');
-    for (const [route, rows] of Object.entries({ file: drawn(await fromFile(text)), rows: drawn(await fromRows(text)) })) {
+    for (const [route, rows] of Object.entries({ file: drawn(await fromFile(text)), rows: drawnAtRest(await fromRows(text)) })) {
       const forked = rows.findIndex((row) => row.kind === 'user' && row.text.includes('FORKED'));
       expect(forked, route).toBeGreaterThan(0);
       expect(rows.slice(0, forked).findLast((row) => row.kind !== 'time' && row.kind !== 'divider'), route).toMatchObject({ kind: 'assistant_text', markdown: 'ONE' });
