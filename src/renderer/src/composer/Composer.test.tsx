@@ -185,11 +185,6 @@ const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
-// UX wave U1a (§D): a permission prompt is allowed once with ⌘↩, which acts once the prompt has been drawn for 400 ms
-const allowOnceKey = async (target: HTMLElement) => {
-  await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
-  await key(target, { key: 'Enter', code: 'Enter', metaKey: true });
-};
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
 const plusOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('button', { name: 'Add files, photos or commands' });
