@@ -268,6 +268,22 @@ describe('the subagents a watch carries', () => {
     expect(agentsOf()).toBeUndefined();
   });
 
+  // Item 5, finding 2: a watch rotated past the replay bound has ended, as its other two ends have, so origin-less
+  // statuses it carried go with it, whether or not the next watch opens.
+  it('lets an origin-less body’s statuses go when a late consumer rotates the watch past the replay bound, the reopening refused', async () => {
+    const fake = fakeClient({ 'laneA.unwatch': undefined });
+    applyLaneAState(A, laneAState(A));
+    watchLaneA(A, () => {}, { client: fake.client });
+    await fake.reply('laneA.watch', { watch: 'w-1' });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [snapshotOf([finished], null)] });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: Array.from({ length: 20_001 }, (_, i) => msg('chunk', { i }, i + 1)) });
+    expect(agentsOf()).toEqual({ agents: [finished], origin: null });
+    watchLaneA(A, () => {}, { client: fake.client, replay: true });
+    expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: A, watch: 'w-1' }]);
+    await fake.fail('laneA.watch', 'the session’s bridge went away');
+    expect(agentsOf()).toBeUndefined();
+  });
+
   // Ruling point 7, the window's half: another machine's session (no record here) is read by the same reception, so a
   // body of its that names an origin is noted under it, the message reaching the watch's consumers as it came.
   it('reads another machine’s body by the same rule: an origin it names is kept as named, and the message passes on unchanged', async () => {

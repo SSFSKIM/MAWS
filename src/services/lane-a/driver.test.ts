@@ -19,7 +19,7 @@ import { Ledger } from './jobs';
 // What the driver costs, as the tests count it: each derivation, and one timeline of every transcript read (by the path
 // it read) and every plane payload, in the order they happened. A test can hold the first read of a path once it has
 // read the file (`holds`), so that the read stays out.
-const counts = vi.hoisted(() => ({ derivations: 0, timeline: [] as string[], holds: new Map<string, Promise<void>>() }));
+const counts = vi.hoisted(() => ({ derivations: 0, timeline: [] as string[], holds: new Map<string, Promise<void>>(), afterStatus: null as (() => Promise<void>) | null }));
 vi.mock('./jobs', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./jobs')>();
   return {
@@ -27,6 +27,23 @@ vi.mock('./jobs', async (importOriginal) => {
     derive: (...args: Parameters<typeof actual.derive>) => {
       counts.derivations += 1;
       return actual.derive(...args);
+    },
+  };
+});
+// A test can run something once, after a `GET /status` answered and before the driver reads the answer
+// (`afterStatus`): a replacement bridge taking the socket between the probe and the stream it opens.
+vi.mock('./bridge-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./bridge-client')>();
+  return {
+    ...actual,
+    call: async (...args: Parameters<typeof actual.call>) => {
+      const answer = await actual.call(...args);
+      const then = args[1] === 'GET' && args[2] === '/status' ? counts.afterStatus : null;
+      if (then !== null) {
+        counts.afterStatus = null;
+        await then();
+      }
+      return answer;
     },
   };
 });
@@ -78,6 +95,7 @@ beforeEach(() => {
   counts.derivations = 0;
   counts.timeline.length = 0;
   counts.holds.clear();
+  counts.afterStatus = null;
   vi.stubEnv('SMINOS_HOME', tmp('o9s-'));
   vi.stubEnv('HOME', tmp('o9h-'));
   vi.stubEnv('CLAUDE_CONFIG_DIR', tmp('o9c-'));
@@ -748,6 +766,26 @@ describe('subagents', () => {
     await expect.poll(() => originOf(s.h.planes, s.watch), { timeout: 3000 }).toBe('terminal:5151');
     expect(agentsOf(s.h.planes, s.watch)).toEqual(before);
     expect(s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined)).toBe(false);
+  });
+
+  // Item 5, finding 1: `/status` and the state stream are two connections, so a replacement bridge can take the socket
+  // between the probe's answer and the stream it opens. The stream's snapshot names its child (`pid`, the child's own,
+  // as `/status` does): one that is not the child the probe found is ended unread and the session probed again, so the
+  // next child's agents never ride a body under the last child's origin.
+  it('ends unread a state stream that opened on another bridge child than its probe found, and names the child that answers', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)]).toEqual(['running/rows', 'terminal:4242']);
+    s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'terminal', pid: 5151 } }); // the last child still answers
+    await s.h.driver.probes.settled();
+    counts.afterStatus = async () => {
+      // the next terminal's child takes the socket after the last child answered the reconnect's probe
+      const next = await bridge({ pid: 5151, launch: 'launch-2' });
+      next.agentSpawned({ agentId: A1, toolUseId: tool(A1) });
+    };
+    s.b.reset();
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)], { timeout: 5000 }).toEqual(['running/bridge', 'terminal:5151']);
+    const bodies = messagesOf(s.h.planes, s.watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').map((m) => m.body as { origin?: string; subagents?: LaneAAgent[] });
+    expect(bodies.some((b) => b.origin === 'terminal:4242' && (b.subagents ?? []).some((a) => a.evidence === 'bridge'))).toBe(false);
   });
 
   // A launch is the engine process a bridge child serves. The next terminal's child can answer a reconnect while the
