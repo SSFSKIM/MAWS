@@ -29,7 +29,7 @@ How to see it working: the unit suites named per milestone, and the Electron e2e
 - [x] (2026-11-15) M3 — The cutover: forms in their rows, the card at the end, the dock gone. Commits `d1a7ecc47`..`d35a21ad8`; fix waves `9436c9b59`..`4abcbb6a9` (rulings on its concerns), `e5a24a12e`..`657f6bada` (a plan's settlement; the slot's docked member), `748169eb0`..`41d977abd` (decision 8b); reviewed clean at the boundary.
 - [x] (2026-11-15) M4 — A prompt's keys from the composer and from no focus, under the guard. Commits `9895868b4`..`201341965`, fix `91e722095`..`0f746a7a5`; reviewed at the boundary, the last finding closed as narrowed by design (the ruling of 2026-11-15); the source guard on overlays' portals is built at the start of M5's range.
 - [x] (2026-11-15) M5 — Finding what waits: the card, the jump button, the way there. Commits `a2880d92f`..`ccddb2679` (with M4's portal guard), the Needs-you line `fed73c172`..`5c7e17dcc`, fix waves `eee76ad54`..`f2074d307`, `657d25985`..`060f25c3c`, `2f40736a1`..`09326452a`; reviewed clean at the boundary (third pass approved).
-- [ ] M6 — MAWS's ask: nothing opens by itself.
+- [x] (2026-11-15) M6 — MAWS's ask: nothing opens by itself. Commits `2b129d553`..`142803541`; reviewed clean at the boundary.
 - [ ] M7 — The e2e edits, the record and the acceptance run.
 - [ ] Handed back to the architect: the branch review, class 1a, the Electron e2e groups, the pull request.
 
@@ -817,6 +817,10 @@ At landing the architect updates the register's rows and closes ticket 586 throu
 - Decision: (the architect's ruling of 2026-11-15 UTC on M6) `settleWaitingAsks` (`tools/maws/ask/connect.ts`) only clears the waiting set and stops the automatic close; with both gone it has no work and goes. Its callers outside `tools/maws/ask/` are named insertions (§I): `panel/SurfaceRow.tsx` (U8) loses the import and the one call in `toggleSurface`, nothing else, with a unit case that toggling the ask sheet's row still shows and hides the sheet; `App.tsx` and `tools/browser/agent/connect.ts` (U12) each get one comment corrected to what is true after M6. Desk web reaches none of M6's files (the executor followed every import from `apps/desk-web/src`), so its three checks do not join M6's proof.
   Rationale: no dead export stays; the insertions are the smallest that remove it.
   Date/Author: 2026-11-15, the architect; recorded by the controller.
+
+- Decision: M6's decisions, as built (`2b129d553`..`142803541`). `connect.ts` only feeds the ask store from live batches and reloads it when the host is back (`ready`, per machine); the automatic open, the deferred open, the automatic close, U8b's give-back and U7b's `asked` on that call are gone, and `settleWaitingAsks` with them (its calls in `actions.ts`'s `openAsk` and `panel/SurfaceRow.tsx`'s `toggleSurface`; `SurfaceRow.tsx` also loses its then-unused `ASK_SHEET_TOOL_ID` import). `panel/surface-row.test.ts` pins that the sheet's icon still shows and hides the sheet, reusing its tab (it pins a keep, so it went in with the build, not red first). The `store.test.ts` cases that pinned only the removed opening, closing and give-back are deleted; three that still hold are reworded and kept (opening from a card, keeping a sheet the person opened, feeding the store). The "Open beside" proof uses the in-place form a row's card draws and `openAsk`. A blocking ask with no drawn capsule is at the end (`placeWaiting`), answered in place there (`EndRegion`'s `askInPlace`, `HoverAsk`).
+  Rationale: the executor's report of M6; the task review approved it.
+  Date/Author: 2026-11-15 (UTC), M6's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
