@@ -197,7 +197,13 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
     if (!isAppSender(event, options.appUrl)) {
-      console.warn(`[ipc] refused ${name} from ${event.senderFrame?.url ?? 'a detached frame'}`);
+      let from: string;
+      try {
+        from = event.senderFrame?.url ?? 'a detached frame';
+      } catch {
+        from = 'a frame whose URL cannot be read'; // UX wave U6e re-review: the refusal's log never throws in its place
+      }
+      console.warn(`[ipc] refused ${name} from ${from}`);
       return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by the app window`) };
     }
     if (mainOnly.has(name)) return mainOnlyRefusal(name);
