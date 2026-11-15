@@ -1217,7 +1217,10 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     const reads = main.callsOf('files.read').length;
     await act(() => openChosen(A));
     await settle();
-    expect(main.callsOf('files.read')).toHaveLength(reads);
+    // nothing read over the edits: the one read after the choice asks the admission alone (review finding 3), and the
+    // document, its baseline and the pin stand
+    expect(main.callsOf('files.read').slice(reads)).toEqual([{ appSessionId: MAIN_A, path: OUT, offset: 0, length: 1, named: true }]);
+    expect(shown()).toMatchObject({ text: 'one\n', hash: fakeHash('one\n'), pin: OUT, dirty: true });
     expect(view().state.doc.toString()).toBe('mine one\n');
     fireEvent.click(saveButton()!);
     await waitFor(() => expect(main.files[OUT]).toBe('mine one\n'));
