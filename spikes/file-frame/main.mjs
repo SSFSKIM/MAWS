@@ -6,7 +6,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { records, result } from './record.mjs';
 import { ownFilters } from './policies.mjs';
-import { descendants, frameOf, frameTree, lastSeq, mount, openerLines, openWindow, ownerRule, page, picture, probeViewer, screenShot, serve, setupSession, since, sleep, stateOf, tokens, waitDrawn, within, xWindows, PDF_VIEWER, exists } from './harness.mjs';
+import { descendants, frameOf, frameTree, viewerFramesOf, lastSeq, mount, openerLines, openWindow, ownerRule, page, picture, probeViewer, screenShot, serve, setupSession, since, sleep, stateOf, tokens, waitDrawn, within, xWindows, PDF_VIEWER, exists } from './harness.mjs';
 import { hostilePdfs, largePdf, pagesPdf } from './pdf.mjs';
 
 const argv = Object.fromEntries(process.argv.filter((a) => a.startsWith('--') && a.includes('=')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.join('=')]; }));
@@ -278,7 +278,35 @@ const suites = {
     const openedFile = process.env.FILE_FRAME_OPENED;
     const electronExe = process.execPath;
     const baseline = {};
-    for (const [name, bytes] of Object.entries(pdfs)) {
+    // In the viewer's own frame, as main (a user gesture): the positive controls of main's record. They are not part of
+    // R4's test; they show that each kind of act would have been seen.
+    const inViewer = (code) => async (_win, t) => {
+      const f = viewerFramesOf(t.url)[0];
+      if (f) await within(f.executeJavaScript(code, true), 3000);
+      await sleep(2000);
+    };
+    const deep = (sel) => `(() => { const find = (root) => { const hit = root.querySelector(${JSON.stringify(sel)}); if (hit) return hit; for (const el of root.querySelectorAll('*')) { const r = el.shadowRoot && find(el.shadowRoot); if (r) return r; } return null; }; const el = find(document); if (el) el.click(); return !!el; })()`;
+    const clickLink = async (win, t) => {
+      win.focus();
+      win.webContents.focus();
+      const st = await stateOf(win, t.name.replace(/\.pdf$/, ''));
+      const x = st.rect.x + Math.round(st.rect.width / 2) + 150; // right of the viewer's sidebar, on the page
+      const y = st.rect.y + 300;
+      win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+      await sleep(300);
+      win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+      win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+      await sleep(1500);
+    };
+    const cases = [
+      ...Object.entries(pdfs).map(([name, bytes]) => [name, bytes, name === 'control-click-link' ? clickLink : null]),
+      ['detector-frame-navigation', pdfs.baseline, inViewer('location.href = "https://example.com/viewer-navigation"')],
+      ['detector-window-navigation', pdfs.baseline, inViewer('window.top.location.href = "https://example.com/window-navigation"')],
+      ['detector-request', pdfs.baseline, inViewer('fetch("https://example.com/viewer-fetch").catch(() => 0)')],
+      ['detector-window-open', pdfs.baseline, inViewer('window.open("https://example.com/viewer-window")')],
+      ['detector-viewer-save', pdfs.baseline, inViewer(deep('#save'))],
+    ];
+    for (const [name, bytes, act] of cases) {
       const win = await openWindow({ width: 1000, height: 900 });
       await sleep(500);
       const before = { x: new Set(xWindows().filter((w) => w.mapped).map((w) => w.id)), procs: new Set(descendants().map((p) => p.pid)), opened: openerLines(openedFile).length, seq: lastSeq() };
@@ -287,18 +315,7 @@ const suites = {
       const d = await waitDrawn(t.url, 15000);
       await page(win, 'spike.frames(120)');
       await sleep(1500);
-      if (name === 'control-click-link') {
-        win.focus();
-        win.webContents.focus();
-        const st = await stateOf(win, name);
-        const x = st.rect.x + Math.round(st.rect.width / 2) + 150; // right of the viewer's sidebar, on the page
-        const y = st.rect.y + 300;
-        win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
-        await sleep(300);
-        win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
-        win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
-        await sleep(1500);
-      }
+      if (act) await act(win, t);
       const probes = await probeViewer(t.url);
       const pic = await picture(win, join(out, `e-${name}.png`));
       const screen = screenShot(join(out, `e-${name}-screen.png`));
@@ -339,7 +356,7 @@ const suites = {
         ...opens.filter((r) => r.type === 'window-open').map((r) => `a window for ${r.url} (denied)`),
       ];
       const viewer = probes.find((p) => p.probe && !p.probe.error)?.probe;
-      const control = name === 'baseline' || name.startsWith('control');
+      const control = name === 'baseline' || name.startsWith('control') || name.startsWith('detector');
       result('e', name, control ? 'record' : happened.length ? 'fail' : 'pass', `${d.ok ? 'drawn' : 'NOT drawn'}; page ${viewer?.pageInput ?? '?'} of ${viewer?.docLength ?? '?'}; happened: ${happened.join('; ') || 'nothing'}; asked and refused: ${asked.join('; ') || 'nothing'}; console lines ${consoles.length}; pictures e-${name}.png (${pic.colours} colours)${screen ? ` and e-${name}-screen.png` : ', no screen picture'}`, { newX, procs, opened, navs, network, scheme, downloads, opens, created: created.length, consoles: consoles.map((c) => `${c.level} ${c.message}`).slice(0, 20), xAfter });
       win.destroy();
       await sleep(700);
