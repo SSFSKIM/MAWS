@@ -175,6 +175,7 @@ describe('the row of an agent’s delete', () => {
   const AT = Date.UTC(2026, 10, 15, 9, 0);
   const LISTED = { id: DRAFT, kind: 'document', title: 'Draft plan', createdBy: { kind: 'session', appSessionId: APP }, createdAt: AT, updatedAt: AT, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3, lastEditor: { kind: 'session', appSessionId: APP }, lastEditedAt: AT, sessions: [] };
   let listed: boolean;
+  let refused: boolean; // fix wave 4: the library's read of the artifact refused (a member whose reads are refused)
   let reads: (MachineRef | undefined)[];
   let main: ReturnType<typeof installFakeMain>;
   let offLibrary: () => void;
@@ -183,10 +184,12 @@ describe('the row of an agent’s delete', () => {
     resetArtifactMachines();
     resetRemoteLaneBStore();
     listed = false;
+    refused = false;
     reads = [];
     main = installFakeMain((name, _input, machine) => {
       if (name !== 'library.get') return new Promise(() => {});
       reads.push(machine);
+      if (refused) return { ok: false, error: { code: 'invalid_input', message: 'not viewable on mini' } } as never;
       return ok({ row: listed ? LISTED : null });
     });
     offLibrary = connectLibrary();
@@ -257,6 +260,24 @@ describe('the row of an agent’s delete', () => {
     expect(line(container)).toBeNull();
     fireEvent.click(undoButton());
     expect(actions.undeleteArtifact).toHaveBeenCalledExactlyOnceWith(R, DRAFT);
+  });
+
+  // Fix wave 4 (the ruling's predicate): restoration is a current successful read; a row kept from a read since refused is not
+  it('a member whose reads are refused after the delete keeps "Deleted" and the owners’ sentence, never a cached row’s Restored', async () => {
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    useMachines.getState().applyRoster([{ ...MINI, capabilities: [SESSION_ACTS_CAPABILITY, 'rl2.artifact-undelete'], owner: false }]);
+    listed = true; // a row read before the delete
+    const view = renderRow(DELETED, { storeKey: R, actions: withUndo(async () => null) });
+    await act(async () => {});
+    refused = true;
+    await libraryChanged();
+    await waitFor(() => expect(reads.length).toBe(2));
+    await act(async () => {});
+    expect(heading(view.container)).toBe('Deleted Draft plan');
+    expect(view.container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('deleted');
+    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
+    expect(undoButton().disabled).toBe(true);
+    expect(line(view.container)).toBe('Only mini’s owners can restore an artifact there.');
   });
 
   it('on another machine Undo is disabled with its sentence as a line: offline, a build without the capability, a member who does not own it', async () => {

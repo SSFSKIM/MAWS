@@ -21,7 +21,7 @@ import { allTabs } from '../stores/layout-model';
 import { installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { openArtifactTab } from './actions';
-import { registerArtifactTabs } from './ArtifactTab';
+import { artifactReplaceVerdict, registerArtifactTabs } from './ArtifactTab';
 import { connectLibrary, resetLibrary } from './store';
 import { noteDeletedReplica, resetDeletedReplicas } from '../artifacts/deleted-replicas'; // UX wave U10b
 import { deferred } from '../test-support/code'; // UX wave U10b
@@ -371,6 +371,16 @@ describe('an artifact an agent deleted while it is open', () => {
     return editor;
   }
   const notice = () => document.querySelector<HTMLElement>('[data-artifact-deleted]');
+
+  // Fix wave 4 (the panel's P1): the header says read-only, yet the replica keeps an edit the fence refused; a session
+  // opened over the tab must not replace it (replacing skips the close guard)
+  it('keeps its tab from being replaced while the parked replica holds an edit the host never acknowledged', async () => {
+    await deletedWhileOpen();
+    const ref = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
+    expect(artifactReplaceVerdict(ref)).toBeNull(); // the header says nothing unsaved (a parked replica's says read-only), nothing kept: replaceable
+    act(() => noteDeletedReplica({}, A, 1));
+    expect(artifactReplaceVerdict(ref)).toEqual({ keep: expect.stringContaining('has unsaved changes') });
+  });
 
   it('keeps the editor on screen under the notice; Undo restores it in place with the same state, and the notice goes', async () => {
     const editor = await deletedWhileOpen();
