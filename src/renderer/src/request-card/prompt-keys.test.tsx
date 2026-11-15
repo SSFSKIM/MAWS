@@ -45,6 +45,7 @@ import { connectRequestCard, renderSessionRequest } from './index';
 import { itemFor, permission, type RequestEvent } from './test-requests';
 
 const APP = at('app-keys' as AppSessionId);
+const OTHER = at('app-keys-beside' as AppSessionId); // the session of the main pane beside the floating card
 const addressing = addressingOf(REGISTRY);
 const GRACE = 400;
 const QUESTIONS = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: null, preview: null }, { label: 'Blue', description: null, preview: null }] }];
@@ -81,6 +82,7 @@ async function scrollPrompt(by: number) {
 // ---- the session and its pane -----------------------------------------------------------------------------------------
 let fake: FakeClient;
 let events: SessionEvent[] = [];
+let otherEvents: SessionEvent[] = []; // a second session's, for the floating card's cases
 let requests = new Map<string, SessionEvent>();
 let outcome: 'delivered' | 'write_failed' = 'delivered';
 let offs: (() => void)[] = [];
@@ -99,10 +101,14 @@ beforeEach(() => {
   useHosts.setState({ supervisor: hostStatus() });
   useAttention.setState({ receipts: new Map(), settling: new Map() });
   events = [];
+  otherEvents = [];
   requests = new Map();
   outcome = 'delivered';
   fake = fakeClient({
-    'session.events': () => ({ events, lastSeq: events.length, complete: true }),
+    'session.events': (input: { appSessionId: string }) => {
+      const of = input.appSessionId === bareOf(OTHER) ? otherEvents : events;
+      return { events: of, lastSeq: of.length, complete: true };
+    },
     'attention.request': (input: { requestId: string }) => ({ event: requests.get(input.requestId) ?? null }),
     'session.answer': () => ({ outcome }),
     'session.queue.list': { entries: [], paused: false, pauseReason: null },
@@ -511,6 +517,62 @@ describe('the refusals that stand', () => {
     holding(0);
     await press(document.body, ESCAPE);
     await waitFor(() => expect(answered()).toEqual([{ requestId: 'rp', answer: DENY }]));
+  });
+});
+
+// The branch review (2026-11-15 UTC): the floating card's pane boundary is `data-pane="card"`, and the card stands for one
+// main pane (`shell/FloatingCard.tsx`: the panel's card for the focused pane, the split's for its floating pane, which a
+// press in it focuses), which it names on that boundary. The shell's focused pane is the one fact of which surface holds
+// the keyboard: with nothing focused, the card's prompt takes a press exactly when that pane is the card's, and a main
+// pane's prompt when it is that pane's, so at most one prompt takes it. Pane 0 shows another session with a prompt of its
+// own; the card, standing for pane 1, shows this one.
+describe('a prompt in the floating card, with nothing focused', () => {
+  async function mountBeside(focusedPane: 0 | 1) {
+    const { prompt } = scene();
+    const b = builder();
+    b.turn('u9', 'Tidy the notes');
+    b.toolUse('b9', 'Bash', { command: 'make tidy' }, 'm9', 0);
+    const besideEvent = b.emit('permission.requested', permissionOf('ro', 'b9', 'make tidy'));
+    otherEvents = b.events;
+    requests.set(besideEvent.requestId, besideEvent);
+    const beside = itemFor(besideEvent as RequestEvent, OTHER, { summary: 'Bash: make tidy' });
+    busy();
+    const s = useSessions.getState();
+    const page = addressing.output('session.get').lift(record(bareOf(OTHER)), TEST_MACHINE)! as SessionRecord;
+    useSessions.setState({ records: new Map(s.records).set(OTHER, page), recordsVersion: s.recordsVersion + 1 });
+    const tab = (id: AppSessionId) => ({ tabs: [{ id: `session:${id}`, kind: 'session', appSessionId: id, pinned: false }], activeTabId: `session:${id}` });
+    useLayout.setState((l) => ({ main: { ...l.main, panes: [tab(OTHER), tab(APP)], focusedPane, splitRatio: 0.5 } }) as never);
+    act(() => useAttention.getState().applySnapshot([prompt, beside], TEST_MACHINE));
+    render(
+      <QueryClientProvider client={queryClient}>
+        <section data-pane={0} aria-label="pane 0">
+          <TranscriptSlot appSessionId={OTHER} />
+        </section>
+        <div data-pane="card" data-card-pane={1} aria-label="the card">
+          <TranscriptSlot appSessionId={APP} />
+          <Composer appSessionId={APP} paneIndex={1} />
+        </div>
+      </QueryClientProvider>,
+    );
+    const endIn = (name: string) => screen.getByLabelText(name).querySelector<HTMLElement>('[data-request-end]');
+    await waitFor(() => expect(endIn('pane 0') && within(endIn('pane 0')!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
+    await waitFor(() => expect(endIn('the card') && within(endIn('the card')!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
+  }
+
+  it('the card holding the keyboard, Esc answers the card’s prompt and not the main pane’s', async () => {
+    await mountBeside(1);
+    arm();
+    focusNothing();
+    expect((await press(document.body, ESCAPE)).defaultPrevented).toBe(true);
+    await waitFor(() => expect(answered()).toEqual([{ requestId: 'rp', answer: DENY }]));
+  });
+
+  it('never both: the main pane holding the keyboard, its prompt takes the press and the card’s does not', async () => {
+    await mountBeside(0);
+    arm();
+    focusNothing();
+    expect((await press(document.body, ESCAPE)).defaultPrevented).toBe(true);
+    await waitFor(() => expect(answered()).toEqual([{ requestId: 'ro', answer: DENY }]));
   });
 });
 

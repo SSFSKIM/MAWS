@@ -218,6 +218,14 @@ describe('the floating card in the Shell', () => {
     expect(body.classList).toContain('overflow-x-hidden');
   });
 
+  // UX wave U1b, the branch review (2026-11-15 UTC): the card stands for one main pane (the focused one, for the panel's
+  // card), and its pane boundary names it, so a prompt in it reads the shell's focused pane as a main pane's prompt does
+  it('the card’s body names the main pane it stands for', () => {
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    expect(card()!.querySelector<HTMLElement>('[data-pane="card"]')!.dataset.cardPane).toBe('0');
+  });
+
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {
     const user = userEvent.setup();
     useLayout.getState().setPanelWidth(444); // UX wave U8b: the width in use (this column's class)
