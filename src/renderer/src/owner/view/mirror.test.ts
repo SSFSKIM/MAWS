@@ -175,6 +175,8 @@ describe('the rows of no stretch (decision 11)', () => {
 });
 
 describe('one asynchronous answer is stated once outside the record (R13)', () => {
+  // These notices are made by hand; the cases "through the derivation" below are what tie them to the notice the
+  // derivation makes of an answer's arrival.
   const answerNotice = () => row('notice', { class: 'answer', outcome: null, toolUseId: 'toolu_q', text: 'The answer: B.' });
   const states = (rows: readonly Row[]) => rows.filter((r) => r.kind === 'notice' || (r.kind === 'question' && r.answers !== null)).length;
 
@@ -197,6 +199,61 @@ describe('one asynchronous answer is stated once outside the record (R13)', () =
   it('an answered or cancelled ask carries the receipt as an answered question does', () => {
     for (const state of ['answered', 'cancelled']) expect(closed([prompt(), row('ask', { toolUseId: 'toolu_q', state }), answerNotice()])).toEqual(['user', 'ask', '› record']);
     expect(closed([prompt(), row('ask', { toolUseId: 'toolu_q', state: 'asked' }), answerNotice()])).toEqual(['user', 'ask', 'notice']);
+  });
+
+  // Through the derivation: a question's call, its answer's arrival as the engine's turn carries it (`user.message`'s
+  // `arrival`, the recorded shapes: the sminos bridge's names the question's tool-use id, `pass3/p1-maws-ask-async`'s
+  // MAWS ask its askId, which is its call's tool-use id) and work around it, derived and then mirrored.
+  describe('through the derivation', () => {
+    const QUESTIONS = [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red' }, { label: 'Blue' }] }];
+    const ASK_QUESTIONS = [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] }];
+    const ANSWERS = [{ id: 'q1', question: 'Which colour?', status: 'answered' as const, value: ['Red'] }];
+    function derived(ask: (b: ReturnType<typeof builder>) => void, tool: 'sminos' | 'maws', call: string): Row[] {
+      const b = builder();
+      b.turn('u0', 'Set it up');
+      b.text('m0', 0, '<message>Ready.</message>');
+      b.end(['u0']);
+      b.turn('u1', 'Paint the fence');
+      ask(b);
+      b.toolUse('t1', 'Bash', { command: 'ls' });
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      const arrival = { class: 'answer' as const, tool, call, summary: 'The user answered: "Which colour?"="Red"', answers: tool === 'maws' ? ANSWERS : null, dismissed: false };
+      b.emit('user.message', { messageUuid: 'a1' as never, content: arrival.summary, isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [arrival] });
+      b.toolUse('t2', 'Bash', { command: 'paint' });
+      b.result('t2', 'ok', { structured: BASH_RESULT('ok') });
+      b.text('m1', 0, '<message>Painted red.</message>');
+      b.end(['u1']);
+      const state = applyEvents(createState(null, null), b.events);
+      return rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+    }
+    const notices = (rows: readonly Row[]) => rows.filter((r) => r.kind === 'notice' && r.class === 'answer');
+
+    it('an engine question whose row carries the answers: the arrival’s notice folds with the record', () => {
+      const rows = derived((b) => {
+        b.toolUse('q1', 'AskUserQuestion', { questions: QUESTIONS });
+        b.result('q1', 'answered', { structured: { answers: { 'Which colour?': 'Red' } } });
+      }, 'sminos', 'q1');
+      expect(notices(rows)).toHaveLength(1);
+      expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: { 'Which colour?': 'Red' } });
+      expect(notices(mirrorRows(rows, {}))).toHaveLength(0);
+    });
+
+    it.each(['answered', 'cancelled'] as const)('a MAWS ask %s: the arrival’s notice folds with the record', (end) => {
+      const rows = derived((b) => {
+        b.toolUse('a1', 'mcp__maws__ask', { title: 'Colour', blocking: false, questions: ASK_QUESTIONS });
+        if (end === 'answered') b.emit('maws.ask.answered', { askId: 'a1', toolUseId: 'a1' as never, answers: ANSWERS, delivery: 'steer' });
+        else b.emit('maws.ask.cancelled', { askId: 'a1', toolUseId: 'a1' as never, reason: 'withdrawn' });
+      }, 'maws', 'a1');
+      expect(notices(rows)).toHaveLength(1);
+      expect(rows.find((r) => r.kind === 'ask')).toMatchObject({ state: end });
+      expect(notices(mirrorRows(rows, {}))).toHaveLength(0);
+    });
+
+    it('a question whose row carries no answers: the notice is the one statement and stays', () => {
+      const rows = derived((b) => b.toolUse('q1', 'AskUserQuestion', { questions: QUESTIONS }), 'sminos', 'q1');
+      expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: null });
+      expect(notices(mirrorRows(rows, {}))).toHaveLength(1);
+    });
   });
 });
 
