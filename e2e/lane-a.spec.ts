@@ -20,6 +20,7 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
+import { menu } from './support/menu';
 import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
 import { END_ROW, rowOf } from './support/request-keys';
 import { sidebarOf, sidebarRow } from './support/sidebar';
@@ -769,6 +770,18 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // nothing counts as waiting (no Needs you, no badge), held by the store past the card; then it goes, and the end with it
     bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
     await expect(end(page).locator('[data-request-card]').getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
+    // how long the receipt stands, read by the page itself (its own clock, from its drawing to its going): a lower bound
+    // only, which a loaded machine can only lengthen
+    await page.evaluate(() => {
+      const seen: { shown: number | null; gone: number | null } = { shown: null, gone: null };
+      (window as unknown as { __u1bSettling: typeof seen }).__u1bSettling = seen;
+      const look = () => {
+        const held = document.querySelector('[data-settling]') !== null;
+        if (held && seen.shown === null) seen.shown = performance.now();
+        if (!held && seen.shown !== null && seen.gone === null) seen.gone = performance.now();
+      };
+      new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+    });
     bridge.settle('toolu_term', 'terminal', 'allow');
     const receipt = end(page).locator('[data-settling]');
     await expect(receipt).toHaveText('Bash: git status · Answered in the terminal: Allowed', { timeout: 2_000 });
@@ -781,6 +794,14 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page).getByRole('button', { name: 'Needs your input. Scroll to the request' }), 'nor the jump button').toHaveCount(0);
     await expect(end(page), 'the receipt goes after SETTLED_MS, and the end row with it').toHaveCount(0, { timeout: 8_000 });
     await expect(main(page).locator(END_ROW)).toHaveCount(0);
+    const stood = await page.evaluate(() => {
+      const seen = (window as unknown as { __u1bSettling: { shown: number | null; gone: number | null } }).__u1bSettling;
+      return seen.shown === null || seen.gone === null ? null : seen.gone - seen.shown;
+    });
+    expect(stood, 'the receipt was drawn and went').not.toBeNull();
+    // SETTLED_MS is 3 s (lane-a/race.ts), its timer started when the follower wrote the receipt, a frame or so before it
+    // was drawn: it stood near three seconds, never a blink
+    expect(stood!, 'the receipt stood for its three seconds').toBeGreaterThanOrEqual(2_500);
 
     // an answer the bridge refuses because another won reads as that settlement, never an error
     bridge.raise({ request: 'toolu_late', tool: 'Bash', input: { command: 'rm notes.md' } });
@@ -1101,6 +1122,78 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
     await open(c);
     for (const [call, lines] of delivered) await expect.poll(() => receiptLines(questionRow(page, call)), { timeout: 15_000, message: `${call}: its row after the reload` }).toEqual(lines);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+  // UX wave U1b, decision 8a (the architect's ruling of 2026-11-15): a question MAWS answers that was answered elsewhere
+  // first. The bridge refuses the answer with 404 and names no settlement (no request pending under that id: its own
+  // record of the request has gone ahead of its stream), so the driver says not pending with no winner and lane A's
+  // controls inject no settlement; the card says "Already answered elsewhere" for its two seconds and closes, while the
+  // bridge still lists the request. Through that gap the row draws no form and no control, and each line reads the
+  // existing sentence, past the two seconds and through a remount, until the row carries its own answers. The column's
+  // card still lists the item; its line goes to a request that is closed, so it says the request is gone and moves the
+  // keyboard nowhere that answers (decision 19).
+  test('a question answered elsewhere while its row waits: Already answered elsewhere on each line, no form and no control, past two seconds and a remount; the column’s line says it is gone; then the row’s own answers', async () => {
+    test.setTimeout(150_000);
+    const week = 'Which day should the printed week start on?';
+    const cover = 'Which colour for the cover?';
+    const ask = { call: 'toolu_u1b_elsewhere', questions: [single(week, 'Week start', ['Monday', 'Sunday']), single(cover, 'Cover', ['Blue', 'Green'])] };
+    let rows!: ReturnType<typeof fileRows>;
+    const c = await begin((sid, cwd, after) => {
+      rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return [rows.prompt('Lay out the garden notes; ask me what you cannot decide.'), rows.call(ask.call, ASK_TOOL, { questions: ask.questions, async: true }), rows.result(ask.call, ASYNC_RESULT), rows.text('I will go on with the layout.'), ...rows.turnEnd()];
+    });
+    const { page } = c;
+    const { bridge } = await drive(c);
+    const row = questionRow(page, ask.call);
+    const form = row.locator('[data-request-card]');
+    const elsewhere = ['Week start→Already answered elsewhere', 'Cover→Already answered elsewhere'];
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'its row before any request' }).toEqual(['Week start→Not answered', 'Cover→Not answered']);
+
+    // the bridge takes no answer for it: 404, no settlement named
+    bridge.answer(`decision:${ask.call}`, () => ({ status: 404, body: { error: `no request ${ask.call} is pending in this session` } }));
+    bridge.raise({ request: ask.call, tool: ASK_TOOL, async: true, input: { questions: ask.questions, async: true } });
+    await expect(form, 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    await form.getByRole('radiogroup', { name: week }).getByRole('radio', { name: 'Monday' }).click();
+    await form.getByRole('button', { name: 'Next', exact: true }).click();
+    await form.getByRole('radiogroup', { name: cover }).getByRole('radio', { name: 'Blue' }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(decided(bridge), 'the bridge recorded no decision').toEqual([]);
+
+    // past the card's two seconds: no form, no control, each line the sentence; the bridge still lists the request
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'each line says it was answered elsewhere' }).toEqual(elsewhere);
+    await expect(form, 'no form').toHaveCount(0);
+    await expect(row.getByRole('button'), 'no control').toHaveCount(0);
+    await expect(row.getByRole('radio'), 'no option').toHaveCount(0);
+    const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((i) => i.request.requestId === ask.call).map((i) => i.state);
+    expect(await listed(), 'the premise: the item is still listed').not.toEqual([]);
+    await expect(end(page), 'nothing at the end for it').toHaveCount(0);
+
+    // the column's card still lists it; its line finds the request closed: gone, said once, the keyboard moved nowhere that answers
+    const column = (await showSessionCards(page)).getByRole('region', { name: 'Waiting for you', exact: true });
+    const line = column.locator(`[data-waiting-card-line="${await addressed(page, value(await invoke(page, 'attention.list', undefined)).find((i) => i.request.requestId === ask.call)!.id)}"]`);
+    await expect(line).toBeVisible();
+    await line.click();
+    const toasts = page.locator('[data-toast-viewport]');
+    await expect(toasts.getByText('That request is no longer waiting'), 'said once').toHaveCount(1);
+    const held = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (element === null || element === document.body) return 'nothing';
+      if (element.closest('[data-request-card], .transcript-row') !== null) return 'a request or a row';
+      return element.hasAttribute('data-waiting-card-line') ? 'the line' : 'elsewhere';
+    });
+    expect(held, 'the keyboard is on nothing that answers').not.toBe('a request or a row');
+    expect(await receiptLines(row), 'and the row unchanged').toEqual(elsewhere);
+
+    // remounted: the pane shows another tab, then the session again; the row reads the same
+    await menu(c.maws.app, 'diagnostics.open');
+    await expect(row, 'the transcript left the page').toHaveCount(0);
+    await open(c);
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'after the remount' }).toEqual(elsewhere);
+    await expect(form, 'still no form').toHaveCount(0);
+
+    // the delivery of the answer that won: the row reads its own answers
+    await c.store.appendLines(c.transcript, [rows.pluginPrompt(delivery(ask.call, answered({ [week]: 'Sunday', [cover]: 'Green' }))), rows.text('Noted: Sunday, a green cover.'), ...rows.turnEnd()].map((r) => JSON.stringify(r)));
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'the row’s own answers win' }).toEqual(['Week start→Sunday', 'Cover→Green']);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });
