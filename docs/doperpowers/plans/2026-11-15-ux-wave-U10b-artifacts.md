@@ -379,7 +379,7 @@ Eleven milestones in four pull requests. Each stands on this document and the co
 
 **What exists at its end.** `artifact_create` takes `designSystem`. On the Library page the section is four cards (Document, Presentation, Dashboard, Design), each one button that starts a chat with the opening words, beside a "Blank" link; a More menu (Design system, HTML page, Add a file…) as the row's last cell; and one design-system choice in the heading.
 
-**What it touches.** `src/shared/maws/tools.ts`, `tools.test.ts`, the probe snapshot; `src/engine-host/tool-server/artifact-tools.ts`, `documents.ts` (the document and dashboard create) and tests; `src/renderer/src/library/MakeSomethingNew.tsx`, `copy.ts`, `Rows.tsx` (the section kept mounted under the list's virtualiser; added 2026-11-15), `Library.test.tsx`, `LibraryMachineMenu.test.tsx`.
+**What it touches.** `src/shared/maws/tools.ts`, `tools.test.ts`, the probe snapshot; `src/engine-host/tool-server/artifact-tools.ts`, `documents.ts` (the document and dashboard create) and tests; `src/renderer/src/library/MakeSomethingNew.tsx`, `copy.ts`, `Library.tsx` (the choice's owner, fix wave 1), `Library.test.tsx`, `LibraryMachineMenu.test.tsx`; in U6's file, `src/renderer/src/keymap/actions-runtime.ts` (§H).
 
 **Interfaces.** Exposes §D.
 
