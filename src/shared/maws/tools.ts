@@ -600,6 +600,7 @@ export const TOOL_ERRORS = {
   targetRequired: (pane: string) => `show_pane: a target is required for the ${pane} pane`,
   fileNotFound: (path: string) => `show_pane: file not found: ${path}`,
   paneTimeout: `show_pane: no MAWS window answered within ${PANE_ANSWER_MS / 1000} s`,
+  paneNotReady: 'show_pane: the MAWS window was still loading its layout; try again', // UX wave U6b-1: the window's wait for its layout ran out
   // E2 start: each artifact refusal names the tool whose call it answers (E1's `notAFile` stays `send_file`'s)
   artifactNotAFile: (tool: ArtifactToolName, path: string) => `${tool}: not a file: ${path}`,
   notHtml: (tool: ArtifactToolName, path: string) => `${tool}: not an HTML file: ${path}`,

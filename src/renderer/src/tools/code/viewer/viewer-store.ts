@@ -39,6 +39,7 @@ import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
 import { machineOf } from '@shared/machine/address';
 import { useFiles, type WatchHold } from '../files/store';
+import { sideFileKeys } from '../files/tabs'; // UX wave U6b-1
 import { dirname, sameFile } from '../files/tree';
 import { EDITOR_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
@@ -144,6 +145,8 @@ export interface ViewerStore {
   // U6c (decision 15): a failed or named entry is read again, now when its tab is mounted, else at its next mount; nothing
   // for an entry with a load in flight or unsaved edits, or one a session given is not the entry's (the mount replaces it)
   revisit(tabId: string, appSessionId?: AppSessionId | null): void;
+  // UX wave U6b-1 (sequence 6): the prune, run by the side tabs' one subscriber (`files/tabs.ts`) when they change
+  prune(): void;
 }
 
 // E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
@@ -294,8 +297,10 @@ export function createViewerStore(client: MawsBridge) {
     // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go. E5: the
     // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked). A
     // file tab leaves the layout only by a guarded close: a session's removal and hydration keep file tabs (E11 W-D).
+    // UX wave U6b-1 (Decision 20a): a file a side tab holds is open too, whether its tab is in view or not.
     const prune = () => {
-      const open = new Set(allTabs(useLayout.getState().main).map((tab) => tab.id)); // W12: every project's tab set
+      const layout = useLayout.getState();
+      const open = new Set([...allTabs(layout.main).map((tab) => tab.id), ...sideFileKeys(layout)]); // W12: every project's tab set
       for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
       for (const tabId of views.keys()) if (!get().entries.has(tabId)) views.delete(tabId);
       const idle = [...get().entries.values()]
@@ -732,6 +737,8 @@ export function createViewerStore(client: MawsBridge) {
         if (mounted.get(tabId)) readAgain(tabId, entry, 'revisit');
         else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
       },
+
+      prune,
 
       reset() {
         for (const hold of holds.values()) hold.release();

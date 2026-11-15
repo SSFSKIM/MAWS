@@ -9,6 +9,10 @@
 // area", disabled with the reason a drag of it would be refused. UX wave U8b (M3): the menu then offers "Move below" on a
 // tab of the upper group (while the column has two groups or its one group more than one tab) and "Move above" on a tab
 // of the lower one; it opens on a right click and on Shift+F10. A strip knows its group and hands it to its "+".
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 6 and 16): a tab of Files
+// that holds a file is titled by the file's name, in italics while it is the session's preview tab (`data-preview`),
+// which a double-click on it keeps; it has no pin glyph. "+ ▸ Files" shows the tree-only tab the scope has (the tool's
+// `reuse`) and adds one only when it has none.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -20,6 +24,7 @@ import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
 import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
+import { fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import { groupOf, sideGroups, type SideGroupName } from './surface-model';
 
@@ -165,11 +170,16 @@ interface TabProps {
 }
 
 function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
-  const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
+  const label = useTabLabel(tab); // the header reads the same label (P3-G)
+  const { tool, suffix } = label;
+  const params = useLayout((s) => s.panelParams[tab.id]);
+  const file = tab.toolId === FILES_TOOL_ID ? fileOfTab(params) : null; // UX wave U6b-1
+  const title = file ? file.file.slice(file.file.lastIndexOf('/') + 1) : label.title;
+  const preview = file?.preview === true;
   const closing = usePanelHost((s) => s.closing.has(tab.id));
-  const pinnable = tool ? tool.pinnable : true;
+  const pinnable = (tool ? tool.pinnable : true) && pinnableTab(params);
   const ToolIcon = tool?.icon;
-  const label = suffix ? `${title} · ${suffix}` : title;
+  const name = suffix ? `${title} · ${suffix}` : title;
   const iconOnly = shape === 'icon';
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
   const record = usePanelRecord(tab.id); // P4-B3: the artifact it shows, which a drag moves to main
@@ -187,6 +197,7 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
     <div
       data-tab-id={tab.id}
       data-tab-shape={shape}
+      data-preview={preview ? 'true' : undefined}
       draggable={record !== null || undefined}
       onDragStart={record === null ? undefined : (event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, artifactId: record })}
       style={maxWidth === null ? undefined : { maxWidth }}
@@ -198,15 +209,16 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
         role="tab"
         aria-selected={selected}
         aria-controls={selected ? bodyId : undefined}
-        aria-label={iconOnly ? label : undefined}
-        title={iconOnly ? label : undefined}
+        aria-label={iconOnly ? name : undefined}
+        title={iconOnly ? name : undefined}
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
+        onDoubleClick={preview ? () => keep(tab.id) : undefined}
         className={`flex h-full min-w-0 flex-1 items-center rounded-sm text-ui outline-accent focus-visible:outline-2 ${iconOnly ? 'justify-center' : 'gap-1.5 pr-1 pl-2'}`}
       >
         {ToolIcon ? <ToolIcon className="size-3.5 shrink-0" /> : iconOnly && <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}
         {!iconOnly && (
-          <span className="truncate">
+          <span className={preview ? 'truncate italic' : 'truncate'}>
             {title}
             {suffix && <span className="text-fg-faint"> · {suffix}</span>}
           </span>

@@ -704,6 +704,16 @@ export function createLayoutStore() {
         // review's finding 2).
         const surfaceActs = earlySurfaces.splice(0);
         if (surfaceActs.length > 0) hydratedPanels = { ...hydratedPanels, panelSurfaces: surfaceActs.reduce((state, change) => change(state), hydratedPanels.panelSurfaces) };
+        // UX wave U6b-1 (Decision 17, sequence 8): the files beside the chat as this build holds them, whatever build wrote
+        // them (a pin build F made on a file's tab, a file both beside the chat and in a main tab, the list's order); each
+        // list it changed is written back, with the params.
+        const files = model.repairFileTabs({ main: hydratedMain, panelPinned: hydratedPanels.panelPinned, panelBySession: hydratedPanels.panelBySession, panelParams: storedParams.params });
+        const repairedFiles = [...files.panelBySession].flatMap(([id, own]) => (own === hydratedPanels.panelBySession.get(id) ? [] : [id]));
+        if (repairedFiles.length > 0) {
+          const after = { ...hydratedPanels, panelBySession: files.panelBySession };
+          const { stacks, ...repaired } = scopePatch(after, repairedScopes(hydratedPanels, after));
+          hydratedPanels = { ...after, ...repaired, panelSurfaces: withStacks(after.panelSurfaces, stacks) };
+        }
         // F's one width is this build's wide width once; 380, F's automatic, is automatic here too (X-165).
         const fromRegions = persistedRegions.panel.width === F_AUTOMATIC_WIDTH ? null : persistedRegions.panel.width;
         const panelWidths = storedWidths ?? { version: 1 as const, wide: fromRegions, narrow: null };
@@ -712,7 +722,7 @@ export function createLayoutStore() {
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(hydratedPanels.panelPinned, hydratedPanels.panelBySession);
-        const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
+        const panelParams = Object.fromEntries(Object.entries(files.panelParams).filter(([id]) => live.has(id)));
         const firstReadPending = !complete && !held.has('panelTools.groups');
         // UX wave U7b ("At hydration"): the page to open is the first of these that applies. 1: what the person opened or
         // closed before the read; 2: none after an act of theirs that showed a tab; then `pageAtStart`, over the stored
@@ -747,7 +757,8 @@ export function createLayoutStore() {
         // the first read pruned, with the params it left (persistence takes the filtered params as its baseline).
         if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
         if (!sameJson(cardsOpen, storedCards.open)) unsaved.add('cards.open'); // a fold made while the reads were pending
-        for (const id of prunedPanels) unsaved.add(`panel.${id}`);
+        for (const id of [...prunedPanels, ...repairedFiles]) unsaved.add(`panel.${id}`);
+        if (files.panelParams !== storedParams.params) unsaved.add('panelTools.params'); // UX wave U6b-1
         // UX wave U7b: `destination` is written, or deleted, where what hydration opened differs from the file; a stored
         // value that does not parse (warned once above) is left in the file until the next page is opened or closed.
         if (readAs.has('destination') ? !sameJson(storedValue('destination', destination), readAs.get('destination')) : destination !== null) unsaved.add('destination');
@@ -760,7 +771,7 @@ export function createLayoutStore() {
           regions, 'main.tabs': storedMain(get().main), 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
           'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
           'panelTools.params': storedValue('panelTools.params', panelParams), destination: storedValue('destination', destination),
-          ...Object.fromEntries(prunedPanels.map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
+          ...Object.fromEntries([...prunedPanels, ...repairedFiles].map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
         };
         for (const key of unsaved) {
           if (!(key in values)) continue;
@@ -921,7 +932,7 @@ export function createLayoutStore() {
         let patch: Pick<LayoutState, 'panelPinned' | 'panelActiveNoSession' | 'panelBySession'>;
         if (pinned) {
           const tab = own.tabs.find((t) => t.id === tabId);
-          if (!tab) return;
+          if (!tab || model.paramsHoldFile(prev.panelParams[tabId])) return; // UX wave U6b-1 (Decision 16): a file's tab is never pinned
           panelBySession.set(appSessionId, { ...own, tabs: own.tabs.filter((t) => t.id !== tabId) });
           patch = { ...pins([...prev.panelPinned, { ...tab, pinned: true }]), panelBySession };
         } else {

@@ -1,9 +1,16 @@
 // The Files tool (C8c execution document, Interfaces *Tools, slots and the open-file seam*; M2's decisions): the
 // session's roots as a tree, one root per directory the session may read, listed lazily as directories expand and kept
 // current by `files.changed` for the expanded ones; `.git` hidden as a root's child, dotfiles shown, symlinks named and
-// not followed. A click on a directory toggles it, on a file opens the viewer in the main area. X5: `id: 'files'`,
-// pinnable, single-instance, `params { path?, line? }`, no summary. Its state is a store handle (C8a's React Compiler
-// rule): the expansion, selection and scroll per session, and a reveal `open` asked for.
+// not followed. A click on a directory toggles it, on a file opens it (`openFile`). X5: `id: 'files'`, pinnable, no
+// summary. Its state is a store handle (C8a's React Compiler rule): the expansion, selection and scroll per session.
+//
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 1, 8 and 21): a file opens
+// beside the chat as a tab of this tool, so Files is multi-instance and a tab of it either holds a file (its params,
+// `files/tabs.ts`) and draws the file viewer, or holds none and draws the tree. What a tab holds is read from the layout
+// store, for a tab restored and for one opened now alike; an add of a tab with a file writes its params before the tab
+// is listed, so no reader meets a file's tab without its file. An add with no file shows the tree-only tab the scope has
+// (`reuse`), and adds one only when it has none. The reveal of `params.path`, which nothing in the window asked for,
+// is gone with its two waiting states.
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useStore } from 'zustand';
@@ -12,20 +19,24 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
+import { machineFor } from '../../../ipc/machine';
+import { useLayout } from '../../../stores/layout';
+import { paramsHoldFile } from '../../../stores/layout-model';
 import { FILES_COPY, REFUSAL } from '../copy';
-import { normalizeLexically, openFile } from '../open-file';
+import { openFile } from '../open-file';
+import { FileViewer } from '../viewer/FileViewer';
 import { listingKey, useFiles } from './store';
-import { dirname, expandTo, firstRoot, roleOf, rootsFor, rowsOf, workingRoot, type RootRole, type TreeRow } from './tree';
+import { fileKey, fileOfTab, FILES_TOOL_ID, type FilesTabParams } from './tabs';
+import { firstRoot, roleOf, rootsFor, rowsOf, workingRoot, type RootRole, type TreeRow } from './tree';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
-export const FILES_TOOL_ID = 'files';
+export { FILES_TOOL_ID };
 export const FILES_ROW_HEIGHT = 24;
 
-export interface FilesParams {
-  path?: string;
-  line?: number;
-}
+// What an add of Files is given: a file to show (`openFile`'s), or nothing for the tree. A restored tab's params are
+// whatever the layout holds for it (X5), read through `fileOfTab`.
+export type FilesParams = FilesTabParams | undefined;
 
 export interface FilesView {
   expanded: ReadonlySet<string>;
@@ -36,11 +47,10 @@ export interface FilesView {
 
 export interface FilesUi {
   views: Readonly<Record<string, FilesView>>; // by session: a pinned tool keeps each session's tree as it left it
-  reveal: { path: string; line: number | null } | null; // asked by `open`, resolved against the shown session's roots
-  pendingOpen: { path: string; line: number | null } | null; // revealed; opened once its directory's listing says it is a file
 }
 
 export interface FilesState {
+  readonly tabId: string;
   readonly ui: StoreApi<FilesUi>;
 }
 
@@ -60,16 +70,18 @@ const toggled = (set: ReadonlySet<string>, path: string): ReadonlySet<string> =>
   return next;
 };
 
-// `params` is undefined for a tab restored from layout.json (X5).
-function createState({ params }: PanelToolInit<FilesParams>): FilesState {
-  const ui = createStore<FilesUi>()(() => ({ views: {}, reveal: null, pendingOpen: null }));
-  if (params?.path) ui.setState({ reveal: { path: normalizeLexically(params.path), line: params.line ?? null } });
-  return { ui };
+// A tab opened now with a file stores it first, before the host lists the tab; a restored tab's are in the layout already.
+function createState({ instanceId, params, restored }: PanelToolInit<FilesParams>): FilesState {
+  if (!restored && paramsHoldFile(params)) useLayout.getState().setPanelParams(instanceId, params);
+  return { tabId: instanceId, ui: createStore<FilesUi>()(() => ({ views: {} })) };
 }
 
-// Re-targeting (X5): reveal the path in the shown session's tree and, for a file, open the viewer at the line.
-function open(state: FilesState, params: FilesParams): void {
-  if (params?.path) state.ui.setState({ reveal: { path: normalizeLexically(params.path), line: params.line ?? null } });
+// Decision 21: an add with no file re-targets the scope's first tab that holds no file (the pinned tree, else the
+// session's own); an add with a file always makes its own tab.
+function reuse(refs: readonly { id: string }[], params: FilesParams): string | null {
+  if (paramsHoldFile(params)) return null;
+  const held = useLayout.getState().panelParams;
+  return refs.find((ref) => !paramsHoldFile(held[ref.id]))?.id ?? null;
 }
 
 export function FilesIcon({ className }: { className?: string }) {
@@ -94,14 +106,21 @@ const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
   intent ? JSON.stringify([intent.location, intent.additionalDirectories, intent.progress.worktree?.path ?? null]) : '';
 
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
+  const held = fileOfTab(useLayout((s) => s.panelParams[state.tabId]));
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
-  return <SessionTree key={ctx.appSessionId} ui={state.ui} appSessionId={ctx.appSessionId} session={ctx.session} />;
+  if (held) return <div data-files-tab data-file={held.file} className="h-full min-h-0"><SideFile appSessionId={ctx.appSessionId} held={held} /></div>;
+  return <div data-files-tab data-file="" className="h-full min-h-0"><SessionTree key={ctx.appSessionId} ui={state.ui} appSessionId={ctx.appSessionId} session={ctx.session} /></div>;
+}
+
+// The file a side tab holds, drawn as a main file tab draws it (law 3): the same viewer and its bar, under the key the
+// file's main tab would have.
+function SideFile({ appSessionId, held }: { appSessionId: AppSessionId; held: FilesTabParams }) {
+  const machine = machineFor(appSessionId);
+  return <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} />;
 }
 
 function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; appSessionId: AppSessionId; session: SessionRecord | null }) {
   const view = useStore(ui, (s) => viewOf(s, appSessionId));
-  const reveal = useStore(ui, (s) => s.reveal);
-  const pendingOpen = useStore(ui, (s) => s.pendingOpen);
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
 
@@ -154,30 +173,6 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
     if (shown === '') return;
     for (const path of shown.split('\0')) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
   }, [appSessionId, shown]);
-
-  // A reveal: expand the path's ancestors under its root and select it; a path under no root opens its tab anyway,
-  // where the viewer says why it cannot be read.
-  useEffect(() => {
-    if (!reveal || !roots || roots.status === 'loading') return;
-    const target = roots.status === 'ok' ? expandTo(rootEntries.map((root) => root.path), reveal.path) : null;
-    if (!target) {
-      ui.setState({ reveal: null });
-      openFile(appSessionId, reveal.path, reveal.line);
-      return;
-    }
-    const opens = target.ancestors.length === 0 ? [target.path] : target.ancestors;
-    ui.setState({ reveal: null, pendingOpen: target.ancestors.length === 0 ? null : { path: target.path, line: reveal.line } });
-    patchView(ui, appSessionId, (v) => ({ expanded: new Set([...v.expanded, ...opens]), selected: target.path }));
-  }, [reveal, roots, rootEntries, ui, appSessionId]);
-  useEffect(() => {
-    if (!pendingOpen) return;
-    const parent = listings.get(listingKey(appSessionId, dirname(pendingOpen.path)));
-    if (!parent || parent.status === 'loading') return;
-    const entry = parent.status === 'ok' ? parent.value.entries.find((e) => e.path === pendingOpen.path) : undefined;
-    ui.setState({ pendingOpen: null });
-    if (entry?.kind === 'dir') patchView(ui, appSessionId, (v) => ({ expanded: new Set([...v.expanded, entry.path]) }));
-    else if (!entry || entry.kind === 'file') openFile(appSessionId, pendingOpen.path, pendingOpen.line);
-  }, [pendingOpen, listings, ui, appSessionId]);
 
   const activate = (row: TreeRow) => {
     if (row.kind === 'notice') return;
@@ -344,10 +339,10 @@ export const filesTool: PanelTool<FilesState, FilesParams> = {
   id: FILES_TOOL_ID,
   title: 'Files',
   icon: FilesIcon,
-  pinnable: true,
-  multiInstance: false,
+  pinnable: true, // the tree-only tab; a tab that holds a file never (the layout store's gate)
+  multiInstance: true,
   createState,
-  open,
+  reuse,
   beforeClose: async () => true, // read-only: nothing to lose
   dispose: () => {}, // the watches are the mounted tree's, released when it unmounts (after the grace)
   render: FilesBody,

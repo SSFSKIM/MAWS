@@ -6,9 +6,11 @@ import { registerSlot } from '../../app/slots';
 import { registerPanelTool } from '../../panel/host';
 import { registerEditor } from './editor/register';
 import { filesTool } from './files/FilesTool';
+import { connectSideFiles } from './files/tabs'; // UX wave U6b-1
 import { DiffTab } from './review/DiffTab';
 import { reviewTool } from './review/ReviewTool';
 import { FileViewer } from './viewer/FileViewer';
+import { useViewer } from './viewer/viewer-store'; // UX wave U6b-1
 
 export { filesTool } from './files/FilesTool';
 export { useFiles } from './files/store';
@@ -26,7 +28,9 @@ export { registerEditor } from './editor/register'; // E5
 // Registers the tools and slots. The disposer unregisters the tools, which closes their tabs (C8a's rule), so App.tsx
 // never calls it; tests and the harness may.
 export function registerCodeTools(): () => void {
-  const offs = [registerPanelTool(reviewTool), registerPanelTool(filesTool), registerEditor()]; // E5: the file guard and file.save
+  // E5: the file guard and file.save. UX wave U6b-1: the side tabs' one subscriber (the files beside the chat held to the
+  // read's rules, then the viewer's prune)
+  const offs = [registerPanelTool(reviewTool), registerPanelTool(filesTool), registerEditor(), connectSideFiles(() => useViewer.getState().prune())];
   registerSlot('fileTab', FileViewer);
   registerSlot('diffTab', DiffTab);
   return () => offs.forEach((off) => off());

@@ -12,8 +12,9 @@ import { tabId, type PanelTabRef } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 import { lastInViewOf, panelHost } from '../../../panel/host';
+import { groupForOpen, sideGroups } from '../../../panel/surface-model';
 import { useLayout, type LayoutState } from '../../../stores/layout';
-import { paramsHoldFile } from '../../../stores/layout-model';
+import { allTabs, paramsHoldFile, repairFileTabs } from '../../../stores/layout-model';
 
 export const FILES_TOOL_ID = 'files';
 
@@ -73,8 +74,19 @@ export type Placement =
 // (5) Its tree-only tab: reused (a pinned Files tab is among the pins, never the session's own list, so it is never
 // taken). (6) A new tab, in the group `groupForOpen` names for Files. `request.keep` decides what the tab is after the
 // placement, not where it goes.
-export function placeOpen(_state: LayoutState, _request: OpenRequest): Placement {
-  return { to: 'main' }; // RED stub
+export function placeOpen(state: LayoutState, request: OpenRequest): Placement {
+  const { appSessionId, path } = request;
+  if (appSessionId === null || request.main) return { to: 'main' };
+  const key = fileKey(machineOf(appSessionId), path);
+  if (allTabs(state.main).some((tab) => tab.id === key)) return { to: 'main' };
+  const files = filesTabs(state, appSessionId).map((ref) => ({ ref, held: fileOfTab(state.panelParams[ref.id]) }));
+  const holding = files.find(({ held }) => held?.file === path);
+  if (holding) return { to: 'side', tabId: holding.ref.id, how: 'select' };
+  const preview = files.find(({ held }) => held?.preview === true);
+  if (preview) return { to: 'side', tabId: preview.ref.id, how: 'reuse' };
+  const tree = files.find(({ held }) => held === null);
+  if (tree) return { to: 'side', tabId: tree.ref.id, how: 'reuse' };
+  return { to: 'side', tabId: null, group: groupForOpen(sideGroups(state, appSessionId), FILES_TOOL_ID, null, null) };
 }
 
 // The preview tab becomes a kept tab (a double-click on it, the first edit, a move); nothing for any other tab.
@@ -113,6 +125,30 @@ export function showFiles(appSessionId: AppSessionId): string {
 // layout is held to the read's rules (`repairFileTabs`: within a list the tree-only Files tab before those that hold a
 // file, Decision 17; no pin and no second preview), and then the viewer's prune runs, which counts the side files'
 // keys. Connected once with the code tools; `prune` is the viewer store's, handed in so this module imports no viewer.
-export function connectSideFiles(_prune: () => void): () => void {
-  return () => {}; // RED stub
+export function connectSideFiles(prune: () => void): () => void {
+  let holding = false; // the repair's own writes notify again: the outer run has the whole repair in hand
+  return useLayout.subscribe((state, prev) => {
+    if (holding || !state.hydrated) return;
+    if (state.panelBySession === prev.panelBySession && state.panelPinned === prev.panelPinned && state.panelParams === prev.panelParams) return;
+    holding = true;
+    try {
+      holdToRules(state);
+    } finally {
+      holding = false;
+    }
+    prune();
+  });
+}
+
+function holdToRules(state: LayoutState): void {
+  const repaired = repairFileTabs({ main: state.main, panelPinned: state.panelPinned, panelBySession: state.panelBySession, panelParams: state.panelParams });
+  if (repaired.panelBySession === state.panelBySession && repaired.panelParams === state.panelParams) return;
+  const layout = useLayout.getState();
+  for (const [appSessionId, own] of repaired.panelBySession) {
+    if (state.panelBySession.get(appSessionId)?.tabs === own.tabs) continue;
+    layout.updatePanelTabs(appSessionId, (refs) => [...refs.filter((ref) => ref.pinned), ...own.tabs]);
+  }
+  for (const [id, params] of Object.entries(state.panelParams)) {
+    if (repaired.panelParams[id] !== params) layout.setPanelParams(id, id in repaired.panelParams ? repaired.panelParams[id] : null);
+  }
 }
