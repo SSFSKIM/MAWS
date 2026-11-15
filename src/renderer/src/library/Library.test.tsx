@@ -735,7 +735,7 @@ describe('Make something new', () => {
 
   // H23 (ruled 2026-11-15, L5): before the Spaces list has answered, a card would start in the focused project with no
   // Space words and Blank would make an artifact the page cannot yet name the Space of; both wait, disabled
-  it('while the narrowed Space loads, each card and its Blank are disabled, Add a file… is not; a Space the list does not hold stays so', async () => {
+  it('while the narrowed Space loads, each card and its Blank are disabled, Add a file… is not', async () => {
     editors(...CARD_KINDS);
     const creator = vi.fn(async () => at(S(9)));
     offs.push(registerSessionCreator(creator));
@@ -764,9 +764,8 @@ describe('Make something new', () => {
     await user.click(card(made, 'Document'));
     await waitFor(() => expect(prefillOf(9)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
 
-    act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile)
-    expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
-    expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(true);
+    act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile): every Space
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
   });
 
   it('More holds Design system (Ask Claude, Blank), HTML page and Add a file…', async () => {
@@ -803,11 +802,11 @@ describe('Make something new', () => {
 
   it('the choice shows the system a new artifact here gets, "<name> · default", first; a system chosen is named in a card’s words and bound by Blank; the default binds none', async () => {
     editors(...CARD_KINDS);
-    withSystems({ spaces: { [WORK]: CLASSROOM } });
+    withSystems({ spaces: { [HOME]: CLASSROOM } });
     const creator = vi.fn(async () => at(S(7)));
     offs.push(registerSessionCreator(creator));
     const user = userEvent.setup();
-    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    act(() => setLibraryView({ view: 'bySpace', spaceId: HOME })); // a Space with no linked folder
     render(<Library />);
     const made = await section();
     await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
@@ -818,17 +817,17 @@ describe('Make something new', () => {
     await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Harbor'));
 
     await user.click(card(made, 'Document'));
-    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document in the Space “Work”, in the design system “Harbor”: ' }));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document in the Space “Home”, in the design system “Harbor”: ' }));
     await user.click(blank(made, 'Presentation'));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: WORK, designSystemId: HARBOR }]));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: HOME, designSystemId: HARBOR }]));
 
     await user.click(choice(made));
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Classroom · default' }));
     await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
     await user.click(blank(made, 'Design'));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'design', title: 'Untitled design', spaceId: WORK }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'design', title: 'Untitled design', spaceId: HOME }));
     await user.click(card(made, 'Dashboard'));
-    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a dashboard in the Space “Work”: ' }));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a dashboard in the Space “Home”: ' }));
   });
 
   it('on All the default is the owner’s, else the bundled floor', async () => {

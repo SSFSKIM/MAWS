@@ -696,7 +696,7 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
           return toolText(replayed.result);
         }
         const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse(TOOL, refusal, sentence)); // P3-F wave S (F5)
-        const system = await designSystemNamed(store, kind, input.designSystem); // UX wave U10b (H10: a dashboard too)
+        const system = await designSystemNamed(store, kind, input.designSystem, (text) => new Refusal(text)); // UX wave U10b (H10: a dashboard too)
         let body: ReturnType<typeof importMarkdown>;
         try {
           body = importMarkdown(input.content ?? '');

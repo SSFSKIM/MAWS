@@ -87,11 +87,12 @@ export async function spaceNamed(store: ArtifactStore, ref: string | undefined, 
 // UX wave U10b (l6-artifacts-08): the design system a create names, by its id, else its title (exactly, then in any case
 // and spacing; H18: the artifact's title, the name the Library and the person's choice show), among the live design
 // systems, read once the batch it was read in committed. None is refused with the systems there are, a title two
-// systems share with their ids; a kind no system governs is refused before anything is read. A system deleted after
-// this read is refused by the store's own check at the create.
-export async function designSystemNamed(store: ArtifactStore, kind: ArtifactKind, ref: string | undefined): Promise<Artifact | undefined> {
+// systems share with their ids; a kind no system governs is refused before anything is read (`refused` makes the
+// calling tool's refusal of the text, as `spaceNamed`'s does). A system deleted after this read is refused by the
+// store's own check at the create.
+export async function designSystemNamed(store: ArtifactStore, kind: ArtifactKind, ref: string | undefined, refused: (text: string) => Error): Promise<Artifact | undefined> {
   if (ref === undefined) return undefined;
-  if (!(DESIGN_SYSTEM_KINDS as readonly ArtifactKind[]).includes(kind)) throw new ToolRefusal(TOOL_ERRORS.designSystemNotForKind(kind));
+  if (!(DESIGN_SYSTEM_KINDS as readonly ArtifactKind[]).includes(kind)) throw refused(TOOL_ERRORS.designSystemNotForKind(kind));
   const systems = await store.readCommitted(() => store.list({ kind: 'design_system' }));
   const byId = systems.find((system) => system.id === ref);
   if (byId) return byId;
@@ -99,8 +100,8 @@ export async function designSystemNamed(store: ArtifactStore, kind: ArtifactKind
   const exact = systems.filter((system) => system.title === ref);
   const named = exact.length > 0 ? exact : systems.filter((system) => loose(system.title) === loose(ref));
   if (named.length === 1) return named[0];
-  if (named.length > 1) throw new ToolRefusal(TOOL_ERRORS.designSystemAmbiguous(ref, named.map((system) => system.id).sort()));
-  throw new ToolRefusal(TOOL_ERRORS.noDesignSystem(ref, systems.map((system) => system.title).sort((a, b) => a.localeCompare(b, 'en'))));
+  if (named.length > 1) throw refused(TOOL_ERRORS.designSystemAmbiguous(ref, named.map((system) => system.id).sort()));
+  throw refused(TOOL_ERRORS.noDesignSystem(ref, systems.map((system) => system.title).sort((a, b) => a.localeCompare(b, 'en'))));
 }
 
 // What a create's answer says of the Space it was made in.
@@ -183,7 +184,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
         return toolText(answer);
       }
       const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse('artifact_create', refusal, sentence)); // F5
-      const system = await designSystemNamed(store, kind, input.designSystem); // UX wave U10b
+      const system = await designSystemNamed(store, kind, input.designSystem, (text) => new ToolRefusal(text)); // UX wave U10b
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
