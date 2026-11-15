@@ -10,13 +10,15 @@ import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf } from '@shared/machine/address';
+import { record, remoteRow } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { useAttention } from '../stores/attention';
 import { applyLaneAList, applyLaneAState, resetLaneAStore } from '../stores/lane-a';
+import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
-import { followSettlements } from './receipts';
+import { followSessionsLeaving, followSettlements } from './receipts';
 import { RequestCard } from './RequestCard';
 import { fixtureRequest, itemFor } from './test-requests';
 
@@ -129,5 +131,50 @@ describe('the card’s own receipt', () => {
     await screen.findByText(failed === 'write_failed' ? "Couldn't deliver the answer" : 'Already answered elsewhere');
     expect(fake.invoked('session.answer')).toHaveLength(1);
     expect(receiptOf(HERE, item.request.toolUseId!)).toBeUndefined();
+  });
+});
+
+// The ruling of 2026-11-15 on M1's D-2: a receipt lasts until the row carries its own answers (the row then reads its own,
+// §D) or the session leaves. A session leaves this window when it stops being one the window knows: a record it holds
+// (removed, or gone from its machine's snapshot) or another machine's listed row (gone from the listing). Its list
+// emptied or dropped by a feed snapshot is no leaving: that is exactly when a receipt speaks.
+describe('a receipt’s lifetime', () => {
+  const UNLISTED = addressOf(OTHER_MACHINE, 'eng-later' as AppSessionId); // a session the window has not seen listed yet
+  const listing = (...ids: AppSessionId[]) => new Map(ids.map((appId) => [appId, { ...remoteRow(OTHER_MACHINE, 'eng-here', { lane: 'A' }), appId }]));
+  const hold = () => {
+    useSessions.setState((s) => ({ records: new Map(s.records).set(HERE, record(HERE)), recordsVersion: s.recordsVersion + 1, listed: listing(THERE) }));
+    useAttention.getState().recordReceipt(HERE, CALL, { answers: { 'Which file?': 'a.ts' } });
+    useAttention.getState().recordReceipt(THERE, CALL, { settled: 'Answered in the terminal' });
+    useAttention.getState().recordReceipt(UNLISTED, CALL, { dismissed: true });
+  };
+
+  it('goes when its session’s listing is gone, and only that session’s', () => {
+    stop = followSessionsLeaving();
+    hold();
+    useSessions.setState({ listed: listing(THERE) }); // the listing again, still naming it
+    expect(receiptOf(THERE)).toEqual({ settled: 'Answered in the terminal' });
+    useSessions.setState({ listed: listing() });
+    expect(receiptOf(THERE)).toBeUndefined();
+    expect(receiptOf(HERE)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    expect(receiptOf(UNLISTED)).toEqual({ dismissed: true }); // never seen, never left
+  });
+
+  it('goes when its session’s record is removed', () => {
+    stop = followSessionsLeaving();
+    hold();
+    useSessions.getState().applyRemoved({ appSessionId: HERE, revision: 1_000 }, TEST_MACHINE);
+    expect(receiptOf(HERE)).toBeUndefined();
+    expect(receiptOf(THERE)).toEqual({ settled: 'Answered in the terminal' });
+  });
+
+  it('stays through its list emptied and dropped by a snapshot, and once stopped nothing goes', () => {
+    stop = followSessionsLeaving();
+    hold();
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [] }, TEST_MACHINE);
+    useAttention.getState().applySnapshot([], TEST_MACHINE);
+    expect(receiptOf(HERE)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    stop();
+    useSessions.setState({ listed: listing() });
+    expect(receiptOf(THERE)).toEqual({ settled: 'Answered in the terminal' });
   });
 });

@@ -13,6 +13,8 @@ import { useAttention } from '../stores/attention';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useLayout } from '../stores/layout';
 import { activeTab } from '../stores/layout-model';
+import { followSettlements } from '../request-card/receipts';
+import { renderRow } from '../transcript/view/rows/test-support';
 import { laneAState } from './test-support/lane-a-state';
 import { connectRemoteLaneA } from './remote-connect';
 
@@ -78,7 +80,9 @@ describe('connectRemoteLaneA', () => {
     expect(useAttention.getState().bySession.get(there)).toHaveLength(1);
     expect(useAttention.getState().drafts.has(third.id)).toBe(true); // the other machine's settling leaves this one's draft
     // UX wave U1b (Interfaces §G, decision 21): a question's receipt is the addressed session's with the call, so the
-    // answer given on one machine's question is never the other's, and dropping one session's list drops its receipts alone
+    // answer given on one machine's question is never the other's. The ruling of 2026-11-15 on M1's D-2: a receipt lasts
+    // until the row carries its own answers or the session leaves, so the machine's snapshot that drops one session's
+    // emptied list leaves its receipts, and the other machine's
     const call = 'toolu_1' as ToolUseId;
     const receipts = () => useAttention.getState().receipts;
     useAttention.getState().recordReceipt(there, call, { answers: { 'Which file?': 'a.ts' } });
@@ -88,8 +92,35 @@ describe('connectRemoteLaneA', () => {
     applyLaneAState(REMOTE, null); // the last watch ended: the mirror empties the list
     useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }); // the machine's snapshot drops it
     expect(useAttention.getState().bySession.has(REMOTE)).toBe(false);
-    expect(receipts().has(REMOTE)).toBe(false);
+    expect(receipts().get(REMOTE)?.get(call)).toEqual({ settled: 'Answered in the terminal' });
     expect(receipts().get(there)?.get(call)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+  });
+
+  // The ruling of 2026-11-15 on M1's D-2, with the owner's card 3: between a terminal's answer and its delivery the
+  // question's row reads "Answered in the terminal" on another machine's session too, also across that machine's feed
+  // snapshots, which drop the session's list once the mirror has emptied it
+  it('reads a terminal answer on the question’s row across the machine’s feed snapshot, until the delivery', () => {
+    const stop = followSettlements();
+    try {
+      const asked = { ...raised, request: 'toolu_q', tool: 'mcp__plugin_sminos_ask__ask', async: true as const, input: { questions: [{ question: 'Ship it?', header: 'Ship', options: [{ label: 'Yes' }] }] } };
+      const row = (answers: Record<string, string> | null) => {
+        const view = renderRow({ id: 'question:toolu_q' as never, turnId: null, at: '2026-10-29T08:00:00.000Z', kind: 'question', toolUseId: 'toolu_q' as ToolUseId, questions: [{ question: 'Ship it?', header: 'Ship', multiSelect: false, options: [{ label: 'Yes', description: null, preview: null }] }], answers, error: null }, { storeKey: REMOTE });
+        const said = [...view.container.querySelectorAll('[data-question]')].map((line) => line.textContent);
+        view.unmount();
+        return said;
+      };
+      applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [asked] }));
+      expect(row(null)).toEqual(['Ship→Not answered']);
+      applyLaneAState(REMOTE, laneAState(REMOTE, { engineSessionId: 'eng-r', link: LINK, acts: [], pending: [], settled: [{ request: 'toolu_q', session: 'eng-r', winner: 'terminal', outcome: 'answered', by: 'terminal' }] }));
+      expect(useAttention.getState().bySession.get(REMOTE)).toEqual([]); // answered in the terminal: the mirror empties the list
+      expect(row(null)).toEqual(['Ship→Answered in the terminal']);
+      useAttention.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }); // the machine's next feed snapshot
+      expect(useAttention.getState().bySession.has(REMOTE)).toBe(false);
+      expect(row(null)).toEqual(['Ship→Answered in the terminal']);
+      expect(row({ 'Ship it?': 'Yes' })).toEqual(['Ship→Yes']); // the delivery is in the rows: the row says its own answer
+    } finally {
+      stop();
+    }
   });
 
   // UC-1 (U1a's Interfaces §B, "A window on another machine"): main says in the session's state which requests the

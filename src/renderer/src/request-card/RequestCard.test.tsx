@@ -635,7 +635,7 @@ describe('request card placements and delivery states', () => {
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
     outcome = 'not_pending';
-    const second = mount(unflaggedRead, 'inline');
+    const second = mount(unflaggedRead, 'inline', { id: 'att-second' as never }); // U1b M2: a delivery is the request's, so each round is a request of its own
     fireEvent.click(screen.getByRole('button', { name: 'Deny' }));
     expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
     act(() => vi.advanceTimersByTime(2_000));
@@ -646,7 +646,7 @@ describe('request card placements and delivery states', () => {
     vi.useRealTimers();
 
     outcome = 'write_failed';
-    mount(unflaggedRead, 'inline');
+    mount(unflaggedRead, 'inline', { id: 'att-third' as never });
     fireEvent.click(screen.getByRole('button', { name: 'Allow once' }));
     expect(await screen.findByText("Couldn't deliver the answer")).toBeTruthy();
     expect((screen.getByRole('button', { name: 'Allow once' }) as HTMLButtonElement).disabled).toBe(false); // back to pending
@@ -1203,6 +1203,129 @@ describe('the card after an answer', () => {
     expect(screen.queryByText(/Answered/)).toBeNull();
     expect(bindingsOf('request.accept')).toEqual([]);
     expect(bindingsOf('request.decline')).toEqual([]);
+  });
+});
+
+// UX wave U1b (Interfaces §G "The delivery"; decision 17): a card's delivery is held by the request, not by the element. A
+// row of the transcript's list unmounts when it is scrolled far away, so a card mounted again mid-answer comes back in the
+// state it left, and every placement of one item shows one state. Each write is held open by the test (the fake client
+// answers `session.answer` only when told).
+describe('a card’s delivery, held by the request', () => {
+  const held = () => {
+    fake = fakeClient({ 'session.events': () => ({ events: [], lastSeq: 0, complete: true }) }); // session.answer held open
+    window.maws = fake.client as unknown as PreloadBridge;
+  };
+  const list = (items: AttentionItem[]) => act(() => useAttention.getState().applySnapshot(items, TEST_MACHINE));
+  const inPane = (item: AttentionItem, placement: Placement = 'inline') => render(<Pane><Card event={unflaggedRead} placement={placement} item={item} /></Pane>);
+  const button = (name: string) => screen.getByRole('button', { name }) as HTMLButtonElement;
+  const card = () => document.querySelector<HTMLElement>('[data-request-card]');
+
+  it('an answer in flight while the item leaves the list: the entry goes with it, and the outcome brings nothing back', async () => {
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    inPane(item);
+    fireEvent.click(button('Allow once'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    expect(useAttention.getState().deliveries.get(item.id)).toEqual({ phase: 'answering' });
+    list([]);
+    expect(useAttention.getState().deliveries.has(item.id)).toBe(false);
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    expect(useAttention.getState().deliveries.has(item.id)).toBe(false);
+  });
+
+  it('an answer in flight while a second call is made for the same item: nothing is sent twice', async () => {
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    inPane(item);
+    fireEvent.click(button('Deny'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    const second = useAttention.getState().deliver(item, { kind: 'permission', decision: 'allow', scope: 'once' });
+    await flush();
+    expect(fake.invoked('session.answer')).toHaveLength(1);
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    expect(await second).toBe('delivered');
+    expect(answers()).toEqual([{ kind: 'permission', decision: 'deny' }]);
+    await sentAsItWas('Deny');
+  });
+
+  it('an answer in flight while its card unmounts and mounts again: it comes back sending, and answers once', async () => {
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    const first = inPane(item);
+    fireEvent.click(button('Allow once'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    first.unmount(); // the list scrolled the row far away
+    inPane(item);
+    expect(card()?.getAttribute('aria-busy')).toBe('true');
+    expect(button('Allow once').disabled).toBe(true);
+    fireEvent.click(button('Deny'));
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    await sentAsItWas('Allow once');
+    expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
+  });
+
+  it('a write that fails while its card is unmounted: it comes back with the failure and a Retry that sends the same answer', async () => {
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    const first = inPane(item);
+    fireEvent.click(button('Allow once'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(1));
+    first.unmount();
+    await act(() => fake.fail('session.answer', 'the link is down'));
+    inPane(item);
+    expect(screen.getByText("Couldn't deliver the answer").getAttribute('title')).toBe('the link is down');
+    expect(button('Allow once').disabled).toBe(false); // back to pending
+    fireEvent.click(button('Retry'));
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(2));
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    await sentAsItWas('Allow once');
+    expect(screen.queryByText("Couldn't deliver the answer")).toBeNull();
+    expect(answers()).toEqual([
+      { kind: 'permission', decision: 'allow', scope: 'once' },
+      { kind: 'permission', decision: 'allow', scope: 'once' },
+    ]);
+  });
+
+  it('answered elsewhere while its card is unmounted: the two seconds pass with no card, and it comes back closed', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    outcome = 'not_pending';
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    const first = inPane(item);
+    fireEvent.click(button('Deny'));
+    expect(await screen.findByText('Already answered elsewhere')).toBeTruthy();
+    first.unmount();
+    act(() => void vi.advanceTimersByTime(2_000));
+    const again = inPane(item);
+    expect(again.container.querySelector('[data-request-card]')).toBeNull();
+    expect(answers()).toHaveLength(1);
+  });
+
+  it('two placements of one item show one state: in flight, failed, and sent', async () => {
+    held();
+    const item = itemFor(unflaggedRead, APP);
+    list([item]);
+    render(
+      <>
+        <Pane><Card event={unflaggedRead} placement="inline" item={item} /></Pane>
+        <Pane index={1}><Card event={unflaggedRead} placement="card" item={item} /></Pane>
+      </>,
+    );
+    const cards = () => [...document.querySelectorAll<HTMLElement>('[data-request-card]')];
+    const allow = () => screen.getAllByRole('button', { name: 'Allow once' }) as HTMLButtonElement[];
+    fireEvent.click(allow()[0]!);
+    await waitFor(() => expect(cards().map((c) => c.getAttribute('aria-busy'))).toEqual(['true', 'true']));
+    await act(() => fake.fail('session.answer', 'the link is down'));
+    expect(screen.getAllByText("Couldn't deliver the answer")).toHaveLength(2);
+    fireEvent.click(screen.getAllByRole('button', { name: 'Retry' })[1]!);
+    await waitFor(() => expect(fake.invoked('session.answer')).toHaveLength(2));
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' }));
+    await waitFor(() => expect(allow().map((b) => b.disabled)).toEqual([true, true]));
+    expect(screen.queryByText("Couldn't deliver the answer")).toBeNull();
   });
 });
 
