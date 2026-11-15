@@ -334,6 +334,15 @@ interface CrossingSteps {
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
+// A crossing needs the attacher's engine host to be another build's. Two builds a minor apart always differ there; two
+// of one wire may not (a change outside every bundle the engine host takes, a stored form of the renderer's), and the
+// attacher's main then meets a host of its own build: matched `same`, served, never handed over or moved. So the scene
+// is skipped, saying so, as soon as the attacher names the bundle it would start (host.status's appBuildId).
+async function skipOneEngineHost(attaching: Run, keptBuild: string, keeper: Build, attacher: Build): Promise<void> {
+  const { appBuildId } = value(await invoke(attaching.page, 'host.status', undefined));
+  test.skip(appBuildId === keptBuild, `${keeper.label} (wire ${wireOf(keeper)}) and ${attacher.label} (wire ${wireOf(attacher)}) bundle one engine host, build ${keptBuild}: there is no other build's engine host to attach to`);
+}
+
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes, steps: CrossingSteps = {}): Promise<string[]> {
   if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
@@ -375,6 +384,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const legacyRoute = routesMachine(attacher) && !routesMachine(keeper) ? turnsJournal(s.root, 'machine-legacy', 1) : null;
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(legacyRoute !== null && { MAWS_E2E_REPLAY_FIXTURES: legacyRoute }), ...steps.env }, attacher.root);
   let second = await attach();
+  await skipOneEngineHost(second, kept.buildId, keeper, attacher);
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onOwnShape(shapes.attacher, keeperDaemon)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
@@ -570,6 +580,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   // the other build's app attaches: its client asks the kept host to hand over, and a host of its own build adopts
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS), ...steps.env }, attacher.root);
   let second = await attach();
+  await skipOneEngineHost(second, kept.buildId, keeper, attacher);
   const attacherRuns: Run[] = [second];
   const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onOwnShape(shapes.attacher, keeperDaemon)(st), 90_000);
   const build = served.appBuildId;
