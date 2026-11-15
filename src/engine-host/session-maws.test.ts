@@ -1001,7 +1001,6 @@ describe('a Space’s instructions in the artifact tools’ answers on an Engine
     await finish(run);
   });
 });
-});
 
 // The app-replay pattern (surface-replay.test.ts): the app's own handshake through the replay transport, surface reads
 // on, the recorded prompt sent and the recorded permission allowed through the session, ended where the probe's own
