@@ -28,12 +28,12 @@ export const applyFork: TypedApply = async (appSessionId, args) => {
 
 export function ForkWidget({ appSessionId, args, close }: { appSessionId: AppSessionId; args: string; close(): void }) {
   const unavailable = useForkUnavailable(appSessionId);
-  // once, on open, before the dialog is drawn: fork and close
+  // once, as soon as nothing refuses it: on open, before the dialog is drawn; or, opened while the turn runs there, when
+  // the refusal lifts with the panel still open (U4b, decision 11). A panel dismissed meanwhile is gone, and forks nothing.
   const started = useRef(false);
   useLayoutEffect(() => {
-    if (started.current) return;
+    if (started.current || unavailable !== null) return;
     started.current = true;
-    if (unavailable !== null) return;
     close();
     void forkConversation(appSessionId, args);
   });
