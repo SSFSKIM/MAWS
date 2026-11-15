@@ -24,7 +24,7 @@ import { buildCodeScratch, type CodeScratch } from './support/code-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, moveSideTab, openSurface, hideSurface, pinSurfaceForSessions, sideColumn, sideGroup, sideTab, sideTabNames, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, moveSideTab, openSurface, hideSurface, pinSurfaceForSessions, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -321,6 +321,36 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Expand pane', pressed: false })).toBeVisible();
   await expect(mainRegion(page).getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// #692: in a split of a session and a document with no side surface open, the card column stays placed while either pane
+// has the session, so the press that focuses the document's pane moves nothing under the pointer and acts at once. The press
+// is held across two frames, which is when a layout shift (the column's going) would have moved the header from under it.
+test('a split of a session and a document: the card column stays through a focus move, and one press on the document pane’s header acts', async () => {
+  test.setTimeout(120_000);
+  const page = await start();
+  await (await sidebarRow(page, 'Harness A')).click();
+  const id = await documentInMain(page, 'B3 first press');
+  await menu('pane.split'); // the document into a right pane
+  await expect(mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).locator(`[data-tab-id="artifact:${await localRef(page)}:${id}"]`)).toBeVisible();
+  await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click(); // focus on the session's pane
+  const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
+  const expand = header.getByRole('button', { name: 'Expand pane' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  await expect(sessionCards(page), 'the column is placed beside the split').toBeVisible();
+  await expect(compact).toHaveCount(0);
+  const before = (await expand.boundingBox())!;
+
+  const frames = () => page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down(); // the document pane takes focus on this pointer-down
+  await frames();
+  expect(await expand.boundingBox(), 'the control stays under the pointer after the focus move').toEqual(before);
+  await expect(sessionCards(page), 'the column stays while the document pane is focused').toBeVisible();
+  await page.mouse.up();
+  await expect(compact, 'the first press acted: the session floated into its card').toBeVisible();
+  await expect(mainRegion(page).getByRole('button', { name: 'Restore split', pressed: true })).toBeVisible();
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 

@@ -129,6 +129,7 @@ export function createHosts(mainBuild: MainBuild, launch: LaunchShape, { machine
     hosts: daemonHostSpecs(paths, daemonStart(launch.daemon, { paths, modules, execPath: process.execPath, env: process.env, packaged: app.isPackaged, unitStart: () => unit().start() }), modules, process.env, machineBudgetsMs, () => engineHandover.drainingAt()),
     emit: hostEventToWindows(emit), // P5 O17 M9b: but what is main's alone
     detached: { identity },
+    relayedVerdict: (owner, incarnation) => (owner === 'engine-host' ? engineHandover.verdict(incarnation) : null), // #473: mawsd's verdict on a drained host's exit
   });
   engineHandover.bind(supervisor); // for the launch's life
   // E10: the engine host is told ready after main's resync (X13), which the session read side registers
