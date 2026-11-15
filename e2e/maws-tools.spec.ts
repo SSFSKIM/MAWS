@@ -271,8 +271,16 @@ test('a message sent while a blocking ask waits: its queue row stands while the 
     const row = stack.locator('li[data-queue-state="next"]');
     await expect(row, 'the queue’s row while the ask waits').toContainText(MESSAGE);
     await expect(row.locator('[data-mark]')).toHaveText('Next step');
-    await expect.poll(() => s.journal(id).some((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && ((r.frame as Frame).message as { content?: unknown } | undefined)?.content === MESSAGE), { message: 'written to the engine' }).toBe(true);
-    await expect.poll(() => s.journal(id).some((r) => r.direction === 'in' && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).state === 'queued'), { message: 'the engine queued it' }).toBe(true);
+    const written = () => s.journal(id).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && ((r.frame as Frame).message as { content?: unknown } | undefined)?.content === MESSAGE);
+    await expect.poll(() => written() !== undefined, { message: 'written to the engine' }).toBe(true);
+    const write = written()!;
+    const uuid = (write.frame as Frame).uuid;
+    expect(uuid, 'the message’s uuid').toEqual(expect.any(String));
+    // its own `queued` frame, after its write (the first prompt has one of its own, earlier); the replay maps the
+    // recorded uuid onto the one the host wrote
+    await expect
+      .poll(() => s.journal(id).some((r) => r.direction === 'in' && r.seq > write.seq && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).state === 'queued' && (r.frame as Frame).command_uuid === uuid), { message: 'the engine queued it' })
+      .toBe(true);
     const transcript = s.pane.locator('[data-transcript-scroller]');
     await expect(transcript.locator('.transcript-row[data-kind="user"]').filter({ hasText: MESSAGE }), 'no bubble while it waits').toHaveCount(0);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
