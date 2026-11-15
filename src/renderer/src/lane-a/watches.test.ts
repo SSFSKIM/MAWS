@@ -18,6 +18,7 @@ const snapshot = msg('snapshot', { streaming: [], usage: null }, 0);
 beforeEach(() => {
   resetLaneAStore();
   resetLaneAWatches();
+  useCompacting.setState({ held: new Map() }); // UX wave U3b (M4)
 });
 
 describe('watchLaneA', () => {
@@ -53,12 +54,15 @@ describe('watchLaneA', () => {
     await settle();
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [snapshot] });
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: Array.from({ length: 20_001 }, (_, i) => msg('chunk', { i }, i + 1)) });
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [msg('compact', { rpc: 'rpc-1', phase: 'start' }, null)] }); // UX wave U3b (M4's review)
+    expect(useCompacting.getState().held.has(A)).toBe(true);
     const late: PlaneEvent[] = [];
     watchLaneA(A, (e) => late.push(e), { client: fake.client, replay: true });
     await settle();
     expect(fake.invoked('laneA.unwatch')).toEqual([{ appSessionId: A, watch: 'w-1' }]);
     expect(fake.invoked('laneA.watch')).toHaveLength(2);
     expect(first.at(-1)).toEqual({ kind: 'reset' }); // what the first drew no longer follows
+    expect(useCompacting.getState().held.has(A)).toBe(false); // UX wave U3b (M4's review): the compaction's end may be lost with it
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [msg('chunk', { stale: true })] }); // the old watch's, ignored
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-2', messages: [snapshot] });
     expect(late).toEqual([{ kind: 'messages', messages: [snapshot] }]);

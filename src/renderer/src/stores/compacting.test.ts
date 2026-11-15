@@ -131,14 +131,64 @@ describe('a terminal session: its bridge’s `compact` messages', () => {
     expect(since(B)).toBeNull();
   });
 
-  it('turns off when a compaction’s boundary later than its start reaches the transcript, not one from before', () => {
+  // the review of M4 (the corrected table): `starting` is a passing state that keeps it; going away or to anything but
+  // `live` or `starting` ends it, from `starting` as from `live`
+  it('stays on while the bridge reads `starting`, and turns off when that state goes', () => {
     disconnect = connectCompacting();
+    applyLaneAState(A, laneAState(A, { bridge: 'starting', reason: 'starting' }));
     noteCompacting(A, bridge(R), true);
-    const boundary = (atMs: number): Row => ({ id: `boundary:${atMs}` as RowId, turnId: null as TurnId | null, at: new Date(atMs).toISOString(), kind: 'boundary', boundaryKind: 'compaction', text: 'Context compacted', detail: null, hiddenRows: 0, revealed: false });
-    const withRows = (rows: Row[]) => useTranscriptStore.setState((state) => ({ entries: { ...state.entries, [A]: { ...state.entries[A], rows } as (typeof state.entries)[string] } }));
-    withRows([boundary(T0 - 60_000)]); // an earlier compaction's
+    applyLaneAState(A, laneAState(A, { bridge: 'starting', reason: 'still starting' }));
     expect(since(A)).toBe(T0);
-    withRows([boundary(T0 - 60_000), boundary(T0 + 5_000)]);
+    applyLaneAState(A, null);
     expect(since(A)).toBeNull();
+  });
+
+  it('turns off when a `starting` bridge becomes unavailable', () => {
+    disconnect = connectCompacting();
+    applyLaneAState(A, laneAState(A, { bridge: 'starting', reason: 'starting' }));
+    noteCompacting(A, bridge(R), true);
+    applyLaneAState(A, laneAState(A, { bridge: 'none', reason: 'the bridge is gone' }));
+    expect(since(A)).toBeNull();
+  });
+
+  // the review of M4: a boundary is told new by its row id, never by its time, which is the transcript machine's clock
+  describe('a compaction’s boundary reaching the transcript', () => {
+    const boundary = (id: string, atMs: number): Row => ({ id: `boundary:${id}` as RowId, turnId: null as TurnId | null, at: new Date(atMs).toISOString(), kind: 'boundary', boundaryKind: 'compaction', text: 'Context compacted', detail: null, hiddenRows: 0, revealed: false });
+    const answer = (id: string): Row => ({ id: `text:${id}` as RowId, turnId: null as TurnId | null, at: new Date(T0).toISOString(), kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: `Note ${id}.`, live: false, phase: 'answer', model: null });
+    const withRows = (rows: Row[]) => useTranscriptStore.setState((state) => ({ entries: { ...state.entries, [A]: { ...state.entries[A], rows } as (typeof state.entries)[string] } }));
+    const HOUR = 3_600_000;
+    beforeEach(() => {
+      disconnect = connectCompacting();
+    });
+
+    it.each([
+      ['behind this window', -HOUR],
+      ['ahead of this window', HOUR],
+    ])('a new one turns it off whatever its time, its machine’s clock %s', (_, skew) => {
+      withRows([answer('1'), boundary('old', T0 - 2 * HOUR)]);
+      noteCompacting(A, bridge(R), true);
+      withRows([answer('1'), boundary('old', T0 - 2 * HOUR), boundary('new', T0 + skew)]);
+      expect(since(A)).toBeNull();
+    });
+
+    it('one already among the rows when it went on leaves it on through an unrelated update, even with a later time', () => {
+      withRows([answer('1'), boundary('old', T0 + HOUR)]); // a machine ahead of this window wrote it before
+      noteCompacting(A, bridge(R), true);
+      withRows([answer('1'), boundary('old', T0 + HOUR), answer('2')]);
+      expect(since(A)).toBe(T0);
+    });
+
+    it('rows that arrive only after it went on are read as what it started over', () => {
+      useTranscriptStore.setState((state) => {
+        const entries = { ...state.entries };
+        delete entries[A];
+        return { entries };
+      });
+      noteCompacting(A, bridge(R), true);
+      withRows([answer('1'), boundary('old', T0 - HOUR)]); // the history the transcript loads
+      expect(since(A)).toBe(T0);
+      withRows([answer('1'), boundary('old', T0 - HOUR), boundary('new', T0 - HOUR)]);
+      expect(since(A)).toBeNull();
+    });
   });
 });
