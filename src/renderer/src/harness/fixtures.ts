@@ -68,8 +68,9 @@ function report({ events, streamFrom }: LoadedFixture): LoadedFixture {
   const opened = new Set<ApiMessageId>();
   const marked = events.map((event): SessionEvent => {
     if (event.agentId !== null) return event;
-    if (event.kind === 'assistant.block.delta' && event.textDelta !== null && finals.has(event.apiMessageId) && !opened.has(event.apiMessageId)) {
-      opened.add(event.apiMessageId);
+    const api = event.kind === 'assistant.block.delta' ? event.apiMessageId : null;
+    if (event.kind === 'assistant.block.delta' && event.textDelta !== null && api !== null && finals.has(api) && !opened.has(api)) {
+      opened.add(api);
       return { ...event, textDelta: `<message>\n${event.textDelta}` };
     }
     if (event.kind === 'assistant.block.complete' && event.block.type === 'text' && finals.has(event.apiMessageId)) return { ...event, block: { ...event.block, text: `<message>\n${event.block.text}\n</message>` } };
