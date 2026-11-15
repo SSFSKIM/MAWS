@@ -14,7 +14,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { addressOf } from '@shared/machine/address';
 import { record, remoteRow, status, T0 } from '../../../../../../test/support/builders';
-import { OTHER_MACHINE } from '../../../../../../test/support/machine';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectPanelEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { openComment } from '../../../side/register';
@@ -376,17 +376,17 @@ describe('comments on lines in Review', () => {
   it('draws each scope’s own hunks for a file under an open card: Uncommitted’s hold is let go when Staged, already read, is chosen', async () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: MOVED, files: [FILES(2)[0]] }; // Staged holds the file with two lines more above the commented one
+    // Staged read and kept by another surface (a diff tab of it), so choosing it answers at once and the stack stays
+    const release = useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null });
+    offs.push(release);
     await mountReview();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
-    fireEvent.click(scopeChip('staged')!);
-    await painted(() => bodyOf('src/report.ts')?.textContent?.includes('// one') ?? false);
-    fireEvent.click(scopeChip('uncommitted')!);
-    await painted(() => (bodyOf('src/other.ts')?.querySelector('table') ?? null) !== null);
     addOn('src/report.ts', 'new', 12);
     await painted(() => card() !== null);
     type('Quote only where a comma is.');
 
     fireEvent.click(scopeChip('staged')!);
+    expect(document.querySelector('[data-review-stack]')).not.toBeNull(); // answered at once: no wait between the scopes
     await painted(() => bodyOf('src/other.ts') === null && (bodyOf('src/report.ts')?.querySelector('table') ?? null) !== null);
     expect(bodyOf('src/report.ts')!.textContent).toContain('// one'); // Staged's hunks, not Uncommitted's held ones
     expect(changedLine('src/report.ts')).toBeNull();
