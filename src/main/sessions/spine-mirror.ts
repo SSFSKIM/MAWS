@@ -6,13 +6,14 @@
 // At each streaming of the `machine` host (main's transport registers no resync, so it streams from its welcome) the
 // mirror reads its snapshot: `session.list {includeArchived: true}`, `session.projects.list` (its `rows`),
 // `session.digests`, `attention.list`, `session.intent.list`, `session.visible` and `session.launchMode`, and in launch
-// mode scenario `session.engineStatuses` (M5b fix round 6: the scenario's statuses, which no stream carries); and, beside it,
-// tells `mawsd` this app's browser socket directory and (UX wave U6e) the app bundle it runs from (`machine.client`), and
-// follows every live session from the cursors it holds (`session.follow`, `live: true`). It follows the front's events through `hosts.onEvent` (validated by main's
-// supervisor): `session.changed`, `session.removed`, `session.projects.changed`, `session.digest`, `attention.changed`
-// with its `silent` ids, `session.intent.changed`, `session.visibleChanged`; and the streams' `session.status` (the
-// engine statuses, each stream's first status its snapshot, so they never depend on the spine being loaded, D19) and
-// `session.eventBatch` (the cursors only).
+// mode scenario `session.engineStatuses` (M5b fix round 6: the scenario's statuses, which no stream carries); and,
+// beside it, tells `mawsd` this app's browser socket directory and (UX wave U6e) the app bundle it runs from
+// (`machine.client`), and follows every live session from the cursors it holds (`session.follow`, `live: true`). It
+// follows the front's events through `hosts.onEvent` (validated by main's supervisor): `session.changed`,
+// `session.removed`, `session.projects.changed`, `session.digest`, `attention.changed` with its `silent` ids,
+// `session.intent.changed`, `session.visibleChanged`; and the streams' `session.status` (the engine statuses, each
+// stream's first status its snapshot, so they never depend on the spine being loaded, D19) and `session.eventBatch`
+// (the cursors only).
 //
 // The race between a snapshot in flight and the events heard meanwhile has one rule: an event always wins over the
 // snapshot it raced, since the spine emits after it mutates. Per member the ids an event touched while that member's
