@@ -191,11 +191,11 @@ const client = () => {
   return qc;
 };
 // UX wave U11c: Customize's page on the project's folder, My items with Plugins chosen
-const at = (show: 'plugins' | 'skills', view: 'mine' | 'discover' = 'mine') => {
+const mountAt = (show: 'plugins' | 'skills', view: 'mine' | 'discover' = 'mine') => {
   useCustomizeProject.setState({ projectId: null, directory: PROJECT }, true);
   return mountCustomize({ view, show }, client());
 };
-const mountPlugins = () => at('plugins');
+const mountPlugins = () => mountAt('plugins');
 const head = () => document.querySelector<HTMLElement>('[data-customize-header]')!;
 const press = (name: string) => fireEvent.click(within(head()).getByRole('radio', { name }));
 const discover = async () => {
@@ -504,7 +504,7 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
 
 describe('Customize › Skills › Discover', () => {
   it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
-    at('skills', 'discover');
+    mountAt('skills', 'discover');
     expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
     expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
