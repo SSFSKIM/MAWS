@@ -128,9 +128,10 @@ function place({ appSessionId, path, line, options }: Request): Opened {
     holdSideViews(key);
     layout.openTab({ kind: 'file', path, line, appSessionId, machine });
     dropSideViews(key);
-    // U6e (decision 19): the agent's show of a main tab of the file reads nothing, also where it draws the tab again
-    if (agent) useViewer.getState().agentShowed(key);
-    else useViewer.getState().revisit(key, appSessionId);
+    // U6e (decision 19): the agent's show of a main tab of the file reads nothing new where it draws the tab again, and
+    // where the view must read fresh bytes (no entry, or the tab now another session's) it reads them as the agent's
+    if (!agent) useViewer.getState().revisit(key, appSessionId);
+    else if (appSessionId !== null) useViewer.getState().agentShowed(key, appSessionId);
     return { surface: 'main', tabId: key };
   }
   const session = appSessionId!;
@@ -150,7 +151,7 @@ function place({ appSessionId, path, line, options }: Request): Opened {
     tabId = placement.tabId;
     showTab(session, tabId, options.asked);
     if (agent && placement.how === 'select') {
-      useViewer.getState().agentShowed(key); // U6e: the tab the session has, read as it is, also where it is drawn again
+      useViewer.getState().agentShowed(key, session); // U6e: the tab the session has, read as it is; fresh bytes read as the agent's
       return { surface: 'side', tabId };
     }
   }

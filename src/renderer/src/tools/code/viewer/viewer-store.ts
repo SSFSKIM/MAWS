@@ -163,9 +163,10 @@ export interface ViewerStore {
   // U6c (decision 15): a failed or named entry is read again, now when its tab is mounted, else at its next mount; nothing
   // for an entry with a load in flight or unsaved edits, or one a session given is not the entry's (the mount replaces it)
   revisit(tabId: string, appSessionId?: AppSessionId | null): void;
-  // UX wave U6e (decision 19, W9): the agent's show brought this file's view forward; when that draws it again, the mount
-  // reads nothing new (a person's open, `revisit`, takes the mark back)
-  agentShowed(tabId: string): void;
+  // UX wave U6e (decision 19, W9): the agent's show for `appSessionId` brings this file's view forward. The next mount of
+  // the view is the agent's: a view it draws again reads nothing new, and one that must read fresh bytes (no entry yet,
+  // or another session's) reads them as the agent's, with `agent` (a person's open, `revisit`, takes it back)
+  agentShowed(tabId: string, appSessionId: AppSessionId): void;
   // UX wave U6e (decision 18): the person chose the file whose real path is `real` for the session (Open File…): each entry
   // of the session pinned to it has its admission read again once, its document and its pin standing
   readAdmission(appSessionId: AppSessionId, real: string): void;
@@ -301,7 +302,7 @@ export function createViewerStore(client: MawsBridge) {
   let lastIncarnation = 0;
   const mounted = new Map<string, number>();
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
-  const quiet = new Set<string>(); // U6e (decision 19): views the agent's show brought forward, whose next mount reads nothing new
+  const shownByAgent = new Set<string>(); // U6e (decision 19): views the agent's show brings forward, whose next mount is the agent's
   const admittedAt = new Map<string, number>(); // U6e (decision 6): the number of the read whose answer last set the tab's admission
   let lastAsk = 0; // the numbers reads that can set an admission draw when they are sent, rising
   const used = new Map<string, number>();
@@ -332,7 +333,7 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     const remove = (tabId: string) => {
-      quiet.delete(tabId);
+      shownByAgent.delete(tabId);
       admittedAt.delete(tabId);
       holds.get(tabId)?.release();
       holds.delete(tabId);
@@ -654,6 +655,10 @@ export function createViewerStore(client: MawsBridge) {
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
         const entry = get().entries.get(tabId);
         const source = artifact ?? null;
+        // U6e (decision 19): the mount reads as the agent's when the tab holds the agent's mark or the agent's show drew it
+        // (the one carrier of a show: `agentShowed`); every fresh read below asks with it
+        const byAgent = shownByAgent.delete(tabId);
+        const asAgent = agent || byAgent;
         const watchThenRead = (reason: 'open' | 'change') => {
           // P3-L (M6b fix wave 2): a file read by its artifact alone has no session to watch under: it is read once
           if (appSessionId === null) return void load(tabId, reason);
@@ -670,7 +675,7 @@ export function createViewerStore(client: MawsBridge) {
           holds.get(tabId)?.release();
           stale.delete(tabId);
           supersede(tabId);
-          patch(tabId, { appSessionId, agent, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
+          patch(tabId, { appSessionId, agent: asAgent, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
           watchThenRead('change');
         } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
           holds.get(tabId)?.release();
@@ -681,7 +686,7 @@ export function createViewerStore(client: MawsBridge) {
             tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false,
-            locked: null, pin: null, agent, textEditable: false,
+            locked: null, pin: null, agent: asAgent, textEditable: false,
           };
           incarnations.set(tabId, ++lastIncarnation);
           admittedAt.delete(tabId); // U6e: a new incarnation's admission is its own reads' alone
@@ -689,10 +694,9 @@ export function createViewerStore(client: MawsBridge) {
           watchThenRead('open');
         } else {
           const moved = line !== entry.line;
-          const marked = agent !== entry.agent;
-          const shownByAgent = quiet.delete(tabId);
+          const marked = asAgent !== entry.agent;
           if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
-          if (marked) patch(tabId, { agent });
+          if (marked) patch(tabId, { agent: asAgent });
           // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e (decision 19):
           // not for a line moved under a view that stays mounted (a person's open reads through `revisit`), nor for a view
           // the agent's show drew again (it reads nothing new); and again when the agent's mark changes, a read in flight
@@ -701,7 +705,7 @@ export function createViewerStore(client: MawsBridge) {
           stale.delete(tabId);
           if (marked && !unsaved(entry) && entry.status === 'loading') void load(tabId, 'open', 'revisit');
           else if (left !== undefined) readAgain(tabId, entry, left);
-          else if (marked ? !unsaved(entry) && (entry.status === 'error' || entry.named || entry.pending > 0) : !moved && !shownByAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
+          else if (marked ? !unsaved(entry) && (entry.status === 'error' || entry.named || entry.pending > 0) : !moved && !byAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         held.delete(tabId); // the move's destination has mounted: the hold has done its work
@@ -855,15 +859,16 @@ export function createViewerStore(client: MawsBridge) {
       },
 
       revisit(tabId, appSessionId) {
-        quiet.delete(tabId); // a person's open: the view reads again as asked
+        shownByAgent.delete(tabId); // a person's open: the view reads again as asked
         const entry = get().entries.get(tabId);
         if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId) || !revisitable(entry)) return;
         if (mounted.get(tabId)) readAgain(tabId, entry, 'revisit');
         else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
       },
 
-      agentShowed(tabId) {
-        if (!mounted.get(tabId) && get().entries.has(tabId)) quiet.add(tabId); // a view drawn now is not drawn again
+      agentShowed(tabId, appSessionId) {
+        // A view drawn now under the same session is not drawn again, so there is no mount to carry the show to
+        if (!mounted.get(tabId) || get().entries.get(tabId)?.appSessionId !== appSessionId) shownByAgent.add(tabId);
       },
 
       readAdmission(appSessionId, real) {
@@ -891,7 +896,7 @@ export function createViewerStore(client: MawsBridge) {
       },
 
       reset() {
-        quiet.clear();
+        shownByAgent.clear();
         admittedAt.clear();
         for (const hold of holds.values()) hold.release();
         holds.clear();
