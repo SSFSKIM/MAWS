@@ -165,9 +165,10 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   return { surface: 'side', tabId };
 }
 
-// U6e (decision 19): a person's click on a file's tab beside the chat is the person's open of the file: the agent's mark
-// goes from the tab and from its entry, and the file is read again as the person's (`revisit`).
-export function personsSideTabClick(tabId: string): void {
+// U6e (decision 19): a person's act on a file's tab beside the chat (a click on it, its move into the other group) is the
+// person's open of the file: the agent's mark goes from the tab and from its entry, and the file is read again as the
+// person's (`revisit`).
+export function personsOpenBeside(tabId: string): void {
   const side = sideFileOf(tabId);
   if (side === null) return;
   const { appSessionId, held, key } = side;
