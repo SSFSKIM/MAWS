@@ -18,7 +18,8 @@ import { surfaceSession } from '../../panel/surface-model';
 import { quietly, useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
-import { dropSideTabs, fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, type FilesTabParams } from './files/tabs';
+import { dropSideViews, holdSideViews } from '../../shell/transfer'; // M4: ⌘-click on a file beside the chat is a move to main
+import { fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, type FilesTabParams } from './files/tabs';
 import { useViewer } from './viewer/viewer-store';
 
 // `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
@@ -119,8 +120,9 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   const key = fileKey(machine, path);
   const placement = placeOpen(layout, { appSessionId, path, main: options.main ?? false, keep: options.keep ?? false });
   if (placement.to === 'main') {
+    holdSideViews(key);
     layout.openTab({ kind: 'file', path, line, appSessionId, machine });
-    dropSideTabs(key);
+    dropSideViews(key);
     useViewer.getState().revisit(key, appSessionId);
     return { surface: 'main', tabId: key };
   }

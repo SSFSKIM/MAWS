@@ -31,6 +31,8 @@ import { FILES_COPY, REFUSAL } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
+import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
+import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
 import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
@@ -198,7 +200,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
       ) : null}
       {held ? (
         <div ref={setFileColumn} hidden={place === 'instead'} inert={place === 'instead'} className="h-full min-h-0 min-w-0 flex-1">
-          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} />
+          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} />
         </div>
       ) : null}
     </div>
@@ -233,6 +235,25 @@ function keepChosen(tabId: string, target: EventTarget): void {
   if (chosen === null || !chosen.second || chosen.tabId !== tabId || sideFileOf(tabId)?.held.file !== chosen.path) return;
   if (target instanceof Element && target.closest(OWN_DOUBLE_CLICK)) return; // a control's own double-click
   keep(tabId);
+}
+
+// M4: the file into the main area from its bar, as from its tab's menu; disabled with the reason while it cannot move.
+function MoveToMain({ tabId }: { tabId: string }) {
+  const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
+  return (
+    <button type="button" data-move-to-main aria-label={TRANSFER_COPY.moveToMain} title={refusal ?? TRANSFER_COPY.moveToMain} disabled={refusal !== null} onClick={() => void moveFileToMain(tabId)} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint">
+      <MoveToMainIcon className="size-3.5" />
+    </button>
+  );
+}
+
+// A box with an arrow leaving it towards the main area, at the left.
+function MoveToMainIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 2.5h5A1.5 1.5 0 0 1 13.5 4v8a1.5 1.5 0 0 1-1.5 1.5H7M2.5 8h7M5 5.5 2.5 8 5 10.5" />
+    </svg>
+  );
 }
 
 function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {

@@ -55,8 +55,9 @@ function PathLead({ path }: { path: string }) {
   );
 }
 
-// UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button).
-export function FileViewer({ tab, start }: { tab: FileTab; start?: ReactNode }) {
+// UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
+// what it puts at the bar's end (Move to main area).
+export function FileViewer({ tab, start, end }: { tab: FileTab; start?: ReactNode; end?: ReactNode }) {
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const lead = (
     <>
@@ -64,7 +65,7 @@ export function FileViewer({ tab, start }: { tab: FileTab; start?: ReactNode }) 
       <PathLead path={tab.path} />
     </>
   );
-  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} />;
+  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} />;
 }
 
 function NoSession({ path }: { path: string }) {
@@ -96,9 +97,10 @@ interface FileBodyProps {
   artifact?: ArtifactRead; // P3-L (M6b fix wave 2): the file read by its artifact alone (`library.read`)
   lead?: ReactNode; // the bar's start (the file tab's path); without one the notices lead and the controls keep right
   controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls)
+  end?: ReactNode; // UX wave U6b-1: the bar's last control (a side tab's Move to main area)
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, end }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -128,6 +130,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {entry ? <Notices entry={entry} /> : null}
         {entry ? controls?.(entry) : null}
         {entry ? <Controls entry={entry} wrap={wrap} zoom={zoom} /> : null}
+        {end}
       </div>
       <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} /> : <Loading />}</div>
     </div>

@@ -258,6 +258,7 @@ export function createViewerStore(client: MawsBridge) {
   const mounted = new Map<string, number>();
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const used = new Map<string, number>();
+  const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
 
@@ -288,6 +289,7 @@ export function createViewerStore(client: MawsBridge) {
       incarnations.delete(tabId);
       stale.delete(tabId);
       used.delete(tabId);
+      held.delete(tabId);
       mounted.delete(tabId);
       views.delete(tabId);
       set((s) => {
@@ -300,14 +302,16 @@ export function createViewerStore(client: MawsBridge) {
     // Entries of tabs the layout no longer holds go; past the bound, the least recently used unmounted ones go. E5: the
     // bound passes over an entry with unsaved edits or a save in flight; a closed tab's goes (its close guard asked). A
     // file tab leaves the layout only by a guarded close: a session's removal and hydration keep file tabs (E11 W-D).
-    // UX wave U6b-1 (Decision 20a): a file a side tab holds is open too, whether its tab is in view or not.
+    // UX wave U6b-1 (Decision 20a): a file a side tab holds is open too, whether its tab is in view or not. (20b) A key held
+    // for a move is passed over by both until its next mount; a hold whose key no tab holds any more ends here.
     const prune = () => {
       const layout = useLayout.getState();
       const open = new Set([...allTabs(layout.main).map((tab) => tab.id), ...sideFileKeys(layout)]); // W12: every project's tab set
-      for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId)) remove(tabId);
+      for (const key of held) if (!open.has(key)) held.delete(key);
+      for (const tabId of get().entries.keys()) if (!open.has(tabId) && !mounted.get(tabId) && !held.has(tabId)) remove(tabId);
       for (const tabId of views.keys()) if (!get().entries.has(tabId)) views.delete(tabId);
       const idle = [...get().entries.values()]
-        .filter((entry) => !mounted.get(entry.tabId) && !entry.dirty && !entry.saving)
+        .filter((entry) => !mounted.get(entry.tabId) && !entry.dirty && !entry.saving && !held.has(entry.tabId))
         .map((entry) => entry.tabId)
         .sort((a, b) => (used.get(a) ?? 0) - (used.get(b) ?? 0));
       while (get().entries.size > VIEWER_ENTRIES_MAX && idle.length > 0) remove(idle.shift()!);
@@ -601,6 +605,7 @@ export function createViewerStore(client: MawsBridge) {
           if (left !== undefined || revisitable(entry)) readAgain(tabId, entry, left ?? 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
+        held.delete(tabId); // the move's destination has mounted: the hold has done its work
         prune();
         let done = false;
         return () => {
@@ -744,7 +749,7 @@ export function createViewerStore(client: MawsBridge) {
       prune,
 
       holdKey(key) {
-        void key;
+        held.add(key);
       },
 
       reset() {
@@ -755,6 +760,7 @@ export function createViewerStore(client: MawsBridge) {
         mounted.clear();
         stale.clear();
         used.clear();
+        held.clear();
         views.clear();
         unsubscribe?.();
         unsubscribe = null;

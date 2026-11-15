@@ -306,8 +306,8 @@ describe('a main file tab moves beside the chat', () => {
   it('a move leaves nothing for Reopen closed tab, either way', async () => {
     renderBoth();
     await openInMain(APP);
-    act(() => void moveFileToSide(KEY(APP)));
-    act(() => void moveFileToMain(sideTabOf(APP)!));
+    act(() => void expect(moveFileToSide(KEY(APP))).toBe(true));
+    act(() => void expect(moveFileToMain(sideTabOf(APP)!)).toBe(true));
     expect(closedIds()).toEqual([]);
     act(() => runAction('tab.reopen'));
     expect(allTabs(useLayout.getState().main).filter((tab) => tab.id === KEY(APP))).toHaveLength(1);
@@ -325,10 +325,10 @@ describe('Reopen closed tab on a file that is beside the chat', () => {
     await waitFor(() => expect(mainTabOf(APP)).toBeUndefined());
     expect(closedIds()).toContain(KEY(APP));
     act(() => useLayout.getState().activateTab(`session:${A}`));
-    const side = await openBeside(APP);
-    act(() => useLayout.getState().activateTab(`session:${A}`));
+    await openBeside(APP);
     act(() => void openFile(B, APP, null, { keep: true })); // another session's list holds it too
     act(() => useLayout.getState().activateTab(`session:${A}`));
+    const side = await editorShowing('panel', ORIGINAL); // drawn again beside A's chat
     type(side, '// mine\n');
     act(() => runAction('tab.reopen'));
     expect(mainTabOf(APP)).toBeDefined();

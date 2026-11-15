@@ -98,8 +98,9 @@ export function keep(tabId: string): void {
   useLayout.getState().setPanelParams(tabId, { file: held.file, line: held.line });
 }
 
-// Rule 3's drop (⌘-click here; a move to the main area and the reopen in M4): every side tab of the file goes from every
-// session's list, written through the store, so the panel host disposes each without its close question.
+// Rule 3's drop, the first half of `dropSideViews` (`shell/transfer.ts`: a move to the main area, a ⌘-click, the reopen):
+// every side tab of the file goes from every session's list, written through the store, so the panel host disposes each
+// without its close question.
 export function dropSideTabs(key: string): void {
   const layout = useLayout.getState();
   for (const [appSessionId, own] of layout.panelBySession) {

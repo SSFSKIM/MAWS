@@ -15,7 +15,7 @@ import { useSettings } from '../stores/settings';
 import { expandPane, focusSplitCard, togglePanelFloat } from '../shell/floating'; // P3-G; P4-B3: expandPane, focusSplitCard
 import { startMarkup } from '../markup/session'; // P3-G
 import { openArtifacts } from '../main/artifacts'; // P3-G
-import { moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/transfer'; // P4-B3 M4
+import { dropSideViews, holdSideViews, moveFocusedArtifactToPanel, moveShownRecordToTab } from '../shell/transfer'; // P4-B3 M4; UX wave U6b-1
 import { panelInMain } from './regions';
 import { setSessionUnread, visibleSessionStep } from '../keymap/session-navigation';
 import { registerSessionAction } from './session-actions';
@@ -67,7 +67,15 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       const tab = tabOnScreen(layout()); // UX wave U7b (§N): nothing behind a page
       if (tab?.kind === 'session') await setSessionUnread(tab.appSessionId, true, client);
     }),
-    registerAction('tab.reopen', () => layout().reopenClosed()),
+    // UX wave U6b-1 (Decision 18): a file's main tab that comes back while the file is beside the chat is a move to the
+    // main area, in the same synchronous run: the key held before the first write, then every side tab of it dropped.
+    registerAction('tab.reopen', () => {
+      const back = layout().main.closedTabs.at(-1);
+      const file = back?.kind === 'file' ? back.id : null;
+      if (file !== null) holdSideViews(file);
+      layout().reopenClosed();
+      if (file !== null) dropSideViews(file);
+    }),
     // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
     registerAction('tab.overview', () => {
       const before = layout();

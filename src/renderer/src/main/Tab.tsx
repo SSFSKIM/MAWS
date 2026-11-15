@@ -33,7 +33,7 @@ import { LIBRARY_COPY } from '../library/copy';
 import { useArtifactTitle } from '../library/store';
 // P3-L end
 // P3-F wave S (F16); P4-B3 (X38): the move to the panel, its drag and its one refusal
-import { beginDrag, endDragFrom, moveArtifactToPanel, TAB_DRAG_TYPE, useTransferRefusal } from '../shell/transfer';
+import { beginDrag, endDragFrom, moveToPanel, TAB_DRAG_TYPE, useTransferRefusal } from '../shell/transfer';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 // E4a start
 import { BROWSER_COPY } from '../tools/browser/copy';
@@ -222,7 +222,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
         <ContextMenu.Content data-tab-focus-owner={tab.id} className="z-50 min-w-44 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg">
           <TabMenuItem onSelect={() => useLayout.getState().togglePinned(tab.id)}>{tab.pinned ? 'Unpin tab' : 'Pin tab'}</TabMenuItem>
           <TabMenuItem onSelect={() => moveToOtherPane(tab.id, pane)}>Move to other pane</TabMenuItem>
-          {tab.kind === 'artifact' && <ShowInPanelItem tab={tab} />}
+          {(tab.kind === 'artifact' || tab.kind === 'file') && <ShowInPanelItem tab={tab} />}{/* UX wave U6b-1: a file's too */}
           <ContextMenu.Separator className="my-1 h-px bg-border" />
           <TabMenuItem onSelect={() => void requestCloseTab(tab.id)}>Close tab</TabMenuItem>
           <TabMenuItem onSelect={() => void closeOthers(tab.id, pane)}>Close other tabs</TabMenuItem>
@@ -251,10 +251,10 @@ function TabMenuItem({ children, onSelect, disabled = false, reason }: { childre
 // disabled with the reason that drag is refused for (the panel shown once the tab is gone has none, M5).
 export const SHOW_IN_PANEL_COPY = { label: TRANSFER_COPY.moveToPanel, noPanel: TRANSFER_COPY.noPanel };
 
-function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' }> }) {
+function ShowInPanelItem({ tab }: { tab: Extract<TabRef, { kind: 'artifact' | 'file' }> }) {
   const refusal = useTransferRefusal({ to: 'panel', mainTabId: tab.id });
   return (
-    <TabMenuItem disabled={refusal !== null} reason={refusal ?? undefined} onSelect={() => void moveArtifactToPanel(tab.id)}>
+    <TabMenuItem disabled={refusal !== null} reason={refusal ?? undefined} onSelect={() => void moveToPanel(tab.id)}>
       {SHOW_IN_PANEL_COPY.label}
     </TabMenuItem>
   );

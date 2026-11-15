@@ -13,6 +13,14 @@
 // after it pass, the comment is handed to that view and the source closes in one synchronous run (Decision Log 39), so
 // a refusal at the guard or the re-checks has changed nothing.
 //
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §D; Decisions 12 to 14,
+// 18 to 20): a file moves too, between a side tab of Files and a main file tab. Its move shares the refusal's words, the
+// drop targets and the drag state with an artifact's, not the move itself: one key keys the file on both surfaces
+// (`fileKey`), so nothing is handed over and nothing is asked. It is one synchronous step (the destination written, then
+// the source removed, so React commits both at once and the going code view leaves its state for the coming one), the
+// viewer holding the key across it (`holdKey`) and the stored layout written in order (`writeInOrder`). Every side tab
+// drags (the strip's drags between the groups are `panel/TabStrip.tsx`'s); one with a main-tab form also onto main.
+//
 // The drag state (`dragging` in the layout store) is set at `dragstart` and cleared at `drop` and `dragend`, both heard on
 // `window` too, and by a source that unmounts mid-drag (INV-5). Targets decide acceptance from it (a `dragover` cannot
 // read the payload) and act on the payload at `drop`. While it is set, the browser cover is held (Decision Log 39), so
@@ -21,7 +29,8 @@ import { useSyncExternalStore, type DragEvent } from 'react';
 import { library, libraryRow } from '../library/store';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { MachineRef } from '@shared/machine/ref';
-import { tabId as mainTabIdOf, type PanelTabRef, type TabRef } from '@shared/ipc/schema/layout';
+import { tabId as mainTabIdOf, type LayoutKey, type PanelTabRef, type TabRef, type TabTarget } from '@shared/ipc/schema/layout';
+import { machineOf } from '@shared/machine/address';
 import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { adoptStagedArtifactEditorState, handArtifactViewOver, heldArtifactEditorState, stageArtifactEditorState } from '../artifacts/registry';
 import { askEditorHostClose, type CloseAsk, type EditorHostScope } from '../panel/editor-host';
@@ -31,13 +40,15 @@ import { ipc } from '../ipc/client';
 import { sessionRow, subscribeSessionRows } from '../keymap/actions-runtime';
 import { selectOrgIndex, setKeyOfProject, type RowKey } from '../stores/org-projects';
 import { useSessions } from '../stores/sessions';
-import { tabOnScreen, useLayout, type LayoutState } from '../stores/layout';
+import { tabOnScreen, useLayout, writeInOrder, type LayoutState } from '../stores/layout';
 import { toast } from '../stores/notices';
-import { allTabs, currentSet, locateTab } from '../stores/layout-model';
+import { allTabs, currentSet, locateTab, paramsHoldFile } from '../stores/layout-model';
 import type { ArtifactsHandle } from '../tools/artifacts/ArtifactsTool';
 import { TRANSFER_COPY } from '../tools/artifacts/copy';
 import { withdrawVersionRequest } from '../tools/artifacts/viewers/requests'; // P4-B4: a stale main ask goes with a move
 import { holdCover } from '../tools/browser/covering'; // Decision Log 39
+import { dropSideTabs, fileKey, FILES_TOOL_ID, sideFileKeys, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
 import { markTranscriptCarry } from '../transcript/view/scroll-carry'; // P4-B3 M5 (S6)
 
 export const TAB_DRAG_TYPE = 'application/x-maws-tab'; // a main tab's id
@@ -132,6 +143,7 @@ export function transferRefusal(request: TransferRequest): string | null {
   const closing = usePanelHost.getState().closing;
   if (request.to === 'panel') {
     const tab = allTabs(layout().main).find((t) => t.id === request.mainTabId);
+    if (tab?.kind === 'file') return fileToSideRefusal(tab); // UX wave U6b-1
     if (tab?.kind !== 'artifact') return TRANSFER_COPY.notArtifact;
     if (libraryRow(library.getState(), tab.artifactId).value == null) return TRANSFER_COPY.loading;
     const session = panelSessionForArtifact(request.mainTabId);
@@ -140,8 +152,18 @@ export function transferRefusal(request: TransferRequest): string | null {
     const dest = artifactsTabOf(session);
     return dest && closing.has(dest.id) ? TRANSFER_COPY.closing : null;
   }
-  if (panelRecordOf(request.panelTabId) === null) return TRANSFER_COPY.noRecord;
+  if (sideFileOf(request.panelTabId) === null && panelRecordOf(request.panelTabId) === null) return TRANSFER_COPY.noRecord;
   return closing.has(request.panelTabId) ? TRANSFER_COPY.closing : null;
+}
+
+// UX wave U6b-1: a main file tab moves beside the chat of the session it was last opened under, which the window must
+// know, once the layout is read (a side tab made before is only a reservation) and while Files is there to take it.
+function fileToSideRefusal(tab: Extract<TabRef, { kind: 'file' }>): string | null {
+  const state = layout();
+  if (!state.hydrated) return TRANSFER_COPY.loading;
+  const { appSessionId } = tab;
+  if (appSessionId === null || !state.knownSession(appSessionId) || fileKey(machineOf(appSessionId), tab.path) !== tab.id) return TRANSFER_COPY.noSession;
+  return usePanelHost.getState().tools.has(FILES_TOOL_ID) ? null : TRANSFER_COPY.noPanel;
 }
 
 // The refusal for a render, re-read whenever the layout or the panel host changes (a record shown or left changes the
@@ -163,8 +185,10 @@ export const useTransferRefusal = (request: TransferRequest | null): string | nu
   useSyncExternalStore(subscribeTransfer, () => (request === null ? null : transferRefusal(request)));
 export const usePanelRecord = (panelTabId: string): string | null => useSyncExternalStore(subscribeTransfer, () => panelRecordOf(panelTabId));
 
-// The panel tabs that move to main: the Artifacts tool's (Decision Log 17; no other tool has a main tab kind).
-export const panelTabMoves = (tab: PanelTabRef): boolean => tab.toolId === ARTIFACTS_TOOL_ID;
+// The panel tabs that move to main: the Artifacts tool's (Decision Log 17) and, UX wave U6b-1, a Files tab that holds a
+// file; no other tool has a main tab kind.
+export const panelTabMoves = (tab: PanelTabRef): boolean =>
+  tab.toolId === ARTIFACTS_TOOL_ID || (tab.toolId === FILES_TOOL_ID && paramsHoldFile(layout().panelParams[tab.id]));
 
 // ---- the moves -----------------------------------------------------------------------------------------------------------
 
@@ -235,7 +259,7 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
     if (locateTab(layout().main, mainTabId)) {
       handArtifactViewOver(source, { surface: 'main', tabId: mainTabId }); // synchronous from here to the Back
       handle.handOff(); // the guard was asked: the record's state is given back
-      placeInMain(artifactId, machine, at);
+      placeInMain({ kind: 'artifact', artifactId, machine }, at);
       return true;
     }
     // Main lost its tab while the guard asked: the record moves after all, its comment with its state.
@@ -246,21 +270,24 @@ export async function moveArtifactToTab(panelTabId: string, at: TabPlace = {}): 
     adoptStagedArtifactEditorState(artifactId, { surface: 'panel', tabId: panelTabId });
     return false;
   }
-  placeInMain(artifactId, machine, at);
+  placeInMain({ kind: 'artifact', artifactId, machine }, at);
   adoptStagedArtifactEditorState(artifactId, { surface: 'main', tabId: mainTabId });
   return true;
 }
 
-// Shows the artifact's main tab at `at`, opening it if main has none (the main area brought back if a maximized or
-// floating panel stood in it). With no pane, an open tab is activated where it is; a new one appends to the focused pane.
-// P4-B4 (the B3 merge's review): the move carries the viewer's state, so an ask left for that artifact's main viewer (a
-// link's open whose tab went before its editor took it) goes, as the carried panel open withdraws the panel's.
-function placeInMain(artifactId: string, machine: MachineRef, at: TabPlace): void {
-  withdrawVersionRequest(artifactId, 'main');
-  const id = mainTabIdOf({ kind: 'artifact', artifactId, machine });
+type MainTarget = Extract<TabTarget, { kind: 'artifact' | 'file' }>;
+
+// Shows the artifact's (UX wave U6b-1: or the file's) main tab at `at`, opening it if main has none (the main area brought
+// back if a maximized or floating panel stood in it). With no pane, an open tab is activated where it is; a new one
+// appends to the focused pane. P4-B4 (the B3 merge's review): the move carries the viewer's state, so an ask left for
+// that artifact's main viewer (a link's open whose tab went before its editor took it) goes, as the carried panel open
+// withdraws the panel's.
+function placeInMain(target: MainTarget, at: TabPlace): void {
+  if (target.kind === 'artifact') withdrawVersionRequest(target.artifactId, 'main');
+  const id = mainTabIdOf(target);
   const before = currentSet(layout().main).panes.findIndex((p) => p.tabs.some((t) => t.id === id));
   layout().revealMain();
-  layout().openTab({ kind: 'artifact', artifactId, machine }, { pane: at.pane ?? 'focused' });
+  layout().openTab(target, { pane: at.pane ?? 'focused' });
   if (at.pane === undefined && before !== -1) return;
   const set = currentSet(layout().main);
   // The pane asked for (pane 1 made if absent, as the right edge asks), else the one the open placed it in.
@@ -293,11 +320,12 @@ useLayout.subscribe((state, before) => {
 
 // The keymap actions (M4; no default chords): the focused main tab into the panel, and the shown panel's Artifacts record
 // into a main tab (its selected tab when that is one, else the first the panel lists). A refusal says why in a toast.
+// UX wave U6b-1 (Decision 12): the same two actions act on a file as on an artifact.
 export function moveFocusedArtifactToPanel(): void {
   const tab = tabOnScreen(layout()); // UX wave U7b (§N): behind a page there is none, and the notice says so
   const refusal = tab ? transferRefusal({ to: 'panel', mainTabId: tab.id }) : TRANSFER_COPY.notArtifact;
   if (refusal !== null || !tab) return refused(refusal ?? TRANSFER_COPY.notArtifact);
-  void moveArtifactToPanel(tab.id);
+  void moveToPanel(tab.id);
 }
 
 export function moveShownRecordToTab(): void {
@@ -307,38 +335,66 @@ export function moveShownRecordToTab(): void {
   const tab = tabs.find((t) => t.id === selected) ?? tabs[0];
   const refusal = tab ? transferRefusal({ to: 'tab', panelTabId: tab.id }) : TRANSFER_COPY.noRecord;
   if (refusal !== null || !tab) return refused(refusal ?? TRANSFER_COPY.noRecord);
-  void moveArtifactToTab(tab.id);
+  void moveToMain(tab.id);
 }
 
 const refused = (text: string) => void toast({ id: 'transfer-refused', level: 'info', text, actions: [], dismissible: true });
 
 // ---- a file's moves (UX wave U6b-1, Interfaces §D) -------------------------------------------------------------------------
 
+// A side tab that has a main-tab form into the main area: a file's (synchronous), else an artifact's record.
 export function moveToMain(panelTabId: string, at: TabPlace = {}): boolean | Promise<boolean> {
-  return moveArtifactToTab(panelTabId, at);
+  return sideFileOf(panelTabId) !== null ? moveFileToMain(panelTabId, at) : moveArtifactToTab(panelTabId, at);
 }
 
+// A main tab that has a side form beside the chat: a file's (synchronous), else an artifact's.
 export function moveToPanel(mainTabId: string): boolean | Promise<boolean> {
-  return moveArtifactToPanel(mainTabId);
+  return allTabs(layout().main).find((t) => t.id === mainTabId)?.kind === 'file' ? moveFileToSide(mainTabId) : moveArtifactToPanel(mainTabId);
 }
 
+// Side → main (Decision 13): a main tab of the file where `at` says, else at the end of the focused pane's strip, in
+// front; every side tab of it goes, in every session's list (rule 3). False: refused, nothing changed.
 export function moveFileToMain(panelTabId: string, at: TabPlace = {}): boolean {
-  void panelTabId;
-  void at;
-  return false;
+  if (transferRefusal({ to: 'tab', panelTabId, ...at }) !== null) return false;
+  const { appSessionId, held, key } = sideFileOf(panelTabId)!;
+  holdSideViews(key);
+  placeInMain({ kind: 'file', path: held.file, line: held.line, appSessionId, machine: machineOf(appSessionId) }, at);
+  dropSideViews(key);
+  return true;
 }
 
+// Main → side (Decision 13): a kept side tab of the file in the list of the session the main tab was last opened under,
+// in `groupForOpen`'s group (the host's), in view, that session's tab in front in the main area. The session's tab comes
+// first, so the add finds its session on screen and replaces no tab. False: refused, nothing changed.
 export function moveFileToSide(mainTabId: string): boolean {
-  void mainTabId;
-  return false;
+  if (transferRefusal({ to: 'panel', mainTabId }) !== null) return false;
+  const tab = allTabs(layout().main).find((t) => t.id === mainTabId) as Extract<TabRef, { kind: 'file' }>;
+  const appSessionId = tab.appSessionId!;
+  useViewer.getState().holdKey(mainTabId);
+  layout().openTab({ kind: 'session', appSessionId });
+  panelHost.addTool(FILES_TOOL_ID, { appSessionId, params: { file: tab.path, line: tab.line } });
+  layout().closeTab(mainTabId, { remember: false }); // a move is not a close: no entry for Reopen closed tab
+  writeInOrder([`panel.${appSessionId}`, 'panelTools.params'], ['main.tabs']);
+  return true;
 }
 
+// The viewer holds the key of a file beside the chat across a move's step (Decision 20b): neither the prune of the view
+// that goes nor the cap takes its entry before the view that comes has mounted.
 export function holdSideViews(key: string): void {
-  void key;
+  if (sideFileKeys(layout()).has(key)) useViewer.getState().holdKey(key);
 }
 
+// The second half of every move to the main area, and of Reopen closed tab (Decision 18): the key held, every side tab
+// of the file gone from every list through the store (the host disposes each without its close question), and the
+// stored layout written in order, `main.tabs` before the lists (Decision 19).
 export function dropSideViews(key: string): void {
-  void key;
+  if (!sideFileKeys(layout()).has(key)) return;
+  holdSideViews(key);
+  const before = layout().panelBySession;
+  dropSideTabs(key);
+  const after = layout().panelBySession;
+  const lists = [...before.keys()].filter((id) => after.get(id) !== before.get(id)).map((id): LayoutKey => `panel.${id}`);
+  writeInOrder(['main.tabs'], [...lists, 'panelTools.params']);
 }
 
 // ---- the drag ------------------------------------------------------------------------------------------------------------
@@ -393,10 +449,11 @@ export function panelTabOfDrop(event: DragEvent): { toolId: string; tabId: strin
   }
 }
 
-// A panel record dropped on a main target (a strip, a pane's body, the right edge) moves to `at`.
+// A panel record (UX wave U6b-1: or a file's side tab) dropped on a main target (a strip, a pane's body, the right edge)
+// moves to `at`.
 export function dropPanelRecord(event: DragEvent, at: TabPlace): void {
   const payload = panelTabOfDrop(event);
-  if (payload) void moveArtifactToTab(payload.tabId, at);
+  if (payload) void moveToMain(payload.tabId, at);
 }
 
 // Whether the drag under way is one a kind of target takes (a refused drag finds no target there). The panel takes an
