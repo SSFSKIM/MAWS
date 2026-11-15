@@ -588,7 +588,7 @@ describe('a plugin’s connectors (UX wave U11h)', () => {
     });
   });
 
-  it('compares, classifies and revises a declared address past the endpoints’ bound whole, and cuts only the endpoints’ url', async () => {
+  it('compares, classifies and revises a declared address past the endpoints’ bound whole, and sends its endpoint no url', async () => {
     const LONG = `https://long.example.com/${'p'.repeat(4096 - 'https://long.example.com/'.length)}`;
     expect(LONG).toHaveLength(4096);
     await json(join(configHome, '.claude.json'), { mcpServers: { bound: { type: 'http', url: LONG }, past: { type: 'http', url: `${LONG}x` } } });
@@ -605,7 +605,8 @@ describe('a plugin’s connectors (UX wave U11h)', () => {
     expect([rows.longer!.sameAddressAs, rows.exact!.sameAddressAs]).toEqual([null, 'bound']);
     expect(rows.template!.address).toBe('templated');
     const first = (await endpoints()).pluginServers!.find((row) => row.server === 'longer')!;
-    expect(first.url).toBe(LONG); // the endpoint's url alone is cut at its bound
+    expect(first.url).toBeNull(); // past the endpoints' bound no address is sent, never a cut text a session could match
+    expect(first.revision).toMatch(/^[0-9a-f]{32}$/); // the revision is of the whole text
     await declare('c');
     expect((await endpoints()).pluginServers!.find((row) => row.server === 'longer')!.revision).not.toBe(first.revision);
   });
