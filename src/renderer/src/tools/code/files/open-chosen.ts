@@ -13,6 +13,7 @@ import { pageOpen, useLayout } from '../../../stores/layout';
 import { toast } from '../../../stores/notices';
 import { OPEN_FILE_COPY } from '../copy';
 import { openFile } from '../open-file';
+import { useViewer } from '../viewer/viewer-store';
 
 const refuse = (text: string) => toast({ level: 'danger', text, actions: [], dismissible: true });
 
@@ -27,6 +28,9 @@ export async function openChosen(appSessionId: AppSessionId): Promise<void> {
   if (result.status === 'cancelled') return;
   if (result.status === 'refused') return void refuse(result.reason === 'not-a-file' ? OPEN_FILE_COPY.notAFile : OPEN_FILE_COPY.unavailable);
   openFile(appSessionId, result.path, null, { keep: true });
+  // Decision 18: a tab pinned to the chosen file whose edits stand under a lock (W4) is not read over; its admission is
+  // read again, so the grant makes it savable where it is
+  useViewer.getState().readAdmission(appSessionId, result.path);
 }
 
 // The session whose chat is in front on this Mac, or null.

@@ -128,7 +128,9 @@ function place({ appSessionId, path, line, options }: Request): Opened {
     holdSideViews(key);
     layout.openTab({ kind: 'file', path, line, appSessionId, machine });
     dropSideViews(key);
-    if (!agent) useViewer.getState().revisit(key, appSessionId); // U6e: the agent's show of a main tab of the file reads nothing
+    // U6e (decision 19): the agent's show of a main tab of the file reads nothing, also where it draws the tab again
+    if (agent) useViewer.getState().agentShowed(key);
+    else useViewer.getState().revisit(key, appSessionId);
     return { surface: 'main', tabId: key };
   }
   const session = appSessionId!;
@@ -147,7 +149,10 @@ function place({ appSessionId, path, line, options }: Request): Opened {
     layout.setPanelParams(placement.tabId, params(preview, marked));
     tabId = placement.tabId;
     showTab(session, tabId, options.asked);
-    if (agent && placement.how === 'select') return { surface: 'side', tabId }; // U6e: the tab the session has, read as it is
+    if (agent && placement.how === 'select') {
+      useViewer.getState().agentShowed(key); // U6e: the tab the session has, read as it is, also where it is drawn again
+      return { surface: 'side', tabId };
+    }
   }
   useViewer.getState().revisit(key, appSessionId);
   return { surface: 'side', tabId };

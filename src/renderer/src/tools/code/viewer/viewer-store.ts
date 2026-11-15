@@ -161,6 +161,12 @@ export interface ViewerStore {
   // U6c (decision 15): a failed or named entry is read again, now when its tab is mounted, else at its next mount; nothing
   // for an entry with a load in flight or unsaved edits, or one a session given is not the entry's (the mount replaces it)
   revisit(tabId: string, appSessionId?: AppSessionId | null): void;
+  // UX wave U6e (decision 19, W9): the agent's show brought this file's view forward; when that draws it again, the mount
+  // reads nothing new (a person's open, `revisit`, takes the mark back)
+  agentShowed(tabId: string): void;
+  // UX wave U6e (decision 18): the person chose the file whose real path is `real` for the session (Open File…): each entry
+  // of the session pinned to it has its admission read again once, its document and its pin standing
+  readAdmission(appSessionId: AppSessionId, real: string): void;
   // UX wave U6b-1 (sequence 6): the prune, run by the side tabs' one subscriber (`files/tabs.ts`) when they change
   prune(): void;
   // UX wave U6b-1 (Decision 20b): a key on its way between two views (a move) is kept out of the ownership prune and the
@@ -293,6 +299,7 @@ export function createViewerStore(client: MawsBridge) {
   let lastIncarnation = 0;
   const mounted = new Map<string, number>();
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
+  const quiet = new Set<string>(); // U6e (decision 19): views the agent's show brought forward, whose next mount reads nothing new
   const used = new Map<string, number>();
   const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
   let clock = 0;
@@ -321,6 +328,7 @@ export function createViewerStore(client: MawsBridge) {
     };
 
     const remove = (tabId: string) => {
+      quiet.delete(tabId);
       holds.get(tabId)?.release();
       holds.delete(tabId);
       generations.delete(tabId);
@@ -360,6 +368,14 @@ export function createViewerStore(client: MawsBridge) {
     // U6e (decision 6): the pin after a read that answered `real`: the read's where it lands on an entry with no unsaved
     // edits, else the one the entry holds, or the read's when it holds none.
     const pinAfter = (entry: ViewerEntry, real: string | null): string | null => (unsaved(entry) ? (entry.pin ?? real) : real);
+    // U6e (decision 6): an answer whose content is not taken (a chunk of another version, a read for the admission alone)
+    // still sets the latest admission; the pin stands, since the document it names does.
+    const admitOnly = (tabId: string, admission: Admission) => {
+      const entry = get().entries.get(tabId);
+      if (!entry) return;
+      const { named, locked } = admission;
+      patch(tabId, { named, locked, editable: entry.textEditable && admits({ readOnly: entry.readOnly, named, locked, pin: entry.pin }) });
+    };
 
     // U6c (decision 15): an entry read again when it is asked for again: its last read failed, or no watch keeps it
     // current (a file the transcript names), and no load of it is in flight nor edits of it unsaved. A failed entry is
@@ -477,8 +493,8 @@ export function createViewerStore(client: MawsBridge) {
           whole = all.value;
         }
         const utf8 = whole.encoding === 'utf8';
-        const again = admissionOf(whole);
-        return commit({ ...file, named: file.named || again.named, locked: again.locked ?? file.locked, real: again.real ?? admitted.real, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
+        const latest = whole === head ? admitted : admissionOf(whole); // U6e (decision 6): the last answer's alone
+        return commit({ ...file, named: latest.named, locked: latest.locked, real: latest.real, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
       }
 
       const hash = kind === 'head' ? null : head.hash;
@@ -498,12 +514,11 @@ export function createViewerStore(client: MawsBridge) {
         // Changed mid-load, whatever the chunk's length (a shrunk file answers zero bytes with its new hash): the load ends
         // here, an open one read-only with `hash: null`; its files.changed re-reads it. Checked before the shrink exit,
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
-        if (hash !== null && next.value.hash !== hash) return;
+        // U6e (decision 6): the answer's admission is the latest even so, its content not taken and the pin standing.
+        if (hash !== null && next.value.hash !== hash) return admitOnly(tabId, admissionOf(next.value));
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
-        const continued = admissionOf(next.value);
-        if (continued.named) named = true;
-        locked = continued.locked ?? locked;
-        real = continued.real ?? real;
+        // U6e (decision 6): each answer's admission is the latest, from itself alone
+        ({ named, locked, real } = admissionOf(next.value));
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
@@ -657,16 +672,18 @@ export function createViewerStore(client: MawsBridge) {
         } else {
           const moved = line !== entry.line;
           const marked = agent !== entry.agent;
+          const shownByAgent = quiet.delete(tabId);
           if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
           if (marked) patch(tabId, { agent });
-          // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e: not for a line
-          // moved under a view that stays mounted (a person's open reads through `revisit`; an agent's show of an open tab
-          // reads nothing, decision 19); and again when the agent's mark changes, a read in flight under the other mark
-          // superseded, since its admission differs
+          // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e (decision 19):
+          // not for a line moved under a view that stays mounted (a person's open reads through `revisit`), nor for a view
+          // the agent's show drew again (it reads nothing new); and again when the agent's mark changes, a read in flight
+          // under the other mark superseded, since its admission differs (one still opening is opened again)
           const left = stale.get(tabId);
           stale.delete(tabId);
-          const again = left !== undefined || (!moved && revisitable(entry)) || (marked && (entry.status === 'error' || entry.named) && !unsaved(entry));
-          if (again) readAgain(tabId, entry, left ?? 'revisit');
+          if (marked && !unsaved(entry) && entry.status === 'loading') void load(tabId, 'open', 'revisit');
+          else if (left !== undefined) readAgain(tabId, entry, left);
+          else if (marked ? !unsaved(entry) && (entry.status === 'error' || entry.named || entry.pending > 0) : !moved && !shownByAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         held.delete(tabId); // the move's destination has mounted: the hold has done its work
@@ -691,10 +708,12 @@ export function createViewerStore(client: MawsBridge) {
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
           const current = get().entries.get(tabId)!;
-          const admitted = admissionOf(next.value); // U6e: a continuation adds to the admission and never loosens it
+          // U6e (decision 6): the answer's admission is the latest; the pin moves by the document and dirty rule
+          const { named, locked, real } = admissionOf(next.value);
+          const pin = pinAfter(current, real);
           patch(tabId, {
             text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false,
-            ...(admitted.named ? { named: true } : {}), ...(admitted.locked !== null ? { locked: admitted.locked } : {}), ...(current.pin === null && admitted.real !== null ? { pin: admitted.real } : {}),
+            named, locked, pin, editable: current.textEditable && admits({ readOnly: current.readOnly, named, locked, pin }),
           });
         });
       },
@@ -820,10 +839,27 @@ export function createViewerStore(client: MawsBridge) {
       },
 
       revisit(tabId, appSessionId) {
+        quiet.delete(tabId); // a person's open: the view reads again as asked
         const entry = get().entries.get(tabId);
         if (!entry || (appSessionId !== undefined && appSessionId !== entry.appSessionId) || !revisitable(entry)) return;
         if (mounted.get(tabId)) readAgain(tabId, entry, 'revisit');
         else if (!stale.has(tabId)) stale.set(tabId, 'revisit'); // read when next shown; an event's re-read already waiting stays one
+      },
+
+      agentShowed(tabId) {
+        if (!mounted.get(tabId) && get().entries.has(tabId)) quiet.add(tabId); // a view drawn now is not drawn again
+      },
+
+      readAdmission(appSessionId, real) {
+        for (const entry of get().entries.values()) {
+          if (entry.appSessionId !== appSessionId || entry.pin !== real || entry.artifact) continue;
+          const { tabId } = entry;
+          const incarnation = incarnations.get(tabId);
+          void readChunk(entry, 0, 1, false).then((answer) => {
+            if (incarnations.get(tabId) !== incarnation || !answer.ok) return; // a refusal moves neither lock nor pin
+            admitOnly(tabId, admissionOf(answer.value));
+          });
+        }
       },
 
       prune,
@@ -833,6 +869,7 @@ export function createViewerStore(client: MawsBridge) {
       },
 
       reset() {
+        quiet.clear();
         for (const hold of holds.values()) hold.release();
         holds.clear();
         generations.clear();

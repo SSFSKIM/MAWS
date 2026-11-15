@@ -90,11 +90,12 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
 }
 
 // UX wave U6e (K1, K14): the last save's failure, a line of its own below the path (`basis-full` in the bar's wrapping
-// row, after everything else in it), wrapped to as many lines as it needs and never cut.
+// row, after everything else in it), wrapped to as many lines as it needs and never cut, an unbroken run (a long path
+// component) included.
 export function SaveFailure({ entry }: { entry: ViewerEntry }) {
   if (entry.saveError === null) return null;
   return (
-    <span role="alert" className="basis-full break-words text-danger">
+    <span role="alert" className="min-w-0 basis-full break-words wrap-anywhere text-danger">
       {EDITOR_COPY.saveFailed(entry.saveError)}
     </span>
   );

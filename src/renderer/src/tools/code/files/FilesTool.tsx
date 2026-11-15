@@ -22,7 +22,7 @@
 // names the machine (until U6f). A tab's agent's mark is handed to its file's viewer (decision 19).
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
@@ -363,13 +363,20 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
   );
 }
 
-// UX wave U6e: the Files list's menu, in the classes of the Files icon's (`panel/SurfaceRow.tsx`, K9), at most max-w-96
-// wide (K6). ⇧F10 opens it at the element that holds the keyboard, as it opens an icon's. Its one row draws no chord: no
+// UX wave U6e: the Files list's menu, in the classes of the Files icon's (`panel/SurfaceRow.tsx`, K9), at most 24rem wide
+// (K6) and never wider than its column less 1rem, the column (the list's own box) measured as the menu opens and its
+// edges the menu's collision boundary (K12). ⇧F10 opens it at the element that holds the keyboard, as it opens an icon's. Its one row draws no chord: no
 // in-page menu of the app draws one, and the File menu shows ⌘O (K7).
-const MENU = 'z-50 min-w-48 max-w-96 rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
+const MENU = 'z-50 min-w-48 max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))] rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
 const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui leading-8 outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
 
 function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; children: ReactNode }) {
+  const list = useRef<HTMLElement>(null);
+  const [column, setColumn] = useState<{ box: Element; width: number } | null>(null);
+  const opened = (open: boolean) => {
+    const box = list.current;
+    if (open && box) setColumn({ box, width: box.getBoundingClientRect().width });
+  };
   const machine = machineFor(appSessionId);
   const elsewhere = useMachines((s) => (machine === ipc.localMachine ? null : machineName(s.machines, machine, ipc.localMachine)));
   const atKeyboard = (event: KeyboardEvent<HTMLElement>) => {
@@ -382,12 +389,18 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
   // with the whole row as its title.
   const whole = elsewhere === null ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
   return (
-    <ContextMenu.Root modal={false}>
-      <ContextMenu.Trigger asChild onKeyDown={atKeyboard}>
+    <ContextMenu.Root modal={false} onOpenChange={opened}>
+      <ContextMenu.Trigger ref={list} asChild onKeyDown={atKeyboard}>
         {children}
       </ContextMenu.Trigger>
       <ContextMenu.Portal>
-        <ContextMenu.Content data-files-menu="" className={MENU}>
+        <ContextMenu.Content
+          data-files-menu=""
+          className={MENU}
+          collisionBoundary={column?.box}
+          collisionPadding={8}
+          style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
+        >
           {whole === null ? (
             <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosen(appSessionId)}>
               {OPEN_FILE_COPY.row}
