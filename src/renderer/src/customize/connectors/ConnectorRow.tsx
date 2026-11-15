@@ -4,7 +4,7 @@
 // operation's line. What depends on the kind of connector (what follows the name, the second line, which sign-in it
 // sends, whether it has Remove) is decided on `row.kind` in `partsOf`, so that a second kind is one branch there.
 // The row's parts are named for what later columns read: `data-connector-main` (the name, what follows it, the state)
-// and `data-connector-trailing` (Cancel, Sign in or its sentence, Remove).
+// and `data-connector-trailing` (Cancel, Sign in or its sentence, Remove), and after them, only under All, the kind word.
 // A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
 // `shadowedBy`) says which entry shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the
 // row it uses. U11a M8: a row of MAWS's own list is a dynamic connector to the sign-in, offered only with its
@@ -17,6 +17,7 @@ import { SECONDARY } from '../../sessions/ui';
 import { OperationLine, useManage } from '../../widgets/plugins/manage';
 import { TextButton } from '../../widgets/parts';
 import { ItemImage } from '../image/ItemImage';
+import { KindWord, NoLastControl } from '../KindWord';
 import { CONNECTORS as C } from './copy';
 import type { AskIn } from './manage';
 import { removalDirectoryOf, removeRequestOf, resultFor, shadowWords, signInViewOf, type AuthPosture, type SignInFacts, type SignInView } from './present';
@@ -39,6 +40,7 @@ export interface ConnectorRowProps {
   fingerprint: string | null;
   revision: string | null;
   iconUrl: string | null;
+  kindWord?: boolean; // under My items, All: "Connector" after the trailing controls, and the width of a last control
 }
 
 // What the row draws and sends for its kind: the words after the name, the second line, the server a sign-in is kept
@@ -54,7 +56,7 @@ function partsOf(row: ConnectorRowModel, cwd: string | null) {
   }
 }
 
-export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision, iconUrl }: ConnectorRowProps) {
+export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, liveRead, posture, fingerprint, revision, iconUrl, kindWord = false }: ConnectorRowProps) {
   const { ops } = useManage();
   const { after, second, own, target, kept, remove, runIn } = partsOf(row, cwd);
   // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
@@ -118,6 +120,12 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
           <OperationLine opKey={row.key} />
         </div>
       </div>
+      {kindWord && (
+        <>
+          <KindWord kind="connector" />
+          <NoLastControl />
+        </>
+      )}
     </li>
   );
 }

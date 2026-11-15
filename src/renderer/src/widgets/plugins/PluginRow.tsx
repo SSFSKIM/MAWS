@@ -15,6 +15,7 @@ import { DropdownMenu } from 'radix-ui';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
 import { ItemImage } from '../../customize/image/ItemImage';
+import { KindWord } from '../../customize/KindWord';
 import { pluginSeedOf } from '../../customize/image/tile';
 import { LIBRARY as L } from '../copy';
 import { MoreIcon } from './icons';
@@ -95,8 +96,9 @@ function managedWords(identity: PluginIdentity): { text: string; title?: string 
 // item's click through the row too).
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open]), a, [role="menuitem"]') !== null;
 
-// `iconUrl`: the directory's icon of this plugin, from the list's one read (`usePluginIcons`); null for its tile
-export function PluginRow({ identity, now, iconUrl, onOpen }: { identity: PluginIdentity; now: number; iconUrl: string | null; onOpen(id: string): void }) {
+// `iconUrl`: the directory's icon of this plugin, from the list's one read (`usePluginIcons`); null for its tile.
+// `kindWord`: under Customize's All (UX wave U11c, §E), "Plugin" before the menu.
+export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: { identity: PluginIdentity; now: number; iconUrl: string | null; onOpen(id: string): void; kindWord?: boolean }) {
   const { ops } = useManage();
   const target = identity.representative;
   const key = installedKey(target);
@@ -161,6 +163,7 @@ export function PluginRow({ identity, now, iconUrl, onOpen }: { identity: Plugin
           )}
         </span>
       )}
+      {kindWord && <KindWord kind="plugin" />}
       <span className="relative inline-flex shrink-0">{actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7" />}</span>
     </li>
   );

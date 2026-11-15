@@ -15,3 +15,9 @@ export const connectorRowKey: (row: Pick<CustomizationServer, 'name' | 'scope' |
 export function connectorRows(inventory: Pick<Inventory, 'servers'>): ConnectorRowModel[] {
   return inventory.servers.map((server) => ({ kind: 'configured', key: connectorRowKey(server), name: server.name, scope: server.scope, path: server.path, transport: server.transport }));
 }
+
+/** The rows whose name holds My items' text, case aside (the connectors' own rule for the page's search). */
+export function connectorRowsMatching(rows: readonly ConnectorRowModel[], search: string): readonly ConnectorRowModel[] {
+  const text = search.trim().toLowerCase();
+  return text === '' ? rows : rows.filter((row) => row.name.toLowerCase().includes(text));
+}

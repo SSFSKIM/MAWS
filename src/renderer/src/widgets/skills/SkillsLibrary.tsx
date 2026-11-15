@@ -9,6 +9,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { SortIcon } from '../../app/IconButton';
 import { ItemImage } from '../../customize/image/ItemImage';
+import { KindWord, NoLastControl } from '../../customize/KindWord';
 import { LIBRARY as L, PLUGIN_MANAGEMENT, SKILLS_LIBRARY as S } from '../copy';
 import { BackButton, backOnChord } from '../plugins/PluginDetail';
 import { Choice, SearchField } from '../plugins/LibraryHeader';
@@ -53,7 +54,9 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 // A click inside the row opens its detail unless it landed on a control of its own.
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open])') !== null;
 
-function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void }) {
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): under Customize's All, `kindWord`
+// ends the row in "Skill" and the width of the last control the other kinds' rows have.
+export function SkillItem({ row, onOpen, onUse, kindWord = false }: { row: SkillRow; onOpen(row: SkillRow): void; onUse?(name: string): void; kindWord?: boolean }) {
   const label = labelOf(row);
   const badge = badgeOf(row);
   const invocation = invocationOf(row);
@@ -83,11 +86,18 @@ function SkillItem({ row, onOpen, onUse }: { row: SkillRow; onOpen(row: SkillRow
       {onUse && invocation !== null && <button type="button" className={`relative ${SECONDARY}`} disabled={row.unavailable != null} title={row.unavailable ?? undefined} onClick={() => onUse(invocation)}>
         {S.useInChat}
       </button>}
+      {kindWord && (
+        <>
+          <KindWord kind="skill" />
+          <NoLastControl />
+        </>
+      )}
     </li>
   );
 }
 
-function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; onUse?(name: string): void }) {
+// `backTo`: the list Back returns to (Customize's All: My items)
+export function SkillDetail({ row, onBack, onUse, backTo = S.list }: { row: SkillRow; onBack(): void; onUse?(name: string): void; backTo?: string }) {
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => root.current?.focus(), []);
   const invocation = invocationOf(row);
@@ -99,7 +109,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
   ];
   return (
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
-      <BackButton to={S.list} onBack={onBack} />
+      <BackButton to={backTo} onBack={onBack} />
       <div className="flex items-center gap-3">
         <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="head" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -123,7 +133,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
 }
 
 // A row's identity across answers: its file, else its name (the list's own key).
-const rowKey = (row: SkillRow): string => row.path ?? row.name;
+export const skillRowKey = (row: SkillRow): string => row.path ?? row.name;
 
 // The list pane and, in place of it, a row's detail. The list stays mounted beneath the detail so Back returns to it as
 // it was; its scroll is restored by hand (an element under `display:none` loses its scrollTop). The detail is the
@@ -139,13 +149,13 @@ export function SkillsLibrary({ groups, shown, onUse, onDetail, onReset, toList 
     setListed(toList);
     setSelectedKey(null);
   }
-  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => rowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
+  const selected = useMemo(() => (selectedKey === null ? null : (groups.flatMap((g) => g.rows).find((row) => skillRowKey(row) === selectedKey) ?? null)), [groups, selectedKey]);
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ name: string; scrollTop: number } | null>(null);
   if (selectedKey !== null && selected === null) setSelectedKey(null); // its skill is gone: the list again
   const open = (row: SkillRow) => {
     left.current = { name: row.name, scrollTop: pane.current?.scrollTop ?? 0 };
-    setSelectedKey(rowKey(row));
+    setSelectedKey(skillRowKey(row));
   };
   const back = () => setSelectedKey(null);
   const inDetail = selected !== null;

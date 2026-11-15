@@ -18,7 +18,7 @@ import { readyCount, ReadySession, resolutionOf } from '../widgets/PluginsWidget
 import { AddMarketplaceDialog } from '../widgets/plugins/AddMarketplaceDialog';
 import type { MarketplaceDialog } from '../widgets/plugins/AddMenu';
 import { ManageMarketplaces } from '../widgets/plugins/ManageMarketplaces';
-import { ManageProvider, usePlaceHeld, useManageState, type Manage } from '../widgets/plugins/manage';
+import { ManageProvider, useManage, usePlaceHeld, useManageState, type Manage } from '../widgets/plugins/manage';
 import { usePluginsEnv, usePluginsRead } from '../widgets/plugins/read';
 import type { PluginSession } from '../widgets/plugins/session';
 import { useConnectorManage, type AskIn } from './connectors/manage';
@@ -81,6 +81,14 @@ export function CustomizePlace({ cwd, name, attached, children }: { cwd: string 
       </ManageProvider>
     </PlaceContext.Provider>
   );
+}
+
+/** The place's Manage with no session's reload: the lines below offer no Reload again, as their kind's never did (Skills'
+ * Discover, the connectors; ./bodies.tsx, ./MineAll.tsx). */
+export function WithoutReload({ children }: { children: ReactNode }) {
+  const manage = useManage();
+  const value = useMemo(() => ({ ...manage, reloadMods: null }), [manage]);
+  return <ManageProvider value={value}>{children}</ManageProvider>;
 }
 
 // Manage marketplaces over the place's listings (the plugin body's reads, shared by their keys).
