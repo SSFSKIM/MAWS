@@ -331,12 +331,11 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
 
   it('takes a scroll the browser makes when the page shrinks under the scroller for a layout change, not the person’s: the reveal stands and lands', async () => {
     const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
-    const { main, reading } = await revealIntoUnread(files);
-    const before = scroller().scrollTop;
-    page.setZoom(0.5); // every height halves: the browser clamps the scroller, with a scroll event and no input
+    const { main, reading, third } = await revealIntoUnread(files);
+    page.setZoom(0.25); // the drawn heights shrink: the browser clamps the scroller, with a scroll event and no input
     await page.settle();
     expect(page.clamped()).toBeGreaterThan(0);
-    expect(scroller().scrollTop).toBe(before / 2); // the section, by its estimate, under the new heights
+    expect(scroller().scrollTop).toBe(page.topOf(third)); // the section, by its estimate, under the new heights
     main.release(files[2].path);
     await page.settle();
     expect(page.rowAtTop()).toEqual(reading);
