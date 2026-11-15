@@ -151,6 +151,22 @@ describe('the report view', () => {
     expect(document.activeElement).toBe(records()[0]);
   });
 
+  it('hands focus within the pane pressed: two panes of one session, each press focuses that pane’s other line', async () => {
+    const { source } = pushSource(session());
+    const panes = [render(<Transcript source={source} variant="session" ownerLane />), render(<Transcript source={source} variant="session" ownerLane />)];
+    const within = (pane: number, name: string) => [...panes[pane].container.querySelectorAll('button')].filter((button) => button.textContent === name);
+    await waitFor(() => expect(within(1, '› working record')).toHaveLength(2));
+    for (const pane of [1, 0]) {
+      within(pane, '› working record')[0].focus();
+      fireEvent.click(within(pane, '› working record')[0]);
+      await waitFor(() => expect(within(pane, '‹ fold to report')).toHaveLength(1));
+      expect(document.activeElement).toBe(within(pane, '‹ fold to report')[0]);
+      fireEvent.click(within(pane, '‹ fold to report')[0]);
+      await waitFor(() => expect(within(pane, '‹ fold to report')).toEqual([]));
+      expect(document.activeElement).toBe(within(pane, '› working record')[0]);
+    }
+  });
+
   it('the full transcript folds nothing: every turn in full, each line with no chevron, the marks unboxed', async () => {
     const { key } = await mounted(session());
     await waitFor(() => expect(records().length).toBeGreaterThan(0));

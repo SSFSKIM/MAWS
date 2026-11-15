@@ -157,5 +157,91 @@ describe('the first streamed mark puts the view in force on every route, and its
       draw(tail([block(STREAMED)], true));
       await theTurnFoldIsBack();
     });
+
+    // A fold the person started just before the first mark: the turn closes as they asked once the view is out of
+    // force again, and its running close is not what the view draws in the meantime (no record line waits on it).
+    it('a fold the person started as the first mark arrives: the view is drawn at once, and the turn is folded after', async () => {
+      const { tail, draw } = await mounted();
+      const fold = () => foldingTurnLines()[0];
+      await waitFor(() => expect(fold()?.getAttribute('aria-expanded')).toBe('false'));
+      fireEvent.click(fold());
+      await waitFor(() => expect(fold().getAttribute('aria-expanded')).toBe('true'));
+      fireEvent.click(fold()); // the close starts; the store folds the turn when it has run
+      expect(fold().getAttribute('aria-expanded')).toBe('false');
+      draw(tail([block(STREAMED)]));
+      expect(recordLines().length).toBeGreaterThan(0); // before the close would have run
+      fireEvent.click(recordLines()[0]);
+      expect(screen.getByText(WORK)).toBeTruthy();
+      draw(tail([]));
+      await theTurnFoldIsBack();
+    });
+  });
+
+  // Two mounts of one key (a session's pane and its card, say): the outside rows' term is either mount's, so one with
+  // no message never clears the other's, and a mount that goes takes its own part with it.
+  describe('two mounts of one key', () => {
+    const block = (text: string): StreamBlock => ({ turnId: 'bridge-turn', agentId: null, step: 2, index: 0, kind: 'text', text, toolName: null, toolUseId: null, settledBy: null });
+    const since = () => '2026-09-28T10:00:30.000Z';
+
+    function scene() {
+      const { source } = sourceOf(() => history().events);
+      const stream = (): Row[] => {
+        const rows = useTranscriptStore.getState().entries[source.key!]?.rows ?? [];
+        return streamingRows([block(STREAMED)], since, { turn: latestTurn(rows), kept: false });
+      };
+      const element = (tail?: Row[]) => <Transcript source={source} variant="session" ownerLane {...(tail && { tail })} />;
+      const inForce = () => useTranscriptStore.getState().entries[source.key!]?.state.ui.noTurnFold === true;
+      const live = () => waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+      return { stream, element, inForce, live };
+    }
+
+    it('the mount holding the message first, then one holding none: the view stays in force', async () => {
+      const { stream, element, inForce, live } = scene();
+      const first = render(element());
+      await live();
+      first.rerender(element(stream()));
+      await waitFor(() => expect(inForce()).toBe(true));
+      render(element());
+      await act(async () => {});
+      expect(inForce()).toBe(true);
+      expect(recordLines().length).toBeGreaterThan(0);
+    });
+
+    it('the mount holding none first, then one holding the message: the view is in force', async () => {
+      const { stream, element, inForce, live } = scene();
+      render(element());
+      await live();
+      const second = render(element());
+      second.rerender(element(stream()));
+      await waitFor(() => expect(inForce()).toBe(true));
+      await act(async () => {});
+      expect(inForce()).toBe(true);
+    });
+
+    it("one mount's stream clears while the other still holds a message, then that one clears too", async () => {
+      const { stream, element, inForce, live } = scene();
+      const first = render(element());
+      await live();
+      first.rerender(element(stream()));
+      const second = render(element(stream()));
+      await waitFor(() => expect(inForce()).toBe(true));
+      first.rerender(element([]));
+      await act(async () => {});
+      expect(inForce()).toBe(true);
+      second.rerender(element([]));
+      await waitFor(() => expect(inForce()).toBe(false));
+    });
+
+    it('the mount holding the message unmounts: its part goes with it', async () => {
+      const { stream, element, inForce, live } = scene();
+      const first = render(element());
+      await live();
+      first.rerender(element(stream()));
+      render(element());
+      await waitFor(() => expect(inForce()).toBe(true));
+      first.unmount();
+      await waitFor(() => expect(inForce()).toBe(false));
+      await theTurnFoldIsBack();
+    });
   });
 });
