@@ -1,0 +1,550 @@
+{
+ "provenance": {
+  "plan": "docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md",
+  "section": "Probes to arrange",
+  "case": "p4p-interrupt",
+  "stale": false,
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "model": "haiku",
+  "launch": "interactive engine in tmux (vm-run.sh term's launch), --model haiku",
+  "route": "gateway (vm-run.sh loopback forward)",
+  "startedAt": "2026-11-15T11:13:09.538Z",
+  "timeUnit": "ms since startedAt; file lines seen by a 100 ms poll"
+ },
+ "failure": null,
+ "agents": [
+  {
+   "id": "a89109b96a8804710",
+   "description": "uxw fg slow"
+  }
+ ],
+ "timeline": [
+  {
+   "ms": 36,
+   "cause": "engine started",
+   "args": [
+    "--model",
+    "haiku",
+    "-p",
+    "Call the Agent tool once, with subagent_type \"general-purpose\", run_in_background false, description \"uxw fg slow\" and prompt \"Run exactly `python3 uxw8d_wait.py 90` with the Bash tool in the foreground (run_in_background false, timeout 600000), then reply with only the word DONE.\". When it returns, whatever it says, reply with only the word OK.",
+    "--permission-mode",
+    "auto",
+    "--session-id",
+    "<session>"
+   ],
+   "env": []
+  },
+  {
+   "ms": 1011,
+   "file": "main",
+   "line": 1,
+   "type": "queue-operation",
+   "operation": "enqueue",
+   "timestamp": "2026-11-15T11:13:10.200Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 2,
+   "type": "queue-operation",
+   "operation": "dequeue",
+   "timestamp": "2026-11-15T11:13:10.204Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 3,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "sdk",
+   "turnOrigin": "sdk",
+   "text": "Call the Agent tool once, with subagent_type \"general-purpose\", run_in_background false, description \"uxw fg slow\" and prompt \"Run exactly `python3 uxw8d_wait.py 90` with the Bash tool in the foregrou",
+   "timestamp": "2026-11-15T11:13:10.344Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 4,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "environment",
+   "timestamp": "2026-11-15T11:13:10.342Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 5,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "model",
+   "timestamp": "2026-11-15T11:13:10.342Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T11:13:10.342Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "agent_listing_delta",
+   "timestamp": "2026-11-15T11:13:10.342Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T11:13:10.342Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 9,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T11:13:10.435Z"
+  },
+  {
+   "ms": 1012,
+   "file": "main",
+   "line": 11,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "date",
+   "timestamp": "2026-11-15T11:13:10.436Z"
+  },
+  {
+   "ms": 1013,
+   "file": "main",
+   "line": 12,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T11:13:10.442Z"
+  },
+  {
+   "ms": 1013,
+   "file": "main",
+   "line": 13,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:10.445Z"
+  },
+  {
+   "ms": 1013,
+   "file": "main",
+   "line": 14,
+   "type": "api-request-shape",
+   "timestamp": "2026-11-15T11:13:10.510Z"
+  },
+  {
+   "ms": 1013,
+   "file": "main",
+   "line": 15,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 1014,
+   "file": "main",
+   "line": 16,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 1014,
+   "file": "main",
+   "line": 17,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:13:10.510Z"
+  },
+  {
+   "ms": 1014,
+   "file": "main",
+   "line": 18,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 1014,
+   "file": "main",
+   "line": 19,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 3229,
+   "file": "main",
+   "line": 20,
+   "type": "tools-used"
+  },
+  {
+   "ms": 3230,
+   "file": "main",
+   "line": 21,
+   "type": "assistant",
+   "isSidechain": false,
+   "toolUses": [
+    {
+     "id": "toolu_01H9VnwYdTbJKQCfsTzeNz6d",
+     "name": "Agent",
+     "bg": false,
+     "description": "uxw fg slow"
+    }
+   ],
+   "timestamp": "2026-11-15T11:13:11.777Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 1,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "text": "Run exactly `python3 uxw8d_wait.py 90` with the Bash tool in the foreground (run_in_background false, timeout 600000), then reply with only the word DONE.",
+   "timestamp": "2026-11-15T11:13:12.646Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 2,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T11:13:12.667Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 3,
+   "type": "user",
+   "isMeta": true,
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "text": "<system-reminder>\nYour final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your las",
+   "timestamp": "2026-11-15T11:13:12.667Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 4,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "environment",
+   "timestamp": "2026-11-15T11:13:12.674Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 5,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "model",
+   "timestamp": "2026-11-15T11:13:12.674Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T11:13:12.678Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T11:13:12.717Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "date",
+   "timestamp": "2026-11-15T11:13:12.717Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 9,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T11:13:12.720Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:12.721Z"
+  },
+  {
+   "ms": 3230,
+   "file": "subagents/agent-a89109b96a8804710.meta.json",
+   "meta": "written",
+   "version": 1
+  },
+  {
+   "ms": 3331,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 11,
+   "type": "api-request-shape",
+   "agentId": "a89109b96a8804710",
+   "timestamp": "2026-11-15T11:13:12.752Z"
+  },
+  {
+   "ms": 3331,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 12,
+   "type": "api-request-blob",
+   "agentId": "a89109b96a8804710"
+  },
+  {
+   "ms": 3331,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 13,
+   "type": "api-request-blob",
+   "agentId": "a89109b96a8804710"
+  },
+  {
+   "ms": 3331,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 14,
+   "type": "api-request",
+   "agentId": "a89109b96a8804710",
+   "timestamp": "2026-11-15T11:13:12.752Z"
+  },
+  {
+   "ms": 4639,
+   "file": "main",
+   "line": 22,
+   "type": "tools-used"
+  },
+  {
+   "ms": 4640,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 15,
+   "type": "assistant",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "toolUses": [
+    {
+     "id": "toolu_01AgqfqYpLBvzFXknrjE1v3p",
+     "name": "Bash",
+     "bg": false,
+     "description": "Run uxw8d_wait.py with argument 90"
+    }
+   ],
+   "timestamp": "2026-11-15T11:13:13.871Z"
+  },
+  {
+   "ms": 5047,
+   "cause": "agent runs its command",
+   "agent": "a89109b96a8804710"
+  },
+  {
+   "ms": 8059,
+   "cause": "SIGINT to the engine (the interrupt of a print-mode run)"
+  },
+  {
+   "ms": 8168,
+   "file": "main",
+   "line": 23,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 8168,
+   "file": "main",
+   "line": 24,
+   "type": "cost-state"
+  },
+  {
+   "ms": 8168,
+   "file": "main",
+   "line": 25,
+   "type": "user",
+   "isSidechain": false,
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_01H9VnwYdTbJKQCfsTzeNz6d",
+     "is_error": true
+    }
+   ],
+   "toolUseResult": "User rejected tool use",
+   "timestamp": "2026-11-15T11:13:17.634Z"
+  },
+  {
+   "ms": 8169,
+   "file": "main",
+   "line": 26,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:17.637Z"
+  },
+  {
+   "ms": 8169,
+   "file": "main",
+   "line": 27,
+   "type": "user",
+   "isSidechain": false,
+   "text": "[Request interrupted by user for tool use]",
+   "timestamp": "2026-11-15T11:13:17.637Z"
+  },
+  {
+   "ms": 8169,
+   "file": "main",
+   "line": 28,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 8169,
+   "file": "main",
+   "line": 29,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 8170,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 16,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_01AgqfqYpLBvzFXknrjE1v3p",
+     "is_error": true
+    }
+   ],
+   "toolUseResult": "User rejected tool use",
+   "timestamp": "2026-11-15T11:13:17.632Z"
+  },
+  {
+   "ms": 8170,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 17,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:17.634Z"
+  },
+  {
+   "ms": 8170,
+   "file": "subagents/agent-a89109b96a8804710.jsonl",
+   "line": 18,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "a89109b96a8804710",
+   "text": "[Request interrupted by user for tool use]",
+   "timestamp": "2026-11-15T11:13:17.635Z"
+  },
+  {
+   "ms": 8466,
+   "cause": "engine exited"
+  }
+ ],
+ "metas": {
+  "subagents/agent-a89109b96a8804710.meta.json": [
+   {
+    "ms": 3230,
+    "meta": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "description": "uxw fg slow",
+     "toolUseId": "toolu_01H9VnwYdTbJKQCfsTzeNz6d",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  ]
+ },
+ "snapshots": [
+  {
+   "label": "before",
+   "ms": 8051,
+   "lines": {
+    "main": 22,
+    "subagents/agent-a89109b96a8804710.jsonl": 15
+   },
+   "metas": {
+    "subagents/agent-a89109b96a8804710.meta.json": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "description": "uxw fg slow",
+     "toolUseId": "toolu_01H9VnwYdTbJKQCfsTzeNz6d",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  },
+  {
+   "label": "after",
+   "ms": 13467,
+   "lines": {
+    "main": 29,
+    "subagents/agent-a89109b96a8804710.jsonl": 18
+   },
+   "metas": {
+    "subagents/agent-a89109b96a8804710.meta.json": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "description": "uxw fg slow",
+     "toolUseId": "toolu_01H9VnwYdTbJKQCfsTzeNz6d",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  }
+ ],
+ "panes": [
+  {
+   "label": "before",
+   "ms": 8051,
+   "pane": "\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n"
+  },
+  {
+   "label": "after",
+   "ms": 13467,
+   "pane": ""
+  }
+ ]
+}

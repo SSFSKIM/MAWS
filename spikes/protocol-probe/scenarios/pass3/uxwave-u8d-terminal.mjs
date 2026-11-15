@@ -8,7 +8,12 @@
 // send-keys. A recorder reads the session's folder every 100 ms and keeps, for each new line of the main transcript and
 // of each agent's file and for each change of a meta, the moment it was seen, beside the moments of what the scenario
 // caused (the timeline). P2 also keeps the bridge's /events stream (its snapshot's agents and its agent events).
-// UXW_CASE: p3-hup | p3-term | p3-nested (a background agent waiting for a nested one; the terminal closed) | p1-two | p1-one | p1-shells | p1-shell (two or one background shell commands) | p4-done | p4-fail | p4-interrupt | p2-bg | p2-fg.
+// p5-late, p5-fail: a background parent P launches a nested background agent N (a 20 s sleep; p5-fail: the command
+// exits 3 and N reports FAILED) and hands back at once; recorded until N has ended and 15 s more. p5-stopped: P launches N
+// (a 51 s sleep) and in the same message runs a 301 s sleep itself; once N's file holds its sleep's call the main loop is told to stop P
+// with TaskStop; recorded until N's sleep has ended (or 90 s) and 15 s more, with N's sleep process counted.
+// UXW_CASE (p4p-*, p2p-fg: the P4 cases and P2's waited-for agent in print mode, `-p <prompt> --permission-mode auto`, run in the same pane; the
+// interrupt there is SIGINT to the engine): p3-hup | p3-term | p3-nested (a background agent waiting for a nested one; the terminal closed) | p1-two | p1-one | p1-shells | p1-shell (two or one background shell commands) | p4-done | p4-fail | p4-interrupt | p2-bg | p2-fg.
 // UXW_STALE=1 (P1): the agents' files' mtimes are set 72 h back before the resume (the engine restarts an orphan only
 // when its file is younger than 48 h, B:941133 `yi`). UXW_TAG names the fixtures (u8d-<case>[-stale]-r1 by default).
 // Kept in fixtures/uxwave/: <tag>.terminal.json (the record), <tag>.transcript.jsonl (the main transcript), and
@@ -23,7 +28,7 @@ import {redact as harnessRedact} from '../../harness.mjs';
 import {BIN,ENGINE_VERSION,FIXTURES,slug,delay} from './uxwave-common-arrivals.mjs';
 
 const CASE=process.env.UXW_CASE??'';
-const CASES=['p3-hup','p3-term','p3-nested','p1-two','p1-one','p1-shells','p1-shell','p4-done','p4-fail','p4-interrupt','p2-bg','p2-fg'];
+const CASES=['p3-hup','p3-term','p3-nested','p1-two','p1-one','p1-shells','p1-shell','p4-done','p4-fail','p4-interrupt','p4p-done','p4p-fail','p4p-interrupt','p2-bg','p2-fg','p2p-fg','p5-late','p5-fail','p5-stopped'];
 const STALE=process.env.UXW_STALE==='1';
 const TAG=process.env.UXW_TAG||`u8d-${CASE}${STALE?'-stale':''}-r1`;
 const MODEL=process.env.UXW_MODEL||'haiku';
@@ -202,6 +207,72 @@ async function body(record){
   await delay(5000);snap('after');
   await type('Reply with only the word AFTER.');await idle(90000);await delay(3000);snap('after-prompt');
   await end('hup');
+ }else if(CASE.startsWith('p4p-')){
+  if(CASE==='p4p-fail'){mkdirSync(join(WORK,'.claude/agents'),{recursive:true});writeFileSync(join(WORK,'.claude/agents/uxw-broken.md'),'---\nname: uxw-broken\ndescription: A probe\'s agent whose model does not exist.\nmodel: claude-uxw-no-such-model-1\n---\nReply with only the word PONG.\n');}
+  const text=CASE==='p4p-done'?launch([['uxw fg ok',QUICK]],false):CASE==='p4p-fail'?launch([['uxw fg broken','Reply with only the word PONG.','uxw-broken']],false):launch([['uxw fg slow',slow(90)]],false);
+  start(['-p',text,'--permission-mode','auto','--session-id',SID]);
+  const pid=enginePid;
+  if(CASE==='p4p-interrupt'){
+   const a=await until(()=>waiting('uxw fg slow'),150000);if(!a)throw new Error('the agent never ran its command');
+   cause('agent runs its command',{agent:a.id});await delay(3000);snap('before');
+   cause('SIGINT to the engine (the interrupt of a print-mode run)');process.kill(pid,'SIGINT');
+  }
+  const gone=await until(()=>!alive(pid),240000,100);cause(gone?'engine exited':'engine still running after 240 s');
+  await delay(5000);snap('after');
+  if(!gone)await end('term');
+ }else if(CASE==='p5-late'||CASE==='p5-fail'){
+  writeFileSync(join(WORK,'uxw8d_fail.py'),'import sys,time\ntime.sleep(float(sys.argv[1]))\nprint("FAILING")\nsys.exit(3)\n');
+  const nested=CASE==='p5-late'?`Run exactly \`python3 uxw8d_wait.py 20\` with the Bash tool in the foreground (timeout 600000), then reply with only the word DONE.`:`Run exactly \`python3 uxw8d_fail.py 20\` with the Bash tool in the foreground (timeout 600000). It exits non-zero: then report the failure, replying with only the word FAILED.`;
+  const inner=`Call the Agent tool once, with subagent_type 'general-purpose', run_in_background true, description 'uxw nested N' and prompt '${nested}'. As soon as that call returns, hand back at once with only the word LAUNCHED; do not wait for the nested agent and do nothing else.`;
+  start(['--session-id',SID]);await ready();
+  await type(launch([['uxw parent P',inner]]));
+  const n=await until(()=>waiting('uxw nested N')||(byDesc('uxw nested N')&&lines(byDesc('uxw nested N').file).some(l=>l.includes(CASE==='p5-late'?'uxw8d_wait':'uxw8d_fail'))&&byDesc('uxw nested N')),150000);if(!n)throw new Error('N never ran its command');
+  cause('N runs its command',{parent:byDesc('uxw parent P')?.id,nested:n.id});
+  const metaOf=a=>{try{return JSON.parse(readFileSync(a.meta,'utf8'));}catch{return {};}};
+  const pEnded=await until(()=>{const p=byDesc('uxw parent P');return p&&metaOf(p).finished===true;},120000);
+  cause(pEnded?'P ended (its meta finished: true)':'P not ended after 120 s');
+  const nEnded=await until(()=>metaOf(n).finished===true||lines(n.file).some(l=>l.includes('"type":"assistant"')&&/\b(DONE|FAILED)\b/.test(l)&&!l.includes('tool_use')),150000);
+  cause(nEnded?'N ended (meta finished or its final reply)':'N not ended after 150 s');
+  await delay(15000);snap('after');
+  await end('hup');
+ }else if(CASE==='p5-stopped'){
+  const nested=`Run exactly \`python3 uxw8d_wait.py 51\` with the Bash tool in the foreground (timeout 600000), then reply with only the word DONE.`;
+  const inner=`In ONE message make two tool calls together: the Agent tool with subagent_type 'general-purpose', run_in_background true, description 'uxw nested N' and prompt '${nested}'; and the Bash tool running exactly \`python3 uxw8d_wait.py 301\` in the foreground (timeout 600000). Do not hand back or reply until that Bash call has returned; then reply with only the word DONE.`;
+  start(['--session-id',SID]);await ready();
+  await type(launch([['uxw parent P',inner]]));
+  const has=(d,s)=>{const a=byDesc(d);return a&&lines(a.file).some(l=>l.includes('"name":"Bash"')&&l.includes(s))&&a;};
+  const ok=await until(()=>has('uxw nested N','uxw8d_wait.py 51')&&has('uxw parent P','uxw8d_wait.py 301'),180000);if(!ok)throw new Error('N or P never ran its sleep');
+  {const m=(()=>{try{return JSON.parse(readFileSync(byDesc('uxw parent P').meta,'utf8'));}catch{return {};}})();if(m.finished)throw new Error('P had already ended before the stop');}
+  const P=byDesc('uxw parent P'),N=byDesc('uxw nested N');
+  const sleeps=()=>{try{return execFileSync('pgrep',['-af','uxw8d_wait.py'],{encoding:'utf8'}).trim().split('\n').filter(l=>/uxw8d_wait\.py (51|301)\b/.test(l)).map(l=>l.replace(/^\d+\s+/,'').replace(/.*uxw8d_wait\.py /,'sleep '));}catch{return [];}};
+  cause('N and P run their sleeps',{parent:P.id,nested:N.id,sleeps:sleeps()});
+  await idle(60000);await delay(2000);snap('before');
+  cause('typed: stop P with TaskStop');
+  await type(`Stop the background agent with id ${P.id} using the TaskStop tool (find it with ToolSearch if it is not loaded). Stop only that one. Then reply with only the word STOPPED.`);
+  const t1=Date.now();
+  const nFinished=()=>{try{return JSON.parse(readFileSync(N.meta,'utf8')).finished===true;}catch{return false;}};
+  while(Date.now()-t1<120000){await delay(5000);timeline.push({ms:ms(),cause:'sleeps alive',sleeps:sleeps()});if(nFinished())break;}
+  cause(nFinished()?'N ended (its meta finished: true)':'N not ended 120 s after the stop',{sleeps:sleeps()});
+  await delay(15000);snap('after');
+  await end('hup');
+ }else if(CASE==='p2p-fg'){
+  const why=contained();if(why.length)throw new Error('not contained: '+why.join('; '));
+  if(!existsSync(join(WORK,'.smns')))record.projectInit=redact(execFileSync('sminos',['project','init','--name','uxw'],{cwd:WORK,env:{PATH:process.env.PATH,HOME:process.env.HOME,LANG:'C.UTF-8',TMPDIR:'/tmp',USER:process.env.USER??'',SHELL:'/bin/bash'},encoding:'utf8',timeout:60000})).slice(0,500);
+  start(['-p',launch([['uxw fg slow',slow(120)]],false),'--permission-mode','auto','--session-id',SID,'--plugin-dir',PLUGIN],{CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:'1'});
+  const pid=enginePid;
+  const up=await until(async()=>existsSync(SOCK)&&(await getJson('/status')).status===200,60000,500);
+  record.bridgeStatus=up?redact(JSON.stringify((await getJson('/status')).body)).slice(0,2000):'no bridge';
+  if(!up)throw new Error('the bridge never answered');
+  subscribe();
+  const a=await until(()=>waiting('uxw fg slow'),150000);if(!a)throw new Error('the agent never ran its command');
+  cause('agent runs its command',{agent:a.id});await delay(3000);
+  record.agentsBefore=JSON.parse(redact(JSON.stringify((await getJson('/agents')).body??null)));snap('before');
+  cause('POST /command stop-agent',{body:{op:'stop-agent',agentId:a.id}});
+  const answer=await post({op:'stop-agent',agentId:a.id});
+  cause('stop-agent answered',{answer});bridge.answers.push(answer);
+  record.agentsAfter=JSON.parse(redact(JSON.stringify((await getJson('/agents')).body??null)));
+  const gone=await until(()=>!alive(pid),180000,100);cause(gone?'engine exited':'engine still running after 180 s');
+  await delay(5000);snap('after');if(!gone)await end('term');
  }else if(CASE==='p2-bg'||CASE==='p2-fg'){
   const why=contained();if(why.length)throw new Error('not contained: '+why.join('; '));
   if(!existsSync(join(WORK,'.smns')))record.projectInit=redact(execFileSync('sminos',['project','init','--name','uxw'],{cwd:WORK,env:{PATH:process.env.PATH,HOME:process.env.HOME,LANG:'C.UTF-8',TMPDIR:'/tmp',USER:process.env.USER??'',SHELL:'/bin/bash'},encoding:'utf8',timeout:60000})).slice(0,500);
@@ -228,7 +299,7 @@ async function body(record){
 
 export default async()=>{
  if(!CASES.includes(CASE))throw new Error('UXW_CASE='+CASES.join(' | '));
- const record={provenance:{plan:'docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md',section:'Probes to arrange',case:CASE,stale:STALE,engine:BIN,engineVersion:ENGINE_VERSION,model:MODEL,launch:'interactive engine in tmux (vm-run.sh term\'s launch), --model '+MODEL+(CASE.startsWith('p2-')?' --plugin-dir '+PLUGIN+', CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1':''),route:'gateway (vm-run.sh loopback forward)',startedAt:new Date(T0).toISOString(),timeUnit:'ms since startedAt; file lines seen by a 100 ms poll'}};
+ const record={provenance:{plan:'docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md',section:'Probes to arrange',case:CASE,stale:STALE,engine:BIN,engineVersion:ENGINE_VERSION,model:MODEL,launch:'interactive engine in tmux (vm-run.sh term\'s launch), --model '+MODEL+(CASE.startsWith('p2')?' --plugin-dir '+PLUGIN+', CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1':''),route:'gateway (vm-run.sh loopback forward)',startedAt:new Date(T0).toISOString(),timeUnit:'ms since startedAt; file lines seen by a 100 ms poll'}};
  const poller=setInterval(()=>{try{scan();}catch{}},100);
  let failure=null;
  try{await body(record);}catch(e){failure=e.message;cause('failure',{error:e.message});}
@@ -240,7 +311,7 @@ export default async()=>{
   writeFileSync(FIXTURES+TAG+'.transcript.jsonl',existsSync(MAIN)?redact(readFileSync(MAIN,'utf8')):'');
   const subOut=FIXTURES+TAG+'-subagents/';
   if(existsSync(SUB)){mkdirSync(subOut,{recursive:true});for(const n of readdirSync(SUB))writeFileSync(subOut+n,redact(readFileSync(join(SUB,n),'utf8')));}
-  Object.assign(record,{failure,agents:agents().map(a=>({id:a.id,description:a.description})),timeline,metas,snapshots,panes,...(CASE.startsWith('p2-')&&{bridge})});
+  Object.assign(record,{failure,agents:agents().map(a=>({id:a.id,description:a.description})),timeline,metas,snapshots,panes,...(CASE.startsWith('p2')&&{bridge})});
   writeFileSync(FIXTURES+TAG+'.terminal.json',redact(JSON.stringify(record,null,1))+'\n');
   console.log('kept',TAG,failure??'ok');
  }
