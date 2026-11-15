@@ -42,6 +42,15 @@ async function fromFile(text: string, agent: { agentId: AgentId; parentToolUseId
   follower.stop();
   return events;
 }
+/** The same while the file is still being written: what the follower emitted before it stops (its stop ends the session). */
+async function fromFileFollowed(text: string): Promise<SessionEvent[]> {
+  const events: SessionEvent[] = [];
+  const follower = new ChainFollower(new MemoryFileReader(text), SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+  await follower.start();
+  const followed = [...events];
+  follower.stop();
+  return followed;
+}
 const fromRows = (text: string, agentId: string | null = null): Promise<SessionEvent[]> =>
   freshSource(rowsIn(text).filter((row) => typeof row.uuid === 'string'), SESSION, subagentLookupOf([]), agentId).snapshot();
 
@@ -190,13 +199,13 @@ describe('an approval the bridge appended waits for the engine to read it, by bo
   }
   const WAITING = 'waiting (next, unread)'; // while the turn it waits for runs
   const UNREAD = 'waiting (no pending, unread)'; // once that turn has ended, for the turn that starts next
-  /** The reading at each prefix of the run's file, from line `from` to line `to`, by each route. */
+  /** The reading at each prefix of the run's file, from line `from` to line `to`, by each route, the file still being written. */
   async function prefixes(name: string, n: number, from: number, to: number) {
     const lines = textOf(`${name}.transcript.jsonl`).split('\n').filter((line) => line.trim() !== '');
     const read: { file: string[]; link: string[] } = { file: [], link: [] };
     for (let p = from; p <= to; p += 1) {
       const head = lines.slice(0, p).join('\n');
-      read.file.push(`${p}: ${approvalAt(await fromFile(`${head}\n`), commandOf(n))}`);
+      read.file.push(`${p}: ${approvalAt(await fromFileFollowed(`${head}\n`), commandOf(n))}`);
       read.link.push(`${p}: ${approvalAt(await fromRows(head), commandOf(n))}`);
     }
     return read;
