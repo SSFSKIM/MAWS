@@ -1176,6 +1176,11 @@ The architect's rulings of 2026-11-15 (UTC) on M5's review, and M5's fix wave 1,
   - An existing Library scene that pinned `{ artifact: null }` for a person's delete now expects §C.5's `deleted` with `undoable: false`. No other reader of that answer under `e2e/` or `apps/desk-web` pins the old shape.
   - The remote scene waits for B's delete before it waits for the turn's end. A launching session's status can read as a finished turn before the turn has started; the hosted run passed by timing.
 
+The architect's ruling of 2026-11-15 (UTC) on the branch panel's findings for U10b-2. The panel found one P1 and four P2 findings, all in the parked replica's recovery; the panel read the mark, the undelete and the seam and found them sound.
+
+- **A parked replica leaves parking only on a current read that answers not-deleted, issued after the deletion was observed.** The order is held by the standing read's ticket (a request number or a generation). Every recovery trigger re-reads and never clears parking on local state: `hostReady`, `retry`, `artifacts.resync` and the `created` announcement. Neither sync completion (a buffered step 2 from before the deletion included) nor a cached library row counts. `retry()` stays armed while the replica is parked. The row's and the notice's "Restored" rest on the same predicate: restoration is a current successful read, and nothing else is. One rule answers the panel's four P2 findings: a recovery open that fails while parked; a cached row read as restoration for a member whose reads are refused; an Undo lost in the remote feed's gap before `artifacts.resync`; a pre-deletion step 2 applied later.
+- **An edit the fence refused keeps its tab.** `unsaved > 0` in a parked replica makes the tab non-replaceable and sends its close through the close guard, read-only or not. Opening a session over that tab, or closing it, no longer drops the edit without a decision (the panel's P1).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
