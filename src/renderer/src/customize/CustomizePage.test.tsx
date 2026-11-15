@@ -202,9 +202,11 @@ describe('the head', () => {
     expect(screen.queryByRole('tablist')).toBeNull();
     for (const name of ['Plugins', 'Skills', 'Connectors']) expect(screen.queryByRole('tab', { name })).toBeNull();
     await screen.findByText('tides');
-    // the row's named parts (§E): the image, the name, what follows it and the state; then the trailing controls
+    // the row's named parts (§E): its image stands before the main part (the name, what follows it, the state); then
+    // the trailing controls
     const main = document.querySelector<HTMLElement>('[data-connector="tides"] [data-connector-main]')!;
-    expect(main.querySelector('[data-item-image]')).not.toBeNull();
+    expect(main.querySelector('[data-item-image]')).toBeNull();
+    expect(document.querySelector('[data-connector="tides"] > [data-item-image]')).not.toBeNull();
     expect(main.textContent).toContain('tides');
     expect(main.querySelector('[data-connector-trailing]')).toBeNull();
   });
