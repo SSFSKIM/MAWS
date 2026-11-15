@@ -46,7 +46,7 @@ export async function watchPrompts(page: Page): Promise<void> {
     const w = window as unknown as { __u1aDrawn?: Record<string, number>; __u1bPrompts?: { cards: Record<string, Watch>; overlay: boolean; clearedAt: number } };
     if (w.__u1aDrawn) return;
     const drawn: Record<string, number> = (w.__u1aDrawn = {});
-    const prompts = (w.__u1bPrompts = { cards: {} as Record<string, Watch>, overlay: false, clearedAt: 0 });
+    const prompts: { cards: Record<string, Watch>; overlay: boolean; clearedAt: number } = (w.__u1bPrompts = { cards: {}, overlay: false, clearedAt: 0 });
     const OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]:not([data-hover-card])`).join(', ');
     const watched = new WeakSet<Element>();
     const watch = (card: Element, id: string, buttons: Element) => {
