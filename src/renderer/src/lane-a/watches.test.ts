@@ -8,6 +8,7 @@ import { at } from '../../../../test/support/machine';
 import { applyLaneAState, resetLaneAStore, useLaneA } from '../stores/lane-a';
 import { laneAState } from './test-support/lane-a-state';
 import { opMessagesOf, readLaneA, resetLaneAWatches, watchLaneA, type PlaneEvent } from './watches';
+import { useCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 
 const A = at('app-a') as AppSessionId;
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -117,6 +118,65 @@ describe('watchLaneA', () => {
     expect(opMessagesOf(A, 'cmd-2').map((m) => m.body)).toEqual([{ rpc: 'cmd-2', op: 'btw', phase: 'start', id: 'cmd-2' }, end.body]);
     fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [msg('compact', { rpc: 'cmd-3', phase: 'end', tokensBefore: 9, tokensAfter: 2 }, null)] });
     expect(opMessagesOf(A, 'cmd-3')).toHaveLength(1);
+  });
+});
+
+// UX wave U3b (M4; the execution document's M4 table, acceptance 11): a terminal session compacts between its bridge's
+// `compact` messages of phase `start` and `end` for one operation, and stops when its watch resets, ends or is let go.
+describe('watchLaneA and a compaction asked through the bridge', () => {
+  const compact = (rpc: string | null, phase: 'start' | 'end') => msg('compact', { rpc, phase }, null);
+  const compacting = () => useCompacting.getState().held.has(A);
+  beforeEach(() => useCompacting.setState({ held: new Map() }));
+  async function watched() {
+    const fake = fakeClient({ 'laneA.watch': { watch: 'w-1' }, 'laneA.unwatch': undefined });
+    applyLaneAState(A, laneAState(A));
+    const off = watchLaneA(A, () => {}, { client: fake.client });
+    await settle();
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages: [snapshot] });
+    const plane = (payload: Record<string, unknown>) => fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', ...payload });
+    return { off, plane };
+  }
+
+  it('is on from the operation’s `start` to its own `end`, not another’s', async () => {
+    const { plane } = await watched();
+    plane({ messages: [compact('rpc-1', 'start')] });
+    expect(compacting()).toBe(true);
+    plane({ messages: [compact('rpc-2', 'end')] });
+    expect(compacting()).toBe(true);
+    plane({ messages: [compact('rpc-1', 'end')] });
+    expect(compacting()).toBe(false);
+  });
+
+  it('says nothing of a compaction no operation asked for (no id: the terminal started it)', async () => {
+    const { plane } = await watched();
+    plane({ messages: [compact(null, 'start')] });
+    expect(compacting()).toBe(false);
+  });
+
+  it.each([
+    ['a reset', { reset: true }],
+    ['an end', { ended: 'the session’s bridge went away' }],
+  ])('is off at %s of the watch', async (_, payload) => {
+    const { plane } = await watched();
+    plane({ messages: [compact('rpc-1', 'start')] });
+    plane(payload);
+    expect(compacting()).toBe(false);
+  });
+
+  it('is off once the watch’s last consumer lets it go', async () => {
+    const { off, plane } = await watched();
+    plane({ messages: [compact('rpc-1', 'start')] });
+    off();
+    expect(compacting()).toBe(false);
+  });
+
+  it('takes nothing from a subagent’s own watch', async () => {
+    const fake = fakeClient({ 'laneA.watch': (input: { agentId?: string }) => ({ watch: input.agentId === undefined ? 'w-1' : `w-${input.agentId}` }), 'laneA.unwatch': undefined });
+    applyLaneAState(A, laneAState(A));
+    watchLaneA(A, () => {}, { client: fake.client, agentId: 'a1' });
+    await settle();
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-a1', messages: [snapshot, compact('rpc-1', 'start')] });
+    expect(compacting()).toBe(false);
   });
 });
 

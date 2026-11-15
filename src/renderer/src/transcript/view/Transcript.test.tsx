@@ -796,3 +796,37 @@ describe('the answers’ action rows', () => {
     expect(estimateRow(answer, true) - estimateRow(answer)).toBe(16);
   });
 });
+
+// UX wave U3b (M4; decisions 16 and 17, Interfaces §E): while the mount is told a compaction runs, the drawn list's last
+// row says so, with the time so far once it reaches a second; nothing of it remains once it is told none runs.
+describe('the compaction’s row', () => {
+  const T0 = Date.parse('2026-11-15T10:00:00.000Z');
+  afterEach(() => void vi.useRealTimers());
+  const lastRow = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')].at(-1)!;
+
+  it('is the last row while `compacting` holds a time, ticks once a second, and goes when it is null', async () => {
+    const source = sourceOf(deniedThenAnswer());
+    const view = render(<Transcript source={source} variant="session" compacting={null} />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+    await screen.findByText('Done.');
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] }); // the row's clock, once the history is in
+    vi.setSystemTime(T0);
+    view.rerender(<Transcript source={source} variant="session" compacting={T0} />);
+    expect(lastRow().dataset.rowId).toBe('activity:compacting');
+    const line = within(lastRow()).getByRole('status');
+    expect(line.textContent).toBe('Compacting session…');
+    act(() => void vi.advanceTimersByTime(1_000));
+    expect(line.textContent).toBe('Compacting session… 1s');
+    expect(within(line).getByRole('timer').textContent).toBe('1s');
+    act(() => void vi.advanceTimersByTime(61_000));
+    expect(line.textContent).toBe('Compacting session… 1m 02s');
+    view.rerender(<Transcript source={source} variant="session" compacting={null} />);
+    expect(document.querySelector('[data-row-id="activity:compacting"]')).toBeNull();
+    expect(screen.queryByText(/Compacting session/)).toBeNull();
+  });
+
+  it('is guessed at the turn line’s height before it is measured', () => {
+    const activity = { id: 'activity:compacting' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'activity' as const, activity: 'compacting' as const, since: '2026-11-15T10:00:00.000Z' };
+    expect(estimateRow(activity)).toBe(40);
+  });
+});

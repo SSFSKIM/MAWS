@@ -16,6 +16,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { useAttention } from '../stores/attention';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
+import { noteCompacting, useCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 import { fillStores, pageScenario, resetShellStores, scenarioFile } from '../test-support/shell-stores';
 import { projectList } from './derive';
 import { RequestPreview } from './RequestPreview';
@@ -55,6 +56,7 @@ const needsRow = (title: string) => screen.getByRole('treeitem', { name: title }
 
 beforeEach(() => {
   resetShellStores();
+  useCompacting.setState({ held: new Map() }); // UX wave U3b (M4)
   fillStores(nine);
   useLayout.getState().setSidebar({ expandedProjects: [at('proj-maws' as ProjectId)] });
   act(() => useAttention.getState().applyChanged({ appSessionId: readAttention.appSessionId, items: readAttention.items }, TEST_MACHINE));
@@ -167,6 +169,20 @@ describe('a session row’s hover card', () => {
     expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
     expect(within(card).getByTestId('hover-answer').textContent).toMatch(/^The request succeeded/);
     expect(within(card).queryByRole('button', { name: 'Approve' })).toBeNull(); // nothing waits
+  });
+
+  // UX wave U3b (M4; acceptance 10): while the session compacts its activity line says so, and then goes back to what
+  // it said
+  it('a compacting session: its activity line reads “Compacting session…” for as long as it compacts', async () => {
+    withMain();
+    useLayout.getState().setSidebar({ expandedProjects: [at('proj-claude-usage-menubar' as ProjectId)] });
+    const id = idOf('Usage reset countdown');
+    act(() => noteCompacting(id, { kind: 'engine' }, true));
+    render(<Sidebar />);
+    const card = await open('Usage reset countdown');
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Compacting session…');
+    act(() => noteCompacting(id, { kind: 'engine' }, false));
+    expect(within(card).getByTestId('hover-activity').textContent).toBe('Running curl -sI https://example.com | head -1');
   });
 
   // P5 O7 M10 (a busy remote session's state): another machine's lane B record, which has no digest, by its listing

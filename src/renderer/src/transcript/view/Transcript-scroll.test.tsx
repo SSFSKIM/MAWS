@@ -4,6 +4,7 @@ import { _resetIOSDetectionForTests } from '@tanstack/react-virtual';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { Row, RowId } from '../model/rows';
 import { TranscriptList, type TranscriptListHandle } from './Transcript';
+import { compactingRow } from './compacting'; // UX wave U3b (M4)
 
 afterEach(() => {
   cleanup();
@@ -115,6 +116,8 @@ async function scene(ios = false, observedMeasurements = ios) {
       if (report) fireEvent.scroll(scroller);
     }),
     stream: () => view.rerender(draw([...rows, { id: 'new-stream-row' as RowId, turnId: null, at: '', kind: 'time', label: 'Incoming answer' }])),
+    rows,
+    redraw: (next: readonly Row[]) => view.rerender(draw([...next])), // UX wave U3b (M4): a list the view composed
   };
 }
 
@@ -695,6 +698,23 @@ it('scroll-up keys in an editable row belong to its editor, not transcript follo
   const editor = document.createElement('textarea');
   s.scroller.appendChild(editor);
   act(() => { fireEvent.keyDown(editor, { key: 'ArrowUp' }); });
+  expect(s.handle.current!.following).toBe(true);
+  expect(s.changed.mock.calls).toEqual([]);
+});
+
+// UX wave U3b (M4; the execution document's M4, "What it proves"): the compaction's row is appended to the drawn list
+// and taken away from it, and a reader who follows the end stays at the end both times.
+it('a following reader stays at the end when the compaction’s row appears and when it goes', async () => {
+  const s = await scene();
+  const atEnd = () => s.scroller.scrollHeight - s.scroller.clientHeight - s.scroller.scrollTop;
+  s.redraw(compactingRow(s.rows, Date.parse('2026-11-15T10:00:00.000Z')));
+  await waitFor(() => expect(s.scroller.querySelector('[data-row-id="activity:compacting"]')).not.toBeNull());
+  expect(s.writes.length).toBeGreaterThan(0);
+  expect(atEnd()).toBe(0);
+  s.writes.length = 0;
+  s.redraw(s.rows);
+  expect(s.scroller.querySelector('[data-row-id="activity:compacting"]')).toBeNull();
+  expect(atEnd()).toBe(0);
   expect(s.handle.current!.following).toBe(true);
   expect(s.changed.mock.calls).toEqual([]);
 });
