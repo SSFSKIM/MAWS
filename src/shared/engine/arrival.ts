@@ -79,6 +79,44 @@ export function readAnswerEnvelope(text: string): Answer | null {
   return steer === null ? null : { class: 'answer', tool: 'maws', call: steer.askId, summary: text, answers: steer.result.answers, dismissed: false };
 }
 
+type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
+const TAG_OPENS = '[MAWS ask ';
+
+/**
+ * MAWS's answer envelopes inside a user text the engine may have joined from several waiting messages (members in order,
+ * one newline between, under the last one's uuid; U4a's decision 32 c), and the rest of the text (the UX wave, U4b: the
+ * Decision Log's line on the architect's medium review, form (b)). An envelope opens at a line that begins with its tag,
+ * and is the shortest slice from there that `parseAskSteer` reads whole and that ends the text or a line: shortest, so a
+ * later member ending in a fenced block of its own is not swallowed. A tag whose slices never parse stays text. The rest
+ * is the other members, the newline that separated each envelope gone; a text that is all envelope has an empty rest.
+ */
+export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
+  const lines = text.split('\n');
+  const envelopes: AskSteer[] = [];
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const end = lines[i]!.startsWith(TAG_OPENS) ? envelopeEnd(lines, i) : null;
+    if (end === null) {
+      kept.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    envelopes.push(end.steer);
+    i = end.next;
+  }
+  return { envelopes, rest: kept.join('\n') };
+}
+
+// The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does.
+function envelopeEnd(lines: readonly string[], start: number): { steer: AskSteer; next: number } | null {
+  for (let last = start; last < lines.length; last++) {
+    if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
+    const steer = parseAskSteer(lines.slice(start, last + 1).join('\n'));
+    if (steer !== null) return { steer, next: last + 1 };
+  }
+  return null;
+}
+
 /**
  * The one definition of the consent sentence: U1c sends it, the reader matches it whole. It is the engine's own
  * "Recently blocked" sentence for one call (`cli.pretty.js` of 2.1.322, the template that ends "if you would like."),

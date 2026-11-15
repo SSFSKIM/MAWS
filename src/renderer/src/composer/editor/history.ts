@@ -4,11 +4,12 @@
 // sources, newest first: this session's own human prompts from the transcript (a `peer` turn's opening message is not
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
 // display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
-// the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run): MAWS's answer envelope is never a
-// prompt to recall: an answer waiting at the next step is a row of the running turn, and ↑ walks past it as the stack's
-// take-back does (`readAnswerEnvelope`, the one reader of the envelope). Pure.
+// the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run; the medium review's form (b), step 1):
+// MAWS's answer envelope is never a prompt to recall. An answer waiting at the next step is a row of the running turn,
+// alone or joined by the engine with the person's own waiting messages, so ↑ and the search recall a row's text without
+// its envelopes (`readAnswerEnvelopes`, the one reader of them) and walk past a row that held nothing else. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { readAnswerEnvelope } from '@shared/engine/arrival';
+import { readAnswerEnvelopes } from '@shared/engine/arrival';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -44,10 +45,11 @@ const PLACEHOLDER_SPACE = /\s*(\[Pasted text #\d+ \+\d+ lines\])\s*/g;
 const ATTACHMENT_PLACEHOLDER = /\s*\[(?:Image|PDF) #\d+\]/g;
 const keyOf = (display: string, bodies: (string | null)[]) => `${display.replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies)}`;
 
-function rowPrefill(row: UserRow): Prefill {
+// `text`: the row's text without its answer envelopes
+function rowPrefill(row: UserRow, text: string): Prefill {
   const dataUrl = (url: string) => /^data:([^;,]+);base64,(.*)$/s.exec(url);
   return {
-    text: typedFromRowText(row.text),
+    text: typedFromRowText(text),
     pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text! })),
     images: row.attachments.flatMap((a) => {
       const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
@@ -74,8 +76,9 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
   let last: string | null = null;
   for (const row of rows) {
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
-    if (readAnswerEnvelope(row.text) !== null) continue; // an answer, not a prompt (U4b)
-    const prefill = rowPrefill(row);
+    const { envelopes, rest } = readAnswerEnvelopes(row.text); // an answer is not a prompt (U4b)
+    if (envelopes.length > 0 && rest === '') continue; // all answer; a row of attachments alone still recalls
+    const prefill = rowPrefill(row, rest);
     const key = prefillKey(prefill);
     if (key === last) continue;
     last = key;
