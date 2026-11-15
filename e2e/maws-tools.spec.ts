@@ -491,8 +491,9 @@ const BESIDE_ASK = {
 test('an ask beside an open file: its form stands in the capsule’s row under the title line, nothing shows above the composer, the side column keeps the file with no sheet tab added, Open beside opens the sheet on the same draft, and Submit turns the form into the capsule’s answer lines', async () => {
   await scene({ titles: ['U1b: ask beside a file'] }, async (s) => {
     const [id] = s.ids;
-    const notes = join(s.repo, 'notes.md');
-    writeFileSync(notes, '# Notes\n\nThe release checklist, in three steps.\n');
+    // a code file: a Markdown one opens in the rendered view (`[data-markdown-view]`), not in the editor's `.cm-line`s
+    const notes = join(s.repo, 'notes.ts');
+    writeFileSync(notes, "export const steps = ['draft', 'review', 'publish'];\n");
     await show(s, id);
 
     // the file open in the side column, through Files

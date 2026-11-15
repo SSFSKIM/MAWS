@@ -74,8 +74,9 @@ export async function watchPrompts(page: Page): Promise<void> {
         const buttons = card.querySelector('[data-decision-buttons]');
         if (buttons !== null && !watched.has(card)) watch(card, id, buttons);
         const state = prompts.cards[id];
-        // only the card watched for the id: another copy of the same item (a hover card's, with no decision row and no
-        // keyed control) is not the prompt and must not read it not live
+        // only the card watched for the id, the one with a decision row: one scene draws an item twice (the end card and
+        // the hover card, the flagged Read in requests.spec.ts), and the hover copy has no keyed control, so it would read
+        // the prompt not live on every pass
         if (state === undefined || !watched.has(card)) continue;
         const live = card.querySelector('[aria-keyshortcuts]:not([disabled])') !== null;
         if (live && !state.live) state.liveAt = now;
