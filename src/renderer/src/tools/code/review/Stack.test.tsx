@@ -292,15 +292,17 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     const files = Array.from({ length: 200 }, (_, i) => made(i, 1, 6));
     prepared.diffs = 0;
     await mount(files);
+    // The bodies the band drew on its way to rest, each once: those drawn under an estimate before their measure moved
+    // the band, and those it draws at rest; at most twice the latter, and nothing like the scope's 200.
     const drawn = drawnBodies().length;
     expect(drawn).toBeGreaterThan(0);
     expect(prepared.diffs).toBeGreaterThanOrEqual(drawn);
-    expect(prepared.diffs).toBeLessThan(20); // the band's bodies (the bound the band's own case gives them), not 200
+    expect(prepared.diffs).toBeLessThanOrEqual(2 * drawn);
     prepared.diffs = 0;
     page.scrollTo(Math.round(scroller().scrollHeight / 2));
     await page.settle();
     expect(prepared.diffs).toBeGreaterThan(0); // the bodies that came into the band
-    expect(prepared.diffs).toBeLessThan(20);
+    expect(prepared.diffs).toBeLessThanOrEqual(2 * drawnBodies().length);
   });
 
   it('makes again the section of the file whose own read answered and no other: one of two hundred and one', async () => {
@@ -506,11 +508,13 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     request(files[3].path);
     await page.settle();
     expect(scroller().scrollTop).toBe(page.topOf(sectionOf(files[3].path)));
-    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    // The section's top at the scroller's top: the reading edge is on the library's row over the file's first line, so the
+    // hunk last passed is the third file's last, as a hand scroll there reads it.
+    expect(hunkLabel()).toBe('Showing hunk 6 of 10');
     next();
     await page.settle();
-    expect(hunkLabel()).toBe('Showing hunk 8 of 10');
-    expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[1] });
+    expect(hunkLabel()).toBe('Showing hunk 7 of 10');
+    expect(page.rowAtTop()).toEqual({ path: files[3].path, side: 'new', line: files[3].starts[0] });
   });
 
   it('counts the hunk at the saved place when a scope is chosen again, and moves on from it', async () => {
