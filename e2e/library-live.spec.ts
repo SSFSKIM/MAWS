@@ -4,7 +4,7 @@
 // with the installed Claude Code (unmodified, D-1) under a scratch CLAUDE_CONFIG_DIR under /tmp (`settings.json` `{}`, a
 // `.claude.json` trusting the scratch repository), through ClaudeUsage's relay (GET /api/hello, one retry two minutes
 // later, else the run is `blocked: relay`), on Haiku in default permission mode, every permission allowed once through
-// the request card docked in the composer. One session, one prompt: the agent makes an `html` artifact with
+// the request card at the transcript’s end (UX wave U1b). One session, one prompt: the agent makes an `html` artifact with
 // `artifact_create` from a page the test wrote and a `file` artifact with `send_file`. Then, without any stand-in:
 // main's library (`library.get`) holds both linked `created` to the session with the session as last editor; the
 // panel's Artifacts tool lists both under This session; the Artifacts main tab shows both with the session's chip and
@@ -155,7 +155,7 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     prompted = true;
     await page.keyboard.press('Enter');
 
-    // the turn, every permission it asks allowed once through the card docked in the composer
+    // the turn, every permission it asks allowed once through the card at the transcript’s end (UX wave U1b)
     const idleNow = async () => {
       const status = await statusOf();
       return status.turn === null && status.pendingRequests === 0;

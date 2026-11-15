@@ -2,7 +2,7 @@
 // the product app (MAWS_HARNESS=0) with the installed Claude Code (never patched, D-1) under a scratch CLAUDE_CONFIG_DIR
 // under /tmp (`settings.json` `{}`, a `.claude.json` trusting the scratch repository; P1 §15's rule, as
 // e2e/maws-tools-live.spec.ts runs it), through ClaudeUsage's relay, in default permission mode, every permission given
-// through the request card docked in the composer. One session, asked in its composer:
+// through the request card at the transcript’s end (UX wave U1b). One session, asked in its composer:
 //   1. creates a document from markdown with `artifact_create`, reads it with ids (`artifact_read`) and makes one small
 //      warm-up edit (so the card's "Allow for this session" covers `artifact_edit` before the measured batch);
 //   2. in ONE `artifact_edit` batch replaces a sentence, inserts a section after a heading and sets a table cell, while
@@ -154,7 +154,7 @@ interface Live {
 const statusOf = async (page: Page, id: string) => value(await invoke(page, 'session.status', { appSessionId: id as AppSessionId }));
 const mainTurnsEnded = (events: SessionEvent[]) => ofKind(events, 'turn.ended').filter((e) => e.parentToolUseId === null && !e.isEchoReceipt);
 
-// One permission the session is asking, allowed for the session through the card docked in the composer (the card's
+// One permission the session is asking, allowed for the session through the card at the transcript’s end (UX wave U1b) (the card's
 // "Allow for this session" scope, so the batch the test watches is never held by a card); true when one was answered.
 async function allowPending(s: Live): Promise<boolean> {
   const events = await s.events();

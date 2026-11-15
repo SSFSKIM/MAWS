@@ -4,7 +4,7 @@
 // MAWS ships it) with the installed Claude Code (unmodified, D-1) under a scratch CLAUDE_CONFIG_DIR under /tmp
 // (`settings.json` `{}`, a `.claude.json` trusting the scratch project), through ClaudeUsage's relay (GET /api/hello, one
 // retry two minutes later, else the run is `blocked: relay`), on Haiku in default permission mode with the session's
-// `--max-budget-usd`, every permission allowed for the session through the request card docked in the composer. The
+// `--max-budget-usd`, every permission allowed for the session through the request card at the transcript’s end (UX wave U1b). The
 // window is never shown (`launchMaws`'s quiet window).
 // One session, four prompts through the real composer:
 //   1. the agent builds a deck of five slides from a brief in one `artifact_create` from files (deck.json and one file
@@ -212,7 +212,7 @@ test('the agent builds a deck from a brief; its stale deck-wide publish is refus
       }
     };
 
-    // one permission the session asks, allowed for the session through the card docked in the composer
+    // one permission the session asks, allowed for the session through the card at the transcript’s end (UX wave U1b)
     const allowPending = async (): Promise<boolean> => {
       const all = await events();
       const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
