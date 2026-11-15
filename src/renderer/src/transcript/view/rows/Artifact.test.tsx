@@ -176,6 +176,7 @@ describe('the row of an agent’s delete', () => {
   const LISTED = { id: DRAFT, kind: 'document', title: 'Draft plan', createdBy: { kind: 'session', appSessionId: APP }, createdAt: AT, updatedAt: AT, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3, lastEditor: { kind: 'session', appSessionId: APP }, lastEditedAt: AT, sessions: [] };
   let listed: boolean;
   let refused: boolean; // fix wave 4: the library's read of the artifact refused (a member whose reads are refused)
+  let held: boolean; // fix wave 5: the library's read under way, never answering
   let reads: (MachineRef | undefined)[];
   let main: ReturnType<typeof installFakeMain>;
   let offLibrary: () => void;
@@ -185,10 +186,12 @@ describe('the row of an agent’s delete', () => {
     resetRemoteLaneBStore();
     listed = false;
     refused = false;
+    held = false;
     reads = [];
     main = installFakeMain((name, _input, machine) => {
       if (name !== 'library.get') return new Promise(() => {});
       reads.push(machine);
+      if (held) return new Promise(() => {});
       if (refused) return { ok: false, error: { code: 'invalid_input', message: 'not viewable on mini' } } as never;
       return ok({ row: listed ? LISTED : null });
     });
@@ -278,6 +281,26 @@ describe('the row of an agent’s delete', () => {
     expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
     expect(undoButton().disabled).toBe(true);
     expect(line(view.container)).toBe('Only mini’s owners can restore an artifact there.');
+  });
+
+  // Fix wave 5: a refusal invalidates the cached row until a successful read; a retry under way does not revive it
+  it('a refused member’s next read, while it is under way, revives no Restored from the cached row', async () => {
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    useMachines.getState().applyRoster([{ ...MINI, capabilities: [SESSION_ACTS_CAPABILITY, 'rl2.artifact-undelete'], owner: false }]);
+    listed = true;
+    const view = renderRow(DELETED, { storeKey: R, actions: withUndo(async () => null) });
+    await act(async () => {});
+    refused = true;
+    await act(async () => main.emit('library.changed', { revision: 2 }, OTHER_MACHINE));
+    await waitFor(() => expect(heading(view.container)).toBe('Deleted Draft plan'));
+    refused = false;
+    held = true; // the next read never answers
+    await act(async () => main.emit('library.changed', { revision: 3 }, OTHER_MACHINE));
+    await waitFor(() => expect(reads.length).toBe(3));
+    await act(async () => {});
+    expect(heading(view.container)).toBe('Deleted Draft plan');
+    expect(screen.queryByRole('button', { name: 'Open' })).toBeNull();
+    expect(undoButton().disabled).toBe(true);
   });
 
   it('on another machine Undo is disabled with its sentence as a line: offline, a build without the capability, a member who does not own it', async () => {

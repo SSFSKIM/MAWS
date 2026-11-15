@@ -590,15 +590,29 @@ describe('a parked replica leaves only on a current read that answers live (fix 
     };
     return { h, handle, restore };
   }
+  // fix wave 5: the read a trigger makes, held, so a row shows the replica still parked until that read answers
+  const heldRead = (h: ReturnType<typeof harness>) => {
+    let answer!: (result: unknown) => void;
+    const result = new Promise((resolve) => (answer = resolve));
+    const before = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', (() => result) as never);
+    return { issued: () => h.calls.filter((c) => c.name === 'artifacts.get').length > before, live: () => answer(LIVE) };
+  };
+  const stillParked = (handle: Awaited<ReturnType<typeof parked>>['handle']) => expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
   const writableWithTheEdit = async (h: ReturnType<typeof harness>, handle: Awaited<ReturnType<typeof parked>>['handle']) => {
     await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
     expect(text(h.host.doc)).toBe('Typed just before. ');
   };
 
   it('`created`; read after it, answering live: writable, the kept edit sent', async () => {
-    const { h, handle, restore } = await parked();
-    restore();
+    const { h, handle } = await parked();
+    const read = heldRead(h);
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle); // the event alone ends nothing: its read does
+    read.live();
     await settle();
     await writableWithTheEdit(h, handle);
     handle.close();
@@ -616,14 +630,18 @@ describe('a parked replica leaves only on a current read that answers live (fix 
   });
 
   it('the host’s `ready` after a restart, the restore missed while it was down and the first recovery open failing; read after it, answering live: writable, the kept edit sent', async () => {
-    const { h, handle, restore } = await parked();
+    const { h, handle } = await parked();
     h.hostState('restarting', 8);
-    restore();
+    const read = heldRead(h);
     h.answers.set('artifacts.open', () => {
       h.answers.delete('artifacts.open');
       return DOWN;
     });
     h.hostState('ready', 9);
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
     await settle();
     await settle(RECONNECT_BACKOFF_MS[0]);
     await writableWithTheEdit(h, handle);
@@ -631,17 +649,39 @@ describe('a parked replica leaves only on a current read that answers live (fix 
   });
 
   it('the backoff, the restore never announced; read at its next step, answering live: writable, the kept edit sent', async () => {
-    const { h, handle, restore } = await parked();
-    restore();
+    const { h, handle } = await parked();
+    const read = heldRead(h);
     await settle(RECONNECT_BACKOFF_MS[1]);
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  // fix wave 5: the backoff stays armed while parked, at its last step, long after it would have run out
+  it('the backoff run out, the restore never announced a minute later; read at its capped step, answering live: writable, the kept edit sent', async () => {
+    const { h, handle, restore } = await parked();
+    await settle(60_000); // every read answering deleted
+    stillParked(handle);
+    const asked = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    restore();
+    await settle(RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1]);
+    expect(h.calls.filter((c) => c.name === 'artifacts.get').length).toBeGreaterThan(asked);
+    await settle();
     await writableWithTheEdit(h, handle);
     handle.close();
   });
 
   it('`artifacts.resync` from its machine, the `created` lost in the feed’s gap; read after it, answering live: writable, the kept edit sent', async () => {
-    const { h, handle, restore } = await parked();
-    restore();
+    const { h, handle } = await parked();
+    const read = heldRead(h);
     h.emit('artifacts.resync', { revision: 2 } as never, TEST_MACHINE);
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
     await settle();
     await writableWithTheEdit(h, handle);
     handle.close();
