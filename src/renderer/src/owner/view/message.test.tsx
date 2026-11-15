@@ -118,6 +118,27 @@ describe('the label follows `spanRows`', () => {
     expect(whole.container.textContent).toContain('Looked at the two files first.');
     expect(whole.container.textContent).toContain('Now the third.');
   });
+
+  // The closed head keeps exactly the marked ranges, each run a message of its own (`parseMarked`), a mark inside a
+  // line included; the full drawing keeps the authored flow (one paragraph, one label).
+  const head = (text: string) => render(<ReportOnly value>{assistantPresentation(text)!.render({ live: false })}</ReportOnly>);
+  it.each<[string, string, string[]]>([
+    ['narration on both sides of a mark inside a line', 'Before <message>For you</message> after.', ['For you']],
+    ['two adjacent marks inside a line', 'Checked. <message>First.</message> <message>Second.</message> Done.', ['First.', 'Second.']],
+    ['a mark nested inside a line', 'Look: <message>Outer <insight>inner</insight> tail</message> end.', ['Outer', 'inner', 'tail']],
+    ['a mark inside a line beside one on its own lines', 'Intro <message>inline</message> words.\n\n<message>\nBlock.\n</message>', ['inline', 'Block.']],
+  ])('a closed stretch’s head draws %s as only its messages', (_name, text, expected) => {
+    const view = head(text);
+    expect(bodies(view.container).map((body) => body.trim())).toEqual(expected);
+    expect(labels(view.container)).toEqual(expected.map((_, i) => (i === 0 ? '● message' : 'message')));
+    expect(view.container.querySelectorAll('.owner-message-ink').length).toBe(expected.length);
+  });
+
+  it('the full drawing keeps a mark inside a line in its authored paragraph, under one label', () => {
+    const view = draw('Checked. <message>First.</message> <message>Second.</message> Done.');
+    expect(view.container.querySelectorAll('p')).toHaveLength(1);
+    expect(view.container.textContent).toBe('● messageChecked. First. Second. Done.');
+  });
 });
 
 // Ruling 4 on recorded sessions: the engine (2.1.312 and 2.1.322 alike) gives every text row of its conversation list
