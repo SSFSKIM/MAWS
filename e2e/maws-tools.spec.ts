@@ -725,7 +725,7 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
     await expect(gone, 'the side column still shows the last record it opened').toBeVisible();
 
     // A14.1: link text, not a box: inline, no border, the prose's font, the accent colour; an underline only under the
-    // pointer
+    // pointer. The border is read by its width: the base reset gives every element the style `solid` at width 0
     const accent = await s.page.evaluate(() => {
       const probe = document.body.appendChild(document.createElement('span'));
       probe.style.color = 'var(--accent)';
@@ -736,9 +736,9 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
     const look = () =>
       chip('Linked plan').evaluate((el) => {
         const style = getComputedStyle(el);
-        return { tag: el.tagName, display: style.display, border: style.borderTopStyle, underline: style.textDecorationLine, colour: style.color, proseFont: style.fontFamily === getComputedStyle(el.parentElement!).fontFamily };
+        return { tag: el.tagName, display: style.display, border: style.borderTopWidth, underline: style.textDecorationLine, colour: style.color, proseFont: style.fontFamily === getComputedStyle(el.parentElement!).fontFamily };
       });
-    expect(await look()).toEqual({ tag: 'SPAN', display: 'inline', border: 'none', underline: 'none', colour: accent, proseFont: true });
+    expect(await look()).toEqual({ tag: 'SPAN', display: 'inline', border: '0px', underline: 'none', colour: accent, proseFont: true });
     await chip('Linked plan').hover();
     await expect.poll(async () => (await look()).underline, { message: 'an underline under the pointer' }).toBe('underline');
     await s.page.mouse.move(700, 20);
