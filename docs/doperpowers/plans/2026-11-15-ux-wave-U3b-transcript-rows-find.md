@@ -37,7 +37,7 @@ How to see it working: the acceptance section's checks, each a unit run on the b
   - [x] (2026-11-15 UTC) M3 — An answer's Copy, Fork from here and time. Reviewed clean at `e1fe74ed8` (with the M3-4 fix wave); the controller re-ran the web typecheck and eslint at that head directly (both clean). Statement 13's integration case over the real mirror waits for U2b on master.
   - [x] (2026-11-15 UTC) M4 — A compaction says so. Reviewed clean at `4f03921fe` after two fix waves (the table corrected on the review: a new boundary told by id, by the key's hydration and by drawn order, never by clock; the local watch reset; the bridge's loss from any state).
   - [x] (2026-11-15 UTC) M5 — The web plugin's fetch, and the word for an agent that ended with its session. Reviewed clean at `30ea71f26` (the review's one Important point was a missing tokens-guard run; it passed, 4 of 4, at `9ae24c672`, whose only difference from `30ea71f26` is this document).
-  - [ ] M6 — The scenes, the record, the last run of landing 1.
+  - [x] (2026-11-15 UTC) M6 — The scenes, the record, the last run of landing 1. Reviewed clean at `b7cf19377` after two fix waves (the width matrix sets `--measure`, the scroll and sticky claims fail when false, this build's side pinned in the crossing, tracker row 14; the sticky step's viewport capped so its premise is reachable). Scenes written and typechecked, unrun (the architect's Mac runs).
 - [ ] **Landing 2**, branch `ux-wave/U3b-2`:
   - [ ] M7 — The five keys, and moving between prompts and messages.
   - [ ] M8 — Find: one reading of what a row draws.
@@ -1249,4 +1249,15 @@ Each milestone's own review, at its boundary, reads that milestone's diff agains
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**Landing 1 (2026-11-15 (UTC), branch `ux-wave/U3b` at `b7cf19377` plus this record).** M1 to M6 are built and each was reviewed clean at its boundary by a task reviewer. What a person now sees, by the unit suites and pending the Mac scenes: a slash command's output is one dim line under its command, one drawing clipped at its second drawn line with Show more; code blocks wrap in one frame and tables scroll in theirs, both inside the text column; the owner's time, Copy and Edit sit on one line under the bubble at no height; the last answer before each of the owner's prompts offers Copy, Fork from here (none above the last compaction; a typed command's bubble counts as the prompt) and its time; a compaction reads "Compacting session…" with its clock at the transcript's end and in the hover card; the web plugin's fetch draws, groups, captions, digests and is asked about as `WebFetch` is; an agent that ended with its session says so. No wire minor, nothing stored; one entry newly sent, its older-build reading proven at the schema level and read (not run) in each older build's code.
+
+What went as planned: the cut into two landings held (nothing of landing 2 was needed); the probes answered before the milestones that rest on them; every milestone stayed inside its files but for insertions the architect ruled one by one (§M now lists them as built).
+
+What the plan did not foresee, and where it changed:
+- The drawn example and the architect's look (R1 to R23) arrived after M1 started and reshaped M1 to M3 in flight; recording each ruling as a dated line kept builders and reviewers on one text. A look settled before the first milestone would have spared M1 a second pass.
+- Three statements of this document were wrong about the code and were corrected in place: `lone` for every loose row (the file and remote routes place an output loose under its bubble); the boundary rule "later than `since`" (it compared two machines' clocks; now the row's id, the key's hydration and drawn order); and the cross-build premise (on one profile every crossing is a handover, so an older window never meets the new entry there).
+- The task reviews earned their place: M1, M3 (by ruling), M4 and M6 each had Important findings that a unit run could not show (an O(session) scan per re-flatten, a reset path that skipped a clear, a width matrix that varied the pane instead of the measure, scroll claims that passed under `overflow: hidden`).
+- The architect's rulings on product points (R17's command bubble, M3-4's automatic compaction, the `beside` row) came within a turn each because they were asked with the evidence and a recommendation.
+
+Owed, and not this executor's: class 1a on the final head; the branch's xhigh panel; the Mac scenes of Proof 4 to 6 by group; the two cross-build runs of Proof 13; the owner's look; the chain merge (U8d's lines in `lane-a/watches.ts`, U1b's end row in `compactingRow`, U2b's `classOf` for `activity` and statement 13's mirror case, U1c's typed `beside`); the charter's X7 sentence, drafted under "The pull requests".
+
