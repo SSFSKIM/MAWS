@@ -1430,15 +1430,21 @@ test.describe('sessions', () => {
         const drawn = await lead.evaluate((el) => {
           const [folder, , name] = Array.from(el.children) as HTMLElement[];
           const rect = (node: Element) => node.getBoundingClientRect();
+          const box = (node: Element) => ({ left: rect(node).left, top: rect(node).top, right: rect(node).right, bottom: rect(node).bottom });
+          const style = getComputedStyle(folder!);
           return {
             lead: { left: rect(el).left, right: rect(el).right },
-            folder: { text: folder!.textContent, left: rect(folder!).left, width: rect(folder!).width, cut: folder!.scrollWidth > folder!.clientWidth },
+            boxes: { lead: box(el), bar: box(el.parentElement!), viewer: box(el.closest('[data-file-viewer]')!) },
+            folder: { text: folder!.textContent, left: rect(folder!).left, width: rect(folder!).width, cut: folder!.scrollWidth > folder!.clientWidth, clipped: [style.textOverflow, style.overflowX] },
             name: { text: name!.textContent, right: rect(name!).right, whole: name!.scrollWidth <= name!.clientWidth },
             ch: rect(name!).width / Math.max(1, name!.textContent?.length ?? 1), // the mono font's character, from the name drawn whole
           };
         });
         expect(drawn.folder.text, 'the folder part holds the whole folder').toBe(dirname(chosen));
         expect(drawn.folder.cut, 'cut where the column is narrow').toBe(true);
+        expect(drawn.folder.clipped, 'the folder part clipped with an ellipsis').toEqual(['ellipsis', 'hidden']);
+        expectInside(drawn.boxes.lead, drawn.boxes.bar, 'the path inside the bar');
+        expectInside(drawn.boxes.bar, drawn.boxes.viewer, 'the bar inside the file viewer');
         expect(drawn.folder.left, 'the path’s start drawn').toBeCloseTo(drawn.lead.left, 0);
         expect([drawn.name.text, drawn.name.whole], 'the name drawn whole').toEqual(['todo.txt', true]);
         expect(drawn.name.right, 'the path’s end drawn, inside the bar').toBeLessThanOrEqual(drawn.lead.right + 0.5);
