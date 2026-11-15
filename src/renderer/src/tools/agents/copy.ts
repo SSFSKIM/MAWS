@@ -40,6 +40,7 @@ export const SUBAGENTS_COPY = {
   finishedWithErrors: (ago: string) => `finished with errors · ${ago}`,
   stopped: (ago: string) => `stopped · ${ago}`,
   endedWithSession: 'ended with the session',
+  ended: 'ended', // card C1, the owner's answer: known to have ended, with no record of how, while the session still runs
   // the same outcomes with no end time known (a sidecar's `stoppedByUser` carries none)
   finishedUndated: 'finished',
   finishedWithErrorsUndated: 'finished with errors',

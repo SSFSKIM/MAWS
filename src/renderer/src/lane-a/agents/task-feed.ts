@@ -56,7 +56,7 @@ type StatusEntry = Extract<SubagentMeta, { status: string }> & { startedAt?: str
 const text = (value: string | null | undefined): string | null => (value ? value : null);
 
 /** One agent's node with DX4's facts laid over what the held rows and its meta gave. */
-function patchedNode(node: TaskNode, { status, spawn, outcome, file, startedAt }: StatusEntry): TaskNode {
+function patchedNode(node: TaskNode, { status, evidence, spawn, outcome, file, startedAt }: StatusEntry): TaskNode {
   const agent = node.agent;
   const next: TaskNode = {
     ...node,
@@ -72,6 +72,9 @@ function patchedNode(node: TaskNode, { status, spawn, outcome, file, startedAt }
       model: agent.model ?? text(spawn?.model),
     },
   };
+  // Card C1 (the owner's answer, option 2): an exited row's word turns on what its status rests on
+  if (status === 'exited') next.evidence = evidence;
+  else delete next.evidence;
   // DX4's status stands. An end the held rows claimed for another status is not this one's: its time and summary go.
   if (status !== node.status) {
     next.status = status;
@@ -84,7 +87,8 @@ function patchedNode(node: TaskNode, { status, spawn, outcome, file, startedAt }
 
 const sameShallow = (a: object | null, b: object | null): boolean =>
   a === b || (a !== null && b !== null && Object.keys(b).every((key) => (a as Record<string, unknown>)[key] === (b as Record<string, unknown>)[key]));
-const sameNode = (a: TaskNode, b: TaskNode): boolean => (Object.keys(b) as (keyof TaskNode)[]).every((key) => (key === 'agent' ? sameShallow(a.agent, b.agent) : a[key] === b[key]));
+const sameNode = (a: TaskNode, b: TaskNode): boolean =>
+  ([...new Set([...Object.keys(a), ...Object.keys(b)])] as (keyof TaskNode)[]).every((key) => (key === 'agent' ? sameShallow(a.agent, b.agent) : a[key] === b[key])); // C1: a key one lacks (`evidence`) counts
 
 /** Whether two graphs' nodes say the same (an overlay's nodes are fresh objects even when they say what the last one did). */
 export function sameTasks(a: TaskGraph, b: TaskGraph): boolean {

@@ -57,9 +57,14 @@ export function refOf(node: TaskNode): SubagentRef {
   };
 }
 
+// Card C1, the owner's answer (option 2): an agent that exited by the bridge's word or its starter's end, while its
+// session still runs, ended with no record of how; one whose session's process went ended with the session. Neither has
+// an end time of its own.
+const exitedWord = (node: TaskNode): string => (node.evidence === 'bridge' || node.evidence === 'parent' ? SUBAGENTS_COPY.ended : SUBAGENTS_COPY.endedWithSession);
+
 // A Done row's outcome: the terminal status with how long ago it ended, the bare word when no end time is known.
 export function outcomeOf(node: TaskNode, now: number): string {
-  if (node.status === 'exited') return SUBAGENTS_COPY.endedWithSession;
+  if (node.status === 'exited') return exitedWord(node);
   const ago = node.endedAt === null ? null : formatAgo(now - Date.parse(node.endedAt));
   if (node.status === 'failed') return ago ? SUBAGENTS_COPY.finishedWithErrors(ago) : SUBAGENTS_COPY.finishedWithErrorsUndated;
   if (node.status === 'stopped') return ago ? SUBAGENTS_COPY.stopped(ago) : SUBAGENTS_COPY.stoppedUndated;
@@ -69,7 +74,7 @@ export function outcomeOf(node: TaskNode, now: number): string {
 // The outcome word alone, without a time (the UX wave's U8b, M7 decision 5: an agent whose own run has ended while a
 // task it started still runs).
 export function outcomeWord(node: TaskNode): string {
-  if (node.status === 'exited') return SUBAGENTS_COPY.endedWithSession;
+  if (node.status === 'exited') return exitedWord(node);
   if (node.status === 'failed') return SUBAGENTS_COPY.finishedWithErrorsUndated;
   if (node.status === 'stopped') return SUBAGENTS_COPY.stoppedUndated;
   return SUBAGENTS_COPY.finishedUndated;
