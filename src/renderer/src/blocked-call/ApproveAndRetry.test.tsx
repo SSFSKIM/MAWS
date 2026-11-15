@@ -5,7 +5,7 @@
 // at each step.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from 'desk-hub/protocol';
 import { consentMessage } from '@shared/engine/arrival';
@@ -427,7 +427,9 @@ describe('where there is no button, and where it is disabled (Acceptance 7 as sh
     expect(row.cell().hasAttribute('data-names-whole')).toBe(false);
   });
 
-  it('a row of a rewound branch, a blocked call with no name, and a call the classifier could not judge draw no button', async () => {
+  // A row of a rewound branch has no state (`blockedStates` counts no row of a hidden branch: M2's model tests), so the
+  // control is never asked for it.
+  it('a blocked shell call with `run_in_background: true`, an MCP tool’s blocked call, and a call the classifier could not judge draw no button', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'make build', run_in_background: true });
