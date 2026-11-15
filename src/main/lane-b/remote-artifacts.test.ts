@@ -128,6 +128,10 @@ describe('artifact writes', () => {
   it('seal the undelete needing the peer’s `rl2.artifact-undelete`, and every other write `rl2.artifacts`', async () => {
     const l = lab();
     l.link.onAct = (act) => act.settle({ state: 'done', result: act.request.action === 'artifacts.undelete' ? undefined : { artifact: row(A1) } });
+    // a peer whose handshake does not list it is sent nothing
+    expect(await l.cmd('artifacts.undelete', { artifactId: A1 })).toMatchObject({ ok: false });
+    expect(l.link.acts).toEqual([]);
+    l.link.peers = [...l.link.peers, 'rl2.artifact-undelete'];
     expect(await l.cmd('artifacts.undelete', { artifactId: A1 })).toMatchObject({ ok: true });
     expect(await l.cmd('artifacts.delete', { artifactId: A1 })).toMatchObject({ ok: true });
     expect(l.link.acts.map((act) => [act.request.action, act.request.requires])).toEqual([

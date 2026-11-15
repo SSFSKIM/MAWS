@@ -2,7 +2,9 @@
 // exactly the keys of `../schema/artifacts.ts`, pinned at compile time in `../schema.ts` and per namespace in
 // `../schema.test.ts`.
 export const commands = [
-  'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete', 'artifacts.duplicate',
+  'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete',
+  'artifacts.undelete', // UX wave U10b: the undo of an agent's delete, after the delete as in the schema
+  'artifacts.duplicate',
   'artifacts.search', 'artifacts.versions', 'artifacts.saveVersion', 'artifacts.nameVersion', 'artifacts.restore', 'artifacts.markViewed',
   'artifacts.pruneVersions', 'artifacts.versionState', 'artifacts.attributions',
   'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', // P3-A M8
@@ -15,7 +17,6 @@ export const commands = [
   'artifacts.downloadAsset', // P3-E (E2 M3): main's
   'artifacts.connectorGrants', 'artifacts.grantConnectorTool', 'artifacts.revokeConnectorTool', // P3-H H3b: main's
   'artifacts.holdDatasets', 'artifacts.releaseDatasets', // E3: main's, a window's holds
-  'artifacts.undelete', // UX wave U10b: the undo of an agent's delete
 ] as const;
 
 export const events = ['artifacts.changed', 'artifacts.resync' /* P3-A M5: main's */, 'artifacts.console' /* P3-A M7: main's */] as const;
