@@ -74,7 +74,9 @@ export async function watchPrompts(page: Page): Promise<void> {
         const buttons = card.querySelector('[data-decision-buttons]');
         if (buttons !== null && !watched.has(card)) watch(card, id, buttons);
         const state = prompts.cards[id];
-        if (state === undefined) continue;
+        // only the card watched for the id: another copy of the same item (a hover card's, with no decision row and no
+        // keyed control) is not the prompt and must not read it not live
+        if (state === undefined || !watched.has(card)) continue;
         const live = card.querySelector('[aria-keyshortcuts]:not([disabled])') !== null;
         if (live && !state.live) state.liveAt = now;
         state.live = live;
