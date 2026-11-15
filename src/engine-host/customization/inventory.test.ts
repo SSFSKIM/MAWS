@@ -559,6 +559,57 @@ describe('a plugin’s connectors (UX wave U11h)', () => {
     expect(JSON.stringify(await read(cwd))).not.toMatch(/example\.com|COMMAND_SECRET|ARG_SECRET|HEADER_SECRET|REGION/);
   });
 
+  // The engine merges the file-configured servers by name before it drops a plugin's server of the same address (2.1.322
+  // cli.pretty.js about 477063, then 476051): an entry another scope overrides by name is not loaded and drops nothing.
+  it('compares a plugin server’s address only with the entry the engine uses for each name', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const [A, B, C, D, E, F] = ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => `https://${x}.example.com/mcp`);
+    await json(join(configHome, '.claude.json'), {
+      mcpServers: { shared: { type: 'http', url: A }, ranked: { type: 'http', url: E } },
+      projects: { [cwd]: { mcpServers: { shared: { type: 'http', url: B } } } },
+    });
+    await json(join(home, '.mcp.json'), { mcpServers: { nested: { type: 'http', url: C }, ranked: { type: 'http', url: F } } });
+    await json(join(cwd, '.mcp.json'), { mcpServers: { nested: { type: 'http', url: D } } });
+    await json(join(userData, 'machine-settings.json'), appServers([{ name: 'shared', type: 'http', url: 'https://own.example.com/mcp' }]));
+    const at = join(root, 'merged');
+    await json(join(at, '.mcp.json'), { mcpServers: {
+      'at-overridden-user': { type: 'http', url: A }, // user `shared`, which local `shared` overrides: not loaded
+      'at-used-local': { type: 'http', url: B }, // local `shared`, the entry used, though MAWS's own list names `shared` too
+      'at-outer-project': { type: 'http', url: C }, // the outer project file's `nested`, which the nearer file overrides
+      'at-nearest-project': { type: 'http', url: D },
+      'at-overridden-project': { type: 'http', url: F }, // project `ranked`, which user `ranked` overrides
+      'at-used-user': { type: 'http', url: E },
+    } });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'merged' });
+    await installed({ 'merged@harbour-market': [{ scope: 'user', installPath: at }] });
+    expect(Object.fromEntries((await read(cwd)).pluginServers!.map((row) => [row.server, row.sameAddressAs]))).toEqual({
+      'at-overridden-user': null, 'at-used-local': 'shared', 'at-outer-project': null, 'at-nearest-project': 'nested', 'at-overridden-project': null, 'at-used-user': 'ranked',
+    });
+  });
+
+  it('compares, classifies and revises a declared address past the endpoints’ bound whole, and cuts only the endpoints’ url', async () => {
+    const LONG = `https://long.example.com/${'p'.repeat(4096 - 'https://long.example.com/'.length)}`;
+    expect(LONG).toHaveLength(4096);
+    await json(join(configHome, '.claude.json'), { mcpServers: { bound: { type: 'http', url: LONG }, past: { type: 'http', url: `${LONG}x` } } });
+    const at = join(root, 'long-address');
+    const declare = (b: string) => json(join(at, '.mcp.json'), { mcpServers: {
+      longer: { type: 'http', url: `${LONG}${b}` }, // equals `bound` in its first 4096 characters only
+      exact: { type: 'http', url: LONG }, // `past` is cut to this text in its endpoint, and is still another address
+      template: { type: 'http', url: `${LONG}\${T}` },
+    } });
+    await declare('b');
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'long-address' });
+    await installed({ 'long@harbour-market': [{ scope: 'user', installPath: at }] });
+    const rows = Object.fromEntries((await read()).pluginServers!.map((row) => [row.server, row]));
+    expect([rows.longer!.sameAddressAs, rows.exact!.sameAddressAs]).toEqual([null, 'bound']);
+    expect(rows.template!.address).toBe('templated');
+    const first = (await endpoints()).pluginServers!.find((row) => row.server === 'longer')!;
+    expect(first.url).toBe(LONG); // the endpoint's url alone is cut at its bound
+    await declare('c');
+    expect((await endpoints()).pluginServers!.find((row) => row.server === 'longer')!.revision).not.toBe(first.revision);
+  });
+
   it('caps the plugins’ connectors at the inventory’s row bound and labels the result partial', async () => {
     const at = join(root, 'many');
     const servers: Record<string, { type: string; url: string }> = {};
