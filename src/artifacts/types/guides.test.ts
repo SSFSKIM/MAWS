@@ -55,4 +55,13 @@ describe('the kinds’ guides and format references', () => {
       expect(last, kind).toContain('[its title](maws-artifact:<artifactId>)');
     }
   });
+
+  // UX wave U6d (O-44): the paragraph that closes every guide, exact, and no guide invites the agent to open a pane
+  it('closes every kind’s guide with the link paragraph, word for word, and no guide names show_pane', () => {
+    for (const kind of ARTIFACT_KINDS) {
+      const { guide } = KIND_GUIDES[kind];
+      expect(guide.endsWith('\n\nWhen a message to the user names this artifact, write it as a Markdown link, [its title](maws-artifact:<artifactId>): the user opens it in MAWS with a click.\n'), kind).toBe(true);
+      expect(guide, kind).not.toContain('show_pane');
+    }
+  });
 });

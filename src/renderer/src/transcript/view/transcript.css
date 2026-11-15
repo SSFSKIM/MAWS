@@ -45,6 +45,15 @@
 }
 button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-chip-detail { color: var(--fg-muted); }
+/* UX wave U6d (O-44; its execution document, Interfaces §E): an artifact mention and a path link are link text in the
+   prose, Claude Desktop's look (the owner's card C4): inline, so a long title wraps with the words around it; the accent
+   colour; an underline only under the pointer, where a web link keeps its standing one; no box, no pressed or visited
+   state. A path link keeps the monospace font at inline code's size. The focus ring is a box shadow, which
+   `box-decoration-break: clone` draws closed on each line of a wrapped link (an outline is no box decoration). */
+.transcript-inline-link { color: var(--accent); text-decoration: none; cursor: pointer; overflow-wrap: anywhere; }
+.transcript-inline-link:hover { text-decoration: underline; text-underline-offset: 2px; }
+.transcript-inline-link[data-chip="path"] { font-family: var(--font-mono); font-size: 0.9em; }
+.transcript-inline-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent); border-radius: var(--radius-sm); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
 
 /* Time separator */
 .transcript-time { display: flex; justify-content: center; padding: 24px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }

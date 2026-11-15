@@ -185,29 +185,29 @@ describe('the maws tool server, live (E1 M2)', () => {
   }, CASE_MS);
 
   // P3-L M6b: the `artifact` pane (E2's `deliverable` until the cutover); pass3/p1-maws-show-pane is the pre-rename recording, and e2e replays a derived copy with the pane renamed (e2e/fixtures/derived/p1-maws-show-pane-artifact.jsonl)
-  it('4 show_pane: terminal opened, artifact not in this build, an unknown pane refused', async (ctx) => {
+  // UX wave U6d (O-44): the pane is retired. The host refuses the call with the sentence that teaches the link and asks no
+  // window, so the terminal's is the one pane request; the event still carries the refusal. Edited and typechecked, not
+  // run: a run records the fixture p1-maws-show-pane again.
+  it('4 show_pane: terminal opened, the retired artifact pane refused with the sentence, an unknown pane refused', async (ctx) => {
     const g = liveCase(gate, ctx);
     await withSession(g, 'p1-maws-show-pane', async (s) => {
       await s.send('Call the maws show_pane tool three times: first with pane "terminal", then with pane "artifact" and target "none", then with pane "nope". Reply with one line per call: the pane name and the result status or error text.');
       const terminal = await s.host.waitFor(() => s.paneShows()[0], 'the terminal pane request', TURN_MS);
       expect(terminal.pane).toBe('terminal');
       expect(await s.host.call('maws.pane.answer', { appSessionId: s.id, requestId: terminal.requestId, result: { ok: true, opened: { kind: 'panel-tool', toolId: 'terminal', tabId: 'terminal:live', title: 'Terminal' } } })).toEqual({ outcome: 'delivered' });
-      const artifact = await s.host.waitFor(() => s.paneShows()[1], 'the artifact pane request', TURN_MS);
-      expect(artifact).toMatchObject({ pane: 'artifact', target: 'none' });
-      expect(await s.host.call('maws.pane.answer', { appSessionId: s.id, requestId: artifact.requestId, result: { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') } })).toEqual({ outcome: 'delivered' });
       const ended = await s.host.waitFor(() => mainTurnsEnded(s.events())[0], 'the turn', TURN_MS);
       console.log(`   reply: ${JSON.stringify(ended.resultText)}`);
       const shown = ofKind(s.events(), 'maws.pane.shown');
       expect(shown).toMatchObject([
         { pane: 'terminal', opened: { kind: 'panel-tool', toolId: 'terminal' }, error: null },
-        { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') },
+        { pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.artifactPaneRetired },
       ]);
       const nope = ofKind(s.events(), 'tool.use').find((e) => e.toolName === 'mcp__maws__show_pane' && (e.input as { pane?: string }).pane === 'nope');
       expect(nope).toBeDefined();
       const refused = ofKind(s.events(), 'tool.result').find((e) => e.toolUseId === nope!.toolUseId)!;
       expect(refused.isError).toBe(true);
       expect(textOf(refused.content)).toContain(TOOL_ERRORS.unknownPane('nope'));
-      expect(s.paneShows()).toHaveLength(2);
+      expect(s.paneShows().map((request) => request.pane)).toEqual(['terminal']);
     });
   }, CASE_MS);
 
