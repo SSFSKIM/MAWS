@@ -1327,7 +1327,13 @@ test('a code block wraps its long lines in one frame the column’s width, with 
   expect(codeScroll.offset, 'an offset set on the code’s viewport holds').toBeGreaterThan(0);
   expect(codeScroll.after, 'R8: scrolling the code leaves the control in its place').toEqual(codeScroll.before);
   expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)})`).toBe(true);
-  // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it
+  // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it.
+  // The fence ends the fixture and the list has no trailing space, so in a 900 px window the scroll would stop short:
+  // for this step the window is 360 px tall, a viewport shorter than the frame, so the list can carry its top that far up.
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 360));
+  await page.waitForFunction(() => window.innerHeight === 360);
+  await settle(page, 300);
+  await mounted(page, loader);
   const stuck = await loader.evaluate(async (frame) => {
     const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
     const control = frame.querySelector('[data-streamdown="code-block-copy-button"]')!;
@@ -1336,12 +1342,15 @@ test('a code block wraps its long lines in one frame the column’s width, with 
     scroller.scrollTop += frame.getBoundingClientRect().top - scroller.getBoundingClientRect().top + 160;
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const [view, outer, own] = [scroller.getBoundingClientRect(), frame.getBoundingClientRect(), control.getBoundingClientRect()];
-    return { sticky, above: Math.round(view.top - outer.top), fromViewTop: Math.round(own.top - view.top), inside: own.bottom <= outer.bottom };
+    return { sticky, above: Math.round(view.top - outer.top), fromViewTop: Math.round(own.top - view.top), inside: own.bottom <= outer.bottom, viewport: scroller.clientHeight, frameHeight: Math.round(outer.height) };
   });
   expect(stuck.sticky, 'R8: the control’s row is sticky').toBe(true);
-  expect(stuck.above, 'the frame’s top is above the viewport').toBeGreaterThan(100);
+  expect(stuck.above, `the frame’s top is above the viewport (a ${stuck.viewport} px viewport, a ${stuck.frameHeight} px frame)`).toBeGreaterThan(100);
   expect(stuck.fromViewTop, 'R8: the control stays at the viewport’s top, not scrolled away with the frame’s').toBeGreaterThanOrEqual(-1);
   expect(stuck.inside, 'and inside its frame').toBe(true);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 900));
+  await page.waitForFunction(() => window.innerHeight === 900);
+  await settle(page, 300);
 
   // the clipboard: the control takes the fence's one line as it is; a selection copied by hand, a line end between the
   // source lines only (a soft wrap is no character), with at most the one a selection that ends a block carries
