@@ -2317,11 +2317,14 @@ test('(deleted draft, both ways) this build’s agent makes two drafts and delet
     await theirs.page.locator('[data-library]').getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 20_000 });
     const editor = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${plan}"] .ProseMirror[data-editor="live"]`);
     await expect(editor, `${peer.label} draws the draft`).toContainText('An agent wrote this.', { timeout: 20_000 });
+    // the store's revision, read and never written through a session (a session's read migrates a document as it), so
+    // the only write under the peer is the person's
+    const revisionOf = async (page: Page) => value(await invoke(page, 'artifacts.get', { artifactId: plan })).artifact?.revision ?? -1;
+    const before = await revisionOf(theirs.page);
     await editor.click();
     await theirs.page.keyboard.press('End');
     await theirs.page.keyboard.type(PERSON_TYPED);
-    const read = async () => JSON.stringify(await agent.ok('xb-reader', 'artifact_read', { artifact: plan }));
-    await expect.poll(read, { timeout: 20_000, message: `${peer.label}'s store holds the person's edit` }).toContain(PERSON_TYPED.trim());
+    await expect.poll(() => revisionOf(theirs.page), { timeout: 20_000, message: `${peer.label}'s store took the person's edit` }).toBeGreaterThan(before);
     expect(await statusOf(theirs.page), `${peer.label}'s store after its own write`).toMatchObject({ status: 'ok' });
     expect(theirs.maws.consoleErrors()).toEqual([]);
     await s.quit(theirs);
@@ -2335,6 +2338,7 @@ test('(deleted draft, both ways) this build’s agent makes two drafts and delet
     expect(refused.text, 'the delete of a draft a person wrote to under the peer').toContain(TOOL_ERRORS.deleteUnknown('Draft plan'));
     expect(refusalOf(refused)).toMatchObject({ reason: 'invalid', why: 'unknown' });
     expect(value(await invoke(again.page, 'artifacts.get', { artifactId: plan })).artifact?.title, 'the edited draft stays').toBe('Draft plan');
+    expect(JSON.stringify(await agent.ok('xb-reader', 'artifact_read', { artifact: plan })), `the person's edit under ${peer.label}, read here`).toContain(PERSON_TYPED.trim());
     value(await invoke(again.page, 'artifacts.undelete', { artifactId: notes }));
     expect(value(await invoke(again.page, 'artifacts.get', { artifactId: notes })).artifact?.title, 'the agent’s delete made before the stay, undone after it').toBe('Draft notes');
     await expect.poll(() => listed(again.page), { timeout: 20_000, message: 'the library lists the restored draft' }).toContain(notes);
