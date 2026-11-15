@@ -34,7 +34,7 @@ After the four pull requests of this landing:
 - [ ] M1 — An HTML page is published from a file and exported as itself.
 - [ ] M2 — A document's page is a setting of the document, and an export says how many pages it has.
 - [ ] M3 — The person's Export menu shows the page, and the scenes of U10b-1.
-- [ ] M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content.
+- [x] (2026-11-15) M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content. Built on `ux-wave/U10b-2`, commits `298646bff..86d4342c1`, reviewed clean after one fix (the mark's durability past a prune, pinned for every breaking case). `WIRE_MINOR` 49 (`708497934`) and `RL2_PROTOCOL.minor` 15 (`8477361e4`), both provisional until the chain merge.
 - [ ] M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2.
 - [ ] M6 — The float has three presentations.
 - [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3.
