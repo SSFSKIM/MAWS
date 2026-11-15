@@ -422,6 +422,7 @@ export const ASK = {
   state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended', dismissed: 'Dismissed' /* UX wave U1b: answered, every answer skipped */ },
   withdrawn: 'Cancelled, the turn was interrupted', // a cancelled ask whose call the engine withdrew (`cancelReason: 'withdrawn'`)
   open: 'Open',
+  openBeside: 'Open beside', // UX wave U1b: the capsule's button while its form stands in the row
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
   decideForMe: 'Decide for me',

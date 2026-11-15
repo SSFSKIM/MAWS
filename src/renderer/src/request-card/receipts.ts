@@ -4,12 +4,14 @@
 // terminal session's lane A state says was settled, under that session's addressed id and the call the settlement names
 // (the bridge's request id for an asynchronous question is its call's tool-use id, C17): a dismissal, or the
 // settlement's own words. And a session's receipts go when the session leaves this window (the ruling of 2026-11-15 on
-// M1's D-2). Both live here, started by `connectRequestCard()`, so MAWS alone runs them: a row's view reads the
+// M1's D-2). And (M3) a terminal session's request answered first elsewhere is held SETTLED_MS as a settling receipt where
+// it stood (decision 20). All live here, started by `connectRequestCard()`, so MAWS alone runs them: a row's view reads the
 // attention store and never the lane A store, which imports MAWS's IPC client (desk web bundles the rows).
-import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { AgentId, AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
-import { raceOf, settledWords } from '../lane-a/race';
-import { useAttention, type Receipt } from '../stores/attention';
+import { raceOf, SETTLED_MS, settledWords } from '../lane-a/race';
+import { selectWaitingRequests, useAttention, type Receipt, type Settling } from '../stores/attention';
 import { useLaneA } from '../stores/lane-a';
 import { useSessions, type SessionsState } from '../stores/sessions';
 
@@ -48,10 +50,58 @@ const known = (state: Pick<SessionsState, 'records' | 'listed'>, id: AppSessionI
 
 /** Drops a session's receipts when it leaves this window: it was known (a record, or a listed row) and is known no
  * longer (its record removed, or gone from its machine's snapshot; its listing gone). A receipt of a session not yet
- * known stays: it has not left. Its attention list emptied or dropped is no leaving. */
+ * known stays: it has not left. Its attention list emptied or dropped is no leaving. Every leaving is told to the store,
+ * also one with no receipt held yet, so an answer still in flight writes none for it (`deliver`). */
 export function followSessionsLeaving(): () => void {
   return useSessions.subscribe((now, before) => {
     if (now.records === before.records && now.listed === before.listed) return;
-    for (const id of useAttention.getState().receipts.keys()) if (known(before, id) && !known(now, id)) useAttention.getState().forgetReceipts(id);
+    const left = new Set<AppSessionId>();
+    for (const id of [...before.records.keys(), ...before.listed.keys()]) if (!known(now, id)) left.add(id);
+    for (const id of left) useAttention.getState().forgetReceipts(id);
   });
+}
+
+// UX wave U1b (Interfaces §G "The settling receipt", decision 20): a request this window listed as waiting that leaves its
+// session's list with a settlement naming somewhere other than this app ("Answered in the terminal: Allowed") stands
+// SETTLED_MS where it stood, as `useSettling` kept it in the docked card; one this app answered, or one whose settlement
+// has no words, writes none.
+function settlingOf(item: AttentionItem): Settling | null {
+  const { requestId } = item.request;
+  if (requestId === null) return null;
+  const lanes = useLaneA.getState();
+  const state = lanes.states.get(item.appSessionId) ?? null;
+  const told = lanes.told.get(item.appSessionId)?.get(requestId) ?? null;
+  const settled = raceOf(state, told, requestId, 0).settled;
+  if (settled === null || settled.where === 'maws') return null;
+  const words = settledWords(settled, { asyncQuestion: item.kind === 'async_input' });
+  if (words === null) return null;
+  return { id: item.id, call: item.request.toolUseId, agentId: (item.request.agentId ?? null) as AgentId | null, summary: item.summary, words, until: Date.now() + SETTLED_MS };
+}
+
+/** Follows the sessions' waiting lists into the settling receipts: each held SETTLED_MS by its own timer. */
+export function followSettling(): () => void {
+  const timers = new Set<ReturnType<typeof setTimeout>>();
+  const off = useAttention.subscribe((now, before) => {
+    if (now.bySession === before.bySession) return;
+    for (const [id, items] of before.bySession) {
+      if (now.bySession.get(id) === items) continue;
+      const still = new Set(selectWaitingRequests(now, id).map((item) => item.id));
+      for (const item of selectWaitingRequests(before, id)) {
+        if (still.has(item.id)) continue;
+        const entry = settlingOf(item);
+        if (entry === null) continue;
+        useAttention.getState().holdSettling(id, entry);
+        const timer = setTimeout(() => {
+          timers.delete(timer);
+          useAttention.getState().releaseSettling(id, entry.id);
+        }, SETTLED_MS);
+        timers.add(timer);
+      }
+    }
+  });
+  return () => {
+    off();
+    for (const timer of timers) clearTimeout(timer);
+    timers.clear();
+  };
 }

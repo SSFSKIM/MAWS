@@ -41,15 +41,15 @@ import { RACE, settledWords, terminalOnlyNow, useRace } from '../lane-a/race'; /
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
 import { itemAge } from '../sidebar/derive';
-import { connectAnswers, useAttention, type Outcome } from '../stores/attention';
-import { markDocked } from '../stores/composer';
+import { ANSWERED_ELSEWHERE, connectAnswers, useAttention, type Outcome } from '../stores/attention';
+import { markDocked, useComposerStore } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../transcript';
 import { toAnswer } from './answers';
 import { ASK_CARD } from './copy'; // E1 M4b
 import { AskBody } from './variants/Ask'; // E1 M4b
-import { CardButton, Controls, Muted } from './controls';
+import { CardButton, Controls, Muted, TONE_CLASS } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { proposedChange, proposedFilePath } from './preview/proposed';
 import { useProposedFile } from './preview/use-proposed-file';
@@ -84,11 +84,16 @@ export interface RequestCardProps {
   paneIndex: 0 | 1 | null; // informational
   onAnswered?: (outcome: 'delivered' | 'not_pending' | 'write_failed') => void;
   askInPlace?: boolean; // P5 O8 M7a: a MAWS ask answers here, through the Question sheet's body, rather than opening the sheet
+  // UX wave U1b (Interfaces §C, §E): where in a transcript an inline card stands: a waiting row's form, or the transcript's
+  // end (whose frame is the card's box). There its keys act while the keyboard is on its transcript row, a question
+  // form's header is the two lines of the owner's "Form header", and the keyboard goes back to the session's composer when
+  // the element holding it leaves with the request. Absent (the project channel's cards), the inline card is as before.
+  region?: 'row' | 'end';
 }
 
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike); docked, the frame's title.
 export const HEADINGS = ATTENTION_HEADINGS;
-const TONE: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
+const TONE: Record<AttentionTone, string> = TONE_CLASS;
 const KEY_NAMES = ['accept', 'decline', 'allowOnce', 'allowLasting'] as const;
 const NO_KEYS: Record<(typeof KEY_NAMES)[number], boolean> = { accept: false, decline: false, allowOnce: false, allowLasting: false };
 const CARRIED: Capability = { available: true }; // no port: today's delivery path refuses it in the holder's words
@@ -228,7 +233,7 @@ function RequestCardFor(props: RequestCardProps) {
   );
 }
 
-function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed, askInPlace = false }: RequestCardProps & {
+function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed, askInPlace = false, region }: RequestCardProps & {
   loading: boolean;
   unreadable: string | null;
   concealed: boolean;
@@ -276,7 +281,8 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     const root = rootRef.current;
     ownerRef.current = root ? (root.parentElement?.closest<HTMLElement>('[tabindex]') ?? root) : null;
   });
-  const cardKeys = placement === 'card' && live;
+  const owns = placement === 'card' || (placement === 'inline' && region !== undefined); // U1b: a transcript's row owns an inline card's keys
+  const cardKeys = owns && live;
   useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept, fresh: true });
   useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true });
   useKeyChord('request.allowOnce', allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true });
@@ -286,8 +292,8 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   // known to be answerable).
   const framed = placement === 'docked' && answerable(request) && !concealed;
   useEffect(() => {
-    if (!live || (placement !== 'card' && placement !== 'docked')) return;
-    const owner = placement === 'card' ? ownerRef.current : (rootRef.current?.closest<HTMLElement>('[data-docked-frame]') ?? null);
+    if (!live || (!owns && placement !== 'docked')) return;
+    const owner = owns ? ownerRef.current : (rootRef.current?.closest<HTMLElement>('[data-docked-frame]') ?? null);
     if (!owner) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!/^[1-9]$/.test(event.key) || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented || isTextEntry(event.target)) return;
@@ -298,7 +304,26 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     };
     owner.addEventListener('keydown', onKeyDown);
     return () => owner.removeEventListener('keydown', onKeyDown);
-  }, [live, placement, framed]);
+  }, [live, placement, framed, owns]);
+
+  // U1b (Interfaces §E): when the element that holds the keyboard leaves with its request (a form answered, the last card
+  // at the end), the keyboard goes to the session's composer, as the docked frame gave it back; when the card did not hold
+  // it, nothing moves.
+  const appSessionId = item.appSessionId;
+  useLayoutEffect(() => {
+    if (region === undefined) return;
+    const root = rootRef.current;
+    const owner = ownerRef.current; // the card's transcript row, for the card's life
+    return () => {
+      const held = document.activeElement;
+      if (!(held instanceof HTMLElement) || root === null || !(root.contains(held) || held === owner)) return;
+      queueMicrotask(() => {
+        if (held.isConnected && document.activeElement === held) return; // its row stays: the keyboard stays there
+        const now = document.activeElement;
+        if (now === null || now === document.body) useComposerStore.getState().focusTargets.get(appSessionId)?.focusEditor();
+      });
+    };
+  }, [region, appSessionId]);
 
   if (phase === 'closed' && race.settled === null) return null; // M6: a settlement stays said while its placement shows it
 
@@ -323,6 +348,8 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   // P2-C end
   const variant = { item, placement, busy: busy || concealed, submit, bindKeys, capability };
   const settled = sent ? null : race.settled; // M6: a settlement after our own delivered answer is ours: nothing to say
+  // U1b: a question's form in a transcript draws its own header, in the variant (`variants/Question.tsx`, `FormHeader`)
+  const rowHeader = region !== undefined && request?.kind === 'question.requested' && !loading && settled === null && phase !== 'not_pending';
   // U1a §G: a dismissal this app made of an asynchronous question says nothing: its card leaves at once
   const settledText = settled === null ? null : settledWords(settled, { asyncQuestion: item.kind === 'async_input' });
   if (settled !== null && settledText === null) return null;
@@ -343,7 +370,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else if (phase === 'not_pending') {
     body = (
       <p role="status" className="m-0 text-fg-muted">
-        Already answered elsewhere
+        {ANSWERED_ELSEWHERE}
       </p>
     );
   } else if (request?.kind === 'maws.ask.opened') {
@@ -359,7 +386,9 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
         // U1a §E: Dismiss sends the decline the form's Esc sends (an asynchronous question's: the bridge's dismissal),
         // gated as that decline is; a double-click on a single-choice option picks it and goes on
         const declining = toAnswer({ kind: 'permission', decision: 'deny', message: '' });
-        body = <QuestionBody {...variant} request={request} dismiss={{ ...gated(capability(declining)), run: () => submit(declining, 'Dismissed') }} doubleClick />;
+        // U1b: in a transcript, the form's header is the variant's two lines (the owner's "Form header", ruling A5)
+        const header = rowHeader ? { from, note: race.asked && settled === null ? (race.terminalOnly ? RACE.terminal : RACE.asked) : null } : undefined;
+        body = <QuestionBody {...variant} request={request} dismiss={{ ...gated(capability(declining)), run: () => submit(declining, 'Dismissed') }} doubleClick header={header} />;
         break;
       }
       case 'plan.requested':
@@ -376,11 +405,12 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     }
   }
 
-  // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool.
-  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : {};
+  // Hover, the card sits in C5's dialog named for the session; the card itself is named for its request and tool. U1b
+  // (§E): wherever else it is drawn, a request's card is a group named by its kind's heading, as the docked frame named it.
+  const named = hover ? { role: 'group', 'aria-label': title === null ? heading.text : `${heading.text}: ${title}` } : framed ? {} : { role: 'group', 'aria-label': heading.text };
   // W4: a question in the transcript is Claude Desktop's 480 px card; docked it fills the frame that stands in for the
-  // composer, and the Overview card is its own width.
-  const questionCard = placement === 'inline' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
+  // composer, and the Overview card is its own width. U1b: at the transcript's end the end's frame is its box.
+  const questionCard = placement === 'inline' && region !== 'end' && request?.kind === 'question.requested' ? 'max-w-[480px] rounded-lg border border-border bg-bg-raised p-3' : '';
   const content = (
     <div ref={rootRef} data-request-card={item.id} aria-busy={busy} {...named} className={`flex flex-col gap-3 text-fg ${placement === 'docked' || placement === 'inline' ? 'text-ui' : 'text-ui-sm'} ${questionCard}`}>
       {asked !== null && (
@@ -395,14 +425,14 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
           {race.asked && settled === null && <Muted>{race.terminalOnly ? RACE.terminal : RACE.asked}</Muted>}
         </div>
       )}
-      {!framed && asked === null && (
+      {!framed && asked === null && !rowHeader && (
         <div className={`flex items-center gap-1.5 ${TONE[heading.tone]}`}>
           <span aria-hidden>{heading.char}</span>
           <span>{heading.text}</span>
           {from !== null && <span className="text-fg-muted">from {from}</span>}
         </div>
       )}
-      {title !== null && asked === null && (
+      {title !== null && asked === null && !rowHeader && (
         <div className="flex flex-col gap-1">
           <h3 className="m-0 text-ui font-semibold">{title}</h3>
           {subtitle && <Muted>{subtitle}</Muted>}

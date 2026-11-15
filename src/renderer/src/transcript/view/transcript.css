@@ -630,3 +630,12 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-restore-dialog ul { max-height: 30vh; overflow: auto; overflow-wrap: anywhere; padding-left: 20px; font-family: var(--font-mono); }
 .transcript-restore-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .transcript-restore-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* UX wave U1b start (Interfaces §D "A call that waits"; the architect's ruling A3): a call waiting for the person's
+   permission draws the waiting glyph in place of its status mark, and its glyph and label in the warning tone, as its
+   run's line does. The form of a waiting row, and the capsule's form under its top line. */
+.transcript-cell[data-waiting] > .transcript-cell-line { color: var(--warning); }
+.transcript-cell[data-waiting] > .transcript-cell-line::before { content: '◐'; width: 12px; height: auto; border: 0; border-radius: 0; animation: none; color: var(--warning); }
+.transcript-waiting-form { margin: 4px 0 10px; }
+.transcript-ask-form { padding: 8px 12px; border-top: 1px solid var(--border); }
+/* UX wave U1b end */

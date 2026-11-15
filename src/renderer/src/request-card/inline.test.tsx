@@ -2,13 +2,13 @@ import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, RequestId } from '@shared/graph/ids';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { bareOf } from '@shared/machine/address';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetSlots, useSlot } from '../app/slots';
 import { useAttention } from '../stores/attention';
-import { markDocked, resetComposerStore } from '../stores/composer';
+import { resetComposerStore } from '../stores/composer';
 import { resetShellStores } from '../test-support/shell-stores';
 import { TranscriptSlot, useTranscriptStore } from '../transcript';
 import { builder, request, tool } from '../transcript/model/test-events';
@@ -22,7 +22,7 @@ const read = permission({ requestId: request('r2'), toolUseId: tool('c1'), toolN
 const twin = permission({ requestId: request('r1'), toolUseId: tool('other'), toolName: 'Edit', displayName: 'Edit', input: { file_path: '/p/b.ts' } });
 const TWIN = at('app-twin' as AppSessionId);
 
-// One turn with two pending requests, as C3 would stream them: each gets a request_slot row.
+// One turn with two pending requests, as C3 would stream them: since UX wave U1b both are drawn at the transcript's end.
 function history(): SessionEvent[] {
   const b = builder();
   b.turn('u1', 'Look around');
@@ -76,33 +76,30 @@ afterEach(() => {
   delete (window as { maws?: PreloadBridge }).maws;
 });
 
-const slot = (requestId: string) => document.querySelector<HTMLElement>(`[data-kind="request_slot"] [data-request-id="${requestId}"]`) ?? document.querySelector<HTMLElement>(`[data-request-id="${requestId}"]`);
+const end = () => document.querySelector<HTMLElement>('[data-request-end]');
+const endRow = () => document.querySelector<HTMLElement>('[data-row-id="request-end"]');
 
+// UX wave U1b (§C): a request makes no row; the transcript's end row draws a session's prompts through the seam
 describe("request renderer registers through C6's seam", () => {
-  it('replaces the placeholder with the card, points at a docked request, and its disposer brings the placeholder back', async () => {
+  it('draws the end row’s prompts once registered, the oldest open and the other under Also waiting; with none registered the end row draws nothing', async () => {
     render(<TranscriptSlot appSessionId={APP} />);
-    await waitFor(() => expect(slot('r1')?.textContent).toBe('Waiting for you · Bash · answer in the composer'));
+    await waitFor(() => expect(document.querySelector('[data-kind="group"]')).not.toBeNull());
+    expect(endRow()?.textContent ?? '').toBe(''); // no renderer: no card, and no placeholder pointing at the composer
+    expect(document.body.textContent).not.toContain('answer in the composer');
 
     act(() => {
       disposeRenderer = connectRequestCard();
     });
-    await waitFor(() => expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command'));
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file');
-
-    let undock = () => {};
-    act(() => {
-      undock = markDocked(APP, 'r1' as RequestId); // a docked placement of this session shows r1
-    });
-    expect(slot('r1')?.textContent).toBe('◐Waiting for you · Bash · answer below ↓');
-    expect(slot('r2')?.querySelector('h3')?.textContent).toBe('◐Read a file'); // a different pending request keeps its full card
-    act(() => undock());
-    expect(slot('r1')?.querySelector('h3')?.textContent).toBe('◐Run a command');
+    await waitFor(() => expect(end()?.querySelector('h3')?.textContent).toBe('◐Run a command'));
+    expect(end()?.querySelector('[data-waiting-line]')?.textContent).toContain('permission.requested');
+    expect(document.querySelectorAll('.transcript-row[data-kind="request_slot"]')).toHaveLength(1); // the end row alone
 
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [itemFor(read, APP)] }, TEST_MACHINE)); // r1 retired
-    expect(slot('r1')?.textContent).toBe('');
+    await waitFor(() => expect(end()?.querySelector('h3')?.textContent).toBe('◐Read a file'));
+    expect(end()?.querySelector('[data-waiting-line]')).toBeNull();
 
     act(() => disposeRenderer());
-    expect(slot('r2')?.textContent).toBe('Waiting for you · Read · answer in the composer');
+    await waitFor(() => expect(end()).toBeNull());
   });
 
   it("registers the X4 card in C5's requestCard slot", () => {
@@ -137,36 +134,25 @@ describe("request renderer registers through C6's seam", () => {
     expect(container.textContent).toBe('');
   });
 
-  it('a docked notice for an unreadable request leaves the transcript its card, whose Retry reads it again', async () => {
+  it('an unreadable request’s card in a row says so, and its Retry reads it again', async () => {
     const item = itemFor(bash, APP);
     useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
     const { renderSessionRequest } = await import('./inline');
-    render(
-      <>
-        <div data-testid="docked">
-          <RequestCard item={item} request={null} placement="docked" paneIndex={null} />
-        </div>
-        <div data-testid="inline">{renderSessionRequest(slotRow)}</div>
-      </>,
-    );
+    render(<div data-testid="inline">{renderSessionRequest(slotRow)}</div>);
     const inline = screen.getByTestId('inline');
-    expect(inline.textContent).not.toContain('answer below'); // no pointer to a notice with nothing to answer
     expect(inline.querySelector('[role="alert"]')?.textContent).toBe('The request could not be readRetry');
     act(() => inline.querySelector<HTMLButtonElement>('[role="alert"] button')!.click());
     await waitFor(() => expect(useAttention.getState().requests.get(item.id)).toMatchObject({ requestId: 'r1' }));
     expect(useAttention.getState().unreadable.has(item.id)).toBe(false);
-    await waitFor(() => expect(inline.textContent).toContain('answer below')); // read now: the docked card shows it
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
   });
 
-  it('renderInlineRequest always renders the full card, docked or not', async () => {
+  it('renderInlineRequest renders the full card from the named session only', async () => {
     const render1 = renderInlineRequest(APP);
     const slotRow = { id: 'slot:r1', turnId: null, at: bash.at, kind: 'request_slot', requestId: 'r1', toolUseId: 'b1', requestKind: 'permission', toolName: 'Bash', requestedAt: bash.at } as never;
-    const undock = markDocked(APP, 'r1' as RequestId);
     render(<>{render1(slotRow)}</>);
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy());
-    expect(screen.queryByText(/answer below/)).toBeNull();
-    undock();
     const other = render(<>{renderInlineRequest(at('app-other' as AppSessionId))(slotRow)}</>); // another session holds no such item
     expect(other.container.innerHTML).toBe('');
   });

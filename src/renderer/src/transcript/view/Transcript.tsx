@@ -25,6 +25,8 @@ import { WorkMotion } from './motion';
 import { recordTranscriptScroll, scrollSignature, takeTranscriptCarry, type TranscriptScroll } from './scroll-carry'; // P4-B3
 import { RowView } from './rows/Row';
 import { useSourcePages } from './source-pages'; // the long-transcript window
+import { useTranscriptWaiting, WaitingViewProvider } from './waiting-view'; // UX wave U1b
+import { END_ROW } from '../model/keys'; // UX wave U1b
 import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
 import { withBrowserActivityRows } from '../model/browser-activity'; // E13
@@ -62,7 +64,9 @@ const ESTIMATES: Record<RowKind, number> = {
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
 };
+const END_ESTIMATE = 220; // UX wave U1b (§C): the end row, one card and its lines
 export function estimateRow(row: Row): number {
+  if (row.id === END_ROW) return END_ESTIMATE;
   if (row.kind === 'group' && row.expanded) return 280;
   if (row.kind === 'cell' && row.expanded) return 220;
   return ESTIMATES[row.kind];
@@ -580,6 +584,9 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     if (report) for (const turn of openRecords ?? []) motion.unfold(turn);
   }, [report, openRecords, motion]);
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
+  // UX wave U1b (Interfaces §C, §D): the session's waiting requests, each in its call's row or at the end row appended
+  // last, after the tail, the projection and the first-row cut; and the transcript's one way to show one of them
+  const requests = useTranscriptWaiting({ storeKey, agent: variant === 'child' ? (source.agentId ?? CHILD) : null, rows, list: listRef, idPrefix });
   // P4-B3 (its Decision Log 14): the place a card's float or dock carries to this mount (once), and where it leaves
   const takeCarried = useCallback(() => takeTranscriptCarry(storeKey), [storeKey]);
   const leave = useCallback((scroll: TranscriptScroll) => recordTranscriptScroll(storeKey, scroll), [storeKey]);
@@ -652,9 +659,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
 
   return (
     <TranscriptProvider value={context}>
+      <WaitingViewProvider view={requests.view} settling={requests.settling}>
       {/* the history read's state, for a scene to settle on: `loading` from the read's start, not from the word's 300 ms */}
       <div ref={rootRef} className={`transcript relative min-h-0 ${className ?? ''}`} data-hydration={failed !== null ? 'failed' : reading ? 'loading' : 'ready'} onWheel={moved} onTouchMove={moved} onPointerDown={moved} onKeyDown={moved}>
-        <TranscriptList id={listElementId(idPrefix)} rows={rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
+        <TranscriptList id={listElementId(idPrefix)} rows={requests.rows} renderRow={renderRow} onFollowChange={followChange} handle={listRef} className="h-full" takeCarried={takeCarried} onLeave={leave} />
         {reach !== null ? (
           // A jump to a message older than what is loaded: its pages on their way, with the reader able to give up, or
           // how it ended when it did not land (the store's `reachMessage`)
@@ -709,6 +717,7 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
           </button>
         )}
       </div>
+      </WaitingViewProvider>
     </TranscriptProvider>
   );
 }

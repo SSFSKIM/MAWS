@@ -16,12 +16,20 @@
 // double-click on a single-choice option picks it and goes on (Next, or Submit on the last step, where the port carries
 // it); a multi-choice option and Other never go on. An asynchronous question (an `async_input` item) binds no Esc, so
 // its Dismiss is the one way to end it without an answer (O-22).
+//
+// UX wave U1b (the owner's answer "Form header" = "Two lines", 2026-11-15, changing the architect's ruling A5's default):
+// a host that draws the form in a transcript hands `header`, and the form's header is two lines above its step, built
+// in `FormHeader` alone: the kind line carrying the count ("? Question waiting · 2 questions"), naming who asks only when
+// an agent other than the session itself asked, and the terminal note for a terminal session. The keys of an inline
+// form are owned by its transcript row (the nearest ancestor that takes focus), as an Overview card's by its article.
 import { Checkbox, RadioGroup } from 'radix-ui';
+import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import type { AttentionItem } from '@shared/graph/attention';
 import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
 import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer } from '../answers';
-import { CardButton, Controls } from '../controls';
+import { CardButton, Controls, Muted, TONE_CLASS } from '../controls';
 import { SandboxedPreview } from '../preview/SandboxedPreview';
 import { advance, answerOf, EMPTY_DRAFT, goTo, pick, setOther, skip, toggle, type QuestionDraft } from '../question-steps';
 import { carried, gated, type VariantProps } from './types';
@@ -137,12 +145,28 @@ function MultiSelect({ question, draft, disabled, onToggle, onOther, onEnter }: 
   );
 }
 
-// The element that owns the card's keys for the placement (RequestCard's rule): the docked frame, or C5's article
-// around an Overview card. Inline and hover own none.
+// The element that owns the card's keys for the placement (RequestCard's rule): the docked frame, C5's article around an
+// Overview card, or (U1b) the transcript row an inline form stands in. Hover owns none.
 function keyOwner(body: HTMLElement, placement: VariantProps<'question.requested'>['placement']): HTMLElement | null {
   if (placement === 'docked') return body.closest<HTMLElement>('[data-docked-frame]');
-  if (placement === 'card') return body.closest<HTMLElement>('[data-request-card]')?.parentElement?.closest<HTMLElement>('[tabindex]') ?? null;
+  if (placement === 'card' || placement === 'inline') return body.closest<HTMLElement>('[data-request-card]')?.parentElement?.closest<HTMLElement>('[tabindex]') ?? null;
   return null;
+}
+
+// U1b: the form's header in a transcript, the one place it is built (the owner's "Form header", "The look" card 5).
+function FormHeader({ kind, count, from, note }: { kind: AttentionItem['kind']; count: number; from: string | null; note: string | null }) {
+  const heading = ATTENTION_HEADINGS[kind];
+  return (
+    <div className="flex flex-col gap-1" data-form-header="">
+      <div className={`flex items-center gap-1.5 ${TONE_CLASS[heading.tone]}`}>
+        <span aria-hidden>{heading.char}</span>
+        <span>{heading.text}</span>
+        {count > 1 && <span className="text-fg-muted">· {count} questions</span>}
+        {from !== null && <span className="text-fg-muted">· from {from}</span>}
+      </div>
+      {note !== null && <Muted>{note}</Muted>}
+    </div>
+  );
 }
 
 const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint disabled:hover:bg-transparent';
@@ -150,9 +174,10 @@ const ARROW = 'rounded-sm px-1 text-fg-muted outline-accent hover:bg-bg-hover ho
 export interface QuestionHostProps {
   dismiss?: { disabled: boolean; title: string | undefined; run(): void }; // the Dismiss button in the form's foot; no key
   doubleClick?: boolean; // a double-click on a single-choice option picks it and goes on
+  header?: { from: string | null; note: string | null }; // U1b: the form in a transcript draws its two-line header (`FormHeader`)
 }
 
-export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability = carried, dismiss, doubleClick = false }: VariantProps<'question.requested'> & QuestionHostProps) {
+export function QuestionBody({ item, request, placement, busy, submit, bindKeys, capability = carried, dismiss, doubleClick = false, header }: VariantProps<'question.requested'> & QuestionHostProps) {
   const { questions } = request;
   const count = questions.length;
   const storedDraft = useAttention((s) => s.drafts.get(item.id)) ?? EMPTY_DRAFT;
@@ -237,6 +262,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
   const Step = question.multiSelect ? MultiSelect : SingleSelect;
   return (
     <div ref={bodyRef} data-question-step={step + 1} className="@container flex flex-col gap-3">
+      {header && <FormHeader kind={item.kind} count={count} from={header.from} note={header.note} />}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
           <span className="min-w-0 flex-1 truncate text-ui-sm text-fg-muted">{question.header}</span>

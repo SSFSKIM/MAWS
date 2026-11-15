@@ -11,7 +11,7 @@ import { create } from 'zustand';
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
@@ -53,6 +53,12 @@ export interface AttentionState {
   // item leaves; `failed` with the answer a Retry sends again. An entry goes when its item leaves the list.
   deliveries: ReadonlyMap<AttentionId, Delivery>;
   deliver(item: AttentionItem, answer: RequestAnswer): Promise<Outcome>; // the card's submit: the session's port (`connectAnswers`), its outcome, the receipt
+  // UX wave U1b (Interfaces §G "The settling receipt", decision 20): a terminal session's request answered first elsewhere
+  // says so for SETTLED_MS where it stood, held here (the end row leaves with its last request). Written and removed by
+  // the card's follower (`request-card/receipts.ts`); never a waiting request: no list, count or key reads it.
+  settling: ReadonlyMap<AppSessionId, readonly Settling[]>;
+  holdSettling(appSessionId: AppSessionId, entry: Settling): void;
+  releaseSettling(appSessionId: AppSessionId, id: AttentionId): void;
   // P5 O6 M4: per machine. A machine's snapshot replaces its sessions' lists only, and buffers only its changes; begun
   // again (a new generation of its link) it drops what it had buffered.
   beginSnapshot(machine: MachineRef): void;
@@ -80,6 +86,11 @@ export type Receipt = { answers: Record<string, string> } | { dismissed: true } 
 export type Delivery = { phase: 'answering' | 'sent' | 'not_pending' | 'closed' } | { phase: 'failed'; detail: string | null; answer: RequestAnswer };
 export type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 export const NOT_PENDING_MS = 2_000;
+/** What a card says while its answer was too late (`not_pending`), and, after (decision 8a), its question's receipt. */
+export const ANSWERED_ELSEWHERE = 'Already answered elsewhere';
+
+/** UX wave U1b (Interfaces §G "The settling receipt"): one request its terminal, or another client, answered first. */
+export interface Settling { id: AttentionId; call: ToolUseId | null; agentId: AgentId | null; summary: string; words: string; until: number }
 
 /** The way an answer reaches its session, given by the card's module (`request-card/RequestCard.tsx`): the session's
  * controls port and lane A's race. Both import MAWS's IPC client, which this store must not: a row's view imports the
@@ -99,11 +110,15 @@ export function connectAnswers(port: AnswerPort): () => void {
   };
 }
 
+// A question's call, for the receipts a delivery writes: the engine's or a bridge's question (kind `question`, or
+// `async_input` for a terminal's asynchronous question) with a call id; null for any other request.
+const questionCall = (item: AttentionItem): ToolUseId | null => (item.kind === 'question' || item.kind === 'async_input' ? item.request.toolUseId : null);
+
 // What a delivered answer says of its question (M1's D-5, moved here with the delivery): the answers sent, or a dismissal
 // for the decline; nothing for an answer to any other request. A question's item, the engine's or a bridge's, is of kind
 // `question`, or `async_input` for a terminal's asynchronous question.
 function receiptOfAnswer(item: AttentionItem, answer: RequestAnswer): Receipt | null {
-  if (item.kind !== 'question' && item.kind !== 'async_input') return null;
+  if (questionCall(item) === null) return null;
   if (answer.kind === 'question') return { answers: { ...answer.answers } };
   return answer.kind === 'permission' && answer.decision !== 'allow' ? { dismissed: true } : null;
 }
@@ -159,6 +174,11 @@ interface Partition {
 export function createAttentionStore() {
   const inFlight = new Map<AttentionId, Promise<void>>();
   const answering = new Map<AttentionId, Promise<Outcome>>(); // U1b: the one answer in flight per item
+  // U1b (M2's review, on the ruling on M1's D-2): how many times each session left this window (`forgetReceipts`). A
+  // delivery writes its receipt only when its session has not left since the answer went out: the leaving is said once,
+  // at its edge, and an outcome arriving after it would otherwise write the session's receipts again.
+  const departures = new Map<AppSessionId, number>();
+  const departuresOf = (id: AppSessionId) => departures.get(id) ?? 0;
   const partitions = new Map<MachineRef, Partition>();
   const partition = (machine: MachineRef): Partition => {
     let p = partitions.get(machine);
@@ -214,6 +234,7 @@ export function createAttentionStore() {
       greyed: new Set(),
       receipts: new Map(),
       deliveries: new Map(),
+      settling: new Map(),
       beginSnapshot(machine) {
         const p = partition(machine);
         if (p.fed) return; // fix wave 1: the feed's changes apply as they come
@@ -305,10 +326,24 @@ export function createAttentionStore() {
         set({ receipts: new Map(get().receipts).set(appSessionId, new Map(get().receipts.get(appSessionId)).set(call, receipt)) });
       },
       forgetReceipts(appSessionId) {
+        departures.set(appSessionId, departuresOf(appSessionId) + 1);
         if (!get().receipts.has(appSessionId)) return;
         const receipts = new Map(get().receipts);
         receipts.delete(appSessionId);
         set({ receipts });
+      },
+      holdSettling(appSessionId, entry) {
+        const held = (get().settling.get(appSessionId) ?? []).filter((s) => s.id !== entry.id);
+        set({ settling: new Map(get().settling).set(appSessionId, [...held, entry]) });
+      },
+      releaseSettling(appSessionId, id) {
+        const held = get().settling.get(appSessionId);
+        if (held === undefined || !held.some((s) => s.id === id)) return;
+        const rest = held.filter((s) => s.id !== id);
+        const settling = new Map(get().settling);
+        if (rest.length > 0) settling.set(appSessionId, rest);
+        else settling.delete(appSessionId);
+        set({ settling });
       },
       deliver(item, answer) {
         const out = answering.get(item.id);
@@ -324,19 +359,24 @@ export function createAttentionStore() {
           set({ deliveries });
         };
         set({ deliveries: new Map(get().deliveries).set(item.id, entry) });
+        const departed = departuresOf(item.appSessionId);
         const sent = (async (): Promise<Outcome> => {
           const result = await answerPort.send(item, answer);
           answering.delete(item.id);
           const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
+          const call = questionCall(item);
+          const stayed = departuresOf(item.appSessionId) === departed; // its session has not left this window meanwhile
           if (outcome === 'delivered') {
             // the receipt is the answer's, whether or not its item is still listed (an asynchronous question's leaves at once)
-            const call = item.request.toolUseId;
             const receipt = receiptOfAnswer(item, answer);
-            if (call !== null && receipt !== null) get().recordReceipt(item.appSessionId, call, receipt);
+            if (call !== null && receipt !== null && stayed) get().recordReceipt(item.appSessionId, call, receipt);
             write({ phase: 'sent' });
           } else if (outcome === 'not_pending') {
             if (answerPort.terminalOnly(item)) write(null); // P5 O9 M6: the terminal's to answer, still pending
             else {
+              // decision 8a: the question's row says so past the card's two seconds, until its own answers arrive; a
+              // receipt already held (a settlement's own words, an answer, a dismissal) says more and stays
+              if (call !== null && stayed && get().receipts.get(item.appSessionId)?.get(call) === undefined) get().recordReceipt(item.appSessionId, call, { settled: ANSWERED_ELSEWHERE });
               const said: Delivery = { phase: 'not_pending' };
               write(said);
               setTimeout(() => {

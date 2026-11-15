@@ -30,7 +30,7 @@ import { Transcript, TranscriptSlot, useTranscriptStore } from '../transcript';
 import { journalToEvents } from '../transcript/dev/journal';
 import { builder, request, tool } from '../transcript/model/test-events';
 import { connectRequestCard, renderSessionRequest } from './index';
-import { itemFor, type RequestEvent } from './test-requests';
+import { askItemFor, askOpened, itemFor, type RequestEvent } from './test-requests';
 
 const APP = at('app-rows' as AppSessionId);
 const QUESTIONS = [
@@ -168,10 +168,18 @@ describe('a question’s form in its call’s row', () => {
     b.result('q0', 'User has answered your questions: "Which colour?"="Blue", "Which size?"="Large".');
     b.toolUse('p1', 'ExitPlanMode', { plan: '1. Read the notes.\n2. Write the page.' });
     const plan = b.emit('plan.requested', { requestId: request('rplan'), toolUseId: tool('p1'), plan: '1. Read the notes.\n2. Write the page.', input: {} });
+    b.toolUse('ask-1', 'mcp__maws__ask', { title: 'Setup', questions: [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }] }] });
+    const ask = askOpened({ askId: 'ask-1', toolUseId: tool('ask-1'), requestId: request('rask'), title: 'Setup' });
     events = b.events;
     requests.set('rplan', plan);
+    requests.set('rask', ask);
     const item = itemFor(plan as RequestEvent, APP, { summary: 'Plan' });
-    await mount([item]);
+    const asking = askItemFor(ask, APP);
+    await mount([item, asking]);
+    const askRow = () => document.querySelector<HTMLElement>('.transcript-row[data-kind="ask"]')!;
+    await waitFor(() => expect(askRow()?.querySelector('.transcript-ask-form [data-request-card]')).not.toBeNull());
+    expect(askRow().querySelector('.transcript-ask-title')?.textContent).toBe('Setup');
+    expect(within(askRow()).getByRole('button', { name: 'Open beside' })).toBeTruthy();
     const planRow = () => document.querySelector<HTMLElement>('.transcript-row[data-kind="plan"]')!;
     await waitFor(() => expect(planRow()?.querySelector('[data-request-card]')).not.toBeNull());
     expect(within(planRow()).getByRole('group', { name: 'Plan review' })).toBeTruthy();
@@ -179,6 +187,8 @@ describe('a question’s form in its call’s row', () => {
     list([]);
     await waitFor(() => expect(planRow().querySelector('[data-request-card]')).toBeNull());
     expect(planRow().querySelector('.transcript-plan')).not.toBeNull();
+    expect(askRow().querySelector('.transcript-ask-form')).toBeNull();
+    expect(within(askRow()).queryByRole('button', { name: 'Open beside' })).toBeNull();
   });
 });
 

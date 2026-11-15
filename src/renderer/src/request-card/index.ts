@@ -2,11 +2,12 @@
 // renders, the pure rules it applies, the transcript renderers, and `connectRequestCard`, which App.tsx's C7 block
 // calls once to register the card in C5's `requestCard` slot and C6's request renderer. UX wave U1b: it also starts the
 // follower of a terminal session's settlements, which writes a question's receipt, and the one that drops a session's
-// receipts when the session leaves (receipts.ts).
+// receipts when the session leaves, and the one that holds a request answered first elsewhere as a settling receipt where
+// it stood (receipts.ts).
 import { registerSlot } from '../app/slots';
 import { registerRequestRenderer } from '../transcript';
 import { renderSessionRequest } from './inline';
-import { followSessionsLeaving, followSettlements } from './receipts';
+import { followSessionsLeaving, followSettlements, followSettling } from './receipts';
 import { RequestCard } from './RequestCard';
 
 export { RequestCard, type Placement, type RequestCardProps } from './RequestCard';
@@ -22,9 +23,11 @@ export function connectRequestCard(): () => void {
   const offRenderer = registerRequestRenderer(renderSessionRequest);
   const offSettlements = followSettlements();
   const offLeaving = followSessionsLeaving();
+  const offSettling = followSettling();
   return () => {
     offRenderer();
     offSettlements();
     offLeaving();
+    offSettling();
   };
 }

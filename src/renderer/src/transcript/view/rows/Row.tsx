@@ -28,6 +28,7 @@ import { DividerRow } from './Divider';
 import { ErrorRow } from './Error';
 import { PlanRow } from './Plan';
 import { RequestSlotRow } from './RequestSlot';
+import { WaitingAsk, WaitingRow } from './WaitingForm'; // UX wave U1b
 import { SubagentRow } from './Subagent';
 import { ThinkingRow } from './Thinking';
 import { TimeRow } from './Time';
@@ -48,14 +49,15 @@ function body(row: Row) {
     case 'bash': return <BashRow row={row} />;
     case 'notice': return <SurfaceNoticeRow row={row} />; // UX wave U3: a task's end, a scheduled fire, an answer, the bridge's wake
     case 'local_command': return <SurfaceCommandRow row={row} />;
-    case 'plan': return <PlanRow row={row} />;
-    case 'question': return <SurfaceQuestionRow row={row} />;
+    // UX wave U1b (Interfaces §D): a waiting row draws its request's form and asks no mod's site of its own
+    case 'plan': return row.waiting ? <WaitingRow row={row} receipt={<PlanRow row={row} />} /> : <PlanRow row={row} />;
+    case 'question': return row.waiting ? <WaitingRow row={row} receipt={<SurfaceQuestionRow row={row} />} /> : <SurfaceQuestionRow row={row} />;
     case 'request_slot': return <RequestSlotRow row={row} />;
     case 'boundary': return <BoundaryRow row={row} />;
     case 'gap': return <GapRow row={row} />; // P5 O7 M2
     case 'error': return <ErrorRow row={row} />;
     // E1 start
-    case 'ask': return <AskCapsule row={row} />;
+    case 'ask': return row.waiting ? <WaitingAsk row={row} /> : <AskCapsule row={row} />;
     case 'delivery': return <DeliveryRowView row={row} />;
     // E1 end
     case 'side_thread': return <SideThreadRow row={row} />; // E3

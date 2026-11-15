@@ -173,7 +173,8 @@ export const childProbes: PanelHarnessApi['child'] = {
       clientWidth: slot?.clientWidth ?? 0,
       overflowX: Math.max(0, ...[slot, body, scroller].map((el) => (el ? el.scrollWidth - el.clientWidth : 0))),
       regionWidth: document.querySelector('[data-region="panel"]')?.getBoundingClientRect().width ?? 0,
-      pendingRequests: rows.filter((row) => row.kind === 'request_slot').length,
+      // UX wave U1b (§I): the waiting rows, and the transcript's end row while it stands
+      pendingRequests: rows.filter((row) => (row.kind === 'question' || row.kind === 'plan' || row.kind === 'ask') && row.waiting === true).length + (scroller?.querySelector('[data-row-id="request-end"]') ? 1 : 0),
     };
   },
 };

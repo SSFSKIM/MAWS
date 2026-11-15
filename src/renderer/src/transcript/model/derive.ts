@@ -751,8 +751,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         const toolUseId = 'toolUseId' in event ? event.toolUseId : null;
         const pending = toolUseId ? pendingRows.get(toolUseId) : undefined;
         if (pending) pending.requestId = event.requestId;
-        if (state?.pending.has(event.requestId)) items.push({ kind: 'row', row: slotRow(event, turn.id, toolUseId) });
-        break;
+        break; // UX wave U1b (§B, rule 3): no row for a request; it is drawn in its call's row or at the transcript's end
       }
       case 'permission.resolved': {
         const rec = toolRecord(event.toolUseId);
@@ -1247,7 +1246,6 @@ function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {
   const { use } = pending;
   const input = record(use.input);
-  if (pending.requestId && state?.pending.has(pending.requestId)) return null; // its slot row was emitted at the request's position
   const waiting = state?.ui.waitingForms?.has(use.toolUseId) === true ? { waiting: true as const } : {}; // UX wave U1b (§B, rule 2)
   if (pending.kind === 'question') {
     const questions = Array.isArray(input.questions) ? input.questions.map(record).map((q) => ({
@@ -1678,12 +1676,6 @@ function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: Tur
 }
 // E4c end
 
-function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
-  const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];
-  const toolName = event.kind === 'permission.requested' ? event.toolName : event.kind === 'question.requested' ? 'AskUserQuestion' : event.kind === 'plan.requested' ? 'ExitPlanMode' : event.kind === 'elicitation.requested' ? event.mcpServerName : null;
-  return { id: rowId.slot(event.requestId), turnId, at: event.at, kind: 'request_slot', requestId: event.requestId, toolUseId, requestKind, toolName, requestedAt: event.at };
-}
-
 function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'boundary.retraction'>, turnId: TurnId | null): RowOf<'boundary'> {
   const base = { id: rowId.boundary(event.id), turnId, at: event.at, kind: 'boundary' as const, hiddenRows: 0, revealed: false };
   switch (event.kind) {
@@ -1844,8 +1836,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'plan.requested':
       case 'dialog.requested':
       case 'elicitation.requested':
-        if (state.pending.has(event.requestId)) rows.push(slotRow(event, null, 'toolUseId' in event ? event.toolUseId : null));
-        break;
+        break; // UX wave U1b (§B, rule 3): no row for a request
       // E3 start
       case 'side.thread.opened':
       case 'side.thread.summarised': {
